@@ -1,0 +1,67 @@
+{
+  "name": "bluu-backend",
+  "version": "0.1.0",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "analyze": "ANALYZE=true npm run build",
+    "electron:dev": "ELECTRON_DEV=true concurrently \"npm:dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron:pack": "electron-builder --dir",
+    "electron:dist": "electron-builder"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2",
+    "firebase": "^12.6.0",
+    "firebase-admin": "^13.6.0",
+    "googleapis": "^169.0.0",
+    "next": "16.0.5",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@next/bundle-analyzer": "^16.1.6",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "concurrently": "^8.2.2",
+    "electron": "^39.2.6",
+    "electron-builder": "^26.0.12",
+    "eslint": "^9",
+    "eslint-config-next": "16.0.5",
+    "firebase-tools": "^14.26.0",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.bluu.app",
+    "productName": "Bluu",
+    "files": [
+      "electron/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "public/logo"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "public/logo/icon.icns",
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "public/logo/bluu-logo.png"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "public/logo/bluu-logo.png",
+      "category": "Utility"
+    }
+  }
+}

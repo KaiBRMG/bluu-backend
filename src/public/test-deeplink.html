@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Deep Link</title>
+    <style>
+        body {
+            font-family: system-ui;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 10px 0;
+            display: block;
+        }
+        .info {
+            background: #f0f0f0;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Deep Link Tester</h1>
+
+    <div class="info">
+        <p><strong>Purpose:</strong> Test if the bluu:// protocol is registered correctly.</p>
+        <p>Click the button below. If it's working, the Electron app should receive the deep link and log it to the console.</p>
+    </div>
+
+    <button onclick="testDeepLink()">Test Deep Link (bluu://callback?code=test123)</button>
+    <button onclick="testDeepLinkError()">Test Error Deep Link (bluu://callback?error=test_error)</button>
+
+    <div id="result"></div>
+
+    <script>
+        function testDeepLink() {
+            const url = 'bluu://callback?code=test123';
+            document.getElementById('result').innerHTML =
+                '<p style="color: blue;">Attempting to open: ' + url + '</p>' +
+                '<p>Check the Electron app console for logs.</p>';
+            window.location.href = url;
+        }
+
+        function testDeepLinkError() {
+            const url = 'bluu://callback?error=test_error';
+            document.getElementById('result').innerHTML =
+                '<p style="color: blue;">Attempting to open: ' + url + '</p>' +
+                '<p>Check the Electron app console for logs.</p>';
+            window.location.href = url;
+        }
+    </script>
+
+    <hr>
+
+    <h2>Instructions:</h2>
+    <ol>
+        <li>Make sure the Electron app is running</li>
+        <li>Open this file in your browser: <code>http://localhost:3000/test-deeplink.html</code></li>
+        <li>Click the test button above</li>
+        <li>Check the Electron app console (should show logs from handleDeepLink)</li>
+        <li>Check if the app receives the OAuth callback</li>
+    </ol>
+
+    <h2>What to look for:</h2>
+    <ul>
+        <li>Electron console should show: "Deep link received: bluu://callback?code=test123"</li>
+        <li>Should also show: "Parsed URL - pathname: /callback"</li>
+        <li>Should show: "Sending oauth-callback to renderer with code"</li>
+    </ul>
+</body>
+</html>
