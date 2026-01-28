@@ -8,8 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "analyze": "ANALYZE=true npm run build",
-    "electron:dev": "ELECTRON_DEV=true concurrently \"npm:dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "analyze": "cross-env ANALYZE=true npm run build",
+    "electron:dev": "cross-env ELECTRON_DEV=true concurrently \"npm:dev\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:pack": "electron-builder --dir",
     "electron:dist": "electron-builder"
   },
@@ -29,6 +29,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "concurrently": "^8.2.2",
+    "cross-env": "^10.1.0",
     "electron": "^39.2.6",
     "electron-builder": "^26.0.12",
     "eslint": "^9",
