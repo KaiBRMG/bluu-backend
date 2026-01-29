@@ -3,7 +3,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 
 export interface CreateUserData {
   uid: string;
-  email: string;
+  workEmail: string;
   displayName: string;
   photoURL?: string;
 }
@@ -17,7 +17,7 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
   const userDoc = await userRef.get();
 
   if (!userDoc.exists) {
-    console.log(`[UserService] Creating new user: ${userData.email}`);
+    console.log(`[UserService] Creating new user: ${userData.workEmail}`);
 
     // Extract first and last name from display name
     const [firstName, ...lastNameParts] = userData.displayName.split(' ');
@@ -26,7 +26,7 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
     // Create user document
     await userRef.set({
       uid: userData.uid,
-      email: userData.email,
+      workEmail: userData.workEmail,
       displayName: userData.displayName,
       photoURL: userData.photoURL || null,
       firstName: firstName || '',
@@ -35,6 +35,36 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
       createdAt: FieldValue.serverTimestamp(),
       lastLoginAt: FieldValue.serverTimestamp(),
       isActive: true,
+
+      address: {
+        street: '',
+        city: '',
+        state: '',
+        zipCode: '',
+        country: '',
+      },
+
+      gender: '',
+      DOB: null,
+
+      jobTitle: '',
+      employmentType: '',
+
+      contactInfo: {
+        phoneNumber: '',
+        countryCode: '',
+        personalEmail: '',
+        telegramHandle: '',
+        emergencyContactName: '',
+        emergencyContactNumber: '',
+        emergencyContactEmail: '',
+      },
+
+      paymentMethod: '',
+      paymentInfo: '',
+
+      userComments: '',
+      
     });
 
     // Add user to General group's member list (non-blocking for better performance)
@@ -44,7 +74,7 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
       console.error('[UserService] Failed to add user to group:', err);
     });
   } else {
-    console.log(`[UserService] Updating last login: ${userData.email}`);
+    console.log(`[UserService] Updating last login: ${userData.workEmail}`);
 
     // Update last login timestamp for existing user
     await userRef.update({

@@ -241,7 +241,10 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, userData }: Sid
 
       {/* Bottom section - Settings */}
       <div className="p-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
-        <button className="sidebar-nav-item w-full">
+        <button
+          onClick={() => router.push('/applications/settings/')}
+          className={`sidebar-nav-item w-full ${pathname === '/applications/settings/' ? 'active' : ''}`}
+        >
           <img src="/Icons/settings.svg" alt="Settings" className="sidebar-nav-item-icon" />
           <span className="sidebar-nav-item-text">Settings</span>
         </button>

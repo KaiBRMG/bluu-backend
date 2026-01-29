@@ -83,27 +83,6 @@ export default function TopBar({ userData }: TopBarProps) {
                 <div className="text-sm" style={{ color: 'var(--foreground-muted)' }}>{userData.email}</div>
               </div>
 
-              <div className="py-2">
-                <button
-                  className="w-full px-4 py-2 text-left transition-colors flex items-center gap-3"
-                  style={{ background: 'transparent' }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--hover-background)'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                >
-                  <div className="w-4 h-4 bg-zinc-700 rounded"></div>
-                  <span className="text-sm">Account Settings</span>
-                </button>
-                <button
-                  className="w-full px-4 py-2 text-left transition-colors flex items-center gap-3"
-                  style={{ background: 'transparent' }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--hover-background)'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                >
-                  <div className="w-4 h-4 bg-zinc-700 rounded"></div>
-                  <span className="text-sm">Preferences</span>
-                </button>
-              </div>
-
               <div className="pt-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
                 <button
                   onClick={handleSignOut}
