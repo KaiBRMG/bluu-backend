@@ -1,8 +1,38 @@
 "use client";
 
+import { useState } from "react";
 import AppLayout from "@/components/AppLayout";
+import SettingsSidebar from "@/components/settings/SettingsSidebar";
+import PersonalInfoForm from "@/components/settings/PersonalInfoForm";
 
 export default function Settings() {
+  const [activeSection, setActiveSection] = useState('personal-info');
+
+  const renderContent = () => {
+    switch (activeSection) {
+      case 'personal-info':
+        return <PersonalInfoForm />;
+      case 'section-2':
+        return (
+          <div className="flex items-center justify-center h-64">
+            <p style={{ color: 'var(--foreground-secondary)' }}>
+              Section 2 content coming soon...
+            </p>
+          </div>
+        );
+      case 'section-3':
+        return (
+          <div className="flex items-center justify-center h-64">
+            <p style={{ color: 'var(--foreground-secondary)' }}>
+              Section 3 content coming soon...
+            </p>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <AppLayout>
       <div className="max-w-5xl">
@@ -13,18 +43,22 @@ export default function Settings() {
           Update your user settings.
         </p>
 
-        {/* Empty state placeholder */}
-        <div className="mt-12">
+        {/* Settings Layout: Sidebar + Content */}
+        <div className="mt-8 flex gap-6">
+          <SettingsSidebar
+            activeSection={activeSection}
+            onSectionChange={setActiveSection}
+          />
+
           <div
-            className="rounded-lg p-8 text-center"
+            className="flex-1 rounded-lg p-6"
             style={{
               background: 'var(--sidebar-background)',
-              border: '1px solid var(--border-subtle)'
+              border: '1px solid var(--border-subtle)',
+              minHeight: '600px',
             }}
           >
-            <p className="text-lg" style={{ color: 'var(--foreground-secondary)' }}>
-              .
-            </p>
+            {renderContent()}
           </div>
         </div>
       </div>
