@@ -3,10 +3,12 @@ import { useEffect, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/firebase-config';
 import { useAuth } from '@/components/AuthProvider';
+import { useNetworkStatus } from '@/contexts/NetworkStatusContext';
 import { UserDocument } from '@/types/firestore';
 
 export function useUserData() {
   const { user } = useAuth();
+  const { reportFirestoreError } = useNetworkStatus();
   const [userData, setUserData] = useState<UserDocument | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -28,12 +30,13 @@ export function useUserData() {
       },
       (error) => {
         console.error('Error fetching user data:', error);
+        reportFirestoreError(error);
         setLoading(false);
       }
     );
 
     return () => unsubscribe();
-  }, [user]);
+  }, [user, reportFirestoreError]);
 
   return { userData, loading };
 }
