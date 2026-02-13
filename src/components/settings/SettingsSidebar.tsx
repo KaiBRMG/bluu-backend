@@ -8,13 +8,18 @@ interface SettingsSidebarProps {
 interface MenuItem {
   id: string;
   label: string;
+  hidden?: boolean;
 }
 
+// All menu items - hidden ones are kept for future use but not rendered
 const menuItems: MenuItem[] = [
   { id: 'personal-info', label: 'Personal Information' },
-  { id: 'section-2', label: 'Section 2 (Placeholder)' },
-  { id: 'section-3', label: 'Section 3 (Placeholder)' },
+  { id: 'section-2', label: 'Section 2', hidden: true },
+  { id: 'section-3', label: 'Section 3', hidden: true },
 ];
+
+// Only show visible items
+const visibleMenuItems = menuItems.filter(item => !item.hidden);
 
 export default function SettingsSidebar({ activeSection, onSectionChange }: SettingsSidebarProps) {
   return (
@@ -26,7 +31,7 @@ export default function SettingsSidebar({ activeSection, onSectionChange }: Sett
       }}
     >
       <nav className="flex flex-col gap-1">
-        {menuItems.map((item) => (
+        {visibleMenuItems.map((item) => (
           <button
             key={item.id}
             onClick={() => onSectionChange(item.id)}

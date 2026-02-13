@@ -79,7 +79,7 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
     // Update last login timestamp for existing user
     await userRef.update({
       lastLoginAt: FieldValue.serverTimestamp(),
-    });
+    }); 
   }
 }
 

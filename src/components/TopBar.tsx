@@ -1,18 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { auth } from "../firebase-config";
+import UserAvatar from "@/components/UserAvatar";
 
 interface TopBarProps {
   userData: {
     name: string;
     email: string;
     role: string;
+    photoURL?: string | null;
   };
 }
 
 export default function TopBar({ userData }: TopBarProps) {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // Click-outside handler for user menu
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+    }
+
+    if (isUserMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isUserMenuOpen]);
 
   const handleSignOut = async () => {
     try {
@@ -52,7 +69,7 @@ export default function TopBar({ userData }: TopBarProps) {
         </button>
 
         {/* User menu */}
-        <div className="relative">
+        <div className="relative" ref={userMenuRef}>
           <button
             onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
             className="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors"
@@ -60,9 +77,11 @@ export default function TopBar({ userData }: TopBarProps) {
             onMouseEnter={(e) => e.currentTarget.style.background = 'var(--hover-background)'}
             onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
           >
-            <div className="w-8 h-8 bg-zinc-700 rounded-full flex items-center justify-center text-sm font-semibold">
-              {userData.name.split(' ').map(n => n[0]).join('')}
-            </div>
+            <UserAvatar
+              photoURL={userData.photoURL}
+              name={userData.name}
+              size="sm"
+            />
             <div className="text-left hidden md:block">
               <div className="text-sm font-medium">{userData.name}</div>
               <div className="text-xs" style={{ color: 'var(--foreground)' }}>{userData.role}</div>

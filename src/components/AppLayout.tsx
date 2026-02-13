@@ -20,10 +20,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const displayGroup = userGroup.charAt(0).toUpperCase() + userGroup.slice(1);
 
   const userData = {
-    name: user?.displayName || "User",
+    name: firestoreUserData?.displayName || user?.displayName || "User",
     email: user?.email || "",
     role: displayGroup,
-    avatar: user?.photoURL || "/avatar-placeholder.png"
+    photoURL: firestoreUserData?.photoURL || user?.photoURL || null,
   };
 
   return (

@@ -5,6 +5,7 @@ import { useUserData } from '@/hooks/useUserData';
 import { useAuth } from '@/components/AuthProvider';
 import { countryCodes, getFlagEmoji } from '@/lib/countryData';
 import { validatePersonalInfoForm, PersonalInfoFormData } from '@/lib/validation';
+import UserAvatar from '@/components/UserAvatar';
 
 const initialFormState: PersonalInfoFormData = {
   displayName: '',
@@ -29,6 +30,9 @@ const initialFormState: PersonalInfoFormData = {
   userComments: '',
 };
 
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
 export default function PersonalInfoForm() {
   const { userData, loading } = useUserData();
   const { user } = useAuth();
@@ -40,6 +44,12 @@ export default function PersonalInfoForm() {
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
   const [countrySearch, setCountrySearch] = useState('');
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [isRemovingPhoto, setIsRemovingPhoto] = useState(false);
+
+  // Refs for click-outside detection
+  const countryDropdownRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Initialize form data when userData loads
   useEffect(() => {
@@ -86,6 +96,21 @@ export default function PersonalInfoForm() {
       return () => clearTimeout(timer);
     }
   }, [saveMessage]);
+
+  // Click-outside handler for country dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (countryDropdownRef.current && !countryDropdownRef.current.contains(event.target as Node)) {
+        setCountryDropdownOpen(false);
+        setCountrySearch('');
+      }
+    }
+
+    if (countryDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [countryDropdownOpen]);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -179,6 +204,121 @@ export default function PersonalInfoForm() {
     }
   };
 
+  const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      setSaveMessage({ type: 'error', text: 'Invalid file type. Allowed: JPEG, PNG, GIF, WebP' });
+      return;
+    }
+
+    // Validate file size
+    if (file.size > MAX_FILE_SIZE) {
+      setSaveMessage({ type: 'error', text: 'File too large. Maximum size is 5MB' });
+      return;
+    }
+
+    setIsUploadingPhoto(true);
+    setSaveMessage(null);
+
+    try {
+      const idToken = await user?.getIdToken();
+      if (!idToken) throw new Error('Not authenticated');
+
+      // Convert file to base64
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64Data = reader.result as string;
+
+          const response = await fetch('/api/user/upload-photo', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${idToken}`,
+            },
+            body: JSON.stringify({
+              imageData: base64Data,
+              contentType: file.type,
+            }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || 'Failed to upload photo');
+          }
+
+          setSaveMessage({ type: 'success', text: 'Photo uploaded successfully!' });
+        } catch (error) {
+          console.error('Upload error:', error);
+          setSaveMessage({
+            type: 'error',
+            text: error instanceof Error ? error.message : 'Failed to upload photo',
+          });
+        } finally {
+          setIsUploadingPhoto(false);
+        }
+      };
+
+      reader.onerror = () => {
+        setSaveMessage({ type: 'error', text: 'Failed to read file' });
+        setIsUploadingPhoto(false);
+      };
+
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('Upload error:', error);
+      setSaveMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Failed to upload photo',
+      });
+      setIsUploadingPhoto(false);
+    }
+
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemovePhoto = async () => {
+    setIsRemovingPhoto(true);
+    setSaveMessage(null);
+
+    try {
+      const idToken = await user?.getIdToken();
+      if (!idToken) throw new Error('Not authenticated');
+
+      const response = await fetch('/api/user/update', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ photoURL: null }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to remove photo');
+      }
+
+      setSaveMessage({ type: 'success', text: 'Photo removed successfully!' });
+    } catch (error) {
+      console.error('Remove photo error:', error);
+      setSaveMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Failed to remove photo',
+      });
+    } finally {
+      setIsRemovingPhoto(false);
+    }
+  };
+
   // Filter countries based on search
   const filteredCountries = countryCodes.filter(
     c => c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
@@ -202,44 +342,49 @@ export default function PersonalInfoForm() {
         <div className="mb-8">
           <label className="form-label block mb-3">Profile photo</label>
           <div className="flex items-center gap-4">
-            <div
-              className="w-24 h-24 rounded-full flex items-center justify-center text-2xl font-semibold relative"
-              style={{ background: 'var(--hover-background)' }}
-            >
-              {userData?.photoURL ? (
-                <img
-                  src={userData.photoURL}
-                  alt="Profile"
-                  className="w-full h-full rounded-full object-cover"
-                />
-              ) : (
-                <span style={{ color: 'var(--foreground-secondary)' }}>
-                  {formData.displayName
-                    .split(' ')
-                    .map(n => n[0])
-                    .join('')
-                    .toUpperCase()
-                    .slice(0, 2)}
-                </span>
-              )}
-              <div
-                className="absolute bottom-0 right-0 w-8 h-8 rounded-full flex items-center justify-center"
-                style={{ background: 'var(--active-background)', border: '2px solid var(--content-background)' }}
+            <UserAvatar
+              photoURL={userData?.photoURL}
+              name={userData?.displayName || formData.displayName}
+              size="lg"
+            />
+            <div className="flex flex-col gap-1">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                onChange={handlePhotoUpload}
+                className="hidden"
+                id="photo-upload"
+                disabled={isUploadingPhoto || isRemovingPhoto}
+              />
+              <label
+                htmlFor="photo-upload"
+                className="text-sm transition-colors cursor-pointer"
+                style={{
+                  color: isUploadingPhoto || isRemovingPhoto ? 'var(--foreground-muted)' : '#3b82f6',
+                  pointerEvents: isUploadingPhoto || isRemovingPhoto ? 'none' : 'auto'
+                }}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                  <circle cx="12" cy="13" r="4" />
-                </svg>
-              </div>
+                {isUploadingPhoto ? 'Uploading...' : 'Upload photo'}
+              </label>
+              {userData?.photoURL && (
+                <button
+                  type="button"
+                  onClick={handleRemovePhoto}
+                  disabled={isUploadingPhoto || isRemovingPhoto}
+                  className="text-sm transition-colors text-left"
+                  style={{
+                    color: isRemovingPhoto ? 'var(--foreground-muted)' : '#ef4444',
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: isRemovingPhoto ? 'default' : 'pointer'
+                  }}
+                >
+                  {isRemovingPhoto ? 'Removing...' : 'Remove photo'}
+                </button>
+              )}
             </div>
-            <button
-              className="text-sm transition-colors"
-              style={{ color: '#3b82f6' }}
-              onMouseEnter={(e) => e.currentTarget.style.opacity = '0.8'}
-              onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
-            >
-              Upload photo
-            </button>
           </div>
         </div>
 
@@ -274,7 +419,7 @@ export default function PersonalInfoForm() {
           <label className="form-label block mb-2">Phone</label>
           <div className="flex gap-2">
             {/* Country Code Dropdown */}
-            <div className="relative">
+            <div className="relative" ref={countryDropdownRef}>
               <button
                 type="button"
                 onClick={() => setCountryDropdownOpen(!countryDropdownOpen)}

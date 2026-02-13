@@ -31,6 +31,7 @@ export async function POST(request: NextRequest) {
       'paymentMethod',
       'paymentInfo',
       'userComments',
+      'photoURL',
     ];
 
     // Filter and sanitize updates

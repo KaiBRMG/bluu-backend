@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
         ensureDefaultGroups(),
         ensureUserExists({
           uid: firebaseUser.uid,
-          email: userInfo.email,
+          workEmail: userInfo.email,
           displayName: userInfo.name || '',
           photoURL: userInfo.picture || undefined,
         }),
