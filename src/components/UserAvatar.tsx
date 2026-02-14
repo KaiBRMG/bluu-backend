@@ -13,6 +13,35 @@ const sizeClasses = {
   lg: 'w-24 h-24 text-2xl',
 };
 
+// Deterministic color palette (soft, muted tones similar to Notion/Google)
+const AVATAR_COLORS = [
+  '#E57373', // red
+  '#F06292', // pink
+  '#BA68C8', // purple
+  '#7986CB', // indigo
+  '#64B5F6', // blue
+  '#4DD0E1', // cyan
+  '#4DB6AC', // teal
+  '#81C784', // green
+  '#FFB74D', // orange
+  '#A1887F', // brown
+];
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function getAvatarColor(name: string): string {
+  const index = hashString(name) % AVATAR_COLORS.length;
+  return AVATAR_COLORS[index];
+}
+
 function getInitials(name: string): string {
   if (!name || name.trim() === '') return '?';
 
@@ -40,12 +69,14 @@ export default function UserAvatar({ photoURL, name, size = 'md', className = ''
     );
   }
 
+  const bgColor = getAvatarColor(name || 'User');
+
   return (
     <div
       className={`${sizeClass} rounded-full flex items-center justify-center font-semibold ${className}`}
-      style={{ background: 'var(--hover-background)' }}
+      style={{ background: bgColor }}
     >
-      <span style={{ color: 'var(--foreground-secondary)' }}>
+      <span style={{ color: '#ffffff' }}>
         {getInitials(name)}
       </span>
     </div>

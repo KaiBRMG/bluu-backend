@@ -2,14 +2,14 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import type { ResolvedAccess, TeamspaceDocument } from "@/types/firestore";
+import type { ResolvedAccess } from "@/types/firestore";
+import type { TeamspaceDef } from "@/lib/definitions";
 
 interface SidebarProps {
   isCollapsed: boolean;
   onToggleCollapse: () => void;
-  teamspaces: TeamspaceDocument[];
+  teamspaces: TeamspaceDef[];
   accessiblePages: ResolvedAccess[];
-  permissionsLoading: boolean;
 }
 
 interface MenuItem {
@@ -25,7 +25,6 @@ export default function Sidebar({
   onToggleCollapse,
   teamspaces,
   accessiblePages,
-  permissionsLoading,
 }: SidebarProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -182,88 +181,82 @@ export default function Sidebar({
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-4">
         <div className="sidebar-nav-group">
-          {permissionsLoading ? (
-            <div className="px-4 py-2 text-sm" style={{ color: "var(--foreground-muted)" }}>
-              Loading...
-            </div>
-          ) : (
-            menuItems.map((item) => (
-              <div key={item.id}>
-                <button
-                  onClick={() => handleMenuItemClick(item)}
-                  className={`sidebar-nav-item w-full ${
-                    item.href && pathname === item.href ? "active" : ""
+          {menuItems.map((item) => (
+            <div key={item.id}>
+              <button
+                onClick={() => handleMenuItemClick(item)}
+                className={`sidebar-nav-item w-full ${
+                  item.href && pathname === item.href ? "active" : ""
+                }`}
+              >
+                {item.icon && item.icon.endsWith(".svg") ? (
+                  <img
+                    src={item.icon}
+                    alt={item.label}
+                    className="sidebar-nav-item-icon"
+                  />
+                ) : (
+                  <div className="sidebar-nav-item-icon bg-zinc-700 rounded"></div>
+                )}
+
+                <span className="sidebar-nav-item-text">{item.label}</span>
+                {item.subItems && (
+                  <img
+                    src={
+                      expandedItems.includes(item.id)
+                        ? "/Icons/expanded_arrow.svg"
+                        : "/Icons/collapsed_arrow.svg"
+                    }
+                    alt={
+                      expandedItems.includes(item.id)
+                        ? "Collapse"
+                        : "Expand"
+                    }
+                    className="sidebar-nav-item-arrow"
+                  />
+                )}
+              </button>
+
+              {/* Sub-items */}
+              {item.subItems && expandedItems.includes(item.id) && (
+                <div
+                  className={`sidebar-nav-group ${
+                    isCollapsed ? "hidden" : ""
                   }`}
                 >
-                  {item.icon && item.icon.endsWith(".svg") ? (
-                    <img
-                      src={item.icon}
-                      alt={item.label}
-                      className="sidebar-nav-item-icon"
-                    />
-                  ) : (
-                    <div className="sidebar-nav-item-icon bg-zinc-700 rounded"></div>
-                  )}
-
-                  <span className="sidebar-nav-item-text">{item.label}</span>
-                  {item.subItems && (
-                    <img
-                      src={
-                        expandedItems.includes(item.id)
-                          ? "/Icons/expanded_arrow.svg"
-                          : "/Icons/collapsed_arrow.svg"
-                      }
-                      alt={
-                        expandedItems.includes(item.id)
-                          ? "Collapse"
-                          : "Expand"
-                      }
-                      className="sidebar-nav-item-arrow"
-                    />
-                  )}
-                </button>
-
-                {/* Sub-items */}
-                {item.subItems && expandedItems.includes(item.id) && (
-                  <div
-                    className={`sidebar-nav-group ${
-                      isCollapsed ? "hidden" : ""
-                    }`}
-                  >
-                    {item.subItems.map((subItem) => (
-                      <button
-                        key={subItem.id}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (subItem.href) {
-                            router.push(subItem.href);
-                          }
-                        }}
-                        className={`sidebar-nav-item nested-1 w-full ${
-                          subItem.href && pathname === subItem.href
-                            ? "active"
-                            : ""
-                        }`}
-                      >
-                        {subItem.icon && subItem.icon.endsWith(".svg") ? (
-                          <img
-                            src={subItem.icon}
-                            alt={subItem.label}
-                            className="sidebar-nav-item-icon"
-                          />
-                        ) : (
-                          <div className="sidebar-nav-item-icon"></div>
-                        )}
-                        <span className="sidebar-nav-item-text">
-                          {subItem.label}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))
-          )}
+                  {item.subItems.map((subItem) => (
+                    <button
+                      key={subItem.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (subItem.href) {
+                          router.push(subItem.href);
+                        }
+                      }}
+                      className={`sidebar-nav-item nested-1 w-full ${
+                        subItem.href && pathname === subItem.href
+                          ? "active"
+                          : ""
+                      }`}
+                    >
+                      {subItem.icon && subItem.icon.endsWith(".svg") ? (
+                        <img
+                          src={subItem.icon}
+                          alt={subItem.label}
+                          className="sidebar-nav-item-icon"
+                        />
+                      ) : (
+                        <div className="sidebar-nav-item-icon"></div>
+                      )}
+                      <span className="sidebar-nav-item-text">
+                        {subItem.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       </nav>
 

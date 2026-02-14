@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '@/firebase-config';
 import { useAuth } from '@/components/AuthProvider';
-import type { PageDocument, TeamspaceDocument, PermissionRole } from '@/types/firestore';
+import type { PagePermissionDoc } from '@/types/firestore';
+import type { PageDef, TeamspaceDef } from '@/lib/definitions';
 
 interface AdminUser {
   uid: string;
@@ -22,8 +23,9 @@ interface AdminGroup {
 }
 
 interface AdminDataState {
-  pages: PageDocument[];
-  teamspaces: TeamspaceDocument[];
+  pages: PageDef[];
+  teamspaces: TeamspaceDef[];
+  pagePermissions: PagePermissionDoc[];
   groups: AdminGroup[];
   users: AdminUser[];
   loading: boolean;
@@ -35,13 +37,13 @@ export function useAdminData() {
   const [state, setState] = useState<AdminDataState>({
     pages: [],
     teamspaces: [],
+    pagePermissions: [],
     groups: [],
     users: [],
     loading: true,
     error: null,
   });
 
-  // Initial fetch of all admin data
   const fetchAdminData = useCallback(async () => {
     if (!user) return;
 
@@ -62,6 +64,7 @@ export function useAdminData() {
       setState({
         pages: data.pages || [],
         teamspaces: data.teamspaces || [],
+        pagePermissions: data.pagePermissions || [],
         groups: data.groups || [],
         users: data.users || [],
         loading: false,
@@ -77,34 +80,32 @@ export function useAdminData() {
     }
   }, [user]);
 
-  // Initial fetch
   useEffect(() => {
     fetchAdminData();
   }, [fetchAdminData]);
 
-  // Real-time listener for pages collection (so multiple admins see updates)
+  // Real-time listener for page-permissions collection
   useEffect(() => {
     if (!user) return;
 
     const unsubscribe = onSnapshot(
-      collection(db, 'pages'),
+      collection(db, 'page-permissions'),
       (snapshot) => {
-        const updatedPages = snapshot.docs.map(doc => doc.data() as PageDocument);
-        setState(prev => ({ ...prev, pages: updatedPages }));
+        const updatedPerms = snapshot.docs.map(doc => doc.data() as PagePermissionDoc);
+        setState(prev => ({ ...prev, pagePermissions: updatedPerms }));
       },
       (error) => {
-        console.error('Pages snapshot error:', error);
+        console.error('Page-permissions snapshot error:', error);
       }
     );
 
     return () => unsubscribe();
   }, [user]);
 
-  // Update permissions for a specific page
   const updatePermission = useCallback(
     async (
       pageId: string,
-      permissions: { users: Record<string, PermissionRole>; groups: Record<string, PermissionRole> }
+      permissions: { groups: Record<string, true>; users: Record<string, true> }
     ) => {
       if (!user) return;
 
@@ -122,8 +123,6 @@ export function useAdminData() {
         const data = await res.json();
         throw new Error(data.error || 'Failed to update permissions');
       }
-
-      // The onSnapshot listener will automatically update the local state
     },
     [user]
   );

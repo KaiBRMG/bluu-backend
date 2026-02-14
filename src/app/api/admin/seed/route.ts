@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
 import { ensureDefaultGroups } from '@/lib/services/groupService';
-import { seedDefaultTeamspaces } from '@/lib/services/teamspaceService';
-import { seedDefaultPages } from '@/lib/services/pageService';
+import { seedDefaultPagePermissions } from '@/lib/services/pageService';
 
 /**
  * POST /api/admin/seed
- * Admin-only. Seeds default groups, teamspaces, and pages. Idempotent.
+ * Admin-only. Seeds default groups and page-permissions. Idempotent.
+ * No longer seeds teamspace or page documents (those are code constants).
  */
 export async function POST(request: NextRequest) {
   try {
@@ -26,10 +26,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
-    // Seed in order: groups first (pages reference group slugs), then teamspaces, then pages
+    // Seed groups first, then page-permissions (which reference group IDs)
     await ensureDefaultGroups();
-    await seedDefaultTeamspaces();
-    await seedDefaultPages();
+    await seedDefaultPagePermissions();
 
     return NextResponse.json({ success: true, message: 'Seed completed' });
   } catch (error: unknown) {

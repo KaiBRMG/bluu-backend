@@ -2,40 +2,24 @@ import { Timestamp } from 'firebase/firestore';
 
 // ─── Group hierarchy ────────────────────────────────────────────────
 
-export type GroupSlug =
-  | 'general'
-  | 'chat-agents'
-  | 'social-media-manager'
-  | 'account-manager'
-  | 'admin';
+export type GroupSlug = 'unassigned' | 'CA' | 'SMM' | 'OFAM' | 'admin';
 
 /** Numeric level for each group. Higher = more privileged. */
 export const GROUP_HIERARCHY: Record<string, number> = {
-  'general': -1,
-  'chat-agents': 0,
-  'social-media-manager': 0,
-  'account-manager': 1,
+  'unassigned': -1,
+  'CA': 0,
+  'SMM': 0,
+  'OFAM': 1,
   'admin': 2,
 };
 
-/** Human-readable display names (singular). */
+/** Human-readable display names. */
 export const GROUP_DISPLAY_NAMES: Record<string, string> = {
-  'general': 'General',
-  'chat-agents': 'Chat Agent',
-  'social-media-manager': 'Social Media Manager',
-  'account-manager': 'Account Manager',
+  'unassigned': 'Unassigned',
+  'CA': 'Chat Agents',
+  'SMM': 'Social Media Manager',
+  'OFAM': 'Account Manager',
   'admin': 'Admin',
-};
-
-// ─── Permission types ───────────────────────────────────────────────
-
-export type PermissionRole = 'full_access' | 'can_edit' | 'can_view';
-
-/** Permission role ranking — higher index = more permissive. */
-export const PERMISSION_ROLE_RANK: Record<PermissionRole, number> = {
-  'can_view': 0,
-  'can_edit': 1,
-  'full_access': 2,
 };
 
 // ─── User ───────────────────────────────────────────────────────────
@@ -94,35 +78,15 @@ export interface GroupDocument {
   level: number;
 }
 
-// ─── Teamspace ──────────────────────────────────────────────────────
+// ─── Page permission (Firestore document) ───────────────────────────
 
-export interface TeamspaceDocument {
-  id: string;
-  name: string;
-  icon: string;
-  order: number;
-  createdAt: Timestamp;
-}
-
-// ─── Page ───────────────────────────────────────────────────────────
-
-export interface PageDocument {
+export interface PagePermissionDoc {
   pageId: string;
-  title: string;
-  teamspaceId: string;
-  href: string | null;
-  icon: string | null;
-  order: number;
-  ownerId: string;
-  permissions: {
-    users: Record<string, PermissionRole>;
-    groups: Record<string, PermissionRole>;
-  };
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  groups: Record<string, true>;  // groupSlug -> true (presence = access)
+  users: Record<string, true>;   // uid -> true (presence = access)
 }
 
-// ─── Resolved access (returned by permission resolver) ──────────────
+// ─── Resolved access (returned to client after permission resolution) ─
 
 export interface ResolvedAccess {
   pageId: string;
@@ -131,7 +95,6 @@ export interface ResolvedAccess {
   href: string | null;
   icon: string | null;
   order: number;
-  effectiveRole: PermissionRole;
   grantedVia: 'user' | 'group';
   grantingGroupId?: string;
 }

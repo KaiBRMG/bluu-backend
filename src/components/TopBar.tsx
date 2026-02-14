@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { auth } from "../firebase-config";
 import UserAvatar from "@/components/UserAvatar";
+import { clearPermissionsCache } from "@/lib/permissionsCache";
 
 interface TopBarProps {
   userData: {
@@ -33,6 +34,7 @@ export default function TopBar({ userData }: TopBarProps) {
 
   const handleSignOut = async () => {
     try {
+      clearPermissionsCache();
       await auth.signOut();
       setIsUserMenuOpen(false);
     } catch (error) {

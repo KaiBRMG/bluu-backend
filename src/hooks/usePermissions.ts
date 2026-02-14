@@ -3,11 +3,13 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { useUserData } from '@/hooks/useUserData';
-import type { ResolvedAccess, TeamspaceDocument } from '@/types/firestore';
+import type { ResolvedAccess } from '@/types/firestore';
+import type { TeamspaceDef } from '@/lib/definitions';
 import { GROUP_HIERARCHY, GROUP_DISPLAY_NAMES } from '@/types/firestore';
+import { getCachedPermissions, setCachedPermissions, clearPermissionsCache } from '@/lib/permissionsCache';
 
 interface PermissionsState {
-  teamspaces: TeamspaceDocument[];
+  teamspaces: TeamspaceDef[];
   accessiblePages: ResolvedAccess[];
   loading: boolean;
   error: string | null;
@@ -17,7 +19,7 @@ interface PermissionsState {
  * Returns the display name of the user's highest-level group.
  */
 export function getHighestGroupName(groups: string[]): string {
-  if (!groups || groups.length === 0) return 'General';
+  if (!groups || groups.length === 0) return 'Unassigned';
 
   let highestSlug = groups[0];
   let highestLevel = GROUP_HIERARCHY[highestSlug] ?? -1;
@@ -36,26 +38,44 @@ export function getHighestGroupName(groups: string[]): string {
 export function usePermissions() {
   const { user } = useAuth();
   const { userData } = useUserData();
-  const [state, setState] = useState<PermissionsState>({
-    teamspaces: [],
-    accessiblePages: [],
-    loading: true,
-    error: null,
+
+  // Initialize state from cache immediately — no loading flash
+  const [state, setState] = useState<PermissionsState>(() => {
+    const cached = getCachedPermissions();
+    if (cached) {
+      return {
+        teamspaces: cached.teamspaces,
+        accessiblePages: cached.accessiblePages,
+        loading: false,
+        error: null,
+      };
+    }
+    return {
+      teamspaces: [],
+      accessiblePages: [],
+      loading: true,
+      error: null,
+    };
   });
 
-  // Track previous groups serialized to detect actual changes
+  // Track previous groups to detect changes
   const prevGroupsRef = useRef<string>('');
 
   const fetchPermissions = useCallback(async () => {
     if (!user) {
       setState({ teamspaces: [], accessiblePages: [], loading: false, error: null });
+      clearPermissionsCache();
       return;
     }
 
     try {
-      setState(prev => ({ ...prev, loading: true, error: null }));
-      const idToken = await user.getIdToken();
+      // Don't set loading if we already have cached data — non-blocking refresh
+      const cached = getCachedPermissions();
+      if (!cached) {
+        setState(prev => ({ ...prev, loading: true, error: null }));
+      }
 
+      const idToken = await user.getIdToken();
       const res = await fetch('/api/permissions/pages', {
         headers: { Authorization: `Bearer ${idToken}` },
       });
@@ -65,26 +85,37 @@ export function usePermissions() {
       }
 
       const data = await res.json();
+      const newTeamspaces = data.teamspaces || [];
+      const newAccessiblePages = data.accessiblePages || [];
+
+      // Update cache
+      setCachedPermissions({ teamspaces: newTeamspaces, accessiblePages: newAccessiblePages });
+
       setState({
-        teamspaces: data.teamspaces || [],
-        accessiblePages: data.accessiblePages || [],
+        teamspaces: newTeamspaces,
+        accessiblePages: newAccessiblePages,
         loading: false,
         error: null,
       });
     } catch (err) {
       console.error('Error fetching permissions:', err);
-      setState(prev => ({
-        ...prev,
-        loading: false,
-        error: err instanceof Error ? err.message : 'Unknown error',
-      }));
+      // Only show error if we have no cached data at all
+      const cached = getCachedPermissions();
+      if (!cached) {
+        setState(prev => ({
+          ...prev,
+          loading: false,
+          error: err instanceof Error ? err.message : 'Unknown error',
+        }));
+      }
     }
   }, [user]);
 
-  // Single effect: fetch when user is available and groups change
+  // Fetch when user is available and groups change
   useEffect(() => {
     if (!user) {
       setState({ teamspaces: [], accessiblePages: [], loading: false, error: null });
+      clearPermissionsCache();
       return;
     }
 

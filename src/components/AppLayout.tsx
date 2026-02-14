@@ -19,7 +19,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const { user } = useAuth();
   const { userData: firestoreUserData } = useUserData();
-  const { teamspaces, accessiblePages, loading: permissionsLoading, canAccess } = usePermissions();
+  const { teamspaces, accessiblePages, loading: permissionsLoading } = usePermissions();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -30,25 +30,23 @@ export default function AppLayout({ children }: AppLayoutProps) {
     name: firestoreUserData?.displayName || user?.displayName || "User",
     email: user?.email || "",
     role: highestGroup,
-    photoURL: firestoreUserData?.photoURL || user?.photoURL || null,
+    photoURL: firestoreUserData?.photoURL || null,
   };
 
-  // Route protection: redirect to home if user navigates to an inaccessible page
+  // Route protection: redirect if user navigates to an inaccessible page
+  // Only redirect after we have data (from cache or API)
   useEffect(() => {
     if (permissionsLoading) return;
+    if (accessiblePages.length === 0 && teamspaces.length === 0) return;
 
-    // Always-accessible routes
     if (ALWAYS_ACCESSIBLE.some(r => pathname === r || pathname === r + '/')) return;
-
-    // Auth routes bypass
     if (pathname.startsWith('/auth/')) return;
 
-    // Check if current route matches any accessible page
     const hasAccess = accessiblePages.some(p => p.href && pathname.startsWith(p.href));
     if (!hasAccess) {
       router.replace('/');
     }
-  }, [pathname, accessiblePages, permissionsLoading, router]);
+  }, [pathname, accessiblePages, teamspaces, permissionsLoading, router]);
 
   return (
     <div className="flex h-screen text-white overflow-hidden" style={{ background: 'var(--background)' }}>
@@ -57,7 +55,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
         onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
         teamspaces={teamspaces}
         accessiblePages={accessiblePages}
-        permissionsLoading={permissionsLoading}
       />
 
       <div className="flex flex-col flex-1 overflow-hidden main-content">

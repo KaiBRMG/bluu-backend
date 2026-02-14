@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import type { PageDocument, PermissionRole, TeamspaceDocument } from "@/types/firestore";
+import type { PagePermissionDoc } from "@/types/firestore";
 import { GROUP_DISPLAY_NAMES } from "@/types/firestore";
+import type { PageDef, TeamspaceDef } from "@/lib/definitions";
 import { resolvePagePermission } from "@/lib/services/permissionResolver";
 
 interface AdminUser {
@@ -14,19 +15,30 @@ interface AdminUser {
 }
 
 interface EffectivePermissionsPreviewProps {
-  pages: PageDocument[];
-  teamspaces: TeamspaceDocument[];
+  pages: PageDef[];
+  teamspaces: TeamspaceDef[];
+  pagePermissions: PagePermissionDoc[];
   users: AdminUser[];
 }
 
 export default function EffectivePermissionsPreview({
   pages,
   teamspaces,
+  pagePermissions,
   users,
 }: EffectivePermissionsPreviewProps) {
   const [selectedUid, setSelectedUid] = useState("");
 
   const selectedUser = users.find((u) => u.uid === selectedUid);
+
+  // Build permission map
+  const permMap = useMemo(() => {
+    const map = new Map<string, PagePermissionDoc>();
+    for (const doc of pagePermissions) {
+      map.set(doc.pageId, doc);
+    }
+    return map;
+  }, [pagePermissions]);
 
   const effectivePermissions = useMemo(() => {
     if (!selectedUser) return [];
@@ -39,8 +51,9 @@ export default function EffectivePermissionsPreview({
         return a.order - b.order;
       })
       .map((page) => {
+        const permDoc = permMap.get(page.pageId);
         const resolved = resolvePagePermission(
-          page,
+          permDoc,
           selectedUser.uid,
           selectedUser.groups || []
         );
@@ -55,7 +68,6 @@ export default function EffectivePermissionsPreview({
           teamspaceId: page.teamspaceId,
           access: resolved
             ? {
-                role: resolved.role,
                 via: resolved.via,
                 groupName:
                   resolved.via === "group" && resolved.groupId
@@ -65,31 +77,9 @@ export default function EffectivePermissionsPreview({
             : null,
         };
       });
-  }, [selectedUid, pages, teamspaces, selectedUser]);
+  }, [selectedUid, pages, teamspaces, pagePermissions, selectedUser, permMap]);
 
-  const roleLabel = (role: PermissionRole) => {
-    switch (role) {
-      case "full_access":
-        return "Full Access";
-      case "can_edit":
-        return "Can Edit";
-      case "can_view":
-        return "Can View";
-    }
-  };
-
-  const roleColor = (role: PermissionRole) => {
-    switch (role) {
-      case "full_access":
-        return "#22c55e";
-      case "can_edit":
-        return "#3b82f6";
-      case "can_view":
-        return "#eab308";
-    }
-  };
-
-  // Group results by teamspace for display
+  // Group results by teamspace
   const groupedByTeamspace = useMemo(() => {
     const map = new Map<string, typeof effectivePermissions>();
     for (const item of effectivePermissions) {
@@ -108,7 +98,7 @@ export default function EffectivePermissionsPreview({
         background: "rgba(255, 255, 255, 0.02)",
       }}
     >
-      <h3 className="text-sm font-semibold mb-3">Effective Permissions Preview</h3>
+      <h3 className="text-sm font-semibold mb-3">Permission Visibility</h3>
 
       <div className="mb-4">
         <select
@@ -157,11 +147,11 @@ export default function EffectivePermissionsPreview({
                         <span
                           className="text-xs font-medium px-2 py-0.5 rounded"
                           style={{
-                            color: roleColor(item.access.role),
-                            background: `${roleColor(item.access.role)}15`,
+                            color: "#22c55e",
+                            background: "rgba(34, 197, 94, 0.08)",
                           }}
                         >
-                          {roleLabel(item.access.role)}
+                          Access
                         </span>
                         <span
                           className="text-xs"

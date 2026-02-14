@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import type { PageDocument, PermissionRole } from "@/types/firestore";
-import { GROUP_DISPLAY_NAMES } from "@/types/firestore";
+import { useState, useRef, useEffect } from "react";
+import type { PagePermissionDoc } from "@/types/firestore";
+import type { PageDef } from "@/lib/definitions";
 
 interface AdminGroup {
   id: string;
@@ -19,55 +19,65 @@ interface AdminUser {
 }
 
 interface PermissionTableProps {
-  pages: PageDocument[];
+  pages: PageDef[];
   teamspaceName: string;
+  pagePermissions: PagePermissionDoc[];
   groups: AdminGroup[];
   users: AdminUser[];
   onUpdatePermission: (
     pageId: string,
-    permissions: { users: Record<string, PermissionRole>; groups: Record<string, PermissionRole> }
+    permissions: { groups: Record<string, true>; users: Record<string, true> }
   ) => Promise<void>;
 }
-
-const ROLE_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "No Access" },
-  { value: "can_view", label: "Can View" },
-  { value: "can_edit", label: "Can Edit" },
-  { value: "full_access", label: "Full Access" },
-];
 
 export default function PermissionTable({
   pages,
   teamspaceName,
+  pagePermissions,
   groups,
   users,
   onUpdatePermission,
 }: PermissionTableProps) {
   const [saving, setSaving] = useState<string | null>(null);
-  const [addingUserTo, setAddingUserTo] = useState<string | null>(null);
-  const [selectedUserId, setSelectedUserId] = useState("");
-  const [selectedUserRole, setSelectedUserRole] = useState<PermissionRole>("can_view");
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Filter out the 'general' group from the permission columns
-  const assignableGroups = groups.filter((g) => g.id !== "general").sort((a, b) => a.level - b.level);
+  // Filter out 'unassigned' group, sort by level
+  const assignableGroups = groups
+    .filter((g) => g.id !== "unassigned")
+    .sort((a, b) => a.level - b.level);
 
-  const handleGroupRoleChange = async (
-    page: PageDocument,
-    groupId: string,
-    newRole: string
-  ) => {
-    setSaving(page.pageId);
-    try {
-      const updatedGroups = { ...page.permissions.groups };
-      if (newRole === "") {
-        delete updatedGroups[groupId];
-      } else {
-        updatedGroups[groupId] = newRole as PermissionRole;
+  // Get permission doc for a page
+  const getPermDoc = (pageId: string): PagePermissionDoc | undefined =>
+    pagePermissions.find((p) => p.pageId === pageId);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setOpenDropdown(null);
       }
-      await onUpdatePermission(page.pageId, {
-        users: page.permissions.users || {},
-        groups: updatedGroups,
-      });
+    }
+    if (openDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [openDropdown]);
+
+  const handleGroupToggle = async (pageId: string, groupId: string, currentlyHasAccess: boolean) => {
+    setSaving(pageId);
+    try {
+      const permDoc = getPermDoc(pageId);
+      const currentGroups = { ...(permDoc?.groups || {}) };
+      const currentUsers = { ...(permDoc?.users || {}) };
+
+      if (currentlyHasAccess) {
+        delete currentGroups[groupId];
+      } else {
+        currentGroups[groupId] = true;
+      }
+
+      await onUpdatePermission(pageId, { groups: currentGroups as Record<string, true>, users: currentUsers as Record<string, true> });
     } catch (err) {
       console.error("Failed to update group permission:", err);
     } finally {
@@ -75,66 +85,21 @@ export default function PermissionTable({
     }
   };
 
-  const handleRemoveUser = async (page: PageDocument, uid: string) => {
-    setSaving(page.pageId);
+  const handleUserToggle = async (pageId: string, uid: string, currentlyHasAccess: boolean) => {
+    setOpenDropdown(null);
+    setSaving(pageId);
     try {
-      const updatedUsers = { ...page.permissions.users };
-      delete updatedUsers[uid];
-      await onUpdatePermission(page.pageId, {
-        users: updatedUsers,
-        groups: page.permissions.groups || {},
-      });
-    } catch (err) {
-      console.error("Failed to remove user permission:", err);
-    } finally {
-      setSaving(null);
-    }
-  };
+      const permDoc = getPermDoc(pageId);
+      const currentGroups = { ...(permDoc?.groups || {}) };
+      const currentUsers = { ...(permDoc?.users || {}) };
 
-  const handleAddUser = async (page: PageDocument) => {
-    if (!selectedUserId) return;
-
-    // Prevent duplicates
-    if (page.permissions.users?.[selectedUserId]) {
-      setAddingUserTo(null);
-      setSelectedUserId("");
-      return;
-    }
-
-    setSaving(page.pageId);
-    try {
-      const updatedUsers = { ...(page.permissions.users || {}), [selectedUserId]: selectedUserRole };
-      await onUpdatePermission(page.pageId, {
-        users: updatedUsers,
-        groups: page.permissions.groups || {},
-      });
-    } catch (err) {
-      console.error("Failed to add user permission:", err);
-    } finally {
-      setSaving(null);
-      setAddingUserTo(null);
-      setSelectedUserId("");
-      setSelectedUserRole("can_view");
-    }
-  };
-
-  const handleUserRoleChange = async (
-    page: PageDocument,
-    uid: string,
-    newRole: string
-  ) => {
-    setSaving(page.pageId);
-    try {
-      const updatedUsers = { ...page.permissions.users };
-      if (newRole === "") {
-        delete updatedUsers[uid];
+      if (currentlyHasAccess) {
+        delete currentUsers[uid];
       } else {
-        updatedUsers[uid] = newRole as PermissionRole;
+        currentUsers[uid] = true;
       }
-      await onUpdatePermission(page.pageId, {
-        users: updatedUsers,
-        groups: page.permissions.groups || {},
-      });
+
+      await onUpdatePermission(pageId, { groups: currentGroups as Record<string, true>, users: currentUsers as Record<string, true> });
     } catch (err) {
       console.error("Failed to update user permission:", err);
     } finally {
@@ -142,9 +107,9 @@ export default function PermissionTable({
     }
   };
 
-  const getUserName = (uid: string) => {
-    const u = users.find((u) => u.uid === uid);
-    return u?.displayName || uid;
+  const getSharedUserCount = (pageId: string): number => {
+    const permDoc = getPermDoc(pageId);
+    return Object.keys(permDoc?.users || {}).length;
   };
 
   return (
@@ -164,7 +129,7 @@ export default function PermissionTable({
         <div
           className="grid items-center px-4 py-2 text-xs font-medium uppercase tracking-wider"
           style={{
-            gridTemplateColumns: `180px repeat(${assignableGroups.length}, 1fr) 1fr`,
+            gridTemplateColumns: `180px repeat(${assignableGroups.length}, 80px) 1fr`,
             background: "rgba(255, 255, 255, 0.03)",
             color: "var(--foreground-muted)",
             borderBottom: "1px solid var(--border-subtle)",
@@ -172,152 +137,128 @@ export default function PermissionTable({
         >
           <div>Page</div>
           {assignableGroups.map((g) => (
-            <div key={g.id}>{GROUP_DISPLAY_NAMES[g.id] || g.name}</div>
+            <div key={g.id} className="text-center">{g.id}</div>
           ))}
-          <div>Users</div>
+          <div>Individuals</div>
         </div>
 
         {/* Rows */}
         {pages
           .sort((a, b) => a.order - b.order)
-          .map((page) => (
-            <div
-              key={page.pageId}
-              className="px-4 py-3"
-              style={{
-                borderBottom: "1px solid var(--border-subtle)",
-                opacity: saving === page.pageId ? 0.6 : 1,
-                transition: "opacity 120ms",
-              }}
-            >
+          .map((page) => {
+            const permDoc = getPermDoc(page.pageId);
+            const sharedCount = getSharedUserCount(page.pageId);
+            const isDropdownOpen = openDropdown === page.pageId;
+
+            return (
               <div
-                className="grid items-center"
+                key={page.pageId}
+                className="px-4 py-3"
                 style={{
-                  gridTemplateColumns: `180px repeat(${assignableGroups.length}, 1fr) 1fr`,
+                  borderBottom: "1px solid var(--border-subtle)",
+                  opacity: saving === page.pageId ? 0.6 : 1,
+                  transition: "opacity 120ms",
                 }}
               >
-                {/* Page name */}
-                <div className="font-medium text-sm">{page.title}</div>
+                <div
+                  className="grid items-center"
+                  style={{
+                    gridTemplateColumns: `180px repeat(${assignableGroups.length}, 80px) 1fr`,
+                  }}
+                >
+                  {/* Page name */}
+                  <div className="font-medium text-sm">{page.title}</div>
 
-                {/* Group dropdowns */}
-                {assignableGroups.map((g) => (
-                  <div key={g.id}>
-                    <select
-                      className="form-input text-sm"
-                      style={{ padding: "4px 8px", maxWidth: "140px" }}
-                      value={page.permissions.groups?.[g.id] || ""}
-                      onChange={(e) =>
-                        handleGroupRoleChange(page, g.id, e.target.value)
-                      }
+                  {/* Group checkboxes */}
+                  {assignableGroups.map((g) => {
+                    const hasAccess = !!permDoc?.groups?.[g.id];
+                    return (
+                      <div key={g.id} className="flex justify-center">
+                        <input
+                          type="checkbox"
+                          checked={hasAccess}
+                          onChange={() => handleGroupToggle(page.pageId, g.id, hasAccess)}
+                          disabled={saving === page.pageId}
+                          className="w-4 h-4 rounded cursor-pointer"
+                          style={{ accentColor: "#3b82f6" }}
+                        />
+                      </div>
+                    );
+                  })}
+
+                  {/* Users dropdown */}
+                  <div className="relative" ref={isDropdownOpen ? dropdownRef : undefined}>
+                    <button
+                      onClick={() => setOpenDropdown(isDropdownOpen ? null : page.pageId)}
+                      className="form-input text-sm flex items-center justify-between gap-2 w-full"
+                      style={{ padding: "4px 8px", maxWidth: "220px", cursor: "pointer" }}
                       disabled={saving === page.pageId}
                     >
-                      {ROLE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
+                      <span style={{ color: sharedCount > 0 ? "var(--foreground)" : "var(--foreground-muted)" }}>
+                        {sharedCount > 0
+                          ? `Shared with ${sharedCount} individual${sharedCount > 1 ? "s" : ""}`
+                          : "No individuals"}
+                      </span>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </button>
 
-                {/* User permissions */}
-                <div className="flex flex-col gap-1">
-                  {Object.entries(page.permissions.users || {}).map(
-                    ([uid, role]) => (
-                      <div key={uid} className="flex items-center gap-2 text-xs">
-                        <span
-                          className="truncate max-w-[100px]"
-                          title={getUserName(uid)}
-                        >
-                          {getUserName(uid)}
-                        </span>
-                        <select
-                          className="form-input text-xs"
-                          style={{ padding: "2px 4px", width: "100px" }}
-                          value={role}
-                          onChange={(e) =>
-                            handleUserRoleChange(page, uid, e.target.value)
-                          }
-                          disabled={saving === page.pageId}
-                        >
-                          {ROLE_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          onClick={() => handleRemoveUser(page, uid)}
-                          className="text-red-400 hover:text-red-300"
-                          disabled={saving === page.pageId}
-                          title="Remove user"
-                        >
-                          x
-                        </button>
-                      </div>
-                    )
-                  )}
-
-                  {addingUserTo === page.pageId ? (
-                    <div className="flex items-center gap-1 mt-1">
-                      <select
-                        className="form-input text-xs"
-                        style={{ padding: "2px 4px", width: "110px" }}
-                        value={selectedUserId}
-                        onChange={(e) => setSelectedUserId(e.target.value)}
-                      >
-                        <option value="">Select user</option>
-                        {users
-                          .filter((u) => !page.permissions.users?.[u.uid])
-                          .map((u) => (
-                            <option key={u.uid} value={u.uid}>
-                              {u.displayName}
-                            </option>
-                          ))}
-                      </select>
-                      <select
-                        className="form-input text-xs"
-                        style={{ padding: "2px 4px", width: "90px" }}
-                        value={selectedUserRole}
-                        onChange={(e) =>
-                          setSelectedUserRole(e.target.value as PermissionRole)
-                        }
-                      >
-                        <option value="can_view">Can View</option>
-                        <option value="can_edit">Can Edit</option>
-                        <option value="full_access">Full Access</option>
-                      </select>
-                      <button
-                        className="text-xs text-blue-400 hover:text-blue-300"
-                        onClick={() => handleAddUser(page)}
-                        disabled={!selectedUserId}
-                      >
-                        Add
-                      </button>
-                      <button
-                        className="text-xs"
-                        style={{ color: "var(--foreground-muted)" }}
-                        onClick={() => {
-                          setAddingUserTo(null);
-                          setSelectedUserId("");
+                    {isDropdownOpen && (
+                      <div
+                        className="absolute top-full left-0 mt-1 w-64 max-h-60 overflow-y-auto rounded-lg shadow-xl z-50"
+                        style={{
+                          background: "var(--sidebar-background)",
+                          border: "1px solid var(--border-subtle)",
                         }}
                       >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      className="text-xs mt-1"
-                      style={{ color: "var(--foreground-muted)" }}
-                      onClick={() => setAddingUserTo(page.pageId)}
-                    >
-                      + Add user
-                    </button>
-                  )}
+                        {users.length === 0 ? (
+                          <div className="px-3 py-2 text-xs" style={{ color: "var(--foreground-muted)" }}>
+                            No users available
+                          </div>
+                        ) : (
+                          users.map((u) => {
+                            const userHasAccess = !!permDoc?.users?.[u.uid];
+                            return (
+                              <button
+                                key={u.uid}
+                                onClick={() => handleUserToggle(page.pageId, u.uid, userHasAccess)}
+                                className="w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors"
+                                style={{
+                                  background: userHasAccess ? "rgba(59, 130, 246, 0.1)" : "transparent",
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (!userHasAccess) e.currentTarget.style.background = "var(--hover-background)";
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = userHasAccess ? "rgba(59, 130, 246, 0.1)" : "transparent";
+                                }}
+                                disabled={saving === page.pageId}
+                              >
+                                {userHasAccess ? (
+                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2">
+                                    <polyline points="20 6 9 17 4 12" />
+                                  </svg>
+                                ) : (
+                                  <div className="w-4 h-4" />
+                                )}
+                                <div className="flex flex-col min-w-0">
+                                  <span className="truncate">{u.displayName}</span>
+                                  <span className="text-xs truncate" style={{ color: "var(--foreground-muted)" }}>
+                                    {u.workEmail}
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
       </div>
     </div>
   );

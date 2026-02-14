@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
-import { getAllTeamspaces } from '@/lib/services/teamspaceService';
 import { getAccessiblePages } from '@/lib/services/pageService';
+import { TEAMSPACES } from '@/lib/definitions';
 
 /**
  * GET /api/permissions/pages
- * Returns all teamspaces and the current user's accessible pages with effective roles.
- * 3 Firestore reads total: user doc, teamspaces collection, pages collection.
+ * Returns all teamspaces (from code) and the current user's accessible pages.
+ * Firestore reads: 1 (user doc) + 1 (page-permissions collection) = 2 reads total.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -20,19 +20,14 @@ export async function GET(request: NextRequest) {
     const decodedToken = await adminAuth.verifyIdToken(idToken);
     const uid = decodedToken.uid;
 
-    // Fetch user, teamspaces, and accessible pages in parallel
-    const [user, teamspaces] = await Promise.all([
-      getUserById(uid),
-      getAllTeamspaces(),
-    ]);
-
+    const user = await getUserById(uid);
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
     const accessiblePages = await getAccessiblePages(uid, user.groups || []);
 
-    return NextResponse.json({ teamspaces, accessiblePages });
+    return NextResponse.json({ teamspaces: TEAMSPACES, accessiblePages });
   } catch (error: unknown) {
     console.error('Error fetching permissions:', error);
     const errorCode = (error as { code?: string })?.code;

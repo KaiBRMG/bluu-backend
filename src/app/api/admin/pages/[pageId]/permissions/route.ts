@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
-import { getPageById, updatePagePermissions } from '@/lib/services/pageService';
+import { updatePagePermissions } from '@/lib/services/pageService';
 import { getAllGroups } from '@/lib/services/groupService';
-import type { PermissionRole } from '@/types/firestore';
+import { getPageDef } from '@/lib/definitions';
 
 /**
  * PUT /api/admin/pages/[pageId]/permissions
  * Admin-only. Updates permissions on a specific page.
+ * Permissions are binary: { groups: { "CA": true }, users: { "uid123": true } }
  */
 export async function PUT(
   request: NextRequest,
@@ -31,9 +32,8 @@ export async function PUT(
 
     const { pageId } = await params;
 
-    // Verify page exists
-    const page = await getPageById(pageId);
-    if (!page) {
+    // Verify page exists in definitions
+    if (!getPageDef(pageId)) {
       return NextResponse.json({ error: 'Page not found' }, { status: 404 });
     }
 
@@ -43,35 +43,21 @@ export async function PUT(
       return NextResponse.json({ error: 'Invalid permissions payload' }, { status: 400 });
     }
 
-    // Validate structure
-    const validRoles: PermissionRole[] = ['full_access', 'can_edit', 'can_view'];
-
-    if (permissions.users && typeof permissions.users === 'object') {
-      for (const [, role] of Object.entries(permissions.users)) {
-        if (!validRoles.includes(role as PermissionRole)) {
-          return NextResponse.json({ error: `Invalid user permission role: ${role}` }, { status: 400 });
-        }
-      }
-    }
-
+    // Validate group slugs exist
     if (permissions.groups && typeof permissions.groups === 'object') {
-      // Validate group slugs exist
       const existingGroups = await getAllGroups();
       const validGroupIds = new Set(existingGroups.map((g: any) => g.id));
 
-      for (const [groupId, role] of Object.entries(permissions.groups)) {
+      for (const groupId of Object.keys(permissions.groups)) {
         if (!validGroupIds.has(groupId)) {
           return NextResponse.json({ error: `Unknown group: ${groupId}` }, { status: 400 });
-        }
-        if (!validRoles.includes(role as PermissionRole)) {
-          return NextResponse.json({ error: `Invalid group permission role: ${role}` }, { status: 400 });
         }
       }
     }
 
     await updatePagePermissions(pageId, {
-      users: permissions.users || {},
       groups: permissions.groups || {},
+      users: permissions.users || {},
     });
 
     return NextResponse.json({ success: true });

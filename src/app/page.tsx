@@ -10,7 +10,7 @@ export default function Home() {
   const firstName = user?.displayName?.split(' ')[0] || 'User';
 
   // Get the first group from the user's groups array, or default to "General"
-  const userGroup = userData?.groups?.[0] || "general";
+  const userGroup = userData?.groups?.[0] || "unassigned";
   const displayGroup = userGroup.charAt(0).toUpperCase() + userGroup.slice(1);
 
   return (

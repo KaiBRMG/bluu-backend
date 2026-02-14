@@ -54,11 +54,10 @@ export async function POST(request: NextRequest) {
       firebaseUser = await adminAuth.getUserByEmail(userInfo.email);
     } catch (error: any) {
       if (error.code === 'auth/user-not-found') {
-        // Create new user
+        // Create new user — do NOT pass photoURL so initials avatar is used
         firebaseUser = await adminAuth.createUser({
           email: userInfo.email,
           displayName: userInfo.name || undefined,
-          photoURL: userInfo.picture || undefined,
           emailVerified: userInfo.verified_email || false,
         });
       } else {
@@ -67,20 +66,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Parallelize database operations and token creation for better performance
-    // These operations are independent and can run concurrently
     console.time('[Auth] Database operations');
     const [, customToken] = await Promise.all([
-      // Group 1: Database setup operations
       Promise.all([
         ensureDefaultGroups(),
         ensureUserExists({
           uid: firebaseUser.uid,
           workEmail: userInfo.email,
           displayName: userInfo.name || '',
-          photoURL: userInfo.picture || undefined,
         }),
       ]),
-      // Group 2: Token creation (independent operation)
       adminAuth.createCustomToken(firebaseUser.uid),
     ]);
     console.timeEnd('[Auth] Database operations');
@@ -90,7 +85,6 @@ export async function POST(request: NextRequest) {
         user: {
           email: userInfo.email,
           name: userInfo.name,
-          picture: userInfo.picture,
         },
       });
     } catch (tokenError: any) {

@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
-import { getAllPages } from '@/lib/services/pageService';
-import { getAllTeamspaces } from '@/lib/services/teamspaceService';
+import { getAllPagePermissions } from '@/lib/services/pageService';
 import { getAllGroups } from '@/lib/services/groupService';
+import { PAGES, TEAMSPACES } from '@/lib/definitions';
 
 /**
  * GET /api/admin/pages
- * Admin-only. Returns all pages (with full permissions), all groups, and all users.
- * Used by the Admin Sharing page.
+ * Admin-only. Returns all pages (from code), page-permissions (from Firestore),
+ * all groups, and all users. Used by the Admin Sharing page.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -27,17 +27,22 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
-    // Fetch all data in parallel
-    const [pages, teamspaces, groups, usersSnapshot] = await Promise.all([
-      getAllPages(),
-      getAllTeamspaces(),
+    // Fetch Firestore data in parallel
+    const [pagePermissions, groups, usersSnapshot] = await Promise.all([
+      getAllPagePermissions(),
       getAllGroups(),
       adminDb.collection('users').select('uid', 'displayName', 'workEmail', 'groups', 'photoURL').get(),
     ]);
 
     const users = usersSnapshot.docs.map(doc => doc.data());
 
-    return NextResponse.json({ pages, teamspaces, groups, users });
+    return NextResponse.json({
+      pages: PAGES,
+      teamspaces: TEAMSPACES,
+      pagePermissions,
+      groups,
+      users,
+    });
   } catch (error: unknown) {
     console.error('Error fetching admin pages:', error);
     const errorCode = (error as { code?: string })?.code;

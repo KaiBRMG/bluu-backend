@@ -5,12 +5,12 @@ export interface CreateUserData {
   uid: string;
   workEmail: string;
   displayName: string;
-  photoURL?: string;
 }
 
 /**
  * Ensures user document exists in Firestore.
  * Creates new document on first login, updates lastLoginAt on subsequent logins.
+ * New users always start with no profile photo (initials avatar).
  */
 export async function ensureUserExists(userData: CreateUserData): Promise<void> {
   const userRef = adminDb.collection('users').doc(userData.uid);
@@ -23,15 +23,15 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
     const [firstName, ...lastNameParts] = userData.displayName.split(' ');
     const lastName = lastNameParts.join(' ');
 
-    // Create user document
+    // Create user document — photoURL is null so initials avatar is used
     await userRef.set({
       uid: userData.uid,
       workEmail: userData.workEmail,
       displayName: userData.displayName,
-      photoURL: userData.photoURL || null,
+      photoURL: null,
       firstName: firstName || '',
       lastName: lastName || '',
-      groups: ['general'], // Assign to default General group
+      groups: ['unassigned'], // Assign to default group
       createdAt: FieldValue.serverTimestamp(),
       lastLoginAt: FieldValue.serverTimestamp(),
       isActive: true,
@@ -64,13 +64,11 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
       paymentInfo: '',
 
       userComments: '',
-      
+
     });
 
-    // Add user to General group's member list (non-blocking for better performance)
-    // The user document already has 'general' in its groups array, so this is just
-    // syncing the reverse relationship. We don't need to block login for this.
-    addUserToGroup(userData.uid, 'general').catch((err) => {
+    // Add user to Unassigned group's member list (non-blocking for better performance)
+    addUserToGroup(userData.uid, 'unassigned').catch((err) => {
       console.error('[UserService] Failed to add user to group:', err);
     });
   } else {
@@ -79,7 +77,7 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
     // Update last login timestamp for existing user
     await userRef.update({
       lastLoginAt: FieldValue.serverTimestamp(),
-    }); 
+    });
   }
 }
 

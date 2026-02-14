@@ -1,56 +1,50 @@
-import type { PageDocument, PermissionRole, ResolvedAccess } from '@/types/firestore';
-import { PERMISSION_ROLE_RANK } from '@/types/firestore';
+import type { PagePermissionDoc, ResolvedAccess } from '@/types/firestore';
+import { PAGES } from '@/lib/definitions';
 
 /**
- * Resolves the effective permission for a single page given the user's UID and groups.
- * Uses the union/additive model: if ANY source grants access, the user gets it.
- * When multiple sources grant access, the highest role wins.
+ * Resolves whether a user has access to a page based on the permission doc.
+ * Binary: either the user has access (via direct UID or group membership) or not.
  */
 export function resolvePagePermission(
-  page: PageDocument,
+  permDoc: PagePermissionDoc | undefined,
   uid: string,
   userGroups: string[]
-): { role: PermissionRole; via: 'user' | 'group'; groupId?: string } | null {
-  let bestRole: PermissionRole | null = null;
-  let bestVia: 'user' | 'group' = 'user';
-  let bestGroupId: string | undefined;
+): { via: 'user' | 'group'; groupId?: string } | null {
+  if (!permDoc) return null;
 
   // Check direct user permission
-  const userRole = page.permissions.users?.[uid];
-  if (userRole) {
-    bestRole = userRole;
-    bestVia = 'user';
+  if (permDoc.users?.[uid]) {
+    return { via: 'user' };
   }
 
   // Check group permissions
   for (const groupSlug of userGroups) {
-    const groupRole = page.permissions.groups?.[groupSlug];
-    if (groupRole) {
-      if (!bestRole || PERMISSION_ROLE_RANK[groupRole] > PERMISSION_ROLE_RANK[bestRole]) {
-        bestRole = groupRole;
-        bestVia = 'group';
-        bestGroupId = groupSlug;
-      }
+    if (permDoc.groups?.[groupSlug]) {
+      return { via: 'group', groupId: groupSlug };
     }
   }
 
-  if (!bestRole) return null;
-
-  return { role: bestRole, via: bestVia, groupId: bestGroupId };
+  return null;
 }
 
 /**
- * Resolves access for all provided pages. Returns only the pages the user can access.
+ * Resolves access for all pages. Returns only the pages the user can access.
  */
 export function resolveAccessiblePages(
-  pages: PageDocument[],
+  permDocs: PagePermissionDoc[],
   uid: string,
   userGroups: string[]
 ): ResolvedAccess[] {
+  const permMap = new Map<string, PagePermissionDoc>();
+  for (const doc of permDocs) {
+    permMap.set(doc.pageId, doc);
+  }
+
   const results: ResolvedAccess[] = [];
 
-  for (const page of pages) {
-    const resolved = resolvePagePermission(page, uid, userGroups);
+  for (const page of PAGES) {
+    const permDoc = permMap.get(page.pageId);
+    const resolved = resolvePagePermission(permDoc, uid, userGroups);
     if (resolved) {
       results.push({
         pageId: page.pageId,
@@ -59,7 +53,6 @@ export function resolveAccessiblePages(
         href: page.href,
         icon: page.icon,
         order: page.order,
-        effectiveRole: resolved.role,
         grantedVia: resolved.via,
         grantingGroupId: resolved.groupId,
       });

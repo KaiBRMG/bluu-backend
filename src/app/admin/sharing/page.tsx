@@ -7,7 +7,7 @@ import PermissionTable from "@/components/admin/sharing/PermissionTable";
 import EffectivePermissionsPreview from "@/components/admin/sharing/EffectivePermissionsPreview";
 
 export default function SharingPage() {
-  const { pages, teamspaces, groups, users, loading, error, updatePermission } =
+  const { pages, teamspaces, pagePermissions, groups, users, loading, error, updatePermission } =
     useAdminData();
 
   // Group pages by teamspace
@@ -69,6 +69,7 @@ export default function SharingPage() {
                 key={ts.id}
                 teamspaceName={ts.name}
                 pages={tsPages}
+                pagePermissions={pagePermissions}
                 groups={groups}
                 users={users}
                 onUpdatePermission={updatePermission}
@@ -81,6 +82,7 @@ export default function SharingPage() {
           <EffectivePermissionsPreview
             pages={pages}
             teamspaces={teamspaces}
+            pagePermissions={pagePermissions}
             users={users}
           />
         </div>

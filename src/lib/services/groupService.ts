@@ -3,28 +3,28 @@ import { FieldValue } from 'firebase-admin/firestore';
 
 const DEFAULT_GROUPS = [
   {
-    id: 'general',
-    name: 'General',
+    id: 'unassigned',
+    name: 'Unassigned',
     description: 'Default group for all new users',
     isDefault: true,
     level: -1,
   },
   {
-    id: 'chat-agents',
+    id: 'CA',
     name: 'Chat Agents',
     description: 'Chat support agents',
     isDefault: false,
     level: 0,
   },
   {
-    id: 'social-media-manager',
+    id: 'SMM',
     name: 'Social Media Manager',
     description: 'Social media management team',
     isDefault: false,
     level: 0,
   },
   {
-    id: 'account-manager',
+    id: 'OFAM',
     name: 'Account Manager',
     description: 'Account management team',
     isDefault: false,
