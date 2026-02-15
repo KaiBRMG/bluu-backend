@@ -30,7 +30,7 @@ export const PAGES: PageDef[] = [
   // Admin
   { pageId: 'sharing', title: 'Sharing', teamspaceId: 'admin', href: '/admin/sharing', icon: '/Icons/share-2.svg', order: 0 },
   { pageId: 'organisation-settings', title: 'Organisation Settings', teamspaceId: 'admin', href: '/admin/organisation-settings', icon: null, order: 1 },
-  { pageId: 'user-settings', title: 'User Settings', teamspaceId: 'admin', href: '/admin/user-settings', icon: null, order: 2 },
+  { pageId: 'user-management', title: 'User Management', teamspaceId: 'admin', href: '/admin/user-management', icon: '/Icons/user-round-cog.svg', order: 2 },
   // Apps
   { pageId: 'time-tracking', title: 'Time Tracking', teamspaceId: 'apps', href: '/applications/time-tracking', icon: '/Icons/time-tracking.svg', order: 0 },
   { pageId: 'app-2', title: 'App 2 (Placeholder)', teamspaceId: 'apps', href: null, icon: null, order: 1 },
