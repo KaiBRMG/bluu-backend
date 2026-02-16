@@ -173,7 +173,7 @@ export default function Sidebar({
           <img
             src="/logo/bluu_uu.svg"
             alt="Bluu"
-            className="h-8 w-auto"
+            className="h-5 w-auto"
           />
         </button>
       </div>

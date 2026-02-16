@@ -45,20 +45,8 @@ export default function TopBar({ userData }: TopBarProps) {
 
   return (
     <header className="h-14 flex items-center justify-between px-6" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-      {/* Search bar */}
-      <div className="flex-1 max-w-xl">
-        <div className="relative flex items-center">
-          <img src="/Icons/search.svg" alt="Search" className="absolute left-3 w-4 h-4 pointer-events-none" style={{ opacity: 'var(--icon-inactive)' }} />
-          <input
-            type="search"
-            placeholder="Search..."
-            className="search-input w-full pl-10 pr-4"
-          />
-        </div>
-      </div>
-
       {/* Right side - notifications and user */}
-      <div className="flex items-center gap-4">
+      <div className="ml-auto flex items-center gap-4">
         {/* Notifications */}
         <button
           className="relative p-2 rounded-lg transition-colors"
