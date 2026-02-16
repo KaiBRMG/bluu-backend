@@ -8,6 +8,7 @@ interface UserManagementSidebarProps {
 const menuItems = [
   { id: 'employee-registry', label: 'Employee Registry' },
   { id: 'user-groups', label: 'User Groups' },
+  // { id: 'user-groups', label: 'User Groups' },
 ];
 
 export default function UserManagementSidebar({ activeSection, onSectionChange }: UserManagementSidebarProps) {

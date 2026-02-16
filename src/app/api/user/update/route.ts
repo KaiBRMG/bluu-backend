@@ -32,6 +32,8 @@ export async function POST(request: NextRequest) {
       'paymentInfo',
       'userComments',
       'photoURL',
+      'timezone',
+      'timezoneOffset',
     ];
 
     // Filter and sanitize updates

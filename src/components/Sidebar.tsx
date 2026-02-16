@@ -125,41 +125,25 @@ export default function Sidebar({
     >
       {/* Top section with logo and collapse button */}
       <div
-        className="h-14 flex items-center justify-between px-4"
+        className="h-14 flex items-center px-4 relative overflow-hidden"
         style={{ borderBottom: "1px solid var(--border-subtle)" }}
       >
-        {!isCollapsed ? (
-          <>
-            <div className="flex items-center">
-              <img
-                src="/logo/bluu_long.svg"
-                alt="Bluu Logo"
-                className="h-8 w-auto"
-              />
-            </div>
-            <button
-              onClick={onToggleCollapse}
-              className="p-1 rounded transition-colors"
-              style={{ background: "transparent" }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background = "var(--hover-background)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "transparent")
-              }
-              title="Collapse sidebar"
-            >
-              <img
-                src="/Icons/menu_collapse.svg"
-                alt="Collapse"
-                className="sidebar-nav-item-icon"
-              />
-            </button>
-          </>
-        ) : (
+        {/* Full logo + collapse button (visible when expanded) */}
+        <div
+          className={`flex items-center justify-between w-full transition-opacity duration-[250ms] ease-out ${
+            isCollapsed ? "opacity-0 pointer-events-none" : "opacity-100"
+          }`}
+        >
+          <div className="flex items-center">
+            <img
+              src="/logo/bluu_long.svg"
+              alt="Bluu Logo"
+              className="h-8 w-auto"
+            />
+          </div>
           <button
             onClick={onToggleCollapse}
-            className="p-1 rounded transition-colors mx-auto"
+            className="p-1 rounded transition-colors"
             style={{ background: "transparent" }}
             onMouseEnter={(e) =>
               (e.currentTarget.style.background = "var(--hover-background)")
@@ -167,15 +151,31 @@ export default function Sidebar({
             onMouseLeave={(e) =>
               (e.currentTarget.style.background = "transparent")
             }
-            title="Expand sidebar"
+            title="Collapse sidebar"
           >
             <img
-              src="/logo/bluu_uu.svg"
-              alt="Bluu"
-              className="h-10 w-auto"
+              src="/Icons/menu_collapse.svg"
+              alt="Collapse"
+              className="sidebar-nav-item-icon"
             />
           </button>
-        )}
+        </div>
+
+        {/* Icon logo (visible when collapsed) */}
+        <button
+          onClick={onToggleCollapse}
+          className={`absolute left-0 top-0 h-full w-full flex items-center justify-center transition-opacity duration-[250ms] ease-out ${
+            isCollapsed ? "opacity-100" : "opacity-0 pointer-events-none"
+          }`}
+          style={{ background: "transparent" }}
+          title="Expand sidebar"
+        >
+          <img
+            src="/logo/bluu_uu.svg"
+            alt="Bluu"
+            className="h-8 w-auto"
+          />
+        </button>
       </div>
 
       {/* Navigation */}

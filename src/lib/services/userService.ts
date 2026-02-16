@@ -65,6 +65,9 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
 
       userComments: '',
 
+      timezone: '',
+      timezoneOffset: '',
+
     });
 
     // Add user to Unassigned group's member list (non-blocking for better performance)

@@ -64,6 +64,9 @@ export interface UserDocument {
   paymentInfo?: string;
 
   userComments?: string;
+
+  timezone?: string;
+  timezoneOffset?: string;
 }
 
 // ─── Group ──────────────────────────────────────────────────────────

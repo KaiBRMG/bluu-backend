@@ -109,6 +109,7 @@ textarea,
   justify-content: flex-start;
   gap: 8px;
   color: var(--foreground);
+  transition: padding 250ms ease-out;
 }
 
 .sidebar-nav-item:hover {
@@ -130,6 +131,10 @@ textarea,
 .sidebar-nav-item-text {
   flex: 1;
   text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 250ms ease-out;
 }
 
 .sidebar-nav-item-arrow {
@@ -139,6 +144,8 @@ textarea,
   flex-shrink: 0;
   margin-left: auto;
   margin-right: 10;
+  overflow: hidden;
+  transition: opacity 250ms ease-out, width 250ms ease-out;
 }
 
 .sidebar-nav-item.active .sidebar-nav-item-icon {
@@ -184,29 +191,25 @@ textarea,
 
 /* Collapsed sidebar styles */
 .sidebar-collapsed .sidebar-nav-item {
-  justify-content: center;
+  justify-content: flex-start;
   padding: 8px;
 }
 
 .sidebar-collapsed .sidebar-nav-item-text {
-  display: none;
+  opacity: 0;
+  width: 0;
+  flex: 0;
+  overflow: hidden;
 }
 
 .sidebar-collapsed .sidebar-nav-item-arrow {
-  display: none;
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
 }
 
 .sidebar-collapsed .sidebar-section-header {
   display: none;
-}
-
-.sidebar-collapsed .logo-text {
-  display: none;
-}
-
-.sidebar-collapsed .logo-icon {
-  display: block;
-  margin: 0 auto;
 }
 
 /* Main content area */

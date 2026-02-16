@@ -6,6 +6,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { countryCodes, getFlagEmoji } from '@/lib/countryData';
 import { validatePersonalInfoForm, PersonalInfoFormData } from '@/lib/validation';
 import UserAvatar from '@/components/UserAvatar';
+import { resolveTimezoneFromAddress } from '@/lib/timezoneData';
 
 const initialFormState: PersonalInfoFormData = {
   displayName: '',
@@ -141,12 +142,15 @@ export default function PersonalInfoForm() {
 
   const handleSave = async () => {
     // Validate
-    const validation = validatePersonalInfoForm(formData);
+    const validation = validatePersonalInfoForm(formData, {
+      resolveTimezone: resolveTimezoneFromAddress,
+    });
     if (!validation.isValid) {
       setErrors(validation.errors);
       return;
     }
 
+    setErrors({});
     setIsSubmitting(true);
     setSaveMessage(null);
 
@@ -190,9 +194,34 @@ export default function PersonalInfoForm() {
       }
 
       // Update original data reference after successful save
+      const prevData = originalDataRef.current;
       originalDataRef.current = { ...formData };
       setHasChanges(false);
       setSaveMessage({ type: 'success', text: 'Changes saved successfully!' });
+
+      // Auto-detect timezone from address when country/city changes
+      if (formData.address.country) {
+        const addressChanged =
+          prevData?.address?.country !== formData.address.country ||
+          prevData?.address?.city !== formData.address.city;
+
+        if (addressChanged || !userData?.timezone) {
+          const resolved = resolveTimezoneFromAddress(formData.address);
+          if (resolved) {
+            fetch('/api/user/update', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`,
+              },
+              body: JSON.stringify({
+                timezone: resolved.timezone,
+                timezoneOffset: resolved.timezoneOffset,
+              }),
+            }).catch(err => console.error('Failed to auto-set timezone:', err));
+          }
+        }
+      }
     } catch (error) {
       console.error('Save error:', error);
       setSaveMessage({
@@ -527,13 +556,25 @@ export default function PersonalInfoForm() {
               placeholder="Street address"
             />
             <div className="grid grid-cols-2 gap-3">
-              <input
-                type="text"
-                className="form-input"
-                value={formData.address.city}
-                onChange={(e) => handleAddressChange('city', e.target.value)}
-                placeholder="City"
-              />
+              <div>
+                <input
+                  type="text"
+                  className={`form-input ${errors.addressCity ? 'error' : ''}`}
+                  value={formData.address.city}
+                  onChange={(e) => {
+                    handleAddressChange('city', e.target.value);
+                    if (errors.addressCity) {
+                      setErrors(prev => {
+                        const next = { ...prev };
+                        delete next.addressCity;
+                        return next;
+                      });
+                    }
+                  }}
+                  placeholder="City"
+                />
+                {errors.addressCity && <p className="form-error">{errors.addressCity}</p>}
+              </div>
               <input
                 type="text"
                 className="form-input"
@@ -550,13 +591,25 @@ export default function PersonalInfoForm() {
                 onChange={(e) => handleAddressChange('zipCode', e.target.value)}
                 placeholder="Zip / Postal code"
               />
-              <input
-                type="text"
-                className="form-input"
-                value={formData.address.country}
-                onChange={(e) => handleAddressChange('country', e.target.value)}
-                placeholder="Country"
-              />
+              <div>
+                <input
+                  type="text"
+                  className={`form-input ${errors.addressCountry ? 'error' : ''}`}
+                  value={formData.address.country}
+                  onChange={(e) => {
+                    handleAddressChange('country', e.target.value);
+                    if (errors.addressCountry) {
+                      setErrors(prev => {
+                        const next = { ...prev };
+                        delete next.addressCountry;
+                        return next;
+                      });
+                    }
+                  }}
+                  placeholder="Country"
+                />
+                {errors.addressCountry && <p className="form-error">{errors.addressCountry}</p>}
+              </div>
             </div>
           </div>
         </div>

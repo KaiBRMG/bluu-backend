@@ -59,7 +59,10 @@ export interface PersonalInfoFormData {
   userComments: string;
 }
 
-export function validatePersonalInfoForm(data: PersonalInfoFormData): ValidationResult {
+export function validatePersonalInfoForm(
+  data: PersonalInfoFormData,
+  options?: { resolveTimezone?: (address: { city?: string; country?: string }) => unknown | null }
+): ValidationResult {
   const errors: Record<string, string> = {};
 
   // Required field: displayName
@@ -79,6 +82,17 @@ export function validatePersonalInfoForm(data: PersonalInfoFormData): Validation
 
   const emergencyPhoneError = validatePhoneNumber(data.emergencyContactNumber);
   if (emergencyPhoneError) errors.emergencyContactNumber = emergencyPhoneError;
+
+  // Timezone resolution check: if city or country is provided, both must resolve to a timezone
+  if (options?.resolveTimezone && (data.address.city || data.address.country)) {
+    const resolved = options.resolveTimezone(data.address);
+    if (!resolved) {
+      const msg = 'Unable to determine time zone from this location';
+      if (data.address.country) errors.addressCountry = msg;
+      if (data.address.city) errors.addressCity = msg;
+      if (!data.address.country) errors.addressCountry = 'Country is required to determine time zone';
+    }
+  }
 
   return {
     isValid: Object.keys(errors).length === 0,

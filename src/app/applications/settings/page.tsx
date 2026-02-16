@@ -4,6 +4,7 @@ import { useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import SettingsSidebar from "@/components/settings/SettingsSidebar";
 import PersonalInfoForm from "@/components/settings/PersonalInfoForm";
+import AppSettingsForm from "@/components/settings/AppSettingsForm";
 
 export default function Settings() {
   const [activeSection, setActiveSection] = useState('personal-info');
@@ -12,14 +13,8 @@ export default function Settings() {
     switch (activeSection) {
       case 'personal-info':
         return <PersonalInfoForm />;
-      case 'section-2':
-        return (
-          <div className="flex items-center justify-center h-64">
-            <p style={{ color: 'var(--foreground-secondary)' }}>
-              Section 2 content coming soon...
-            </p>
-          </div>
-        );
+      case 'app-settings':
+        return <AppSettingsForm onSectionChange={setActiveSection} />;
       case 'section-3':
         return (
           <div className="flex items-center justify-center h-64">

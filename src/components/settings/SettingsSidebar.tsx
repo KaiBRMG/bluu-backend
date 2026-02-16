@@ -14,7 +14,7 @@ interface MenuItem {
 // All menu items - hidden ones are kept for future use but not rendered
 const menuItems: MenuItem[] = [
   { id: 'personal-info', label: 'Personal Information' },
-  { id: 'section-2', label: 'Section 2', hidden: true },
+  { id: 'app-settings', label: 'App Settings'},
   { id: 'section-3', label: 'Section 3', hidden: true },
 ];
 
