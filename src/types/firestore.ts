@@ -67,6 +67,8 @@ export interface UserDocument {
 
   timezone?: string;
   timezoneOffset?: string;
+  timeTracking?: boolean;
+  hasPaidLeave?: boolean;
 }
 
 // ─── Group ──────────────────────────────────────────────────────────
@@ -87,6 +89,18 @@ export interface PagePermissionDoc {
   pageId: string;
   groups: Record<string, true>;  // groupSlug -> true (presence = access)
   users: Record<string, true>;   // uid -> true (presence = access)
+}
+
+// ─── Time Tracking ──────────────────────────────────────────────────
+
+export type TimeEntryState = 'working' | 'idle' | 'on-break';
+export type TimerDisplayState = 'working' | 'idle' | 'on-break' | 'clocked-out';
+
+export interface TimeEntryDocument {
+  userId: string;
+  state: TimeEntryState;
+  createdTime: Timestamp;
+  lastTime: Timestamp;
 }
 
 // ─── Resolved access (returned to client after permission resolution) ─

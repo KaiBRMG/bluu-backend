@@ -23,5 +23,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Window control
   window: {
     setResizable: (resizable) => ipcRenderer.send('window:set-resizable', resizable)
+  },
+
+  // Time tracking
+  timeTracking: {
+    getIdleTime: () => ipcRenderer.invoke('timeTracking:getIdleTime'),
   }
 });

@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, shell, nativeImage, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, nativeImage, ipcMain, powerMonitor } = require('electron');
 const path = require('path');
 
 const isDev = process.env.ELECTRON_DEV === 'true' || process.env.NODE_ENV !== 'production';
@@ -110,6 +110,11 @@ ipcMain.handle('auth:start-google-oauth', async () => {
   shell.openExternal(authUrl);
 
   return { success: true };
+});
+
+// IPC handler for idle time detection
+ipcMain.handle('timeTracking:getIdleTime', () => {
+  return powerMonitor.getSystemIdleTime();
 });
 
 // IPC handler for window resizability

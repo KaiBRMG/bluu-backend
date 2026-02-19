@@ -67,6 +67,8 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
 
       timezone: '',
       timezoneOffset: '',
+      hasPaidLeave: false,
+      timeTracking: false,
 
     });
 

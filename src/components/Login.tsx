@@ -4,23 +4,6 @@ import { useEffect, useState } from 'react';
 import { signInWithPopup, signInWithCustomToken } from 'firebase/auth';
 import { auth, googleProvider } from '../firebase-config';
 
-declare global {
-  interface Window {
-    electronAPI?: {
-      isElectron: boolean;
-      auth: {
-        startGoogleOAuth: () => Promise<{ success: boolean }>;
-        onOAuthCallback: (callback: (code: string) => void) => void;
-        onOAuthError: (callback: (error: string) => void) => void;
-        removeOAuthListeners: () => void;
-      };
-      window: {
-        setResizable: (resizable: boolean) => void;
-      };
-    };
-  }
-}
-
 function Login() {
   const [isElectron] = useState(() => typeof window !== 'undefined' && window.electronAPI?.isElectron);
   const [loading, setLoading] = useState(false);
