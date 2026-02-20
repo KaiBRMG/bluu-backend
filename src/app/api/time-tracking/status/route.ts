@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
 import { getActiveEntry } from '@/lib/services/timeEntryService';
+import { getUserById } from '@/lib/services/userService';
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,9 +14,16 @@ export async function GET(request: NextRequest) {
     const decodedToken = await adminAuth.verifyIdToken(idToken);
     const uid = decodedToken.uid;
 
-    const active = await getActiveEntry(uid);
+    const [active, userData] = await Promise.all([
+      getActiveEntry(uid),
+      getUserById(uid),
+    ]);
+
     if (!active) {
-      return NextResponse.json({ entry: null });
+      return NextResponse.json({
+        entry: null,
+        enableScreenshots: userData?.enableScreenshots ?? true,
+      });
     }
 
     return NextResponse.json({
@@ -24,7 +32,9 @@ export async function GET(request: NextRequest) {
         state: active.data.state,
         createdTime: active.data.createdTime?.toDate?.()?.toISOString() ?? null,
         lastTime: active.data.lastTime?.toDate?.()?.toISOString() ?? null,
+        userClockOut: active.data.userClockOut ?? false,
       },
+      enableScreenshots: userData?.enableScreenshots ?? true,
     });
   } catch (error: unknown) {
     console.error('Error getting time tracking status:', error);

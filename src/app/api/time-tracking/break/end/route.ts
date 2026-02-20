@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
-import { updateEntryLastTime } from '@/lib/services/timeEntryService';
+import { createTimeEntry, markUserClockOut } from '@/lib/services/timeEntryService';
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,13 +13,22 @@ export async function POST(request: NextRequest) {
     const decodedToken = await adminAuth.verifyIdToken(idToken);
     const uid = decodedToken.uid;
 
-    const { currentEntryId } = await request.json();
+    const { currentEntryId, autoExpired } = await request.json();
     if (!currentEntryId) {
       return NextResponse.json({ error: 'Missing currentEntryId' }, { status: 400 });
     }
 
-    await updateEntryLastTime(currentEntryId, uid);
-    return NextResponse.json({ success: true });
+    if (autoExpired) {
+      // Break timer expired — clock out, do not resume working
+      await markUserClockOut(currentEntryId, uid);
+      return NextResponse.json({ success: true });
+    }
+
+    // Manual "End Break Early" — close the break entry and resume working
+    await markUserClockOut(currentEntryId, uid);
+    const entryId = await createTimeEntry(uid, 'working');
+
+    return NextResponse.json({ success: true, entryId });
   } catch (error: unknown) {
     console.error('Error ending break:', error);
     const errorCode = (error as { code?: string })?.code;

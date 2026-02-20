@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
-import { markUserClockOut } from '@/lib/services/timeEntryService';
+import { getActiveEntry, markUserClockOut } from '@/lib/services/timeEntryService';
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,19 +13,23 @@ export async function POST(request: NextRequest) {
     const decodedToken = await adminAuth.verifyIdToken(idToken);
     const uid = decodedToken.uid;
 
-    const { entryId } = await request.json();
-    if (!entryId) {
-      return NextResponse.json({ error: 'Missing entryId' }, { status: 400 });
+    const active = await getActiveEntry(uid);
+    if (!active) {
+      return NextResponse.json({ success: true });
     }
 
-    await markUserClockOut(entryId, uid);
+    // Only mark as clocked out if not already marked
+    if (!active.data.userClockOut) {
+      await markUserClockOut(active.id, uid);
+    }
+
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
-    console.error('Error stopping time tracking:', error);
+    console.error('Error clocking out:', error);
     const errorCode = (error as { code?: string })?.code;
     if (errorCode === 'auth/id-token-expired') {
       return NextResponse.json({ error: 'Session expired' }, { status: 401 });
     }
-    return NextResponse.json({ error: 'Failed to stop tracking' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to clock out' }, { status: 500 });
   }
 }

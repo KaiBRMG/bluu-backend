@@ -70,6 +70,7 @@ export interface UserDocument {
   timeTracking?: boolean;
   hasPaidLeave?: boolean;
   includeIdleTime?: boolean;
+  enableScreenshots?: boolean;
 }
 
 // ─── Group ──────────────────────────────────────────────────────────
@@ -102,6 +103,18 @@ export interface TimeEntryDocument {
   state: TimeEntryState;
   createdTime: Timestamp;
   lastTime: Timestamp;
+  userClockOut: boolean;
+}
+
+// ─── Screenshots ─────────────────────────────────────────────────────
+
+export interface ScreenshotDocument {
+  userId: string;
+  timestampUTC: Timestamp;
+  storagePath: string;
+  thumbnailPath: string;
+  captureGroup: string; // shared ID to group multi-screen captures
+  screenIndex: number;  // 0-based index of this screen in the capture group
 }
 
 // ─── Resolved access (returned to client after permission resolution) ─

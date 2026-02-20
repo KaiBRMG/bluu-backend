@@ -7,6 +7,7 @@ interface ShiftManagementSidebarProps {
 
 const menuItems = [
   { id: 'timesheets', label: 'Timesheets' },
+  { id: 'screenshots', label: 'Screenshots' },
 ];
 
 export default function ShiftManagementSidebar({ activeSection, onSectionChange }: ShiftManagementSidebarProps) {

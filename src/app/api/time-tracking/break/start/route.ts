@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
-import { updateEntryLastTime, createTimeEntry } from '@/lib/services/timeEntryService';
+import { markUserClockOut, createTimeEntry } from '@/lib/services/timeEntryService';
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing currentEntryId' }, { status: 400 });
     }
 
-    await updateEntryLastTime(currentEntryId, uid);
+    await markUserClockOut(currentEntryId, uid);
     const entryId = await createTimeEntry(uid, 'on-break');
     return NextResponse.json({ entryId });
   } catch (error: unknown) {

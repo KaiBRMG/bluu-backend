@@ -14,6 +14,7 @@ export async function createTimeEntry(
     state,
     createdTime: now,
     lastTime: now,
+    userClockOut: false,
   });
   return docRef.id;
 }
@@ -28,6 +29,21 @@ export async function updateEntryLastTime(
     throw new Error('Entry not found or unauthorized');
   }
   await ref.update({ lastTime: FieldValue.serverTimestamp() });
+}
+
+export async function markUserClockOut(
+  entryId: string,
+  userId: string,
+): Promise<void> {
+  const ref = adminDb.collection(COLLECTION).doc(entryId);
+  const doc = await ref.get();
+  if (!doc.exists || doc.data()?.userId !== userId) {
+    throw new Error('Entry not found or unauthorized');
+  }
+  await ref.update({
+    lastTime: FieldValue.serverTimestamp(),
+    userClockOut: true,
+  });
 }
 
 export async function getActiveEntry(

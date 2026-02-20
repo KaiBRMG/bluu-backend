@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, shell, nativeImage, ipcMain, powerMonitor } = require('electron');
+const { app, BrowserWindow, shell, nativeImage, ipcMain, powerMonitor, desktopCapturer } = require('electron');
 const path = require('path');
 
 const isDev = process.env.ELECTRON_DEV === 'true' || process.env.NODE_ENV !== 'production';
@@ -117,6 +117,34 @@ ipcMain.handle('timeTracking:getIdleTime', () => {
   return powerMonitor.getSystemIdleTime();
 });
 
+// IPC handler for screenshot capture (all screens)
+ipcMain.handle('timeTracking:captureScreenshot', async () => {
+  try {
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: 1920, height: 1080 },
+    });
+
+    if (sources.length === 0) {
+      return { success: false, error: 'No screen sources available' };
+    }
+
+    // Capture all connected screens, filtering out empty captures
+    const screens = sources
+      .map(source => source.thumbnail.toPNG().toString('base64'))
+      .filter(b64 => b64.length > 0);
+
+    if (screens.length === 0) {
+      return { success: false, error: 'All screen captures were empty (check screen recording permissions)' };
+    }
+
+    return { success: true, screens };
+  } catch (err) {
+    console.error('[Screenshot] Capture failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 // IPC handler for window resizability
 ipcMain.on('window:set-resizable', (_event, resizable) => {
   console.log('[Performance] IPC setResizable called:', resizable);
@@ -200,7 +228,14 @@ app.whenReady().then(() => {
   });
 });
 
-// Quit on all windows closed (except macOS)
+// Notify renderer before quitting so it can clock out
+app.on('before-quit', () => {
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send('app-closing');
+  }
+});
+
+// Quit on all windows closed (including macOS)
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  app.quit();
 });

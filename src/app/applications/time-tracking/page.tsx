@@ -6,10 +6,10 @@ import UserTimesheet from "@/components/timesheet/UserTimesheet";
 import type { TimerDisplayState } from "@/types/firestore";
 
 const STATE_CONFIG: Record<TimerDisplayState, { color: string; bgAlpha: string; label: string }> = {
-  working: { color: '#22c55e', bgAlpha: 'rgba(34,197,94,0.1)', label: 'Working' },
-  idle: { color: '#f59e0b', bgAlpha: 'rgba(245,158,11,0.1)', label: 'Idle' },
-  'on-break': { color: '#8b5cf6', bgAlpha: 'rgba(139,92,246,0.1)', label: 'On Break' },
-  'clocked-out': { color: 'var(--foreground-muted)', bgAlpha: 'var(--sidebar-background)', label: 'Clocked Out' },
+  working: { color: '#86C27E', bgAlpha: 'rgba(134,194,126,0.1)', label: 'Working' },
+  idle: { color: '#E37836', bgAlpha: 'rgba(227,120,54,0.1)', label: 'Idle' },
+  'on-break': { color: '#20498C', bgAlpha: 'rgba(32,73,140,0.1)', label: 'On Break' },
+  'clocked-out': { color: '#DF626E', bgAlpha: 'rgba(223,98,110,0.1)', label: 'Clocked Out' },
 };
 
 function formatTime(totalSeconds: number): string {

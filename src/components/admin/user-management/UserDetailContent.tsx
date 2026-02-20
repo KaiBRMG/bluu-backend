@@ -40,6 +40,7 @@ interface FormData {
   paymentInfo: string;
   userComments: string;
   includeIdleTime: boolean;
+  enableScreenshots: boolean;
 }
 
 function buildFormData(user: AdminFullUser): FormData {
@@ -68,6 +69,7 @@ function buildFormData(user: AdminFullUser): FormData {
     paymentInfo: user.paymentInfo || '',
     userComments: user.userComments || '',
     includeIdleTime: user.includeIdleTime ?? false,
+    enableScreenshots: user.enableScreenshots ?? true,
   };
 }
 
@@ -181,6 +183,7 @@ export default function UserDetailContent({
         paymentInfo: formData.paymentInfo,
         userComments: formData.userComments,
         includeIdleTime: formData.includeIdleTime,
+        enableScreenshots: formData.enableScreenshots,
       };
 
       // Update profile fields
@@ -372,6 +375,19 @@ export default function UserDetailContent({
                   style={{ accentColor: '#3b82f6' }}
                 />
                 <span className="text-sm">Include Idle Time in Totals</span>
+              </label>
+            </div>
+
+            <div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.enableScreenshots}
+                  onChange={(e) => handleChange('enableScreenshots', e.target.checked)}
+                  className="w-4 h-4"
+                  style={{ accentColor: '#3b82f6' }}
+                />
+                <span className="text-sm">Enable Screenshots</span>
               </label>
             </div>
 

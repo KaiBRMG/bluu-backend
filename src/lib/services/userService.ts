@@ -70,6 +70,7 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
       hasPaidLeave: false,
       timeTracking: false,
       includeIdleTime: false,
+      enableScreenshots: true,
 
     });
 

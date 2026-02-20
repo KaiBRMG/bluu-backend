@@ -122,7 +122,7 @@ export default function PermissionTable({
       </h3>
 
       <div
-        className="rounded-lg overflow-hidden"
+        className="rounded-lg"
         style={{ border: "1px solid var(--border-subtle)" }}
       >
         {/* Header */}

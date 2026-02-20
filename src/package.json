@@ -18,9 +18,10 @@
     "firebase": "^12.6.0",
     "firebase-admin": "^13.6.0",
     "googleapis": "^169.0.0",
-    "next": "16.0.5",
+    "next": "16.1.6",
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-dom": "19.2.0",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@next/bundle-analyzer": "^16.1.6",
@@ -28,12 +29,14 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/sharp": "^0.31.1",
+    "baseline-browser-mapping": "^2.10.0",
     "concurrently": "^8.2.2",
     "cross-env": "^10.1.0",
     "electron": "^39.2.6",
     "electron-builder": "^26.0.12",
     "eslint": "^9",
-    "eslint-config-next": "16.0.5",
+    "eslint-config-next": "16.1.6",
     "firebase-tools": "^14.26.0",
     "tailwindcss": "^4",
     "typescript": "^5",

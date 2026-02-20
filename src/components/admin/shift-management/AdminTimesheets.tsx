@@ -19,11 +19,14 @@ function addDays(dateStr: string, days: number): string {
   return toDateString(date);
 }
 
-export default function AdminTimesheets() {
+interface AdminTimesheetsProps {
+  selectedUserId: string | null;
+  onUserChange: (userId: string | null) => void;
+}
+
+export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminTimesheetsProps) {
   const { users, loading: usersLoading } = useAdminUsers();
   const today = toDateString(new Date());
-
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [startDate, setStartDate] = useState(addDays(today, -6));
   const [endDate, setEndDate] = useState(today);
 
@@ -69,7 +72,7 @@ export default function AdminTimesheets() {
           <select
             className="form-input"
             value={selectedUserId || ''}
-            onChange={(e) => setSelectedUserId(e.target.value || null)}
+            onChange={(e) => onUserChange(e.target.value || null)}
             disabled={usersLoading}
           >
             <option value="">Select a user...</option>

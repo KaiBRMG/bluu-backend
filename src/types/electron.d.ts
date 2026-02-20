@@ -11,7 +11,10 @@ interface ElectronAPI {
   };
   timeTracking: {
     getIdleTime: () => Promise<number>;
+    captureScreenshot: () => Promise<{ success: boolean; screens?: string[]; error?: string }>;
   };
+  onAppClosing: (callback: () => void) => void;
+  removeAppClosingListeners: () => void;
 }
 
 declare global {

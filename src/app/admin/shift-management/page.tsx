@@ -4,14 +4,18 @@ import { useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import ShiftManagementSidebar from "@/components/admin/shift-management/ShiftManagementSidebar";
 import AdminTimesheets from "@/components/admin/shift-management/AdminTimesheets";
+import AdminScreenshots from "@/components/admin/shift-management/AdminScreenshots";
 
 export default function ShiftManagementPage() {
   const [activeSection, setActiveSection] = useState('timesheets');
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
   const renderContent = () => {
     switch (activeSection) {
       case 'timesheets':
-        return <AdminTimesheets />;
+        return <AdminTimesheets selectedUserId={selectedUserId} onUserChange={setSelectedUserId} />;
+      case 'screenshots':
+        return <AdminScreenshots selectedUserId={selectedUserId} onUserChange={setSelectedUserId} />;
       default:
         return null;
     }
@@ -24,7 +28,7 @@ export default function ShiftManagementPage() {
           Shift Management
         </h1>
         <p className="text-lg" style={{ color: 'var(--foreground-secondary)' }}>
-          View and manage employee timesheets.
+          View and manage employee timesheets and screenshots.
         </p>
 
         <div className="mt-8 flex gap-6">

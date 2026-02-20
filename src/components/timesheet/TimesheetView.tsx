@@ -170,9 +170,9 @@ export default function TimesheetView({
       {/* Legend */}
       <div className="flex items-center gap-4 mt-4 pt-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
         {[
-          { color: '#22c55e', label: 'Working' },
-          { color: '#f59e0b', label: 'Idle' },
-          { color: '#8b5cf6', label: 'On Break' },
+          { color: '#86C27E', label: 'Working' },
+          { color: '#E37836', label: 'Idle' },
+          { color: '#20498C', label: 'On Break' },
         ].map((item) => (
           <div key={item.label} className="flex items-center gap-1.5">
             <div className="w-2.5 h-2.5 rounded-full" style={{ background: item.color }} />

@@ -5,9 +5,9 @@ import type { TimesheetEntry } from '@/hooks/useTimesheetData';
 import type { TimeEntryState } from '@/types/firestore';
 
 const STATE_COLORS: Record<TimeEntryState, string> = {
-  working: '#22c55e',
-  idle: '#f59e0b',
-  'on-break': '#8b5cf6',
+  working: '#86C27E',
+  idle: '#E37836',
+  'on-break': '#20498C',
 };
 
 const STATE_LABELS: Record<TimeEntryState, string> = {

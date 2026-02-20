@@ -9,6 +9,8 @@ const IDLE_CHECK_INTERVAL_MS = 30_000;
 const IDLE_RESUME_CHECK_INTERVAL_MS = 5_000;
 const IDLE_THRESHOLD_SECONDS = 900; // 15 minutes
 const BREAK_DURATION_SECONDS = 2700; // 45 minutes
+const SCREENSHOT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const STALE_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes — entries older than this are from a previous session
 
 interface TimeTrackingContextType {
   displayState: TimerDisplayState;
@@ -42,6 +44,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [breakRemainingSeconds, setBreakRemainingSeconds] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [enableScreenshots, setEnableScreenshots] = useState(false);
 
   // Track cumulative working time across working+idle segments within a session
   const sessionBaseSecondsRef = useRef(0);
@@ -59,6 +62,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const idleCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const screenshotTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isTransitioningRef = useRef(false);
   const hasHydratedRef = useRef(false);
@@ -91,28 +96,26 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     (async () => {
       try {
         const data = await apiCall('status', 'GET');
-        if (data.entry) {
-          const { id, state, createdTime } = data.entry;
-          setCurrentEntryId(id);
+        setEnableScreenshots(data.enableScreenshots ?? false);
 
-          if (state === 'working' || state === 'idle') {
-            const startMs = new Date(createdTime).getTime();
-            const elapsedSoFar = Math.floor((Date.now() - startMs) / 1000);
-            if (state === 'working') {
-              sessionBaseSecondsRef.current = 0;
-              setEntryStartTime(startMs);
-              setElapsedSeconds(elapsedSoFar);
-            } else {
-              // Idle: freeze at accumulated time
-              sessionBaseSecondsRef.current = elapsedSoFar;
-              setEntryStartTime(Date.now());
-              setElapsedSeconds(elapsedSoFar);
+        // Resume from server state if:
+        // 1. userClockOut is false (user did NOT intentionally stop / close the app)
+        // 2. lastTime is fresh (< 2 min old) — rules out stale entries from crashes
+        if (data.entry && !data.entry.userClockOut) {
+          const lastTime = new Date(data.entry.lastTime).getTime();
+          const isFresh = Date.now() - lastTime < STALE_THRESHOLD_MS;
+
+          if (isFresh && (data.entry.state === 'working' || data.entry.state === 'on-break')) {
+            const createdTime = new Date(data.entry.createdTime).getTime();
+            setCurrentEntryId(data.entry.id);
+
+            if (data.entry.state === 'working') {
+              setEntryStartTime(createdTime);
+              setDisplayState('working');
+            } else if (data.entry.state === 'on-break') {
+              setBreakStartTime(createdTime);
+              setDisplayState('on-break');
             }
-            setDisplayState(state);
-          } else if (state === 'on-break') {
-            const startMs = new Date(createdTime).getTime();
-            setBreakStartTime(startMs);
-            setDisplayState('on-break');
           }
         }
       } catch (err) {
@@ -131,8 +134,40 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       setBreakStartTime(null);
       setElapsedSeconds(0);
       setBreakRemainingSeconds(null);
+      setEnableScreenshots(false);
       sessionBaseSecondsRef.current = 0;
     }
+  }, [user]);
+
+  // --- App closing (Electron window close) → mark entry as userClockOut ---
+  useEffect(() => {
+    const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
+    if (!electronAPI?.onAppClosing) return;
+
+    electronAPI.onAppClosing(async () => {
+      const entryId = currentEntryIdRef.current;
+      const state = displayStateRef.current;
+      if (!entryId || state === 'clocked-out') return;
+
+      try {
+        const idToken = await user?.getIdToken();
+        if (idToken) {
+          await fetch('/api/time-tracking/clock-out', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${idToken}`,
+            },
+          });
+        }
+      } catch (err) {
+        console.error('[TimeTracking] Clock-out on app close failed:', err);
+      }
+    });
+
+    return () => {
+      electronAPI.removeAppClosingListeners();
+    };
   }, [user]);
 
   // --- Heartbeat ---
@@ -262,7 +297,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         if (remaining <= 0) {
           const entryId = currentEntryIdRef.current;
           if (entryId) {
-            apiCall('break/end', 'POST', { currentEntryId: entryId }).catch((err) => {
+            apiCall('break/end', 'POST', { currentEntryId: entryId, autoExpired: true }).catch((err) => {
               console.error('[TimeTracking] Break auto-end failed:', err);
             });
           }
@@ -302,6 +337,58 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [displayState, entryStartTime, breakStartTime, apiCall]);
+
+  // --- Screenshot Scheduling ---
+  useEffect(() => {
+    if (screenshotTimeoutRef.current) {
+      clearTimeout(screenshotTimeoutRef.current);
+      screenshotTimeoutRef.current = null;
+    }
+
+    const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
+    if (!electronAPI?.timeTracking?.captureScreenshot) return;
+    if (!enableScreenshots) return;
+    if (displayState !== 'working' && displayState !== 'idle') return;
+
+    const scheduleNextCapture = () => {
+      const delay = Math.floor(Math.random() * SCREENSHOT_WINDOW_MS);
+
+      screenshotTimeoutRef.current = setTimeout(async () => {
+        const currentState = displayStateRef.current;
+        if (currentState !== 'working' && currentState !== 'idle') return;
+
+        try {
+          const result = await electronAPI.timeTracking.captureScreenshot();
+          if (result.success && result.screens && result.screens.length > 0) {
+            const idToken = await user?.getIdToken();
+            if (idToken) {
+              await fetch('/api/time-tracking/screenshots/upload', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${idToken}`,
+                },
+                body: JSON.stringify({ screens: result.screens }),
+              });
+            }
+          }
+        } catch (err) {
+          console.error('[TimeTracking] Screenshot capture/upload failed:', err);
+        }
+
+        scheduleNextCapture();
+      }, delay);
+    };
+
+    scheduleNextCapture();
+
+    return () => {
+      if (screenshotTimeoutRef.current) {
+        clearTimeout(screenshotTimeoutRef.current);
+        screenshotTimeoutRef.current = null;
+      }
+    };
+  }, [displayState, enableScreenshots, user]);
 
   // --- Actions ---
 
@@ -359,12 +446,13 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     if (isLoading || displayState !== 'on-break' || !currentEntryId) return;
     setIsLoading(true);
     try {
-      await apiCall('break/end', 'POST', { currentEntryId });
-      setDisplayState('clocked-out');
-      setCurrentEntryId(null);
-      setEntryStartTime(null);
-      setBreakStartTime(null);
+      const data = await apiCall('break/end', 'POST', { currentEntryId });
       sessionBaseSecondsRef.current = 0;
+      setBreakStartTime(null);
+      setBreakRemainingSeconds(null);
+      setCurrentEntryId(data.entryId);
+      setEntryStartTime(Date.now());
+      setDisplayState('working');
     } catch (err) {
       console.error('[TimeTracking] Break end failed:', err);
     } finally {

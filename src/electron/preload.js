@@ -28,5 +28,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Time tracking
   timeTracking: {
     getIdleTime: () => ipcRenderer.invoke('timeTracking:getIdleTime'),
+    captureScreenshot: () => ipcRenderer.invoke('timeTracking:captureScreenshot'),
+  },
+
+  // App lifecycle
+  onAppClosing: (callback) => {
+    ipcRenderer.on('app-closing', () => callback());
+  },
+  removeAppClosingListeners: () => {
+    ipcRenderer.removeAllListeners('app-closing');
   }
 });

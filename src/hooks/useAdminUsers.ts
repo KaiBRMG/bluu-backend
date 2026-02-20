@@ -40,6 +40,7 @@ export interface AdminFullUser {
   userComments?: string;
   timeTracking?: boolean;
   includeIdleTime?: boolean;
+  enableScreenshots?: boolean;
 }
 
 export interface AdminGroup {
