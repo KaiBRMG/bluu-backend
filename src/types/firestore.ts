@@ -69,6 +69,7 @@ export interface UserDocument {
   timezoneOffset?: string;
   timeTracking?: boolean;
   hasPaidLeave?: boolean;
+  includeIdleTime?: boolean;
 }
 
 // ─── Group ──────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@
 
 import AppLayout from "@/components/AppLayout";
 import { useTimeTracking } from "@/hooks/useTimeTracking";
+import UserTimesheet from "@/components/timesheet/UserTimesheet";
 import type { TimerDisplayState } from "@/types/firestore";
 
 const STATE_CONFIG: Record<TimerDisplayState, { color: string; bgAlpha: string; label: string }> = {
@@ -137,6 +138,10 @@ export default function TimeTrackingPage() {
               )}
             </div>
           </div>
+        </div>
+
+        <div className="mt-8">
+          <UserTimesheet />
         </div>
       </div>
     </AppLayout>

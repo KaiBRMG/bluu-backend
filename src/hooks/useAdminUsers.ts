@@ -38,6 +38,8 @@ export interface AdminFullUser {
   paymentMethod?: string;
   paymentInfo?: string;
   userComments?: string;
+  timeTracking?: boolean;
+  includeIdleTime?: boolean;
 }
 
 export interface AdminGroup {

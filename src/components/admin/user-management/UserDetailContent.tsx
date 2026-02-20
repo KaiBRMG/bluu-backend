@@ -39,6 +39,7 @@ interface FormData {
   paymentMethod: string;
   paymentInfo: string;
   userComments: string;
+  includeIdleTime: boolean;
 }
 
 function buildFormData(user: AdminFullUser): FormData {
@@ -66,6 +67,7 @@ function buildFormData(user: AdminFullUser): FormData {
     paymentMethod: user.paymentMethod || '',
     paymentInfo: user.paymentInfo || '',
     userComments: user.userComments || '',
+    includeIdleTime: user.includeIdleTime ?? false,
   };
 }
 
@@ -178,6 +180,7 @@ export default function UserDetailContent({
         paymentMethod: formData.paymentMethod,
         paymentInfo: formData.paymentInfo,
         userComments: formData.userComments,
+        includeIdleTime: formData.includeIdleTime,
       };
 
       // Update profile fields
@@ -357,6 +360,19 @@ export default function UserDetailContent({
                   </label>
                 ))}
               </div>
+            </div>
+
+            <div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.includeIdleTime}
+                  onChange={(e) => handleChange('includeIdleTime', e.target.checked)}
+                  className="w-4 h-4"
+                  style={{ accentColor: '#3b82f6' }}
+                />
+                <span className="text-sm">Include Idle Time in Totals</span>
+              </label>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
