@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { adminAuth } from '@/lib/firebase-admin';
 import { ensureUserExists } from '@/lib/services/userService';
-import { ensureDefaultGroups } from '@/lib/services/groupService';
 
 const oauth2Client = new google.auth.OAuth2(
   process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
@@ -68,14 +67,11 @@ export async function POST(request: NextRequest) {
     // Parallelize database operations and token creation for better performance
     console.time('[Auth] Database operations');
     const [, customToken] = await Promise.all([
-      Promise.all([
-        ensureDefaultGroups(),
-        ensureUserExists({
-          uid: firebaseUser.uid,
-          workEmail: userInfo.email,
-          displayName: userInfo.name || '',
-        }),
-      ]),
+      ensureUserExists({
+        uid: firebaseUser.uid,
+        workEmail: userInfo.email,
+        displayName: userInfo.name || '',
+      }),
       adminAuth.createCustomToken(firebaseUser.uid),
     ]);
     console.timeEnd('[Auth] Database operations');

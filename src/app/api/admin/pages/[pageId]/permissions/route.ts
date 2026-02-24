@@ -1,31 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
+import { withAuth } from '@/lib/middleware/withAuth';
 import { getUserById } from '@/lib/services/userService';
 import { updatePagePermissions } from '@/lib/services/pageService';
 import { getAllGroups } from '@/lib/services/groupService';
 import { getPageDef } from '@/lib/definitions';
+import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
  * PUT /api/admin/pages/[pageId]/permissions
  * Admin-only. Updates permissions on a specific page.
  * Permissions are binary: { groups: { "CA": true }, users: { "uid123": true } }
  */
-export async function PUT(
+export const PUT = withAuth(async (
   request: NextRequest,
-  { params }: { params: Promise<{ pageId: string }> }
-) {
+  token: DecodedIdToken,
+  params: Promise<{ pageId: string }>
+) => {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Missing authorization token' }, { status: 401 });
-    }
-
-    const idToken = authHeader.split('Bearer ')[1];
-    const decodedToken = await adminAuth.verifyIdToken(idToken);
-    const uid = decodedToken.uid;
-
     // Verify caller is admin
-    const caller = await getUserById(uid);
+    const caller = await getUserById(token.uid);
     if (!caller?.groups?.includes('admin')) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
@@ -63,11 +56,7 @@ export async function PUT(
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
     console.error('Error updating page permissions:', error);
-    const errorCode = (error as { code?: string })?.code;
-    if (errorCode === 'auth/id-token-expired') {
-      return NextResponse.json({ error: 'Session expired' }, { status: 401 });
-    }
     const msg = error instanceof Error ? error.message : 'Failed to update permissions';
     return NextResponse.json({ error: msg }, { status: 500 });
   }
-}
+});

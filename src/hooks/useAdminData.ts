@@ -1,8 +1,6 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
-import { db } from '@/firebase-config';
 import { useAuth } from '@/components/AuthProvider';
 import type { PagePermissionDoc } from '@/types/firestore';
 import type { PageDef, TeamspaceDef } from '@/lib/definitions';
@@ -84,24 +82,8 @@ export function useAdminData() {
     fetchAdminData();
   }, [fetchAdminData]);
 
-  // Real-time listener for page-permissions collection
-  useEffect(() => {
-    if (!user) return;
-
-    const unsubscribe = onSnapshot(
-      collection(db, 'page-permissions'),
-      (snapshot) => {
-        const updatedPerms = snapshot.docs.map(doc => doc.data() as PagePermissionDoc);
-        setState(prev => ({ ...prev, pagePermissions: updatedPerms }));
-      },
-      (error) => {
-        console.error('Page-permissions snapshot error:', error);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [user]);
-
+  // updatePermission refreshes data after a successful write so the UI stays
+  // in sync without a standing onSnapshot listener (which billed reads for all users).
   const updatePermission = useCallback(
     async (
       pageId: string,
@@ -123,8 +105,11 @@ export function useAdminData() {
         const data = await res.json();
         throw new Error(data.error || 'Failed to update permissions');
       }
+
+      // Refresh local state after a successful permission update
+      await fetchAdminData();
     },
-    [user]
+    [user, fetchAdminData]
   );
 
   return {

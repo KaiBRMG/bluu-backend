@@ -1,21 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
+import { withAuth } from '@/lib/middleware/withAuth';
 import { getUserById } from '@/lib/services/userService';
 import { deleteScreenshots } from '@/lib/services/screenshotService';
+import type { DecodedIdToken } from 'firebase-admin/auth';
 
-export async function POST(request: NextRequest) {
+export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Missing authorization token' }, { status: 401 });
-    }
-
-    const idToken = authHeader.split('Bearer ')[1];
-    const decodedToken = await adminAuth.verifyIdToken(idToken);
-    const uid = decodedToken.uid;
-
     // Must be admin
-    const caller = await getUserById(uid);
+    const caller = await getUserById(token.uid);
     if (!caller?.groups?.includes('admin')) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
@@ -33,10 +25,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
     console.error('Error deleting screenshots:', error);
-    const errorCode = (error as { code?: string })?.code;
-    if (errorCode === 'auth/id-token-expired') {
-      return NextResponse.json({ error: 'Session expired' }, { status: 401 });
-    }
     return NextResponse.json({ error: 'Failed to delete screenshots' }, { status: 500 });
   }
-}
+});

@@ -5,13 +5,16 @@ import AppLayout from "@/components/AppLayout";
 import ShiftManagementSidebar from "@/components/admin/shift-management/ShiftManagementSidebar";
 import AdminTimesheets from "@/components/admin/shift-management/AdminTimesheets";
 import AdminScreenshots from "@/components/admin/shift-management/AdminScreenshots";
+import AdminActiveUsers from "@/components/admin/shift-management/AdminActiveUsers";
 
 export default function ShiftManagementPage() {
-  const [activeSection, setActiveSection] = useState('timesheets');
+  const [activeSection, setActiveSection] = useState('active-users');
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
   const renderContent = () => {
     switch (activeSection) {
+      case 'active-users':
+        return <AdminActiveUsers />;
       case 'timesheets':
         return <AdminTimesheets selectedUserId={selectedUserId} onUserChange={setSelectedUserId} />;
       case 'screenshots':

@@ -98,12 +98,37 @@ async function addUserToGroup(uid: string, groupId: string): Promise<void> {
   });
 }
 
+// Module-level cache: uid → { data, expiresAt }.
+// TTL of 60 s is safe because user documents change infrequently (group edits,
+// profile updates) and those write paths call invalidateUserCache() to bust it
+// immediately. The cache is per-serverless-instance, so cold-starts always miss.
+const USER_CACHE_TTL_MS = 60_000;
+const userCache = new Map<string, { data: any; expiresAt: number }>();
+
 /**
- * Gets user document by UID
+ * Gets user document by UID.
+ * Results are cached in-process for 60 s to prevent redundant Firestore reads
+ * when multiple API helpers call getUserById for the same UID within a single
+ * request (e.g. admin auth check + data fetch in /api/time-tracking/entries).
  */
 export async function getUserById(uid: string): Promise<any> {
+  const cached = userCache.get(uid);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
   const userDoc = await adminDb.collection('users').doc(uid).get();
-  return userDoc.exists ? userDoc.data() : null;
+  const data = userDoc.exists ? userDoc.data() : null;
+  userCache.set(uid, { data, expiresAt: Date.now() + USER_CACHE_TTL_MS });
+  return data;
+}
+
+/**
+ * Invalidates the in-process user cache for a given UID.
+ * Call this after any write to the user document so the next getUserById
+ * call fetches fresh data from Firestore.
+ */
+export function invalidateUserCache(uid: string): void {
+  userCache.delete(uid);
 }
 
 /**

@@ -1,19 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
+import { withAuth } from '@/lib/middleware/withAuth';
 import { getUserById } from '@/lib/services/userService';
 import { getScreenshotsByDate, getScreenshotUrl, ScreenshotRow } from '@/lib/services/screenshotService';
+import type { DecodedIdToken } from 'firebase-admin/auth';
 
-export async function GET(request: NextRequest) {
+export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Missing authorization token' }, { status: 401 });
-    }
-
-    const idToken = authHeader.split('Bearer ')[1];
-    const decodedToken = await adminAuth.verifyIdToken(idToken);
-    const callerUid = decodedToken.uid;
-
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
     const date = searchParams.get('date');
@@ -28,8 +20,8 @@ export async function GET(request: NextRequest) {
     }
 
     // If querying another user, caller must be admin
-    if (userId !== callerUid) {
-      const caller = await getUserById(callerUid);
+    if (userId !== token.uid) {
+      const caller = await getUserById(token.uid);
       if (!caller?.groups?.includes('admin')) {
         return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
       }
@@ -55,7 +47,7 @@ export async function GET(request: NextRequest) {
             id: ss.id,
             timestampUTC: ss.timestampUTC,
             url: await getScreenshotUrl(ss.storagePath),
-            thumbnailUrl: await getScreenshotUrl(ss.thumbnailPath),
+            thumbnailUrl: await getScreenshotUrl(ss.thumbnailPath || ''),
             screenIndex: ss.screenIndex,
           }))
         );
@@ -72,10 +64,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ groups });
   } catch (error: unknown) {
     console.error('Error fetching screenshots:', error);
-    const errorCode = (error as { code?: string })?.code;
-    if (errorCode === 'auth/id-token-expired') {
-      return NextResponse.json({ error: 'Session expired' }, { status: 401 });
-    }
     return NextResponse.json({ error: 'Failed to fetch screenshots' }, { status: 500 });
   }
-}
+});

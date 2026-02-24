@@ -1,31 +1,52 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
-import { markUserClockOut } from '@/lib/services/timeEntryService';
+import { withAuth } from '@/lib/middleware/withAuth';
+import { getActiveSession, commitSession } from '@/lib/services/activeSessionService';
+import { getUserById } from '@/lib/services/userService';
+import { parseBuffer } from '@/lib/parseBuffer';
+import type { DecodedIdToken } from 'firebase-admin/auth';
+import type { LocalSessionBuffer } from '@/types/firestore';
 
-export async function POST(request: NextRequest) {
+// Explicit clock-out: parse the local buffer, write a time_entries ledger doc,
+// and delete the active_sessions document — all in one atomic batch.
+export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Missing authorization token' }, { status: 401 });
+    const { buffer } = await request.json() as { buffer: LocalSessionBuffer };
+
+    if (!buffer?.sessionId || !Array.isArray(buffer.events)) {
+      return NextResponse.json({ error: 'Invalid buffer payload' }, { status: 400 });
     }
 
-    const idToken = authHeader.split('Bearer ')[1];
-    const decodedToken = await adminAuth.verifyIdToken(idToken);
-    const uid = decodedToken.uid;
+    // Verify the active session belongs to this user
+    const [session, userData] = await Promise.all([
+      getActiveSession(token.uid),
+      getUserById(token.uid),
+    ]);
 
-    const { entryId } = await request.json();
-    if (!entryId) {
-      return NextResponse.json({ error: 'Missing entryId' }, { status: 400 });
+    if (!session) {
+      return NextResponse.json({ error: 'No active session found' }, { status: 404 });
     }
 
-    await markUserClockOut(entryId, uid);
+    if (session.data.sessionId !== buffer.sessionId) {
+      return NextResponse.json({ error: 'Session ID mismatch' }, { status: 400 });
+    }
+
+    const endTimeMs = Date.now();
+    const parsedTotals = parseBuffer(buffer.events, endTimeMs);
+
+    await commitSession(
+      token.uid,
+      buffer.sessionId,
+      buffer.startTime,
+      endTimeMs,
+      parsedTotals,
+      buffer.events,
+      userData?.timezone ?? 'UTC',
+      userData?.includeIdleTime ?? false,
+    );
+
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
     console.error('Error stopping time tracking:', error);
-    const errorCode = (error as { code?: string })?.code;
-    if (errorCode === 'auth/id-token-expired') {
-      return NextResponse.json({ error: 'Session expired' }, { status: 401 });
-    }
     return NextResponse.json({ error: 'Failed to stop tracking' }, { status: 500 });
   }
-}
+});

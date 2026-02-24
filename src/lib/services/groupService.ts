@@ -41,19 +41,20 @@ const DEFAULT_GROUPS = [
 
 /**
  * Ensures all default groups exist. Idempotent — skips groups that already exist.
+ * Uses a single getAll() instead of N sequential reads.
  */
 export async function ensureDefaultGroups(): Promise<void> {
+  const refs = DEFAULT_GROUPS.map(g => adminDb.collection('groups').doc(g.id));
+  const snaps = await adminDb.getAll(...refs);
+
   const batch = adminDb.batch();
   let needsCommit = false;
 
-  for (const group of DEFAULT_GROUPS) {
-    const ref = adminDb.collection('groups').doc(group.id);
-    const doc = await ref.get();
-
-    if (!doc.exists) {
-      console.log(`[GroupService] Creating group: ${group.name}`);
-      batch.set(ref, {
-        ...group,
+  for (let i = 0; i < DEFAULT_GROUPS.length; i++) {
+    if (!snaps[i].exists) {
+      console.log(`[GroupService] Creating group: ${DEFAULT_GROUPS[i].name}`);
+      batch.set(refs[i], {
+        ...DEFAULT_GROUPS[i],
         members: [],
         createdAt: FieldValue.serverTimestamp(),
       });

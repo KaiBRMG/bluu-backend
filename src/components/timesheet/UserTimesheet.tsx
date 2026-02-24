@@ -19,16 +19,15 @@ function addDays(dateStr: string, days: number): string {
 }
 
 export default function UserTimesheet() {
-  const today = toDateString(new Date());
-  const [selectedDate, setSelectedDate] = useState(today);
+  const yesterday = useMemo(() => addDays(toDateString(new Date()), -1), []);
+  const [selectedDate, setSelectedDate] = useState(yesterday);
 
-  // Selected date is the END date (shown at top); show 7 days ending on that date
-  const { startDate, endDate } = useMemo(() => {
-    return {
-      startDate: addDays(selectedDate, -6),
-      endDate: selectedDate,
-    };
-  }, [selectedDate]);
+  // Selected date is the END date (shown at top); show 7 days ending on that date.
+  // Today is never included — timesheets are only available from yesterday back.
+  const { startDate, endDate } = useMemo(() => ({
+    startDate: addDays(selectedDate, -6),
+    endDate: selectedDate,
+  }), [selectedDate]);
 
   const { entries, timezone, includeIdleTime, loading, error } = useTimesheetData(null, startDate, endDate);
 
@@ -48,7 +47,7 @@ export default function UserTimesheet() {
           <button
             onClick={() => window.location.reload()}
             className="p-1.5 rounded-md transition-colors hover:bg-white/10"
-            title="Refresh timesheet — note there may be a delay in reading the server for most up-to-date timesheets"
+            title="Refresh timesheet"
           >
             <img src="/Icons/refresh-ccw.svg" alt="Refresh" width={16} height={16} />
           </button>
@@ -59,7 +58,7 @@ export default function UserTimesheet() {
             onChange={(e) => {
               if (e.target.value) setSelectedDate(e.target.value);
             }}
-            max={today}
+            max={yesterday}
             required
           />
         </div>

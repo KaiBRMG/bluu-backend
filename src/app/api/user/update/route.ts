@@ -1,23 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb, adminAuth } from '@/lib/firebase-admin';
+import { withAuth } from '@/lib/middleware/withAuth';
+import { adminDb } from '@/lib/firebase-admin';
+import { invalidateUserCache } from '@/lib/services/userService';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import type { DecodedIdToken } from 'firebase-admin/auth';
 
-export async function POST(request: NextRequest) {
+export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
-    // Get the authorization header
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'Missing authorization token' },
-        { status: 401 }
-      );
-    }
-
-    // Verify the Firebase ID token
-    const idToken = authHeader.split('Bearer ')[1];
-    const decodedToken = await adminAuth.verifyIdToken(idToken);
-    const uid = decodedToken.uid;
-
     // Parse request body
     const updates = await request.json();
 
@@ -53,29 +42,20 @@ export async function POST(request: NextRequest) {
     }
 
     // Update the user document
-    const userRef = adminDb.collection('users').doc(uid);
+    const userRef = adminDb.collection('users').doc(token.uid);
     await userRef.update({
       ...sanitizedUpdates,
       updatedAt: FieldValue.serverTimestamp(),
     });
+    invalidateUserCache(token.uid);
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
     console.error('Error updating user:', error);
-
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    const errorCode = (error as { code?: string })?.code;
-
-    if (errorCode === 'auth/id-token-expired') {
-      return NextResponse.json(
-        { error: 'Session expired. Please sign in again.' },
-        { status: 401 }
-      );
-    }
-
     return NextResponse.json(
       { error: errorMessage || 'Failed to update user' },
       { status: 500 }
     );
   }
-}
+});

@@ -1,26 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb, adminAuth, adminStorage } from '@/lib/firebase-admin';
+import { withAuth } from '@/lib/middleware/withAuth';
+import { adminDb, adminStorage } from '@/lib/firebase-admin';
+import { invalidateUserCache } from '@/lib/services/userService';
 import { FieldValue } from 'firebase-admin/firestore';
+import type { DecodedIdToken } from 'firebase-admin/auth';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
-export async function POST(request: NextRequest) {
+export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
-    // Get the authorization header
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'Missing authorization token' },
-        { status: 401 }
-      );
-    }
-
-    // Verify the Firebase ID token
-    const idToken = authHeader.split('Bearer ')[1];
-    const decodedToken = await adminAuth.verifyIdToken(idToken);
-    const uid = decodedToken.uid;
-
     // Parse request body
     const body = await request.json();
     const { imageData, contentType } = body;
@@ -54,7 +43,7 @@ export async function POST(request: NextRequest) {
 
     // Determine file extension
     const extension = contentType.split('/')[1] === 'jpeg' ? 'jpg' : contentType.split('/')[1];
-    const fileName = `profile-photos/${uid}/avatar.${extension}`;
+    const fileName = `profile-photos/${token.uid}/avatar.${extension}`;
 
     // Upload to Firebase Storage
     const bucket = adminStorage.bucket();
@@ -64,7 +53,7 @@ export async function POST(request: NextRequest) {
       metadata: {
         contentType,
         metadata: {
-          uploadedBy: uid,
+          uploadedBy: token.uid,
           uploadedAt: new Date().toISOString(),
         },
       },
@@ -77,29 +66,20 @@ export async function POST(request: NextRequest) {
     const photoURL = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
 
     // Update user document with new photo URL
-    const userRef = adminDb.collection('users').doc(uid);
+    const userRef = adminDb.collection('users').doc(token.uid);
     await userRef.update({
       photoURL,
       updatedAt: FieldValue.serverTimestamp(),
     });
+    invalidateUserCache(token.uid);
 
     return NextResponse.json({ success: true, photoURL });
   } catch (error: unknown) {
     console.error('Error uploading photo:', error);
-
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    const errorCode = (error as { code?: string })?.code;
-
-    if (errorCode === 'auth/id-token-expired') {
-      return NextResponse.json(
-        { error: 'Session expired. Please sign in again.' },
-        { status: 401 }
-      );
-    }
-
     return NextResponse.json(
       { error: errorMessage || 'Failed to upload photo' },
       { status: 500 }
     );
   }
-}
+});

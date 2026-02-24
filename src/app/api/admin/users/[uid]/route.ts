@@ -1,29 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb, adminAuth } from '@/lib/firebase-admin';
-import { getUserById } from '@/lib/services/userService';
+import { withAuth } from '@/lib/middleware/withAuth';
+import { adminDb } from '@/lib/firebase-admin';
+import { getUserById, invalidateUserCache } from '@/lib/services/userService';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
  * PUT /api/admin/users/[uid]
  * Admin-only. Updates any user's profile fields.
  * Does NOT handle group membership — use /api/admin/groups/[groupId]/members for that.
  */
-export async function PUT(
+export const PUT = withAuth(async (
   request: NextRequest,
-  { params }: { params: Promise<{ uid: string }> }
-) {
+  token: DecodedIdToken,
+  params: Promise<{ uid: string }>
+) => {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Missing authorization token' }, { status: 401 });
-    }
-
-    const idToken = authHeader.split('Bearer ')[1];
-    const decodedToken = await adminAuth.verifyIdToken(idToken);
-    const callerUid = decodedToken.uid;
-
     // Verify caller is admin
-    const caller = await getUserById(callerUid);
+    const caller = await getUserById(token.uid);
     if (!caller?.groups?.includes('admin')) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
@@ -47,6 +41,8 @@ export async function PUT(
       'paymentInfo',
       'userComments',
       'photoURL',
+      'includeIdleTime',
+      'enableScreenshots',
     ];
 
     // Filter and sanitize updates
@@ -73,14 +69,11 @@ export async function PUT(
       ...sanitizedUpdates,
       updatedAt: FieldValue.serverTimestamp(),
     });
+    invalidateUserCache(targetUid);
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
     console.error('Error updating user:', error);
-    const errorCode = (error as { code?: string })?.code;
-    if (errorCode === 'auth/id-token-expired') {
-      return NextResponse.json({ error: 'Session expired' }, { status: 401 });
-    }
     return NextResponse.json({ error: 'Failed to update user' }, { status: 500 });
   }
-}
+});

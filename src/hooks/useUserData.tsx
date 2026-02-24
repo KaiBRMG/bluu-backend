@@ -1,12 +1,19 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/firebase-config';
 import { useAuth } from '@/components/AuthProvider';
 import { useNetworkStatus } from '@/contexts/NetworkStatusContext';
 import { UserDocument } from '@/types/firestore';
 
-export function useUserData() {
+interface UserDataContextType {
+  userData: UserDocument | null;
+  loading: boolean;
+}
+
+const UserDataContext = createContext<UserDataContextType>({ userData: null, loading: true });
+
+export function UserDataProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
   const { user } = useAuth();
   const { reportFirestoreError } = useNetworkStatus();
   const [userData, setUserData] = useState<UserDocument | null>(null);
@@ -19,7 +26,6 @@ export function useUserData() {
       return;
     }
 
-    // Real-time listener for user document
     const unsubscribe = onSnapshot(
       doc(db, 'users', user.uid),
       (docSnapshot) => {
@@ -38,5 +44,13 @@ export function useUserData() {
     return () => unsubscribe();
   }, [user, reportFirestoreError]);
 
-  return { userData, loading };
+  return (
+    <UserDataContext.Provider value={{ userData, loading }}>
+      {children}
+    </UserDataContext.Provider>
+  );
+}
+
+export function useUserData() {
+  return useContext(UserDataContext);
 }

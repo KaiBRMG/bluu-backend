@@ -157,6 +157,13 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
     : null;
   const currentModalGroup = modalPos ? groups[modalPos[0]] : null;
 
+  // Track whether the current modal image has finished loading.
+  // Reset to false whenever the URL changes so the spinner shows immediately.
+  const [modalImageLoaded, setModalImageLoaded] = useState(false);
+  useEffect(() => {
+    setModalImageLoaded(false);
+  }, [currentModalScreen?.url]);
+
   return (
     <div>
       <h2 className="text-xl font-semibold mb-4" style={{ color: 'var(--foreground)' }}>
@@ -320,10 +327,29 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
             className="flex flex-col items-center max-w-[90vw] max-h-[90vh]"
             onClick={(e) => e.stopPropagation()}
           >
+            {!modalImageLoaded && (
+              <div
+                className="flex items-center justify-center rounded"
+                style={{ width: '60vw', height: '33.75vw', background: 'rgba(255,255,255,0.05)' }}
+              >
+                <svg
+                  className="animate-spin"
+                  style={{ width: 40, height: 40, color: 'rgba(255,255,255,0.5)' }}
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                </svg>
+              </div>
+            )}
             <img
               src={currentModalScreen.url}
               alt={`Screenshot at ${currentModalScreen.timestampUTC}`}
               className="max-w-full max-h-[85vh] object-contain rounded"
+              style={{ display: modalImageLoaded ? 'block' : 'none' }}
+              onLoad={() => setModalImageLoaded(true)}
             />
             <p className="text-white mt-3 text-sm">
               {formatTime(currentModalGroup.timestampUTC)}

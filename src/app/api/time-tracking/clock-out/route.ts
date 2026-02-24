@@ -1,35 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
-import { getActiveEntry, markUserClockOut } from '@/lib/services/timeEntryService';
+import { withAuth } from '@/lib/middleware/withAuth';
+import { getActiveSession, markUserClockOut } from '@/lib/services/activeSessionService';
+import type { DecodedIdToken } from 'firebase-admin/auth';
 
-export async function POST(request: NextRequest) {
+// Called when the Electron app window closes without an explicit clock-out.
+// Marks the active_sessions doc with userClockOut:true so the session is not
+// auto-resumed on next startup. Does NOT create a time_entries document —
+// that happens when the client uploads its local buffer on next app open.
+export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Missing authorization token' }, { status: 401 });
-    }
-
-    const idToken = authHeader.split('Bearer ')[1];
-    const decodedToken = await adminAuth.verifyIdToken(idToken);
-    const uid = decodedToken.uid;
-
-    const active = await getActiveEntry(uid);
-    if (!active) {
+    const session = await getActiveSession(token.uid);
+    if (!session || session.data.userClockOut) {
       return NextResponse.json({ success: true });
     }
-
-    // Only mark as clocked out if not already marked
-    if (!active.data.userClockOut) {
-      await markUserClockOut(active.id, uid);
-    }
-
+    await markUserClockOut(token.uid);
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
-    console.error('Error clocking out:', error);
-    const errorCode = (error as { code?: string })?.code;
-    if (errorCode === 'auth/id-token-expired') {
-      return NextResponse.json({ error: 'Session expired' }, { status: 401 });
-    }
+    console.error('Error during clock-out:', error);
     return NextResponse.json({ error: 'Failed to clock out' }, { status: 500 });
   }
-}
+});

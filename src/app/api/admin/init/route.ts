@@ -6,26 +6,25 @@ import { seedDefaultPagePermissions } from '@/lib/services/pageService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
- * POST /api/admin/seed
- * Admin-only. Seeds default groups and page-permissions. Idempotent.
- * No longer seeds teamspace or page documents (those are code constants).
+ * POST /api/admin/init
+ * One-time idempotent seed: creates default groups and page-permissions.
+ * Admin-only. Safe to call multiple times — existing docs are skipped.
  */
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
-    // Verify caller is admin
     const caller = await getUserById(token.uid);
     if (!caller?.groups?.includes('admin')) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
-    // Seed groups first, then page-permissions (which reference group IDs)
-    await ensureDefaultGroups();
-    await seedDefaultPagePermissions();
+    await Promise.all([
+      ensureDefaultGroups(),
+      seedDefaultPagePermissions(),
+    ]);
 
-    return NextResponse.json({ success: true, message: 'Seed completed' });
+    return NextResponse.json({ success: true });
   } catch (error: unknown) {
-    console.error('Error seeding data:', error);
-    const msg = error instanceof Error ? error.message : 'Failed to seed data';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    console.error('[admin/init] Error:', error);
+    return NextResponse.json({ error: 'Initialization failed' }, { status: 500 });
   }
 });

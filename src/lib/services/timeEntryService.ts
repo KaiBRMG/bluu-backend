@@ -31,6 +31,36 @@ export async function updateEntryLastTime(
   await ref.update({ lastTime: FieldValue.serverTimestamp() });
 }
 
+export async function closeEntryWithDuration(
+  entryId: string,
+  userId: string,
+): Promise<void> {
+  const ref = adminDb.collection(COLLECTION).doc(entryId);
+  const doc = await ref.get();
+  if (!doc.exists || doc.data()?.userId !== userId) {
+    throw new Error('Entry not found or unauthorized');
+  }
+  const createdTime = doc.data()?.createdTime as FirebaseFirestore.Timestamp | undefined;
+  const durationSeconds = createdTime
+    ? Math.floor((Date.now() - createdTime.toMillis()) / 1000)
+    : 0;
+  await ref.update({
+    lastTime: FieldValue.serverTimestamp(),
+    userClockOut: true,
+    durationSeconds,
+  });
+}
+
+export async function markEntryInterrupted(entryId: string): Promise<void> {
+  const ref = adminDb.collection(COLLECTION).doc(entryId);
+  await ref.update({
+    lastTime: FieldValue.serverTimestamp(),
+    userClockOut: false,
+    durationSeconds: null,
+    interrupted: true,
+  });
+}
+
 export async function markUserClockOut(
   entryId: string,
   userId: string,

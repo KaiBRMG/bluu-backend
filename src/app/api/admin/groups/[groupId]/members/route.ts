@@ -1,28 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb, adminAuth } from '@/lib/firebase-admin';
-import { getUserById } from '@/lib/services/userService';
+import { withAuth } from '@/lib/middleware/withAuth';
+import { adminDb } from '@/lib/firebase-admin';
+import { getUserById, invalidateUserCache } from '@/lib/services/userService';
+import { recomputeUserPermissions } from '@/lib/services/pageService';
 import { FieldValue } from 'firebase-admin/firestore';
+import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
  * POST /api/admin/groups/[groupId]/members
  * Add one or more users to a group. Updates both collections atomically.
  * Body: { uids: string[] }
  */
-export async function POST(
+export const POST = withAuth(async (
   request: NextRequest,
-  { params }: { params: Promise<{ groupId: string }> }
-) {
+  token: DecodedIdToken,
+  params: Promise<{ groupId: string }>
+) => {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Missing authorization token' }, { status: 401 });
-    }
-
-    const idToken = authHeader.split('Bearer ')[1];
-    const decodedToken = await adminAuth.verifyIdToken(idToken);
-    const callerUid = decodedToken.uid;
-
-    const caller = await getUserById(callerUid);
+    const caller = await getUserById(token.uid);
     if (!caller?.groups?.includes('admin')) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
@@ -51,38 +46,42 @@ export async function POST(
     }
 
     await batch.commit();
+    // Invalidate in-process cache for all modified users
+    for (const uid of uids) invalidateUserCache(uid);
+
+    // Recompute permittedPageIds for each affected user (non-blocking).
+    // Batch-read all user docs in one round-trip instead of N sequential reads.
+    Promise.all(
+      uids.map(uid => adminDb.collection('users').doc(uid))
+    ).then(refs =>
+      adminDb.getAll(...refs)
+    ).then(snaps =>
+      Promise.all(snaps.map(snap => {
+        if (!snap.exists) return;
+        const userGroups: string[] = snap.data()?.groups ?? [];
+        return recomputeUserPermissions(snap.id, userGroups);
+      }))
+    ).catch(err => console.error('[GroupMembers POST] Failed to recompute permissions:', err));
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
     console.error('Error adding group members:', error);
-    const errorCode = (error as { code?: string })?.code;
-    if (errorCode === 'auth/id-token-expired') {
-      return NextResponse.json({ error: 'Session expired' }, { status: 401 });
-    }
     return NextResponse.json({ error: 'Failed to add members' }, { status: 500 });
   }
-}
+});
 
 /**
  * DELETE /api/admin/groups/[groupId]/members
  * Remove a user from a group. Updates both collections atomically.
  * Body: { uid: string }
  */
-export async function DELETE(
+export const DELETE = withAuth(async (
   request: NextRequest,
-  { params }: { params: Promise<{ groupId: string }> }
-) {
+  token: DecodedIdToken,
+  params: Promise<{ groupId: string }>
+) => {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Missing authorization token' }, { status: 401 });
-    }
-
-    const idToken = authHeader.split('Bearer ')[1];
-    const decodedToken = await adminAuth.verifyIdToken(idToken);
-    const callerUid = decodedToken.uid;
-
-    const caller = await getUserById(callerUid);
+    const caller = await getUserById(token.uid);
     if (!caller?.groups?.includes('admin')) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
@@ -109,14 +108,18 @@ export async function DELETE(
     });
 
     await batch.commit();
+    invalidateUserCache(uid);
+
+    // Recompute permittedPageIds for the removed user (non-blocking)
+    // Fetch the updated groups from the user doc after batch commit
+    adminDb.collection('users').doc(uid).get().then(snap => {
+      const userGroups: string[] = snap.data()?.groups ?? [];
+      return recomputeUserPermissions(uid, userGroups);
+    }).catch(err => console.error('[GroupMembers DELETE] Failed to recompute permissions:', err));
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
     console.error('Error removing group member:', error);
-    const errorCode = (error as { code?: string })?.code;
-    if (errorCode === 'auth/id-token-expired') {
-      return NextResponse.json({ error: 'Session expired' }, { status: 401 });
-    }
     return NextResponse.json({ error: 'Failed to remove member' }, { status: 500 });
   }
-}
+});

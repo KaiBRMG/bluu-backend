@@ -1,23 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
+import { withAuth } from '@/lib/middleware/withAuth';
 import { getUserById } from '@/lib/services/userService';
 import { saveScreenshots } from '@/lib/services/screenshotService';
+import type { DecodedIdToken } from 'firebase-admin/auth';
 
 const MAX_BASE64_LENGTH = 10 * 1024 * 1024; // ~10MB per screen
 
-export async function POST(request: NextRequest) {
+export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Missing authorization token' }, { status: 401 });
-    }
-
-    const idToken = authHeader.split('Bearer ')[1];
-    const decodedToken = await adminAuth.verifyIdToken(idToken);
-    const uid = decodedToken.uid;
-
     // Check if screenshots are enabled for this user
-    const userData = await getUserById(uid);
+    const userData = await getUserById(token.uid);
     if (!userData?.enableScreenshots) {
       return NextResponse.json({ error: 'Screenshots not enabled for this user' }, { status: 403 });
     }
@@ -39,14 +31,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const screenshotIds = await saveScreenshots(uid, screens);
+    const screenshotIds = await saveScreenshots(token.uid, screens);
     return NextResponse.json({ screenshotIds });
   } catch (error: unknown) {
     console.error('Error uploading screenshot:', error);
-    const errorCode = (error as { code?: string })?.code;
-    if (errorCode === 'auth/id-token-expired') {
-      return NextResponse.json({ error: 'Session expired' }, { status: 401 });
-    }
     return NextResponse.json({ error: 'Failed to upload screenshot' }, { status: 500 });
   }
-}
+});

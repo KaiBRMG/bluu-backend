@@ -1,11 +1,8 @@
 import { adminDb, adminStorage } from '../firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
-import sharp from 'sharp';
 import { randomUUID } from 'crypto';
 
 const COLLECTION = 'screenshots';
-const THUMBNAIL_WIDTH = 300;
-const THUMBNAIL_HEIGHT = 169; // ~16:9
 
 export async function saveScreenshots(
   userId: string,
@@ -26,26 +23,16 @@ export async function saveScreenshots(
     const buffer = Buffer.from(base64, 'base64');
     if (buffer.length === 0) continue;
 
-    // Full-size image
+    // Full-size image — thumbnail is generated asynchronously by the Cloud Function
     const storagePath = `screenshots/${userId}/${dateStr}/${timestamp}_${i}.png`;
     const file = bucket.file(storagePath);
     await file.save(buffer, { contentType: 'image/png' });
-
-    // Generate thumbnail
-    const thumbBuffer = await sharp(buffer)
-      .resize(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, { fit: 'cover' })
-      .png({ quality: 70 })
-      .toBuffer();
-
-    const thumbPath = `screenshots/${userId}/${dateStr}/${timestamp}_${i}_thumb.png`;
-    const thumbFile = bucket.file(thumbPath);
-    await thumbFile.save(thumbBuffer, { contentType: 'image/png' });
 
     const docRef = await adminDb.collection(COLLECTION).add({
       userId,
       timestampUTC: FieldValue.serverTimestamp(),
       storagePath,
-      thumbnailPath: thumbPath,
+      thumbnailPath: null,
       captureGroup,
       screenIndex: i,
     });
@@ -60,7 +47,7 @@ export interface ScreenshotRow {
   id: string;
   timestampUTC: string;
   storagePath: string;
-  thumbnailPath: string;
+  thumbnailPath: string | null;
   captureGroup: string;
   screenIndex: number;
 }
@@ -107,29 +94,34 @@ export async function getScreenshotUrl(storagePath: string): Promise<string> {
 export async function deleteScreenshots(
   screenshotIds: string[],
 ): Promise<void> {
-  const bucket = adminStorage.bucket();
-  const batch = adminDb.batch();
+  if (screenshotIds.length === 0) return;
 
-  for (const id of screenshotIds) {
-    const docRef = adminDb.collection(COLLECTION).doc(id);
-    const doc = await docRef.get();
-    if (doc.exists) {
-      const data = doc.data();
-      const storagePath = data?.storagePath;
-      const thumbnailPath = data?.thumbnailPath;
-      if (storagePath) {
-        await bucket.file(storagePath).delete().catch(err => {
-          console.error(`[Screenshot] Failed to delete storage file ${storagePath}:`, err);
-        });
-      }
-      if (thumbnailPath) {
-        await bucket.file(thumbnailPath).delete().catch(err => {
-          console.error(`[Screenshot] Failed to delete thumbnail ${thumbnailPath}:`, err);
-        });
-      }
-      batch.delete(docRef);
-    }
-  }
+  const bucket = adminStorage.bucket();
+  const docRefs = screenshotIds.map(id => adminDb.collection(COLLECTION).doc(id));
+
+  // Batch-read all docs in a single round-trip instead of N sequential reads
+  const snaps = await adminDb.getAll(...docRefs);
+
+  const batch = adminDb.batch();
+  await Promise.all(snaps.map(async (doc) => {
+    if (!doc.exists) return;
+    const data = doc.data();
+    const storagePath = data?.storagePath;
+    const thumbnailPath = data?.thumbnailPath;
+    await Promise.all([
+      storagePath
+        ? bucket.file(storagePath).delete().catch(err => {
+            console.error(`[Screenshot] Failed to delete storage file ${storagePath}:`, err);
+          })
+        : Promise.resolve(),
+      thumbnailPath
+        ? bucket.file(thumbnailPath).delete().catch(err => {
+            console.error(`[Screenshot] Failed to delete thumbnail ${thumbnailPath}:`, err);
+          })
+        : Promise.resolve(),
+    ]);
+    batch.delete(doc.ref);
+  }));
 
   await batch.commit();
 }

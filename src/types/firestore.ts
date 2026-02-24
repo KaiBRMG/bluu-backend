@@ -71,6 +71,9 @@ export interface UserDocument {
   hasPaidLeave?: boolean;
   includeIdleTime?: boolean;
   enableScreenshots?: boolean;
+
+  // Denormalized: page IDs this user can access (kept in sync by server on group/permission changes)
+  permittedPageIds?: string[];
 }
 
 // ─── Group ──────────────────────────────────────────────────────────
@@ -95,15 +98,97 @@ export interface PagePermissionDoc {
 
 // ─── Time Tracking ──────────────────────────────────────────────────
 
+/** @deprecated Used only for the legacy time-entries collection. New sessions use ActiveSessionDocument + TimeEntryLedgerDocument. */
 export type TimeEntryState = 'working' | 'idle' | 'on-break';
-export type TimerDisplayState = 'working' | 'idle' | 'on-break' | 'clocked-out';
 
+/** @deprecated Used only for the legacy time-entries collection. */
 export interface TimeEntryDocument {
   userId: string;
   state: TimeEntryState;
   createdTime: Timestamp;
   lastTime: Timestamp;
   userClockOut: boolean;
+  durationSeconds?: number | null;
+  interrupted?: boolean;
+}
+
+// ─── New session model ───────────────────────────────────────────────
+
+export type ActiveSessionState = 'working' | 'idle' | 'on-break' | 'paused';
+export type TimerDisplayState = 'working' | 'idle' | 'on-break' | 'paused' | 'clocked-out';
+
+export type SessionEventType =
+  | 'clock-in'
+  | 'idle-start'
+  | 'idle-end'
+  | 'break-start'
+  | 'break-end'
+  | 'pause'
+  | 'resume'
+  | 'activity'
+  | 'screenshot'
+  | 'clock-out';
+
+export interface SessionEvent {
+  type: SessionEventType;
+  timestamp: number; // ms since epoch
+  meta?: Record<string, unknown>;
+}
+
+export interface LocalSessionBuffer {
+  sessionId: string;
+  userId: string;
+  startTime: number; // ms since epoch
+  events: SessionEvent[];
+  lastFlushed?: number; // timestamp of last upload attempt
+}
+
+/** active_sessions/{userId} — lightweight presence signal; deleted on clock-out */
+export interface ActiveSessionDocument {
+  sessionId: string;
+  userId: string;
+  startTime: Timestamp;
+  lastUpdated: Timestamp; // updated by heartbeat (working state only)
+  currentState: ActiveSessionState;
+  userClockOut: boolean; // true = app closed gracefully without explicit clock-out
+}
+
+export interface SessionModification {
+  modifiedBy: string;
+  modifiedAt: Timestamp;
+  field: string;
+  oldValue: unknown;
+  newValue: unknown;
+  reason: string;
+}
+
+export interface ParsedSessionTotals {
+  workingSeconds: number;
+  idleSeconds: number;
+  breakSeconds: number;
+  pauseSeconds: number;
+}
+
+/** time_entries/{sessionId} — permanent ledger; written once at clock-out or by Cloud Function */
+export interface TimeEntryLedgerDocument {
+  sessionId: string;
+  userId: string;
+  startTime: Timestamp;
+  endTime: Timestamp;
+  workingSeconds: number;
+  idleSeconds: number;
+  breakSeconds: number;
+  pauseSeconds: number;
+  didNotClockOut: boolean; // true if terminated by Cloud Function
+  logUploadedAt: Timestamp | null; // null until client uploads local buffer
+  eventLog: SessionEvent[];
+  status: 'completed' | 'interrupted';
+  isManual: boolean;
+  modifications: SessionModification[];
+  originalData: ParsedSessionTotals;
+  includeIdleTime: boolean;
+  timezone: string;
+  createdAt: Timestamp;
 }
 
 // ─── Screenshots ─────────────────────────────────────────────────────

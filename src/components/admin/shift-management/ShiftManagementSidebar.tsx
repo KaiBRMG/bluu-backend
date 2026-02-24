@@ -6,6 +6,7 @@ interface ShiftManagementSidebarProps {
 }
 
 const menuItems = [
+  { id: 'active-users', label: 'Active Users' },
   { id: 'timesheets', label: 'Timesheets' },
   { id: 'screenshots', label: 'Screenshots' },
 ];

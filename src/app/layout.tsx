@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/components/AuthProvider";
 import { NetworkStatusProvider } from "@/contexts/NetworkStatusContext";
+import { UserDataProvider } from "@/hooks/useUserData";
 import { TimeTrackingProvider } from "@/contexts/TimeTrackingContext";
 import AuthWrapper from "@/components/AuthWrapper";
 
@@ -33,11 +34,13 @@ export default function RootLayout({
       >
         <AuthProvider>
           <NetworkStatusProvider>
-            <TimeTrackingProvider>
-              <AuthWrapper>
-                {children}
-              </AuthWrapper>
-            </TimeTrackingProvider>
+            <UserDataProvider>
+              <TimeTrackingProvider>
+                <AuthWrapper>
+                  {children}
+                </AuthWrapper>
+              </TimeTrackingProvider>
+            </UserDataProvider>
           </NetworkStatusProvider>
         </AuthProvider>
       </body>

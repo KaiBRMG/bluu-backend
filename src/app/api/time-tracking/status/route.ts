@@ -1,47 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
-import { getActiveEntry } from '@/lib/services/timeEntryService';
+import { withAuth } from '@/lib/middleware/withAuth';
+import { getActiveSession } from '@/lib/services/activeSessionService';
 import { getUserById } from '@/lib/services/userService';
+import type { DecodedIdToken } from 'firebase-admin/auth';
 
-export async function GET(request: NextRequest) {
+export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Missing authorization token' }, { status: 401 });
-    }
-
-    const idToken = authHeader.split('Bearer ')[1];
-    const decodedToken = await adminAuth.verifyIdToken(idToken);
-    const uid = decodedToken.uid;
-
-    const [active, userData] = await Promise.all([
-      getActiveEntry(uid),
-      getUserById(uid),
+    // Doc get by ID — O(1), no query needed
+    const [session, userData] = await Promise.all([
+      getActiveSession(token.uid),
+      getUserById(token.uid),
     ]);
 
-    if (!active) {
-      return NextResponse.json({
-        entry: null,
-        enableScreenshots: userData?.enableScreenshots ?? true,
-      });
+    const enableScreenshots = userData?.enableScreenshots ?? true;
+
+    if (!session) {
+      return NextResponse.json({ session: null, enableScreenshots });
     }
 
     return NextResponse.json({
-      entry: {
-        id: active.id,
-        state: active.data.state,
-        createdTime: active.data.createdTime?.toDate?.()?.toISOString() ?? null,
-        lastTime: active.data.lastTime?.toDate?.()?.toISOString() ?? null,
-        userClockOut: active.data.userClockOut ?? false,
+      session: {
+        sessionId:    session.data.sessionId,
+        currentState: session.data.currentState,
+        startTime:    session.data.startTime.toDate().toISOString(),
+        lastUpdated:  session.data.lastUpdated.toDate().toISOString(),
+        userClockOut: session.data.userClockOut,
       },
-      enableScreenshots: userData?.enableScreenshots ?? true,
+      enableScreenshots,
     });
   } catch (error: unknown) {
     console.error('Error getting time tracking status:', error);
-    const errorCode = (error as { code?: string })?.code;
-    if (errorCode === 'auth/id-token-expired') {
-      return NextResponse.json({ error: 'Session expired' }, { status: 401 });
-    }
     return NextResponse.json({ error: 'Failed to get status' }, { status: 500 });
   }
-}
+});

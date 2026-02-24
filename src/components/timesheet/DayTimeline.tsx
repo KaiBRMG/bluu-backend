@@ -7,7 +7,7 @@ import type { TimeEntryState } from '@/types/firestore';
 const STATE_COLORS: Record<TimeEntryState, string> = {
   working: '#86C27E',
   idle: '#E37836',
-  'on-break': '#20498C',
+  'on-break': '#4B8FCC',
 };
 
 const STATE_LABELS: Record<TimeEntryState, string> = {
