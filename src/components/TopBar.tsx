@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import { auth } from "../firebase-config";
 import UserAvatar from "@/components/UserAvatar";
 import { clearPermissionsCache } from "@/lib/permissionsCache";
+import { Bell, LogOut } from "lucide-react";
+import TimerPill from "@/components/TimerPill";
 
 interface TopBarProps {
   userData: {
@@ -44,7 +46,10 @@ export default function TopBar({ userData }: TopBarProps) {
   };
 
   return (
-    <header className="h-14 flex items-center justify-between px-6" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+    <header className="h-14 flex items-center justify-between px-6" style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--sidebar-background)' }}>
+      {/* Left: timer pill */}
+      <TimerPill />
+
       {/* Right side - notifications and user */}
       <div className="ml-auto flex items-center gap-4">
         {/* Notifications */}
@@ -54,7 +59,7 @@ export default function TopBar({ userData }: TopBarProps) {
           onMouseEnter={(e) => e.currentTarget.style.background = 'var(--hover-background)'}
           onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
         >
-          <img src="/Icons/notifications.svg" alt="Notifications" className="w-5 h-5" style={{ opacity: 'var(--icon-inactive)' }} />
+          <Bell className="w-5 h-5" style={{ opacity: 'var(--icon-inactive)' }} />
           <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
         </button>
 
@@ -100,7 +105,7 @@ export default function TopBar({ userData }: TopBarProps) {
                   onMouseEnter={(e) => e.currentTarget.style.background = 'var(--hover-background)'}
                   onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                 >
-                  <img src="/Icons/sign_out.svg" alt="Sign Out" className="w-4 h-4" />
+                  <LogOut className="w-4 h-4" />
                   <span className="text-sm">Sign Out</span>
                 </button>
               </div>

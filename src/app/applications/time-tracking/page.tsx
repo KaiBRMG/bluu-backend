@@ -7,13 +7,16 @@ import UserTimesheet from "@/components/timesheet/UserTimesheet";
 import TodayTimeline from "@/components/timesheet/TodayTimeline";
 import type { TimerDisplayState } from "@/types/firestore";
 import UserUpcomingShifts from "@/components/shifts/UserUpcomingShifts";
+import { useUserData } from "@/hooks/useUserData";
+import { useDayTotal } from "@/hooks/useDayTotal";
+import { Clock4, ClockCheck, ClockAlert, Coffee, CirclePause } from 'lucide-react';
 
-const STATE_CONFIG: Record<TimerDisplayState, { color: string; bgAlpha: string; label: string }> = {
-  working:      { color: '#86C27E', bgAlpha: 'rgba(134,194,126,0.1)', label: 'Working' },
-  idle:         { color: '#E37836', bgAlpha: 'rgba(227,120,54,0.1)', label: 'Idle' },
-  'on-break':   { color: '#4B8FCC', bgAlpha: 'rgba(75,143,204,0.1)', label: 'On Break' },
-  paused:       { color: '#8B5CF6', bgAlpha: 'rgba(139,92,246,0.1)', label: 'Paused' },
-  'clocked-out': { color: '#DF626E', bgAlpha: 'rgba(223,98,110,0.1)', label: 'Clocked Out' },
+const STATE_CONFIG: Record<TimerDisplayState, { color: string; bgAlpha: string; label: string; Icon: React.ElementType }> = {
+  working:       { color: '#86C27E', bgAlpha: 'rgba(134,194,126,0.1)', label: 'Working',     Icon: ClockCheck  },
+  idle:          { color: '#E37836', bgAlpha: 'rgba(227,120,54,0.1)',  label: 'Idle',         Icon: ClockAlert  },
+  'on-break':    { color: '#4B8FCC', bgAlpha: 'rgba(75,143,204,0.1)', label: 'On Break',     Icon: Coffee      },
+  paused:        { color: '#8B5CF6', bgAlpha: 'rgba(139,92,246,0.1)', label: 'Paused',       Icon: CirclePause },
+  'clocked-out': { color: '#DF626E', bgAlpha: 'rgba(223,98,110,0.1)', label: 'Clocked Out',  Icon: Clock4      },
 };
 
 const BREAK_DURATION_SECONDS = 2700;
@@ -49,6 +52,11 @@ export default function TimeTrackingPage() {
 
   const [activeTab, setActiveTab] = useState<Tab>('today');
 
+  const { userData } = useUserData();
+  const timezone = userData?.timezone || 'UTC';
+  const includeIdleTime = userData?.includeIdleTime ?? false;
+  const dayTotalSeconds = useDayTotal(timezone, includeIdleTime);
+
   const config = STATE_CONFIG[displayState];
 
   const timerDisplay = formatTime(elapsedSeconds);
@@ -62,7 +70,7 @@ export default function TimeTrackingPage() {
           Time Tracking
         </h1>
         <p className="text-lg" style={{ color: 'var(--foreground-secondary)' }}>
-          Track your time and productivity
+          Track your time and attendance
         </p>
 
         <div className="mt-12">
@@ -77,13 +85,7 @@ export default function TimeTrackingPage() {
             <div className="flex-1">
               {/* State indicator */}
               <div className="flex items-center gap-3 mb-6">
-                <div
-                  className="w-3 h-3 rounded-full"
-                  style={{
-                    background: config.color,
-                    boxShadow: displayState === 'working' ? `0 0 8px ${config.color}` : 'none',
-                  }}
-                />
+                <config.Icon style={{ color: config.color, width: '1.125rem', height: '1.125rem', flexShrink: 0 }} />
                 <span className="text-lg font-medium" style={{ color: config.color }}>
                   {config.label}
                 </span>
@@ -91,10 +93,24 @@ export default function TimeTrackingPage() {
 
               {/* Timer display */}
               <div
-                className="text-6xl font-mono font-bold mb-8"
-                style={{ fontVariantNumeric: 'tabular-nums' }}
+                className="text-6xl font-mono font-bold"
+                style={{
+                  fontVariantNumeric: 'tabular-nums',
+                  opacity: displayState === 'on-break' ? 0.35 : 1,
+                  transition: 'opacity 0.2s ease',
+                }}
               >
                 {timerDisplay}
+              </div>
+
+              {/* Day total */}
+              <div className="flex items-center gap-2 mt-2 mb-8">
+                <span className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--foreground-muted)' }}>
+                  Today
+                </span>
+                <span className="text-sm font-mono" style={{ color: 'var(--foreground-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+                  {formatTime(dayTotalSeconds)}
+                </span>
               </div>
 
               {/* Action buttons */}
@@ -106,7 +122,7 @@ export default function TimeTrackingPage() {
                     className="btn-primary"
                     style={{ opacity: isLoading ? 0.6 : 1 }}
                   >
-                    {isLoading ? 'Starting...' : 'Start Tracking'}
+                    {isLoading ? 'Starting...' : 'Clock In'}
                   </button>
                 )}
 
@@ -139,10 +155,11 @@ export default function TimeTrackingPage() {
                     <button
                       onClick={startBreak}
                       disabled={isLoading}
-                      className="btn-secondary"
+                      className="btn-secondary flex items-center gap-2"
                       style={{ opacity: isLoading ? 0.6 : 1 }}
                     >
-                      {isLoading ? 'Starting...' : 'Take Break'}
+                      <Coffee style={{ width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
+                      {isLoading ? 'Starting...' : 'Break'}
                     </button>
                   </>
                 )}
@@ -202,7 +219,13 @@ export default function TimeTrackingPage() {
                 </span>
                 <span
                   className="text-2xl font-mono font-semibold"
-                  style={{ color: breakAllowanceRemaining === 0 ? '#DF626E' : '#4B8FCC' }}
+                  style={{
+                    color: displayState !== 'on-break'
+                      ? 'var(--foreground-muted)'
+                      : breakAllowanceRemaining === 0 ? '#DF626E' : '#4B8FCC',
+                    opacity: displayState !== 'on-break' ? 0.5 : 1,
+                    transition: 'color 0.2s ease, opacity 0.2s ease',
+                  }}
                 >
                   {formatTime(breakAllowanceRemaining)}
                 </span>

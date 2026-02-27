@@ -7,6 +7,7 @@ import type { ExpandedShift } from '@/lib/utils/recurrence';
 import ShiftCard from './ShiftCard';
 import ShiftModal from './ShiftModal';
 import UserAvatar from '@/components/UserAvatar';
+import { RefreshCcw } from 'lucide-react';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -231,7 +232,7 @@ export default function AdminShifts() {
             justifyContent: 'center',
           }}
         >
-          <img src="/Icons/refresh-ccw.svg" alt="Refresh" style={{ width: '14px', height: '14px', opacity: 0.7 }} />
+          <RefreshCcw style={{ width: '14px', height: '14px', opacity: 0.7 }} />
         </button>
       </div>
 

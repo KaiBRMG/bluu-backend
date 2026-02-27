@@ -6,6 +6,7 @@ import { useUserData } from '@/hooks/useUserData';
 import { getTodaySessions } from '@/lib/localBuffer';
 import { parseBuffer } from '@/lib/parseBuffer';
 import type { LocalSessionBuffer, SessionEvent } from '@/types/firestore';
+import { RefreshCcw } from 'lucide-react';
 
 // ─── Segment types ────────────────────────────────────────────────────
 
@@ -68,7 +69,9 @@ function formatTimeInTZ(ms: number, timezone: string): string {
 function formatDuration(totalSeconds: number): string {
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
-  return `${String(h).padStart(2, '0')}h${String(m).padStart(2, '0')}m`;
+  if (totalSeconds === 0) return '—';
+  if (h === 0) return `${m}m`;
+  return `${h}h ${m}m`;
 }
 
 function formatAgo(sinceMs: number): string {
@@ -161,6 +164,7 @@ export default function TodayTimeline() {
   const { sessionId, displayState, elapsedSeconds, breakRemainingSeconds } = useTimeTracking();
   const { userData } = useUserData();
   const timezone = userData?.timezone || 'UTC';
+  const includeIdleTime = userData?.includeIdleTime ?? false;
 
   const [buffers, setBuffers] = useState<LocalSessionBuffer[]>([]);
   const [now, setNow] = useState(() => Date.now());
@@ -211,9 +215,9 @@ export default function TodayTimeline() {
         ? now
         : (buf.events.find(e => e.type === 'clock-out')?.timestamp ?? now);
       const totals = parseBuffer(buf.events, closeMs);
-      return sum + totals.workingSeconds;
+      return sum + totals.workingSeconds + totals.breakSeconds + (includeIdleTime ? totals.idleSeconds : 0);
     }, 0);
-  }, [buffers, sessionId, now]);
+  }, [buffers, sessionId, now, includeIdleTime]);
 
   const toPercent = (ms: number) =>
     Math.max(0, Math.min(100, ((ms - dayStart) / dayDuration) * 100));
@@ -273,52 +277,75 @@ export default function TodayTimeline() {
             className="p-1.5 rounded-md transition-colors hover:bg-white/10"
             title="Refresh timeline"
           >
-            <img src="/Icons/refresh-ccw.svg" alt="Refresh" width={16} height={16} />
+            <RefreshCcw width={16} height={16} />
           </button>
         </div>
       </div>
 
       {/* Hour markers */}
-      <div className="flex justify-between text-xs mb-2" style={{ color: 'var(--foreground-muted)' }}>
-        {HOUR_MARKERS.map(h => (
-          <span key={h}>{h === 24 ? '23:59' : `${String(h).padStart(2, '0')}:00`}</span>
-        ))}
+      <div className="flex items-center mb-2">
+        <div className="flex-1 flex justify-between text-xs" style={{ color: 'var(--foreground-muted)' }}>
+          {HOUR_MARKERS.map(h => (
+            <span key={h}>{h === 24 ? '23:59' : `${String(h).padStart(2, '0')}:00`}</span>
+          ))}
+        </div>
+        <div className="w-20 flex-shrink-0" />
       </div>
 
       {/* Timeline bars — one per session */}
       <div className="flex flex-col gap-1.5">
-        {allSessionSegments.map((segments, bi) => (
-          <div
-            key={buffers[bi].sessionId}
-            className="relative w-full h-7 rounded-full overflow-hidden"
-            style={{ background: 'var(--border-subtle)' }}
-          >
-            {segments.map((seg, si) => {
-              const left = toPercent(seg.startMs);
-              const width = Math.max(0, toPercent(seg.endMs) - left);
-              const key = `${bi}-${si}`;
-              return (
-                <div
-                  key={key}
-                  className="absolute top-0 bottom-0 transition-opacity"
-                  style={{
-                    left: `${left}%`,
-                    width: `${width}%`,
-                    background: SEGMENT_COLORS[seg.kind],
-                    minWidth: '2px',
-                    opacity: hoveredKey === key ? 0.8 : 1,
-                  }}
-                  onMouseEnter={(e) => {
-                    setHoveredKey(key);
-                    setMousePos({ x: e.clientX, y: e.clientY });
-                  }}
-                  onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
-                  onMouseLeave={() => setHoveredKey(null)}
-                />
-              );
-            })}
-          </div>
-        ))}
+        {allSessionSegments.map((segments, bi) => {
+          const buf = buffers[bi];
+          const isActive = buf.sessionId === sessionId;
+          const closeMs = isActive
+            ? now
+            : (buf.events.find(e => e.type === 'clock-out')?.timestamp ?? now);
+          const totals = parseBuffer(buf.events, closeMs);
+          const workedSeconds = totals.workingSeconds;
+          const h = Math.floor(workedSeconds / 3600);
+          const m = Math.floor((workedSeconds % 3600) / 60);
+          const sessionTotal = workedSeconds === 0 ? '—' : h === 0 ? `${m}m` : `${h}h ${m}m`;
+
+          return (
+            <div key={buf.sessionId} className="flex items-center gap-3">
+              <div
+                className="flex-1 relative h-7 rounded-full overflow-hidden"
+                style={{ background: 'var(--border-subtle)' }}
+              >
+                {segments.map((seg, si) => {
+                  const left = toPercent(seg.startMs);
+                  const width = Math.max(0, toPercent(seg.endMs) - left);
+                  const key = `${bi}-${si}`;
+                  return (
+                    <div
+                      key={key}
+                      className="absolute top-0 bottom-0 transition-opacity"
+                      style={{
+                        left: `${left}%`,
+                        width: `${width}%`,
+                        background: SEGMENT_COLORS[seg.kind],
+                        minWidth: '2px',
+                        opacity: hoveredKey === key ? 0.8 : 1,
+                      }}
+                      onMouseEnter={(e) => {
+                        setHoveredKey(key);
+                        setMousePos({ x: e.clientX, y: e.clientY });
+                      }}
+                      onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
+                      onMouseLeave={() => setHoveredKey(null)}
+                    />
+                  );
+                })}
+              </div>
+              <div
+                className="w-20 flex-shrink-0 text-xs text-right font-medium"
+                style={{ color: 'var(--foreground-secondary)' }}
+              >
+                {sessionTotal}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Tooltip */}

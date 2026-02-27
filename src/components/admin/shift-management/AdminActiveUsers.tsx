@@ -5,6 +5,7 @@ import { useActiveUsers } from '@/hooks/useActiveUsers';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import UserAvatar from '@/components/UserAvatar';
 import type { ActiveSessionState } from '@/types/firestore';
+import { RefreshCcw } from 'lucide-react';
 
 const STATE_CONFIG: Record<ActiveSessionState, { color: string; label: string }> = {
   working:    { color: '#86C27E', label: 'Working' },
@@ -69,7 +70,7 @@ export default function AdminActiveUsers() {
           className="p-1.5 rounded-md transition-colors hover:bg-white/10"
           title="Refresh"
         >
-          <img src="/Icons/refresh-ccw.svg" alt="Refresh" width={16} height={16} />
+          <RefreshCcw width={16} height={16} />
         </button>
       </div>
 

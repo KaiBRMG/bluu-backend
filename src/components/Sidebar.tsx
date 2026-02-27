@@ -4,6 +4,40 @@ import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import type { ResolvedAccess } from "@/types/firestore";
 import type { TeamspaceDef } from "@/lib/definitions";
+import {
+  House,
+  ArrowLeftFromLine,
+  ChevronDown,
+  ChevronLeft,
+  Settings,
+  MessageSquareQuote,
+  ShieldUser,
+  PanelLeft,
+  CalendarClock,
+  UserRoundCog,
+  Share2,
+  CalendarCog,
+  ClockFading,
+  type LucideIcon,
+} from "lucide-react";
+
+const ICON_MAP: Record<string, LucideIcon> = {
+  House,
+  MessageSquareQuote,
+  ShieldUser,
+  PanelLeft,
+  CalendarClock,
+  UserRoundCog,
+  Share2,
+  CalendarCog,
+  ClockFading,
+};
+
+function NavIcon({ name, className }: { name: string; className?: string }) {
+  const Icon = ICON_MAP[name];
+  if (!Icon) return <div className={className ?? "sidebar-nav-item-icon bg-zinc-700 rounded"} />;
+  return <Icon className={className ?? "sidebar-nav-item-icon"} />;
+}
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -35,7 +69,7 @@ export default function Sidebar({
     {
       id: "home",
       label: "Home",
-      icon: "/Icons/house.svg",
+      icon: "House",
       href: "/",
     },
     ...teamspaces
@@ -153,11 +187,7 @@ export default function Sidebar({
             }
             title="Collapse sidebar"
           >
-            <img
-              src="/Icons/menu_collapse.svg"
-              alt="Collapse"
-              className="sidebar-nav-item-icon"
-            />
+            <ArrowLeftFromLine className="sidebar-nav-item-icon" />
           </button>
         </div>
 
@@ -189,31 +219,17 @@ export default function Sidebar({
                   item.href && pathname === item.href ? "active" : ""
                 }`}
               >
-                {item.icon && item.icon.endsWith(".svg") ? (
-                  <img
-                    src={item.icon}
-                    alt={item.label}
-                    className="sidebar-nav-item-icon"
-                  />
+                {item.icon ? (
+                  <NavIcon name={item.icon} />
                 ) : (
                   <div className="sidebar-nav-item-icon bg-zinc-700 rounded"></div>
                 )}
 
                 <span className="sidebar-nav-item-text">{item.label}</span>
                 {item.subItems && (
-                  <img
-                    src={
-                      expandedItems.includes(item.id)
-                        ? "/Icons/expanded_arrow.svg"
-                        : "/Icons/collapsed_arrow.svg"
-                    }
-                    alt={
-                      expandedItems.includes(item.id)
-                        ? "Collapse"
-                        : "Expand"
-                    }
-                    className="sidebar-nav-item-arrow"
-                  />
+                  expandedItems.includes(item.id)
+                    ? <ChevronDown className="sidebar-nav-item-arrow" />
+                    : <ChevronLeft className="sidebar-nav-item-arrow" />
                 )}
               </button>
 
@@ -239,12 +255,8 @@ export default function Sidebar({
                           : ""
                       }`}
                     >
-                      {subItem.icon && subItem.icon.endsWith(".svg") ? (
-                        <img
-                          src={subItem.icon}
-                          alt={subItem.label}
-                          className="sidebar-nav-item-icon"
-                        />
+                      {subItem.icon ? (
+                        <NavIcon name={subItem.icon} />
                       ) : (
                         <div className="sidebar-nav-item-icon"></div>
                       )}
@@ -271,11 +283,7 @@ export default function Sidebar({
             pathname === "/applications/settings/" ? "active" : ""
           }`}
         >
-          <img
-            src="/Icons/settings.svg"
-            alt="Settings"
-            className="sidebar-nav-item-icon"
-          />
+          <Settings className="sidebar-nav-item-icon" />
           <span className="sidebar-nav-item-text">Settings</span>
         </button>
       </div>

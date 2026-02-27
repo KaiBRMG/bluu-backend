@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useTimesheetData } from '@/hooks/useTimesheetData';
 import TimesheetView from './TimesheetView';
+import { RefreshCcw } from 'lucide-react';
 
 function toDateString(date: Date): string {
   const y = date.getFullYear();
@@ -49,7 +50,7 @@ export default function UserTimesheet() {
             className="p-1.5 rounded-md transition-colors hover:bg-white/10"
             title="Refresh timesheet"
           >
-            <img src="/Icons/refresh-ccw.svg" alt="Refresh" width={16} height={16} />
+            <RefreshCcw width={16} height={16} />
           </button>
           <input
             type="date"

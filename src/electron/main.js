@@ -170,8 +170,8 @@ function createWindow() {
   }
 
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 850,
+    width: 1430,
+    height: 870,
     resizable: false,  // Start with window locked (login page)
     show: false,  // Don't show until ready (prevents white flash)
     backgroundColor: '#002333',     // Match your logo's dark background

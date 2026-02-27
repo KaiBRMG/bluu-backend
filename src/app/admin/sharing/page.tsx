@@ -52,8 +52,7 @@ export default function SharingPage() {
         <div className="mb-6">
           <h1 className="text-xl font-semibold mb-1">Sharing & Permissions</h1>
           <p className="text-sm" style={{ color: "var(--foreground-muted)" }}>
-            Manage which groups and users can access each page. Changes are saved
-            automatically and take effect immediately.
+            Manage which groups and users can access each page.
           </p>
         </div>
 

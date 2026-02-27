@@ -25,7 +25,7 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
 
       if (typeof window !== 'undefined' && window.electronAPI) {
         if (isLoggedIn) {
-          window.electronAPI.window.setSize(1290, 695);
+          window.electronAPI.window.setSize(1430, 870);
           window.electronAPI.window.setResizable(true);
         } else {
           window.electronAPI.window.setResizable(false);

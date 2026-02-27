@@ -111,16 +111,25 @@ export function usePermissions() {
     }
   }, [user]);
 
-  // Fetch when user is available and groups change
+  // Fetch as soon as user is available — don't wait for userData
   useEffect(() => {
     if (!user) {
       setState({ teamspaces: [], accessiblePages: [], loading: false, error: null });
       clearPermissionsCache();
+      prevGroupsRef.current = '';
       return;
     }
 
-    // Wait for userData to be loaded
-    if (!userData) return;
+    // First fetch: fire immediately without waiting for userData
+    if (prevGroupsRef.current === '') {
+      prevGroupsRef.current = '[]'; // sentinel to prevent double-fire below
+      fetchPermissions();
+    }
+  }, [user, fetchPermissions]);
+
+  // Re-fetch when groups change (after userData loads)
+  useEffect(() => {
+    if (!user || !userData) return;
 
     const currentGroups = JSON.stringify(userData.groups || []);
     if (prevGroupsRef.current === currentGroups) return;

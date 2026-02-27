@@ -23,6 +23,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       'photoURL',
       'timezone',
       'timezoneOffset',
+      'additionalTimezones',
     ];
 
     // Filter and sanitize updates

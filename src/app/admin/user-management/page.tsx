@@ -67,11 +67,11 @@ export default function UserManagementPage() {
   return (
     <AppLayout>
       <div className="max-w-6xl">
-        <h1 className="text-5xl font-bold mb-2 tracking-tight">
+      <h1 className="text-xl font-semibold mb-1">
           User Management
         </h1>
-        <p className="text-lg" style={{ color: 'var(--foreground-secondary)' }}>
-          Manage employees and user groups.
+        <p className="text-sm" style={{ color: "var(--foreground-muted)" }}>
+          See and manage employee data and user groups.
         </p>
 
         <div className="mt-8 flex gap-6">

@@ -30,11 +30,11 @@ export default function ShiftManagementPage() {
   return (
     <AppLayout>
       <div className="max-w-6xl">
-        <h1 className="text-5xl font-bold mb-2 tracking-tight">
+        <h1 className="text-xl font-semibold mb-1">
           Shift Management
         </h1>
-        <p className="text-lg" style={{ color: 'var(--foreground-secondary)' }}>
-          View and manage employee timesheets and screenshots.
+        <p className="text-sm" style={{ color: "var(--foreground-muted)" }}>
+          View and manage employee time tracking.
         </p>
 
         <div
