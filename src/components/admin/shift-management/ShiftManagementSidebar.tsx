@@ -6,6 +6,7 @@ interface ShiftManagementSidebarProps {
 }
 
 const menuItems = [
+  { id: 'shifts', label: 'Shifts' },
   { id: 'active-users', label: 'Active Users' },
   { id: 'timesheets', label: 'Timesheets' },
   { id: 'screenshots', label: 'Screenshots' },
@@ -14,39 +15,43 @@ const menuItems = [
 export default function ShiftManagementSidebar({ activeSection, onSectionChange }: ShiftManagementSidebarProps) {
   return (
     <div
-      className="w-56 flex-shrink-0 rounded-lg p-2"
       style={{
-        background: 'var(--sidebar-background)',
-        border: '1px solid var(--border-subtle)',
+        display: 'flex',
+        gap: '2px',
+        borderBottom: '1px solid var(--border-subtle)',
+        marginBottom: '0',
       }}
     >
-      <nav className="flex flex-col gap-1">
-        {menuItems.map((item) => (
+      {menuItems.map((item) => {
+        const isActive = activeSection === item.id;
+        return (
           <button
             key={item.id}
             onClick={() => onSectionChange(item.id)}
-            className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
-              activeSection === item.id ? 'font-medium' : ''
-            }`}
             style={{
-              background: activeSection === item.id ? 'var(--active-background)' : 'transparent',
-              color: activeSection === item.id ? 'var(--foreground)' : 'var(--foreground-secondary)',
+              padding: '8px 16px',
+              background: 'transparent',
+              border: 'none',
+              borderBottom: isActive ? '2px solid var(--foreground)' : '2px solid transparent',
+              color: isActive ? 'var(--foreground)' : 'var(--foreground-secondary)',
+              fontSize: '13px',
+              fontWeight: isActive ? 600 : 400,
+              cursor: 'pointer',
+              marginBottom: '-1px',
+              transition: 'color 0.15s',
+              whiteSpace: 'nowrap',
             }}
             onMouseEnter={(e) => {
-              if (activeSection !== item.id) {
-                e.currentTarget.style.background = 'var(--hover-background)';
-              }
+              if (!isActive) e.currentTarget.style.color = 'var(--foreground)';
             }}
             onMouseLeave={(e) => {
-              if (activeSection !== item.id) {
-                e.currentTarget.style.background = 'transparent';
-              }
+              if (!isActive) e.currentTarget.style.color = 'var(--foreground-secondary)';
             }}
           >
             {item.label}
           </button>
-        ))}
-      </nav>
+        );
+      })}
     </div>
   );
 }

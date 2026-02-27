@@ -191,6 +191,35 @@ export interface TimeEntryLedgerDocument {
   createdAt: Timestamp;
 }
 
+// ─── Shifts ──────────────────────────────────────────────────────────
+
+export interface ShiftRecurrence {
+  frequency: 'daily' | 'weekly' | 'monthly';
+  interval: number;
+  daysOfWeek: number[];        // 0=Sun..6=Sat; only meaningful for weekly
+  endDate: Timestamp | null;
+  count: number | null;        // mutually exclusive with endDate
+  parentShiftId: string | null; // null on root; set on per-instance overrides
+}
+
+export interface ShiftDocument {
+  shiftId: string;
+  userId: string;
+  startTime: Timestamp;        // UTC
+  endTime: Timestamp;          // UTC
+  wallClockStart: string;      // "HH:mm" local time for DST-safe recurrence expansion
+  wallClockEnd: string;        // "HH:mm" local time
+  userTimezone: string;        // IANA timezone at creation time (e.g. "America/New_York")
+  createdBy: string;           // admin UID
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  isRecurring: boolean;        // true when recurrence != null (for query efficiency)
+  recurrence: ShiftRecurrence | null;
+  seriesId: string | null;     // points to root recurring shift (on override docs)
+  overrideDate: Timestamp | null; // UTC midnight of the date being overridden
+  isDeleted: boolean;          // tombstone for "delete single occurrence"
+}
+
 // ─── Screenshots ─────────────────────────────────────────────────────
 
 export interface ScreenshotDocument {

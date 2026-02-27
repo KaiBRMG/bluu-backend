@@ -55,21 +55,6 @@ export default function UserCard({ user, onClick }: UserCardProps) {
             <span className="text-sm font-medium truncate" style={{ color: 'var(--foreground)' }}>
               {fullName}
             </span>
-            {/* Active/inactive indicator */}
-            <span className="flex items-center gap-1 flex-shrink-0">
-              <span
-                className="w-2 h-2 rounded-full"
-                style={{
-                  background: user.isActive ? '#22c55e' : 'var(--foreground-muted)',
-                }}
-              />
-              <span
-                className="text-xs"
-                style={{ color: user.isActive ? '#22c55e' : 'var(--foreground-muted)' }}
-              >
-                {user.isActive ? 'Active' : 'Away'}
-              </span>
-            </span>
           </div>
 
           {user.displayName && user.displayName !== fullName && (

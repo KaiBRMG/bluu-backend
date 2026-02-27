@@ -22,7 +22,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Window control
   window: {
-    setResizable: (resizable) => ipcRenderer.send('window:set-resizable', resizable)
+    setResizable: (resizable) => ipcRenderer.send('window:set-resizable', resizable),
+    setSize: (width, height) => ipcRenderer.send('window:set-size', width, height),
   },
 
   // Time tracking

@@ -397,7 +397,7 @@ export default function UserDetailContent({
                 <input
                   type="text"
                   className="form-input w-full"
-                  value={user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}
+                  value={user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { timeZone: user.timezone || undefined, year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A'}
                   disabled
                   style={{ opacity: 0.6 }}
                 />
@@ -407,7 +407,7 @@ export default function UserDetailContent({
                 <input
                   type="text"
                   className="form-input w-full"
-                  value={user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleDateString() : 'N/A'}
+                  value={user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleDateString('en-US', { timeZone: user.timezone || undefined, year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A'}
                   disabled
                   style={{ opacity: 0.6 }}
                 />

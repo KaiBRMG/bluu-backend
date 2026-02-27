@@ -138,3 +138,14 @@ export async function getUserGroups(uid: string): Promise<string[]> {
   const user = await getUserById(uid);
   return user?.groups || [];
 }
+
+/**
+ * Returns all user documents where timeTracking === true.
+ */
+export async function getAllTimeTrackingUsers(): Promise<any[]> {
+  const snap = await adminDb
+    .collection('users')
+    .where('timeTracking', '==', true)
+    .get();
+  return snap.docs.map(d => d.data());
+}

@@ -153,6 +153,14 @@ ipcMain.on('window:set-resizable', (_event, resizable) => {
   }
 });
 
+// IPC handler for window size
+ipcMain.on('window:set-size', (_event, width, height) => {
+  if (mainWindow) {
+    mainWindow.setSize(width, height, true);
+    mainWindow.center();
+  }
+});
+
 function createWindow() {
   // Set app icon for macOS dock
   const iconPath = path.join(__dirname, '../public/logo/icon.icns');

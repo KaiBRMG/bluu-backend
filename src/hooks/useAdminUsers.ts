@@ -41,6 +41,7 @@ export interface AdminFullUser {
   timeTracking?: boolean;
   includeIdleTime?: boolean;
   enableScreenshots?: boolean;
+  timezone?: string;
 }
 
 export interface AdminGroup {

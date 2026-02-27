@@ -6,6 +6,7 @@ import { useTimeTracking } from "@/hooks/useTimeTracking";
 import UserTimesheet from "@/components/timesheet/UserTimesheet";
 import TodayTimeline from "@/components/timesheet/TodayTimeline";
 import type { TimerDisplayState } from "@/types/firestore";
+import UserUpcomingShifts from "@/components/shifts/UserUpcomingShifts";
 
 const STATE_CONFIG: Record<TimerDisplayState, { color: string; bgAlpha: string; label: string }> = {
   working:      { color: '#86C27E', bgAlpha: 'rgba(134,194,126,0.1)', label: 'Working' },
@@ -235,18 +236,7 @@ export default function TimeTrackingPage() {
           <div className="mt-4">
             {activeTab === 'today' && <TodayTimeline />}
             {activeTab === 'previous' && <UserTimesheet />}
-            {activeTab === 'upcoming' && (
-              <div
-                className="rounded-lg p-6 text-center text-sm"
-                style={{
-                  color: 'var(--foreground-muted)',
-                  background: 'var(--sidebar-background)',
-                  border: '1px solid var(--border-subtle)',
-                }}
-              >
-                Upcoming shifts will appear here.
-              </div>
-            )}
+            {activeTab === 'upcoming' && <UserUpcomingShifts />}
           </div>
         </div>
       </div>

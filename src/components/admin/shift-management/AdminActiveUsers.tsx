@@ -13,8 +13,9 @@ const STATE_CONFIG: Record<ActiveSessionState, { color: string; label: string }>
   paused:     { color: '#8B5CF6', label: 'Paused' },
 };
 
-function formatTime(date: Date): string {
+function formatTime(date: Date, timezone?: string): string {
   return date.toLocaleTimeString('en-US', {
+    timeZone: timezone || undefined,
     hour: '2-digit',
     minute: '2-digit',
     hour12: true,
@@ -118,7 +119,7 @@ export default function AdminActiveUsers() {
                     {displayName}
                   </div>
                   <div className="text-xs mt-0.5" style={{ color: 'var(--foreground-muted)' }}>
-                    Clock-in time: {formatTime(session.startTime)}
+                    Clock-in time: {formatTime(session.startTime, user?.timezone)}
                   </div>
                 </div>
 
@@ -143,7 +144,7 @@ export default function AdminActiveUsers() {
                   className="text-xs flex-shrink-0"
                   style={{ color: 'var(--foreground-muted)', minWidth: '130px', textAlign: 'right' }}
                 >
-                  Last activity at {formatTime(session.lastUpdated)}
+                  Last activity at {formatTime(session.lastUpdated, user?.timezone)}
                 </div>
               </div>
             );

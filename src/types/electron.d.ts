@@ -8,6 +8,7 @@ interface ElectronAPI {
   };
   window: {
     setResizable: (resizable: boolean) => void;
+    setSize: (width: number, height: number) => void;
   };
   timeTracking: {
     getIdleTime: () => Promise<number>;

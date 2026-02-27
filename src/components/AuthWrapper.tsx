@@ -24,9 +24,12 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
       prevIsLoggedInRef.current = isLoggedIn;
 
       if (typeof window !== 'undefined' && window.electronAPI) {
-        // When logged in, make window resizable
-        // When logged out, lock the window
-        window.electronAPI.window.setResizable(isLoggedIn);
+        if (isLoggedIn) {
+          window.electronAPI.window.setSize(1290, 695);
+          window.electronAPI.window.setResizable(true);
+        } else {
+          window.electronAPI.window.setResizable(false);
+        }
       }
     }
   }, [isLoggedIn]);

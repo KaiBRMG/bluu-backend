@@ -91,6 +91,63 @@ export async function getScreenshotUrl(storagePath: string): Promise<string> {
   return url;
 }
 
+export async function getScreenshotCountsByUsers(
+  userIds: string[],
+): Promise<Record<string, number>> {
+  if (userIds.length === 0) return {};
+
+  const counts: Record<string, number> = {};
+
+  await Promise.all(
+    userIds.map(async (uid) => {
+      const snap = await adminDb
+        .collection(COLLECTION)
+        .where('userId', '==', uid)
+        .count()
+        .get();
+      counts[uid] = snap.data().count;
+    })
+  );
+
+  return counts;
+}
+
+export async function deleteScreenshotsByUsersAndDateRange(
+  userIds: string[],
+  startDate: string,
+  endDate: string,
+): Promise<number> {
+  if (userIds.length === 0) return 0;
+
+  const rangeStart = new Date(`${startDate}T00:00:00.000Z`);
+  const rangeEnd = new Date(`${endDate}T23:59:59.999Z`);
+
+  let totalDeleted = 0;
+
+  await Promise.all(
+    userIds.map(async (uid) => {
+      const snap = await adminDb
+        .collection(COLLECTION)
+        .where('userId', '==', uid)
+        .where('timestampUTC', '>=', Timestamp.fromDate(rangeStart))
+        .where('timestampUTC', '<=', Timestamp.fromDate(rangeEnd))
+        .get();
+
+      if (snap.empty) return;
+
+      const ids = snap.docs.map((d) => d.id);
+      // deleteScreenshots uses getAll which supports up to 500 docs; chunk to be safe
+      const CHUNK = 400;
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        await deleteScreenshots(ids.slice(i, i + CHUNK));
+      }
+      totalDeleted += ids.length;
+    })
+  );
+
+  return totalDeleted;
+}
+
 export async function deleteScreenshots(
   screenshotIds: string[],
 ): Promise<void> {

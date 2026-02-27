@@ -27,6 +27,304 @@ interface AdminScreenshotsProps {
   onUserChange: (userId: string | null) => void;
 }
 
+// ---------------------------------------------------------------------------
+// Batch Delete Dialog
+// ---------------------------------------------------------------------------
+
+interface BatchDeleteDialogProps {
+  onClose: () => void;
+  onDeleted: () => void;
+}
+
+function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
+  const { user } = useAuth();
+  const { users, loading: usersLoading } = useAdminUsers();
+  const today = toDateString(new Date());
+
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState(today);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [countsLoading, setCountsLoading] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const timeTrackedUsers = useMemo(() => {
+    const tracked = users.filter((u) => u.timeTracking === true);
+    return tracked.length > 0 ? tracked : users;
+  }, [users]);
+
+  // Fetch screenshot counts for all time-tracked users once they load
+  useEffect(() => {
+    if (!user || timeTrackedUsers.length === 0) return;
+    let cancelled = false;
+
+    const fetchCounts = async () => {
+      setCountsLoading(true);
+      try {
+        const idToken = await user.getIdToken();
+        const userIds = timeTrackedUsers.map((u) => u.uid).join(',');
+        const res = await fetch(
+          `/api/time-tracking/screenshots/counts?userIds=${encodeURIComponent(userIds)}`,
+          { headers: { Authorization: `Bearer ${idToken}` } },
+        );
+        if (!res.ok) throw new Error('Failed to fetch counts');
+        const data = await res.json();
+        if (!cancelled) setCounts(data.counts || {});
+      } catch (err) {
+        console.error('[BatchDeleteDialog] Failed to load counts:', err);
+      } finally {
+        if (!cancelled) setCountsLoading(false);
+      }
+    };
+
+    fetchCounts();
+    return () => { cancelled = true; };
+  }, [user, timeTrackedUsers]);
+
+  // Only show users that have at least 1 screenshot
+  const usersWithScreenshots = useMemo(
+    () => timeTrackedUsers.filter((u) => (counts[u.uid] ?? 0) > 0),
+    [timeTrackedUsers, counts],
+  );
+
+  const toggleUser = (uid: string) => {
+    setSelectedUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
+  };
+
+  const canDelete =
+    selectedUserIds.size > 0 && startDate.length > 0 && endDate.length > 0 && startDate <= endDate;
+
+  const handleDeleteConfirmed = async () => {
+    if (!user || !canDelete) return;
+    setIsDeleting(true);
+    setError(null);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/time-tracking/screenshots/batch-delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          userIds: Array.from(selectedUserIds),
+          startDate,
+          endDate,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Batch delete failed');
+      }
+      setShowConfirm(false);
+      onDeleted();
+      onClose();
+    } catch (err) {
+      console.error('[BatchDeleteDialog] Delete failed:', err);
+      setError(err instanceof Error ? err.message : 'Delete failed');
+      setShowConfirm(false);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.5)' }}
+      onClick={() => !isDeleting && onClose()}
+    >
+      <div
+        className="rounded-lg p-6 w-full max-w-md mx-4 flex flex-col gap-5"
+        style={{
+          background: 'var(--background)',
+          border: '1px solid var(--border-subtle)',
+          maxHeight: '85vh',
+          overflow: 'hidden',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-semibold" style={{ color: 'var(--foreground)' }}>
+          Batch Delete Screenshots
+        </h3>
+
+        {/* Date range */}
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className="form-label block mb-1">Start date</label>
+            <input
+              type="date"
+              className="form-input w-full"
+              value={startDate}
+              max={today}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
+          </div>
+          <div className="flex-1">
+            <label className="form-label block mb-1">End date</label>
+            <input
+              type="date"
+              className="form-input w-full"
+              value={endDate}
+              max={today}
+              onChange={(e) => setEndDate(e.target.value)}
+            />
+          </div>
+        </div>
+        {startDate && endDate && startDate > endDate && (
+          <p className="text-xs" style={{ color: '#ef4444', marginTop: -12 }}>
+            Start date must be before end date.
+          </p>
+        )}
+
+        {/* User list */}
+        <div>
+          <label className="form-label block mb-2">Select employees</label>
+          {usersLoading || countsLoading ? (
+            <p className="text-sm" style={{ color: 'var(--foreground-muted)' }}>
+              Loading...
+            </p>
+          ) : usersWithScreenshots.length === 0 ? (
+            <p className="text-sm" style={{ color: 'var(--foreground-muted)' }}>
+              No employees have screenshots in storage.
+            </p>
+          ) : (
+            <div
+              className="flex flex-col gap-1 overflow-y-auto"
+              style={{ maxHeight: '220px' }}
+            >
+              {usersWithScreenshots.map((u) => {
+                const count = counts[u.uid] ?? 0;
+                const checked = selectedUserIds.has(u.uid);
+                return (
+                  <label
+                    key={u.uid}
+                    className="flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors"
+                    style={{
+                      background: checked ? 'var(--active-background)' : 'transparent',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleUser(u.uid)}
+                      className="w-4 h-4 flex-shrink-0"
+                      style={{ accentColor: '#3b82f6' }}
+                    />
+                    <span
+                      className="flex-1 text-sm"
+                      style={{ color: 'var(--foreground)' }}
+                    >
+                      {u.displayName || `${u.firstName} ${u.lastName}`}
+                    </span>
+                    <span
+                      className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0"
+                      style={{
+                        background: 'var(--hover-background)',
+                        color: 'var(--foreground-secondary)',
+                      }}
+                    >
+                      {count}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {error && (
+          <p className="text-sm" style={{ color: '#ef4444' }}>
+            {error}
+          </p>
+        )}
+
+        {/* Actions */}
+        <div className="flex justify-end gap-3 pt-1">
+          <button
+            onClick={onClose}
+            className="btn-secondary"
+            disabled={isDeleting}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => setShowConfirm(true)}
+            disabled={!canDelete || isDeleting}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={{
+              background: canDelete ? '#ef4444' : 'var(--hover-background)',
+              color: canDelete ? '#fff' : 'var(--foreground-muted)',
+              cursor: canDelete ? 'pointer' : 'not-allowed',
+            }}
+          >
+            Delete All Screenshots
+          </button>
+        </div>
+      </div>
+
+      {/* Confirmation dialog */}
+      {showConfirm && (
+        <div
+          className="fixed inset-0 z-60 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.6)' }}
+          onClick={() => !isDeleting && setShowConfirm(false)}
+        >
+          <div
+            className="rounded-lg p-6 max-w-sm w-full mx-4"
+            style={{
+              background: 'var(--background)',
+              border: '1px solid var(--border-subtle)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--foreground)' }}>
+              Confirm Batch Delete
+            </h3>
+            <p className="text-sm mb-1" style={{ color: 'var(--foreground-secondary)' }}>
+              All screenshots between <strong>{startDate}</strong> and <strong>{endDate}</strong> for{' '}
+              <strong>{selectedUserIds.size} employee{selectedUserIds.size !== 1 ? 's' : ''}</strong> will be
+              permanently deleted. This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setShowConfirm(false)}
+                className="btn-secondary"
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteConfirmed}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-lg text-sm font-medium"
+                style={{
+                  background: '#ef4444',
+                  color: '#fff',
+                  opacity: isDeleting ? 0.6 : 1,
+                }}
+              >
+                {isDeleting ? 'Deleting...' : 'Confirm Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
 export default function AdminScreenshots({ selectedUserId, onUserChange }: AdminScreenshotsProps) {
   const { user } = useAuth();
   const { users, loading: usersLoading } = useAdminUsers();
@@ -38,11 +336,18 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
   const [modalPos, setModalPos] = useState<[number, number] | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showBatchDelete, setShowBatchDelete] = useState(false);
 
   const timeTrackedUsers = useMemo(() => {
     const tracked = users.filter((u) => u.timeTracking === true);
     return tracked.length > 0 ? tracked : users;
   }, [users]);
+
+  // Timezone of the currently selected employee — used for timestamp display
+  const selectedUserTimezone = useMemo(() => {
+    if (!selectedUserId) return 'UTC';
+    return users.find((u) => u.uid === selectedUserId)?.timezone || 'UTC';
+  }, [users, selectedUserId]);
 
   const { groups, loading, error, refetch } = useAdminScreenshots(
     selectedUserId,
@@ -166,9 +471,33 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
 
   return (
     <div>
-      <h2 className="text-xl font-semibold mb-4" style={{ color: 'var(--foreground)' }}>
-        Screenshots
-      </h2>
+      {/* Header row with Batch Delete button */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-semibold" style={{ color: 'var(--foreground)' }}>
+          Screenshots
+        </h2>
+        <button
+          onClick={() => setShowBatchDelete(true)}
+          className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+          style={{
+            background: 'var(--hover-background)',
+            color: 'var(--foreground-secondary)',
+            border: '1px solid var(--border-subtle)',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = '#ef444420';
+            e.currentTarget.style.color = '#ef4444';
+            e.currentTarget.style.borderColor = '#ef444460';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'var(--hover-background)';
+            e.currentTarget.style.color = 'var(--foreground-secondary)';
+            e.currentTarget.style.borderColor = 'var(--border-subtle)';
+          }}
+        >
+          Batch Delete
+        </button>
+      </div>
 
       {/* Controls */}
       <div className="flex flex-wrap items-end gap-4 mb-6">
@@ -284,7 +613,7 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
                     className="text-xs mt-1 text-center"
                     style={{ color: 'var(--foreground-muted)' }}
                   >
-                    {formatTime(group.timestampUTC)} &bull; {group.screenCount} screen{group.screenCount !== 1 ? 's' : ''}
+                    {formatTime(group.timestampUTC, selectedUserTimezone)} &bull; {group.screenCount} screen{group.screenCount !== 1 ? 's' : ''}
                   </p>
                 </div>
               );
@@ -352,7 +681,7 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
               onLoad={() => setModalImageLoaded(true)}
             />
             <p className="text-white mt-3 text-sm">
-              {formatTime(currentModalGroup.timestampUTC)}
+              {formatTime(currentModalGroup.timestampUTC, selectedUserTimezone)}
               {currentModalGroup.screenCount > 1 && (
                 <span style={{ color: 'rgba(255,255,255,0.6)' }}>
                   {' '}&bull; Screen {currentModalScreen.screenIndex + 1} of {currentModalGroup.screenCount}
@@ -377,7 +706,7 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
         </div>
       )}
 
-      {/* Delete confirmation dialog */}
+      {/* Delete confirmation dialog (for selected groups) */}
       {showDeleteConfirm && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center"
@@ -421,6 +750,14 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
             </div>
           </div>
         </div>
+      )}
+
+      {/* Batch delete dialog */}
+      {showBatchDelete && (
+        <BatchDeleteDialog
+          onClose={() => setShowBatchDelete(false)}
+          onDeleted={refetch}
+        />
       )}
     </div>
   );
