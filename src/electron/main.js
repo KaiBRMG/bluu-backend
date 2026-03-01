@@ -1,5 +1,6 @@
 // electron/main.js
-const { app, BrowserWindow, shell, nativeImage, ipcMain, powerMonitor, desktopCapturer } = require('electron');
+const { app, BrowserWindow, shell, nativeImage, ipcMain, powerMonitor, desktopCapturer, Notification } = require('electron');
+const { exec } = require('child_process');
 const path = require('path');
 
 const isDev = process.env.ELECTRON_DEV === 'true' || process.env.NODE_ENV !== 'production';
@@ -143,6 +144,38 @@ ipcMain.handle('timeTracking:captureScreenshot', async () => {
     console.error('[Screenshot] Capture failed:', err);
     return { success: false, error: err.message };
   }
+});
+
+// IPC handler for system notifications + sound
+ipcMain.handle('notifications:show', async (_event, { title, body, playSound, actionUrl }) => {
+  if (Notification.isSupported()) {
+    const notif = new Notification({ title, body, silent: true });
+
+    if (actionUrl && mainWindow) {
+      notif.on('click', () => {
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.focus();
+          mainWindow.webContents.send('notification:navigate', actionUrl);
+        }
+      });
+    }
+
+    notif.show();
+  }
+
+  if (playSound) {
+    const soundPath = path.join(__dirname, '../public/mixkit-message-pop-alert-2354.mp3');
+    if (process.platform === 'darwin') {
+      exec(`afplay "${soundPath}"`);
+    } else if (process.platform === 'win32') {
+      exec(`powershell -c (New-Object Media.SoundPlayer "${soundPath}").PlaySync()`);
+    } else {
+      exec(`aplay "${soundPath}" 2>/dev/null || paplay "${soundPath}" 2>/dev/null`);
+    }
+  }
+
+  return { success: true };
 });
 
 // IPC handler for window resizability

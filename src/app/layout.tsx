@@ -5,6 +5,7 @@ import { AuthProvider } from "@/components/AuthProvider";
 import { NetworkStatusProvider } from "@/contexts/NetworkStatusContext";
 import { UserDataProvider } from "@/hooks/useUserData";
 import { TimeTrackingProvider } from "@/contexts/TimeTrackingContext";
+import { NotificationsProvider } from "@/hooks/useNotifications";
 import AuthWrapper from "@/components/AuthWrapper";
 
 const geistSans = Geist({
@@ -35,11 +36,13 @@ export default function RootLayout({
         <AuthProvider>
           <NetworkStatusProvider>
             <UserDataProvider>
-              <TimeTrackingProvider>
-                <AuthWrapper>
-                  {children}
-                </AuthWrapper>
-              </TimeTrackingProvider>
+              <NotificationsProvider>
+                <TimeTrackingProvider>
+                  <AuthWrapper>
+                    {children}
+                  </AuthWrapper>
+                </TimeTrackingProvider>
+              </NotificationsProvider>
             </UserDataProvider>
           </NetworkStatusProvider>
         </AuthProvider>

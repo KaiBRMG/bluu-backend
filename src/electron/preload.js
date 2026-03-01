@@ -32,6 +32,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     captureScreenshot: () => ipcRenderer.invoke('timeTracking:captureScreenshot'),
   },
 
+  // Notifications
+  notifications: {
+    show: (options) => ipcRenderer.invoke('notifications:show', options),
+    onNavigate: (callback) => {
+      ipcRenderer.on('notification:navigate', (_event, url) => callback(url));
+    },
+    removeNavigateListener: () => {
+      ipcRenderer.removeAllListeners('notification:navigate');
+    },
+  },
+
   // App lifecycle
   onAppClosing: (callback) => {
     ipcRenderer.on('app-closing', () => callback());

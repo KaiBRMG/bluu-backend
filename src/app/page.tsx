@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useAuth } from "@/components/AuthProvider";
 import { useUserData } from "@/hooks/useUserData";
 import { useTimeTracking } from "@/hooks/useTimeTracking";
-import type { TimerDisplayState } from "@/types/firestore";
+import { useNotifications } from "@/hooks/useNotifications";
+import type { NotificationDocument, NotificationType, TimerDisplayState } from "@/types/firestore";
 import { Clock4, ClockCheck, ClockAlert, Coffee, CirclePause } from 'lucide-react';
 
 const STATE_CONFIG: Record<TimerDisplayState, { color: string; bgAlpha: string; label: string; Icon: React.ElementType }> = {
@@ -47,6 +48,123 @@ function tzOffsetMinutes(tz: string): number {
   const utcMs = now.getTime();
   const localMs = new Date(now.toLocaleString('en-US', { timeZone: tz })).getTime();
   return Math.round((localMs - utcMs) / 60000);
+}
+
+// ─── Announcement helpers ────────────────────────────────────────────
+
+const TYPE_ANNOUNCEMENT_COLOR: Record<NotificationType, { color: string; bg: string }> = {
+  shift:      { color: '#3b82f6', bg: 'rgba(59,130,246,0.1)'  },
+  alert:      { color: '#ef4444', bg: 'rgba(239,68,68,0.1)'   },
+  success:    { color: '#22c55e', bg: 'rgba(34,197,94,0.1)'   },
+  action:     { color: '#eab308', bg: 'rgba(234,179,8,0.1)'   },
+  onboarding: { color: 'var(--foreground-muted)', bg: 'var(--sidebar-background)' },
+  system:     { color: 'var(--foreground-muted)', bg: 'var(--sidebar-background)' },
+};
+
+function formatAnnouncementDate(ts: import('@/types/firestore').NotificationDocument['createdAt']): string {
+  if (!ts) return '';
+  const d = ts.toDate();
+  return d.toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+}
+
+function AnnouncementBanner({ announcements }: { announcements: NotificationDocument[] }) {
+  const { user } = useAuth();
+  // Track IDs we've already fired mark-read for this session
+  const markedRef = useRef<Set<string>>(new Set());
+  // Track IDs we've already fired dismiss for this session
+  const dismissedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!user || announcements.length === 0) return;
+
+    async function getIdToken() {
+      if (!user) return null;
+      return user.getIdToken();
+    }
+
+    for (const ann of announcements) {
+      // Mark as read on first display
+      if (!ann.read && !markedRef.current.has(ann.id)) {
+        markedRef.current.add(ann.id);
+        getIdToken().then((token) => {
+          if (!token) return;
+          fetch('/api/notifications/mark-read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ notificationId: ann.id }),
+          }).catch(() => {});
+        });
+      }
+
+      // Auto-dismiss if past expiry
+      if (
+        ann.announcementExpiry &&
+        ann.announcementExpiry.toMillis() <= Date.now() &&
+        !dismissedRef.current.has(ann.id)
+      ) {
+        dismissedRef.current.add(ann.id);
+        getIdToken().then((token) => {
+          if (!token) return;
+          fetch('/api/notifications/dismiss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ notificationId: ann.id }),
+          }).catch(() => {});
+        });
+      }
+    }
+  }, [announcements, user]);
+
+  if (announcements.length === 0) return null;
+
+  // Colour the block by the most recent announcement's type
+  const mostRecent = announcements[0];
+  const { color, bg } = TYPE_ANNOUNCEMENT_COLOR[mostRecent.type] ?? TYPE_ANNOUNCEMENT_COLOR.system;
+
+  return (
+    <div
+      className="rounded-lg p-6 mb-8"
+      style={{ background: bg }}
+    >
+      <div className="flex flex-col gap-4">
+        {announcements.map((ann) => {
+          const stripe = TYPE_ANNOUNCEMENT_COLOR[ann.type]?.color ?? 'var(--foreground-muted)';
+          return (
+            <div key={ann.id} className="flex items-stretch gap-4">
+              {/* Type stripe */}
+              <div
+                className="flex-shrink-0 w-1 rounded-full self-stretch"
+                style={{ background: stripe }}
+              />
+              <div className="flex-1 min-w-0">
+                <p
+                  className="text-sm font-semibold leading-snug"
+                  style={{ color }}
+                >
+                  {ann.title}
+                  <span
+                    className="ml-2 text-xs font-normal"
+                    style={{ color: 'var(--foreground-secondary)' }}
+                  >
+                    — {formatAnnouncementDate(ann.createdAt)}
+                  </span>
+                </p>
+                <p
+                  className="text-sm mt-1"
+                  style={{ color: 'var(--foreground-secondary)' }}
+                >
+                  {ann.message}
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function ClockWidget() {
@@ -205,7 +323,14 @@ function TimeTrackingWidget() {
 export default function Home() {
   const { user } = useAuth();
   const { userData } = useUserData();
+  const { notifications } = useNotifications();
   const firstName = user?.displayName?.split(' ')[0] || 'User';
+
+  const now = Date.now();
+  const announcements = notifications.filter(
+    (n) => n.announcement === true && !n.dismissedByUser &&
+      (!n.announcementExpiry || n.announcementExpiry.toMillis() > now),
+  );
 
   // Get the first group from the user's groups array, or default to "General"
   const userGroup = userData?.groups?.[0] || "unassigned";
@@ -219,9 +344,8 @@ export default function Home() {
         <h1 className="text-5xl font-bold mb-2 tracking-tight">
           Welcome, {firstName}
         </h1>
-        <p className="text-lg" style={{ color: 'var(--foreground-secondary)' }}>
-          Your personalized workspace
-        </p>
+
+        <AnnouncementBanner announcements={announcements} />
 
         {/* Quick stats or widgets can go here */}
         <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">

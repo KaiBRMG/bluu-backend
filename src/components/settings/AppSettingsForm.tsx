@@ -29,6 +29,12 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
   const { userData, loading } = useUserData();
   const { user } = useAuth();
 
+  // Notification preferences
+  const [desktopEnabled, setDesktopEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [shiftReminders, setShiftReminders] = useState(true);
+  const originalNotifPrefsRef = useRef({ desktopEnabled: true, soundEnabled: true, shiftReminders: true });
+
   const [selectedTimezone, setSelectedTimezone] = useState('');
   const originalTimezoneRef = useRef<string>('');
   const [additionalTimezones, setAdditionalTimezones] = useState<string[]>([]);
@@ -54,6 +60,19 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
     }
   }, [userData?.timezone]);
 
+  // Initialize notification preferences from userData
+  useEffect(() => {
+    const prefs = userData?.notificationPreferences;
+    const desktop = prefs?.desktopEnabled !== false;
+    const sound   = prefs?.soundEnabled   !== false;
+    const shifts  = prefs?.shiftReminders !== false;
+    setDesktopEnabled(desktop);
+    setSoundEnabled(sound);
+    setShiftReminders(shifts);
+    originalNotifPrefsRef.current = { desktopEnabled: desktop, soundEnabled: sound, shiftReminders: shifts };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userData?.notificationPreferences]);
+
   useEffect(() => {
     // undefined = never set → seed with defaults; [] = user explicitly cleared
     const saved = userData?.additionalTimezones !== undefined
@@ -70,8 +89,12 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
     const addlChanged =
       additionalTimezones.length !== originalAdditionalTimezonesRef.current.length ||
       additionalTimezones.some((tz, i) => tz !== originalAdditionalTimezonesRef.current[i]);
-    setHasChanges(tzChanged || addlChanged);
-  }, [selectedTimezone, additionalTimezones]);
+    const notifChanged =
+      desktopEnabled  !== originalNotifPrefsRef.current.desktopEnabled ||
+      soundEnabled    !== originalNotifPrefsRef.current.soundEnabled   ||
+      shiftReminders  !== originalNotifPrefsRef.current.shiftReminders;
+    setHasChanges(tzChanged || addlChanged || notifChanged);
+  }, [selectedTimezone, additionalTimezones, desktopEnabled, soundEnabled, shiftReminders]);
 
   // Clear save message after 3 seconds
   useEffect(() => {
@@ -176,6 +199,9 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
   const handleCancel = () => {
     setSelectedTimezone(originalTimezoneRef.current);
     setAdditionalTimezones(originalAdditionalTimezonesRef.current);
+    setDesktopEnabled(originalNotifPrefsRef.current.desktopEnabled);
+    setSoundEnabled(originalNotifPrefsRef.current.soundEnabled);
+    setShiftReminders(originalNotifPrefsRef.current.shiftReminders);
     setSaveMessage(null);
   };
 
@@ -201,6 +227,7 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
           timezone: selectedTimezone,
           timezoneOffset: offset,
           additionalTimezones: additionalTimezones.filter(Boolean),
+          notificationPreferences: { desktopEnabled, soundEnabled, shiftReminders },
         }),
       });
 
@@ -212,6 +239,7 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
 
       originalTimezoneRef.current = selectedTimezone;
       originalAdditionalTimezonesRef.current = additionalTimezones.filter(Boolean);
+      originalNotifPrefsRef.current = { desktopEnabled, soundEnabled, shiftReminders };
       setHasChanges(false);
       setSaveMessage({ type: 'success', text: 'Changes saved successfully!' });
     } catch (error) {
@@ -488,6 +516,88 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
               </button>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Notifications Section */}
+      <div className="mb-6">
+        <div className="mb-4">
+          <label className="form-label">Notifications</label>
+        </div>
+
+        {/* Desktop Notifications */}
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
+              Desktop Notifications
+            </div>
+            <div className="text-xs italic mt-0.5" style={{ color: 'var(--foreground-secondary)' }}>
+              Show OS-level toast popups when new notifications arrive.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={desktopEnabled}
+            onClick={() => setDesktopEnabled((v) => !v)}
+            className="flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none"
+            style={{ background: desktopEnabled ? '#3b82f6' : 'var(--border-subtle)' }}
+          >
+            <span
+              className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
+              style={{ transform: desktopEnabled ? 'translateX(18px)' : 'translateX(2px)' }}
+            />
+          </button>
+        </div>
+
+        {/* Notification Sound */}
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
+              Notification Sound
+            </div>
+            <div className="text-xs italic mt-0.5" style={{ color: 'var(--foreground-secondary)' }}>
+              Play a chime when a notification arrives (independent of desktop notifications).
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={soundEnabled}
+            onClick={() => setSoundEnabled((v) => !v)}
+            className="flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none"
+            style={{ background: soundEnabled ? '#3b82f6' : 'var(--border-subtle)' }}
+          >
+            <span
+              className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
+              style={{ transform: soundEnabled ? 'translateX(18px)' : 'translateX(2px)' }}
+            />
+          </button>
+        </div>
+
+        {/* Shift Reminders */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
+              Shift Reminders
+            </div>
+            <div className="text-xs italic mt-0.5" style={{ color: 'var(--foreground-secondary)' }}>
+              Receive alerts before your scheduled shifts.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={shiftReminders}
+            onClick={() => setShiftReminders((v) => !v)}
+            className="flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none"
+            style={{ background: shiftReminders ? '#3b82f6' : 'var(--border-subtle)' }}
+          >
+            <span
+              className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
+              style={{ transform: shiftReminders ? 'translateX(18px)' : 'translateX(2px)' }}
+            />
+          </button>
         </div>
       </div>
 

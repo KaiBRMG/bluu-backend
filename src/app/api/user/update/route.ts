@@ -24,6 +24,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       'timezone',
       'timezoneOffset',
       'additionalTimezones',
+      'notificationPreferences',
     ];
 
     // Filter and sanitize updates

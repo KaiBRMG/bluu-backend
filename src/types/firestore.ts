@@ -73,8 +73,32 @@ export interface UserDocument {
   includeIdleTime?: boolean;
   enableScreenshots?: boolean;
 
+  notificationPreferences?: {
+    desktopEnabled: boolean;
+    soundEnabled: boolean;
+    shiftReminders: boolean;
+  };
+
   // Denormalized: page IDs this user can access (kept in sync by server on group/permission changes)
   permittedPageIds?: string[];
+}
+
+// ─── Notifications ───────────────────────────────────────────────────
+
+export type NotificationType = 'onboarding' | 'system' | 'shift' | 'alert' | 'success' | 'action';
+
+export interface NotificationDocument {
+  id: string;
+  userId: string;
+  title: string;
+  message: string;
+  type: NotificationType;
+  read: boolean;
+  dismissedByUser: boolean;
+  createdAt: Timestamp;
+  actionUrl?: string | null;
+  announcement?: boolean;
+  announcementExpiry?: Timestamp | null;
 }
 
 // ─── Group ──────────────────────────────────────────────────────────

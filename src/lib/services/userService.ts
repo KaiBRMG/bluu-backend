@@ -78,6 +78,37 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
     addUserToGroup(userData.uid, 'unassigned').catch((err) => {
       console.error('[UserService] Failed to add user to group:', err);
     });
+
+    // Send welcome notification (non-blocking)
+    // To do: notify admin as well (create super admin)
+    adminDb.collection('notifications').add({
+      userId: userData.uid,
+      title: 'Welcome to Bluu Rock!',
+      message: `Hi ${firstName || userData.displayName}, welcome to the team! You will be assigned to a group by an administrator soon.`,
+      type: 'success',
+      read: false,
+      dismissedByUser: false,
+      createdAt: FieldValue.serverTimestamp(),
+      actionUrl: null,
+      announcement: false,
+      announcementExpiry: null,
+    }).catch((err) => {
+      console.error('[UserService] Failed to create welcome notification:', err);
+    });
+    adminDb.collection('notifications').add({
+      userId: userData.uid,
+      title: 'Action Required',
+      message: `To complete your onboarding, click here to update your personal information.`,
+      type: 'action',
+      read: false,
+      dismissedByUser: false,
+      createdAt: FieldValue.serverTimestamp(),
+      actionUrl: '/applications/settings',
+      announcement: false,
+      announcementExpiry: null,
+    }).catch((err) => {
+      console.error('[UserService] Failed to create welcome notification:', err);
+    });
   } else {
     console.log(`[UserService] Updating last login: ${userData.workEmail}`);
 

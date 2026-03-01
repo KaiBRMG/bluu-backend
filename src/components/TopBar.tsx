@@ -4,8 +4,9 @@ import { useState, useEffect, useRef } from "react";
 import { auth } from "../firebase-config";
 import UserAvatar from "@/components/UserAvatar";
 import { clearPermissionsCache } from "@/lib/permissionsCache";
-import { Bell, LogOut } from "lucide-react";
+import { LogOut } from "lucide-react";
 import TimerPill from "@/components/TimerPill";
+import NotificationTray from "@/components/NotificationTray";
 
 interface TopBarProps {
   userData: {
@@ -53,15 +54,7 @@ export default function TopBar({ userData }: TopBarProps) {
       {/* Right side - notifications and user */}
       <div className="ml-auto flex items-center gap-4">
         {/* Notifications */}
-        <button
-          className="relative p-2 rounded-lg transition-colors"
-          style={{ background: 'transparent' }}
-          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--hover-background)'}
-          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-        >
-          <Bell className="w-5 h-5" style={{ opacity: 'var(--icon-inactive)' }} />
-          <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-        </button>
+        <NotificationTray />
 
         {/* User menu */}
         <div className="relative" ref={userMenuRef}>
