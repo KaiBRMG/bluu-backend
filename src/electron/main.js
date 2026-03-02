@@ -104,7 +104,7 @@ function handleDeepLink(url) {
 
 // IPC handlers for OAuth
 ipcMain.handle('auth:start-google-oauth', async () => {
-  const baseUrl = isDev ? 'http://localhost:3000' : 'https://app.yourcompany.com';
+  const baseUrl = isDev ? 'http://localhost:3000' : 'https://bluu-backend.vercel.app';
   const authUrl = `${baseUrl}/auth/google`;
 
   // Open the browser for OAuth
@@ -225,8 +225,7 @@ function createWindow() {
     // mainWindow.webContents.openDevTools();
   } else {
     // In production, load your hosted site
-    // TODO: Update this to your production URL
-    mainWindow.loadURL('https://app.yourcompany.com');
+    mainWindow.loadURL('https://bluu-backend.vercel.app');
   }
 
   // Open external links (target=_blank) in default browser
@@ -238,7 +237,7 @@ function createWindow() {
 
   // Prevent navigation to other origins from the electron window
   mainWindow.webContents.on('will-navigate', (e, url) => {
-    const allowed = isDev ? 'http://localhost:3000' : 'https://app.yourcompany.com';
+    const allowed = isDev ? 'http://localhost:3000' : 'https://bluu-backend.vercel.app';
     if (!url.startsWith(allowed)) {
       e.preventDefault();
       shell.openExternal(url);
