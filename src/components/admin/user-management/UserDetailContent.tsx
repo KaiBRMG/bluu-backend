@@ -256,7 +256,7 @@ export default function UserDetailContent({
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {/* User avatar & info header */}
         <div className="flex items-center gap-4 mb-6">
-          <Avatar size="lg" style={{ background: getAvatarColor((user.displayName || fullName) || 'User') }}>
+          <Avatar className="size-14" style={{ background: getAvatarColor((user.displayName || fullName) || 'User') }}>
             {user.photoURL && <AvatarImage src={user.photoURL} alt={user.displayName || fullName} />}
             <AvatarFallback style={{ background: getAvatarColor((user.displayName || fullName) || 'User'), color: '#fff' }}>
               {getInitials(user.displayName || fullName)}
@@ -272,7 +272,7 @@ export default function UserDetailContent({
           </div>
         </div>
 
-        <Accordion type="single" defaultValue={['identity']}>
+        <Accordion type="single" defaultValue="identity">
 
         {/* Identity Section */}
         <AccordionItem value="identity">

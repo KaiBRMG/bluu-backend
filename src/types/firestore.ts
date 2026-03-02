@@ -1,4 +1,6 @@
-import { Timestamp } from 'firebase/firestore';
+// Timestamp used in shared types — compatible with both firebase/firestore and firebase-admin/firestore
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type Timestamp = any;
 
 // ─── Group hierarchy ────────────────────────────────────────────────
 

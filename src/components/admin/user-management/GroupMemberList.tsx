@@ -116,7 +116,7 @@ export default function GroupMemberList({
               className="flex items-center gap-3 px-3 py-2 text-sm"
               style={{ borderBottom: '1px solid var(--border-subtle)' }}
             >
-              <Avatar size="sm" style={{ background: getAvatarColor(member.displayName || 'User') }}>
+              <Avatar className="size-7" style={{ background: getAvatarColor(member.displayName || 'User') }}>
                 {member.photoURL && <AvatarImage src={member.photoURL} alt={member.displayName} />}
                 <AvatarFallback style={{ background: getAvatarColor(member.displayName || 'User'), color: '#fff' }}>
                   {getInitials(member.displayName)}

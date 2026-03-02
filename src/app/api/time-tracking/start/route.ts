@@ -37,7 +37,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     });
 
     if ('existing' in result) {
-      const d = result.existing;
+      const d = result.existing!;
       return NextResponse.json({
         sessionId: d.sessionId,
         alreadyActive: true,

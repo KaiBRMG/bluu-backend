@@ -6,7 +6,7 @@ import { Bell, Trash2, CheckCheck } from 'lucide-react';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useAuth } from '@/components/AuthProvider';
 import { NotificationDocument, NotificationType } from '@/types/firestore';
-import { Timestamp } from 'firebase/firestore';
+import type { Timestamp } from '@/types/firestore';
 
 // ─── Helpers ────────────────────────────────────────────────────────
 

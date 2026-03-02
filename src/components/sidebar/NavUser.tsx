@@ -59,7 +59,7 @@ interface NavUserProps {
 
 function UserAvatarItem({ name, photoURL }: { name: string; photoURL?: string | null }) {
   return (
-    <Avatar size="sm" style={{ background: getAvatarColor(name || "User") }}>
+    <Avatar className="size-7" style={{ background: getAvatarColor(name || "User") }}>
       {photoURL && <AvatarImage src={photoURL} alt={name} />}
       <AvatarFallback style={{ background: getAvatarColor(name || "User"), color: "#fff" }}>
         {getInitials(name)}

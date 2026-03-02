@@ -333,7 +333,7 @@ export default function AdminShifts() {
                   {/* User cell */}
                   <td style={{ padding: '6px 10px', verticalAlign: 'middle', borderRight: '1px solid rgba(255,255,255,0.06)', height: '52px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-                      <Avatar size="sm" style={{ background: getAvatarColor(user.displayName || 'User') }}>
+                      <Avatar className="size-7" style={{ background: getAvatarColor(user.displayName || 'User') }}>
                         {user.photoURL && <AvatarImage src={user.photoURL} alt={user.displayName} />}
                         <AvatarFallback style={{ background: getAvatarColor(user.displayName || 'User'), color: '#fff' }}>
                           {getInitials(user.displayName)}

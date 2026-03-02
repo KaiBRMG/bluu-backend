@@ -206,7 +206,7 @@ export default function TimeTrackingPage() {
 
         {/* Tabbed container */}
         <Tabs defaultValue="today" className="mt-8">
-          <TabsList variant="line">
+          <TabsList>
             <TabsTrigger value="today">Today's Timesheet</TabsTrigger>
             <TabsTrigger value="previous">Previous Timesheets</TabsTrigger>
             <TabsTrigger value="upcoming">Upcoming Shifts</TabsTrigger>

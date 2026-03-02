@@ -129,7 +129,7 @@ export default function AddMembersDropdown({ group, allUsers, onAdd, onClose }: 
                   checked={isSelected}
                   onCheckedChange={() => toggleUser(user.uid)}
                 />
-                <Avatar size="sm" style={{ background: getAvatarColor(user.displayName || 'User') }}>
+                <Avatar className="size-7" style={{ background: getAvatarColor(user.displayName || 'User') }}>
                   {user.photoURL && <AvatarImage src={user.photoURL} alt={user.displayName} />}
                   <AvatarFallback style={{ background: getAvatarColor(user.displayName || 'User'), color: '#fff' }}>
                     {getInitials(user.displayName)}

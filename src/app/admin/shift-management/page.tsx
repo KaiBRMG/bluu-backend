@@ -30,7 +30,7 @@ export default function ShiftManagementPage() {
         >
           <Tabs defaultValue="shifts">
             <div className="px-6 pt-4">
-              <TabsList variant="line">
+              <TabsList>
                 <TabsTrigger value="shifts">Shifts</TabsTrigger>
                 <TabsTrigger value="active-users">Active Users</TabsTrigger>
                 <TabsTrigger value="timesheets">Timesheets</TabsTrigger>

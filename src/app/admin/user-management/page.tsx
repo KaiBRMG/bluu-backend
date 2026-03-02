@@ -55,7 +55,6 @@ export default function UserManagementPage() {
             className="flex gap-6"
           >
             <TabsList
-              variant="line"
               className="w-56 flex-shrink-0 rounded-lg p-2 h-fit"
               style={{
                 background: 'var(--sidebar-background)',
