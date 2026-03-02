@@ -268,7 +268,7 @@ app.whenReady().then(() => {
   });
 });
 
-// Notify renderer before quitting so it can clock out
+// Notify renderer before quitting so it can clock out k
 app.on('before-quit', () => {
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
     mainWindow.webContents.send('app-closing');
