@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useUserShifts } from '@/hooks/useUserShifts';
 import { useUserData } from '@/hooks/useUserData';
+import { Button } from "@/components/ui/button";
 import type { ExpandedShift } from '@/lib/utils/recurrence';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -167,26 +168,30 @@ export default function UserUpcomingShifts() {
     <div>
       {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-        <button
+        <Button
           onClick={() => !isCurrentWeek && setWeekStart(addDays(weekStart, -7))}
           disabled={isCurrentWeek}
-          style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border-subtle)', background: 'transparent', color: isCurrentWeek ? 'var(--foreground-muted)' : 'var(--foreground)', cursor: isCurrentWeek ? 'default' : 'pointer', opacity: isCurrentWeek ? 0.4 : 1 }}
+          variant="outline"
+          size="sm"
         >
           ←
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={() => setWeekStart(addDays(weekStart, 7))}
-          style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border-subtle)', background: 'transparent', color: 'var(--foreground)', cursor: 'pointer' }}
+          variant="outline"
+          size="sm"
         >
           →
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={() => !isCurrentWeek && setWeekStart(currentWeek)}
           disabled={isCurrentWeek}
-          style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border-subtle)', background: 'transparent', color: 'var(--foreground-secondary)', cursor: isCurrentWeek ? 'default' : 'pointer', fontSize: '12px', opacity: isCurrentWeek ? 0.4 : 1 }}
+          variant="outline"
+          size="sm"
+          style={{ color: 'var(--foreground-secondary)', fontSize: '12px' }}
         >
           This Week
-        </button>
+        </Button>
       </div>
 
       {loading && (
@@ -208,7 +213,7 @@ export default function UserUpcomingShifts() {
             textAlign: 'center',
             color: 'var(--foreground-muted)',
             fontSize: '13px',
-            background: 'var(--sidebar-background)',
+            background: 'var(--container-background)',
             borderRadius: '8px',
             border: '1px solid var(--border-subtle)',
           }}

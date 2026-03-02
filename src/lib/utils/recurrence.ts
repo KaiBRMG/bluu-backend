@@ -146,8 +146,10 @@ function* generateCandidateDates(
 ): Generator<string> {
   const endDateStr = rule.endDate
     ? toLocalDateStr(
-        (rule.endDate as unknown as { toMillis?: () => number; seconds?: number })
-          .toMillis?.() ?? ((rule.endDate as unknown as { seconds: number }).seconds * 1000),
+        typeof rule.endDate === 'string'
+          ? new Date(rule.endDate).getTime()
+          : (rule.endDate as unknown as { toMillis?: () => number; seconds?: number })
+              .toMillis?.() ?? ((rule.endDate as unknown as { seconds: number }).seconds * 1000),
         tz,
       )
     : null;

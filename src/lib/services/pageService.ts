@@ -1,5 +1,6 @@
 import { adminDb } from '../firebase-admin';
 import { resolveAccessiblePages } from './permissionResolver';
+import { FieldValue } from 'firebase-admin/firestore';
 import type { PagePermissionDoc, ResolvedAccess } from '@/types/firestore';
 import { PAGES, getPageDef } from '@/lib/definitions';
 
@@ -73,6 +74,7 @@ export async function updatePagePermissions(
       const accessible = resolveAccessiblePages(allPermDocs, userDoc.id, userGroups);
       directBatch.update(adminDb.collection('users').doc(userDoc.id), {
         permittedPageIds: accessible.map(p => p.pageId),
+        permissionsVersion: FieldValue.increment(1),
       });
     }
     await directBatch.commit();
@@ -89,7 +91,10 @@ export async function recomputeUserPermissions(uid: string, userGroups: string[]
   const accessible = resolveAccessiblePages(allPermDocs, uid, userGroups);
   const permittedPageIds = accessible.map(p => p.pageId);
 
-  await adminDb.collection('users').doc(uid).update({ permittedPageIds });
+  await adminDb.collection('users').doc(uid).update({
+    permittedPageIds,
+    permissionsVersion: FieldValue.increment(1),
+  });
 }
 
 /**
@@ -120,6 +125,7 @@ export async function recomputePermissionsForGroup(groupId: string): Promise<voi
     const accessible = resolveAccessiblePages(allPermDocs, userDoc.id, userGroups);
     batch.update(adminDb.collection('users').doc(userDoc.id), {
       permittedPageIds: accessible.map(p => p.pageId),
+      permissionsVersion: FieldValue.increment(1),
     });
   }
 

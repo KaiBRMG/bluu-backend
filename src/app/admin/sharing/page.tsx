@@ -50,8 +50,8 @@ export default function SharingPage() {
     <AppLayout>
       <div className="max-w-6xl">
         <div className="mb-6">
-          <h1 className="text-xl font-semibold mb-1">Sharing & Permissions</h1>
-          <p className="text-sm" style={{ color: "var(--foreground-muted)" }}>
+          <h1 className="text-2xl font-bold tracking-tight mb-2">Sharing & Permissions</h1>
+          <p className="text-sm text-muted-foreground">
             Manage which groups and users can access each page.
           </p>
         </div>

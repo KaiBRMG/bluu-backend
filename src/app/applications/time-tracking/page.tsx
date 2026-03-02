@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from 'react';
 import AppLayout from "@/components/AppLayout";
 import { useTimeTracking } from "@/hooks/useTimeTracking";
 import UserTimesheet from "@/components/timesheet/UserTimesheet";
@@ -10,6 +9,8 @@ import UserUpcomingShifts from "@/components/shifts/UserUpcomingShifts";
 import { useUserData } from "@/hooks/useUserData";
 import { useDayTotal } from "@/hooks/useDayTotal";
 import { Clock4, ClockCheck, ClockAlert, Coffee, CirclePause } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 const STATE_CONFIG: Record<TimerDisplayState, { color: string; bgAlpha: string; label: string; Icon: React.ElementType }> = {
   working:       { color: '#86C27E', bgAlpha: 'rgba(134,194,126,0.1)', label: 'Working',     Icon: ClockCheck  },
@@ -19,15 +20,6 @@ const STATE_CONFIG: Record<TimerDisplayState, { color: string; bgAlpha: string; 
   'clocked-out': { color: '#DF626E', bgAlpha: 'rgba(223,98,110,0.1)', label: 'Clocked Out',  Icon: Clock4      },
 };
 
-const BREAK_DURATION_SECONDS = 2700;
-
-const TAB_LABELS = {
-  today: "Today's Timesheet",
-  previous: 'Previous Timesheets',
-  upcoming: 'Upcoming Shifts',
-} as const;
-
-type Tab = keyof typeof TAB_LABELS;
 
 function formatTime(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
@@ -41,6 +33,7 @@ export default function TimeTrackingPage() {
     displayState,
     elapsedSeconds,
     breakUsedSeconds,
+    breakAllowanceSeconds,
     startTracking,
     stopTracking,
     pauseTracking,
@@ -49,8 +42,6 @@ export default function TimeTrackingPage() {
     endBreak,
     isLoading,
   } = useTimeTracking();
-
-  const [activeTab, setActiveTab] = useState<Tab>('today');
 
   const { userData } = useUserData();
   const timezone = userData?.timezone || 'UTC';
@@ -61,15 +52,15 @@ export default function TimeTrackingPage() {
 
   const timerDisplay = formatTime(elapsedSeconds);
 
-  const breakAllowanceRemaining = Math.max(0, BREAK_DURATION_SECONDS - breakUsedSeconds);
+  const breakAllowanceRemaining = Math.max(0, breakAllowanceSeconds - breakUsedSeconds);
 
   return (
     <AppLayout>
       <div className="max-w-5xl">
-        <h1 className="text-5xl font-bold mb-2 tracking-tight">
+        <h1 className="text-2xl font-bold tracking-tight mb-2">
           Time Tracking
         </h1>
-        <p className="text-lg" style={{ color: 'var(--foreground-secondary)' }}>
+        <p className="text-sm text-muted-foreground">
           Track your time and attendance
         </p>
 
@@ -116,87 +107,66 @@ export default function TimeTrackingPage() {
               {/* Action buttons */}
               <div className="flex gap-4 items-center">
                 {displayState === 'clocked-out' && (
-                  <button
+                  <Button
                     onClick={startTracking}
                     disabled={isLoading}
-                    className="btn-primary"
-                    style={{ opacity: isLoading ? 0.6 : 1 }}
                   >
                     {isLoading ? 'Starting...' : 'Clock In'}
-                  </button>
+                  </Button>
                 )}
 
                 {displayState === 'working' && (
                   <>
-                    <button
+                    <Button
                       onClick={stopTracking}
                       disabled={isLoading}
-                      className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                      style={{
-                        background: '#ef4444',
-                        color: '#fff',
-                        opacity: isLoading ? 0.6 : 1,
-                      }}
+                      variant="destructive"
                     >
                       {isLoading ? 'Stopping...' : 'Clock Out'}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       onClick={pauseTracking}
                       disabled={isLoading}
-                      className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                      style={{
-                        background: '#8B5CF6',
-                        color: '#fff',
-                        opacity: isLoading ? 0.6 : 1,
-                      }}
+                      style={{ background: '#8B5CF6', color: '#fff' }}
                     >
                       {isLoading ? 'Pausing...' : 'Pause'}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       onClick={startBreak}
                       disabled={isLoading}
-                      className="btn-secondary flex items-center gap-2"
-                      style={{ opacity: isLoading ? 0.6 : 1 }}
+                      variant="outline"
                     >
                       <Coffee style={{ width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
                       {isLoading ? 'Starting...' : 'Break'}
-                    </button>
+                    </Button>
                   </>
                 )}
 
                 {displayState === 'on-break' && (
-                  <button
+                  <Button
                     onClick={endBreak}
                     disabled={isLoading}
-                    className="btn-secondary"
-                    style={{ opacity: isLoading ? 0.6 : 1 }}
+                    variant="outline"
                   >
                     {isLoading ? 'Ending...' : 'End Break'}
-                  </button>
+                  </Button>
                 )}
 
                 {displayState === 'paused' && (
                   <>
-                    <button
+                    <Button
                       onClick={resumeFromPause}
                       disabled={isLoading}
-                      className="btn-primary"
-                      style={{ opacity: isLoading ? 0.6 : 1 }}
                     >
                       {isLoading ? 'Resuming...' : 'Resume'}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       onClick={stopTracking}
                       disabled={isLoading}
-                      className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                      style={{
-                        background: '#ef4444',
-                        color: '#fff',
-                        opacity: isLoading ? 0.6 : 1,
-                      }}
+                      variant="destructive"
                     >
                       {isLoading ? 'Stopping...' : 'Clock Out'}
-                    </button>
+                    </Button>
                   </>
                 )}
 
@@ -235,33 +205,16 @@ export default function TimeTrackingPage() {
         </div>
 
         {/* Tabbed container */}
-        <div className="mt-8">
-          <div
-            className="flex border-b"
-            style={{ borderColor: 'var(--border-subtle)' }}
-          >
-            {(Object.keys(TAB_LABELS) as Tab[]).map((key) => (
-              <button
-                key={key}
-                onClick={() => setActiveTab(key)}
-                className="px-4 py-2.5 text-sm font-medium transition-colors"
-                style={{
-                  color: activeTab === key ? 'var(--foreground)' : 'var(--foreground-muted)',
-                  borderBottom: activeTab === key ? '2px solid var(--foreground)' : '2px solid transparent',
-                  marginBottom: '-1px',
-                }}
-              >
-                {TAB_LABELS[key]}
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-4">
-            {activeTab === 'today' && <TodayTimeline />}
-            {activeTab === 'previous' && <UserTimesheet />}
-            {activeTab === 'upcoming' && <UserUpcomingShifts />}
-          </div>
-        </div>
+        <Tabs defaultValue="today" className="mt-8">
+          <TabsList variant="line">
+            <TabsTrigger value="today">Today's Timesheet</TabsTrigger>
+            <TabsTrigger value="previous">Previous Timesheets</TabsTrigger>
+            <TabsTrigger value="upcoming">Upcoming Shifts</TabsTrigger>
+          </TabsList>
+          <TabsContent value="today" className="mt-4"><TodayTimeline /></TabsContent>
+          <TabsContent value="previous" className="mt-4"><UserTimesheet /></TabsContent>
+          <TabsContent value="upcoming" className="mt-4"><UserUpcomingShifts /></TabsContent>
+        </Tabs>
       </div>
     </AppLayout>
   );

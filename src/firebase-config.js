@@ -4,14 +4,16 @@ import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
-// Your web app's Firebase configuration
+// Firebase client configuration — values sourced from NEXT_PUBLIC_FIREBASE_* env vars.
+// These are public by Firebase design; keeping them in env vars allows key rotation
+// without a code change.
 const firebaseConfig = {
-  apiKey: "AIzaSyDa6fezdvhViWBSoh5LQuwzYwyDh1lY314",
-  authDomain: "bluu-backend.firebaseapp.com",
-  projectId: "bluu-backend",
-  storageBucket: "bluu-backend.firebasestorage.app",
-  messagingSenderId: "211818603920",
-  appId: "1:211818603920:web:531afeb508d1debcb3ff15"
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
 // Initialize Firebase

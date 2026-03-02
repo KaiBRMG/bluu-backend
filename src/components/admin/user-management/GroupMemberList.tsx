@@ -2,7 +2,32 @@
 
 import { useState } from 'react';
 import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
-import UserAvatar from '@/components/UserAvatar';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Button } from "@/components/ui/button";
+
+const AVATAR_COLORS = [
+  '#E57373', '#F06292', '#BA68C8', '#7986CB', '#64B5F6',
+  '#4DD0E1', '#4DB6AC', '#81C784', '#FFB74D', '#A1887F',
+];
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function getAvatarColor(name: string): string {
+  return AVATAR_COLORS[hashString(name) % AVATAR_COLORS.length];
+}
+
+function getInitials(name: string): string {
+  if (!name?.trim()) return '?';
+  return name.split(' ').map((p) => p[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
+}
 import AddMembersDropdown from './AddMembersDropdown';
 
 interface GroupMemberListProps {
@@ -58,12 +83,12 @@ export default function GroupMemberList({
           </span>
         </div>
         <div className="relative">
-          <button
+          <Button
             onClick={() => setShowAddDropdown(!showAddDropdown)}
-            className="btn-primary text-sm"
+            size="sm"
           >
             Add Members
-          </button>
+          </Button>
           {showAddDropdown && (
             <AddMembersDropdown
               group={group}
@@ -91,11 +116,12 @@ export default function GroupMemberList({
               className="flex items-center gap-3 px-3 py-2 text-sm"
               style={{ borderBottom: '1px solid var(--border-subtle)' }}
             >
-              <UserAvatar
-                photoURL={member.photoURL}
-                name={member.displayName}
-                size="sm"
-              />
+              <Avatar size="sm" style={{ background: getAvatarColor(member.displayName || 'User') }}>
+                {member.photoURL && <AvatarImage src={member.photoURL} alt={member.displayName} />}
+                <AvatarFallback style={{ background: getAvatarColor(member.displayName || 'User'), color: '#fff' }}>
+                  {getInitials(member.displayName)}
+                </AvatarFallback>
+              </Avatar>
               <div className="flex-1 min-w-0">
                 <span className="block truncate" style={{ color: 'var(--foreground)' }}>
                   {member.displayName}
@@ -106,22 +132,14 @@ export default function GroupMemberList({
                   </span>
                 )}
               </div>
-              <button
+              <Button
                 onClick={() => handleRemove(member.uid)}
                 disabled={removingUid === member.uid}
-                className="p-1 rounded transition-colors flex-shrink-0"
+                variant="ghost"
+                size="icon"
+                className="flex-shrink-0 size-7"
                 style={{
                   color: removingUid === member.uid ? 'var(--foreground-muted)' : 'var(--foreground-secondary)',
-                }}
-                onMouseEnter={(e) => {
-                  if (removingUid !== member.uid) {
-                    e.currentTarget.style.background = 'var(--hover-background)';
-                    e.currentTarget.style.color = '#ef4444';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent';
-                  e.currentTarget.style.color = 'var(--foreground-secondary)';
                 }}
                 title="Remove from group"
               >
@@ -129,7 +147,7 @@ export default function GroupMemberList({
                   <line x1="18" y1="6" x2="6" y2="18" />
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
-              </button>
+              </Button>
             </div>
           ))
         )}

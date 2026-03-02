@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import type { PagePermissionDoc } from '@/types/firestore';
 import type { PageDef, TeamspaceDef } from '@/lib/definitions';
+import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
 
 interface AdminUser {
   uid: string;
@@ -30,20 +31,37 @@ interface AdminDataState {
   error: string | null;
 }
 
+interface AdminPagesCacheData {
+  pages: PageDef[];
+  teamspaces: TeamspaceDef[];
+  pagePermissions: PagePermissionDoc[];
+  groups: AdminGroup[];
+  users: AdminUser[];
+}
+
+const CACHE_KEY = 'bluu_admin_pages_v1';
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 export function useAdminData() {
   const { user } = useAuth();
-  const [state, setState] = useState<AdminDataState>({
-    pages: [],
-    teamspaces: [],
-    pagePermissions: [],
-    groups: [],
-    users: [],
-    loading: true,
-    error: null,
+  const [state, setState] = useState<AdminDataState>(() => {
+    const cached = getCache<AdminPagesCacheData>(CACHE_KEY, CACHE_TTL_MS);
+    if (cached) {
+      return { ...cached, loading: false, error: null };
+    }
+    return { pages: [], teamspaces: [], pagePermissions: [], groups: [], users: [], loading: true, error: null };
   });
 
-  const fetchAdminData = useCallback(async () => {
+  const fetchAdminData = useCallback(async (forceRefresh = false) => {
     if (!user) return;
+
+    if (!forceRefresh) {
+      const cached = getCache<AdminPagesCacheData>(CACHE_KEY, CACHE_TTL_MS);
+      if (cached) {
+        setState({ ...cached, loading: false, error: null });
+        return;
+      }
+    }
 
     try {
       setState(prev => ({ ...prev, loading: true, error: null }));
@@ -59,15 +77,15 @@ export function useAdminData() {
       }
 
       const data = await res.json();
-      setState({
+      const cacheData: AdminPagesCacheData = {
         pages: data.pages || [],
         teamspaces: data.teamspaces || [],
         pagePermissions: data.pagePermissions || [],
         groups: data.groups || [],
         users: data.users || [],
-        loading: false,
-        error: null,
-      });
+      };
+      setCache<AdminPagesCacheData>(CACHE_KEY, cacheData);
+      setState({ ...cacheData, loading: false, error: null });
     } catch (err) {
       console.error('Error fetching admin data:', err);
       setState(prev => ({
@@ -106,15 +124,15 @@ export function useAdminData() {
         throw new Error(data.error || 'Failed to update permissions');
       }
 
-      // Refresh local state after a successful permission update
-      await fetchAdminData();
+      invalidateCache(CACHE_KEY);
+      await fetchAdminData(true);
     },
     [user, fetchAdminData]
   );
 
   return {
     ...state,
-    refetch: fetchAdminData,
+    refetch: () => fetchAdminData(true),
     updatePermission,
   };
 }

@@ -27,11 +27,33 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       'notificationPreferences',
     ];
 
+    // Maximum byte lengths for free-text string fields
+    const STRING_MAX_LENGTHS: Record<string, number> = {
+      displayName: 100,
+      gender: 50,
+      paymentMethod: 100,
+      paymentInfo: 500,
+      userComments: 2000,
+      timezone: 100,
+      timezoneOffset: 10,
+      photoURL: 2048,
+    };
+
     // Filter and sanitize updates
     const sanitizedUpdates: Record<string, unknown> = {};
 
     for (const field of allowedFields) {
       if (updates[field] !== undefined) {
+        // Enforce max length on top-level string fields
+        if (typeof updates[field] === 'string' && STRING_MAX_LENGTHS[field] !== undefined) {
+          if (updates[field].length > STRING_MAX_LENGTHS[field]) {
+            return NextResponse.json(
+              { error: `${field} exceeds maximum length of ${STRING_MAX_LENGTHS[field]}` },
+              { status: 400 }
+            );
+          }
+        }
+
         // Handle DOB timestamp conversion
         if (field === 'DOB' && updates[field]) {
           sanitizedUpdates[field] = Timestamp.fromDate(new Date(updates[field]));
@@ -53,11 +75,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
-    console.error('Error updating user:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json(
-      { error: errorMessage || 'Failed to update user' },
-      { status: 500 }
-    );
+    console.error('[user/update] error:', error);
+    return NextResponse.json({ error: 'Failed to update user' }, { status: 500 });
   }
 });

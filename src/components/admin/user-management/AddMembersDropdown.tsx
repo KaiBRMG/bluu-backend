@@ -2,7 +2,34 @@
 
 import { useState, useRef, useEffect } from 'react';
 import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
-import UserAvatar from '@/components/UserAvatar';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from '@/components/ui/input';
+
+const AVATAR_COLORS = [
+  '#E57373', '#F06292', '#BA68C8', '#7986CB', '#64B5F6',
+  '#4DD0E1', '#4DB6AC', '#81C784', '#FFB74D', '#A1887F',
+];
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function getAvatarColor(name: string): string {
+  return AVATAR_COLORS[hashString(name) % AVATAR_COLORS.length];
+}
+
+function getInitials(name: string): string {
+  if (!name?.trim()) return '?';
+  return name.split(' ').map((p) => p[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
+}
 
 interface AddMembersDropdownProps {
   group: AdminGroup;
@@ -64,7 +91,7 @@ export default function AddMembersDropdown({ group, allUsers, onAdd, onClose }: 
     >
       {/* Search */}
       <div className="p-2" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-        <input
+        <Input
           type="text"
           className="form-input w-full text-sm"
           placeholder="Search by name or email..."
@@ -98,18 +125,16 @@ export default function AddMembersDropdown({ group, allUsers, onAdd, onClose }: 
                   if (!isSelected) e.currentTarget.style.background = 'transparent';
                 }}
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={isSelected}
-                  readOnly
-                  className="w-4 h-4"
-                  style={{ accentColor: '#3b82f6' }}
+                  onCheckedChange={() => toggleUser(user.uid)}
                 />
-                <UserAvatar
-                  photoURL={user.photoURL}
-                  name={user.displayName}
-                  size="sm"
-                />
+                <Avatar size="sm" style={{ background: getAvatarColor(user.displayName || 'User') }}>
+                  {user.photoURL && <AvatarImage src={user.photoURL} alt={user.displayName} />}
+                  <AvatarFallback style={{ background: getAvatarColor(user.displayName || 'User'), color: '#fff' }}>
+                    {getInitials(user.displayName)}
+                  </AvatarFallback>
+                </Avatar>
                 <div className="flex-1 min-w-0">
                   <span className="block truncate" style={{ color: 'var(--foreground)' }}>
                     {user.displayName}
@@ -127,13 +152,14 @@ export default function AddMembersDropdown({ group, allUsers, onAdd, onClose }: 
       {/* Confirm button */}
       {nonMembers.length > 0 && (
         <div className="p-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
-          <button
+          <Button
             onClick={handleConfirm}
-            className="btn-primary w-full text-sm"
+            className="w-full"
+            size="sm"
             disabled={selectedUids.length === 0}
           >
             Add Selected ({selectedUids.length})
-          </button>
+          </Button>
         </div>
       )}
     </div>

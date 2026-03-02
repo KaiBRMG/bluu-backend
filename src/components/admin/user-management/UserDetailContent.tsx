@@ -3,8 +3,40 @@
 import { useState, useEffect, useRef } from 'react';
 import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
 import { validateEmail, validatePhoneNumber, validateRequired } from '@/lib/validation';
-import UserAvatar from '@/components/UserAvatar';
-import AccordionSection from './AccordionSection';
+import { Button } from "@/components/ui/button";
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Checkbox } from "@/components/ui/checkbox";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
+
+const AVATAR_COLORS = [
+  '#E57373', '#F06292', '#BA68C8', '#7986CB', '#64B5F6',
+  '#4DD0E1', '#4DB6AC', '#81C784', '#FFB74D', '#A1887F',
+];
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function getAvatarColor(name: string): string {
+  return AVATAR_COLORS[hashString(name) % AVATAR_COLORS.length];
+}
+
+function getInitials(name: string): string {
+  if (!name?.trim()) return '?';
+  return name.split(' ').map((p) => p[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
+}
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
+import { Input } from '@/components/ui/input';
+import { ChevronDownIcon } from 'lucide-react';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 interface UserDetailContentProps {
   user: AdminFullUser;
@@ -82,6 +114,7 @@ export default function UserDetailContent({
   onRefetch,
 }: UserDetailContentProps) {
   const [formData, setFormData] = useState<FormData>(() => buildFormData(user));
+  const [dobOpen, setDobOpen] = useState(false);
   const originalDataRef = useRef<FormData>(buildFormData(user));
   const [hasChanges, setHasChanges] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -223,11 +256,12 @@ export default function UserDetailContent({
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {/* User avatar & info header */}
         <div className="flex items-center gap-4 mb-6">
-          <UserAvatar
-            photoURL={user.photoURL}
-            name={user.displayName || fullName}
-            size="lg"
-          />
+          <Avatar size="lg" style={{ background: getAvatarColor((user.displayName || fullName) || 'User') }}>
+            {user.photoURL && <AvatarImage src={user.photoURL} alt={user.displayName || fullName} />}
+            <AvatarFallback style={{ background: getAvatarColor((user.displayName || fullName) || 'User'), color: '#fff' }}>
+              {getInitials(user.displayName || fullName)}
+            </AvatarFallback>
+          </Avatar>
           <div>
             <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
               {fullName}
@@ -238,13 +272,17 @@ export default function UserDetailContent({
           </div>
         </div>
 
+        <Accordion type="single" defaultValue={['identity']}>
+
         {/* Identity Section */}
-        <AccordionSection title="Identity" defaultOpen>
+        <AccordionItem value="identity">
+          <AccordionTrigger>Identity</AccordionTrigger>
+          <AccordionContent>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="form-label block mb-1">First Name</label>
-                <input
+                <Input
                   type="text"
                   className={`form-input w-full ${errors.firstName ? 'error' : ''}`}
                   value={formData.firstName}
@@ -254,7 +292,7 @@ export default function UserDetailContent({
               </div>
               <div>
                 <label className="form-label block mb-1">Last Name</label>
-                <input
+                <Input
                   type="text"
                   className={`form-input w-full ${errors.lastName ? 'error' : ''}`}
                   value={formData.lastName}
@@ -266,7 +304,7 @@ export default function UserDetailContent({
 
             <div>
               <label className="form-label block mb-1">Display Name</label>
-              <input
+              <Input
                 type="text"
                 className="form-input w-full"
                 value={formData.displayName}
@@ -276,43 +314,55 @@ export default function UserDetailContent({
 
             <div>
               <label className="form-label block mb-1">Gender</label>
-              <div className="flex gap-6">
+              <RadioGroup
+                value={formData.gender}
+                onValueChange={(value) => handleChange('gender', value)}
+                className="flex gap-6"
+              >
                 {['Male', 'Female', 'Other'].map((option) => (
-                  <label key={option} className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="gender"
-                      value={option}
-                      checked={formData.gender === option}
-                      onChange={(e) => handleChange('gender', e.target.value)}
-                      className="w-4 h-4"
-                      style={{ accentColor: '#3b82f6' }}
-                    />
-                    <span className="text-sm">{option}</span>
-                  </label>
+                  <div key={option} className="flex items-center gap-2">
+                    <RadioGroupItem value={option} id={`gender-detail-${option}`} />
+                    <Label htmlFor={`gender-detail-${option}`} className="text-sm cursor-pointer">{option}</Label>
+                  </div>
                 ))}
-              </div>
+              </RadioGroup>
             </div>
 
             <div>
               <label className="form-label block mb-1">Date of Birth</label>
-              <input
-                type="date"
-                className="form-input"
-                value={formData.DOB}
-                onChange={(e) => handleChange('DOB', e.target.value)}
-              />
+              <Popover open={dobOpen} onOpenChange={setDobOpen}>
+                <PopoverTrigger asChild>
+                  <button type="button" className="form-input flex items-center justify-between gap-2" style={{ cursor: 'pointer' }}>
+                    {formData.DOB || 'Select date'}
+                    <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={formData.DOB ? new Date(formData.DOB + 'T00:00:00') : undefined}
+                    captionLayout="dropdown"
+                    onSelect={(date: Date | undefined) => {
+                      handleChange('DOB', date ? date.toLocaleDateString('en-CA') : '');
+                      setDobOpen(false);
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
 
           </div>
-        </AccordionSection>
+          </AccordionContent>
+        </AccordionItem>
 
         {/* Work Section */}
-        <AccordionSection title="Work">
+        <AccordionItem value="work">
+          <AccordionTrigger>Work</AccordionTrigger>
+          <AccordionContent>
           <div className="space-y-4">
             <div>
               <label className="form-label block mb-1">Job Title</label>
-              <input
+              <Input
                 type="text"
                 className="form-input w-full"
                 value={formData.jobTitle}
@@ -338,7 +388,7 @@ export default function UserDetailContent({
 
             <div>
               <label className="form-label block mb-1">Work Email</label>
-              <input
+              <Input
                 type="email"
                 className="form-input w-full"
                 value={user.workEmail}
@@ -352,12 +402,9 @@ export default function UserDetailContent({
               <div className="space-y-2">
                 {groups.map((group) => (
                   <label key={group.id} className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={formData.groups.includes(group.id)}
-                      onChange={() => handleGroupToggle(group.id)}
-                      className="w-4 h-4"
-                      style={{ accentColor: '#3b82f6' }}
+                      onCheckedChange={() => handleGroupToggle(group.id)}
                     />
                     <span className="text-sm">{group.name}</span>
                   </label>
@@ -367,12 +414,9 @@ export default function UserDetailContent({
 
             <div>
               <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={formData.includeIdleTime}
-                  onChange={(e) => handleChange('includeIdleTime', e.target.checked)}
-                  className="w-4 h-4"
-                  style={{ accentColor: '#3b82f6' }}
+                  onCheckedChange={(checked) => handleChange('includeIdleTime', checked === true)}
                 />
                 <span className="text-sm">Include Idle Time in Totals</span>
               </label>
@@ -380,12 +424,9 @@ export default function UserDetailContent({
 
             <div>
               <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={formData.enableScreenshots}
-                  onChange={(e) => handleChange('enableScreenshots', e.target.checked)}
-                  className="w-4 h-4"
-                  style={{ accentColor: '#3b82f6' }}
+                  onCheckedChange={(checked) => handleChange('enableScreenshots', checked === true)}
                 />
                 <span className="text-sm">Enable Screenshots</span>
               </label>
@@ -394,7 +435,7 @@ export default function UserDetailContent({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="form-label block mb-1">Created At</label>
-                <input
+                <Input
                   type="text"
                   className="form-input w-full"
                   value={user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { timeZone: user.timezone || undefined, year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A'}
@@ -404,7 +445,7 @@ export default function UserDetailContent({
               </div>
               <div>
                 <label className="form-label block mb-1">Last Login</label>
-                <input
+                <Input
                   type="text"
                   className="form-input w-full"
                   value={user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleDateString('en-US', { timeZone: user.timezone || undefined, year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A'}
@@ -414,12 +455,15 @@ export default function UserDetailContent({
               </div>
             </div>
           </div>
-        </AccordionSection>
+          </AccordionContent>
+        </AccordionItem>
 
         {/* Address Section */}
-        <AccordionSection title="Address">
+        <AccordionItem value="address">
+          <AccordionTrigger>Address</AccordionTrigger>
+          <AccordionContent>
           <div className="space-y-3">
-            <input
+            <Input
               type="text"
               className="form-input w-full"
               value={formData.street}
@@ -427,14 +471,14 @@ export default function UserDetailContent({
               placeholder="Street address"
             />
             <div className="grid grid-cols-2 gap-3">
-              <input
+              <Input
                 type="text"
                 className="form-input"
                 value={formData.city}
                 onChange={(e) => handleChange('city', e.target.value)}
                 placeholder="City"
               />
-              <input
+              <Input
                 type="text"
                 className="form-input"
                 value={formData.state}
@@ -443,14 +487,14 @@ export default function UserDetailContent({
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <input
+              <Input
                 type="text"
                 className="form-input"
                 value={formData.zipCode}
                 onChange={(e) => handleChange('zipCode', e.target.value)}
                 placeholder="Zip / Postal code"
               />
-              <input
+              <Input
                 type="text"
                 className="form-input"
                 value={formData.country}
@@ -459,15 +503,18 @@ export default function UserDetailContent({
               />
             </div>
           </div>
-        </AccordionSection>
+          </AccordionContent>
+        </AccordionItem>
 
         {/* Contact Section */}
-        <AccordionSection title="Contact">
+        <AccordionItem value="contact">
+          <AccordionTrigger>Contact</AccordionTrigger>
+          <AccordionContent>
           <div className="space-y-4">
             <div>
               <label className="form-label block mb-1">Phone Number</label>
               <div className="flex gap-2 items-start">
-                <input
+                <Input
                   type="text"
                   className="form-input flex-shrink-0 text-center"
                   style={{ width: '72px' }}
@@ -475,7 +522,7 @@ export default function UserDetailContent({
                   onChange={(e) => handleChange('countryCode', e.target.value)}
                   placeholder="+1"
                 />
-                <input
+                <Input
                   type="tel"
                   className={`form-input flex-1 min-w-0 ${errors.phoneNumber ? 'error' : ''}`}
                   value={formData.phoneNumber}
@@ -488,7 +535,7 @@ export default function UserDetailContent({
 
             <div>
               <label className="form-label block mb-1">Personal Email</label>
-              <input
+              <Input
                 type="email"
                 className={`form-input w-full ${errors.personalEmail ? 'error' : ''}`}
                 value={formData.personalEmail}
@@ -500,7 +547,7 @@ export default function UserDetailContent({
 
             <div>
               <label className="form-label block mb-1">Telegram Handle</label>
-              <input
+              <Input
                 type="text"
                 className="form-input w-full"
                 value={formData.telegramHandle}
@@ -509,19 +556,22 @@ export default function UserDetailContent({
               />
             </div>
           </div>
-        </AccordionSection>
+          </AccordionContent>
+        </AccordionItem>
 
         {/* Emergency Contact Section */}
-        <AccordionSection title="Emergency Contact">
+        <AccordionItem value="emergency-contact">
+          <AccordionTrigger>Emergency Contact</AccordionTrigger>
+          <AccordionContent>
           <div className="space-y-3">
-            <input
+            <Input
               type="text"
               className="form-input w-full"
               value={formData.emergencyContactName}
               onChange={(e) => handleChange('emergencyContactName', e.target.value)}
               placeholder="Emergency contact name"
             />
-            <input
+            <Input
               type="tel"
               className={`form-input w-full ${errors.emergencyContactNumber ? 'error' : ''}`}
               value={formData.emergencyContactNumber}
@@ -529,7 +579,7 @@ export default function UserDetailContent({
               placeholder="Emergency contact number"
             />
             {errors.emergencyContactNumber && <p className="form-error">{errors.emergencyContactNumber}</p>}
-            <input
+            <Input
               type="email"
               className={`form-input w-full ${errors.emergencyContactEmail ? 'error' : ''}`}
               value={formData.emergencyContactEmail}
@@ -538,14 +588,17 @@ export default function UserDetailContent({
             />
             {errors.emergencyContactEmail && <p className="form-error">{errors.emergencyContactEmail}</p>}
           </div>
-        </AccordionSection>
+          </AccordionContent>
+        </AccordionItem>
 
         {/* Payment & Notes Section */}
-        <AccordionSection title="Payment & Notes">
+        <AccordionItem value="payment-notes">
+          <AccordionTrigger>Payment &amp; Notes</AccordionTrigger>
+          <AccordionContent>
           <div className="space-y-4">
             <div>
               <label className="form-label block mb-1">Payment Method</label>
-              <input
+              <Input
                 type="text"
                 className="form-input w-full"
                 value={formData.paymentMethod}
@@ -556,7 +609,7 @@ export default function UserDetailContent({
 
             <div>
               <label className="form-label block mb-1">Payment Info</label>
-              <input
+              <Input
                 type="text"
                 className="form-input w-full"
                 value={formData.paymentInfo}
@@ -575,7 +628,10 @@ export default function UserDetailContent({
               />
             </div>
           </div>
-        </AccordionSection>
+          </AccordionContent>
+        </AccordionItem>
+
+        </Accordion>
       </div>
 
       {/* Footer with Save/Cancel */}
@@ -595,23 +651,22 @@ export default function UserDetailContent({
         </div>
         <div className="flex gap-3">
           {hasChanges && (
-            <button
+            <Button
               type="button"
               onClick={handleCancel}
-              className="btn-secondary"
+              variant="outline"
               disabled={isSubmitting}
             >
               Cancel
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             type="button"
             onClick={handleSave}
-            className="btn-primary"
             disabled={!hasChanges || isSubmitting}
           >
             {isSubmitting ? 'Saving...' : 'Save Changes'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

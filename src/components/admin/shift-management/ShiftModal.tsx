@@ -3,6 +3,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { ExpandedShift } from '@/lib/utils/recurrence';
 import type { ShiftUser, CreateShiftPayload, UpdateShiftPayload } from '@/hooks/useShifts';
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
+import { ChevronDownIcon } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -118,6 +125,11 @@ export default function ShiftModal({
     shift?.recurrence?.endDate ? new Date(shift.recurrence.endDate as unknown as string).toISOString().slice(0, 10) : '',
   );
   const [count,         setCount]         = useState(shift?.recurrence?.count ?? 10);
+
+  // ── Date picker open states ──────────────────────────────────────────
+  const [startDateOpen,  setStartDateOpen]  = useState(false);
+  const [endDateOpen,    setEndDateOpen]    = useState(false);
+  const [recurEndOpen,   setRecurEndOpen]   = useState(false);
 
   // ── Save dialogue (for recurring edits) ─────────────────────────────
   const [showSaveDialogue,   setShowSaveDialogue]   = useState(false);
@@ -363,20 +375,33 @@ export default function ShiftModal({
         <div style={{ ...sectionStyle, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
           <div>
             <label style={labelStyle}>Start Date</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={e => {
-                setStartDate(e.target.value);
-                // Keep end date in sync if it was equal to old start date
-                if (endDate === startDate) setEndDate(e.target.value);
-              }}
-              style={inputStyle}
-            />
+            <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
+              <PopoverTrigger asChild>
+                <button type="button" style={{ ...inputStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+                  {startDate || 'Select date'}
+                  <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={startDate ? new Date(startDate + 'T00:00:00') : undefined}
+                  captionLayout="dropdown"
+                  onSelect={(date: Date | undefined) => {
+                    if (date) {
+                      const val = date.toLocaleDateString('en-CA');
+                      setStartDate(val);
+                      if (endDate === startDate) setEndDate(val);
+                    }
+                    setStartDateOpen(false);
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
           </div>
           <div>
             <label style={labelStyle}>Start Time</label>
-            <input
+            <Input
               type="time"
               value={startTime}
               onChange={e => setStartTime(e.target.value)}
@@ -389,16 +414,29 @@ export default function ShiftModal({
         <div style={{ ...sectionStyle, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
           <div>
             <label style={labelStyle}>End Date</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={e => setEndDate(e.target.value)}
-              style={inputStyle}
-            />
+            <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
+              <PopoverTrigger asChild>
+                <button type="button" style={{ ...inputStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+                  {endDate || 'Select date'}
+                  <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={endDate ? new Date(endDate + 'T00:00:00') : undefined}
+                  captionLayout="dropdown"
+                  onSelect={(date: Date | undefined) => {
+                    if (date) setEndDate(date.toLocaleDateString('en-CA'));
+                    setEndDateOpen(false);
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
           </div>
           <div>
             <label style={labelStyle}>End Time</label>
-            <input
+            <Input
               type="time"
               value={endTime}
               onChange={e => setEndTime(e.target.value)}
@@ -415,12 +453,10 @@ export default function ShiftModal({
         {/* Recurrence toggle */}
         {!isEdit && (
           <div style={{ ...sectionStyle, display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <input
-              type="checkbox"
+            <Checkbox
               id="recurring-toggle"
               checked={isRecurring}
-              onChange={e => setIsRecurring(e.target.checked)}
-              style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+              onCheckedChange={(checked) => setIsRecurring(checked === true)}
             />
             <label htmlFor="recurring-toggle" style={{ ...labelStyle, marginBottom: 0, cursor: 'pointer' }}>
               Recurring shift
@@ -455,7 +491,7 @@ export default function ShiftModal({
               </div>
               <div>
                 <label style={labelStyle}>Every</label>
-                <input
+                <Input
                   type="number"
                   min={1}
                   max={99}
@@ -504,43 +540,56 @@ export default function ShiftModal({
             {/* End condition */}
             <div>
               <label style={labelStyle}>Ends</label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {(['none', 'date', 'count'] as const).map(cond => (
-                  <label key={cond} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: 'var(--foreground)' }}>
-                    <input
-                      type="radio"
-                      checked={endCondition === cond}
-                      onChange={() => setEndCondition(cond)}
+              <RadioGroup
+                value={endCondition}
+                onValueChange={(value) => setEndCondition(value as typeof endCondition)}
+                style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <RadioGroupItem value="none" id="end-none" />
+                  <Label htmlFor="end-none" style={{ fontSize: '13px', color: 'var(--foreground)', cursor: 'pointer' }}>Never</Label>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <RadioGroupItem value="date" id="end-date" />
+                  <Label htmlFor="end-date" style={{ fontSize: '13px', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    On date
+                    <Popover open={recurEndOpen} onOpenChange={setRecurEndOpen}>
+                      <PopoverTrigger asChild>
+                        <button type="button" style={{ ...inputStyle, width: 'auto', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', cursor: 'pointer' }}>
+                          {recurEndDate || 'Select date'}
+                          <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={recurEndDate ? new Date(recurEndDate + 'T00:00:00') : undefined}
+                          captionLayout="dropdown"
+                          onSelect={(date: Date | undefined) => {
+                            if (date) setRecurEndDate(date.toLocaleDateString('en-CA'));
+                            setRecurEndOpen(false);
+                          }}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </Label>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <RadioGroupItem value="count" id="end-count" />
+                  <Label htmlFor="end-count" style={{ fontSize: '13px', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    After
+                    <Input
+                      type="number"
+                      min={1}
+                      max={999}
+                      value={count}
+                      onChange={e => setCount(Math.max(1, parseInt(e.target.value) || 1))}
+                      style={{ ...inputStyle, width: '70px' }}
                     />
-                    {cond === 'none'  && 'Never'}
-                    {cond === 'date'  && (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        On date
-                        <input
-                          type="date"
-                          value={recurEndDate}
-                          onChange={e => setRecurEndDate(e.target.value)}
-                          style={{ ...inputStyle, width: 'auto', flex: 1 }}
-                        />
-                      </span>
-                    )}
-                    {cond === 'count' && (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        After
-                        <input
-                          type="number"
-                          min={1}
-                          max={999}
-                          value={count}
-                          onChange={e => setCount(Math.max(1, parseInt(e.target.value) || 1))}
-                          style={{ ...inputStyle, width: '70px' }}
-                        />
-                        occurrences
-                      </span>
-                    )}
-                  </label>
-                ))}
-              </div>
+                    occurrences
+                  </Label>
+                </div>
+              </RadioGroup>
             </div>
           </div>
         )}
@@ -618,10 +667,10 @@ export default function ShiftModal({
               </>
             ) : (
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button style={btnDanger} onClick={() => handleDelete('single')} disabled={deleting}>
+                <Button variant="destructive" onClick={() => handleDelete('single')} disabled={deleting}>
                   {deleting ? 'Deleting...' : 'Delete'}
-                </button>
-                <button style={btnSecondary} onClick={() => setShowDeleteDialogue(false)}>Cancel</button>
+                </Button>
+                <Button variant="outline" onClick={() => setShowDeleteDialogue(false)}>Cancel</Button>
               </div>
             )}
           </div>
@@ -631,20 +680,20 @@ export default function ShiftModal({
         {!showSaveDialogue && !showDeleteDialogue && (
           <div style={{ display: 'flex', gap: '8px', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button style={btnPrimary} onClick={handleSaveClick} disabled={saving}>
+              <Button onClick={handleSaveClick} disabled={saving}>
                 {saving ? 'Saving...' : 'Save'}
-              </button>
-              <button style={btnSecondary} onClick={onClose}>Cancel</button>
+              </Button>
+              <Button variant="outline" onClick={onClose}>Cancel</Button>
             </div>
 
             {isEdit && onDelete && (
-              <button
-                style={{ ...btnDanger, opacity: deleting ? 0.6 : 1 }}
+              <Button
+                variant="destructive"
                 onClick={() => setShowDeleteDialogue(true)}
                 disabled={deleting}
               >
                 Delete
-              </button>
+              </Button>
             )}
           </div>
         )}

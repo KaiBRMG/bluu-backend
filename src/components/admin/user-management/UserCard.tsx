@@ -1,7 +1,31 @@
 "use client";
 
-import UserAvatar from '@/components/UserAvatar';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import type { AdminFullUser } from '@/hooks/useAdminUsers';
+
+const AVATAR_COLORS = [
+  '#E57373', '#F06292', '#BA68C8', '#7986CB', '#64B5F6',
+  '#4DD0E1', '#4DB6AC', '#81C784', '#FFB74D', '#A1887F',
+];
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function getAvatarColor(name: string): string {
+  return AVATAR_COLORS[hashString(name) % AVATAR_COLORS.length];
+}
+
+function getInitials(name: string): string {
+  if (!name?.trim()) return '?';
+  return name.split(' ').map((p) => p[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
+}
 
 interface UserCardProps {
   user: AdminFullUser;
@@ -32,7 +56,7 @@ export default function UserCard({ user, onClick }: UserCardProps) {
       onClick={onClick}
       className="rounded-lg p-4 cursor-pointer transition-colors"
       style={{
-        background: 'var(--sidebar-background)',
+        background: 'var(--container-background)',
         border: '1px solid var(--border-subtle)',
       }}
       onMouseEnter={(e) => {
@@ -40,16 +64,17 @@ export default function UserCard({ user, onClick }: UserCardProps) {
         e.currentTarget.style.borderColor = 'var(--foreground-muted)';
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'var(--sidebar-background)';
+        e.currentTarget.style.background = 'var(--container-background)';
         e.currentTarget.style.borderColor = 'var(--border-subtle)';
       }}
     >
       <div className="flex items-start gap-3">
-        <UserAvatar
-          photoURL={user.photoURL}
-          name={user.displayName || fullName}
-          size="md"
-        />
+        <Avatar style={{ background: getAvatarColor((user.displayName || fullName) || 'User') }}>
+          {user.photoURL && <AvatarImage src={user.photoURL} alt={user.displayName || fullName} />}
+          <AvatarFallback style={{ background: getAvatarColor((user.displayName || fullName) || 'User'), color: '#fff' }}>
+            {getInitials(user.displayName || fullName)}
+          </AvatarFallback>
+        </Avatar>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium truncate" style={{ color: 'var(--foreground)' }}>

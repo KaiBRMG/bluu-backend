@@ -39,7 +39,8 @@ export function usePermissions() {
   const { user } = useAuth();
   const { userData } = useUserData();
 
-  // Initialize state from cache immediately — no loading flash
+  // Initialize state from cache immediately — no loading flash.
+  // We still fire a background fetch on mount to validate permissionsVersion.
   const [state, setState] = useState<PermissionsState>(() => {
     const cached = getCachedPermissions();
     if (cached) {
@@ -69,7 +70,8 @@ export function usePermissions() {
     }
 
     try {
-      // Don't set loading if we already have cached data — non-blocking refresh
+      // Always fetch to check permissionsVersion; only show loading spinner when
+      // there's no cached data to display while the request is in-flight.
       const cached = getCachedPermissions();
       if (!cached) {
         setState(prev => ({ ...prev, loading: true, error: null }));
@@ -87,16 +89,32 @@ export function usePermissions() {
       const data = await res.json();
       const newTeamspaces = data.teamspaces || [];
       const newAccessiblePages = data.accessiblePages || [];
+      const newPermissionsVersion: number = data.permissionsVersion ?? 0;
 
-      // Update cache
-      setCachedPermissions({ teamspaces: newTeamspaces, accessiblePages: newAccessiblePages });
+      // Check version before updating: if server version is newer than what we
+      // served from cache at init, the cached state is stale — update immediately.
+      const cachedAfterFetch = getCachedPermissions();
+      const cachedVersion = cachedAfterFetch?.permissionsVersion ?? -1;
+      const isStale = newPermissionsVersion > cachedVersion;
 
-      setState({
+      // Update cache — store version so staleness can be detected on next load
+      setCachedPermissions({
         teamspaces: newTeamspaces,
         accessiblePages: newAccessiblePages,
-        loading: false,
-        error: null,
+        permissionsVersion: newPermissionsVersion,
       });
+
+      // Always update state when versions diverge; otherwise only update if needed
+      if (isStale || !cachedAfterFetch) {
+        setState({
+          teamspaces: newTeamspaces,
+          accessiblePages: newAccessiblePages,
+          loading: false,
+          error: null,
+        });
+      } else {
+        setState(prev => ({ ...prev, loading: false, error: null }));
+      }
     } catch (err) {
       console.error('Error fetching permissions:', err);
       // Only show error if we have no cached data at all

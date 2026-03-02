@@ -7,6 +7,7 @@ import { getTodaySessions } from '@/lib/localBuffer';
 import { parseBuffer } from '@/lib/parseBuffer';
 import type { LocalSessionBuffer, SessionEvent } from '@/types/firestore';
 import { RefreshCcw } from 'lucide-react';
+import { Button } from "@/components/ui/button";
 
 // ─── Segment types ────────────────────────────────────────────────────
 
@@ -228,7 +229,7 @@ export default function TodayTimeline() {
         className="rounded-lg p-6 text-center text-sm"
         style={{
           color: 'var(--foreground-muted)',
-          background: 'var(--sidebar-background)',
+          background: 'var(--container-background)',
           border: '1px solid var(--border-subtle)',
         }}
       >
@@ -254,14 +255,14 @@ export default function TodayTimeline() {
     <div
       className="rounded-lg p-6"
       style={{
-        background: 'var(--sidebar-background)',
+        background: 'var(--container-background)',
         border: '1px solid var(--border-subtle)',
       }}
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-baseline gap-3">
-          <h2 className="text-lg font-semibold" style={{ color: 'var(--foreground)' }}>
+          <h2 className="text-lg font-semibold tracking-tight">
             {todayLabel}
           </h2>
           <span className="text-xs" style={{ color: 'var(--foreground-muted)' }}>
@@ -272,13 +273,14 @@ export default function TodayTimeline() {
           <span className="text-xs" style={{ color: 'var(--foreground-muted)' }}>
             Last updated {formatAgo(now - lastRefreshed)}
           </span>
-          <button
+          <Button
             onClick={loadBuffers}
-            className="p-1.5 rounded-md transition-colors hover:bg-white/10"
+            variant="ghost"
+            size="icon"
             title="Refresh timeline"
           >
             <RefreshCcw width={16} height={16} />
-          </button>
+          </Button>
         </div>
       </div>
 

@@ -7,7 +7,8 @@
 :root {
   /* Main backgrounds */
   --sidebar-background: #000000;
-  --content-background: #151515;
+  --content-background: #171717;
+  --container-background: #171717;
 
   /* Text colors */
   --foreground-secondary: #9ca3af;
@@ -22,7 +23,7 @@
   --icon-inactive: 0.65;
   --section-header-opacity: 0.5;
   --radius: 0.625rem;
-  --background: #151515;
+  --background: #0A0A0A;
   --foreground: #ffffff;
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.141 0.005 285.823);
@@ -45,13 +46,13 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: hsl(0 0% 98%);
-  --sidebar-foreground: hsl(240 5.3% 26.1%);
-  --sidebar-primary: hsl(240 5.9% 10%);
-  --sidebar-primary-foreground: hsl(0 0% 98%);
-  --sidebar-accent: hsl(240 4.8% 95.9%);
-  --sidebar-accent-foreground: hsl(240 5.9% 10%);
-  --sidebar-border: hsl(220 13% 91%);
+  --sidebar: #000000;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #ffffff;
+  --sidebar-primary-foreground: #000000;
+  --sidebar-accent: rgba(255, 255, 255, 0.055);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #2a2a2a;
   --sidebar-ring: hsl(217.2 91.2% 59.8%);
 }
 
@@ -59,6 +60,7 @@
   --color-background: var(--background);
   --color-sidebar-bg: var(--sidebar-background);
   --color-content-bg: var(--content-background);
+  --color-container-bg: var(--container-background);
   --color-foreground: var(--foreground);
   --color-foreground-secondary: var(--foreground-secondary);
   --color-foreground-muted: var(--foreground-muted);

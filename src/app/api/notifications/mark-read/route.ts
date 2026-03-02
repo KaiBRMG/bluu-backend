@@ -45,9 +45,6 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     return NextResponse.json({ error: 'Provide notificationId or all: true' }, { status: 400 });
   } catch (error: unknown) {
     console.error('[notifications/mark-read]', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: 'Failed to update notifications' }, { status: 500 });
   }
 });

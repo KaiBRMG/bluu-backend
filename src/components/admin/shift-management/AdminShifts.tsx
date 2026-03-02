@@ -6,8 +6,35 @@ import type { ShiftUser, CreateShiftPayload, UpdateShiftPayload } from '@/hooks/
 import type { ExpandedShift } from '@/lib/utils/recurrence';
 import ShiftCard from './ShiftCard';
 import ShiftModal from './ShiftModal';
-import UserAvatar from '@/components/UserAvatar';
-import { RefreshCcw } from 'lucide-react';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+
+const AVATAR_COLORS = [
+  '#E57373', '#F06292', '#BA68C8', '#7986CB', '#64B5F6',
+  '#4DD0E1', '#4DB6AC', '#81C784', '#FFB74D', '#A1887F',
+];
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function getAvatarColor(name: string): string {
+  return AVATAR_COLORS[hashString(name) % AVATAR_COLORS.length];
+}
+
+function getInitials(name: string): string {
+  if (!name?.trim()) return '?';
+  return name.split(' ').map((p) => p[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
+}
+import { RefreshCcw, ChevronDownIcon } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -46,6 +73,7 @@ type ModalState =
 export default function AdminShifts() {
   const today      = todayStr();
   const [weekStart, setWeekStart] = useState(() => getMondayOfWeek(today));
+  const [weekPickerOpen, setWeekPickerOpen] = useState(false);
   const [groupFilter,    setGroupFilter]    = useState('all');
   const [showUnscheduled, setShowUnscheduled] = useState(true);
   const [modalState,     setModalState]     = useState<ModalState | null>(null);
@@ -177,20 +205,35 @@ export default function AdminShifts() {
 
         {/* Week navigation group */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <button onClick={() => setWeekStart(addDays(weekStart, -7))} style={controlStyle}>←</button>
-          <input
-            type="date"
-            value={weekStart}
-            onChange={e => setWeekStart(getMondayOfWeek(e.target.value))}
-            style={{ ...controlStyle, background: 'var(--sidebar-background)' }}
-          />
-          <button onClick={() => setWeekStart(addDays(weekStart, 7))} style={controlStyle}>→</button>
-          <button
+          <Button variant="outline" size="sm" onClick={() => setWeekStart(addDays(weekStart, -7))}>←</Button>
+          <Popover open={weekPickerOpen} onOpenChange={setWeekPickerOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" style={{ fontWeight: 'normal', fontSize: '13px', gap: '4px' }}>
+                {weekStart}
+                <ChevronDownIcon style={{ width: '12px', height: '12px' }} />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={weekStart ? new Date(weekStart + 'T00:00:00') : undefined}
+                captionLayout="dropdown"
+                onSelect={(date: Date | undefined) => {
+                  if (date) setWeekStart(getMondayOfWeek(date.toLocaleDateString('en-CA')));
+                  setWeekPickerOpen(false);
+                }}
+              />
+            </PopoverContent>
+          </Popover>
+          <Button variant="outline" size="sm" onClick={() => setWeekStart(addDays(weekStart, 7))}>→</Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setWeekStart(getMondayOfWeek(today))}
-            style={{ ...controlStyle, color: 'var(--foreground-secondary)', fontSize: '12px' }}
+            style={{ color: 'var(--foreground-secondary)', fontSize: '12px' }}
           >
             Today
-          </button>
+          </Button>
         </div>
 
         {/* Divider */}
@@ -220,20 +263,15 @@ export default function AdminShifts() {
         </div>
 
         {/* Refresh icon button — pushed to far right */}
-        <button
+        <Button
           onClick={refetch}
           title="Refresh"
-          style={{
-            ...controlStyle,
-            marginLeft: 'auto',
-            padding: '5px 7px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
+          variant="outline"
+          size="icon"
+          style={{ marginLeft: 'auto' }}
         >
           <RefreshCcw style={{ width: '14px', height: '14px', opacity: 0.7 }} />
-        </button>
+        </Button>
       </div>
 
       {/* ── Loading / error ────────────────────────────────────────── */}
@@ -295,7 +333,12 @@ export default function AdminShifts() {
                   {/* User cell */}
                   <td style={{ padding: '6px 10px', verticalAlign: 'middle', borderRight: '1px solid rgba(255,255,255,0.06)', height: '52px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-                      <UserAvatar photoURL={user.photoURL} name={user.displayName} size="sm" />
+                      <Avatar size="sm" style={{ background: getAvatarColor(user.displayName || 'User') }}>
+                        {user.photoURL && <AvatarImage src={user.photoURL} alt={user.displayName} />}
+                        <AvatarFallback style={{ background: getAvatarColor(user.displayName || 'User'), color: '#fff' }}>
+                          {getInitials(user.displayName)}
+                        </AvatarFallback>
+                      </Avatar>
                       <span style={{ fontSize: '12px', fontWeight: 400, color: 'var(--foreground)', lineHeight: 1.3 }}>
                         {user.displayName}
                       </span>

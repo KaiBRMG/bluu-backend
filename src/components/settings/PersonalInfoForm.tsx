@@ -5,8 +5,39 @@ import { useUserData } from '@/hooks/useUserData';
 import { useAuth } from '@/components/AuthProvider';
 import { countryCodes, getFlagEmoji } from '@/lib/countryData';
 import { validatePersonalInfoForm, PersonalInfoFormData } from '@/lib/validation';
-import UserAvatar from '@/components/UserAvatar';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+
+const AVATAR_COLORS = [
+  '#E57373', '#F06292', '#BA68C8', '#7986CB', '#64B5F6',
+  '#4DD0E1', '#4DB6AC', '#81C784', '#FFB74D', '#A1887F',
+];
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function getAvatarColor(name: string): string {
+  return AVATAR_COLORS[hashString(name) % AVATAR_COLORS.length];
+}
+
+function getInitials(name: string): string {
+  if (!name?.trim()) return '?';
+  return name.split(' ').map((p) => p[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
+}
 import { resolveTimezoneFromAddress } from '@/lib/timezoneData';
+import { Button } from "@/components/ui/button";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
+import { Input } from '@/components/ui/input';
+import { ChevronDownIcon } from 'lucide-react';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 const initialFormState: PersonalInfoFormData = {
   displayName: '',
@@ -44,6 +75,7 @@ export default function PersonalInfoForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
+  const [dobOpen, setDobOpen] = useState(false);
   const [countrySearch, setCountrySearch] = useState('');
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isRemovingPhoto, setIsRemovingPhoto] = useState(false);
@@ -371,11 +403,12 @@ export default function PersonalInfoForm() {
         <div className="mb-8">
           <label className="form-label block mb-3">Profile photo</label>
           <div className="flex items-center gap-4">
-            <UserAvatar
-              photoURL={userData?.photoURL}
-              name={userData?.displayName || formData.displayName}
-              size="lg"
-            />
+            <Avatar className="size-24 text-2xl" style={{ background: getAvatarColor((userData?.displayName || formData.displayName) || 'User') }}>
+              {userData?.photoURL && <AvatarImage src={userData.photoURL} alt={userData?.displayName || formData.displayName} />}
+              <AvatarFallback className="text-2xl" style={{ background: getAvatarColor((userData?.displayName || formData.displayName) || 'User'), color: '#fff' }}>
+                {getInitials(userData?.displayName || formData.displayName)}
+              </AvatarFallback>
+            </Avatar>
             <div className="flex flex-col gap-1">
               <input
                 ref={fileInputRef}
@@ -397,21 +430,16 @@ export default function PersonalInfoForm() {
                 {isUploadingPhoto ? 'Uploading...' : 'Upload photo'}
               </label>
               {userData?.photoURL && (
-                <button
+                <Button
                   type="button"
+                  variant="link"
                   onClick={handleRemovePhoto}
                   disabled={isUploadingPhoto || isRemovingPhoto}
-                  className="text-sm transition-colors text-left"
-                  style={{
-                    color: isRemovingPhoto ? 'var(--foreground-muted)' : '#ef4444',
-                    background: 'none',
-                    border: 'none',
-                    padding: 0,
-                    cursor: isRemovingPhoto ? 'default' : 'pointer'
-                  }}
+                  className="h-auto p-0 text-sm"
+                  style={{ color: isRemovingPhoto ? 'var(--foreground-muted)' : '#ef4444' }}
                 >
                   {isRemovingPhoto ? 'Removing...' : 'Remove photo'}
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -420,7 +448,7 @@ export default function PersonalInfoForm() {
         {/* Preferred Nickname */}
         <div className="mb-6">
           <label className="form-label block mb-2">Preferred Nickname</label>
-          <input
+          <Input
             type="text"
             className={`form-input ${errors.displayName ? 'error' : ''}`}
             value={formData.displayName}
@@ -433,7 +461,7 @@ export default function PersonalInfoForm() {
         {/* Personal Email */}
         <div className="mb-6">
           <label className="form-label block mb-2">Personal Email</label>
-          <input
+          <Input
             type="email"
             className={`form-input ${errors.personalEmail ? 'error' : ''}`}
             value={formData.personalEmail}
@@ -469,7 +497,7 @@ export default function PersonalInfoForm() {
                   style={{ background: 'var(--sidebar-background)', border: '1px solid var(--border-subtle)' }}
                 >
                   <div className="p-2 sticky top-0" style={{ background: 'var(--sidebar-background)' }}>
-                    <input
+                    <Input
                       type="text"
                       className="form-input w-full"
                       placeholder="Search country..."
@@ -501,7 +529,7 @@ export default function PersonalInfoForm() {
               )}
             </div>
             {/* Phone Number */}
-            <input
+            <Input
               type="tel"
               className={`form-input flex-1 ${errors.phoneNumber ? 'error' : ''}`}
               value={formData.phoneNumber}
@@ -515,40 +543,49 @@ export default function PersonalInfoForm() {
         {/* Gender */}
         <div className="mb-6">
           <label className="form-label block mb-2">Gender</label>
-          <div className="flex gap-6">
+          <RadioGroup
+            value={formData.gender}
+            onValueChange={(value) => handleInputChange('gender', value)}
+            className="flex gap-6"
+          >
             {['Male', 'Female', 'Other'].map((option) => (
-              <label key={option} className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="gender"
-                  value={option}
-                  checked={formData.gender === option}
-                  onChange={(e) => handleInputChange('gender', e.target.value)}
-                  className="w-4 h-4"
-                  style={{ accentColor: '#3b82f6' }}
-                />
-                <span className="text-sm">{option}</span>
-              </label>
+              <div key={option} className="flex items-center gap-2">
+                <RadioGroupItem value={option} id={`gender-settings-${option}`} />
+                <Label htmlFor={`gender-settings-${option}`} className="text-sm cursor-pointer">{option}</Label>
+              </div>
             ))}
-          </div>
+          </RadioGroup>
         </div>
 
         {/* Date of Birth */}
         <div className="mb-6">
           <label className="form-label block mb-2">Date of Birth</label>
-          <input
-            type="date"
-            className="form-input"
-            value={formData.DOB}
-            onChange={(e) => handleInputChange('DOB', e.target.value)}
-          />
+          <Popover open={dobOpen} onOpenChange={setDobOpen}>
+            <PopoverTrigger asChild>
+              <button type="button" className="form-input flex items-center justify-between gap-2" style={{ cursor: 'pointer' }}>
+                {formData.DOB || 'Select date'}
+                <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={formData.DOB ? new Date(formData.DOB + 'T00:00:00') : undefined}
+                captionLayout="dropdown"
+                onSelect={(date: Date | undefined) => {
+                  handleInputChange('DOB', date ? date.toLocaleDateString('en-CA') : '');
+                  setDobOpen(false);
+                }}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
 
         {/* Address Section */}
         <div className="mb-6">
           <label className="form-label block mb-2">Address</label>
           <div className="space-y-3">
-            <input
+            <Input
               type="text"
               className="form-input"
               value={formData.address.street}
@@ -557,7 +594,7 @@ export default function PersonalInfoForm() {
             />
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <input
+                <Input
                   type="text"
                   className={`form-input ${errors.addressCity ? 'error' : ''}`}
                   value={formData.address.city}
@@ -575,7 +612,7 @@ export default function PersonalInfoForm() {
                 />
                 {errors.addressCity && <p className="form-error">{errors.addressCity}</p>}
               </div>
-              <input
+              <Input
                 type="text"
                 className="form-input"
                 value={formData.address.state}
@@ -584,7 +621,7 @@ export default function PersonalInfoForm() {
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <input
+              <Input
                 type="text"
                 className="form-input"
                 value={formData.address.zipCode}
@@ -592,7 +629,7 @@ export default function PersonalInfoForm() {
                 placeholder="Zip / Postal code"
               />
               <div>
-                <input
+                <Input
                   type="text"
                   className={`form-input ${errors.addressCountry ? 'error' : ''}`}
                   value={formData.address.country}
@@ -618,14 +655,14 @@ export default function PersonalInfoForm() {
         <div className="mb-6">
           <label className="form-label block mb-2">Emergency Contact</label>
           <div className="space-y-3">
-            <input
+            <Input
               type="text"
               className="form-input"
               value={formData.emergencyContactName}
               onChange={(e) => handleInputChange('emergencyContactName', e.target.value)}
               placeholder="Emergency contact name"
             />
-            <input
+            <Input
               type="tel"
               className={`form-input ${errors.emergencyContactNumber ? 'error' : ''}`}
               value={formData.emergencyContactNumber}
@@ -633,7 +670,7 @@ export default function PersonalInfoForm() {
               placeholder="Emergency contact number"
             />
             {errors.emergencyContactNumber && <p className="form-error">{errors.emergencyContactNumber}</p>}
-            <input
+            <Input
               type="email"
               className={`form-input ${errors.emergencyContactEmail ? 'error' : ''}`}
               value={formData.emergencyContactEmail}
@@ -647,7 +684,7 @@ export default function PersonalInfoForm() {
         {/* Telegram Handle */}
         <div className="mb-6">
           <label className="form-label block mb-2">Telegram Handle</label>
-          <input
+          <Input
             type="text"
             className="form-input"
             value={formData.telegramHandle}
@@ -659,7 +696,7 @@ export default function PersonalInfoForm() {
         {/* Payment Method */}
         <div className="mb-6">
           <label className="form-label block mb-2">Payment Method</label>
-          <input
+          <Input
             type="text"
             className="form-input"
             value={formData.paymentMethod}
@@ -671,7 +708,7 @@ export default function PersonalInfoForm() {
         {/* Payment Info */}
         <div className="mb-6">
           <label className="form-label block mb-2">Payment Info</label>
-          <input
+          <Input
             type="text"
             className="form-input"
             value={formData.paymentInfo}
@@ -709,23 +746,22 @@ export default function PersonalInfoForm() {
         </div>
         <div className="flex gap-3">
           {hasChanges && (
-            <button
+            <Button
               type="button"
               onClick={handleCancel}
-              className="btn-secondary"
+              variant="outline"
               disabled={isSubmitting}
             >
               Cancel
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             type="button"
             onClick={handleSave}
-            className="btn-primary"
             disabled={!hasChanges || isSubmitting}
           >
             {isSubmitting ? 'Saving...' : 'Save Changes'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

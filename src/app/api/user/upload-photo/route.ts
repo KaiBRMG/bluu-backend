@@ -59,27 +59,24 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       },
     });
 
-    // Make the file publicly accessible
-    await file.makePublic();
+    // Generate a signed URL valid for 7 days — no public access on the file
+    const [photoURL] = await file.getSignedUrl({
+      action: 'read',
+      expires: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
 
-    // Get the public URL
-    const photoURL = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
-
-    // Update user document with new photo URL
+    // Update user document with signed URL and storage path (path allows re-signing later)
     const userRef = adminDb.collection('users').doc(token.uid);
     await userRef.update({
       photoURL,
+      photoStoragePath: fileName,
       updatedAt: FieldValue.serverTimestamp(),
     });
     invalidateUserCache(token.uid);
 
     return NextResponse.json({ success: true, photoURL });
   } catch (error: unknown) {
-    console.error('Error uploading photo:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json(
-      { error: errorMessage || 'Failed to upload photo' },
-      { status: 500 }
-    );
+    console.error('[user/upload-photo] error:', error);
+    return NextResponse.json({ error: 'Failed to upload photo' }, { status: 500 });
   }
 });

@@ -8,6 +8,8 @@ import { useTimeTracking } from "@/hooks/useTimeTracking";
 import { useNotifications } from "@/hooks/useNotifications";
 import type { NotificationDocument, NotificationType, TimerDisplayState } from "@/types/firestore";
 import { Clock4, ClockCheck, ClockAlert, Coffee, CirclePause } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 
 const STATE_CONFIG: Record<TimerDisplayState, { color: string; bgAlpha: string; label: string; Icon: React.ElementType }> = {
   working:       { color: '#86C27E', bgAlpha: 'rgba(134,194,126,0.1)', label: 'Working',    Icon: ClockCheck  },
@@ -145,17 +147,11 @@ function AnnouncementBanner({ announcements }: { announcements: NotificationDocu
                   style={{ color }}
                 >
                   {ann.title}
-                  <span
-                    className="ml-2 text-xs font-normal"
-                    style={{ color: 'var(--foreground-secondary)' }}
-                  >
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
                     — {formatAnnouncementDate(ann.createdAt)}
                   </span>
                 </p>
-                <p
-                  className="text-sm mt-1"
-                  style={{ color: 'var(--foreground-secondary)' }}
-                >
+                <p className="text-sm mt-1 text-muted-foreground">
                   {ann.message}
                 </p>
               </div>
@@ -189,37 +185,33 @@ function ClockWidget() {
   }, []);
 
   return (
-    <div
-      className="rounded-lg p-6"
-      style={{ background: '#000000' }}
-    >
-      {allTzs.length === 0 ? (
-        <div className="flex items-baseline gap-2">
-          <span className="text-2xl font-mono font-semibold" style={{ fontVariantNumeric: 'tabular-nums' }}>
-            --:--
-          </span>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {allTzs.map((tz) => (
-            <div key={tz} className="flex items-baseline gap-2">
-              <span
-                className="text-2xl font-mono font-semibold"
-                style={{ fontVariantNumeric: 'tabular-nums' }}
-              >
-                {formatClockTime(tz)}
-              </span>
-              <span
-                className="text-sm"
-                style={{ color: 'var(--foreground-secondary)' }}
-              >
-                {shortTzLabel(tz)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    <Card style={{ background: '#171717' }} className="border-0 shadow-none py-0 gap-0">
+      <CardContent className="p-6">
+        {allTzs.length === 0 ? (
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-mono font-semibold" style={{ fontVariantNumeric: 'tabular-nums' }}>
+              --:--
+            </span>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {allTzs.map((tz) => (
+              <div key={tz} className="flex items-baseline gap-2">
+                <span
+                  className="text-2xl font-mono font-semibold"
+                  style={{ fontVariantNumeric: 'tabular-nums' }}
+                >
+                  {formatClockTime(tz)}
+                </span>
+                <span className="text-sm text-muted-foreground">
+                  {shortTzLabel(tz)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -240,83 +232,57 @@ function TimeTrackingWidget() {
   const timerSeconds = isOnBreak && breakRemainingSeconds !== null ? breakRemainingSeconds : elapsedSeconds;
 
   return (
-    <div
-      className="rounded-lg p-6 transition-colors"
-      style={{
-        background: config.bgAlpha,
-      }}
-    >
-      {/* State indicator */}
-      <div className="flex items-center gap-2 mb-3">
-        <config.Icon style={{ color: config.color, width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
-        <span className="text-xs font-medium uppercase tracking-wide" style={{ color: config.color }}>
-          {config.label}
-        </span>
-      </div>
+    <Card className="border-0 shadow-none transition-colors py-0 gap-0" style={{ background: config.bgAlpha }}>
+      <CardContent className="p-6">
+        {/* State indicator */}
+        <div className="flex items-center gap-2 mb-3">
+          <config.Icon style={{ color: config.color, width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
+          <span className="text-xs font-medium uppercase tracking-wide" style={{ color: config.color }}>
+            {config.label}
+          </span>
+        </div>
 
-      {/* Timer */}
-      <p
-        className="text-2xl font-mono font-semibold mb-4"
-        style={{
-          fontVariantNumeric: 'tabular-nums',
-          color: isOnBreak ? '#4B8FCC' : undefined,
-          transition: 'color 0.2s ease',
-        }}
-      >
-        {formatTime(timerSeconds)}
-      </p>
-
-      {/* Actions */}
-      <div className="flex flex-wrap gap-2">
-        {displayState === 'clocked-out' && (
-          <button
-            onClick={startTracking}
-            disabled={isLoading}
-            className="btn-primary text-sm"
-            style={{ opacity: isLoading ? 0.6 : 1 }}
+        {/* Timer + Actions */}
+        <div className="flex items-center justify-between gap-4">
+          <p
+            className="text-2xl font-mono font-semibold"
+            style={{
+              fontVariantNumeric: 'tabular-nums',
+              color: isOnBreak ? '#4B8FCC' : undefined,
+              transition: 'color 0.2s ease',
+            }}
           >
-            {isLoading ? 'Starting...' : 'Clock In'}
-          </button>
-        )}
+            {formatTime(timerSeconds)}
+          </p>
 
-        {displayState === 'working' && (
-          <>
-            <button
-              onClick={startBreak}
-              disabled={isLoading}
-              className="btn-secondary flex items-center gap-1.5 text-sm"
-              style={{ opacity: isLoading ? 0.6 : 1 }}
-            >
-              <Coffee style={{ width: '0.75rem', height: '0.75rem', flexShrink: 0 }} />
-              {isLoading ? 'Starting...' : 'Break'}
-            </button>
-            <button
-              onClick={stopTracking}
-              disabled={isLoading}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-              style={{
-                background: '#ef4444',
-                color: '#fff',
-                opacity: isLoading ? 0.6 : 1,
-              }}
-            >
-              {isLoading ? 'Stopping...' : 'Clock Out'}
-            </button>
-          </>
-        )}
+          <div className="flex flex-col gap-2 items-end">
+            {displayState === 'clocked-out' && (
+              <Button onClick={startTracking} disabled={isLoading} size="sm">
+                {isLoading ? 'Starting...' : 'Clock In'}
+              </Button>
+            )}
 
-        {displayState === 'on-break' && (
-          <button
-            onClick={endBreak}
-            disabled={isLoading}
-            className="btn-secondary text-sm"
-            style={{ opacity: isLoading ? 0.6 : 1 }}
-          >
-            {isLoading ? 'Ending...' : 'End Break'}
-          </button>
-        )}
-      </div>
-    </div>
+            {displayState === 'working' && (
+              <>
+                <Button onClick={stopTracking} disabled={isLoading} variant="destructive" size="sm">
+                  {isLoading ? 'Stopping...' : 'Clock Out'}
+                </Button>
+                <Button onClick={startBreak} disabled={isLoading} variant="outline" size="sm">
+                  <Coffee style={{ width: '0.75rem', height: '0.75rem', flexShrink: 0 }} />
+                  {isLoading ? 'Starting...' : 'Break'}
+                </Button>
+              </>
+            )}
+
+            {displayState === 'on-break' && (
+              <Button onClick={endBreak} disabled={isLoading} variant="outline" size="sm">
+                {isLoading ? 'Ending...' : 'End Break'}
+              </Button>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -341,39 +307,35 @@ export default function Home() {
   return (
     <AppLayout>
       <div className="max-w-5xl">
-        <h1 className="text-5xl font-bold mb-2 tracking-tight">
+        <h1 className="text-2xl font-bold tracking-tight mb-2">
           Welcome, {firstName}
         </h1>
 
         <AnnouncementBanner announcements={announcements} />
 
         {/* Quick stats or widgets can go here */}
-        <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div
-            className="rounded-lg p-6"
-            style={{
-              background: 'var(--sidebar-background)',
-            }}
-          >
-            <h3 className="text-sm uppercase tracking-wide mb-2" style={{ color: 'var(--foreground-secondary)' }}>Team</h3>
-            <p className="text-2xl font-semibold">{displayGroup}</p>
-          </div>
+        <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+          <Card style={{ background: '#171717', borderColor: 'transparent' }} className="py-0 gap-0">
+            <CardContent className="p-6">
+              <h3 className="text-sm font-medium uppercase tracking-wide mb-2 text-muted-foreground">Team</h3>
+              <p className="text-2xl font-semibold">{displayGroup}</p>
+            </CardContent>
+          </Card>
 
           {showTimeTracking ? (
             <TimeTrackingWidget />
           ) : (
-            <div
-              className="rounded-lg p-6 transition-colors"
-              style={{
-                background: 'var(--sidebar-background)',
-                border: '1px solid var(--border-subtle)'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)'}
-              onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border-subtle)'}
+            <Card
+              className="transition-colors py-0 gap-0"
+              style={{ background: '#171717', borderColor: 'var(--border-subtle)' }}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)')}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border-subtle)')}
             >
-              <h3 className="text-sm uppercase tracking-wide mb-2" style={{ color: 'var(--foreground-secondary)' }}>Active Projects</h3>
-              <p className="text-2xl font-semibold">5</p>
-            </div>
+              <CardContent className="p-6">
+                <h3 className="text-sm font-medium uppercase tracking-wide mb-2 text-muted-foreground">Active Projects</h3>
+                <p className="text-2xl font-semibold">5</p>
+              </CardContent>
+            </Card>
           )}
 
           <ClockWidget />

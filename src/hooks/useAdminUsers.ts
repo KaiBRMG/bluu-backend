@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
+import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
 
 export interface AdminFullUser {
   uid: string;
@@ -60,17 +61,34 @@ interface AdminUsersState {
   error: string | null;
 }
 
+interface AdminUsersCacheData {
+  users: AdminFullUser[];
+  groups: AdminGroup[];
+}
+
+const CACHE_KEY = 'bluu_admin_users_v1';
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 export function useAdminUsers() {
   const { user } = useAuth();
-  const [state, setState] = useState<AdminUsersState>({
-    users: [],
-    groups: [],
-    loading: true,
-    error: null,
+  const [state, setState] = useState<AdminUsersState>(() => {
+    const cached = getCache<AdminUsersCacheData>(CACHE_KEY, CACHE_TTL_MS);
+    if (cached) {
+      return { users: cached.users, groups: cached.groups, loading: false, error: null };
+    }
+    return { users: [], groups: [], loading: true, error: null };
   });
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (forceRefresh = false) => {
     if (!user) return;
+
+    if (!forceRefresh) {
+      const cached = getCache<AdminUsersCacheData>(CACHE_KEY, CACHE_TTL_MS);
+      if (cached) {
+        setState({ users: cached.users, groups: cached.groups, loading: false, error: null });
+        return;
+      }
+    }
 
     try {
       setState(prev => ({ ...prev, loading: true, error: null }));
@@ -86,12 +104,10 @@ export function useAdminUsers() {
       }
 
       const data = await res.json();
-      setState({
-        users: data.users || [],
-        groups: data.groups || [],
-        loading: false,
-        error: null,
-      });
+      const users: AdminFullUser[] = data.users || [];
+      const groups: AdminGroup[] = data.groups || [];
+      setCache<AdminUsersCacheData>(CACHE_KEY, { users, groups });
+      setState({ users, groups, loading: false, error: null });
     } catch (err) {
       console.error('Error fetching admin users:', err);
       setState(prev => ({
@@ -125,7 +141,8 @@ export function useAdminUsers() {
         throw new Error(data.error || 'Failed to update user');
       }
 
-      await fetchData();
+      invalidateCache(CACHE_KEY);
+      await fetchData(true);
     },
     [user, fetchData]
   );
@@ -149,7 +166,8 @@ export function useAdminUsers() {
         throw new Error(data.error || 'Failed to add members');
       }
 
-      await fetchData();
+      invalidateCache(CACHE_KEY);
+      await fetchData(true);
     },
     [user, fetchData]
   );
@@ -173,14 +191,15 @@ export function useAdminUsers() {
         throw new Error(data.error || 'Failed to remove member');
       }
 
-      await fetchData();
+      invalidateCache(CACHE_KEY);
+      await fetchData(true);
     },
     [user, fetchData]
   );
 
   return {
     ...state,
-    refetch: fetchData,
+    refetch: () => fetchData(true),
     updateUser,
     addGroupMembers,
     removeGroupMember,

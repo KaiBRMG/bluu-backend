@@ -50,7 +50,11 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       );
     }
 
-    return NextResponse.json({ teamspaces: TEAMSPACES, accessiblePages });
+    return NextResponse.json({
+      teamspaces: TEAMSPACES,
+      accessiblePages,
+      permissionsVersion: user.permissionsVersion ?? 0,
+    });
   } catch (error: unknown) {
     console.error('Error fetching permissions:', error);
     return NextResponse.json({ error: 'Failed to fetch permissions' }, { status: 500 });

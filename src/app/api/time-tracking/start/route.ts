@@ -1,29 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
-import { createActiveSession, getActiveSession } from '@/lib/services/activeSessionService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { randomUUID } from 'crypto';
+import { adminDb } from '@/lib/firebase-admin';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import type { ActiveSessionDocument } from '@/types/firestore';
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
-    const existing = await getActiveSession(token.uid);
+    const sessionRef = adminDb.collection('active_sessions').doc(token.uid);
 
-    if (existing && !existing.data.userClockOut) {
-      // Active session already exists — return it so the client can decide to resume or discard
+    // Use a Firestore transaction so concurrent requests cannot create two active sessions
+    const result = await adminDb.runTransaction(async (tx) => {
+      const snap = await tx.get(sessionRef);
+
+      if (snap.exists) {
+        const data = snap.data() as ActiveSessionDocument;
+        if (!data.userClockOut) {
+          // Active session already exists — return it so the client can resume or discard
+          return { existing: data };
+        }
+      }
+
+      // No active session (or previous session was clocked out) — create atomically
+      const sessionId = randomUUID();
+      const startTime = Date.now();
+      tx.set(sessionRef, {
+        sessionId,
+        userId: token.uid,
+        startTime: Timestamp.fromMillis(startTime),
+        lastUpdated: FieldValue.serverTimestamp(),
+        currentState: 'working',
+        userClockOut: false,
+      });
+      return { sessionId, startTime };
+    });
+
+    if ('existing' in result) {
+      const d = result.existing;
       return NextResponse.json({
-        sessionId: existing.data.sessionId,
+        sessionId: d.sessionId,
         alreadyActive: true,
-        currentState: existing.data.currentState,
-        startTime: existing.data.startTime.toDate().toISOString(),
-        lastUpdated: existing.data.lastUpdated.toDate().toISOString(),
+        currentState: d.currentState,
+        startTime: d.startTime.toDate().toISOString(),
+        lastUpdated: d.lastUpdated.toDate().toISOString(),
       });
     }
 
-    const sessionId = randomUUID();
-    const startTime = Date.now();
-    await createActiveSession(token.uid, sessionId, startTime);
-
-    return NextResponse.json({ sessionId, startTime });
+    return NextResponse.json({ sessionId: result.sessionId, startTime: result.startTime });
   } catch (error: unknown) {
     console.error('Error starting time tracking:', error);
     return NextResponse.json({ error: 'Failed to start tracking' }, { status: 500 });

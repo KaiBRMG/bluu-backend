@@ -4,11 +4,22 @@ import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { expandShiftsForWindow } from '@/lib/utils/recurrence';
 import type { RawApiShift, ExpandedShift } from '@/lib/utils/recurrence';
+import { getCache, setCache } from '@/lib/queryCache';
 
 interface UserShiftsState {
   shifts: ExpandedShift[];
   loading: boolean;
   error: string | null;
+}
+
+interface UserShiftsCacheData {
+  shifts: ExpandedShift[];
+}
+
+const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
+function cacheKey(uid: string): string {
+  return `bluu_user_shifts_v1:${uid}`;
 }
 
 /**
@@ -23,8 +34,16 @@ export function useUserShifts() {
     error: null,
   });
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (forceRefresh = false) => {
     if (!user) return;
+
+    if (!forceRefresh) {
+      const cached = getCache<UserShiftsCacheData>(cacheKey(user.uid), CACHE_TTL_MS);
+      if (cached) {
+        setState({ shifts: cached.shifts, loading: false, error: null });
+        return;
+      }
+    }
 
     setState(prev => ({ ...prev, loading: true, error: null }));
 
@@ -54,6 +73,7 @@ export function useUserShifts() {
       // Filter to current and future occurrences
       const relevant = expanded.filter(s => s.occurrenceEnd > now);
 
+      setCache<UserShiftsCacheData>(cacheKey(user.uid), { shifts: relevant });
       setState({ shifts: relevant, loading: false, error: null });
     } catch (err) {
       console.error('[useUserShifts]', err);
@@ -71,6 +91,6 @@ export function useUserShifts() {
 
   return {
     ...state,
-    refetch: fetchData,
+    refetch: () => fetchData(true),
   };
 }

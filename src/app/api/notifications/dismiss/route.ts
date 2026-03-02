@@ -31,27 +31,25 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     }
 
     // Dismiss all read non-announcement notifications (tray trash action)
+    // The announcement filter is pushed into Firestore to avoid fetching unnecessary docs.
+    // Requires composite index: (userId, read, dismissedByUser, announcement)
     const snap = await adminDb
       .collection('notifications')
       .where('userId', '==', token.uid)
       .where('read', '==', true)
       .where('dismissedByUser', '==', false)
+      .where('announcement', '==', false)
       .get();
 
-    const toDismiss = snap.docs.filter((doc) => !doc.data().announcement);
-
-    if (toDismiss.length > 0) {
+    if (snap.size > 0) {
       const batch = adminDb.batch();
-      toDismiss.forEach((doc) => batch.update(doc.ref, { dismissedByUser: true }));
+      snap.docs.forEach((doc) => batch.update(doc.ref, { dismissedByUser: true }));
       await batch.commit();
     }
 
-    return NextResponse.json({ success: true, dismissed: toDismiss.length });
+    return NextResponse.json({ success: true, dismissed: snap.size });
   } catch (error: unknown) {
     console.error('[notifications/dismiss]', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: 'Failed to dismiss notifications' }, { status: 500 });
   }
 });

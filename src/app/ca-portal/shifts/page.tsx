@@ -6,10 +6,10 @@ export default function ShiftsPage() {
   return (
     <AppLayout>
       <div className="max-w-5xl">
-        <h1 className="text-5xl font-bold mb-2 tracking-tight">
+        <h1 className="text-2xl font-bold tracking-tight mb-2">
           Shifts
         </h1>
-        <p className="text-lg" style={{ color: 'var(--foreground-secondary)' }}>
+        <p className="text-sm text-muted-foreground">
           See the current shift schedule
         </p>
 
@@ -22,7 +22,7 @@ export default function ShiftsPage() {
               border: '1px solid var(--border-subtle)'
             }}
           >
-            <p className="text-lg" style={{ color: 'var(--foreground-secondary)' }}>
+            <p className="text-sm text-muted-foreground">
               .
             </p>
           </div>

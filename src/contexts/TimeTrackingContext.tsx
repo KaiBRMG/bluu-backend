@@ -19,9 +19,16 @@ const HEARTBEAT_INTERVAL_MS   = 15 * 60 * 1000; // 15 minutes — working state 
 const IDLE_CHECK_INTERVAL_MS  = 30_000;          // poll for idle every 30s
 const IDLE_RESUME_CHECK_MS    = 5_000;           // poll for resume every 5s
 const IDLE_THRESHOLD_SECONDS  = 900;             // 15 minutes without input = idle
-const BREAK_DURATION_SECONDS  = 2700;            // 45-minute break cap
+const BREAK_DURATION_SECONDS  = 2700;            // 45-minute break allowance per period
+const WORK_PERIOD_SECONDS     = 8 * 3600;        // new break period unlocked every 8 hours
 const SCREENSHOT_WINDOW_MS    = 15 * 60 * 1000;
 const STALE_THRESHOLD_MS      = 15 * 60 * 1000; // 15 minutes — beyond this, don't resume
+
+/** Total break seconds allowed based on how many 8-hour periods have elapsed. */
+function computeBreakAllowance(workingSeconds: number): number {
+  const periods = Math.floor(workingSeconds / WORK_PERIOD_SECONDS) + 1;
+  return periods * BREAK_DURATION_SECONDS;
+}
 
 interface TimeTrackingContextType {
   displayState:          TimerDisplayState;
@@ -29,6 +36,7 @@ interface TimeTrackingContextType {
   elapsedSeconds:        number;
   breakRemainingSeconds: number | null;
   breakUsedSeconds:      number;
+  breakAllowanceSeconds: number;  // total break seconds allowed so far (grows every 8h)
   startTracking:         () => Promise<void>;
   stopTracking:          () => Promise<void>;
   pauseTracking:         () => Promise<void>;
@@ -57,6 +65,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   const [elapsedSeconds, setElapsedSeconds]             = useState(0);
   const [breakRemainingSeconds, setBreakRemainingSeconds] = useState<number | null>(null);
   const [breakUsedSeconds, setBreakUsedSeconds]         = useState(0);
+  const [breakAllowanceSeconds, setBreakAllowanceSeconds] = useState(BREAK_DURATION_SECONDS);
   const [isLoading, setIsLoading]                       = useState(false);
   const [enableScreenshots, setEnableScreenshots]       = useState(false);
 
@@ -136,6 +145,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
               sessionBaseSecondsRef.current = totals.workingSeconds;
               breakUsedSecondsRef.current = totals.breakSeconds;
               setBreakUsedSeconds(totals.breakSeconds);
+              setBreakAllowanceSeconds(computeBreakAllowance(totals.workingSeconds));
             }
 
             const state = data.session.currentState;
@@ -196,6 +206,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       setElapsedSeconds(0);
       setBreakRemainingSeconds(null);
       setBreakUsedSeconds(0);
+      setBreakAllowanceSeconds(BREAK_DURATION_SECONDS);
       setEnableScreenshots(false);
       sessionBaseSecondsRef.current = 0;
       breakUsedSecondsRef.current = 0;
@@ -345,12 +356,13 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     }
 
     if (displayState === 'on-break' && breakStartTime) {
-      const allowanceSeconds = BREAK_DURATION_SECONDS - breakUsedSecondsRef.current;
+      const allowanceAtStart = computeBreakAllowance(sessionBaseSecondsRef.current) - breakUsedSecondsRef.current;
       const tick = () => {
         const elapsed = Math.floor((Date.now() - breakStartTime) / 1000);
-        const remaining = Math.max(0, allowanceSeconds - elapsed);
+        const remaining = Math.max(0, allowanceAtStart - elapsed);
         setBreakRemainingSeconds(remaining);
         setBreakUsedSeconds(breakUsedSecondsRef.current + elapsed);
+        setBreakAllowanceSeconds(computeBreakAllowance(sessionBaseSecondsRef.current));
 
         if (remaining <= 0) {
           const sid = sessionIdRef.current;
@@ -381,10 +393,13 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
           const startTime = entryStartTimeRef.current;
           if (startTime) {
             const currentSegment = Math.floor((Date.now() - startTime) / 1000);
-            setElapsedSeconds(sessionBaseSecondsRef.current + currentSegment);
+            const totalWorking = sessionBaseSecondsRef.current + currentSegment;
+            setElapsedSeconds(totalWorking);
+            setBreakAllowanceSeconds(computeBreakAllowance(totalWorking));
           }
         } else {
           setElapsedSeconds(sessionBaseSecondsRef.current);
+          setBreakAllowanceSeconds(computeBreakAllowance(sessionBaseSecondsRef.current));
         }
         setBreakUsedSeconds(breakUsedSecondsRef.current);
       };
@@ -465,6 +480,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         await initBuffer(fresh.sessionId, user!.uid, fresh.startTime);
         sessionBaseSecondsRef.current = 0;
         breakUsedSecondsRef.current = 0;
+        setBreakAllowanceSeconds(BREAK_DURATION_SECONDS);
         setSessionId(fresh.sessionId);
         setEntryStartTime(Date.now());
         setDisplayState('working');
@@ -475,6 +491,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       await initBuffer(data.sessionId, user!.uid, data.startTime);
       sessionBaseSecondsRef.current = 0;
       breakUsedSecondsRef.current = 0;
+      setBreakAllowanceSeconds(BREAK_DURATION_SECONDS);
       setSessionId(data.sessionId);
       setEntryStartTime(Date.now());
       setDisplayState('working');
@@ -503,6 +520,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       setEntryStartTime(null);
       setBreakStartTime(null);
       setBreakRemainingSeconds(null);
+      setBreakAllowanceSeconds(BREAK_DURATION_SECONDS);
       sessionBaseSecondsRef.current = 0;
       breakUsedSecondsRef.current = 0;
       if (user) invalidateTimesheetCache(user.uid);
@@ -563,8 +581,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     if (isLoading || displayState !== 'working') return;
     const sid = sessionId;
     if (!sid) return;
-    // Block break if the full allowance has been used
-    if (breakUsedSecondsRef.current >= BREAK_DURATION_SECONDS) return;
+    // Block break if the full allowance for the current period has been used
+    if (breakUsedSecondsRef.current >= computeBreakAllowance(sessionBaseSecondsRef.current)) return;
     setIsLoading(true);
     try {
       // Stop the tick immediately so no further updates race with state changes
@@ -621,6 +639,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       elapsedSeconds,
       breakRemainingSeconds,
       breakUsedSeconds,
+      breakAllowanceSeconds,
       startTracking,
       stopTracking,
       pauseTracking,

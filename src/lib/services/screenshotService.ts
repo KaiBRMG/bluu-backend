@@ -14,21 +14,30 @@ export async function saveScreenshots(
   const captureGroup = randomUUID();
 
   const bucket = adminStorage.bucket();
-  const ids: string[] = [];
 
-  for (let i = 0; i < screens.length; i++) {
-    const base64 = screens[i];
-    if (!base64 || base64.length === 0) continue;
+  // Save all images to Storage in parallel, collecting (storagePath, docRef) pairs
+  const saved: Array<{ storagePath: string; docRef: FirebaseFirestore.DocumentReference }> = [];
 
-    const buffer = Buffer.from(base64, 'base64');
-    if (buffer.length === 0) continue;
+  await Promise.all(
+    screens.map(async (base64, i) => {
+      if (!base64 || base64.length === 0) return;
+      const buffer = Buffer.from(base64, 'base64');
+      if (buffer.length === 0) return;
 
-    // Full-size image — thumbnail is generated asynchronously by the Cloud Function
-    const storagePath = `screenshots/${userId}/${dateStr}/${timestamp}_${i}.png`;
-    const file = bucket.file(storagePath);
-    await file.save(buffer, { contentType: 'image/png' });
+      // Full-size image — thumbnail is generated asynchronously by the Cloud Function
+      const storagePath = `screenshots/${userId}/${dateStr}/${timestamp}_${i}.png`;
+      await bucket.file(storagePath).save(buffer, { contentType: 'image/png' });
 
-    const docRef = await adminDb.collection(COLLECTION).add({
+      saved.push({ storagePath, docRef: adminDb.collection(COLLECTION).doc() });
+    }),
+  );
+
+  if (saved.length === 0) return [];
+
+  // Write all Firestore docs in a single batch (one round-trip instead of N)
+  const batch = adminDb.batch();
+  saved.forEach(({ storagePath, docRef }, i) => {
+    batch.set(docRef, {
       userId,
       timestampUTC: FieldValue.serverTimestamp(),
       storagePath,
@@ -36,11 +45,10 @@ export async function saveScreenshots(
       captureGroup,
       screenIndex: i,
     });
+  });
+  await batch.commit();
 
-    ids.push(docRef.id);
-  }
-
-  return ids;
+  return saved.map(({ docRef }) => docRef.id);
 }
 
 export interface ScreenshotRow {

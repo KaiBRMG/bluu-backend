@@ -7,6 +7,7 @@ import { UserDataProvider } from "@/hooks/useUserData";
 import { TimeTrackingProvider } from "@/contexts/TimeTrackingContext";
 import { NotificationsProvider } from "@/hooks/useNotifications";
 import AuthWrapper from "@/components/AuthWrapper";
+import { ThemeProvider } from "next-themes";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,10 +30,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased bg-background text-foreground`}
       >
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
         <AuthProvider>
           <NetworkStatusProvider>
             <UserDataProvider>
@@ -46,6 +48,7 @@ export default function RootLayout({
             </UserDataProvider>
           </NetworkStatusProvider>
         </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

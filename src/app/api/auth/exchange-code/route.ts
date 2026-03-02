@@ -65,7 +65,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Parallelize database operations and token creation for better performance
-    console.time('[Auth] Database operations');
     const [, customToken] = await Promise.all([
       ensureUserExists({
         uid: firebaseUser.uid,
@@ -74,7 +73,6 @@ export async function POST(request: NextRequest) {
       }),
       adminAuth.createCustomToken(firebaseUser.uid),
     ]);
-    console.timeEnd('[Auth] Database operations');
 
       return NextResponse.json({
         customToken,
@@ -87,9 +85,9 @@ export async function POST(request: NextRequest) {
       throw tokenError;
     }
   } catch (error: any) {
-    console.error('Error exchanging code:', error);
+    console.error('[exchange-code] error:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to exchange authorization code' },
+      { error: 'Failed to exchange authorization code' },
       { status: 500 }
     );
   }

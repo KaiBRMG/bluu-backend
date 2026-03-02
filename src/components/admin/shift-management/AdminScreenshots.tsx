@@ -4,6 +4,11 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useAdminScreenshots, ScreenshotGroup } from '@/hooks/useAdminScreenshots';
 import { useAuth } from '@/components/AuthProvider';
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ChevronDownIcon } from 'lucide-react';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 function toDateString(date: Date): string {
   const y = date.getFullYear();
@@ -44,6 +49,8 @@ function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
   const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState(today);
+  const [startOpen, setStartOpen] = useState(false);
+  const [endOpen, setEndOpen] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [countsLoading, setCountsLoading] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -151,7 +158,7 @@ function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-lg font-semibold" style={{ color: 'var(--foreground)' }}>
+        <h3 className="text-lg font-semibold tracking-tight">
           Batch Delete Screenshots
         </h3>
 
@@ -159,23 +166,49 @@ function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
         <div className="flex gap-3">
           <div className="flex-1">
             <label className="form-label block mb-1">Start date</label>
-            <input
-              type="date"
-              className="form-input w-full"
-              value={startDate}
-              max={today}
-              onChange={(e) => setStartDate(e.target.value)}
-            />
+            <Popover open={startOpen} onOpenChange={setStartOpen}>
+              <PopoverTrigger asChild>
+                <button type="button" className="form-input w-full flex items-center justify-between gap-2" style={{ cursor: 'pointer' }}>
+                  {startDate || 'Select date'}
+                  <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={startDate ? new Date(startDate + 'T00:00:00') : undefined}
+                  captionLayout="dropdown"
+                  disabled={{ after: new Date(today + 'T00:00:00') }}
+                  onSelect={(date: Date | undefined) => {
+                    if (date) setStartDate(date.toLocaleDateString('en-CA'));
+                    setStartOpen(false);
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
           </div>
           <div className="flex-1">
             <label className="form-label block mb-1">End date</label>
-            <input
-              type="date"
-              className="form-input w-full"
-              value={endDate}
-              max={today}
-              onChange={(e) => setEndDate(e.target.value)}
-            />
+            <Popover open={endOpen} onOpenChange={setEndOpen}>
+              <PopoverTrigger asChild>
+                <button type="button" className="form-input w-full flex items-center justify-between gap-2" style={{ cursor: 'pointer' }}>
+                  {endDate || 'Select date'}
+                  <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={endDate ? new Date(endDate + 'T00:00:00') : undefined}
+                  captionLayout="dropdown"
+                  disabled={{ after: new Date(today + 'T00:00:00') }}
+                  onSelect={(date: Date | undefined) => {
+                    if (date) setEndDate(date.toLocaleDateString('en-CA'));
+                    setEndOpen(false);
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
         {startDate && endDate && startDate > endDate && (
@@ -211,12 +244,10 @@ function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
                       background: checked ? 'var(--active-background)' : 'transparent',
                     }}
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={checked}
-                      onChange={() => toggleUser(u.uid)}
-                      className="w-4 h-4 flex-shrink-0"
-                      style={{ accentColor: '#3b82f6' }}
+                      onCheckedChange={() => toggleUser(u.uid)}
+                      className="flex-shrink-0"
                     />
                     <span
                       className="flex-1 text-sm"
@@ -248,25 +279,20 @@ function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
 
         {/* Actions */}
         <div className="flex justify-end gap-3 pt-1">
-          <button
+          <Button
             onClick={onClose}
-            className="btn-secondary"
+            variant="outline"
             disabled={isDeleting}
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => setShowConfirm(true)}
             disabled={!canDelete || isDeleting}
-            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-            style={{
-              background: canDelete ? '#ef4444' : 'var(--hover-background)',
-              color: canDelete ? '#fff' : 'var(--foreground-muted)',
-              cursor: canDelete ? 'pointer' : 'not-allowed',
-            }}
+            variant="destructive"
           >
             Delete All Screenshots
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -285,34 +311,29 @@ function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--foreground)' }}>
+            <h3 className="text-lg font-semibold tracking-tight mb-2">
               Confirm Batch Delete
             </h3>
-            <p className="text-sm mb-1" style={{ color: 'var(--foreground-secondary)' }}>
+            <p className="text-sm text-muted-foreground mb-1">
               All screenshots between <strong>{startDate}</strong> and <strong>{endDate}</strong> for{' '}
               <strong>{selectedUserIds.size} employee{selectedUserIds.size !== 1 ? 's' : ''}</strong> will be
               permanently deleted. This cannot be undone.
             </p>
             <div className="flex justify-end gap-3 mt-6">
-              <button
+              <Button
                 onClick={() => setShowConfirm(false)}
-                className="btn-secondary"
+                variant="outline"
                 disabled={isDeleting}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={handleDeleteConfirmed}
                 disabled={isDeleting}
-                className="px-4 py-2 rounded-lg text-sm font-medium"
-                style={{
-                  background: '#ef4444',
-                  color: '#fff',
-                  opacity: isDeleting ? 0.6 : 1,
-                }}
+                variant="destructive"
               >
                 {isDeleting ? 'Deleting...' : 'Confirm Delete'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -331,6 +352,7 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
   const today = toDateString(new Date());
 
   const [selectedDate, setSelectedDate] = useState(today);
+  const [dateOpen, setDateOpen] = useState(false);
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
   // Modal state: [groupIndex, screenIndexWithinGroup]
   const [modalPos, setModalPos] = useState<[number, number] | null>(null);
@@ -473,30 +495,16 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
     <div>
       {/* Header row with Batch Delete button */}
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold" style={{ color: 'var(--foreground)' }}>
+        <h2 className="text-lg font-semibold tracking-tight">
           Screenshots
         </h2>
-        <button
+        <Button
           onClick={() => setShowBatchDelete(true)}
-          className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
-          style={{
-            background: 'var(--hover-background)',
-            color: 'var(--foreground-secondary)',
-            border: '1px solid var(--border-subtle)',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = '#ef444420';
-            e.currentTarget.style.color = '#ef4444';
-            e.currentTarget.style.borderColor = '#ef444460';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'var(--hover-background)';
-            e.currentTarget.style.color = 'var(--foreground-secondary)';
-            e.currentTarget.style.borderColor = 'var(--border-subtle)';
-          }}
+          variant="outline"
+          size="sm"
         >
           Batch Delete
-        </button>
+        </Button>
       </div>
 
       {/* Controls */}
@@ -520,27 +528,35 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
 
         <div>
           <label className="form-label block mb-1">Date</label>
-          <input
-            type="date"
-            className="form-input"
-            value={selectedDate}
-            onChange={(e) => { if (e.target.value) setSelectedDate(e.target.value); }}
-            max={today}
-            required
-          />
+          <Popover open={dateOpen} onOpenChange={setDateOpen}>
+            <PopoverTrigger asChild>
+              <button type="button" className="form-input flex items-center justify-between gap-2" style={{ cursor: 'pointer' }}>
+                {selectedDate}
+                <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={selectedDate ? new Date(selectedDate + 'T00:00:00') : undefined}
+                captionLayout="dropdown"
+                disabled={{ after: new Date(today + 'T00:00:00') }}
+                onSelect={(date: Date | undefined) => {
+                  if (date) setSelectedDate(date.toLocaleDateString('en-CA'));
+                  setDateOpen(false);
+                }}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
 
         {selectedGroupIds.size > 0 && (
-          <button
+          <Button
             onClick={() => setShowDeleteConfirm(true)}
-            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-            style={{
-              background: '#ef4444',
-              color: '#fff',
-            }}
+            variant="destructive"
           >
             Delete Selected ({selectedGroupIds.size})
-          </button>
+          </Button>
         )}
       </div>
 
@@ -571,12 +587,9 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
           {/* Select all */}
           <div className="flex items-center gap-2 mb-4">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={selectedGroupIds.size === groups.length}
-                onChange={selectAll}
-                className="w-4 h-4"
-                style={{ accentColor: '#3b82f6' }}
+                onCheckedChange={selectAll}
               />
               <span className="text-sm" style={{ color: 'var(--foreground-secondary)' }}>
                 Select all ({groups.length})
@@ -593,12 +606,9 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
               return (
                 <div key={group.captureGroup} className="relative group">
                   <div className="absolute top-2 left-2 z-10">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={selectedGroupIds.has(group.captureGroup)}
-                      onChange={() => toggleGroupSelect(group.captureGroup)}
-                      className="w-4 h-4"
-                      style={{ accentColor: '#3b82f6' }}
+                      onCheckedChange={() => toggleGroupSelect(group.captureGroup)}
                     />
                   </div>
                   <img
@@ -630,25 +640,28 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
           onClick={() => setModalPos(null)}
         >
           {/* Close button */}
-          <button
+          <Button
             onClick={() => setModalPos(null)}
-            className="absolute top-4 right-4 text-white text-3xl leading-none hover:opacity-70 transition-opacity"
+            variant="ghost"
+            size="icon"
+            className="absolute top-4 right-4 text-white text-3xl leading-none hover:opacity-70 hover:bg-transparent"
           >
             &times;
-          </button>
+          </Button>
 
           {/* Left arrow */}
           {modalFlatIndex > 0 && (
-            <button
+            <Button
               onClick={(e) => {
                 e.stopPropagation();
                 const prev = flatScreens[modalFlatIndex - 1];
                 setModalPos([prev.groupIndex, prev.screenIndex]);
               }}
-              className="absolute left-4 text-white text-5xl leading-none hover:opacity-70 transition-opacity"
+              variant="ghost"
+              className="absolute left-4 text-white text-5xl leading-none hover:opacity-70 hover:bg-transparent"
             >
               &#8249;
-            </button>
+            </Button>
           )}
 
           {/* Image + info */}
@@ -692,16 +705,17 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
 
           {/* Right arrow */}
           {modalFlatIndex < flatScreens.length - 1 && (
-            <button
+            <Button
               onClick={(e) => {
                 e.stopPropagation();
                 const next = flatScreens[modalFlatIndex + 1];
                 setModalPos([next.groupIndex, next.screenIndex]);
               }}
-              className="absolute right-4 text-white text-5xl leading-none hover:opacity-70 transition-opacity"
+              variant="ghost"
+              className="absolute right-4 text-white text-5xl leading-none hover:opacity-70 hover:bg-transparent"
             >
               &#8250;
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -721,32 +735,27 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--foreground)' }}>
+            <h3 className="text-lg font-semibold tracking-tight mb-2">
               Delete Screenshots
             </h3>
-            <p className="text-sm mb-6" style={{ color: 'var(--foreground-secondary)' }}>
+            <p className="text-sm text-muted-foreground mb-6">
               Delete {selectedGroupIds.size} capture group{selectedGroupIds.size !== 1 ? 's' : ''} ({selectedScreenshotIds.length} screenshot{selectedScreenshotIds.length !== 1 ? 's' : ''})? This cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
-              <button
+              <Button
                 onClick={() => setShowDeleteConfirm(false)}
-                className="btn-secondary"
+                variant="outline"
                 disabled={isDeleting}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={handleDelete}
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                style={{
-                  background: '#ef4444',
-                  color: '#fff',
-                  opacity: isDeleting ? 0.6 : 1,
-                }}
+                variant="destructive"
                 disabled={isDeleting}
               >
                 {isDeleting ? 'Deleting...' : 'Delete'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

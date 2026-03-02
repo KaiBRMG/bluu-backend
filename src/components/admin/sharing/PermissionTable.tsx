@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import type { PagePermissionDoc } from "@/types/firestore";
 import type { PageDef } from "@/lib/definitions";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface AdminGroup {
   id: string;
@@ -174,13 +175,10 @@ export default function PermissionTable({
                     const hasAccess = !!permDoc?.groups?.[g.id];
                     return (
                       <div key={g.id} className="flex justify-center">
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={hasAccess}
-                          onChange={() => handleGroupToggle(page.pageId, g.id, hasAccess)}
+                          onCheckedChange={() => handleGroupToggle(page.pageId, g.id, hasAccess)}
                           disabled={saving === page.pageId}
-                          className="w-4 h-4 rounded cursor-pointer"
-                          style={{ accentColor: "#3b82f6" }}
                         />
                       </div>
                     );

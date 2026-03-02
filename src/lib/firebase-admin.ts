@@ -2,15 +2,17 @@ import admin from 'firebase-admin';
 
 // Singleton initialization to prevent duplicate app errors
 if (!admin.apps.length) {
-  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT
-    ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
-    : {
-        projectId: process.env.FIREBASE_PROJECT_ID || 'bluu-backend',
-      };
+  if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
+    throw new Error(
+      'FIREBASE_SERVICE_ACCOUNT env var is required — refusing to start without credentials'
+    );
+  }
+
+  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount as admin.ServiceAccount),
-    storageBucket: 'bluu-backend.firebasestorage.app',
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   });
 }
 

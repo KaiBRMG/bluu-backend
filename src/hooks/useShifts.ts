@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { expandShiftsForWindow } from '@/lib/utils/recurrence';
 import type { RawApiShift, ExpandedShift } from '@/lib/utils/recurrence';
+import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
 
 export interface ShiftUser {
   uid: string;
@@ -37,6 +38,17 @@ interface ShiftsState {
   error: string | null;
 }
 
+interface ShiftsCacheData {
+  shifts: ExpandedShift[];
+  users: ShiftUser[];
+}
+
+const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
+function cacheKey(weekStart: string): string {
+  return `bluu_shifts_week_v1:${weekStart}`;
+}
+
 /** Compute the Monday of the week that contains `dateStr` (YYYY-MM-DD). */
 export function getMondayOfWeek(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -54,15 +66,35 @@ export function todayStr(): string {
 
 export function useShifts(weekStart: string) {
   const { user } = useAuth();
-  const [state, setState] = useState<ShiftsState>({
-    shifts: [],
-    users: [],
-    loading: true,
-    error: null,
+  const [state, setState] = useState<ShiftsState>(() => {
+    const cached = getCache<ShiftsCacheData>(cacheKey(weekStart), CACHE_TTL_MS);
+    if (cached) {
+      return { shifts: cached.shifts, users: cached.users, loading: false, error: null };
+    }
+    return { shifts: [], users: [], loading: true, error: null };
   });
 
-  const fetchData = useCallback(async () => {
+  // When weekStart changes, sync state from cache (or reset to loading)
+  // before the fetch effect runs to avoid flashing stale week data.
+  useEffect(() => {
+    const cached = getCache<ShiftsCacheData>(cacheKey(weekStart), CACHE_TTL_MS);
+    if (cached) {
+      setState({ shifts: cached.shifts, users: cached.users, loading: false, error: null });
+    } else {
+      setState({ shifts: [], users: [], loading: true, error: null });
+    }
+  }, [weekStart]);
+
+  const fetchData = useCallback(async (forceRefresh = false) => {
     if (!user || !weekStart) return;
+
+    if (!forceRefresh) {
+      const cached = getCache<ShiftsCacheData>(cacheKey(weekStart), CACHE_TTL_MS);
+      if (cached) {
+        setState({ shifts: cached.shifts, users: cached.users, loading: false, error: null });
+        return;
+      }
+    }
 
     setState(prev => ({ ...prev, loading: true, error: null }));
 
@@ -86,6 +118,7 @@ export function useShifts(weekStart: string) {
 
       const expanded = expandShiftsForWindow(data.shifts, windowStartMs, windowEndMs);
 
+      setCache<ShiftsCacheData>(cacheKey(weekStart), { shifts: expanded, users: data.users });
       setState({ shifts: expanded, users: data.users, loading: false, error: null });
     } catch (err) {
       console.error('[useShifts]', err);
@@ -118,8 +151,9 @@ export function useShifts(weekStart: string) {
       throw new Error(data.error ?? 'Failed to create shift');
     }
 
-    await fetchData();
-  }, [user, fetchData]);
+    invalidateCache(cacheKey(weekStart));
+    await fetchData(true);
+  }, [user, weekStart, fetchData]);
 
   const updateShift = useCallback(async (shiftId: string, payload: UpdateShiftPayload) => {
     if (!user) throw new Error('Not authenticated');
@@ -136,8 +170,9 @@ export function useShifts(weekStart: string) {
       throw new Error(data.error ?? 'Failed to update shift');
     }
 
-    await fetchData();
-  }, [user, fetchData]);
+    invalidateCache(cacheKey(weekStart));
+    await fetchData(true);
+  }, [user, weekStart, fetchData]);
 
   const deleteShift = useCallback(async (
     shiftId: string,
@@ -160,12 +195,13 @@ export function useShifts(weekStart: string) {
       throw new Error(data.error ?? 'Failed to delete shift');
     }
 
-    await fetchData();
-  }, [user, fetchData]);
+    invalidateCache(cacheKey(weekStart));
+    await fetchData(true);
+  }, [user, weekStart, fetchData]);
 
   return {
     ...state,
-    refetch: fetchData,
+    refetch: () => fetchData(true),
     createShift,
     updateShift,
     deleteShift,

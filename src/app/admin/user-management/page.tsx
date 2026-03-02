@@ -3,9 +3,9 @@
 import { useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useAdminUsers } from "@/hooks/useAdminUsers";
-import UserManagementSidebar from "@/components/admin/user-management/UserManagementSidebar";
 import EmployeeRegistry from "@/components/admin/user-management/EmployeeRegistry";
 import UserGroups from "@/components/admin/user-management/UserGroups";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export default function UserManagementPage() {
   const [activeSection, setActiveSection] = useState('employee-registry');
@@ -37,59 +37,63 @@ export default function UserManagementPage() {
     );
   }
 
-  const renderContent = () => {
-    switch (activeSection) {
-      case 'employee-registry':
-        return (
-          <EmployeeRegistry
-            users={users}
-            groups={groups}
-            onUpdateUser={updateUser}
-            onAddGroupMembers={addGroupMembers}
-            onRemoveGroupMember={removeGroupMember}
-            onRefetch={refetch}
-          />
-        );
-      case 'user-groups':
-        return (
-          <UserGroups
-            users={users}
-            groups={groups}
-            onAddGroupMembers={addGroupMembers}
-            onRemoveGroupMember={removeGroupMember}
-          />
-        );
-      default:
-        return null;
-    }
-  };
-
   return (
     <AppLayout>
       <div className="max-w-6xl">
-      <h1 className="text-xl font-semibold mb-1">
+        <h1 className="text-2xl font-bold tracking-tight mb-2">
           User Management
         </h1>
-        <p className="text-sm" style={{ color: "var(--foreground-muted)" }}>
+        <p className="text-sm text-muted-foreground">
           See and manage employee data and user groups.
         </p>
 
-        <div className="mt-8 flex gap-6">
-          <UserManagementSidebar
-            activeSection={activeSection}
-            onSectionChange={setActiveSection}
-          />
-
-          <div
-            className="flex-1 rounded-lg p-6"
-            style={{
-              background: 'var(--sidebar-background)',
-              border: '1px solid var(--border-subtle)',
-              minHeight: '600px',
-            }}
+        <div className="mt-8">
+          <Tabs
+            orientation="vertical"
+            value={activeSection}
+            onValueChange={setActiveSection}
+            className="flex gap-6"
           >
-            {renderContent()}
-          </div>
+            <TabsList
+              variant="line"
+              className="w-56 flex-shrink-0 rounded-lg p-2 h-fit"
+              style={{
+                background: 'var(--sidebar-background)',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <TabsTrigger value="employee-registry">Employee Registry</TabsTrigger>
+              <TabsTrigger value="user-groups">User Groups</TabsTrigger>
+            </TabsList>
+
+            <div
+              className="flex-1 rounded-lg p-6"
+              style={{
+                background: 'var(--sidebar-background)',
+                border: '1px solid var(--border-subtle)',
+                minHeight: '600px',
+              }}
+            >
+              <TabsContent value="employee-registry">
+                <EmployeeRegistry
+                  users={users}
+                  groups={groups}
+                  onUpdateUser={updateUser}
+                  onAddGroupMembers={addGroupMembers}
+                  onRemoveGroupMember={removeGroupMember}
+                  onRefetch={refetch}
+                />
+              </TabsContent>
+              <TabsContent value="user-groups">
+                <UserGroups
+                  users={users}
+                  groups={groups}
+                  onAddGroupMembers={addGroupMembers}
+                  onRemoveGroupMember={removeGroupMember}
+                />
+              </TabsContent>
+            </div>
+          </Tabs>
         </div>
       </div>
     </AppLayout>

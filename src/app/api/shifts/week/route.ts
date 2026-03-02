@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { getUserById, getAllTimeTrackingUsers } from '@/lib/services/userService';
+import { adminDb } from '@/lib/firebase-admin';
 import {
   getShiftsByRange,
   getShiftsByUserAndRange,
@@ -9,6 +10,7 @@ import {
 } from '@/lib/services/shiftService';
 import { computeWorkedInWindow } from '@/lib/utils/sessionSegments';
 import type { DecodedIdToken } from 'firebase-admin/auth';
+import type { DocumentSnapshot } from 'firebase-admin/firestore';
 import type { ShiftDocument, TimeEntryLedgerDocument, ActiveSessionDocument } from '@/types/firestore';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -147,14 +149,20 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 
     // ── 2. Fetch ALL time-tracking users (one query) + any extra users
     //       referenced by shifts but not yet in that set ─────────────────
-    const [allTtUsers, shiftUserDocs] = await Promise.all([
+    const shiftUserIds = [...new Set(rawShifts.map(s => s.userId))];
+    const shiftUserRefs = shiftUserIds.map(uid => adminDb.collection('users').doc(uid));
+
+    const [allTtUsers, shiftUserSnaps] = await Promise.all([
       getAllTimeTrackingUsers(),
-      Promise.all(
-        [...new Set(rawShifts.map(s => s.userId))].map(uid =>
-          getUserById(uid).then(u => ({ uid, user: u })),
-        ),
-      ),
+      shiftUserIds.length > 0
+        ? adminDb.getAll(...shiftUserRefs)
+        : Promise.resolve([] as DocumentSnapshot[]),
     ]);
+
+    const shiftUserDocs = shiftUserSnaps.map((snap, i) => ({
+      uid: shiftUserIds[i],
+      user: snap.exists ? snap.data() : null,
+    }));
 
     // Build a unified map: uid → user doc
     const userMap = new Map<string, any>();

@@ -24,8 +24,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
 
     return NextResponse.json({ success: true, message: 'Seed completed' });
   } catch (error: unknown) {
-    console.error('Error seeding data:', error);
-    const msg = error instanceof Error ? error.message : 'Failed to seed data';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    console.error('[admin/seed] error:', error);
+    return NextResponse.json({ error: 'Failed to seed data' }, { status: 500 });
   }
 });

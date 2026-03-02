@@ -4,6 +4,9 @@ import { useState, useMemo } from 'react';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useTimesheetData } from '@/hooks/useTimesheetData';
 import TimesheetView from '@/components/timesheet/TimesheetView';
+import { ChevronDownIcon } from 'lucide-react';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 function toDateString(date: Date): string {
   const y = date.getFullYear();
@@ -29,6 +32,8 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
   const today = toDateString(new Date());
   const [startDate, setStartDate] = useState(addDays(today, -6));
   const [endDate, setEndDate] = useState(today);
+  const [startOpen, setStartOpen] = useState(false);
+  const [endOpen, setEndOpen] = useState(false);
 
   // Filter to users with timeTracking enabled; fall back to all users if none have it set
   const timeTrackedUsers = useMemo(() => {
@@ -61,7 +66,7 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
 
   return (
     <div>
-      <h2 className="text-xl font-semibold mb-4" style={{ color: 'var(--foreground)' }}>
+      <h2 className="text-lg font-semibold tracking-tight mb-4">
         Timesheets
       </h2>
 
@@ -86,26 +91,50 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
 
         <div>
           <label className="form-label block mb-1">Start Date</label>
-          <input
-            type="date"
-            className="form-input"
-            value={startDate}
-            onChange={(e) => { if (e.target.value) setStartDate(e.target.value); }}
-            max={today}
-            required
-          />
+          <Popover open={startOpen} onOpenChange={setStartOpen}>
+            <PopoverTrigger asChild>
+              <button type="button" className="form-input flex items-center justify-between gap-2" style={{ cursor: 'pointer' }}>
+                {startDate}
+                <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={startDate ? new Date(startDate + 'T00:00:00') : undefined}
+                captionLayout="dropdown"
+                disabled={{ after: new Date(today + 'T00:00:00') }}
+                onSelect={(date: Date | undefined) => {
+                  if (date) setStartDate(date.toLocaleDateString('en-CA'));
+                  setStartOpen(false);
+                }}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
 
         <div>
           <label className="form-label block mb-1">End Date</label>
-          <input
-            type="date"
-            className="form-input"
-            value={endDate}
-            onChange={(e) => { if (e.target.value) setEndDate(e.target.value); }}
-            max={today}
-            required
-          />
+          <Popover open={endOpen} onOpenChange={setEndOpen}>
+            <PopoverTrigger asChild>
+              <button type="button" className="form-input flex items-center justify-between gap-2" style={{ cursor: 'pointer' }}>
+                {endDate}
+                <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={endDate ? new Date(endDate + 'T00:00:00') : undefined}
+                captionLayout="dropdown"
+                disabled={{ after: new Date(today + 'T00:00:00') }}
+                onSelect={(date: Date | undefined) => {
+                  if (date) setEndDate(date.toLocaleDateString('en-CA'));
+                  setEndOpen(false);
+                }}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
