@@ -35,6 +35,22 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   const seenIdsRef = useRef<Set<string>>(new Set());
   const initialLoadDoneRef = useRef(false);
 
+  // Unlock audio context on first user interaction (required by autoplay policy)
+  const audioContextRef = useRef<AudioContext | null>(null);
+  useEffect(() => {
+    if (!window.electronAPI?.notifications) return;
+    const unlock = () => {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext();
+      }
+      if (audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume();
+      }
+    };
+    window.addEventListener('click', unlock, { once: true });
+    return () => window.removeEventListener('click', unlock);
+  }, []);
+
   // Register Electron toast click → navigate listener once on mount
   useEffect(() => {
     if (!window.electronAPI?.notifications) return;
@@ -42,8 +58,23 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       router.push(url);
     });
     window.electronAPI.notifications.onPlaySound(() => {
-      const audio = new Audio('/mixkit-message-pop-alert-2354.mp3');
-      audio.play().catch((err) => console.error('[Sound] play error:', err));
+      const ctx = audioContextRef.current;
+      if (ctx) {
+        fetch('/mixkit-message-pop-alert-2354.mp3')
+          .then((r) => r.arrayBuffer())
+          .then((buf) => ctx.decodeAudioData(buf))
+          .then((decoded) => {
+            const source = ctx.createBufferSource();
+            source.buffer = decoded;
+            source.connect(ctx.destination);
+            source.start();
+          })
+          .catch((err) => console.error('[Sound] play error:', err));
+      } else {
+        // Fallback if user hasn't clicked yet
+        const audio = new Audio('/mixkit-message-pop-alert-2354.mp3');
+        audio.play().catch((err) => console.error('[Sound] play error:', err));
+      }
     });
     return () => {
       window.electronAPI?.notifications.removeNavigateListener();
