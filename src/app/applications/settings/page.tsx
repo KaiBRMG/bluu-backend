@@ -19,32 +19,25 @@ export default function Settings() {
           Update your user settings.
         </p>
 
-        <div className="mt-8">
+        <div
+          className="mt-8 rounded-lg"
+          style={{
+            background: 'var(--sidebar-background)',
+            border: '1px solid var(--border-subtle)',
+          }}
+        >
           <Tabs
-            orientation="vertical"
             value={activeSection}
             onValueChange={setActiveSection}
-            className="flex gap-6"
           >
-            <TabsList
-              className="w-56 flex-shrink-0 rounded-lg p-2 h-fit"
-              style={{
-                background: 'var(--sidebar-background)',
-                border: '1px solid var(--border-subtle)',
-              }}
-            >
-              <TabsTrigger value="personal-info">Personal Information</TabsTrigger>
-              <TabsTrigger value="app-settings">App Settings</TabsTrigger>
-            </TabsList>
+            <div className="px-6 pt-4">
+              <TabsList>
+                <TabsTrigger value="personal-info">Personal Information</TabsTrigger>
+                <TabsTrigger value="app-settings">App Settings</TabsTrigger>
+              </TabsList>
+            </div>
 
-            <div
-              className="flex-1 rounded-lg p-6"
-              style={{
-                background: 'var(--sidebar-background)',
-                border: '1px solid var(--border-subtle)',
-                minHeight: '600px',
-              }}
-            >
+            <div className="p-6" style={{ minHeight: '600px' }}>
               <TabsContent value="personal-info"><PersonalInfoForm /></TabsContent>
               <TabsContent value="app-settings">
                 <AppSettingsForm onSectionChange={setActiveSection} />

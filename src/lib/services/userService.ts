@@ -84,18 +84,6 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
     const notifBatch = adminDb.batch();
     notifBatch.set(adminDb.collection('notifications').doc(), {
       userId: userData.uid,
-      title: 'Welcome to Bluu Rock!',
-      message: `Hi ${firstName || userData.displayName}, welcome to the team! You will be assigned to a group by an administrator soon.`,
-      type: 'success',
-      read: false,
-      dismissedByUser: false,
-      createdAt: FieldValue.serverTimestamp(),
-      actionUrl: null,
-      announcement: false,
-      announcementExpiry: null,
-    });
-    notifBatch.set(adminDb.collection('notifications').doc(), {
-      userId: userData.uid,
       title: 'Action Required',
       message: `To complete your onboarding, click here to update your personal information.`,
       type: 'action',
@@ -106,6 +94,19 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
       announcement: false,
       announcementExpiry: null,
     });
+    notifBatch.set(adminDb.collection('notifications').doc(), {
+      userId: userData.uid,
+      title: 'Welcome to Bluu Rock!',
+      message: `Hi ${firstName || userData.displayName}, welcome to the team! You will be assigned to a group soon.`,
+      type: 'success',
+      read: false,
+      dismissedByUser: false,
+      createdAt: FieldValue.serverTimestamp(),
+      actionUrl: null,
+      announcement: false,
+      announcementExpiry: null,
+    });
+
     notifBatch.commit().catch((err) => {
       console.error('[UserService] Failed to create welcome notifications:', err);
     });

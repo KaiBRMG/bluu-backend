@@ -170,13 +170,12 @@ function ClockWidget() {
   // additionalTimezones absent (undefined) = use defaults; [] = user explicitly cleared
   const storedAdditional = userData?.additionalTimezones;
   const primaryOffsetMin = primaryTz ? tzOffsetMinutes(primaryTz) : null;
-  const effectiveAdditional = storedAdditional !== undefined
+  const additionalPool = storedAdditional !== undefined
     ? storedAdditional
-    : DEFAULT_ADDITIONAL_TZS.filter(
-        tz => primaryOffsetMin === null || tzOffsetMinutes(tz) !== primaryOffsetMin
-      );
-
-  const allTzs = primaryTz ? [primaryTz, ...effectiveAdditional] : [];
+    : DEFAULT_ADDITIONAL_TZS;
+  const effectiveAdditional = additionalPool.filter(
+    tz => tz && (primaryOffsetMin === null || tzOffsetMinutes(tz) !== primaryOffsetMin)
+  );
 
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -187,29 +186,34 @@ function ClockWidget() {
   return (
     <Card style={{ background: '#171717' }} className="border-0 shadow-none py-0 gap-0">
       <CardContent className="p-6">
-        {allTzs.length === 0 ? (
+        <div className="flex flex-col gap-2">
+          {/* Primary timezone — always shown; '--:--' if not yet set */}
           <div className="flex items-baseline gap-2">
             <span className="text-2xl font-mono font-semibold" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              --:--
+              {primaryTz ? formatClockTime(primaryTz) : '--:--'}
             </span>
+            {primaryTz ? (
+              <span className="text-sm text-muted-foreground">{shortTzLabel(primaryTz)}</span>
+            ) : (
+              <span className="text-xs" style={{ color: '#DF626E' }}>Time zone not configured</span>
+            )}
           </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {allTzs.map((tz) => (
-              <div key={tz} className="flex items-baseline gap-2">
-                <span
-                  className="text-2xl font-mono font-semibold"
-                  style={{ fontVariantNumeric: 'tabular-nums' }}
-                >
-                  {formatClockTime(tz)}
-                </span>
-                <span className="text-sm text-muted-foreground">
-                  {shortTzLabel(tz)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+
+          {/* Additional clocks */}
+          {effectiveAdditional.map((tz) => (
+            <div key={tz} className="flex items-baseline gap-2">
+              <span
+                className="text-2xl font-mono font-semibold"
+                style={{ fontVariantNumeric: 'tabular-nums' }}
+              >
+                {formatClockTime(tz)}
+              </span>
+              <span className="text-sm text-muted-foreground">
+                {shortTzLabel(tz)}
+              </span>
+            </div>
+          ))}
+        </div>
       </CardContent>
     </Card>
   );
@@ -315,10 +319,21 @@ export default function Home() {
 
         {/* Quick stats or widgets can go here */}
         <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-          <Card style={{ background: '#171717', borderColor: 'transparent' }} className="py-0 gap-0">
+          <Card
+            style={{
+              background: userGroup === 'unassigned' ? 'rgba(223,98,110,0.1)' : '#171717',
+              borderColor: userGroup === 'unassigned' ? 'rgba(223,98,110,0.3)' : 'transparent',
+            }}
+            className="py-0 gap-0"
+          >
             <CardContent className="p-6">
-              <h3 className="text-sm font-medium uppercase tracking-wide mb-2 text-muted-foreground">Team</h3>
+              <h3 className="text-sm font-medium uppercase tracking-wide mb-2 text-muted-foreground">Group</h3>
               <p className="text-2xl font-semibold">{displayGroup}</p>
+              {userGroup === 'unassigned' && (
+                <p className="text-xs mt-2" style={{ color: '#DF626E' }}>
+                  User functionality limited: You are currently not assigned to any groups. Please wait until a system administrator assigns you.
+                </p>
+              )}
             </CardContent>
           </Card>
 
