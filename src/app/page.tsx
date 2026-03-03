@@ -39,7 +39,7 @@ function shortTzLabel(tz: string): string {
   const city = tz.split('/').pop()?.replace(/_/g, ' ') ?? tz;
   const formatter = new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'shortOffset' });
   const gmtPart = formatter.formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value ?? '';
-  // Normalise "GMT+2" → "GMT+2", already correct
+  // Normalise "GMT+2" → "GMT+2", already correct.
   return `${city} ${gmtPart}`;
 }
 
