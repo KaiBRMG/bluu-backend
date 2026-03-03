@@ -41,7 +41,6 @@ export function usePermissions() {
   const { userData } = useUserData();
 
   // Initialize state from cache immediately — no loading flash.
-  // We still fire a background fetch on mount to validate permissionsVersion.
   const [state, setState] = useState<PermissionsState>(() => {
     const cached = getCachedPermissions();
     if (cached) {
@@ -60,9 +59,12 @@ export function usePermissions() {
     };
   });
 
-  // Track previous permittedPageIds to detect real changes
   const prevPermittedRef = useRef<string>('uninitialised');
+  const prevGroupsRef = useRef<string>('uninitialised');
+  const groupFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // fetchPermissions: only needed for initial load and the groups-change fallback.
+  // dep array only on [user] — does not depend on userData.
   const fetchPermissions = useCallback(async () => {
     if (!user) {
       setState({ teamspaces: [], accessiblePages: [], loading: false, error: null });
@@ -100,11 +102,11 @@ export function usePermissions() {
         permissionsVersion: newPermissionsVersion,
       });
 
-      // Sync prevPermittedRef so the permittedPageIds watcher doesn't fire a
-      // redundant local derivation right after this fetch settles.
-      if (userData?.permittedPageIds !== undefined) {
-        prevPermittedRef.current = JSON.stringify(userData.permittedPageIds ?? []);
-      }
+      // Sync prevPermittedRef so the permittedPageIds watcher doesn't re-derive
+      // immediately after this fetch settles (they'd be identical).
+      prevPermittedRef.current = JSON.stringify(
+        newAccessiblePages.map((p: ResolvedAccess) => p.pageId).sort()
+      );
 
       if (isStale || !cachedAfterFetch) {
         setState({
@@ -127,31 +129,37 @@ export function usePermissions() {
         }));
       }
     }
-  }, [user, userData?.permittedPageIds]);
+  }, [user]);
 
-  // Initial fetch on mount — handles first-ever load, backfill of permittedPageIds,
-  // and cache version validation. Does NOT re-run when userData changes.
+  // Initial fetch on mount — handles first-ever load, permittedPageIds backfill,
+  // and cache version validation.
   useEffect(() => {
     if (!user) {
       setState({ teamspaces: [], accessiblePages: [], loading: false, error: null });
       clearPermissionsCache();
       prevPermittedRef.current = 'uninitialised';
+      prevGroupsRef.current = 'uninitialised';
+      if (groupFallbackTimerRef.current) clearTimeout(groupFallbackTimerRef.current);
       return;
     }
     fetchPermissions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, fetchPermissions]);
 
-  // React to permittedPageIds changes pushed via the users/{uid} onSnapshot.
-  // Derives accessible pages locally from static PAGES/TEAMSPACES — 0 extra reads.
-  // This fires after recomputeUserPermissions() has written the final authoritative
-  // value, avoiding the race where groups changes before permittedPageIds is updated.
+  // Primary: react to permittedPageIds changes pushed via the users/{uid} onSnapshot.
+  // Derives accessible pages locally — 0 extra reads. Fires after the server has
+  // finished recomputeUserPermissions(), which is the final authoritative write.
   useEffect(() => {
     if (!user || !userData) return;
 
-    const currentPermitted = JSON.stringify(userData.permittedPageIds ?? []);
+    const currentPermitted = JSON.stringify((userData.permittedPageIds ?? []).slice().sort());
     if (prevPermittedRef.current === currentPermitted) return;
     prevPermittedRef.current = currentPermitted;
+
+    // Cancel any pending groups-fallback fetch — permittedPageIds already updated.
+    if (groupFallbackTimerRef.current) {
+      clearTimeout(groupFallbackTimerRef.current);
+      groupFallbackTimerRef.current = null;
+    }
 
     const ids = new Set(userData.permittedPageIds ?? []);
     const accessiblePages: ResolvedAccess[] = PAGES
@@ -160,9 +168,6 @@ export function usePermissions() {
     const usedTeamspaceIds = new Set(accessiblePages.map(p => p.teamspaceId));
     const teamspaces = TEAMSPACES.filter(t => usedTeamspaceIds.has(t.id));
 
-    // Preserve the existing permissionsVersion — no server round-trip means no new
-    // version. The version will be validated on the next API fetch (page reload or
-    // explicit refetch).
     const cached = getCachedPermissions();
     setCachedPermissions({
       teamspaces,
@@ -171,7 +176,32 @@ export function usePermissions() {
     });
 
     setState({ teamspaces, accessiblePages, loading: false, error: null });
-  }, [user, userData, userData?.permittedPageIds]);
+  }, [user, userData]);
+
+  // Fallback: if groups changed but permittedPageIds hasn't updated after 3 s
+  // (i.e. recomputeUserPermissions failed silently server-side), fetch from the API.
+  useEffect(() => {
+    if (!user || !userData) return;
+
+    const currentGroups = JSON.stringify((userData.groups ?? []).slice().sort());
+    if (prevGroupsRef.current === currentGroups) return;
+    prevGroupsRef.current = currentGroups;
+
+    // Schedule a fallback API fetch. If permittedPageIds arrives first (primary
+    // effect above), it will clear this timer before it fires.
+    if (groupFallbackTimerRef.current) clearTimeout(groupFallbackTimerRef.current);
+    groupFallbackTimerRef.current = setTimeout(() => {
+      groupFallbackTimerRef.current = null;
+      fetchPermissions();
+    }, 3000);
+  }, [user, userData, fetchPermissions]);
+
+  // Clean up fallback timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (groupFallbackTimerRef.current) clearTimeout(groupFallbackTimerRef.current);
+    };
+  }, []);
 
   const canAccess = useCallback(
     (href: string): boolean => {
