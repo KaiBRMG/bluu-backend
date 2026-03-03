@@ -47,32 +47,25 @@ export default function UserManagementPage() {
           See and manage employee data and user groups.
         </p>
 
-        <div className="mt-8">
+        <div
+          className="mt-8 rounded-lg"
+          style={{
+            background: 'var(--sidebar-background)',
+            border: '1px solid var(--border-subtle)',
+          }}
+        >
           <Tabs
-            orientation="vertical"
             value={activeSection}
             onValueChange={setActiveSection}
-            className="flex gap-6"
           >
-            <TabsList
-              className="w-56 flex-shrink-0 rounded-lg p-2 h-fit"
-              style={{
-                background: 'var(--sidebar-background)',
-                border: '1px solid var(--border-subtle)',
-              }}
-            >
-              <TabsTrigger value="employee-registry">Employee Registry</TabsTrigger>
-              <TabsTrigger value="user-groups">User Groups</TabsTrigger>
-            </TabsList>
+            <div className="px-6 pt-4">
+              <TabsList>
+                <TabsTrigger value="employee-registry">Employee Registry</TabsTrigger>
+                <TabsTrigger value="user-groups">User Groups</TabsTrigger>
+              </TabsList>
+            </div>
 
-            <div
-              className="flex-1 rounded-lg p-6"
-              style={{
-                background: 'var(--sidebar-background)',
-                border: '1px solid var(--border-subtle)',
-                minHeight: '600px',
-              }}
-            >
+            <div className="p-6" style={{ minHeight: '600px' }}>
               <TabsContent value="employee-registry">
                 <EmployeeRegistry
                   users={users}

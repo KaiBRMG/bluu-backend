@@ -531,9 +531,6 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
             <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
               Desktop Notifications
             </div>
-            <div className="text-xs italic mt-0.5" style={{ color: 'var(--foreground-secondary)' }}>
-              Show OS-level toast popups when new notifications arrive.
-            </div>
           </div>
           <button
             type="button"
@@ -551,13 +548,10 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
         </div>
 
         {/* Notification Sound */}
-        <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
               Notification Sound
-            </div>
-            <div className="text-xs italic mt-0.5" style={{ color: 'var(--foreground-secondary)' }}>
-              Play a chime when a notification arrives (independent of desktop notifications).
             </div>
           </div>
           <button
@@ -575,30 +569,6 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
           </button>
         </div>
 
-        {/* Shift Reminders */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
-              Shift Reminders
-            </div>
-            <div className="text-xs italic mt-0.5" style={{ color: 'var(--foreground-secondary)' }}>
-              Receive alerts before your scheduled shifts.
-            </div>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={shiftReminders}
-            onClick={() => setShiftReminders((v) => !v)}
-            className="flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none"
-            style={{ background: shiftReminders ? '#3b82f6' : 'var(--border-subtle)' }}
-          >
-            <span
-              className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
-              style={{ transform: shiftReminders ? 'translateX(18px)' : 'translateX(2px)' }}
-            />
-          </button>
-        </div>
       </div>
 
       {/* Footer with Save/Cancel */}
