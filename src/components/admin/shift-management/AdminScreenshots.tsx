@@ -58,7 +58,7 @@ function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
   const [error, setError] = useState<string | null>(null);
 
   const timeTrackedUsers = useMemo(() => {
-    const tracked = users.filter((u) => u.timeTracking === true);
+    const tracked = users.filter((u) => u.permittedPageIds?.includes('time-tracking'));
     return tracked.length > 0 ? tracked : users;
   }, [users]);
 
@@ -361,7 +361,7 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
   const [showBatchDelete, setShowBatchDelete] = useState(false);
 
   const timeTrackedUsers = useMemo(() => {
-    const tracked = users.filter((u) => u.timeTracking === true);
+    const tracked = users.filter((u) => u.permittedPageIds?.includes('time-tracking'));
     return tracked.length > 0 ? tracked : users;
   }, [users]);
 

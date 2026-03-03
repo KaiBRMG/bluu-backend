@@ -91,12 +91,12 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'Invalid startTime/endTime' }, { status: 400 });
     }
 
-    // Validate user exists and has timeTracking enabled
+    // Validate user exists and has access to the time-tracking page
     const targetUser = await getUserById(userId);
     if (!targetUser) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
-    if (!targetUser.timeTracking) {
+    if (!targetUser.permittedPageIds?.includes('time-tracking')) {
       return NextResponse.json({ error: 'User does not have time tracking enabled' }, { status: 400 });
     }
 

@@ -29,20 +29,44 @@ export const POST = withAuth(async (
       return NextResponse.json({ error: 'uids array is required' }, { status: 400 });
     }
 
+    // Fetch current user docs to determine which are in 'unassigned'
+    const userRefs = uids.map(uid => adminDb.collection('users').doc(uid));
+    const userSnaps = await adminDb.getAll(...userRefs);
+    const usersInUnassigned = new Set<string>();
+    for (const snap of userSnaps) {
+      if (snap.exists && (snap.data()?.groups ?? []).includes('unassigned')) {
+        usersInUnassigned.add(snap.id);
+      }
+    }
+
     const batch = adminDb.batch();
 
-    // Add each uid to the group's members array
+    // Add each uid to the target group's members array
     const groupRef = adminDb.collection('groups').doc(groupId);
     batch.update(groupRef, {
       members: FieldValue.arrayUnion(...uids),
     });
 
-    // Add the groupId to each user's groups array
+    // For users currently in 'unassigned', remove them from it
+    if (usersInUnassigned.size > 0) {
+      const unassignedRef = adminDb.collection('groups').doc('unassigned');
+      batch.update(unassignedRef, {
+        members: FieldValue.arrayRemove(...Array.from(usersInUnassigned)),
+      });
+    }
+
+    // Update each user's groups array: add new group, remove 'unassigned' if applicable
     for (const uid of uids) {
       const userRef = adminDb.collection('users').doc(uid);
-      batch.update(userRef, {
-        groups: FieldValue.arrayUnion(groupId),
-      });
+      if (usersInUnassigned.has(uid)) {
+        // arrayUnion + arrayRemove can't be combined on the same field in one update;
+        // build the corrected array directly from the snapshot
+        const currentGroups: string[] = userSnaps.find(s => s.id === uid)?.data()?.groups ?? [];
+        const newGroups = [...new Set([...currentGroups.filter(g => g !== 'unassigned'), groupId])];
+        batch.update(userRef, { groups: newGroups });
+      } else {
+        batch.update(userRef, { groups: FieldValue.arrayUnion(groupId) });
+      }
     }
 
     await batch.commit();
@@ -93,29 +117,37 @@ export const DELETE = withAuth(async (
       return NextResponse.json({ error: 'uid is required' }, { status: 400 });
     }
 
+    // Fetch current user doc to compute remaining groups after removal
+    const userRef = adminDb.collection('users').doc(uid);
+    const userSnap = await userRef.get();
+    const currentGroups: string[] = userSnap.data()?.groups ?? [];
+    const remainingGroups = currentGroups.filter(g => g !== groupId && g !== 'unassigned');
+    const needsUnassigned = remainingGroups.length === 0;
+
     const batch = adminDb.batch();
 
-    // Remove uid from group's members array
+    // Remove uid from the target group's members array
     const groupRef = adminDb.collection('groups').doc(groupId);
-    batch.update(groupRef, {
-      members: FieldValue.arrayRemove(uid),
+    batch.update(groupRef, { members: FieldValue.arrayRemove(uid) });
+
+    // Update user's groups: remove the group, add 'unassigned' if now groupless
+    batch.update(userRef, {
+      groups: needsUnassigned ? ['unassigned'] : remainingGroups,
     });
 
-    // Remove groupId from user's groups array
-    const userRef = adminDb.collection('users').doc(uid);
-    batch.update(userRef, {
-      groups: FieldValue.arrayRemove(groupId),
-    });
+    // If falling back to unassigned, add to that group's members array
+    if (needsUnassigned) {
+      const unassignedRef = adminDb.collection('groups').doc('unassigned');
+      batch.update(unassignedRef, { members: FieldValue.arrayUnion(uid) });
+    }
 
     await batch.commit();
     invalidateUserCache(uid);
 
     // Recompute permittedPageIds for the removed user (non-blocking)
-    // Fetch the updated groups from the user doc after batch commit
-    adminDb.collection('users').doc(uid).get().then(snap => {
-      const userGroups: string[] = snap.data()?.groups ?? [];
-      return recomputeUserPermissions(uid, userGroups);
-    }).catch(err => console.error('[GroupMembers DELETE] Failed to recompute permissions:', err));
+    const updatedGroups = needsUnassigned ? ['unassigned'] : remainingGroups;
+    recomputeUserPermissions(uid, updatedGroups)
+      .catch(err => console.error('[GroupMembers DELETE] Failed to recompute permissions:', err));
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

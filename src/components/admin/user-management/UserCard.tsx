@@ -54,7 +54,7 @@ export default function UserCard({ user, onClick }: UserCardProps) {
   return (
     <div
       onClick={onClick}
-      className="rounded-lg p-4 cursor-pointer transition-colors"
+      className="relative rounded-lg p-4 cursor-pointer transition-colors"
       style={{
         background: 'var(--container-background)',
         border: '1px solid var(--border-subtle)',
@@ -68,6 +68,19 @@ export default function UserCard({ user, onClick }: UserCardProps) {
         e.currentTarget.style.borderColor = 'var(--border-subtle)';
       }}
     >
+      <span
+        className="absolute top-3 right-3 text-xs font-medium px-2 py-0.5 rounded flex items-center gap-1"
+        style={{
+          color: user.isActive !== false ? '#22c55e' : '#ef4444',
+          background: user.isActive !== false ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
+        }}
+      >
+        <span
+          className="inline-block rounded-full"
+          style={{ width: 6, height: 6, background: user.isActive !== false ? '#22c55e' : '#ef4444' }}
+        />
+        {user.isActive !== false ? 'Active' : 'Disabled'}
+      </span>
       <div className="flex items-start gap-3">
         <Avatar style={{ background: getAvatarColor((user.displayName || fullName) || 'User') }}>
           {user.photoURL && <AvatarImage src={user.photoURL} alt={user.displayName || fullName} />}

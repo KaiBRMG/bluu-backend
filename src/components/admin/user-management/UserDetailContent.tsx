@@ -37,6 +37,16 @@ import { Input } from '@/components/ui/input';
 import { ChevronDownIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface UserDetailContentProps {
   user: AdminFullUser;
@@ -120,6 +130,9 @@ export default function UserDetailContent({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isActive, setIsActive] = useState<boolean>(user.isActive ?? true);
+  const [isActiveUpdating, setIsActiveUpdating] = useState(false);
+  const [pendingIsActive, setPendingIsActive] = useState<boolean | null>(null);
 
   // Change detection
   useEffect(() => {
@@ -134,6 +147,24 @@ export default function UserDetailContent({
       return () => clearTimeout(timer);
     }
   }, [saveMessage]);
+
+  const handleIsActiveToggle = (checked: boolean) => {
+    setPendingIsActive(checked);
+  };
+
+  const confirmIsActiveChange = async () => {
+    if (pendingIsActive === null) return;
+    setIsActiveUpdating(true);
+    try {
+      await onUpdateUser(user.uid, { isActive: pendingIsActive });
+      setIsActive(pendingIsActive);
+    } catch (err) {
+      console.error('Failed to update isActive:', err);
+    } finally {
+      setIsActiveUpdating(false);
+      setPendingIsActive(null);
+    }
+  };
 
   const handleChange = (field: keyof FormData, value: string | boolean | string[]) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -252,6 +283,7 @@ export default function UserDetailContent({
   const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.displayName;
 
   return (
+    <>
     <div className="flex flex-col h-[calc(100vh-65px)]">
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {/* User avatar & info header */}
@@ -270,6 +302,26 @@ export default function UserDetailContent({
               {user.workEmail}
             </div>
           </div>
+        </div>
+
+        {/* Account status — instant kill-switch, outside the deferred save form */}
+        <div
+          className="flex items-center justify-between mb-4 px-3 py-2 rounded-lg"
+          style={{ background: isActive ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', border: `1px solid ${isActive ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}` }}
+        >
+          <div>
+            <span className="text-sm font-medium" style={{ color: isActive ? '#22c55e' : '#ef4444' }}>
+              {isActive ? 'Account Active' : 'Account Disabled'}
+            </span>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--foreground-muted)' }}>
+              {isActive ? 'User can access the system' : 'User is blocked from logging in'}
+            </p>
+          </div>
+          <Checkbox
+            checked={isActive}
+            onCheckedChange={(checked) => handleIsActiveToggle(checked === true)}
+            disabled={isActiveUpdating}
+          />
         </div>
 
         <Accordion type="single" defaultValue="identity">
@@ -670,5 +722,29 @@ export default function UserDetailContent({
         </div>
       </div>
     </div>
+      <AlertDialog open={pendingIsActive !== null} onOpenChange={(open) => { if (!open) setPendingIsActive(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingIsActive ? 'Re-enable account access?' : 'Revoke account access?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingIsActive
+                ? `This will restore ${user.firstName || user.displayName}'s access to Bluu Backend. They will be able to log in immediately.`
+                : `This will immediately block ${user.firstName || user.displayName} from logging in. If they are currently logged in, they will be signed out and redirected to an access-revoked screen within seconds. This action can be undone at any time.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmIsActiveChange}
+              style={pendingIsActive === false ? { background: '#ef4444' } : undefined}
+            >
+              {pendingIsActive ? 'Enable Access' : 'Revoke Access'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

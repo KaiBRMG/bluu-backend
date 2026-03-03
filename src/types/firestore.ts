@@ -70,7 +70,6 @@ export interface UserDocument {
   timezone?: string;
   timezoneOffset?: string;
   additionalTimezones?: string[];
-  timeTracking?: boolean;
   hasPaidLeave?: boolean;
   includeIdleTime?: boolean;
   enableScreenshots?: boolean;

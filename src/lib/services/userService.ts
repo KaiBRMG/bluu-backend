@@ -68,7 +68,6 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
       timezone: '',
       timezoneOffset: '',
       hasPaidLeave: false,
-      timeTracking: false,
       includeIdleTime: false,
       enableScreenshots: true,
 
@@ -172,12 +171,12 @@ export async function getUserGroups(uid: string): Promise<string[]> {
 }
 
 /**
- * Returns all user documents where timeTracking === true.
+ * Returns all user documents that have the 'time-tracking' page in their permittedPageIds.
  */
 export async function getAllTimeTrackingUsers(): Promise<any[]> {
   const snap = await adminDb
     .collection('users')
-    .where('timeTracking', '==', true)
+    .where('permittedPageIds', 'array-contains', 'time-tracking')
     .get();
   return snap.docs.map(d => d.data());
 }

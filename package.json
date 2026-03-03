@@ -1,7 +1,4 @@
 {
-  "devDependencies": {
-    "@next/bundle-analyzer": "^16.1.1"
-  },
   "name": "bluu-backend",
   "version": "1.0.0",
   "description": "",

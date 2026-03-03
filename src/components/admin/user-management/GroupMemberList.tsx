@@ -132,22 +132,24 @@ export default function GroupMemberList({
                   </span>
                 )}
               </div>
-              <Button
-                onClick={() => handleRemove(member.uid)}
-                disabled={removingUid === member.uid}
-                variant="ghost"
-                size="icon"
-                className="flex-shrink-0 size-7"
-                style={{
-                  color: removingUid === member.uid ? 'var(--foreground-muted)' : 'var(--foreground-secondary)',
-                }}
-                title="Remove from group"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </Button>
+              {group.id !== 'unassigned' && (
+                <Button
+                  onClick={() => handleRemove(member.uid)}
+                  disabled={removingUid === member.uid}
+                  variant="ghost"
+                  size="icon"
+                  className="flex-shrink-0 size-7"
+                  style={{
+                    color: removingUid === member.uid ? 'var(--foreground-muted)' : 'var(--foreground-secondary)',
+                  }}
+                  title="Remove from group"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </Button>
+              )}
             </div>
           ))
         )}

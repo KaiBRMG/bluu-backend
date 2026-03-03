@@ -170,10 +170,10 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       if (u?.uid) userMap.set(u.uid, u);
     }
     for (const { uid, user } of shiftUserDocs) {
-      if (!userMap.has(uid) && user?.timeTracking === true) userMap.set(uid, user);
+      if (!userMap.has(uid) && user?.permittedPageIds?.includes('time-tracking')) userMap.set(uid, user);
     }
 
-    // All eligible (timeTracking: true) user IDs
+    // All eligible (time-tracking permitted) user IDs
     const eligibleUserIds = new Set(userMap.keys());
 
     // ── 3. Batch-fetch time_entries + active_sessions (2–3 Firestore reads total) ──
@@ -231,7 +231,6 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         timezone:       u?.timezone       ?? 'UTC',
         includeIdleTime: u?.includeIdleTime ?? false,
         groups:         u?.groups         ?? [],
-        timeTracking:   u?.timeTracking   ?? false,
       };
     });
 

@@ -22,3 +22,6 @@ yarn-error.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+# Legacy folder with committed secrets — keep untracked
+Delete/

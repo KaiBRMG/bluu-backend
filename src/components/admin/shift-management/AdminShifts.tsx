@@ -84,7 +84,7 @@ export default function AdminShifts() {
 
   // ── Filter users ──────────────────────────────────────────────────
   const filteredUsers = useMemo(() => {
-    let list = users.filter(u => u.timeTracking);
+    let list = [...users];
     if (groupFilter !== 'all') {
       list = list.filter(u => u.groups.includes(groupFilter));
     }
@@ -390,7 +390,7 @@ export default function AdminShifts() {
           shift={modalState.mode === 'edit' ? modalState.shift : undefined}
           prefillUserId={modalState.mode === 'create' ? modalState.userId : undefined}
           prefillDate={modalState.mode === 'create' ? modalState.date : undefined}
-          users={users.filter(u => u.timeTracking)}
+          users={users}
           onSave={handleSave}
           onDelete={modalState.mode === 'edit' ? handleDelete : undefined}
           onClose={() => setModalState(null)}

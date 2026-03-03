@@ -29,7 +29,7 @@ function Login() {
           throw new Error(data.error || 'Failed to authenticate');
         }
 
-        // Sign in with custom token
+        // Sign in with custom token — AuthProvider will check isActive before setting user
         await signInWithCustomToken(auth, data.customToken);
 
         setLoading(false);
@@ -75,7 +75,11 @@ function Login() {
         await auth.signOut();
         alert('Access denied. Please use your @bluurock.com email address.');
         setLoading(false);
+        return;
       }
+
+      // AuthProvider will check isActive before setting user — no further action needed here
+      setLoading(false);
     } catch (error) {
       console.error('Login error:', error);
       alert('Login failed. Please try again.');

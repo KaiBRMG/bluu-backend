@@ -306,7 +306,7 @@ export default function Home() {
   const userGroup = userData?.groups?.[0] || "unassigned";
   const displayGroup = userGroup.charAt(0).toUpperCase() + userGroup.slice(1);
 
-  const showTimeTracking = userData?.timeTracking === true;
+  const showTimeTracking = userData?.permittedPageIds?.includes('time-tracking') ?? false;
 
   return (
     <AppLayout>

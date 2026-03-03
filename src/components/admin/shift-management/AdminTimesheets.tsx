@@ -35,9 +35,9 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
   const [startOpen, setStartOpen] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
 
-  // Filter to users with timeTracking enabled; fall back to all users if none have it set
+  // Users from useAdminUsers are already filtered server-side to time-tracking-permitted users
   const timeTrackedUsers = useMemo(() => {
-    const tracked = users.filter((u) => u.timeTracking === true);
+    const tracked = users.filter((u) => u.permittedPageIds?.includes('time-tracking'));
     return tracked.length > 0 ? tracked : users;
   }, [users]);
 

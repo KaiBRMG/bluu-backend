@@ -111,10 +111,10 @@ export default function AddMembersDropdown({ group, allUsers, onAdd, onClose }: 
           nonMembers.map((user) => {
             const isSelected = selectedUids.includes(user.uid);
             return (
-              <button
+              <div
                 key={user.uid}
                 onClick={() => toggleUser(user.uid)}
-                className="w-full flex items-center gap-3 px-3 py-2 text-left text-sm transition-colors"
+                className="w-full flex items-center gap-3 px-3 py-2 text-left text-sm transition-colors cursor-pointer"
                 style={{
                   background: isSelected ? 'var(--active-background)' : 'transparent',
                 }}
@@ -143,7 +143,7 @@ export default function AddMembersDropdown({ group, allUsers, onAdd, onClose }: 
                     {user.workEmail}
                   </span>
                 </div>
-              </button>
+              </div>
             );
           })
         )}

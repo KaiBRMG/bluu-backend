@@ -2,23 +2,30 @@
 
 import { useEffect, useRef } from 'react';
 import { useAuth } from './AuthProvider';
+import { useUserData } from '@/hooks/useUserData';
 import Login from './Login';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { auth } from '@/firebase-config';
 
 export default function AuthWrapper({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, revokedRedirect } = useAuth();
+  const { userData, loading: userDataLoading } = useUserData();
   const pathname = usePathname();
+  const router = useRouter();
 
-  // Track login state to prevent unnecessary IPC calls
-  // Only call Electron API when the boolean state actually changes
   const isLoggedIn = !!user;
   const prevIsLoggedInRef = useRef<boolean>(isLoggedIn);
 
-  // Allow auth routes to bypass authentication check
   const isAuthRoute = pathname?.startsWith('/auth/');
 
+  // Redirect to revoked page if AuthProvider detected isActive=false at login time
+  useEffect(() => {
+    if (revokedRedirect) {
+      router.replace('/auth/revoked');
+    }
+  }, [revokedRedirect, router]);
+
   // Control window resizability based on login state
-  // Optimized to only make IPC call when login state changes, not on every user object mutation
   useEffect(() => {
     if (prevIsLoggedInRef.current !== isLoggedIn) {
       prevIsLoggedInRef.current = isLoggedIn;
@@ -34,6 +41,17 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
     }
   }, [isLoggedIn]);
 
+  // Mid-session kill-switch: fires when an admin revokes access while the user is logged in.
+  // useUserData uses onSnapshot — 0 extra reads while isActive stays true.
+  useEffect(() => {
+    if (!user || userDataLoading || isAuthRoute) return;
+    if (userData && userData.isActive === false) {
+      auth.signOut().then(() => {
+        router.replace('/auth/revoked');
+      });
+    }
+  }, [userData, userDataLoading, user, isAuthRoute, router]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-black">
@@ -42,7 +60,6 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
     );
   }
 
-  // Skip auth check for authentication routes
   if (isAuthRoute) {
     return <>{children}</>;
   }

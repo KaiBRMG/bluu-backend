@@ -13,7 +13,6 @@ export interface ShiftUser {
   timezone: string;
   includeIdleTime: boolean;
   groups: string[];
-  timeTracking: boolean;
 }
 
 export interface CreateShiftPayload {

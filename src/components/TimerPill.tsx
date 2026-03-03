@@ -30,7 +30,7 @@ export default function TimerPill() {
   const { displayState, elapsedSeconds, breakRemainingSeconds } = useTimeTracking();
   const router = useRouter();
 
-  if (!userData?.timeTracking) return null;
+  if (!userData?.permittedPageIds?.includes('time-tracking')) return null;
 
   const { color, Icon } = STATE_CONFIG[displayState];
   const isOnBreak = displayState === 'on-break';
