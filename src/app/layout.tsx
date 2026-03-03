@@ -9,6 +9,7 @@ import { UserDataProvider } from "@/hooks/useUserData";
 import { TimeTrackingProvider } from "@/contexts/TimeTrackingContext";
 import { NotificationsProvider } from "@/hooks/useNotifications";
 import AuthWrapper from "@/components/AuthWrapper";
+import ErrorLogger from "@/components/ErrorLogger";
 import { ThemeProvider } from "next-themes";
 
 const geistSans = Geist({
@@ -40,6 +41,7 @@ export default function RootLayout({
         <AuthProvider>
           <NetworkStatusProvider>
             <UserDataProvider>
+              <ErrorLogger />
               <NotificationsProvider>
                 <TimeTrackingProvider>
                   <AuthWrapper>
