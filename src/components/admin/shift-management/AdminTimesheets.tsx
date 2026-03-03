@@ -35,11 +35,7 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
   const [startOpen, setStartOpen] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
 
-  // Users from useAdminUsers are already filtered server-side to time-tracking-permitted users
-  const timeTrackedUsers = useMemo(() => {
-    const tracked = users.filter((u) => u.permittedPageIds?.includes('time-tracking'));
-    return tracked.length > 0 ? tracked : users;
-  }, [users]);
+  const timeTrackedUsers = useMemo(() => users, [users]);
 
   // Validate date range
   const dateError = useMemo(() => {
