@@ -339,7 +339,7 @@ export default function AdminShifts() {
                           {getInitials(user.displayName)}
                         </AvatarFallback>
                       </Avatar>
-                      <span style={{ fontSize: '12px', fontWeight: 400, color: 'var(--foreground)', lineHeight: 1.3 }}>
+                      <span style={{ fontSize: '12px', fontWeight: 400, color: 'var(--foreground)', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
                         {user.displayName}
                       </span>
                     </div>

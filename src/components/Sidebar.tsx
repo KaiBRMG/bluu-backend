@@ -62,7 +62,7 @@ interface SidebarProps {
   accessiblePages: ResolvedAccess[];
   userData: {
     name: string;
-    email: string;
+    groupName: string;
     photoURL?: string | null;
   };
 }

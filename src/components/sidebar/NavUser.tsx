@@ -52,7 +52,7 @@ function getInitials(name: string): string {
 interface NavUserProps {
   user: {
     name: string;
-    email: string;
+    groupName: string;
     photoURL?: string | null;
   };
 }
@@ -92,7 +92,7 @@ export function NavUser({ user }: NavUserProps) {
               <UserAvatarItem name={user.name} photoURL={user.photoURL} />
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">{user.name}</span>
-                <span className="truncate text-xs opacity-60">{user.email}</span>
+                <span className="truncate text-xs opacity-60">{user.groupName}</span>
               </div>
               <IconDotsVertical className="ml-auto size-4" />
             </SidebarMenuButton>
@@ -108,7 +108,7 @@ export function NavUser({ user }: NavUserProps) {
                 <UserAvatarItem name={user.name} photoURL={user.photoURL} />
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-medium">{user.name}</span>
-                  <span className="truncate text-xs opacity-60">{user.email}</span>
+                  <span className="truncate text-xs opacity-60">{user.groupName}</span>
                 </div>
               </div>
             </DropdownMenuLabel>

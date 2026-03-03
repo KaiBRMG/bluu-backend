@@ -6,7 +6,7 @@ import Sidebar from "@/components/Sidebar";
 import TopBar from "@/components/TopBar";
 import { useAuth } from "@/components/AuthProvider";
 import { useUserData } from "@/hooks/useUserData";
-import { usePermissions } from "@/hooks/usePermissions";
+import { usePermissions, getHighestGroupName } from "@/hooks/usePermissions";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 
 interface AppLayoutProps {
@@ -25,7 +25,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   const userData = {
     name: firestoreUserData?.displayName || user?.displayName || "User",
-    email: user?.email || "",
+    groupName: getHighestGroupName(firestoreUserData?.groups ?? []),
     photoURL: firestoreUserData?.photoURL || null,
   };
 
