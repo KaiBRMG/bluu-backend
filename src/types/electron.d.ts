@@ -18,6 +18,8 @@ interface ElectronAPI {
     show: (options: { title: string; body: string; playSound: boolean; actionUrl?: string | null }) => Promise<{ success: boolean }>;
     onNavigate: (callback: (url: string) => void) => void;
     removeNavigateListener: () => void;
+    onPlaySound: (callback: () => void) => void;
+    removePlaySoundListener: () => void;
   };
   onAppClosing: (callback: () => void) => void;
   removeAppClosingListeners: () => void;

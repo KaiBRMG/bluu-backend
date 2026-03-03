@@ -41,8 +41,13 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     window.electronAPI.notifications.onNavigate((url) => {
       router.push(url);
     });
+    window.electronAPI.notifications.onPlaySound(() => {
+      const audio = new Audio('/mixkit-message-pop-alert-2354.mp3');
+      audio.play().catch((err) => console.error('[Sound] play error:', err));
+    });
     return () => {
       window.electronAPI?.notifications.removeNavigateListener();
+      window.electronAPI?.notifications.removePlaySoundListener();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
