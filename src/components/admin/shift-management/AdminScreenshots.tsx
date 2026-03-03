@@ -57,10 +57,7 @@ function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const timeTrackedUsers = useMemo(() => {
-    const tracked = users.filter((u) => u.permittedPageIds?.includes('time-tracking'));
-    return tracked.length > 0 ? tracked : users;
-  }, [users]);
+  const timeTrackedUsers = useMemo(() => users, [users]);
 
   // Fetch screenshot counts for all time-tracked users once they load
   useEffect(() => {
@@ -360,10 +357,7 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
   const [isDeleting, setIsDeleting] = useState(false);
   const [showBatchDelete, setShowBatchDelete] = useState(false);
 
-  const timeTrackedUsers = useMemo(() => {
-    const tracked = users.filter((u) => u.permittedPageIds?.includes('time-tracking'));
-    return tracked.length > 0 ? tracked : users;
-  }, [users]);
+  const timeTrackedUsers = useMemo(() => users, [users]);
 
   // Timezone of the currently selected employee — used for timestamp display
   const selectedUserTimezone = useMemo(() => {
