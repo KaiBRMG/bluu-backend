@@ -6,6 +6,7 @@ import { useUserData } from '@/hooks/useUserData';
 import type { ResolvedAccess } from '@/types/firestore';
 import type { TeamspaceDef } from '@/lib/definitions';
 import { GROUP_HIERARCHY, GROUP_DISPLAY_NAMES } from '@/types/firestore';
+import { PAGES, TEAMSPACES } from '@/lib/definitions';
 import { getCachedPermissions, setCachedPermissions, clearPermissionsCache } from '@/lib/permissionsCache';
 
 interface PermissionsState {
@@ -59,8 +60,8 @@ export function usePermissions() {
     };
   });
 
-  // Track previous groups to detect changes
-  const prevGroupsRef = useRef<string>('');
+  // Track previous permittedPageIds to detect real changes
+  const prevPermittedRef = useRef<string>('uninitialised');
 
   const fetchPermissions = useCallback(async () => {
     if (!user) {
@@ -70,8 +71,6 @@ export function usePermissions() {
     }
 
     try {
-      // Always fetch to check permissionsVersion; only show loading spinner when
-      // there's no cached data to display while the request is in-flight.
       const cached = getCachedPermissions();
       if (!cached) {
         setState(prev => ({ ...prev, loading: true, error: null }));
@@ -91,20 +90,22 @@ export function usePermissions() {
       const newAccessiblePages = data.accessiblePages || [];
       const newPermissionsVersion: number = data.permissionsVersion ?? 0;
 
-      // Check version before updating: if server version is newer than what we
-      // served from cache at init, the cached state is stale — update immediately.
       const cachedAfterFetch = getCachedPermissions();
       const cachedVersion = cachedAfterFetch?.permissionsVersion ?? -1;
       const isStale = newPermissionsVersion > cachedVersion;
 
-      // Update cache — store version so staleness can be detected on next load
       setCachedPermissions({
         teamspaces: newTeamspaces,
         accessiblePages: newAccessiblePages,
         permissionsVersion: newPermissionsVersion,
       });
 
-      // Always update state when versions diverge; otherwise only update if needed
+      // Sync prevPermittedRef so the permittedPageIds watcher doesn't fire a
+      // redundant local derivation right after this fetch settles.
+      if (userData?.permittedPageIds !== undefined) {
+        prevPermittedRef.current = JSON.stringify(userData.permittedPageIds ?? []);
+      }
+
       if (isStale || !cachedAfterFetch) {
         setState({
           teamspaces: newTeamspaces,
@@ -117,7 +118,6 @@ export function usePermissions() {
       }
     } catch (err) {
       console.error('Error fetching permissions:', err);
-      // Only show error if we have no cached data at all
       const cached = getCachedPermissions();
       if (!cached) {
         setState(prev => ({
@@ -127,34 +127,51 @@ export function usePermissions() {
         }));
       }
     }
-  }, [user]);
+  }, [user, userData?.permittedPageIds]);
 
-  // Fetch as soon as user is available — don't wait for userData
+  // Initial fetch on mount — handles first-ever load, backfill of permittedPageIds,
+  // and cache version validation. Does NOT re-run when userData changes.
   useEffect(() => {
     if (!user) {
       setState({ teamspaces: [], accessiblePages: [], loading: false, error: null });
       clearPermissionsCache();
-      prevGroupsRef.current = '';
+      prevPermittedRef.current = 'uninitialised';
       return;
     }
+    fetchPermissions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
-    // First fetch: fire immediately without waiting for userData
-    if (prevGroupsRef.current === '') {
-      prevGroupsRef.current = '[]'; // sentinel to prevent double-fire below
-      fetchPermissions();
-    }
-  }, [user, fetchPermissions]);
-
-  // Re-fetch when groups change (after userData loads)
+  // React to permittedPageIds changes pushed via the users/{uid} onSnapshot.
+  // Derives accessible pages locally from static PAGES/TEAMSPACES — 0 extra reads.
+  // This fires after recomputeUserPermissions() has written the final authoritative
+  // value, avoiding the race where groups changes before permittedPageIds is updated.
   useEffect(() => {
     if (!user || !userData) return;
 
-    const currentGroups = JSON.stringify(userData.groups || []);
-    if (prevGroupsRef.current === currentGroups) return;
+    const currentPermitted = JSON.stringify(userData.permittedPageIds ?? []);
+    if (prevPermittedRef.current === currentPermitted) return;
+    prevPermittedRef.current = currentPermitted;
 
-    prevGroupsRef.current = currentGroups;
-    fetchPermissions();
-  }, [user, userData, fetchPermissions]);
+    const ids = new Set(userData.permittedPageIds ?? []);
+    const accessiblePages: ResolvedAccess[] = PAGES
+      .filter(p => ids.has(p.pageId))
+      .map(p => ({ ...p, grantedVia: 'group' as const }));
+    const usedTeamspaceIds = new Set(accessiblePages.map(p => p.teamspaceId));
+    const teamspaces = TEAMSPACES.filter(t => usedTeamspaceIds.has(t.id));
+
+    // Preserve the existing permissionsVersion — no server round-trip means no new
+    // version. The version will be validated on the next API fetch (page reload or
+    // explicit refetch).
+    const cached = getCachedPermissions();
+    setCachedPermissions({
+      teamspaces,
+      accessiblePages,
+      permissionsVersion: cached?.permissionsVersion ?? 0,
+    });
+
+    setState({ teamspaces, accessiblePages, loading: false, error: null });
+  }, [user, userData, userData?.permittedPageIds]);
 
   const canAccess = useCallback(
     (href: string): boolean => {
