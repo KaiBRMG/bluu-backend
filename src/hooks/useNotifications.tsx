@@ -68,6 +68,8 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       orderBy('createdAt', 'desc'),
     );
 
+    const pendingTimers: ReturnType<typeof setTimeout>[] = [];
+
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
@@ -76,34 +78,39 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
           ...(d.data() as Omit<NotificationDocument, 'id'>),
         }));
 
-        setNotifications(docs);
-        setLoading(false);
+        const delay = initialLoadDoneRef.current ? 0 : 5_000;
+        const timer = setTimeout(() => {
+          setNotifications(docs);
+          setLoading(false);
 
-        // Fire Electron toast + sound for newly arrived unread notifications.
-        // Skip on the very first load (would toast all existing ones on startup).
-        if (initialLoadDoneRef.current) {
-          const prefs = userData?.notificationPreferences;
-          const desktopEnabled = prefs?.desktopEnabled !== false; // default true
-          const soundEnabled = prefs?.soundEnabled !== false;     // default true
+          // Fire Electron toast + sound for newly arrived unread notifications.
+          // Skip on the very first load (would toast all existing ones on startup).
+          if (initialLoadDoneRef.current) {
+            const prefs = userData?.notificationPreferences;
+            const desktopEnabled = prefs?.desktopEnabled !== false; // default true
+            const soundEnabled = prefs?.soundEnabled !== false;     // default true
 
-          for (const doc of docs) {
-            if (!doc.read && !seenIdsRef.current.has(doc.id)) {
-              if ((desktopEnabled || soundEnabled) && window.electronAPI?.notifications) {
-                window.electronAPI.notifications.show({
-                  title: doc.title,
-                  body: doc.message,
-                  playSound: soundEnabled,
-                  actionUrl: doc.actionUrl,
-                });
+            for (const doc of docs) {
+              if (!doc.read && !seenIdsRef.current.has(doc.id)) {
+                if ((desktopEnabled || soundEnabled) && window.electronAPI?.notifications) {
+                  window.electronAPI.notifications.show({
+                    title: doc.title,
+                    body: doc.message,
+                    playSound: soundEnabled,
+                    actionUrl: doc.actionUrl,
+                  });
+                }
               }
             }
+          } else {
+            initialLoadDoneRef.current = true;
           }
-        } else {
-          initialLoadDoneRef.current = true;
-        }
 
-        // Update seen set
-        seenIdsRef.current = new Set(docs.map((d) => d.id));
+          // Update seen set
+          seenIdsRef.current = new Set(docs.map((d) => d.id));
+        }, delay);
+
+        pendingTimers.push(timer);
       },
       (error) => {
         console.error('[useNotifications] Snapshot error:', error);
@@ -111,7 +118,10 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       },
     );
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      pendingTimers.forEach(clearTimeout);
+    };
   // userData.notificationPreferences intentionally omitted — we read it inside the callback
   // via the ref-like closure; adding it would re-subscribe unnecessarily.
   // eslint-disable-next-line react-hooks/exhaustive-deps
