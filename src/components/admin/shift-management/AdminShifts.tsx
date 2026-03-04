@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useShifts, getMondayOfWeek, todayStr } from '@/hooks/useShifts';
+import { useUserData } from '@/hooks/useUserData';
 import type { ShiftUser, CreateShiftPayload, UpdateShiftPayload } from '@/hooks/useShifts';
 import type { ExpandedShift } from '@/lib/utils/recurrence';
 import ShiftCard from './ShiftCard';
@@ -71,7 +72,9 @@ type ModalState =
 // ─── Component ───────────────────────────────────────────────────────
 
 export default function AdminShifts() {
-  const today      = todayStr();
+  const { userData: viewerData } = useUserData();
+  const viewerTimezone = viewerData?.timezone || 'UTC';
+  const today      = todayStr(viewerTimezone);
   const [weekStart, setWeekStart] = useState(() => getMondayOfWeek(today));
   const [weekPickerOpen, setWeekPickerOpen] = useState(false);
   const [groupFilter,    setGroupFilter]    = useState('all');

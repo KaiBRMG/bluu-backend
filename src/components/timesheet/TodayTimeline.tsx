@@ -38,13 +38,16 @@ interface TimelineSegment {
 function getDayBoundsUTC(dateStr: string, timezone: string): { start: number; end: number } {
   const [year, month, day] = dateStr.split('-').map(Number);
   const noonUTC = Date.UTC(year, month - 1, day, 12, 0, 0);
-  const noonFormatter = new Intl.DateTimeFormat('en-US', {
+  const fmt = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
-    hour: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
     hour12: false,
   });
-  const noonHourInTZ = parseInt(noonFormatter.format(new Date(noonUTC)), 10);
-  const offsetMs = (noonHourInTZ - 12) * 60 * 60 * 1000;
+  const parts = fmt.formatToParts(new Date(noonUTC));
+  const noonH = parseInt(parts.find(p => p.type === 'hour')!.value,   10);
+  const noonM = parseInt(parts.find(p => p.type === 'minute')!.value, 10);
+  const offsetMs = ((noonH * 60 + noonM) - (12 * 60)) * 60 * 1000;
   const dayStartUTC = Date.UTC(year, month - 1, day, 0, 0, 0) - offsetMs;
   return { start: dayStartUTC, end: dayStartUTC + 24 * 60 * 60 * 1000 - 1 };
 }

@@ -13,19 +13,30 @@ interface TimesheetViewProps {
   includeIdleTime: boolean;
 }
 
+/**
+ * Returns UTC millisecond bounds for a calendar date (YYYY-MM-DD) as observed
+ * in `timezone`. Handles sub-hour offsets (India +5:30, Nepal +5:45, etc.) and
+ * DST correctly by sampling the actual timezone offset at noon on that day.
+ */
 function getDayBoundsUTC(dateStr: string, timezone: string): { start: number; end: number } {
   const [year, month, day] = dateStr.split('-').map(Number);
+
   const noonUTC = Date.UTC(year, month - 1, day, 12, 0, 0);
-  const noonFormatter = new Intl.DateTimeFormat('en-US', {
+  const fmt = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
-    hour: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
     hour12: false,
   });
-  const noonHourInTZ = parseInt(noonFormatter.format(new Date(noonUTC)), 10);
-  const offsetHours = noonHourInTZ - 12;
-  const offsetMs = offsetHours * 60 * 60 * 1000;
+  const parts = fmt.formatToParts(new Date(noonUTC));
+  const noonHourInTZ   = parseInt(parts.find(p => p.type === 'hour')!.value,   10);
+  const noonMinuteInTZ = parseInt(parts.find(p => p.type === 'minute')!.value, 10);
+
+  const offsetMinutes = (noonHourInTZ * 60 + noonMinuteInTZ) - (12 * 60);
+  const offsetMs = offsetMinutes * 60 * 1000;
+
   const dayStartUTC = Date.UTC(year, month - 1, day, 0, 0, 0) - offsetMs;
-  const dayEndUTC = dayStartUTC + 24 * 60 * 60 * 1000 - 1;
+  const dayEndUTC   = dayStartUTC + 24 * 60 * 60 * 1000 - 1;
   return { start: dayStartUTC, end: dayEndUTC };
 }
 

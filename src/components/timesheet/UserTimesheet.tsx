@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useTimesheetData } from '@/hooks/useTimesheetData';
+import { useUserData } from '@/hooks/useUserData';
 import TimesheetView from './TimesheetView';
 import { RefreshCcw, ChevronDownIcon } from 'lucide-react';
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,9 @@ function addDays(dateStr: string, days: number): string {
 }
 
 export default function UserTimesheet() {
+  const { userData } = useUserData();
+  const userTimezone = userData?.timezone || 'UTC';
+
   const yesterday = useMemo(() => addDays(toDateString(new Date()), -1), []);
   const [selectedDate, setSelectedDate] = useState(yesterday);
   const [dateOpen, setDateOpen] = useState(false);
@@ -34,7 +38,7 @@ export default function UserTimesheet() {
     endDate: selectedDate,
   }), [selectedDate]);
 
-  const { entries, timezone, includeIdleTime, loading, error } = useTimesheetData(null, startDate, endDate);
+  const { entries, timezone, includeIdleTime, loading, error } = useTimesheetData(null, startDate, endDate, userTimezone);
 
   return (
     <div

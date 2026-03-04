@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useAdminScreenshots, ScreenshotGroup } from '@/hooks/useAdminScreenshots';
 import { useAuth } from '@/components/AuthProvider';
+import { useUserData } from '@/hooks/useUserData';
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ChevronDownIcon } from 'lucide-react';
@@ -346,6 +347,8 @@ function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
 export default function AdminScreenshots({ selectedUserId, onUserChange }: AdminScreenshotsProps) {
   const { user } = useAuth();
   const { users, loading: usersLoading } = useAdminUsers();
+  const { userData: viewerData } = useUserData();
+  const viewerTimezone = viewerData?.timezone || 'UTC';
   const today = toDateString(new Date());
 
   const [selectedDate, setSelectedDate] = useState(today);
@@ -359,15 +362,10 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
 
   const timeTrackedUsers = useMemo(() => users, [users]);
 
-  // Timezone of the currently selected employee — used for timestamp display
-  const selectedUserTimezone = useMemo(() => {
-    if (!selectedUserId) return 'UTC';
-    return users.find((u) => u.uid === selectedUserId)?.timezone || 'UTC';
-  }, [users, selectedUserId]);
-
   const { groups, loading, error, refetch } = useAdminScreenshots(
     selectedUserId,
     selectedDate,
+    viewerTimezone,
   );
 
   // Clear selection when user or date changes
@@ -617,7 +615,7 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
                     className="text-xs mt-1 text-center"
                     style={{ color: 'var(--foreground-muted)' }}
                   >
-                    {formatTime(group.timestampUTC, selectedUserTimezone)} &bull; {group.screenCount} screen{group.screenCount !== 1 ? 's' : ''}
+                    {formatTime(group.timestampUTC, viewerTimezone)} &bull; {group.screenCount} screen{group.screenCount !== 1 ? 's' : ''}
                   </p>
                 </div>
               );
@@ -688,7 +686,7 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
               onLoad={() => setModalImageLoaded(true)}
             />
             <p className="text-white mt-3 text-sm">
-              {formatTime(currentModalGroup.timestampUTC, selectedUserTimezone)}
+              {formatTime(currentModalGroup.timestampUTC, viewerTimezone)}
               {currentModalGroup.screenCount > 1 && (
                 <span style={{ color: 'rgba(255,255,255,0.6)' }}>
                   {' '}&bull; Screen {currentModalScreen.screenIndex + 1} of {currentModalGroup.screenCount}

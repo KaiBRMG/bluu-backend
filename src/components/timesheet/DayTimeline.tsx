@@ -30,50 +30,38 @@ interface DayTimelineProps {
   timezone: string;
 }
 
+/**
+ * Returns UTC millisecond bounds for a calendar date (YYYY-MM-DD) as observed
+ * in `timezone`. Handles sub-hour offsets (India +5:30, Nepal +5:45, etc.) and
+ * DST correctly by sampling the actual timezone offset at noon on that day.
+ *
+ * Strategy: format noon-UTC as H and M in the target timezone, compute the
+ * exact offset in minutes (including sub-hour), then derive day-start UTC.
+ * Noon is used because it is far from both midnight boundaries, so a single
+ * DST transition within the day does not affect the noon offset we read.
+ */
 function getDayBoundsUTC(dateStr: string, timezone: string): { start: number; end: number } {
-  // Compute the UTC millisecond for 00:00:00 and 23:59:59.999 of the given date in the user's timezone
-  // Parse the date string as year/month/day
   const [year, month, day] = dateStr.split('-').map(Number);
 
-  // Create a date string that represents midnight in the target timezone
-  // Use the Intl API to find the UTC offset at that point
-  const midnightLocal = new Date(`${dateStr}T00:00:00`);
-
-  // Get the timezone offset by formatting and parsing
-  const formatter = new Intl.DateTimeFormat('en-US', {
+  // Sample the offset at noon UTC → what H:M does the timezone show?
+  const noonUTC = Date.UTC(year, month - 1, day, 12, 0, 0);
+  const fmt = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit',
     hour12: false,
   });
+  const parts = fmt.formatToParts(new Date(noonUTC));
+  const noonHourInTZ   = parseInt(parts.find(p => p.type === 'hour')!.value,   10);
+  const noonMinuteInTZ = parseInt(parts.find(p => p.type === 'minute')!.value, 10);
 
-  // Use a known UTC time and see what it maps to in the timezone to compute offset
-  // Instead, construct the start-of-day using a reliable method:
-  // Create dates and check using timezone formatting
-  const parts = formatter.formatToParts(midnightLocal);
-  const getPart = (type: string) => parts.find(p => p.type === type)?.value || '0';
+  // offset = local noon − UTC noon, in minutes (positive = east of UTC)
+  const offsetMinutes = (noonHourInTZ * 60 + noonMinuteInTZ) - (12 * 60);
+  const offsetMs = offsetMinutes * 60 * 1000;
 
-  // We need to find the UTC timestamp where the given timezone reads as YYYY-MM-DD 00:00:00
-  // Binary approach is complex; instead use a simpler method:
-  // Create a date at noon UTC on that day, then adjust based on the timezone offset
-  const noonUTC = Date.UTC(year, month - 1, day, 12, 0, 0);
-  const noonFormatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    hour: 'numeric',
-    hour12: false,
-  });
-  const noonHourInTZ = parseInt(noonFormatter.format(new Date(noonUTC)), 10);
-  // offset in hours: if noon UTC shows as 17 in timezone, offset is +5
-  const offsetHours = noonHourInTZ - 12;
-  const offsetMs = offsetHours * 60 * 60 * 1000;
-
-  // Start of day in UTC = midnight in timezone = midnight local - offset
+  // UTC timestamp of midnight in the target timezone for that calendar date
   const dayStartUTC = Date.UTC(year, month - 1, day, 0, 0, 0) - offsetMs;
-  const dayEndUTC = dayStartUTC + 24 * 60 * 60 * 1000 - 1; // 23:59:59.999
+  const dayEndUTC   = dayStartUTC + 24 * 60 * 60 * 1000 - 1; // 23:59:59.999
 
   return { start: dayStartUTC, end: dayEndUTC };
 }

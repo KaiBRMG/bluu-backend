@@ -32,23 +32,24 @@ interface UseAdminScreenshotsReturn {
 
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-function cacheKey(userId: string, date: string): string {
-  return `bluu_screenshots_v1:${userId}:${date}`;
+function cacheKey(userId: string, date: string, timezone: string): string {
+  return `bluu_screenshots_v1:${userId}:${date}:${timezone}`;
 }
 
 export function useAdminScreenshots(
   userId: string | null,
   date: string | null,
+  timezone = 'UTC',
 ): UseAdminScreenshotsReturn {
   const { user } = useAuth();
   const [groups, setGroups] = useState<ScreenshotGroup[]>(() => {
     if (!userId || !date) return [];
-    const cached = getCache<ScreenshotsCacheData>(cacheKey(userId, date), CACHE_TTL_MS);
+    const cached = getCache<ScreenshotsCacheData>(cacheKey(userId, date, timezone), CACHE_TTL_MS);
     return cached?.groups ?? [];
   });
   const [loading, setLoading] = useState<boolean>(() => {
     if (!userId || !date) return false;
-    const cached = getCache<ScreenshotsCacheData>(cacheKey(userId, date), CACHE_TTL_MS);
+    const cached = getCache<ScreenshotsCacheData>(cacheKey(userId, date, timezone), CACHE_TTL_MS);
     return !cached;
   });
   const [error, setError] = useState<string | null>(null);
@@ -59,8 +60,10 @@ export function useAdminScreenshots(
       return;
     }
 
+    const key = cacheKey(userId, date, timezone);
+
     if (!forceRefresh) {
-      const cached = getCache<ScreenshotsCacheData>(cacheKey(userId, date), CACHE_TTL_MS);
+      const cached = getCache<ScreenshotsCacheData>(key, CACHE_TTL_MS);
       if (cached) {
         setGroups(cached.groups);
         setLoading(false);
@@ -72,7 +75,7 @@ export function useAdminScreenshots(
     setError(null);
     try {
       const idToken = await user.getIdToken();
-      const params = new URLSearchParams({ userId, date });
+      const params = new URLSearchParams({ userId, date, timezone });
 
       const res = await fetch(`/api/time-tracking/screenshots?${params}`, {
         headers: { Authorization: `Bearer ${idToken}` },
@@ -83,7 +86,7 @@ export function useAdminScreenshots(
       }
       const data = await res.json();
       const fetched: ScreenshotGroup[] = data.groups || [];
-      setCache<ScreenshotsCacheData>(cacheKey(userId, date), { groups: fetched });
+      setCache<ScreenshotsCacheData>(key, { groups: fetched });
       setGroups(fetched);
     } catch (err) {
       console.error('[useAdminScreenshots] Fetch failed:', err);
@@ -91,7 +94,7 @@ export function useAdminScreenshots(
     } finally {
       setLoading(false);
     }
-  }, [user, userId, date]);
+  }, [user, userId, date, timezone]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useTimesheetData } from '@/hooks/useTimesheetData';
+import { useUserData } from '@/hooks/useUserData';
 import TimesheetView from '@/components/timesheet/TimesheetView';
 import { ChevronDownIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
@@ -29,6 +30,8 @@ interface AdminTimesheetsProps {
 
 export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminTimesheetsProps) {
   const { users, loading: usersLoading } = useAdminUsers();
+  const { userData: viewerData } = useUserData();
+  const viewerTimezone = viewerData?.timezone || 'UTC';
   const today = toDateString(new Date());
   const [startDate, setStartDate] = useState(addDays(today, -6));
   const [endDate, setEndDate] = useState(today);
@@ -58,6 +61,7 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
     selectedUserId,
     dateError ? null : startDate,
     dateError ? null : endDate,
+    viewerTimezone,
   );
 
   return (
@@ -150,7 +154,7 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
       ) : !dateError ? (
         <TimesheetView
           entries={entries}
-          timezone={timezone}
+          timezone={viewerTimezone}
           startDate={startDate}
           endDate={endDate}
           loading={entriesLoading}

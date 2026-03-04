@@ -58,9 +58,14 @@ export function getMondayOfWeek(dateStr: string): string {
   return monday.toISOString().slice(0, 10);
 }
 
-/** Today's date as YYYY-MM-DD. */
-export function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+/** Today's date as YYYY-MM-DD in the given IANA timezone (defaults to UTC). */
+export function todayStr(timezone = 'UTC'): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
 }
 
 export function useShifts(weekStart: string) {

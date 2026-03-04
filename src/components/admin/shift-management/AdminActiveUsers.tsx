@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useActiveUsers } from '@/hooks/useActiveUsers';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
+import { useUserData } from '@/hooks/useUserData';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 
 const AVATAR_COLORS = [
@@ -50,6 +51,8 @@ function formatTime(date: Date, timezone?: string): string {
 export default function AdminActiveUsers() {
   const { activeSessions, isLoading: sessionsLoading } = useActiveUsers();
   const { users, groups, loading: usersLoading, refetch } = useAdminUsers();
+  const { userData: viewerData } = useUserData();
+  const viewerTimezone = viewerData?.timezone || 'UTC';
   const [selectedGroup, setSelectedGroup] = useState<string>('all');
 
   const userMap = useMemo(() => {
@@ -144,7 +147,7 @@ export default function AdminActiveUsers() {
                     {displayName}
                   </div>
                   <div className="text-xs mt-0.5" style={{ color: 'var(--foreground-muted)' }}>
-                    Clock-in time: {formatTime(session.startTime, user?.timezone)}
+                    Clock-in time: {formatTime(session.startTime, viewerTimezone)}
                   </div>
                 </div>
 
@@ -169,7 +172,7 @@ export default function AdminActiveUsers() {
                   className="text-xs flex-shrink-0"
                   style={{ color: 'var(--foreground-muted)', minWidth: '130px', textAlign: 'right' }}
                 >
-                  Last activity at {formatTime(session.lastUpdated, user?.timezone)}
+                  Last activity at {formatTime(session.lastUpdated, viewerTimezone)}
                 </div>
               </div>
             );

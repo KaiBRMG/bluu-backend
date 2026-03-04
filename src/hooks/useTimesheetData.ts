@@ -32,8 +32,8 @@ interface UseTimesheetDataReturn {
 // when the user immediately navigates back to the page.
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-function cacheKey(uid: string, userId: string | null, startDate: string, endDate: string): string {
-  return `bluu_timesheet_v1:${uid}:${userId ?? 'self'}:${startDate}:${endDate}`;
+function cacheKey(uid: string, userId: string | null, startDate: string, endDate: string, timezone: string): string {
+  return `bluu_timesheet_v1:${uid}:${userId ?? 'self'}:${startDate}:${endDate}:${timezone}`;
 }
 
 function readCache(key: string): CachedTimesheetData | null {
@@ -77,6 +77,7 @@ export function useTimesheetData(
   userId: string | null,
   startDate: string | null,
   endDate: string | null,
+  viewerTimezone = 'UTC',
 ): UseTimesheetDataReturn {
   const { user } = useAuth();
   const [entries, setEntries] = useState<TimesheetEntry[]>([]);
@@ -88,7 +89,7 @@ export function useTimesheetData(
   const fetchData = useCallback(async (forceRefresh = false) => {
     if (!user || !startDate || !endDate) return;
 
-    const key = cacheKey(user.uid, userId, startDate, endDate);
+    const key = cacheKey(user.uid, userId, startDate, endDate, viewerTimezone);
 
     // Serve from cache on re-navigation unless caller explicitly requests refresh
     if (!forceRefresh) {
@@ -105,7 +106,7 @@ export function useTimesheetData(
     setError(null);
     try {
       const idToken = await user.getIdToken();
-      const params = new URLSearchParams({ startDate, endDate });
+      const params = new URLSearchParams({ startDate, endDate, timezone: viewerTimezone });
       if (userId) params.set('userId', userId);
 
       const res = await fetch(`/api/time-tracking/entries?${params}`, {
@@ -130,7 +131,7 @@ export function useTimesheetData(
     } finally {
       setLoading(false);
     }
-  }, [user, userId, startDate, endDate]);
+  }, [user, userId, startDate, endDate, viewerTimezone]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

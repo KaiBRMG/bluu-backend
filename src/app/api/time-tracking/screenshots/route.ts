@@ -7,8 +7,11 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
     const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('userId');
-    const date = searchParams.get('date');
+    const userId   = searchParams.get('userId');
+    const date     = searchParams.get('date');
+    // Viewer's IANA timezone — used to interpret the calendar date correctly.
+    // Defaults to UTC so the API stays backward-compatible.
+    const timezone = searchParams.get('timezone') || 'UTC';
 
     if (!userId || !date) {
       return NextResponse.json({ error: 'userId and date required' }, { status: 400 });
@@ -27,7 +30,7 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       }
     }
 
-    const rows = await getScreenshotsByDate(userId, date);
+    const rows = await getScreenshotsByDate(userId, date, timezone);
 
     // Group by captureGroup
     const groupMap = new Map<string, ScreenshotRow[]>();
