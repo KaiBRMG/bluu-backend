@@ -165,7 +165,7 @@ function buildSegments(events: SessionEvent[], nowMs: number): TimelineSegment[]
 const HOUR_MARKERS = [0, 6, 12, 18, 24];
 
 export default function TodayTimeline() {
-  const { sessionId, displayState, elapsedSeconds, breakRemainingSeconds } = useTimeTracking();
+  const { sessionId, displayState } = useTimeTracking();
   const { userData } = useUserData();
   const timezone = userData?.timezone || 'UTC';
   const includeIdleTime = userData?.includeIdleTime ?? false;
@@ -182,10 +182,10 @@ export default function TodayTimeline() {
     setLastRefreshed(Date.now());
   }, [timezone]);
 
-  // Reload when the active session ticks (new events) or on demand
+  // Reload when the session changes or a state transition appends new buffer events
   useEffect(() => {
     loadBuffers();
-  }, [loadBuffers, sessionId, elapsedSeconds, breakRemainingSeconds]);
+  }, [loadBuffers, sessionId, displayState]);
 
   // Keep `now` in sync for live open-segment rendering
   useEffect(() => {
