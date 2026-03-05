@@ -27,7 +27,7 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
     await userRef.set({
       uid: userData.uid,
       workEmail: userData.workEmail,
-      displayName: userData.displayName,
+      displayName: firstName || '',
       photoURL: null,
       firstName: firstName || '',
       lastName: lastName || '',

@@ -41,6 +41,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     removeNavigateListener: () => {
       ipcRenderer.removeAllListeners('notification:navigate');
     },
+    onPlaySound: (callback) => {
+      ipcRenderer.on('notifications:play-sound', () => callback());
+    },
+    removePlaySoundListener: () => {
+      ipcRenderer.removeAllListeners('notifications:play-sound');
+    },
   },
 
   // App lifecycle
@@ -49,5 +55,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   removeAppClosingListeners: () => {
     ipcRenderer.removeAllListeners('app-closing');
+  },
+
+  // Bug reporting — main process forwards errors here so renderer can POST to /api/bugs
+  bugs: {
+    onReport: (callback) => {
+      ipcRenderer.on('bug:report', (_event, payload) => callback(payload));
+    },
+    removeReportListener: () => {
+      ipcRenderer.removeAllListeners('bug:report');
+    },
   }
 });

@@ -1,0 +1,98 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: authenticated Firebase user only.
+    // Domain enforcement happens at token issuance (exchange-code route),
+    // so we do not repeat the email regex here — it costs a string match
+    // on every rule evaluation and the token was already validated server-side.
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Helper: Check if the authenticated user has the 'admin' group.
+    // Costs 1 billable read per rule evaluation — acceptable here because
+    // this path is only hit by the client-side useUserData listener, which
+    // fires infrequently (on mount and reconnect), not on every action.
+    // TODO: move admin role to Custom JWT Claims (request.auth.token.admin == true)
+    // in the exchange-code route to make this $0 cost.
+    function isAdmin() {
+      return isSignedIn() &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.groups.hasAny(['admin']);
+    }
+
+    // 1. Users collection
+    // Client listener: hooks/useUserData.ts (onSnapshot users/{uid})
+    // Admin panel reads other users' docs via the listener — needs isAdmin() bypass.
+    // Writes: Admin SDK only (API routes bypass these rules)
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if false;
+    }
+
+    // 2. Groups collection
+    // No client-side listeners; read via API routes (Admin SDK).
+    // Keeping a permissive read rule here in case a future client listener
+    // needs it, but writes remain server-only.
+    match /groups/{groupId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // 3. Page permissions collection
+    // Client listener: hooks/useAdminData.ts (onSnapshot page-permissions)
+    // Full collection read — authenticated users only.
+    match /page-permissions/{pageId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // 4. Time entries
+    // No client-side listeners currently. All reads/writes go through API routes
+    // (Admin SDK). Rules defined here for defence-in-depth and future listeners.
+    // Admin access to other users' entries is handled entirely via Admin SDK
+    // in API routes, so we do not need an isAdmin() bypass here.
+    // NOTE: If you add client-side listeners for admin timesheet views, move
+    // admin role checking to Custom JWT Claims (request.auth.token.admin == true)
+    // to avoid billable get() calls inside rules.
+    match /time-entries/{entryId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // 5. Screenshots
+    // Same pattern as time-entries.
+    match /screenshots/{screenshotId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // 6. Active sessions (new session model)
+    // Client-side onSnapshot used by useActiveUsers (admin panel).
+    // User reads own doc; admin reads all. Writes via Admin SDK only.
+    // NOTE: isAdmin() costs 1 read per evaluation — acceptable because the
+    // admin listener fires infrequently. Move to JWT claims if volume grows.
+    match /active_sessions/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if false;
+    }
+
+    // 7. Time entries ledger (new session model)
+    // All reads/writes via Admin SDK (API routes + Cloud Function).
+    // User reads own completed sessions; admin reads all.
+    match /time_entries/{sessionId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
+
+    // 8. Notifications
+    // Client listener: hooks/useNotifications.tsx (onSnapshot notifications)
+    // Users may only read their own notifications. Writes (mark-read, dismiss)
+    // go through API routes (Admin SDK) so client write remains denied.
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+  }
+}

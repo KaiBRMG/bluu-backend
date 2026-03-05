@@ -1,0 +1,49 @@
+{
+  "name": "bluu-backend",
+  "version": "0.1.0",
+  "description": "Bluu Rock MGMT SaaS",
+  "author": "BluuRockMGMT",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "pack": "electron-builder --dir",
+    "dev": "cross-env ELECTRON_DEV=true electron ."
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2",
+    "glob": "^13.0.6"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0",
+    "electron": "^39.2.6",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.bluu.app",
+    "productName": "Bluu Backend",
+    "files": [
+      "main.js",
+      "preload.js",
+      "public/logo/icon.icns",
+      "public/logo/icon.ico",
+      "public/mixkit-message-pop-alert-2354.mp3",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "public/logo"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "public/logo/icon.icns",
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "public/logo/icon.ico"
+    }
+  }
+}

@@ -1,9 +1,8 @@
 // electron/main.js
 const { app, BrowserWindow, shell, nativeImage, ipcMain, powerMonitor, desktopCapturer, Notification } = require('electron');
-const { exec } = require('child_process');
 const path = require('path');
 
-const isDev = process.env.ELECTRON_DEV === 'true' || process.env.NODE_ENV !== 'production';
+const isDev = process.env.ELECTRON_DEV === 'true' || !app.isPackaged;
 
 // Custom protocol for OAuth callback
 const PROTOCOL = 'bluu';
@@ -164,15 +163,8 @@ ipcMain.handle('notifications:show', async (_event, { title, body, playSound, ac
     notif.show();
   }
 
-  if (playSound) {
-    const soundPath = path.join(__dirname, '../public/mixkit-message-pop-alert-2354.mp3');
-    if (process.platform === 'darwin') {
-      exec(`afplay "${soundPath}"`);
-    } else if (process.platform === 'win32') {
-      exec(`powershell -c (New-Object Media.SoundPlayer "${soundPath}").PlaySync()`);
-    } else {
-      exec(`aplay "${soundPath}" 2>/dev/null || paplay "${soundPath}" 2>/dev/null`);
-    }
+  if (playSound && mainWindow) {
+    mainWindow.webContents.send('notifications:play-sound');
   }
 
   return { success: true };
@@ -196,7 +188,7 @@ ipcMain.on('window:set-size', (_event, width, height) => {
 
 function createWindow() {
   // Set app icon for macOS dock
-  const iconPath = path.join(__dirname, '../public/logo/icon.icns');
+  const iconPath = path.join(__dirname, './public/logo/icon.icns');
   if (process.platform === 'darwin') {
     const image = nativeImage.createFromPath(iconPath);
     app.dock.setIcon(image);
@@ -266,6 +258,25 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+// Forward main-process errors to the renderer so they reach the /api/bugs route
+function forwardErrorToRenderer(context, message, stack) {
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send('bug:report', { context, message, stack });
+  }
+}
+
+process.on('uncaughtException', (err) => {
+  console.error('[main] uncaughtException:', err);
+  forwardErrorToRenderer('electron:main:uncaughtException', err.message, err.stack);
+});
+
+process.on('unhandledRejection', (reason) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  const stack = reason instanceof Error ? reason.stack : undefined;
+  console.error('[main] unhandledRejection:', reason);
+  forwardErrorToRenderer('electron:main:unhandledRejection', message, stack);
 });
 
 // Notify renderer before quitting so it can clock out k

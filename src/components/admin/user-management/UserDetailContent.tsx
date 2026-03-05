@@ -355,7 +355,7 @@ export default function UserDetailContent({
             </div>
 
             <div>
-              <label className="form-label block mb-1">Display Name</label>
+              <label className="form-label block mb-1">Preferred Nickname</label>
               <Input
                 type="text"
                 className="form-input w-full"
