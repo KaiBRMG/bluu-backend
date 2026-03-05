@@ -248,10 +248,37 @@ export default function TodayTimeline() {
     day: 'numeric',
   });
 
+  // For each segment, compute the tooltip time range by merging consecutive
+  // same-kind segments whose boundary falls within the same minute.
+  const tooltipRanges = useMemo(() => {
+    return allSessionSegments.map(segments => {
+      const starts = segments.map(s => s.startMs);
+      const ends = segments.map(s => s.endMs);
+      for (let i = segments.length - 1; i > 0; i--) {
+        const prev = segments[i - 1];
+        const curr = segments[i];
+        if (
+          prev.kind === curr.kind &&
+          Math.floor(prev.endMs / 60000) === Math.floor(curr.startMs / 60000)
+        ) {
+          starts[i] = starts[i - 1];
+          ends[i - 1] = ends[i];
+        }
+      }
+      return { starts, ends };
+    });
+  }, [allSessionSegments]);
+
   const hoveredSeg = (() => {
     if (!hoveredKey) return null;
     const [bi, si] = hoveredKey.split('-').map(Number);
-    return allSessionSegments[bi]?.[si] ?? null;
+    const seg = allSessionSegments[bi]?.[si];
+    if (!seg) return null;
+    return {
+      kind: seg.kind,
+      startMs: tooltipRanges[bi]?.starts[si] ?? seg.startMs,
+      endMs: tooltipRanges[bi]?.ends[si] ?? seg.endMs,
+    };
   })();
 
   return (

@@ -22,6 +22,9 @@ interface Segment {
   state: TimeEntryState;
   startTime: Date;
   endTime: Date;
+  // For tooltip: may span multiple merged entries
+  tooltipStartTime: Date;
+  tooltipEndTime: Date;
 }
 
 interface DayTimelineProps {
@@ -103,7 +106,22 @@ export default function DayTimeline({ date, entries, timezone }: DayTimelineProp
         state: entry.state,
         startTime: new Date(clampedStart),
         endTime: new Date(clampedEnd),
+        tooltipStartTime: new Date(clampedStart),
+        tooltipEndTime: new Date(clampedEnd),
       });
+    }
+
+    // Merge consecutive segments of the same state where the boundary falls within the same minute
+    for (let i = segs.length - 1; i > 0; i--) {
+      const prev = segs[i - 1];
+      const curr = segs[i];
+      if (
+        prev.state === curr.state &&
+        Math.floor(prev.endTime.getTime() / 60000) === Math.floor(curr.startTime.getTime() / 60000)
+      ) {
+        prev.tooltipEndTime = curr.tooltipEndTime;
+        curr.tooltipStartTime = prev.tooltipStartTime;
+      }
     }
 
     return { segments: segs, dayStart: start, dayDuration: duration };
@@ -156,7 +174,7 @@ export default function DayTimeline({ date, entries, timezone }: DayTimelineProp
             <span className="font-medium">{STATE_LABELS[segments[hoveredIndex].state]}</span>
           </div>
           <div style={{ color: 'var(--foreground-secondary)' }}>
-            {formatTimeInTZ(segments[hoveredIndex].startTime, timezone)} — {formatTimeInTZ(segments[hoveredIndex].endTime, timezone)}
+            {formatTimeInTZ(segments[hoveredIndex].tooltipStartTime, timezone)} — {formatTimeInTZ(segments[hoveredIndex].tooltipEndTime, timezone)}
           </div>
         </div>
       )}
