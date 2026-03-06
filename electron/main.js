@@ -256,6 +256,8 @@ function createWindow() {
 
 function initAutoUpdater() {
   if (isDev) return;
+  // TODO: re-enable once app is signed/notarized
+  return;
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false;
