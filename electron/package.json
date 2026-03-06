@@ -37,6 +37,9 @@
       "buildResources": "public/logo"
     },
     "mac": {
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
       "target": "dmg",
       "icon": "public/logo/icon.icns",
       "category": "public.app-category.productivity"
