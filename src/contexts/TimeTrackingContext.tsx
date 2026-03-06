@@ -240,9 +240,9 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     electronAPI.onAppClosing(clockOutAndFlush);
 
     // Before auto-update installs, flush data then signal ready
-    electronAPI.updater?.onBeforeInstall(async () => {
+    electronAPI.updater?.onBeforeInstall?.call(electronAPI.updater, async () => {
       await clockOutAndFlush();
-      electronAPI.updater.readyToInstall();
+      electronAPI.updater.readyToInstall?.();
     });
 
     return () => {
