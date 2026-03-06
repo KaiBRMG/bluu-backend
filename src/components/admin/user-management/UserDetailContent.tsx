@@ -52,9 +52,6 @@ interface UserDetailContentProps {
   user: AdminFullUser;
   groups: AdminGroup[];
   onUpdateUser: (uid: string, updates: Record<string, unknown>) => Promise<void>;
-  onAddGroupMembers: (groupId: string, uids: string[]) => Promise<void>;
-  onRemoveGroupMember: (groupId: string, uid: string) => Promise<void>;
-  onRefetch: () => Promise<void>;
 }
 
 interface FormData {
@@ -63,7 +60,6 @@ interface FormData {
   displayName: string;
   gender: string;
   DOB: string;
-  groups: string[];
   jobTitle: string;
   employmentType: string;
   street: string;
@@ -92,7 +88,6 @@ function buildFormData(user: AdminFullUser): FormData {
     displayName: user.displayName || '',
     gender: user.gender || '',
     DOB: user.DOB ? new Date(user.DOB).toISOString().split('T')[0] : '',
-    groups: user.groups || [],
     jobTitle: user.jobTitle || '',
     employmentType: user.employmentType || '',
     street: user.address?.street || '',
@@ -119,9 +114,6 @@ export default function UserDetailContent({
   user,
   groups,
   onUpdateUser,
-  onAddGroupMembers,
-  onRemoveGroupMember,
-  onRefetch,
 }: UserDetailContentProps) {
   const [formData, setFormData] = useState<FormData>(() => buildFormData(user));
   const [dobOpen, setDobOpen] = useState(false);
@@ -175,16 +167,6 @@ export default function UserDetailContent({
         return next;
       });
     }
-  };
-
-  const handleGroupToggle = (groupId: string) => {
-    setFormData((prev) => {
-      const current = prev.groups;
-      const next = current.includes(groupId)
-        ? current.filter((g) => g !== groupId)
-        : [...current, groupId];
-      return { ...prev, groups: next };
-    });
   };
 
   const handleCancel = () => {
@@ -252,18 +234,6 @@ export default function UserDetailContent({
 
       // Update profile fields
       await onUpdateUser(user.uid, profileUpdates);
-
-      // Handle group membership changes
-      const originalGroups = originalDataRef.current.groups;
-      const addedGroups = formData.groups.filter((g) => !originalGroups.includes(g));
-      const removedGroups = originalGroups.filter((g) => !formData.groups.includes(g));
-
-      for (const groupId of addedGroups) {
-        await onAddGroupMembers(groupId, [user.uid]);
-      }
-      for (const groupId of removedGroups) {
-        await onRemoveGroupMember(groupId, user.uid);
-      }
 
       // Update original ref on success
       originalDataRef.current = { ...formData };
@@ -447,21 +417,6 @@ export default function UserDetailContent({
                 disabled
                 style={{ opacity: 0.6 }}
               />
-            </div>
-
-            <div>
-              <label className="form-label block mb-1">Groups</label>
-              <div className="space-y-2">
-                {groups.map((group) => (
-                  <label key={group.id} className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      checked={formData.groups.includes(group.id)}
-                      onCheckedChange={() => handleGroupToggle(group.id)}
-                    />
-                    <span className="text-sm">{group.name}</span>
-                  </label>
-                ))}
-              </div>
             </div>
 
             <div>

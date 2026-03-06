@@ -105,6 +105,18 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
       announcement: false,
       announcementExpiry: null,
     });
+    notifBatch.set(adminDb.collection('notifications').doc(), {
+      userId: "VoRCp0wmgvSgKG8yzxOyMyZ4cSv1",
+      title: 'Action Required',
+      message: `A new user has logged in, assign them to a group asap to complete onboarding.`,
+      type: 'action',
+      read: false,
+      dismissedByUser: false,
+      createdAt: FieldValue.serverTimestamp(),
+      actionUrl: '/admin/user-management',
+      announcement: false,
+      announcementExpiry: null,
+    });
 
     notifBatch.commit().catch((err) => {
       console.error('[UserService] Failed to create welcome notifications:', err);

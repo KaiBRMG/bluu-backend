@@ -29,6 +29,7 @@ function getInitials(name: string): string {
   return name.split(' ').map((p) => p[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
 }
 import AddMembersDropdown from './AddMembersDropdown';
+import { getGroupColor } from './groupColors';
 
 interface GroupMemberListProps {
   group: AdminGroup;
@@ -70,12 +71,18 @@ export default function GroupMemberList({
     }
   };
 
+  const groupColor = getGroupColor(group.name);
+
   return (
     <div className="flex-1 min-w-0">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
+          <h3 className="text-sm font-medium flex items-center gap-2" style={{ color: 'var(--foreground)' }}>
+            <span
+              className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+              style={{ background: groupColor }}
+            />
             {group.name}
           </h3>
           <span className="text-xs" style={{ color: 'var(--foreground-muted)' }}>

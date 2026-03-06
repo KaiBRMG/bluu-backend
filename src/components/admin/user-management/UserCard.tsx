@@ -1,7 +1,8 @@
 "use client";
 
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import type { AdminFullUser } from '@/hooks/useAdminUsers';
+import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
+import { getGroupBadgeStyle } from './groupColors';
 
 const AVATAR_COLORS = [
   '#E57373', '#F06292', '#BA68C8', '#7986CB', '#64B5F6',
@@ -29,27 +30,15 @@ function getInitials(name: string): string {
 
 interface UserCardProps {
   user: AdminFullUser;
+  groups: AdminGroup[];
   onClick: () => void;
 }
 
-const EMPLOYMENT_BADGE_COLORS: Record<string, { color: string; bg: string }> = {
-  'full-time': { color: '#22c55e', bg: 'rgba(34, 197, 94, 0.08)' },
-  'Full-time': { color: '#22c55e', bg: 'rgba(34, 197, 94, 0.08)' },
-  'part-time': { color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.08)' },
-  'Part-time': { color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.08)' },
-  'contractor': { color: '#f97316', bg: 'rgba(249, 115, 22, 0.08)' },
-  'Contractor': { color: '#f97316', bg: 'rgba(249, 115, 22, 0.08)' },
-  'intern': { color: '#a855f7', bg: 'rgba(168, 85, 247, 0.08)' },
-  'Intern': { color: '#a855f7', bg: 'rgba(168, 85, 247, 0.08)' },
-};
-
-const DEFAULT_BADGE = { color: 'var(--foreground-muted)', bg: 'rgba(255, 255, 255, 0.04)' };
-
-export default function UserCard({ user, onClick }: UserCardProps) {
+export default function UserCard({ user, groups, onClick }: UserCardProps) {
   const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.displayName;
-  const badge = user.employmentType
-    ? EMPLOYMENT_BADGE_COLORS[user.employmentType] || DEFAULT_BADGE
-    : null;
+  const userGroups = (user.groups || [])
+    .map((id) => groups.find((g) => g.id === id))
+    .filter(Boolean) as AdminGroup[];
 
   return (
     <div
@@ -107,16 +96,22 @@ export default function UserCard({ user, onClick }: UserCardProps) {
             </div>
           )}
 
-          <div className="flex items-center gap-2 mt-2">
-            {badge && user.employmentType && (
-              <span
-                className="text-xs font-medium px-2 py-0.5 rounded"
-                style={{ color: badge.color, background: badge.bg }}
-              >
-                {user.employmentType}
-              </span>
-            )}
-          </div>
+          {userGroups.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1 mt-2">
+              {userGroups.map((group) => {
+                const style = getGroupBadgeStyle(group.name);
+                return (
+                  <span
+                    key={group.id}
+                    className="text-xs font-medium px-2 py-0.5 rounded"
+                    style={{ color: style.color, background: style.background }}
+                  >
+                    {group.name}
+                  </span>
+                );
+              })}
+            </div>
+          )}
 
           {user.workEmail && (
             <div className="text-xs mt-2 truncate" style={{ color: 'var(--foreground-muted)' }}>

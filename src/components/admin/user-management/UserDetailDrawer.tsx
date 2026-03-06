@@ -49,9 +49,6 @@ export default function UserDetailDrawer({
             user={user}
             groups={groups}
             onUpdateUser={onUpdateUser}
-            onAddGroupMembers={onAddGroupMembers}
-            onRemoveGroupMember={onRemoveGroupMember}
-            onRefetch={onRefetch}
           />
         )}
       </SheetContent>

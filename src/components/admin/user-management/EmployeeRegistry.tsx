@@ -66,6 +66,7 @@ export default function EmployeeRegistry({
             <UserCard
               key={user.uid}
               user={user}
+              groups={groups}
               onClick={() => setSelectedUserId(user.uid)}
             />
           ))}

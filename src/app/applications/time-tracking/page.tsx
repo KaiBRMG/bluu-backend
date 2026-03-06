@@ -118,13 +118,6 @@ export default function TimeTrackingPage() {
                 {displayState === 'working' && (
                   <>
                     <Button
-                      onClick={stopTracking}
-                      disabled={isLoading}
-                      variant="destructive"
-                    >
-                      {isLoading ? 'Stopping...' : 'Clock Out'}
-                    </Button>
-                    <Button
                       onClick={pauseTracking}
                       disabled={isLoading}
                       style={{ background: '#8B5CF6', color: '#fff' }}
@@ -153,21 +146,12 @@ export default function TimeTrackingPage() {
                 )}
 
                 {displayState === 'paused' && (
-                  <>
-                    <Button
-                      onClick={resumeFromPause}
-                      disabled={isLoading}
-                    >
-                      {isLoading ? 'Resuming...' : 'Resume'}
-                    </Button>
-                    <Button
-                      onClick={stopTracking}
-                      disabled={isLoading}
-                      variant="destructive"
-                    >
-                      {isLoading ? 'Stopping...' : 'Clock Out'}
-                    </Button>
-                  </>
+                  <Button
+                    onClick={resumeFromPause}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? 'Resuming...' : 'Resume'}
+                  </Button>
                 )}
 
                 {displayState === 'idle' && (
@@ -178,27 +162,38 @@ export default function TimeTrackingPage() {
               </div>
             </div>
 
-            {/* Right: break allowance remaining (only when session is active) */}
+            {/* Right: break allowance remaining + clock out (only when session is active) */}
             {displayState !== 'clocked-out' && (
-              <div className="flex flex-col items-end gap-1 ml-8 flex-shrink-0">
-                <span
-                  className="text-xs font-medium uppercase tracking-wide"
-                  style={{ color: 'var(--foreground-muted)' }}
-                >
-                  Break Remaining
-                </span>
-                <span
-                  className="text-2xl font-mono font-semibold"
-                  style={{
-                    color: displayState !== 'on-break'
-                      ? 'var(--foreground-muted)'
-                      : breakAllowanceRemaining === 0 ? '#DF626E' : '#4B8FCC',
-                    opacity: displayState !== 'on-break' ? 0.5 : 1,
-                    transition: 'color 0.2s ease, opacity 0.2s ease',
-                  }}
-                >
-                  {formatTime(breakAllowanceRemaining)}
-                </span>
+              <div className="flex flex-col items-end gap-4 ml-8 flex-shrink-0">
+                <div className="flex flex-col items-end gap-1">
+                  <span
+                    className="text-xs font-medium uppercase tracking-wide"
+                    style={{ color: 'var(--foreground-muted)' }}
+                  >
+                    Break Remaining
+                  </span>
+                  <span
+                    className="text-2xl font-mono font-semibold"
+                    style={{
+                      color: displayState !== 'on-break'
+                        ? 'var(--foreground-muted)'
+                        : breakAllowanceRemaining === 0 ? '#DF626E' : '#4B8FCC',
+                      opacity: displayState !== 'on-break' ? 0.5 : 1,
+                      transition: 'color 0.2s ease, opacity 0.2s ease',
+                    }}
+                  >
+                    {formatTime(breakAllowanceRemaining)}
+                  </span>
+                </div>
+                {(displayState === 'working' || displayState === 'paused') && (
+                  <Button
+                    onClick={stopTracking}
+                    disabled={isLoading}
+                    variant="destructive"
+                  >
+                    {isLoading ? 'Stopping...' : 'Clock Out'}
+                  </Button>
+                )}
               </div>
             )}
           </div>

@@ -1,25 +1,12 @@
 "use client";
 
 import type { AdminGroup } from '@/hooks/useAdminUsers';
+import { getGroupColor } from './groupColors';
 
 interface GroupListProps {
   groups: AdminGroup[];
   selectedGroupId: string | null;
   onSelectGroup: (id: string) => void;
-}
-
-// Deterministic color from group name (same hash approach as UserAvatar)
-const GROUP_COLORS = [
-  '#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6',
-  '#3b82f6', '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e',
-];
-
-function getGroupColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return GROUP_COLORS[Math.abs(hash) % GROUP_COLORS.length];
 }
 
 export default function GroupList({ groups, selectedGroupId, onSelectGroup }: GroupListProps) {
