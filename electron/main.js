@@ -202,7 +202,7 @@ function createWindow() {
     show: false,  // Don't show until ready (prevents white flash)
     backgroundColor: '#002333',     // Match your logo's dark background
     icon: iconPath,  // App icon for window
-    title: 'Bluu',
+    title: `Bluu Backend (${app.getVersion()})`,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,     // important for security
