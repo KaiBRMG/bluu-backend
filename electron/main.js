@@ -278,7 +278,19 @@ function initAutoUpdater() {
   });
 
   autoUpdater.on('update-downloaded', () => {
-    autoUpdater.quitAndInstall(false, true);
+    // Give the renderer up to 10 seconds to flush pending data before installing
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('updater:before-install');
+      const installTimer = setTimeout(() => {
+        autoUpdater.quitAndInstall(false, true);
+      }, 10000);
+      ipcMain.once('updater:ready-to-install', () => {
+        clearTimeout(installTimer);
+        autoUpdater.quitAndInstall(false, true);
+      });
+    } else {
+      autoUpdater.quitAndInstall(false, true);
+    }
   });
 
   autoUpdater.on('error', (err) => {

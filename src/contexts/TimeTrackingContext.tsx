@@ -213,12 +213,12 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     }
   }, [user]);
 
-  // ─── App-close handler (Electron window close) ──────────────────────
+  // ─── App-close / pre-update handler (Electron) ──────────────────────
   useEffect(() => {
     const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
     if (!electronAPI?.onAppClosing) return;
 
-    electronAPI.onAppClosing(async () => {
+    const clockOutAndFlush = async () => {
       const state = displayStateRef.current;
       if (state === 'clocked-out') return;
 
@@ -235,9 +235,19 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         console.error('[TimeTracking] Clock-out on app close failed:', err);
       }
+    };
+
+    electronAPI.onAppClosing(clockOutAndFlush);
+
+    // Before auto-update installs, flush data then signal ready
+    electronAPI.updater?.onBeforeInstall(async () => {
+      await clockOutAndFlush();
+      electronAPI.updater.readyToInstall();
     });
 
-    return () => { electronAPI.removeAppClosingListeners(); };
+    return () => {
+      electronAPI.removeAppClosingListeners();
+    };
   }, [user]);
 
   // ─── Heartbeat (working state only) ─────────────────────────────────

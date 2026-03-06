@@ -23,6 +23,13 @@ interface ElectronAPI {
   };
   onAppClosing: (callback: () => void) => void;
   removeAppClosingListeners: () => void;
+  updater: {
+    onStatus: (callback: (data: { status: 'downloading' | 'error'; version?: string; message?: string }) => void) => void;
+    onProgress: (callback: (data: { percent: number; bytesPerSecond: number; total: number; transferred: number }) => void) => void;
+    onBeforeInstall: (callback: () => void) => void;
+    readyToInstall: () => void;
+    removeListeners: () => void;
+  };
 }
 
 declare global {
