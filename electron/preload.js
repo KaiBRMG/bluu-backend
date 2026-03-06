@@ -65,5 +65,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     removeReportListener: () => {
       ipcRenderer.removeAllListeners('bug:report');
     },
-  }
+  },
+
+  // Auto-updater
+  updater: {
+    onStatus: (callback) => {
+      ipcRenderer.on('updater:status', (_event, data) => callback(data));
+    },
+    onProgress: (callback) => {
+      ipcRenderer.on('updater:progress', (_event, data) => callback(data));
+    },
+    removeListeners: () => {
+      ipcRenderer.removeAllListeners('updater:status');
+      ipcRenderer.removeAllListeners('updater:progress');
+    },
+  },
 });

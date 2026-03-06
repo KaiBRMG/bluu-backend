@@ -1,6 +1,6 @@
 {
   "name": "bluu-backend",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Bluu Rock MGMT SaaS",
   "author": "BluuRockMGMT",
   "private": true,
@@ -44,6 +44,15 @@
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }],
       "icon": "public/logo/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "KaiBRMG",
+      "repo": "bluu-backend"
     }
   }
 }

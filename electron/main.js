@@ -1,5 +1,6 @@
 // electron/main.js
 const { app, BrowserWindow, shell, nativeImage, ipcMain, powerMonitor, desktopCapturer, Notification } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
 const isDev = process.env.ELECTRON_DEV === 'true' || !app.isPackaged;
@@ -253,8 +254,46 @@ function createWindow() {
   return mainWindow;
 }
 
+function initAutoUpdater() {
+  if (isDev) return;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = false;
+
+  autoUpdater.on('update-available', (info) => {
+    if (mainWindow) {
+      mainWindow.webContents.send('updater:status', { status: 'downloading', version: info.version });
+    }
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    if (mainWindow) {
+      mainWindow.webContents.send('updater:progress', {
+        percent: progress.percent,
+        bytesPerSecond: progress.bytesPerSecond,
+        total: progress.total,
+        transferred: progress.transferred,
+      });
+    }
+  });
+
+  autoUpdater.on('update-downloaded', () => {
+    autoUpdater.quitAndInstall(false, true);
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('[updater] error:', err);
+    if (mainWindow) {
+      mainWindow.webContents.send('updater:status', { status: 'error', message: err.message });
+    }
+  });
+
+  autoUpdater.checkForUpdatesAndNotify();
+}
+
 app.whenReady().then(() => {
   createWindow();
+  initAutoUpdater();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
