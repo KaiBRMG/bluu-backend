@@ -44,7 +44,9 @@
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }],
       "icon": "public/logo/icon.ico",
-      "publisherName": "BluuRockMGMT"
+      "signtoolOptions": {
+        "publisherName": "BluuRockMGMT"
+      }
     },
     "nsis": {
       "oneClick": true,
