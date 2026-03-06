@@ -1,6 +1,6 @@
 {
   "name": "bluu-backend",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Bluu Rock MGMT SaaS",
   "author": "BluuRockMGMT",
   "private": true,
@@ -40,7 +40,7 @@
       "identity": "-",
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
-      "target": "dmg",
+      "target": ["dmg", "zip"],
       "icon": "public/logo/icon.icns",
       "category": "public.app-category.productivity"
     },
@@ -58,7 +58,8 @@
     "publish": {
       "provider": "github",
       "owner": "KaiBRMG",
-      "repo": "bluu-backend"
+      "repo": "bluu-backend",
+      "releaseType": "release"
     }
   }
 }
