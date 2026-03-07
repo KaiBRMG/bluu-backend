@@ -9,7 +9,7 @@ const STATE_COLORS: Record<SegmentState, string> = {
   working: '#86C27E',
   idle: '#E37836',
   'on-break': '#4B8FCC',
-  paused: '#4B8FCC',
+  paused: '#8B5CF6',
 };
 
 const STATE_LABELS: Record<SegmentState, string> = {
