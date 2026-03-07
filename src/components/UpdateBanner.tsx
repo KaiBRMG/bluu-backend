@@ -22,7 +22,7 @@ export default function UpdateBanner() {
 
   useEffect(() => {
     const api = (window as any).electronAPI;
-    if (!api?.isElectron) return;
+    if (!api?.isElectron || !api?.updater) return;
 
     api.updater.onStatus((data: UpdateStatus) => {
       setUpdateStatus(data);
