@@ -2,24 +2,27 @@
 
 import { useState, useMemo } from 'react';
 import type { TimesheetEntry } from '@/hooks/useTimesheetData';
-import type { TimeEntryState } from '@/types/firestore';
 
-const STATE_COLORS: Record<TimeEntryState, string> = {
+type SegmentState = TimesheetEntry['state'];
+
+const STATE_COLORS: Record<SegmentState, string> = {
   working: '#86C27E',
   idle: '#E37836',
   'on-break': '#4B8FCC',
+  paused: '#4B8FCC',
 };
 
-const STATE_LABELS: Record<TimeEntryState, string> = {
+const STATE_LABELS: Record<SegmentState, string> = {
   working: 'Working',
   idle: 'Idle',
   'on-break': 'On Break',
+  paused: 'Paused',
 };
 
 interface Segment {
   leftPct: number;
   widthPct: number;
-  state: TimeEntryState;
+  state: SegmentState;
   startTime: Date;
   endTime: Date;
   // For tooltip: may span multiple merged entries
