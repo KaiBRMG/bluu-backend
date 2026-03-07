@@ -185,6 +185,7 @@ export default function TimesheetView({
           { color: '#86C27E', label: 'Working' },
           { color: '#E37836', label: 'Idle' },
           { color: '#4B8FCC', label: 'On Break' },
+          { color: '#8B5CF6', label: 'Paused' },
         ].map((item) => (
           <div key={item.label} className="flex items-center gap-1.5">
             <div className="w-2.5 h-2.5 rounded-full" style={{ background: item.color }} />

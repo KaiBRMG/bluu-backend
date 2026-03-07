@@ -54,9 +54,15 @@ exports.generateThumbnail = onObjectFinalized({ bucket: STORAGE_BUCKET }, async 
 /**
  * Stale session cleanup — runs once per day at 02:00 UTC.
  *
- * Finds active_sessions documents that have not had a heartbeat in over 24 hours
- * and have not been explicitly clocked out. This catches devices that crashed
- * and were never reopened.
+ * Finds active_sessions documents that have not had a heartbeat in over 6 hours
+ * and have not been explicitly clocked out. This catches:
+ *   - Sessions paused or left on break before end-of-day (no heartbeat while
+ *     paused, so lastUpdated freezes at the pause timestamp)
+ *   - Devices that crashed and were never reopened
+ *
+ * 6 hours means any session quiet since before 8:00 PM UTC is caught at 02:00.
+ * An actively working session at 02:00 UTC will have had a heartbeat within the
+ * last 15 minutes and is never affected.
  *
  * For each stale session:
  *   1. Writes a time_entries ledger document with status:'interrupted' and
@@ -66,11 +72,11 @@ exports.generateThumbnail = onObjectFinalized({ bucket: STORAGE_BUCKET }, async 
  *   2. Deletes the active_sessions document.
  *
  * If the client opens the app before this function runs (i.e. the session is
- * between 15 min and 24 h stale), the startup hydration logic handles it via
+ * between 15 min and 6 h stale), the startup hydration logic handles it via
  * the /upload-log route instead.
  */
 exports.cleanupStaleSessions = onSchedule({ schedule: '0 2 * * *', timeZone: 'UTC' }, async () => {
-  const STALE_HOURS = 24;
+  const STALE_HOURS = 6;
   const cutoff = admin.firestore.Timestamp.fromDate(
     new Date(Date.now() - STALE_HOURS * 60 * 60 * 1000),
   );
