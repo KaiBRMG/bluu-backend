@@ -74,6 +74,7 @@ function computeDailyTotal(
 ): string {
   let totalMs = 0;
   for (const entry of entries) {
+    if (entry.state === 'paused') continue;
     if (entry.state === 'idle' && !includeIdleTime) continue;
 
     const entryStart = new Date(entry.createdTime).getTime();

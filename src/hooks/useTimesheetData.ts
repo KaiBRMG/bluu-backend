@@ -2,11 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
-import type { TimeEntryState } from '@/types/firestore';
-
 export interface TimesheetEntry {
   id: string;
-  state: TimeEntryState;
+  state: 'working' | 'idle' | 'on-break' | 'paused';
   createdTime: string;
   lastTime: string;
 }
