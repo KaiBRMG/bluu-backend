@@ -9,6 +9,7 @@ import {
   getActiveSessionsForUsers,
 } from '@/lib/services/shiftService';
 import { computeWorkedInWindow } from '@/lib/utils/sessionSegments';
+import { expandShiftsForWindow } from '@/lib/utils/recurrence';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { DocumentSnapshot } from 'firebase-admin/firestore';
 import type { ShiftDocument, TimeEntryLedgerDocument, ActiveSessionDocument } from '@/types/firestore';
@@ -190,37 +191,45 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     ]);
 
     // ── 4. Build response ─────────────────────────────────────────────
-    const serialisedShifts = rawShifts
+    // Serialise raw shifts for expansion (recurrence.ts works with ISO strings)
+    const eligibleRaw = rawShifts
       .filter(s => eligibleUserIds.has(s.userId))
-      .map(s => {
-        const shiftStartMs = s.startTime.toMillis();
-        const shiftEndMs   = s.endTime.toMillis();
-        const isPast       = shiftEndMs <= now;
-        const isCurrent    = shiftStartMs <= now && shiftEndMs > now;
+      .map(s => ({
+        ...serialiseShift(s),
+        timeWorkedSeconds: null as number | null,
+        attendanceStatus: null as 'on-time' | 'late' | 'absent' | null,
+      }));
 
-        const sessions       = ledgerByUser.get(s.userId) ?? [];
-        const activeSession  = activeSessions.get(s.userId);
+    // Expand recurring roots into per-occurrence entries server-side so that
+    // attendance and time-worked are computed against each occurrence's actual
+    // start/end time (not the root document's original timestamp).
+    const expandedShifts = expandShiftsForWindow(eligibleRaw, weekStartMs, weekEndMs);
 
-        let timeWorkedSeconds: number | null = null;
-        let attendanceStatus: 'on-time' | 'late' | 'absent' | null = null;
+    const serialisedShifts = expandedShifts.map(s => {
+      const shiftStartMs = s.occurrenceStart;
+      const shiftEndMs   = s.occurrenceEnd;
+      const isPast       = shiftEndMs <= now;
+      const isCurrent    = shiftStartMs <= now && shiftEndMs > now;
 
-        if (isPast || isCurrent) {
-          const effectiveEnd = isPast ? shiftEndMs : now;
-          timeWorkedSeconds = computeTimeWorked(
-            shiftStartMs, effectiveEnd, sessions, activeSession,
-            userMap.get(s.userId)?.includeIdleTime ?? false,
-          );
-          attendanceStatus = computeAttendance(
-            shiftStartMs, shiftEndMs, sessions, activeSession,
-          );
-        }
+      const sessions       = ledgerByUser.get(s.userId) ?? [];
+      const activeSession  = activeSessions.get(s.userId);
 
-        return {
-          ...serialiseShift(s),
-          timeWorkedSeconds,
-          attendanceStatus,
-        };
-      });
+      let timeWorkedSeconds: number | null = null;
+      let attendanceStatus: 'on-time' | 'late' | 'absent' | null = null;
+
+      if (isPast || isCurrent) {
+        const effectiveEnd = isPast ? shiftEndMs : now;
+        timeWorkedSeconds = computeTimeWorked(
+          shiftStartMs, effectiveEnd, sessions, activeSession,
+          userMap.get(s.userId)?.includeIdleTime ?? false,
+        );
+        attendanceStatus = computeAttendance(
+          shiftStartMs, shiftEndMs, sessions, activeSession,
+        );
+      }
+
+      return { ...s, timeWorkedSeconds, attendanceStatus };
+    });
 
     const users = [...eligibleUserIds].map(uid => {
       const u = userMap.get(uid);

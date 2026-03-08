@@ -2,8 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
-import { expandShiftsForWindow } from '@/lib/utils/recurrence';
-import type { RawApiShift, ExpandedShift } from '@/lib/utils/recurrence';
+import type { ExpandedShift } from '@/lib/utils/recurrence';
 import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
 
 export interface ShiftUser {
@@ -113,17 +112,12 @@ export function useShifts(weekStart: string) {
         throw new Error(data.error ?? `Request failed: ${res.status}`);
       }
 
-      const data: { shifts: RawApiShift[]; users: ShiftUser[] } = await res.json();
+      const data: { shifts: ExpandedShift[]; users: ShiftUser[] } = await res.json();
 
-      // Compute window bounds for expansion
-      const [wy, wm, wd] = weekStart.split('-').map(Number);
-      const windowStartMs = Date.UTC(wy, wm - 1, wd, 0, 0, 0, 0);
-      const windowEndMs   = Date.UTC(wy, wm - 1, wd + 6, 23, 59, 59, 999);
-
-      const expanded = expandShiftsForWindow(data.shifts, windowStartMs, windowEndMs);
-
-      setCache<ShiftsCacheData>(cacheKey(weekStart), { shifts: expanded, users: data.users });
-      setState({ shifts: expanded, users: data.users, loading: false, error: null });
+      // Server now returns pre-expanded occurrences with correct per-occurrence
+      // attendance and time-worked — no client-side expansion needed.
+      setCache<ShiftsCacheData>(cacheKey(weekStart), { shifts: data.shifts, users: data.users });
+      setState({ shifts: data.shifts, users: data.users, loading: false, error: null });
     } catch (err) {
       console.error('[useShifts]', err);
       setState(prev => ({
