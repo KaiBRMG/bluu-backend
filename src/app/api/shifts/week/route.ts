@@ -54,17 +54,25 @@ function computeAttendance(
   const onTimeFrom  = shiftStartMs - ON_TIME_BEFORE_MS;
   const lateThresh  = shiftStartMs + LATE_AFTER_MS;
 
-  // Collect all clock-in times (completed sessions + active session)
+  // Collect effective arrival times for all sessions that overlap the shift.
+  // A session that started before onTimeFrom but was still active during the
+  // shift counts as present — use shiftStartMs as the effective arrival time.
   const clockIns: number[] = [];
 
+  const addSession = (startMs: number, endMs: number) => {
+    // Session must overlap the shift window
+    if (endMs <= shiftStartMs || startMs >= shiftEndMs) return;
+    // Effective arrival: capped to shiftStart for early clock-ins
+    clockIns.push(Math.max(startMs, onTimeFrom));
+  };
+
   for (const s of sessions) {
-    const t = s.startTime.toMillis();
-    if (t >= onTimeFrom && t <= shiftEndMs) clockIns.push(t);
+    addSession(s.startTime.toMillis(), s.endTime.toMillis());
   }
 
   if (activeSession) {
-    const t = activeSession.startTime.toMillis();
-    if (t >= onTimeFrom && t <= shiftEndMs) clockIns.push(t);
+    const sessionEndMs = activeSession.userClockOut ? shiftStartMs - 1 : Date.now();
+    addSession(activeSession.startTime.toMillis(), sessionEndMs);
   }
 
   if (clockIns.length === 0) return 'absent';
@@ -179,12 +187,17 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 
     // ── 3. Batch-fetch time_entries + active_sessions (2–3 Firestore reads total) ──
     const now = Date.now();
-    const BUFFER_MS = 4 * 60 * 60 * 1000; // 4h before window for sessions that started before shift
+    // Buffer: reach back 24h before the earliest shift start in the week so that
+    // sessions which began before a shift (but overlap it) are always included.
+    const earliestShiftStart = rawShifts.length > 0
+      ? Math.min(...rawShifts.map(s => s.startTime.toMillis()))
+      : weekStartMs;
+    const BUFFER_MS = 24 * 60 * 60 * 1000; // 24h before the earliest shift
 
     const [ledgerByUser, activeSessions] = await Promise.all([
       getLedgerEntriesForUsers(
         [...eligibleUserIds],
-        weekStartMs - BUFFER_MS,
+        earliestShiftStart - BUFFER_MS,
         weekEndMs,
       ),
       getActiveSessionsForUsers([...eligibleUserIds]),
