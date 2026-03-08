@@ -1,5 +1,6 @@
 import { adminDb } from '../firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import type { ShiftDocument, ShiftRecurrence, TimeEntryLedgerDocument, ActiveSessionDocument } from '@/types/firestore';
 
 const SHIFTS = 'shifts';
@@ -321,6 +322,8 @@ export async function getShiftsByUserAndRange(
 
 /**
  * Batch-fetch time_entries for multiple users within a time window.
+ * Returns all sessions that overlap [windowStartMs, windowEndMs], including
+ * sessions that started before the window but ended inside it.
  * Chunks userIds into groups of 30 to stay within Firestore's 'in' query limit.
  * Returns a Map keyed by userId.
  */
@@ -335,6 +338,17 @@ export async function getLedgerEntriesForUsers(
   const startTs = Timestamp.fromMillis(windowStartMs);
   const endTs   = Timestamp.fromMillis(windowEndMs);
 
+  const seen = new Set<string>();
+
+  const addDoc = (doc: QueryDocumentSnapshot) => {
+    if (seen.has(doc.id)) return;
+    seen.add(doc.id);
+    const data = doc.data() as TimeEntryLedgerDocument;
+    const existing = result.get(data.userId) ?? [];
+    existing.push(data);
+    result.set(data.userId, existing);
+  };
+
   const chunks: string[][] = [];
   for (let i = 0; i < userIds.length; i += 30) {
     chunks.push(userIds.slice(i, i + 30));
@@ -342,19 +356,26 @@ export async function getLedgerEntriesForUsers(
 
   await Promise.all(
     chunks.map(async (chunk) => {
-      const snap = await adminDb.collection(TIME_ENTRIES)
-        .where('userId', 'in', chunk)
-        .where('startTime', '>=', startTs)
-        .where('startTime', '<=', endTs)
-        .orderBy('startTime', 'asc')
-        .get();
+      // Query 1: sessions that started within the window (most common case)
+      // Query 2: sessions that started before the window but ended inside it
+      //          (e.g. clocked in the day before, shift starts partway through)
+      const [startedInWindow, endedInWindow] = await Promise.all([
+        adminDb.collection(TIME_ENTRIES)
+          .where('userId', 'in', chunk)
+          .where('startTime', '>=', startTs)
+          .where('startTime', '<=', endTs)
+          .orderBy('startTime', 'asc')
+          .get(),
+        adminDb.collection(TIME_ENTRIES)
+          .where('userId', 'in', chunk)
+          .where('endTime', '>=', startTs)
+          .where('endTime', '<=', endTs)
+          .orderBy('endTime', 'asc')
+          .get(),
+      ]);
 
-      for (const doc of snap.docs) {
-        const data = doc.data() as TimeEntryLedgerDocument;
-        const existing = result.get(data.userId) ?? [];
-        existing.push(data);
-        result.set(data.userId, existing);
-      }
+      for (const doc of startedInWindow.docs) addDoc(doc);
+      for (const doc of endedInWindow.docs) addDoc(doc);
     }),
   );
 
