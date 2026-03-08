@@ -54,25 +54,17 @@ function computeAttendance(
   const onTimeFrom  = shiftStartMs - ON_TIME_BEFORE_MS;
   const lateThresh  = shiftStartMs + LATE_AFTER_MS;
 
-  // Collect effective arrival times for all sessions that overlap the shift.
-  // A session that started before onTimeFrom but was still active during the
-  // shift counts as present — use shiftStartMs as the effective arrival time.
+  // Collect all clock-in times (completed sessions + active session)
   const clockIns: number[] = [];
 
-  const addSession = (startMs: number, endMs: number) => {
-    // Session must overlap the shift window
-    if (endMs <= shiftStartMs || startMs >= shiftEndMs) return;
-    // Effective arrival: capped to shiftStart for early clock-ins
-    clockIns.push(Math.max(startMs, onTimeFrom));
-  };
-
   for (const s of sessions) {
-    addSession(s.startTime.toMillis(), s.endTime.toMillis());
+    const t = s.startTime.toMillis();
+    if (t >= onTimeFrom && t <= shiftEndMs) clockIns.push(t);
   }
 
   if (activeSession) {
-    const sessionEndMs = activeSession.userClockOut ? shiftStartMs - 1 : Date.now();
-    addSession(activeSession.startTime.toMillis(), sessionEndMs);
+    const t = activeSession.startTime.toMillis();
+    if (t >= onTimeFrom && t <= shiftEndMs) clockIns.push(t);
   }
 
   if (clockIns.length === 0) return 'absent';
@@ -187,13 +179,12 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 
     // ── 3. Batch-fetch time_entries + active_sessions (2–3 Firestore reads total) ──
     const now = Date.now();
+    const BUFFER_MS = 4 * 60 * 60 * 1000; // 4h before window for sessions that started before shift
 
     const [ledgerByUser, activeSessions] = await Promise.all([
-      // getLedgerEntriesForUsers uses two queries to catch sessions that started
-      // before the week window but ended inside it (overlap case).
       getLedgerEntriesForUsers(
         [...eligibleUserIds],
-        weekStartMs,
+        weekStartMs - BUFFER_MS,
         weekEndMs,
       ),
       getActiveSessionsForUsers([...eligibleUserIds]),
