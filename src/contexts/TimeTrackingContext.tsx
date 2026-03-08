@@ -455,6 +455,14 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
               if (sid) {
                 appendEvent(sid, { type: 'screenshot', timestamp: Date.now() }).catch(() => {});
               }
+              // Notify user via desktop toast (if enabled in preferences)
+              if (userData?.notificationPreferences?.screenshotNotifications !== false) {
+                electronAPI.notifications?.show({
+                  title: 'Screenshot Captured',
+                  body: '',
+                  playSound: false,
+                }).catch(() => {});
+              }
             }
           }
         } catch (err) {

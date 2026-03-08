@@ -78,6 +78,7 @@ export interface UserDocument {
     desktopEnabled: boolean;
     soundEnabled: boolean;
     shiftReminders: boolean;
+    screenshotNotifications: boolean;
   };
 
   // Denormalized: page IDs this user can access (kept in sync by server on group/permission changes)

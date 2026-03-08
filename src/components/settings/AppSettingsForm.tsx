@@ -33,7 +33,8 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
   const [desktopEnabled, setDesktopEnabled] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [shiftReminders, setShiftReminders] = useState(true);
-  const originalNotifPrefsRef = useRef({ desktopEnabled: true, soundEnabled: true, shiftReminders: true });
+  const [screenshotNotifications, setScreenshotNotifications] = useState(true);
+  const originalNotifPrefsRef = useRef({ desktopEnabled: true, soundEnabled: true, shiftReminders: true, screenshotNotifications: true });
 
   const [selectedTimezone, setSelectedTimezone] = useState('');
   const originalTimezoneRef = useRef<string>('');
@@ -63,13 +64,15 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
   // Initialize notification preferences from userData
   useEffect(() => {
     const prefs = userData?.notificationPreferences;
-    const desktop = prefs?.desktopEnabled !== false;
-    const sound   = prefs?.soundEnabled   !== false;
-    const shifts  = prefs?.shiftReminders !== false;
+    const desktop     = prefs?.desktopEnabled          !== false;
+    const sound       = prefs?.soundEnabled            !== false;
+    const shifts      = prefs?.shiftReminders          !== false;
+    const screenshots = prefs?.screenshotNotifications !== false;
     setDesktopEnabled(desktop);
     setSoundEnabled(sound);
     setShiftReminders(shifts);
-    originalNotifPrefsRef.current = { desktopEnabled: desktop, soundEnabled: sound, shiftReminders: shifts };
+    setScreenshotNotifications(screenshots);
+    originalNotifPrefsRef.current = { desktopEnabled: desktop, soundEnabled: sound, shiftReminders: shifts, screenshotNotifications: screenshots };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userData?.notificationPreferences]);
 
@@ -90,11 +93,12 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
       additionalTimezones.length !== originalAdditionalTimezonesRef.current.length ||
       additionalTimezones.some((tz, i) => tz !== originalAdditionalTimezonesRef.current[i]);
     const notifChanged =
-      desktopEnabled  !== originalNotifPrefsRef.current.desktopEnabled ||
-      soundEnabled    !== originalNotifPrefsRef.current.soundEnabled   ||
-      shiftReminders  !== originalNotifPrefsRef.current.shiftReminders;
+      desktopEnabled          !== originalNotifPrefsRef.current.desktopEnabled          ||
+      soundEnabled            !== originalNotifPrefsRef.current.soundEnabled            ||
+      shiftReminders          !== originalNotifPrefsRef.current.shiftReminders          ||
+      screenshotNotifications !== originalNotifPrefsRef.current.screenshotNotifications;
     setHasChanges(tzChanged || addlChanged || notifChanged);
-  }, [selectedTimezone, additionalTimezones, desktopEnabled, soundEnabled, shiftReminders]);
+  }, [selectedTimezone, additionalTimezones, desktopEnabled, soundEnabled, shiftReminders, screenshotNotifications]);
 
   // Clear save message after 3 seconds
   useEffect(() => {
@@ -202,6 +206,7 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
     setDesktopEnabled(originalNotifPrefsRef.current.desktopEnabled);
     setSoundEnabled(originalNotifPrefsRef.current.soundEnabled);
     setShiftReminders(originalNotifPrefsRef.current.shiftReminders);
+    setScreenshotNotifications(originalNotifPrefsRef.current.screenshotNotifications);
     setSaveMessage(null);
   };
 
@@ -227,7 +232,7 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
           timezone: selectedTimezone,
           timezoneOffset: offset,
           additionalTimezones: additionalTimezones.filter(Boolean),
-          notificationPreferences: { desktopEnabled, soundEnabled, shiftReminders },
+          notificationPreferences: { desktopEnabled, soundEnabled, shiftReminders, screenshotNotifications },
         }),
       });
 
@@ -239,7 +244,7 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
 
       originalTimezoneRef.current = selectedTimezone;
       originalAdditionalTimezonesRef.current = additionalTimezones.filter(Boolean);
-      originalNotifPrefsRef.current = { desktopEnabled, soundEnabled, shiftReminders };
+      originalNotifPrefsRef.current = { desktopEnabled, soundEnabled, shiftReminders, screenshotNotifications };
       setHasChanges(false);
       setSaveMessage({ type: 'success', text: 'Changes saved successfully!' });
     } catch (error) {
@@ -548,7 +553,7 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
         </div>
 
         {/* Notification Sound */}
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-4 mb-4">
           <div>
             <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
               Notification Sound
@@ -565,6 +570,28 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
             <span
               className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
               style={{ transform: soundEnabled ? 'translateX(18px)' : 'translateX(2px)' }}
+            />
+          </button>
+        </div>
+
+        {/* Screenshot Notifications */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
+              Screenshot Notifications
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={screenshotNotifications}
+            onClick={() => setScreenshotNotifications((v) => !v)}
+            className="flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none"
+            style={{ background: screenshotNotifications ? '#3b82f6' : 'var(--border-subtle)' }}
+          >
+            <span
+              className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
+              style={{ transform: screenshotNotifications ? 'translateX(18px)' : 'translateX(2px)' }}
             />
           </button>
         </div>
