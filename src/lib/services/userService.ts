@@ -1,5 +1,6 @@
 import { adminDb } from '../firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
+import { randomUUID } from 'crypto';
 
 export interface CreateUserData {
   uid: string;
@@ -12,9 +13,11 @@ export interface CreateUserData {
  * Creates new document on first login, updates lastLoginAt on subsequent logins.
  * New users always start with no profile photo (initials avatar).
  */
-export async function ensureUserExists(userData: CreateUserData): Promise<void> {
+export async function ensureUserExists(userData: CreateUserData): Promise<string> {
   const userRef = adminDb.collection('users').doc(userData.uid);
   const userDoc = await userRef.get();
+
+  const sessionToken = randomUUID();
 
   if (!userDoc.exists) {
     console.log(`[UserService] Creating new user: ${userData.workEmail}`);
@@ -70,7 +73,7 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
       hasPaidLeave: false,
       includeIdleTime: false,
       enableScreenshots: true,
-
+      sessionToken,
     });
 
     // Add user to Unassigned group's member list (non-blocking for better performance)
@@ -124,11 +127,15 @@ export async function ensureUserExists(userData: CreateUserData): Promise<void> 
   } else {
     console.log(`[UserService] Updating last login: ${userData.workEmail}`);
 
-    // Update last login timestamp for existing user
+    // Rotate session token and update last login — kicks out any existing session
     await userRef.update({
       lastLoginAt: FieldValue.serverTimestamp(),
+      sessionToken,
     });
   }
+
+  invalidateUserCache(userData.uid);
+  return sessionToken;
 }
 
 /**

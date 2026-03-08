@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Parallelize database operations and token creation for better performance
-    const [, customToken] = await Promise.all([
+    const [sessionToken, customToken] = await Promise.all([
       ensureUserExists({
         uid: firebaseUser.uid,
         workEmail: userInfo.email,
@@ -76,6 +76,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         customToken,
+        sessionToken,
         user: {
           email: userInfo.email,
           name: userInfo.name,

@@ -32,6 +32,11 @@ function Login() {
         // Sign in with custom token — AuthProvider will check isActive before setting user
         await signInWithCustomToken(auth, data.customToken);
 
+        // Store session token so we can detect displacement by another login
+        if (data.sessionToken) {
+          localStorage.setItem('sessionToken', data.sessionToken);
+        }
+
         setLoading(false);
       } catch (error: any) {
         console.error('OAuth callback error:', error);
@@ -78,7 +83,18 @@ function Login() {
         return;
       }
 
-      // AuthProvider will check isActive before setting user — no further action needed here
+      // Rotate the session token server-side to displace any existing session
+      const idToken = await result.user.getIdToken();
+      const res = await fetch('/api/auth/session-token', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${idToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem('sessionToken', data.sessionToken);
+      }
+
+      // AuthProvider will check isActive before setting user
       setLoading(false);
     } catch (error) {
       console.error('Login error:', error);

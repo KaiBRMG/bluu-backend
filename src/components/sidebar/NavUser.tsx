@@ -74,6 +74,7 @@ export function NavUser({ user }: NavUserProps) {
   const handleSignOut = async () => {
     try {
       clearPermissionsCache();
+      localStorage.removeItem('sessionToken');
       await auth.signOut();
     } catch (error) {
       console.error("Sign out error:", error);

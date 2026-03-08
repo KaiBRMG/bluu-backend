@@ -9,7 +9,7 @@ import { auth } from '@/firebase-config';
 
 export default function AuthWrapper({ children }: { children: React.ReactNode }) {
   const { user, loading, revokedRedirect } = useAuth();
-  const { userData, loading: userDataLoading } = useUserData();
+  const { userData, loading: userDataLoading, displaced } = useUserData();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -51,6 +51,17 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
       });
     }
   }, [userData, userDataLoading, user, isAuthRoute, router]);
+
+  // Single active session enforcement: sign out and redirect if another device logged in.
+  useEffect(() => {
+    if (!user || userDataLoading || isAuthRoute) return;
+    if (displaced) {
+      localStorage.removeItem('sessionToken');
+      auth.signOut().then(() => {
+        router.replace('/auth/displaced');
+      });
+    }
+  }, [displaced, userDataLoading, user, isAuthRoute, router]);
 
   if (loading) {
     return (
