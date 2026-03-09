@@ -5,6 +5,7 @@ import AppLayout from "@/components/AppLayout";
 import { useAdminData } from "@/hooks/useAdminData";
 import PermissionTable from "@/components/admin/sharing/PermissionTable";
 import EffectivePermissionsPreview from "@/components/admin/sharing/EffectivePermissionsPreview";
+import { Loader } from "@/components/ui/loader";
 
 export default function SharingPage() {
   const { pages, teamspaces, pagePermissions, groups, users, loading, error, updatePermission } =
@@ -25,7 +26,7 @@ export default function SharingPage() {
     return (
       <AppLayout>
         <div className="flex items-center justify-center h-64">
-          <div style={{ color: "var(--foreground-muted)" }}>Loading sharing settings...</div>
+          <Loader />
         </div>
       </AppLayout>
     );

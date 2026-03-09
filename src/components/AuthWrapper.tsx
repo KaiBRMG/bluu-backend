@@ -6,6 +6,7 @@ import { useUserData } from '@/hooks/useUserData';
 import Login from './Login';
 import { usePathname, useRouter } from 'next/navigation';
 import { auth } from '@/firebase-config';
+import { Loader } from '@/components/ui/loader';
 
 export default function AuthWrapper({ children }: { children: React.ReactNode }) {
   const { user, loading, revokedRedirect } = useAuth();
@@ -16,7 +17,7 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
   const isLoggedIn = !!user;
   const prevIsLoggedInRef = useRef<boolean>(isLoggedIn);
 
-  const isAuthRoute = pathname?.startsWith('/auth/');
+  const isAuthRoute = pathname?.startsWith('/auth/') || pathname?.startsWith('/onboarding/');
 
   // Redirect to revoked page if AuthProvider detected isActive=false at login time
   useEffect(() => {
@@ -63,10 +64,25 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
     }
   }, [displaced, userDataLoading, user, isAuthRoute, router]);
 
+  // Onboarding guard: redirect to the appropriate onboarding step if not completed
+  useEffect(() => {
+    if (!user || userDataLoading || isAuthRoute) return;
+    if (!userData) return;
+
+    if (userData.hasAcceptedTerms !== true) {
+      router.replace('/onboarding/welcome');
+      return;
+    }
+    if (userData.hasCompletedOnboarding !== true) {
+      router.replace('/onboarding/permissions');
+      return;
+    }
+  }, [userData, userDataLoading, user, isAuthRoute, router]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-black">
-        <div className="text-white text-xl">Loading...</div>
+        <Loader />
       </div>
     );
   }

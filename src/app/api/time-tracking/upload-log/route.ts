@@ -26,7 +26,17 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'Invalid buffer payload' }, { status: 400 });
     }
 
-    const endTimeMs = Date.now();
+    // Determine the effective session end time from the buffer.
+    // Priority: clock-out timestamp > last event timestamp > startTime.
+    // The last event is either a clock-out (explicit), an activity heartbeat
+    // (appended every 15 min while working — gives a tight crash bound), or a
+    // state-transition event. Using this avoids inflating workingSeconds to
+    // "now" (upload time) for sessions that ended hours ago.
+    const clockOutEvent = buffer.events.find(e => e.type === 'clock-out');
+    const lastEvent = buffer.events.length > 0 ? buffer.events[buffer.events.length - 1] : null;
+    const endTimeMs = clockOutEvent
+      ? clockOutEvent.timestamp
+      : (lastEvent ? lastEvent.timestamp : buffer.startTime);
     const parsedTotals = parseBuffer(buffer.events, endTimeMs);
 
     // Check both possible states in parallel
@@ -37,8 +47,11 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     ]);
 
     if (ledgerExists) {
-      // Cloud Function already created the time_entries doc — merge our log in
-      await updateSessionLog(buffer.sessionId, buffer.events, parsedTotals);
+      // Cloud Function already created the time_entries doc — merge our log in.
+      // Correct endTime using the buffer's last known activity timestamp so the
+      // timesheet segment accurately reflects when the session actually ended,
+      // rather than the CF-assigned lastUpdated which could be late in the day.
+      await updateSessionLog(buffer.sessionId, buffer.events, parsedTotals, endTimeMs);
       return NextResponse.json({ success: true, action: 'log-merged' });
     }
 

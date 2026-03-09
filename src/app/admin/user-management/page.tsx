@@ -6,6 +6,7 @@ import { useAdminUsers } from "@/hooks/useAdminUsers";
 import EmployeeRegistry from "@/components/admin/user-management/EmployeeRegistry";
 import UserGroups from "@/components/admin/user-management/UserGroups";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Loader } from "@/components/ui/loader";
 
 export default function UserManagementPage() {
   const [activeSection, setActiveSection] = useState('employee-registry');
@@ -16,7 +17,7 @@ export default function UserManagementPage() {
     return (
       <AppLayout>
         <div className="flex items-center justify-center h-64">
-          <div style={{ color: "var(--foreground-muted)" }}>Loading user management...</div>
+          <Loader />
         </div>
       </AppLayout>
     );

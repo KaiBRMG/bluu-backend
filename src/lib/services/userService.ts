@@ -74,6 +74,8 @@ export async function ensureUserExists(userData: CreateUserData): Promise<string
       includeIdleTime: false,
       enableScreenshots: true,
       sessionToken,
+      hasAcceptedTerms: false,
+      hasCompletedOnboarding: false,
     });
 
     // Add user to Unassigned group's member list (non-blocking for better performance)

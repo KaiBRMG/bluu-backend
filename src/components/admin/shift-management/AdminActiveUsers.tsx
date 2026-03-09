@@ -5,6 +5,7 @@ import { useActiveUsers } from '@/hooks/useActiveUsers';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useUserData } from '@/hooks/useUserData';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Loader } from '@/components/ui/loader';
 
 const AVATAR_COLORS = [
   '#E57373', '#F06292', '#BA68C8', '#7986CB', '#64B5F6',
@@ -104,7 +105,7 @@ export default function AdminActiveUsers() {
       {/* Content */}
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
-          <div className="text-sm" style={{ color: 'var(--foreground-muted)' }}>Loading...</div>
+          <Loader />
         </div>
       ) : filteredSessions.length === 0 ? (
         <div className="flex items-center justify-center py-16">

@@ -8,6 +8,7 @@ import type { ExpandedShift } from '@/lib/utils/recurrence';
 import ShiftCard from './ShiftCard';
 import ShiftModal from './ShiftModal';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Loader } from '@/components/ui/loader';
 
 const AVATAR_COLORS = [
   '#E57373', '#F06292', '#BA68C8', '#7986CB', '#64B5F6',
@@ -279,8 +280,8 @@ export default function AdminShifts() {
 
       {/* ── Loading / error ────────────────────────────────────────── */}
       {loading && (
-        <div style={{ padding: '32px', textAlign: 'center', color: 'var(--foreground-muted)', fontSize: '13px' }}>
-          Loading shifts...
+        <div style={{ padding: '32px', display: 'flex', justifyContent: 'center' }}>
+          <Loader />
         </div>
       )}
       {error && (

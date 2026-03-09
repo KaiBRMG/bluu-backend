@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import DayTimeline from './DayTimeline';
+import { Loader } from '@/components/ui/loader';
 import type { TimesheetEntry } from '@/hooks/useTimesheetData';
 
 interface TimesheetViewProps {
@@ -128,7 +129,7 @@ export default function TimesheetView({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <span className="text-sm" style={{ color: 'var(--foreground-muted)' }}>Loading timesheet...</span>
+        <Loader />
       </div>
     );
   }

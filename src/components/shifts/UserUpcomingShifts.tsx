@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react';
 import { useUserShifts } from '@/hooks/useUserShifts';
 import { useUserData } from '@/hooks/useUserData';
 import { Button } from "@/components/ui/button";
+import { Loader } from "@/components/ui/loader";
 import type { ExpandedShift } from '@/lib/utils/recurrence';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -195,8 +196,8 @@ export default function UserUpcomingShifts() {
       </div>
 
       {loading && (
-        <div style={{ padding: '32px', textAlign: 'center', color: 'var(--foreground-muted)', fontSize: '13px' }}>
-          Loading shifts...
+        <div style={{ padding: '32px', display: 'flex', justifyContent: 'center' }}>
+          <Loader />
         </div>
       )}
 

@@ -4,6 +4,25 @@
 
 @custom-variant dark (&:is(.dark *));
 
+.loader {
+  width: 20px;
+  aspect-ratio: 1;
+  background-image:
+    radial-gradient(farthest-side,#0000 calc(95% - 1px),#fff calc(100% - 1px) 98%,#0000 101%),
+    radial-gradient(farthest-side,#0000 calc(95% - 1px),#fff calc(100% - 1px) 98%,#0000 101%),
+    radial-gradient(farthest-side,#0000 calc(95% - 1px),#fff calc(100% - 1px) 98%,#0000 101%);
+  background-size: 9px 9px;
+  background-repeat: no-repeat;
+  animation: l10 1.5s infinite;
+}
+@keyframes l10 {
+  0%   { background-position: 0 0,    0 100%, 100% 100%; }
+  25%  { background-position: 100% 0, 0 100%, 100% 100%; }
+  50%  { background-position: 100% 0, 0 0,    100% 100%; }
+  75%  { background-position: 100% 0, 0 0,    0 100%;    }
+  100% { background-position: 100% 100%, 0 0, 0 100%;    }
+}
+
 :root {
   /* Main backgrounds */
   --sidebar-background: #000000;

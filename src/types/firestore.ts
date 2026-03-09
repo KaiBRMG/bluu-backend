@@ -87,6 +87,10 @@ export interface UserDocument {
   // Single active session enforcement: rotated on every login.
   // Client stores this locally; onSnapshot detects a mismatch and forces sign-out.
   sessionToken?: string;
+
+  // Onboarding state
+  hasAcceptedTerms: boolean;
+  hasCompletedOnboarding: boolean;
 }
 
 // ─── Notifications ───────────────────────────────────────────────────

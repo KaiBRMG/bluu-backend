@@ -76,13 +76,24 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
     .sort((a, b) => a.order - b.order)
     .filter((ts) => accessiblePages.some((p) => p.teamspaceId === ts.id));
 
-  // Start all teamspaces expanded
-  const [openMap, setOpenMap] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(sortedTeamspaces.map((ts) => [ts.id, true]))
-  );
+  const STORAGE_KEY = "sidebar_teamspace_open";
+
+  const [openMap, setOpenMap] = useState<Record<string, boolean>>(() => {
+    let stored: Record<string, boolean> = {};
+    try {
+      stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
+    } catch {}
+    return Object.fromEntries(
+      sortedTeamspaces.map((ts) => [ts.id, stored[ts.id] ?? true])
+    );
+  });
 
   const toggle = (id: string) =>
-    setOpenMap((prev) => ({ ...prev, [id]: !prev[id] }));
+    setOpenMap((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
 
   return (
     <SidebarPrimitive collapsible="icon">

@@ -121,14 +121,17 @@ export async function commitSession(
 /**
  * Merge an event log into an existing time_entries doc created by the Cloud Function.
  * Called when the client uploads its local buffer after the CF already ran.
+ * Also corrects endTime to the actual last-activity timestamp from the buffer.
  */
 export async function updateSessionLog(
   sessionId: string,
   eventLog: SessionEvent[],
   parsedTotals: ParsedSessionTotals,
+  endTimeMs: number,
 ): Promise<void> {
   await adminDb.collection(TIME_ENTRIES).doc(sessionId).update({
     eventLog,
+    endTime: Timestamp.fromMillis(endTimeMs),
     workingSeconds: parsedTotals.workingSeconds,
     idleSeconds: parsedTotals.idleSeconds,
     breakSeconds: parsedTotals.breakSeconds,

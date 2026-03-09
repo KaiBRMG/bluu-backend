@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, shell, nativeImage, ipcMain, powerMonitor, desktopCapturer, Notification } = require('electron');
+const { app, BrowserWindow, shell, nativeImage, ipcMain, powerMonitor, desktopCapturer, Notification, systemPreferences } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
@@ -170,6 +170,70 @@ ipcMain.handle('notifications:show', async (_event, { title, body, playSound, ac
 
   return { success: true };
 });
+
+// IPC handler for screen recording permission status.
+// On macOS, getMediaAccessStatus('screen') may lag after the user grants access in System Settings.
+// We verify by attempting a real capture — if it returns non-empty frames, permission is granted.
+ipcMain.handle('permissions:getScreenStatus', async () => {
+  if (process.platform === 'darwin') {
+    const stated = systemPreferences.getMediaAccessStatus('screen');
+    if (stated === 'granted') return 'granted';
+
+    // Attempt a real capture to detect if permission was actually granted
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: 100, height: 100 },
+      });
+      const hasContent = sources.some(s => s.thumbnail.toPNG().length > 0);
+      if (hasContent) return 'granted';
+    } catch {
+      // capture failed — permission not granted
+    }
+
+    return stated;
+  }
+  return 'granted'; // Windows has no screen recording permission model
+});
+
+// IPC handler to request screen recording access
+// macOS does not support programmatic screen recording permission requests —
+// we open System Settings so the user can grant access manually.
+ipcMain.handle('permissions:requestScreenAccess', async () => {
+  if (process.platform === 'darwin') {
+    shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+    return { success: true };
+  }
+  // On Windows, trigger a getSources call to prompt the user
+  try {
+    await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } });
+    return { success: true };
+  } catch {
+    return { success: false };
+  }
+});
+
+// IPC handler for notification permission status
+ipcMain.handle('permissions:getNotificationStatus', async () => {
+  return Notification.isSupported() ? 'granted' : 'denied';
+});
+
+// IPC handler to request notification permission (shows a test notification)
+ipcMain.handle('permissions:requestNotification', async () => {
+  if (Notification.isSupported()) {
+    const notif = new Notification({
+      title: 'Bluu Backend',
+      body: 'Notifications are enabled.',
+      silent: true,
+    });
+    notif.show();
+    return { success: true };
+  }
+  return { success: false };
+});
+
+// IPC handler to return the current platform
+ipcMain.handle('app:getPlatform', () => process.platform);
 
 // IPC handler for window resizability
 ipcMain.on('window:set-resizable', (_event, resizable) => {

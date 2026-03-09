@@ -7,6 +7,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { useUserData } from '@/hooks/useUserData';
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Loader } from "@/components/ui/loader";
 import { ChevronDownIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -219,9 +220,7 @@ function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
         <div>
           <label className="form-label block mb-2">Select employees</label>
           {usersLoading || countsLoading ? (
-            <p className="text-sm" style={{ color: 'var(--foreground-muted)' }}>
-              Loading...
-            </p>
+            <div className="py-4"><Loader /></div>
           ) : usersWithScreenshots.length === 0 ? (
             <p className="text-sm" style={{ color: 'var(--foreground-muted)' }}>
               No employees have screenshots in storage.
@@ -564,9 +563,7 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
         </div>
       ) : loading ? (
         <div className="flex items-center justify-center py-12">
-          <span className="text-sm" style={{ color: 'var(--foreground-muted)' }}>
-            Loading screenshots...
-          </span>
+          <Loader />
         </div>
       ) : groups.length === 0 ? (
         <div className="flex items-center justify-center py-16">

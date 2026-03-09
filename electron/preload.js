@@ -67,6 +67,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // Platform info
+  app: {
+    getPlatform: () => ipcRenderer.invoke('app:getPlatform'),
+  },
+
+  // OS permission checks
+  permissions: {
+    getScreenStatus: () => ipcRenderer.invoke('permissions:getScreenStatus'),
+    requestScreenAccess: () => ipcRenderer.invoke('permissions:requestScreenAccess'),
+    getNotificationStatus: () => ipcRenderer.invoke('permissions:getNotificationStatus'),
+    requestNotification: () => ipcRenderer.invoke('permissions:requestNotification'),
+  },
+
   // Auto-updater
   updater: {
     onStatus: (callback) => {

@@ -259,6 +259,10 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
 
     if (displayState === 'working') {
       heartbeatRef.current = setInterval(() => {
+        const sid = sessionIdRef.current;
+        if (sid) {
+          appendEvent(sid, { type: 'activity', timestamp: Date.now() }).catch(() => {});
+        }
         apiCall('heartbeat', 'POST').catch(err => {
           console.error('[TimeTracking] Heartbeat failed:', err);
         });
@@ -458,8 +462,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
               // Notify user via desktop toast (if enabled in preferences)
               if (userData?.notificationPreferences?.screenshotNotifications !== false) {
                 electronAPI.notifications?.show({
-                  title: 'Screenshot Captured',
-                  body: '',
+                  title: 'Bluu Backend',
+                  body: 'Screenshot Captured',
                   playSound: false,
                 }).catch(() => {});
               }

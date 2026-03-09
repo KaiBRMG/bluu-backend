@@ -23,6 +23,15 @@ interface ElectronAPI {
   };
   onAppClosing: (callback: () => void) => void;
   removeAppClosingListeners: () => void;
+  app: {
+    getPlatform: () => Promise<string>;
+  };
+  permissions: {
+    getScreenStatus: () => Promise<string>;
+    requestScreenAccess: () => Promise<{ success: boolean }>;
+    getNotificationStatus: () => Promise<string>;
+    requestNotification: () => Promise<{ success: boolean }>;
+  };
   updater: {
     onStatus: (callback: (data: { status: 'downloading' | 'error'; version?: string; message?: string }) => void) => void;
     onProgress: (callback: (data: { percent: number; bytesPerSecond: number; total: number; transferred: number }) => void) => void;
