@@ -337,21 +337,7 @@ export default function Home() {
             </CardContent>
           </Card>
 
-          {showTimeTracking ? (
-            <TimeTrackingWidget />
-          ) : (
-            <Card
-              className="transition-colors py-0 gap-0"
-              style={{ background: '#171717', borderColor: 'var(--border-subtle)' }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)')}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border-subtle)')}
-            >
-              <CardContent className="p-6">
-                <h3 className="text-sm font-medium uppercase tracking-wide mb-2 text-muted-foreground">Active Projects</h3>
-                <p className="text-2xl font-semibold">5</p>
-              </CardContent>
-            </Card>
-          )}
+          {showTimeTracking && <TimeTrackingWidget />}
 
           <ClockWidget />
         </div>
