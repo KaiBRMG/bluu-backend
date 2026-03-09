@@ -15,7 +15,7 @@
   "dependencies": {
     "electron-updater": "^6.6.2",
     "glob": "^13.0.6"
-  },
+  }, 
   "devDependencies": {
     "cross-env": "^10.1.0",
     "electron": "^39.2.6",
