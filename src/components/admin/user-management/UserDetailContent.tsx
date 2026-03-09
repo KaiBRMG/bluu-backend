@@ -8,6 +8,13 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { ChevronDownIcon } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 const AVATAR_COLORS = [
   '#E57373', '#F06292', '#BA68C8', '#7986CB', '#64B5F6',
@@ -395,17 +402,25 @@ export default function UserDetailContent({
 
             <div>
               <label className="form-label block mb-1">Employment Type</label>
-              <select
-                className="form-input w-full"
-                value={formData.employmentType}
-                onChange={(e) => handleChange('employmentType', e.target.value)}
-              >
-                <option value="">Select...</option>
-                <option value="Full-time">Full-time</option>
-                <option value="Part-time">Part-time</option>
-                <option value="Contractor">Contractor</option>
-                <option value="Intern">Intern</option>
-              </select>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="form-input w-full flex items-center justify-between gap-2"
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <span>{formData.employmentType || 'Select...'}</span>
+                    <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="dark min-w-[160px]">
+                  <DropdownMenuItem onSelect={() => handleChange('employmentType', '')}>Select...</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => handleChange('employmentType', 'Full-time')}>Full-time</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => handleChange('employmentType', 'Part-time')}>Part-time</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => handleChange('employmentType', 'Contractor')}>Contractor</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => handleChange('employmentType', 'Intern')}>Intern</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
 
             <div>

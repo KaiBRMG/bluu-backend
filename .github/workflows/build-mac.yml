@@ -9,6 +9,9 @@ on:
 jobs:
   build-mac:
     runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [arm64, x64]
 
     steps:
       - name: Checkout
@@ -25,9 +28,9 @@ jobs:
         working-directory: electron
         run: npm ci
 
-      - name: Build macOS DMG
+      - name: Build macOS DMG (${{ matrix.arch }})
         working-directory: electron
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run dist:mac -- --publish always
+        run: npm run dist:mac-${{ matrix.arch }} -- --publish always

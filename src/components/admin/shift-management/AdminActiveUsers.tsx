@@ -6,6 +6,13 @@ import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useUserData } from '@/hooks/useUserData';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Loader } from '@/components/ui/loader';
+import { ChevronDownIcon } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 const AVATAR_COLORS = [
   '#E57373', '#F06292', '#BA68C8', '#7986CB', '#64B5F6',
@@ -77,17 +84,24 @@ export default function AdminActiveUsers() {
       {/* Toolbar */}
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
-          <select
-            value={selectedGroup}
-            onChange={e => setSelectedGroup(e.target.value)}
-            className="form-input text-sm"
-            style={{ minWidth: '160px' }}
-          >
-            <option value="all">All Groups</option>
-            {groups.map(g => (
-              <option key={g.id} value={g.id}>{g.name}</option>
-            ))}
-          </select>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="form-input text-sm flex items-center justify-between gap-2"
+                style={{ cursor: 'pointer', minWidth: '160px' }}
+              >
+                <span>{selectedGroup === 'all' ? 'All Groups' : (groups.find(g => g.id === selectedGroup)?.name ?? 'All Groups')}</span>
+                <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="dark min-w-[160px]">
+              <DropdownMenuItem onSelect={() => setSelectedGroup('all')}>All Groups</DropdownMenuItem>
+              {groups.map(g => (
+                <DropdownMenuItem key={g.id} onSelect={() => setSelectedGroup(g.id)}>{g.name}</DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <span className="text-sm" style={{ color: 'var(--foreground-muted)' }}>
             {filteredSessions.length} active
           </span>

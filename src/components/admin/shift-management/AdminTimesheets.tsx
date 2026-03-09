@@ -8,6 +8,12 @@ import TimesheetView from '@/components/timesheet/TimesheetView';
 import { ChevronDownIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 function toDateString(date: Date): string {
   const y = date.getFullYear();
@@ -74,19 +80,33 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
       <div className="flex flex-wrap items-end gap-4 mb-6">
         <div>
           <label className="form-label block mb-1">Employee</label>
-          <select
-            className="form-input"
-            value={selectedUserId || ''}
-            onChange={(e) => onUserChange(e.target.value || null)}
-            disabled={usersLoading}
-          >
-            <option value="">Select a user...</option>
-            {timeTrackedUsers.map((u) => (
-              <option key={u.uid} value={u.uid}>
-                {u.displayName || `${u.firstName} ${u.lastName}`}
-              </option>
-            ))}
-          </select>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="form-input flex items-center justify-between gap-2"
+                style={{ cursor: 'pointer', minWidth: '180px' }}
+                disabled={usersLoading}
+              >
+                <span>
+                  {selectedUserId
+                    ? (() => { const u = timeTrackedUsers.find((u) => u.uid === selectedUserId); return u ? (u.displayName || `${u.firstName} ${u.lastName}`) : 'Select a user...'; })()
+                    : 'Select a user...'}
+                </span>
+                <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="dark min-w-[180px]">
+              <DropdownMenuItem onSelect={() => onUserChange(null)}>
+                Select a user...
+              </DropdownMenuItem>
+              {timeTrackedUsers.map((u) => (
+                <DropdownMenuItem key={u.uid} onSelect={() => onUserChange(u.uid)}>
+                  {u.displayName || `${u.firstName} ${u.lastName}`}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <div>

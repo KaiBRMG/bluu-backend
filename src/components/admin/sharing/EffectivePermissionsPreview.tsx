@@ -5,6 +5,13 @@ import type { PagePermissionDoc } from "@/types/firestore";
 import { GROUP_DISPLAY_NAMES } from "@/types/firestore";
 import type { PageDef, TeamspaceDef } from "@/lib/definitions";
 import { resolvePagePermission } from "@/lib/services/permissionResolver";
+import { ChevronDownIcon } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 interface AdminUser {
   uid: string;
@@ -101,19 +108,30 @@ export default function EffectivePermissionsPreview({
       <h3 className="text-sm font-semibold mb-3">Permission Visibility</h3>
 
       <div className="mb-4">
-        <select
-          className="form-input text-sm"
-          style={{ maxWidth: "300px" }}
-          value={selectedUid}
-          onChange={(e) => setSelectedUid(e.target.value)}
-        >
-          <option value="">Select a user to preview...</option>
-          {users.map((u) => (
-            <option key={u.uid} value={u.uid}>
-              {u.displayName} ({u.workEmail})
-            </option>
-          ))}
-        </select>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="form-input text-sm flex items-center justify-between gap-2"
+              style={{ cursor: 'pointer', maxWidth: '300px', minWidth: '200px' }}
+            >
+              <span>
+                {selectedUid
+                  ? (() => { const u = users.find(u => u.uid === selectedUid); return u ? `${u.displayName} (${u.workEmail})` : 'Select a user to preview...'; })()
+                  : 'Select a user to preview...'}
+              </span>
+              <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="dark min-w-[200px]">
+            <DropdownMenuItem onSelect={() => setSelectedUid('')}>Select a user to preview...</DropdownMenuItem>
+            {users.map((u) => (
+              <DropdownMenuItem key={u.uid} onSelect={() => setSelectedUid(u.uid)}>
+                {u.displayName} ({u.workEmail})
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         {selectedUser && (
           <div className="mt-2 text-xs" style={{ color: "var(--foreground-muted)" }}>

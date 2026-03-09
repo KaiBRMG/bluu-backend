@@ -9,6 +9,8 @@
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
+    "dist:mac-arm64": "electron-builder --mac --arm64",
+    "dist:mac-x64": "electron-builder --mac --x64",
     "pack": "electron-builder --dir",
     "dev": "cross-env ELECTRON_DEV=true electron ."
   },
@@ -40,7 +42,10 @@
       "identity": "-",
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
-      "target": ["dmg", "zip"],
+      "target": [
+        { "target": "dmg", "arch": ["arm64"] },
+        { "target": "dmg", "arch": ["x64"] }
+      ],
       "icon": "public/logo/icon.icns",
       "category": "public.app-category.productivity"
     },

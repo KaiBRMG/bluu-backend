@@ -11,6 +11,12 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { ChevronDownIcon } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -360,16 +366,23 @@ export default function ShiftModal({
         {/* Employee selector */}
         <div style={sectionStyle}>
           <label style={labelStyle}>Employee</label>
-          <select
-            value={userId}
-            onChange={e => setUserId(e.target.value)}
-            style={inputStyle}
-            disabled={isEdit}
-          >
-            {users.map(u => (
-              <option key={u.uid} value={u.uid}>{u.displayName}</option>
-            ))}
-          </select>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                style={{ ...inputStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: isEdit ? 'default' : 'pointer', opacity: isEdit ? 0.6 : 1 }}
+                disabled={isEdit}
+              >
+                <span>{users.find(u => u.uid === userId)?.displayName ?? 'Select employee'}</span>
+                <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="dark" style={{ minWidth: '200px' }}>
+              {users.map(u => (
+                <DropdownMenuItem key={u.uid} onSelect={() => setUserId(u.uid)}>{u.displayName}</DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Start date + time */}
@@ -480,15 +493,22 @@ export default function ShiftModal({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px', gap: '10px', marginBottom: '12px' }}>
               <div>
                 <label style={labelStyle}>Frequency</label>
-                <select
-                  value={frequency}
-                  onChange={e => setFrequency(e.target.value as RecurrenceFrequency)}
-                  style={inputStyle}
-                >
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                </select>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      style={{ ...inputStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                    >
+                      <span>{frequency.charAt(0).toUpperCase() + frequency.slice(1)}</span>
+                      <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="dark" style={{ minWidth: '120px' }}>
+                    <DropdownMenuItem onSelect={() => setFrequency('daily')}>Daily</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setFrequency('weekly')}>Weekly</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setFrequency('monthly')}>Monthly</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
               <div>
                 <label style={labelStyle}>Every</label>
