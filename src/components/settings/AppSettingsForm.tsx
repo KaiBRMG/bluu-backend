@@ -553,7 +553,7 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
         </div>
 
         {/* Notification Sound */}
-        <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
               Notification Sound
@@ -595,7 +595,6 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
             />
           </button>
         </div>
-
       </div>
 
       {/* Footer with Save/Cancel */}
