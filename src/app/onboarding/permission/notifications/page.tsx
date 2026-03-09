@@ -9,6 +9,7 @@ export default function NotificationsPermissionPage() {
   const { user } = useAuth();
   const router = useRouter();
   const [platform, setPlatform] = useState<string>('');
+  const [prompted, setPrompted] = useState(false);
   const [finishing, setFinishing] = useState(false);
 
   useEffect(() => {
@@ -25,6 +26,7 @@ export default function NotificationsPermissionPage() {
     if (typeof window !== 'undefined' && window.electronAPI?.permissions) {
       await window.electronAPI.permissions.requestNotification();
     }
+    setPrompted(true);
   };
 
   const handleFinish = async () => {
@@ -73,7 +75,7 @@ export default function NotificationsPermissionPage() {
 
       <button
         onClick={handleFinish}
-        disabled={finishing}
+        disabled={!prompted || finishing}
         className="w-full bg-white text-black font-semibold py-3 px-6 rounded-lg hover:bg-zinc-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
         {finishing ? 'Please wait...' : "I've enabled it"}

@@ -44,11 +44,11 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       return NextResponse.json({ error: 'start and end required' }, { status: 400 });
     }
 
-    // Non-self requests require admin
+    // Non-self requests require shift-management page access
     if (targetUserId !== token.uid) {
       const caller = await getUserById(token.uid);
-      if (!caller?.groups?.includes('admin')) {
-        return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+      if (!caller?.permittedPageIds?.includes('shift-management')) {
+        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }
     }
 
@@ -73,8 +73,8 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
     const caller = await getUserById(token.uid);
-    if (!caller?.groups?.includes('admin')) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+    if (!caller?.permittedPageIds?.includes('shift-management')) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
     const body = await request.json();

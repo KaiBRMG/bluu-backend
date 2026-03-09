@@ -67,6 +67,8 @@ interface AdminUsersCacheData {
 
 const CACHE_KEY = 'bluu_admin_users_v1';
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+// Invalidated whenever group membership changes so useAdminData (sharing page) re-fetches fresh users
+const ADMIN_DATA_CACHE_KEY = 'bluu_admin_pages_v1';
 
 export function useAdminUsers() {
   const { user } = useAuth();
@@ -166,6 +168,7 @@ export function useAdminUsers() {
       }
 
       invalidateCache(CACHE_KEY);
+      invalidateCache(ADMIN_DATA_CACHE_KEY);
       await fetchData(true);
     },
     [user, fetchData]
@@ -191,6 +194,7 @@ export function useAdminUsers() {
       }
 
       invalidateCache(CACHE_KEY);
+      invalidateCache(ADMIN_DATA_CACHE_KEY);
       await fetchData(true);
     },
     [user, fetchData]

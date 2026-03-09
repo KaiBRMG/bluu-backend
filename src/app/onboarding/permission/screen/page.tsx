@@ -7,8 +7,7 @@ import { Focus } from 'lucide-react';
 export default function ScreenPermissionPage() {
   const router = useRouter();
   const [platform, setPlatform] = useState<string>('');
-  const [status, setStatus] = useState<string>('unknown');
-  const [checking, setChecking] = useState(false);
+  const [prompted, setPrompted] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -20,32 +19,18 @@ export default function ScreenPermissionPage() {
     init();
   }, []);
 
-  const checkStatus = async () => {
-    if (typeof window !== 'undefined' && window.electronAPI?.permissions) {
-      setChecking(true);
-      const s = await window.electronAPI.permissions.getScreenStatus();
-      setChecking(false);
-      if (s === 'granted') {
-        router.push('/onboarding/permission/notifications');
-        return;
-      }
-      setStatus(s);
-    }
-  };
-
   const handleRequestAccess = async () => {
     if (typeof window !== 'undefined' && window.electronAPI?.permissions) {
       await window.electronAPI.permissions.requestScreenAccess();
     }
+    setPrompted(true);
   };
 
   const isMac = platform === 'darwin';
 
   const instructions = isMac
-    ? 'Click the button below, or, open System Settings → Privacy & Security → Screen Recording → Enable for Bluu Backend. Then click "I\'ve enabled it" below.'
-    : 'Allow screen recording when the system prompt appears. Then click "I\'ve enabled it" below.';
-
-  const granted = status === 'granted';
+    ? "Click the button below, or open System Settings → Privacy & Security → Screen Recording → Enable for Bluu Backend. Then click \"I've enabled it\" below. Note, you may need to restart the app after giving the permission."
+    : "Allow screen recording when the system prompt appears. Then click \"I've enabled it\" below.";
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-12 max-w-lg w-full">
@@ -58,16 +43,6 @@ export default function ScreenPermissionPage() {
         <p className="text-zinc-300 text-sm leading-relaxed">{instructions}</p>
       </div>
 
-      {status !== 'unknown' && !granted && (
-        <p className="text-red-400 text-sm mb-4">
-          Permission not granted yet. Please enable it and try again.
-        </p>
-      )}
-
-      {granted && (
-        <p className="text-green-400 text-sm mb-4">Permission granted.</p>
-      )}
-
       <button
         onClick={handleRequestAccess}
         className="w-full bg-zinc-700 text-white font-semibold py-3 px-6 rounded-lg hover:bg-zinc-600 transition-colors mb-3"
@@ -76,11 +51,11 @@ export default function ScreenPermissionPage() {
       </button>
 
       <button
-        onClick={granted ? () => router.push('/onboarding/permission/notifications') : checkStatus}
-        disabled={checking}
+        onClick={() => router.push('/onboarding/permission/notifications')}
+        disabled={!prompted}
         className="w-full bg-white text-black font-semibold py-3 px-6 rounded-lg hover:bg-zinc-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        {checking ? 'Checking...' : granted ? 'Next' : "I've enabled it"}
+        I&apos;ve enabled it
       </button>
     </div>
   );

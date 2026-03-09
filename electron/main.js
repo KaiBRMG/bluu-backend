@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, shell, nativeImage, ipcMain, powerMonitor, desktopCapturer, Notification, systemPreferences } = require('electron');
+const { app, BrowserWindow, shell, nativeImage, ipcMain, powerMonitor, desktopCapturer, Notification } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
@@ -171,40 +171,13 @@ ipcMain.handle('notifications:show', async (_event, { title, body, playSound, ac
   return { success: true };
 });
 
-// IPC handler for screen recording permission status.
-// On macOS, getMediaAccessStatus('screen') may lag after the user grants access in System Settings.
-// We verify by attempting a real capture — if it returns non-empty frames, permission is granted.
-ipcMain.handle('permissions:getScreenStatus', async () => {
-  if (process.platform === 'darwin') {
-    const stated = systemPreferences.getMediaAccessStatus('screen');
-    if (stated === 'granted') return 'granted';
-
-    // Attempt a real capture to detect if permission was actually granted
-    try {
-      const sources = await desktopCapturer.getSources({
-        types: ['screen'],
-        thumbnailSize: { width: 100, height: 100 },
-      });
-      const hasContent = sources.some(s => s.thumbnail.toPNG().length > 0);
-      if (hasContent) return 'granted';
-    } catch {
-      // capture failed — permission not granted
-    }
-
-    return stated;
-  }
-  return 'granted'; // Windows has no screen recording permission model
-});
-
-// IPC handler to request screen recording access
-// macOS does not support programmatic screen recording permission requests —
-// we open System Settings so the user can grant access manually.
+// IPC handler to open System Settings for screen recording access (macOS).
+// On Windows, triggers a getSources call which prompts the user.
 ipcMain.handle('permissions:requestScreenAccess', async () => {
   if (process.platform === 'darwin') {
     shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
     return { success: true };
   }
-  // On Windows, trigger a getSources call to prompt the user
   try {
     await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } });
     return { success: true };
@@ -213,12 +186,7 @@ ipcMain.handle('permissions:requestScreenAccess', async () => {
   }
 });
 
-// IPC handler for notification permission status
-ipcMain.handle('permissions:getNotificationStatus', async () => {
-  return Notification.isSupported() ? 'granted' : 'denied';
-});
-
-// IPC handler to request notification permission (shows a test notification)
+// IPC handler to trigger a test notification (prompts OS permission on first run)
 ipcMain.handle('permissions:requestNotification', async () => {
   if (Notification.isSupported()) {
     const notif = new Notification({

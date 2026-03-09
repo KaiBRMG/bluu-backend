@@ -27,9 +27,7 @@ interface ElectronAPI {
     getPlatform: () => Promise<string>;
   };
   permissions: {
-    getScreenStatus: () => Promise<string>;
     requestScreenAccess: () => Promise<{ success: boolean }>;
-    getNotificationStatus: () => Promise<string>;
     requestNotification: () => Promise<{ success: boolean }>;
   };
   updater: {

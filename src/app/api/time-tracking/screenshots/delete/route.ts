@@ -6,10 +6,9 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
-    // Must be admin
     const caller = await getUserById(token.uid);
-    if (!caller?.groups?.includes('admin')) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+    if (!caller?.permittedPageIds?.includes('shift-management')) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
     const { screenshotIds } = await request.json();

@@ -468,6 +468,21 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
                 }).catch(() => {});
               }
             }
+          } else {
+            // Capture failed — likely a missing screen recording permission.
+            // Send a persistent in-app notification so the user knows to fix it.
+            const idToken = await user?.getIdToken();
+            if (idToken) {
+              fetch('/api/notifications/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+                body: JSON.stringify({
+                  title: 'Urgent Action Required',
+                  message: 'The system failed to capture your screen. Please provide Bluu Backend with the required system permission in your OS settings, or contact a system administrator to assist you.',
+                  type: 'alert',
+                }),
+              }).catch(() => {});
+            }
           }
         } catch (err) {
           console.error('[TimeTracking] Screenshot capture/upload failed:', err);

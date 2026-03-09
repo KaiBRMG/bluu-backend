@@ -23,8 +23,8 @@ export const PUT = withAuth(async (
 ) => {
   try {
     const caller = await getUserById(token.uid);
-    if (!caller?.groups?.includes('admin')) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+    if (!caller?.permittedPageIds?.includes('shift-management')) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
     const { shiftId } = await Promise.resolve(params);
@@ -130,8 +130,8 @@ export const DELETE = withAuth(async (
 ) => {
   try {
     const caller = await getUserById(token.uid);
-    if (!caller?.groups?.includes('admin')) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+    if (!caller?.permittedPageIds?.includes('shift-management')) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
     const { shiftId } = await Promise.resolve(params);

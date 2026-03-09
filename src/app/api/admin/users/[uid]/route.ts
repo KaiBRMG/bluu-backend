@@ -16,10 +16,9 @@ export const PUT = withAuth(async (
   params: Promise<{ uid: string }>
 ) => {
   try {
-    // Verify caller is admin
     const caller = await getUserById(token.uid);
-    if (!caller?.groups?.includes('admin')) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+    if (!caller?.permittedPageIds?.includes('user-management')) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
     const { uid: targetUid } = await params;

@@ -11,10 +11,9 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
  */
 export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
-    // Verify caller is admin
     const caller = await getUserById(token.uid);
-    if (!caller?.groups?.includes('admin')) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+    if (!caller?.permittedPageIds?.includes('user-management')) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
     // Fetch all users and groups in parallel

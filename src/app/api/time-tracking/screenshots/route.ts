@@ -22,11 +22,11 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       return NextResponse.json({ error: 'Invalid date format. Use YYYY-MM-DD' }, { status: 400 });
     }
 
-    // If querying another user, caller must be admin
+    // If querying another user, caller must have shift-management access
     if (userId !== token.uid) {
       const caller = await getUserById(token.uid);
-      if (!caller?.groups?.includes('admin')) {
-        return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+      if (!caller?.permittedPageIds?.includes('shift-management')) {
+        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }
     }
 
