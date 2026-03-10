@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { adminAuth } from '@/lib/firebase-admin';
-import { ensureUserExists } from '@/lib/services/userService';
+import { ensureUserExists, getUserById } from '@/lib/services/userService';
 
 const oauth2Client = new google.auth.OAuth2(
   process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
@@ -64,24 +64,31 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Parallelize database operations and token creation for better performance
-    const [sessionToken, customToken] = await Promise.all([
-      ensureUserExists({
-        uid: firebaseUser.uid,
-        workEmail: userInfo.email,
-        displayName: userInfo.name || '',
-      }),
-      adminAuth.createCustomToken(firebaseUser.uid),
-    ]);
+    // Ensure user doc exists and fetch their groups to set the admin claim.
+    // ensureUserExists writes/updates the doc; getUserById reads it (cached).
+    const sessionToken = await ensureUserExists({
+      uid: firebaseUser.uid,
+      workEmail: userInfo.email,
+      displayName: userInfo.name || '',
+    });
 
-      return NextResponse.json({
-        customToken,
-        sessionToken,
-        user: {
-          email: userInfo.email,
-          name: userInfo.name,
-        },
-      });
+    const userDoc = await getUserById(firebaseUser.uid);
+    const isAdmin = Array.isArray(userDoc?.groups) && userDoc.groups.includes('admin');
+
+    // Set Custom JWT Claim so Firestore rules can check request.auth.token.admin
+    // without a billable Firestore read on every rule evaluation.
+    await adminAuth.setCustomUserClaims(firebaseUser.uid, { admin: isAdmin });
+
+    const customToken = await adminAuth.createCustomToken(firebaseUser.uid, { admin: isAdmin });
+
+    return NextResponse.json({
+      customToken,
+      sessionToken,
+      user: {
+        email: userInfo.email,
+        name: userInfo.name,
+      },
+    });
     } catch (tokenError: any) {
       throw tokenError;
     }

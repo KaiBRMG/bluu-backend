@@ -11,14 +11,10 @@ service cloud.firestore {
     }
 
     // Helper: Check if the authenticated user has the 'admin' group.
-    // Costs 1 billable read per rule evaluation — acceptable here because
-    // this path is only hit by the client-side useUserData listener, which
-    // fires infrequently (on mount and reconnect), not on every action.
-    // TODO: move admin role to Custom JWT Claims (request.auth.token.admin == true)
-    // in the exchange-code route to make this $0 cost.
+    // Uses Custom JWT Claims set in the exchange-code route and refreshed
+    // whenever group membership changes — $0 cost, no Firestore read required.
     function isAdmin() {
-      return isSignedIn() &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.groups.hasAny(['admin']);
+      return isSignedIn() && request.auth.token.admin == true;
     }
 
     // 1. Users collection
@@ -52,9 +48,6 @@ service cloud.firestore {
     // (Admin SDK). Rules defined here for defence-in-depth and future listeners.
     // Admin access to other users' entries is handled entirely via Admin SDK
     // in API routes, so we do not need an isAdmin() bypass here.
-    // NOTE: If you add client-side listeners for admin timesheet views, move
-    // admin role checking to Custom JWT Claims (request.auth.token.admin == true)
-    // to avoid billable get() calls inside rules.
     match /time-entries/{entryId} {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow write: if false;
@@ -70,10 +63,9 @@ service cloud.firestore {
     // 6. Active sessions (new session model)
     // Client-side onSnapshot used by useActiveUsers (admin panel).
     // User reads own doc; admin reads all. Writes via Admin SDK only.
-    // NOTE: isAdmin() costs 1 read per evaluation — acceptable because the
-    // admin listener fires infrequently. Move to JWT claims if volume grows.
     match /active_sessions/{userId} {
-      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
       allow write: if false;
     }
 
@@ -92,6 +84,40 @@ service cloud.firestore {
     match /notifications/{notificationId} {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow write: if false;
+    }
+
+    // 9. Disputes
+    // All writes via Admin SDK (API routes — bypass these rules entirely).
+    // Users may read disputes they created or are assigned to.
+    // Admins may read all disputes.
+    match /disputes/{disputeId} {
+      allow read: if isSignedIn() && (
+        resource.data.createdBy == request.auth.uid ||
+        resource.data.assignedTo == request.auth.uid ||
+        isAdmin()
+      );
+      allow write: if false;
+    }
+
+    // 10. Shifts
+    // All reads/writes via Admin SDK (API routes). No client-side listeners.
+    // Rule exists for defence-in-depth — denies any accidental direct client access.
+    match /shifts/{shiftId} {
+      allow read, write: if false;
+    }
+
+    // 11. Creators
+    // All reads via Admin SDK (API routes). No client-side listeners.
+    // Rule exists for defence-in-depth — denies any accidental direct client access.
+    match /creators/{creatorId} {
+      allow read, write: if false;
+    }
+
+    // 12. Bug reports
+    // All writes via Admin SDK (API routes). No client-side access needed.
+    // Rule exists for defence-in-depth — denies any accidental direct client writes.
+    match /bugs/{bugId} {
+      allow read, write: if false;
     }
 
   }

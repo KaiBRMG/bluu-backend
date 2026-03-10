@@ -24,13 +24,16 @@ export const TEAMSPACES: TeamspaceDef[] = [
 
 export const PAGES: PageDef[] = [
   // CA Portal
-  { pageId: 'shifts', title: 'Shifts', teamspaceId: 'ca-portal', href: '/ca-portal/shifts', icon: 'CalendarClock', order: 0 },
-  // { pageId: 'documents', title: 'Documents', teamspaceId: 'ca-portal', href: '/ca-portal/documents', icon: null, order: 1 },
+  { pageId: 'ca-shifts', title: 'Shifts', teamspaceId: 'ca-portal', href: '/ca-portal/shifts', icon: 'CalendarClock', order: 0 },
+  { pageId: 'ca-disputes', title: 'Disputes', teamspaceId: 'ca-portal', href: '/ca-portal/disputes', icon: 'MessageCircleQuestionMark', order: 1 },
+  { pageId: 'ca-admin', title: 'Admin', teamspaceId: 'ca-portal', href: '/ca-portal/admin', icon: 'Cog', order: 2 },
   // { pageId: 'calendar', title: 'Calendar', teamspaceId: 'ca-portal', href: '/ca-portal/calendar', icon: null, order: 2 },
+  
   // Admin
   { pageId: 'user-management', title: 'User Management', teamspaceId: 'admin', href: '/admin/user-management', icon: 'UserRoundCog', order: 0 },
   { pageId: 'sharing', title: 'Sharing', teamspaceId: 'admin', href: '/admin/sharing', icon: 'Share2', order: 1 },
   { pageId: 'shift-management', title: 'Shift Management', teamspaceId: 'admin', href: '/admin/shift-management', icon: 'CalendarCog', order: 2 },
+  
   // Apps
   { pageId: 'time-tracking', title: 'Time Tracking', teamspaceId: 'apps', href: '/applications/time-tracking', icon: 'ClockFading', order: 0 },
   // { pageId: 'app-2', title: 'App 2 (Placeholder)', teamspaceId: 'apps', href: null, icon: null, order: 1 },

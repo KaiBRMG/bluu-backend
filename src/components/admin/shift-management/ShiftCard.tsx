@@ -58,10 +58,11 @@ const BADGE_CONFIG = {
 interface ShiftCardProps {
   shift: ExpandedShift;
   user: ShiftUser;
+  viewerTimezone: string;  // admin's timezone — times are displayed in this tz
   onClick?: () => void;
 }
 
-export default function ShiftCard({ shift, user, onClick }: ShiftCardProps) {
+export default function ShiftCard({ shift, user, viewerTimezone, onClick }: ShiftCardProps) {
   const now          = Date.now();
   const startMs      = shift.occurrenceStart;
   const endMs        = shift.occurrenceEnd;
@@ -71,10 +72,9 @@ export default function ShiftCard({ shift, user, onClick }: ShiftCardProps) {
 
   const color    = getShiftColor(user.uid);
   const rgb      = hexToRgb(color);
-  const tz       = user.timezone || 'UTC';
 
-  const startLabel = formatLocalTime(startMs, tz);
-  const endLabel   = formatLocalTime(endMs,   tz);
+  const startLabel = formatLocalTime(startMs, viewerTimezone);
+  const endLabel   = formatLocalTime(endMs,   viewerTimezone);
 
   const badge = shift.attendanceStatus ? BADGE_CONFIG[shift.attendanceStatus] : null;
 

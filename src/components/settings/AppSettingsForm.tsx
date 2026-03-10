@@ -4,6 +4,13 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useUserData } from '@/hooks/useUserData';
 import { useAuth } from '@/components/AuthProvider';
 import { getTimezoneList, getOffsetForTimezone, TimezoneOption } from '@/lib/timezoneData';
+import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { CheckIcon, ChevronDownIcon, PlusIcon, XIcon } from "lucide-react";
 
 const DEFAULT_ADDITIONAL_TZS = ['Africa/Johannesburg', 'Asia/Manila'];
 
@@ -41,15 +48,10 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
   const [additionalTimezones, setAdditionalTimezones] = useState<string[]>([]);
   const originalAdditionalTimezonesRef = useRef<string[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const [additionalDropdownOpen, setAdditionalDropdownOpen] = useState<number | null>(null);
-  const [additionalSearch, setAdditionalSearch] = useState('');
+  const [primaryOpen, setPrimaryOpen] = useState(false);
+  const [additionalOpen, setAdditionalOpen] = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const additionalDropdownRef = useRef<HTMLDivElement>(null);
 
   const timezoneList = useMemo(() => getTimezoneList(), []);
 
@@ -108,56 +110,15 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
     }
   }, [saveMessage]);
 
-  // Click-outside handler (primary timezone)
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setDropdownOpen(false);
-        setSearch('');
-      }
-    }
-
-    if (dropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [dropdownOpen]);
-
-  // Click-outside handler (additional timezones)
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (additionalDropdownRef.current && !additionalDropdownRef.current.contains(event.target as Node)) {
-        setAdditionalDropdownOpen(null);
-        setAdditionalSearch('');
-      }
-    }
-
-    if (additionalDropdownOpen !== null) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [additionalDropdownOpen]);
-
   const addressIsSet = !!(userData?.address?.city && userData?.address?.country);
   const isDisabled = !addressIsSet && !userData?.timezone;
-
-  // Filter timezones by search
-  const filteredTimezones = useMemo(() => {
-    if (!search) return timezoneList;
-    const lower = search.toLowerCase();
-    return timezoneList.filter(
-      tz => tz.value.toLowerCase().includes(lower) ||
-            tz.label.toLowerCase().includes(lower)
-    );
-  }, [timezoneList, search]);
 
   // Get current selection display
   const selectedOption: TimezoneOption | undefined = timezoneList.find(tz => tz.value === selectedTimezone);
 
   const handleSelect = (tz: TimezoneOption) => {
     setSelectedTimezone(tz.value);
-    setDropdownOpen(false);
-    setSearch('');
+    setPrimaryOpen(false);
     // Remove any additional timezone that shares the same offset as the new primary
     const newPrimaryOffset = tzOffsetMinutes(tz.value);
     setAdditionalTimezones(prev =>
@@ -171,18 +132,10 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
     return timezoneList.filter(tz => !taken.has(tz.value));
   }, [timezoneList, selectedTimezone, additionalTimezones]);
 
-  const filteredAdditional = useMemo(() => {
-    if (!additionalSearch) return availableForAdditional;
-    const lower = additionalSearch.toLowerCase();
-    return availableForAdditional.filter(
-      tz => tz.value.toLowerCase().includes(lower) || tz.label.toLowerCase().includes(lower)
-    );
-  }, [availableForAdditional, additionalSearch]);
-
   const handleAddAdditionalSlot = () => {
     if (additionalTimezones.length < 2) {
       setAdditionalTimezones(prev => [...prev, '']);
-      setAdditionalDropdownOpen(additionalTimezones.length);
+      setAdditionalOpen(additionalTimezones.length);
     }
   };
 
@@ -192,8 +145,7 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
       next[index] = tz;
       return next;
     });
-    setAdditionalDropdownOpen(null);
-    setAdditionalSearch('');
+    setAdditionalOpen(null);
   };
 
   const handleRemoveAdditional = (index: number) => {
@@ -286,124 +238,63 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
           {isDisabled && (
             <p className="text-sm mb-3" style={{ color: '#ef4444' }}>
               Address must first be set in{' '}
-              <button
+              <Button
                 type="button"
+                variant="link"
                 onClick={() => onSectionChange('personal-info')}
-                style={{
-                  color: '#3b82f6',
-                  background: 'none',
-                  border: 'none',
-                  padding: 0,
-                  cursor: 'pointer',
-                  textDecoration: 'underline',
-                  font: 'inherit',
-                }}
+                className="h-auto p-0 text-sm"
               >
                 Personal Information
-              </button>
+              </Button>
             </p>
           )}
 
-          {/* Timezone Dropdown */}
-          <div
-            className="relative"
-            ref={dropdownRef}
-            style={{
-              opacity: isDisabled ? 0.5 : 1,
-              pointerEvents: isDisabled ? 'none' : 'auto',
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setDropdownOpen(!dropdownOpen)}
-              className="form-input w-full flex items-center justify-between gap-2 text-left"
-              style={{ cursor: 'pointer' }}
-            >
-              <span
-                className="truncate"
-                style={{
-                  color: selectedOption ? 'var(--foreground)' : 'var(--foreground-muted)',
-                }}
-              >
-                {selectedOption
-                  ? `${selectedOption.value.replace(/_/g, ' ')} (UTC${selectedOption.offset})`
-                  : 'Select timezone...'}
-              </span>
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                className="flex-shrink-0"
-              >
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-
-            {dropdownOpen && (
-              <div
-                className="absolute top-full left-0 mt-1 w-full max-h-72 overflow-y-auto rounded-lg shadow-xl z-50"
-                style={{
-                  background: 'var(--sidebar-background)',
-                  border: '1px solid var(--border-subtle)',
-                }}
-              >
-                {/* Search input */}
-                <div
-                  className="p-2 sticky top-0"
-                  style={{ background: 'var(--sidebar-background)' }}
+          {/* Primary Timezone Dropdown */}
+          <div style={{ opacity: isDisabled ? 0.5 : 1, pointerEvents: isDisabled ? 'none' : 'auto' }}>
+            <Popover open={primaryOpen} onOpenChange={setPrimaryOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="form-input w-full flex items-center justify-between gap-2 text-left"
+                  style={{ cursor: 'pointer' }}
                 >
-                  <input
-                    type="text"
-                    className="form-input w-full"
-                    placeholder="Search timezone or location..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    onClick={(e) => e.stopPropagation()}
-                    autoFocus
-                  />
-                </div>
-
-                {/* Timezone list */}
-                {filteredTimezones.length === 0 ? (
-                  <div
-                    className="px-3 py-4 text-sm text-center"
-                    style={{ color: 'var(--foreground-muted)' }}
+                  <span
+                    className="truncate"
+                    style={{
+                      color: selectedOption ? 'var(--foreground)' : 'var(--foreground-muted)',
+                    }}
                   >
-                    No timezones found
-                  </div>
-                ) : (
-                  filteredTimezones.map((tz) => (
-                    <button
-                      key={tz.value}
-                      type="button"
-                      className="w-full px-3 py-2 text-left text-sm transition-colors"
-                      style={{
-                        background: tz.value === selectedTimezone
-                          ? 'var(--active-background)'
-                          : 'transparent',
-                        fontWeight: tz.value === selectedTimezone ? 500 : 400,
-                      }}
-                      onMouseEnter={(e) => {
-                        if (tz.value !== selectedTimezone) {
-                          e.currentTarget.style.background = 'var(--hover-background)';
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (tz.value !== selectedTimezone) {
-                          e.currentTarget.style.background = 'transparent';
-                        }
-                      }}
-                      onClick={() => handleSelect(tz)}
-                    >
-                      {tz.label}
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
+                    {selectedOption
+                      ? `${selectedOption.value.replace(/_/g, ' ')} (UTC${selectedOption.offset})`
+                      : 'Select timezone...'}
+                  </span>
+                  <ChevronDownIcon className="size-3 flex-shrink-0" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search timezone or location..." />
+                  <CommandList className="max-h-64">
+                    <CommandEmpty>No timezones found</CommandEmpty>
+                    <CommandGroup>
+                      {timezoneList.map((tz) => (
+                        <CommandItem
+                          key={tz.value}
+                          value={tz.label}
+                          onSelect={() => handleSelect(tz)}
+                        >
+                          <CheckIcon
+                            className="mr-2 size-4"
+                            style={{ opacity: tz.value === selectedTimezone ? 1 : 0 }}
+                          />
+                          {tz.label}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
 
@@ -416,109 +307,73 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
             </p>
           </div>
 
-          <div className="flex flex-col gap-2" ref={additionalDropdownRef}>
+          <div className="flex flex-col gap-2">
             {additionalTimezones.map((tz, index) => {
               const option = timezoneList.find(t => t.value === tz);
-              const isOpen = additionalDropdownOpen === index;
+              const isOpen = additionalOpen === index;
               return (
-                <div key={index} className="relative flex items-center gap-2">
-                  <button
+                <div key={index} className="flex items-center gap-2">
+                  <Popover open={isOpen} onOpenChange={(open) => setAdditionalOpen(open ? index : null)}>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        className="form-input flex-1 flex items-center justify-between gap-2 text-left"
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <span
+                          className="truncate"
+                          style={{ color: option ? 'var(--foreground)' : 'var(--foreground-muted)' }}
+                        >
+                          {option
+                            ? `${option.value.replace(/_/g, ' ')} (UTC${option.offset})`
+                            : 'Select timezone...'}
+                        </span>
+                        <ChevronDownIcon className="size-3 flex-shrink-0" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-72 p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search timezone or location..." />
+                        <CommandList className="max-h-64">
+                          <CommandEmpty>No timezones found</CommandEmpty>
+                          <CommandGroup>
+                            {availableForAdditional.map((tzOpt) => (
+                              <CommandItem
+                                key={tzOpt.value}
+                                value={tzOpt.label}
+                                onSelect={() => handleSelectAdditional(index, tzOpt.value)}
+                              >
+                                {tzOpt.label}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  <Button
                     type="button"
-                    onClick={() => {
-                      setAdditionalDropdownOpen(isOpen ? null : index);
-                      setAdditionalSearch('');
-                    }}
-                    className="form-input flex-1 flex items-center justify-between gap-2 text-left"
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <span
-                      className="truncate"
-                      style={{ color: option ? 'var(--foreground)' : 'var(--foreground-muted)' }}
-                    >
-                      {option
-                        ? `${option.value.replace(/_/g, ' ')} (UTC${option.offset})`
-                        : 'Select timezone...'}
-                    </span>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="flex-shrink-0">
-                      <path d="M6 9l6 6 6-6" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
+                    variant="ghost"
+                    size="icon"
                     onClick={() => handleRemoveAdditional(index)}
-                    className="flex-shrink-0 p-1 rounded"
-                    style={{ color: 'var(--foreground-muted)' }}
-                    onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--foreground-muted)'; }}
-                    title="Remove"
+                    className="flex-shrink-0 size-8 text-muted-foreground hover:text-destructive"
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M18 6L6 18M6 6l12 12" />
-                    </svg>
-                  </button>
-
-                  {isOpen && (
-                    <div
-                      className="absolute top-full left-0 mt-1 w-full max-h-72 overflow-y-auto rounded-lg shadow-xl z-50"
-                      style={{
-                        background: 'var(--sidebar-background)',
-                        border: '1px solid var(--border-subtle)',
-                        width: 'calc(100% - 2rem)',
-                      }}
-                    >
-                      <div className="p-2 sticky top-0" style={{ background: 'var(--sidebar-background)' }}>
-                        <input
-                          type="text"
-                          className="form-input w-full"
-                          placeholder="Search timezone or location..."
-                          value={additionalSearch}
-                          onChange={(e) => setAdditionalSearch(e.target.value)}
-                          onClick={(e) => e.stopPropagation()}
-                          autoFocus
-                        />
-                      </div>
-                      {filteredAdditional.length === 0 ? (
-                        <div className="px-3 py-4 text-sm text-center" style={{ color: 'var(--foreground-muted)' }}>
-                          No timezones found
-                        </div>
-                      ) : (
-                        filteredAdditional.map((tzOpt) => (
-                          <button
-                            key={tzOpt.value}
-                            type="button"
-                            className="w-full px-3 py-2 text-left text-sm transition-colors"
-                            style={{ background: 'transparent' }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--hover-background)'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                            onClick={() => handleSelectAdditional(index, tzOpt.value)}
-                          >
-                            {tzOpt.label}
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  )}
+                    <XIcon className="size-3.5" />
+                  </Button>
                 </div>
               );
             })}
 
             {additionalTimezones.length < 2 && (
-              <button
+              <Button
                 type="button"
+                variant="outline"
                 onClick={handleAddAdditionalSlot}
-                className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg transition-colors"
-                style={{
-                  color: 'var(--foreground-secondary)',
-                  border: '1px dashed var(--border-subtle)',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--foreground-muted)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}
+                className="justify-start gap-1.5 border-dashed text-muted-foreground"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
+                <PlusIcon className="size-3" />
                 Add timezone ({additionalTimezones.length}/2)
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -531,69 +386,39 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
         </div>
 
         {/* Desktop Notifications */}
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <div>
-            <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
-              Desktop Notifications
-            </div>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={desktopEnabled}
-            onClick={() => setDesktopEnabled((v) => !v)}
-            className="flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none"
-            style={{ background: desktopEnabled ? '#3b82f6' : 'var(--border-subtle)' }}
-          >
-            <span
-              className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
-              style={{ transform: desktopEnabled ? 'translateX(18px)' : 'translateX(2px)' }}
-            />
-          </button>
+        <div className="flex items-center justify-between gap-4 mb-4">
+          <Label htmlFor="desktop-notif" className="text-sm font-medium cursor-pointer" style={{ color: 'var(--foreground)' }}>
+            Desktop Notifications
+          </Label>
+          <Switch
+            id="desktop-notif"
+            checked={desktopEnabled}
+            onCheckedChange={setDesktopEnabled}
+          />
         </div>
 
         {/* Notification Sound */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
-              Notification Sound
-            </div>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={soundEnabled}
-            onClick={() => setSoundEnabled((v) => !v)}
-            className="flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none"
-            style={{ background: soundEnabled ? '#3b82f6' : 'var(--border-subtle)' }}
-          >
-            <span
-              className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
-              style={{ transform: soundEnabled ? 'translateX(18px)' : 'translateX(2px)' }}
-            />
-          </button>
+        <div className="flex items-center justify-between gap-4 mb-4">
+          <Label htmlFor="sound-notif" className="text-sm font-medium cursor-pointer" style={{ color: 'var(--foreground)' }}>
+            Notification Sound
+          </Label>
+          <Switch
+            id="sound-notif"
+            checked={soundEnabled}
+            onCheckedChange={setSoundEnabled}
+          />
         </div>
 
         {/* Screenshot Notifications */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
-              Screenshot Notifications
-            </div>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={screenshotNotifications}
-            onClick={() => setScreenshotNotifications((v) => !v)}
-            className="flex-shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none"
-            style={{ background: screenshotNotifications ? '#3b82f6' : 'var(--border-subtle)' }}
-          >
-            <span
-              className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
-              style={{ transform: screenshotNotifications ? 'translateX(18px)' : 'translateX(2px)' }}
-            />
-          </button>
+        <div className="flex items-center justify-between gap-4">
+          <Label htmlFor="screenshot-notif" className="text-sm font-medium cursor-pointer" style={{ color: 'var(--foreground)' }}>
+            Screenshot Notifications
+          </Label>
+          <Switch
+            id="screenshot-notif"
+            checked={screenshotNotifications}
+            onCheckedChange={setScreenshotNotifications}
+          />
         </div>
       </div>
 
@@ -604,33 +429,29 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
       >
         <div>
           {saveMessage && (
-            <span
-              className="text-sm"
-              style={{ color: saveMessage.type === 'success' ? '#22c55e' : '#ef4444' }}
-            >
-              {saveMessage.text}
-            </span>
+            <Alert variant={saveMessage.type === 'error' ? 'destructive' : 'default'} className="py-2 px-3">
+              <AlertDescription>{saveMessage.text}</AlertDescription>
+            </Alert>
           )}
         </div>
         <div className="flex gap-3">
           {hasChanges && (
-            <button
+            <Button
               type="button"
               onClick={handleCancel}
-              className="btn-secondary"
+              variant="outline"
               disabled={isSubmitting}
             >
               Cancel
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             type="button"
             onClick={handleSave}
-            className="btn-primary"
             disabled={!hasChanges || isSubmitting || isDisabled}
           >
             {isSubmitting ? 'Saving...' : 'Save Changes'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

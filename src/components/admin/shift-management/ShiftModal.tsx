@@ -10,6 +10,22 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 import { ChevronDownIcon } from 'lucide-react';
 import {
   DropdownMenu,
@@ -30,6 +46,7 @@ interface Props {
   prefillUserId?: string;       // for create from cell click
   prefillDate?: string;         // "YYYY-MM-DD" for create from cell click
   users: ShiftUser[];
+  viewerTimezone: string;       // admin's IANA timezone — all display/input is in this tz
   onSave: (shiftId: string | null, payload: CreateShiftPayload | UpdateShiftPayload, saveMode: SaveMode) => Promise<void>;
   onDelete?: (shiftId: string, mode: DeleteMode, overrideDate?: string) => Promise<void>;
   onClose: () => void;
@@ -80,6 +97,30 @@ function localToUtcIso(dateStr: string, timeStr: string, tz: string): string {
   return new Date(guessMs).toISOString();
 }
 
+// ─── Styles shared across form fields ────────────────────────────────
+
+const labelStyle: React.CSSProperties = {
+  fontSize: '12px',
+  fontWeight: 500,
+  color: 'var(--foreground-secondary)',
+  marginBottom: '4px',
+  display: 'block',
+};
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '7px 10px',
+  borderRadius: '6px',
+  border: '1px solid var(--border-subtle)',
+  background: 'var(--input-background, var(--sidebar-background))',
+  color: 'var(--foreground)',
+  fontSize: '13px',
+  outline: 'none',
+  boxSizing: 'border-box',
+};
+
+const sectionStyle: React.CSSProperties = { marginBottom: '14px' };
+
 // ─── Component ───────────────────────────────────────────────────────
 
 export default function ShiftModal({
@@ -88,6 +129,7 @@ export default function ShiftModal({
   prefillUserId,
   prefillDate,
   users,
+  viewerTimezone,
   onSave,
   onDelete,
   onClose,
@@ -95,21 +137,21 @@ export default function ShiftModal({
   const isEdit   = mode === 'edit';
   const isRecurringShift = !!shift?.isRecurring;
 
-  // Determine display timezone: use selected user's timezone
+  // Employee's IANA timezone — used only for storing wallClock/userTimezone in Firestore
   const getUserTz = useCallback((uid: string) =>
-    users.find(u => u.uid === uid)?.timezone ?? 'UTC', [users]);
+    users.find(u => u.uid === uid)?.timezone || 'UTC', [users]);
 
   // ── Form state ──────────────────────────────────────────────────────
+  // All dates/times are in the admin's timezone (viewerTimezone)
   const defaultUser = prefillUserId ?? shift?.userId ?? users[0]?.uid ?? '';
-  const defaultTz   = getUserTz(defaultUser);
 
   const defaultStartDate = prefillDate
-    ?? (shift ? toLocalDateString(shift.occurrenceStart, getUserTz(shift.userId)) : new Date().toISOString().slice(0, 10));
+    ?? (shift ? toLocalDateString(shift.occurrenceStart, viewerTimezone) : new Date().toISOString().slice(0, 10));
   const defaultEndDate   = shift
-    ? toLocalDateString(shift.occurrenceEnd, getUserTz(shift.userId))
+    ? toLocalDateString(shift.occurrenceEnd, viewerTimezone)
     : defaultStartDate;
-  const defaultStartTime = shift ? toLocalTimeString(shift.occurrenceStart, getUserTz(shift.userId)) : '09:00';
-  const defaultEndTime   = shift ? toLocalTimeString(shift.occurrenceEnd,   getUserTz(shift.userId)) : '17:00';
+  const defaultStartTime = shift ? toLocalTimeString(shift.occurrenceStart, viewerTimezone) : '09:00';
+  const defaultEndTime   = shift ? toLocalTimeString(shift.occurrenceEnd,   viewerTimezone) : '17:00';
 
   const [userId,        setUserId]        = useState(defaultUser);
   const [startDate,     setStartDate]     = useState(defaultStartDate);
@@ -138,7 +180,7 @@ export default function ShiftModal({
   const [endDateOpen,    setEndDateOpen]    = useState(false);
   const [recurEndOpen,   setRecurEndOpen]   = useState(false);
 
-  // ── Save dialogue (for recurring edits) ─────────────────────────────
+  // ── Save/Delete dialogue states ──────────────────────────────────────
   const [showSaveDialogue,   setShowSaveDialogue]   = useState(false);
   const [showDeleteDialogue, setShowDeleteDialogue] = useState(false);
   const [saving,             setSaving]             = useState(false);
@@ -161,9 +203,9 @@ export default function ShiftModal({
     if (!endDate)    return 'Please set an end date.';
     if (!startTime)  return 'Please set a start time.';
     if (!endTime)    return 'Please set an end time.';
-    const tz  = getUserTz(userId);
-    const startMs = new Date(localToUtcIso(startDate, startTime, tz)).getTime();
-    const endMs   = new Date(localToUtcIso(endDate,   endTime,   tz)).getTime();
+    // Validate using the admin's timezone (what they entered)
+    const startMs = new Date(localToUtcIso(startDate, startTime, viewerTimezone)).getTime();
+    const endMs   = new Date(localToUtcIso(endDate,   endTime,   viewerTimezone)).getTime();
     if (endMs <= startMs) return 'End must be after start.';
     if (isRecurring && frequency === 'weekly' && daysOfWeek.length === 0)
       return 'Select at least one day for weekly recurrence.';
@@ -172,24 +214,34 @@ export default function ShiftModal({
 
   // ── Build payload ────────────────────────────────────────────────────
   function buildPayload() {
-    const tz = getUserTz(userId);
+    // Admin enters times in viewerTimezone → convert to UTC ISO strings
+    const startUtcIso = localToUtcIso(startDate, startTime, viewerTimezone);
+    const endUtcIso   = localToUtcIso(endDate,   endTime,   viewerTimezone);
+
+    // For Firestore: wallClock times and userTimezone must be in the employee's tz
+    // so DST-safe recurrence expansion fires at the right wall-clock time for them.
+    const employeeTz       = getUserTz(userId);
+    const startMs          = new Date(startUtcIso).getTime();
+    const endMs            = new Date(endUtcIso).getTime();
+    const wallClockStart   = toLocalTimeString(startMs, employeeTz);
+    const wallClockEnd     = toLocalTimeString(endMs,   employeeTz);
 
     const recurrencePayload = isRecurring ? {
       frequency,
       interval,
       daysOfWeek: frequency === 'weekly' ? daysOfWeek : [],
-      endDate: endCondition === 'date' && recurEndDate ? localToUtcIso(recurEndDate, '00:00', tz) : null,
+      endDate: endCondition === 'date' && recurEndDate ? localToUtcIso(recurEndDate, '00:00', viewerTimezone) : null,
       count:   endCondition === 'count' ? count : null,
       parentShiftId: null,
     } : null;
 
     return {
       userId,
-      startTime:      localToUtcIso(startDate, startTime, tz),
-      endTime:        localToUtcIso(endDate,   endTime,   tz),
-      wallClockStart: startTime,
-      wallClockEnd:   endTime,
-      userTimezone:   tz,
+      startTime:      startUtcIso,
+      endTime:        endUtcIso,
+      wallClockStart,
+      wallClockEnd,
+      userTimezone:   employeeTz,
       recurrence:     recurrencePayload,
     };
   }
@@ -259,446 +311,274 @@ export default function ShiftModal({
     }
   }
 
-  // ── Styles ────────────────────────────────────────────────────────────
-  const labelStyle: React.CSSProperties = {
-    fontSize: '12px',
-    fontWeight: 500,
-    color: 'var(--foreground-secondary)',
-    marginBottom: '4px',
-    display: 'block',
-  };
-
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    padding: '7px 10px',
-    borderRadius: '6px',
-    border: '1px solid var(--border-subtle)',
-    background: 'var(--input-background, var(--sidebar-background))',
-    color: 'var(--foreground)',
-    fontSize: '13px',
-    outline: 'none',
-    boxSizing: 'border-box',
-  };
-
-  const sectionStyle: React.CSSProperties = {
-    marginBottom: '14px',
-  };
-
-  const btnPrimary: React.CSSProperties = {
-    padding: '8px 16px',
-    borderRadius: '7px',
-    background: 'var(--foreground)',
-    color: 'var(--background)',
-    fontSize: '13px',
-    fontWeight: 600,
-    border: 'none',
-    cursor: saving ? 'not-allowed' : 'pointer',
-    opacity: saving ? 0.6 : 1,
-  };
-
-  const btnSecondary: React.CSSProperties = {
-    padding: '8px 16px',
-    borderRadius: '7px',
-    background: 'transparent',
-    color: 'var(--foreground-secondary)',
-    fontSize: '13px',
-    fontWeight: 500,
-    border: '1px solid var(--border-subtle)',
-    cursor: 'pointer',
-  };
-
-  const btnDanger: React.CSSProperties = {
-    padding: '8px 16px',
-    borderRadius: '7px',
-    background: '#ef4444',
-    color: '#fff',
-    fontSize: '13px',
-    fontWeight: 500,
-    border: 'none',
-    cursor: deleting ? 'not-allowed' : 'pointer',
-    opacity: deleting ? 0.6 : 1,
-  };
-
-  const dialogueOptionStyle: React.CSSProperties = {
-    padding: '10px 14px',
-    borderRadius: '7px',
-    border: '1px solid var(--border-subtle)',
-    background: 'var(--sidebar-background)',
-    color: 'var(--foreground)',
-    fontSize: '13px',
-    cursor: 'pointer',
-    textAlign: 'left',
-    width: '100%',
-    marginBottom: '6px',
-  };
-
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.45)',
-        zIndex: 1000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '16px',
-      }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div
-        style={{
-          background: 'var(--background)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: '12px',
-          width: '100%',
-          maxWidth: '480px',
-          maxHeight: '90vh',
-          overflowY: 'auto',
-          padding: '24px',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
-        }}
-      >
-        <h2 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '20px', color: 'var(--foreground)' }}>
-          {isEdit ? 'Edit Shift' : 'Create Shift'}
-        </h2>
+    <>
+      <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+        <DialogContent className="max-w-[480px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{isEdit ? 'Edit Shift' : 'Create Shift'}</DialogTitle>
+          </DialogHeader>
 
-        {/* Employee selector */}
-        <div style={sectionStyle}>
-          <label style={labelStyle}>Employee</label>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                style={{ ...inputStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: isEdit ? 'default' : 'pointer', opacity: isEdit ? 0.6 : 1 }}
-                disabled={isEdit}
-              >
-                <span>{users.find(u => u.uid === userId)?.displayName ?? 'Select employee'}</span>
-                <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="dark" style={{ minWidth: '200px' }}>
-              {users.map(u => (
-                <DropdownMenuItem key={u.uid} onSelect={() => setUserId(u.uid)}>{u.displayName}</DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-
-        {/* Start date + time */}
-        <div style={{ ...sectionStyle, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-          <div>
-            <label style={labelStyle}>Start Date</label>
-            <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
-              <PopoverTrigger asChild>
-                <button type="button" style={{ ...inputStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
-                  {startDate || 'Select date'}
+          {/* Employee selector */}
+          <div style={sectionStyle}>
+            <label style={labelStyle}>Employee</label>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  style={{ ...inputStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: isEdit ? 'default' : 'pointer', opacity: isEdit ? 0.6 : 1 }}
+                  disabled={isEdit}
+                >
+                  <span>{users.find(u => u.uid === userId)?.displayName ?? 'Select employee'}</span>
                   <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
                 </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto overflow-hidden p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={startDate ? new Date(startDate + 'T00:00:00') : undefined}
-                  captionLayout="dropdown"
-                  onSelect={(date: Date | undefined) => {
-                    if (date) {
-                      const val = date.toLocaleDateString('en-CA');
-                      setStartDate(val);
-                      if (endDate === startDate) setEndDate(val);
-                    }
-                    setStartDateOpen(false);
-                  }}
-                />
-              </PopoverContent>
-            </Popover>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="dark" style={{ minWidth: '200px' }}>
+                {users.map(u => (
+                  <DropdownMenuItem key={u.uid} onSelect={() => setUserId(u.uid)}>{u.displayName}</DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-          <div>
-            <label style={labelStyle}>Start Time</label>
-            <Input
-              type="time"
-              value={startTime}
-              onChange={e => setStartTime(e.target.value)}
-              style={inputStyle}
-            />
-          </div>
-        </div>
 
-        {/* End date + time */}
-        <div style={{ ...sectionStyle, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-          <div>
-            <label style={labelStyle}>End Date</label>
-            <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
-              <PopoverTrigger asChild>
-                <button type="button" style={{ ...inputStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
-                  {endDate || 'Select date'}
-                  <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto overflow-hidden p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={endDate ? new Date(endDate + 'T00:00:00') : undefined}
-                  captionLayout="dropdown"
-                  onSelect={(date: Date | undefined) => {
-                    if (date) setEndDate(date.toLocaleDateString('en-CA'));
-                    setEndDateOpen(false);
-                  }}
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-          <div>
-            <label style={labelStyle}>End Time</label>
-            <Input
-              type="time"
-              value={endTime}
-              onChange={e => setEndTime(e.target.value)}
-              style={inputStyle}
-            />
-          </div>
-        </div>
-
-        {/* Timezone note */}
-        <div style={{ marginBottom: '16px', fontSize: '11px', color: 'var(--foreground-muted)' }}>
-          Times are in {getUserTz(userId)}
-        </div>
-
-        {/* Recurrence toggle */}
-        {!isEdit && (
-          <div style={{ ...sectionStyle, display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Checkbox
-              id="recurring-toggle"
-              checked={isRecurring}
-              onCheckedChange={(checked) => setIsRecurring(checked === true)}
-            />
-            <label htmlFor="recurring-toggle" style={{ ...labelStyle, marginBottom: 0, cursor: 'pointer' }}>
-              Recurring shift
-            </label>
-          </div>
-        )}
-
-        {/* Recurrence options */}
-        {isRecurring && (
-          <div
-            style={{
-              background: 'var(--sidebar-background)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '8px',
-              padding: '14px',
-              marginBottom: '14px',
-            }}
-          >
-            {/* Frequency + interval */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px', gap: '10px', marginBottom: '12px' }}>
-              <div>
-                <label style={labelStyle}>Frequency</label>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      style={{ ...inputStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
-                    >
-                      <span>{frequency.charAt(0).toUpperCase() + frequency.slice(1)}</span>
-                      <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="dark" style={{ minWidth: '120px' }}>
-                    <DropdownMenuItem onSelect={() => setFrequency('daily')}>Daily</DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => setFrequency('weekly')}>Weekly</DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => setFrequency('monthly')}>Monthly</DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-              <div>
-                <label style={labelStyle}>Every</label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={99}
-                  value={interval}
-                  onChange={e => setInterval(Math.max(1, parseInt(e.target.value) || 1))}
-                  style={inputStyle}
-                />
-              </div>
-            </div>
-
-            {/* Days of week (weekly only) */}
-            {frequency === 'weekly' && (
-              <div style={{ marginBottom: '12px' }}>
-                <label style={labelStyle}>Repeat on</label>
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  {DAY_LABELS.map((label, dow) => {
-                    const selected = daysOfWeek.includes(dow);
-                    return (
-                      <button
-                        key={dow}
-                        type="button"
-                        onClick={() => setDaysOfWeek(
-                          selected
-                            ? daysOfWeek.filter(d => d !== dow)
-                            : [...daysOfWeek, dow],
-                        )}
-                        style={{
-                          padding: '4px 8px',
-                          borderRadius: '5px',
-                          border: '1px solid var(--border-subtle)',
-                          background: selected ? 'var(--foreground)' : 'transparent',
-                          color: selected ? 'var(--background)' : 'var(--foreground-secondary)',
-                          fontSize: '12px',
-                          cursor: 'pointer',
-                          fontWeight: selected ? 600 : 400,
-                        }}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* End condition */}
+          {/* Start date + time */}
+          <div style={{ ...sectionStyle, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
-              <label style={labelStyle}>Ends</label>
-              <RadioGroup
-                value={endCondition}
-                onValueChange={(value) => setEndCondition(value as typeof endCondition)}
-                style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <RadioGroupItem value="none" id="end-none" />
-                  <Label htmlFor="end-none" style={{ fontSize: '13px', color: 'var(--foreground)', cursor: 'pointer' }}>Never</Label>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <RadioGroupItem value="date" id="end-date" />
-                  <Label htmlFor="end-date" style={{ fontSize: '13px', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    On date
-                    <Popover open={recurEndOpen} onOpenChange={setRecurEndOpen}>
-                      <PopoverTrigger asChild>
-                        <button type="button" style={{ ...inputStyle, width: 'auto', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', cursor: 'pointer' }}>
-                          {recurEndDate || 'Select date'}
-                          <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
-                        </button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto overflow-hidden p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={recurEndDate ? new Date(recurEndDate + 'T00:00:00') : undefined}
-                          captionLayout="dropdown"
-                          onSelect={(date: Date | undefined) => {
-                            if (date) setRecurEndDate(date.toLocaleDateString('en-CA'));
-                            setRecurEndOpen(false);
-                          }}
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </Label>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <RadioGroupItem value="count" id="end-count" />
-                  <Label htmlFor="end-count" style={{ fontSize: '13px', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    After
-                    <Input
-                      type="number"
-                      min={1}
-                      max={999}
-                      value={count}
-                      onChange={e => setCount(Math.max(1, parseInt(e.target.value) || 1))}
-                      style={{ ...inputStyle, width: '70px' }}
-                    />
-                    occurrences
-                  </Label>
-                </div>
-              </RadioGroup>
+              <label style={labelStyle}>Start Date</label>
+              <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
+                <PopoverTrigger asChild>
+                  <button type="button" style={{ ...inputStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+                    {startDate || 'Select date'}
+                    <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={startDate ? new Date(startDate + 'T00:00:00') : undefined}
+                    captionLayout="dropdown"
+                    onSelect={(date: Date | undefined) => {
+                      if (date) {
+                        const val = date.toLocaleDateString('en-CA');
+                        setStartDate(val);
+                        if (endDate === startDate) setEndDate(val);
+                      }
+                      setStartDateOpen(false);
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+            <div>
+              <label style={labelStyle}>Start Time</label>
+              <Input
+                type="time"
+                value={startTime}
+                onChange={e => setStartTime(e.target.value)}
+                style={inputStyle}
+              />
             </div>
           </div>
-        )}
 
-        {/* Error */}
-        {error && (
-          <div style={{
-            marginBottom: '12px',
-            padding: '8px 12px',
-            background: 'rgba(239,68,68,0.1)',
-            border: '1px solid rgba(239,68,68,0.3)',
-            borderRadius: '6px',
-            fontSize: '13px',
-            color: '#ef4444',
-          }}>
-            {error}
+          {/* End date + time */}
+          <div style={{ ...sectionStyle, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={labelStyle}>End Date</label>
+              <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
+                <PopoverTrigger asChild>
+                  <button type="button" style={{ ...inputStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+                    {endDate || 'Select date'}
+                    <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={endDate ? new Date(endDate + 'T00:00:00') : undefined}
+                    captionLayout="dropdown"
+                    onSelect={(date: Date | undefined) => {
+                      if (date) setEndDate(date.toLocaleDateString('en-CA'));
+                      setEndDateOpen(false);
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+            <div>
+              <label style={labelStyle}>End Time</label>
+              <Input
+                type="time"
+                value={endTime}
+                onChange={e => setEndTime(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
           </div>
-        )}
 
-        {/* Save dialogue (recurring edit) */}
-        {showSaveDialogue && (
-          <div style={{
-            marginBottom: '14px',
-            padding: '14px',
-            background: 'var(--sidebar-background)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '8px',
-          }}>
-            <p style={{ fontSize: '13px', marginBottom: '10px', color: 'var(--foreground)' }}>
-              This is a recurring shift. Which occurrences do you want to update?
-            </p>
-            <button style={dialogueOptionStyle} onClick={() => handleSave('single')} disabled={saving}>
-              This occurrence only
-            </button>
-            <button style={dialogueOptionStyle} onClick={() => handleSave('future')} disabled={saving}>
-              This and all future occurrences
-            </button>
-            <button style={{ ...dialogueOptionStyle, border: 'none', color: 'var(--foreground-muted)', background: 'transparent' }}
-              onClick={() => setShowSaveDialogue(false)}>
-              Cancel
-            </button>
+          {/* Timezone note */}
+          <div style={{ marginBottom: '16px', fontSize: '11px', color: 'var(--foreground-muted)' }}>
+            Times are in {viewerTimezone}
           </div>
-        )}
 
-        {/* Delete dialogue */}
-        {showDeleteDialogue && (
-          <div style={{
-            marginBottom: '14px',
-            padding: '14px',
-            background: 'rgba(239,68,68,0.07)',
-            border: '1px solid rgba(239,68,68,0.25)',
-            borderRadius: '8px',
-          }}>
-            <p style={{ fontSize: '13px', marginBottom: '10px', color: 'var(--foreground)' }}>
-              {isRecurringShift
-                ? 'Which occurrences do you want to delete?'
-                : 'Are you sure you want to delete this shift?'}
-            </p>
-            {isRecurringShift ? (
-              <>
-                <button style={dialogueOptionStyle} onClick={() => handleDelete('single')} disabled={deleting}>
-                  This occurrence only
-                </button>
-                <button style={dialogueOptionStyle} onClick={() => handleDelete('future')} disabled={deleting}>
-                  This and all future occurrences
-                </button>
-                <button style={{ ...dialogueOptionStyle, borderColor: 'rgba(239,68,68,0.4)', color: '#ef4444' }}
-                  onClick={() => handleDelete('series')} disabled={deleting}>
-                  All occurrences
-                </button>
-                <button style={{ ...dialogueOptionStyle, border: 'none', color: 'var(--foreground-muted)', background: 'transparent' }}
-                  onClick={() => setShowDeleteDialogue(false)}>
-                  Cancel
-                </button>
-              </>
-            ) : (
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <Button variant="destructive" onClick={() => handleDelete('single')} disabled={deleting}>
-                  {deleting ? 'Deleting...' : 'Delete'}
-                </Button>
-                <Button variant="outline" onClick={() => setShowDeleteDialogue(false)}>Cancel</Button>
+          {/* Recurrence toggle */}
+          {!isEdit && (
+            <div style={{ ...sectionStyle, display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Checkbox
+                id="recurring-toggle"
+                checked={isRecurring}
+                onCheckedChange={(checked) => setIsRecurring(checked === true)}
+              />
+              <label htmlFor="recurring-toggle" style={{ ...labelStyle, marginBottom: 0, cursor: 'pointer' }}>
+                Recurring shift
+              </label>
+            </div>
+          )}
+
+          {/* Recurrence options */}
+          {isRecurring && (
+            <div
+              style={{
+                background: 'var(--sidebar-background)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '8px',
+                padding: '14px',
+                marginBottom: '14px',
+              }}
+            >
+              {/* Frequency + interval */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px', gap: '10px', marginBottom: '12px' }}>
+                <div>
+                  <label style={labelStyle}>Frequency</label>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        style={{ ...inputStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                      >
+                        <span>{frequency.charAt(0).toUpperCase() + frequency.slice(1)}</span>
+                        <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="dark" style={{ minWidth: '120px' }}>
+                      <DropdownMenuItem onSelect={() => setFrequency('daily')}>Daily</DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => setFrequency('weekly')}>Weekly</DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => setFrequency('monthly')}>Monthly</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+                <div>
+                  <label style={labelStyle}>Every</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={99}
+                    value={interval}
+                    onChange={e => setInterval(Math.max(1, parseInt(e.target.value) || 1))}
+                    style={inputStyle}
+                  />
+                </div>
               </div>
-            )}
-          </div>
-        )}
 
-        {/* Footer buttons */}
-        {!showSaveDialogue && !showDeleteDialogue && (
+              {/* Days of week (weekly only) */}
+              {frequency === 'weekly' && (
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={labelStyle}>Repeat on</label>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {DAY_LABELS.map((label, dow) => {
+                      const selected = daysOfWeek.includes(dow);
+                      return (
+                        <button
+                          key={dow}
+                          type="button"
+                          onClick={() => setDaysOfWeek(
+                            selected
+                              ? daysOfWeek.filter(d => d !== dow)
+                              : [...daysOfWeek, dow],
+                          )}
+                          style={{
+                            padding: '4px 8px',
+                            borderRadius: '5px',
+                            border: '1px solid var(--border-subtle)',
+                            background: selected ? 'var(--foreground)' : 'transparent',
+                            color: selected ? 'var(--background)' : 'var(--foreground-secondary)',
+                            fontSize: '12px',
+                            cursor: 'pointer',
+                            fontWeight: selected ? 600 : 400,
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* End condition */}
+              <div>
+                <label style={labelStyle}>Ends</label>
+                <RadioGroup
+                  value={endCondition}
+                  onValueChange={(value) => setEndCondition(value as typeof endCondition)}
+                  style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <RadioGroupItem value="none" id="end-none" />
+                    <Label htmlFor="end-none" style={{ fontSize: '13px', color: 'var(--foreground)', cursor: 'pointer' }}>Never</Label>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <RadioGroupItem value="date" id="end-date" />
+                    <Label htmlFor="end-date" style={{ fontSize: '13px', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      On date
+                      <Popover open={recurEndOpen} onOpenChange={setRecurEndOpen}>
+                        <PopoverTrigger asChild>
+                          <button type="button" style={{ ...inputStyle, width: 'auto', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', cursor: 'pointer' }}>
+                            {recurEndDate || 'Select date'}
+                            <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={recurEndDate ? new Date(recurEndDate + 'T00:00:00') : undefined}
+                            captionLayout="dropdown"
+                            onSelect={(date: Date | undefined) => {
+                              if (date) setRecurEndDate(date.toLocaleDateString('en-CA'));
+                              setRecurEndOpen(false);
+                            }}
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    </Label>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <RadioGroupItem value="count" id="end-count" />
+                    <Label htmlFor="end-count" style={{ fontSize: '13px', color: 'var(--foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      After
+                      <Input
+                        type="number"
+                        min={1}
+                        max={999}
+                        value={count}
+                        onChange={e => setCount(Math.max(1, parseInt(e.target.value) || 1))}
+                        style={{ ...inputStyle, width: '70px' }}
+                      />
+                      occurrences
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </div>
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <Alert variant="destructive" className="mb-3">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          {/* Footer buttons */}
           <div style={{ display: 'flex', gap: '8px', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
             <div style={{ display: 'flex', gap: '8px' }}>
               <Button onClick={handleSaveClick} disabled={saving}>
@@ -717,8 +597,70 @@ export default function ShiftModal({
               </Button>
             )}
           </div>
-        )}
-      </div>
-    </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Save dialogue (recurring edit) */}
+      <AlertDialog open={showSaveDialogue} onOpenChange={setShowSaveDialogue}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Edit recurring shift</AlertDialogTitle>
+            <AlertDialogDescription>
+              This is a recurring shift. Which occurrences do you want to update?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col sm:flex-col gap-2">
+            <Button className="w-full" onClick={() => handleSave('single')} disabled={saving}>
+              This occurrence only
+            </Button>
+            <Button className="w-full" onClick={() => handleSave('future')} disabled={saving}>
+              This and all future occurrences
+            </Button>
+            <AlertDialogCancel className="w-full" onClick={() => setShowSaveDialogue(false)}>
+              Cancel
+            </AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete dialogue */}
+      <AlertDialog open={showDeleteDialogue} onOpenChange={setShowDeleteDialogue}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete shift</AlertDialogTitle>
+            <AlertDialogDescription>
+              {isRecurringShift
+                ? 'Which occurrences do you want to delete?'
+                : 'Are you sure you want to delete this shift? This cannot be undone.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col sm:flex-col gap-2">
+            {isRecurringShift ? (
+              <>
+                <Button className="w-full" variant="outline" onClick={() => handleDelete('single')} disabled={deleting}>
+                  This occurrence only
+                </Button>
+                <Button className="w-full" variant="outline" onClick={() => handleDelete('future')} disabled={deleting}>
+                  This and all future occurrences
+                </Button>
+                <Button className="w-full" variant="destructive" onClick={() => handleDelete('series')} disabled={deleting}>
+                  All occurrences
+                </Button>
+                <AlertDialogCancel className="w-full" onClick={() => setShowDeleteDialogue(false)}>
+                  Cancel
+                </AlertDialogCancel>
+              </>
+            ) : (
+              <>
+                <Button variant="destructive" onClick={() => handleDelete('single')} disabled={deleting}>
+                  {deleting ? 'Deleting...' : 'Delete'}
+                </Button>
+                <AlertDialogCancel onClick={() => setShowDeleteDialogue(false)}>Cancel</AlertDialogCancel>
+              </>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

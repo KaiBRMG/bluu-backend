@@ -35,6 +35,8 @@ import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Input } from '@/components/ui/input';
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { ChevronDownIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -65,7 +67,11 @@ const initialFormState: PersonalInfoFormData = {
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
-export default function PersonalInfoForm() {
+interface PersonalInfoFormProps {
+  onHasChanges?: (hasChanges: boolean) => void;
+}
+
+export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps = {}) {
   const { userData, loading } = useUserData();
   const { user } = useAuth();
   const [formData, setFormData] = useState<PersonalInfoFormData>(initialFormState);
@@ -76,12 +82,10 @@ export default function PersonalInfoForm() {
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
   const [dobOpen, setDobOpen] = useState(false);
-  const [countrySearch, setCountrySearch] = useState('');
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isRemovingPhoto, setIsRemovingPhoto] = useState(false);
 
-  // Refs for click-outside detection
-  const countryDropdownRef = useRef<HTMLDivElement>(null);
+  // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Initialize form data when userData loads
@@ -119,8 +123,9 @@ export default function PersonalInfoForm() {
     if (originalDataRef.current) {
       const changed = JSON.stringify(formData) !== JSON.stringify(originalDataRef.current);
       setHasChanges(changed);
+      onHasChanges?.(changed);
     }
-  }, [formData]);
+  }, [formData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Clear save message after 3 seconds
   useEffect(() => {
@@ -129,21 +134,6 @@ export default function PersonalInfoForm() {
       return () => clearTimeout(timer);
     }
   }, [saveMessage]);
-
-  // Click-outside handler for country dropdown
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (countryDropdownRef.current && !countryDropdownRef.current.contains(event.target as Node)) {
-        setCountryDropdownOpen(false);
-        setCountrySearch('');
-      }
-    }
-
-    if (countryDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [countryDropdownOpen]);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -380,12 +370,6 @@ export default function PersonalInfoForm() {
     }
   };
 
-  // Filter countries based on search
-  const filteredCountries = countryCodes.filter(
-    c => c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
-         c.dialCode.includes(countrySearch)
-  );
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -398,6 +382,36 @@ export default function PersonalInfoForm() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Header with action buttons */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          {saveMessage && (
+            <Alert variant={saveMessage.type === 'error' ? 'destructive' : 'default'} className="py-2 px-3">
+              <AlertDescription>{saveMessage.text}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+        <div className="flex gap-3">
+          {hasChanges && (
+            <Button
+              type="button"
+              onClick={handleCancel}
+              variant="outline"
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+          )}
+          <Button
+            type="button"
+            onClick={handleSave}
+            disabled={!hasChanges || isSubmitting}
+          >
+            {isSubmitting ? 'Saving...' : 'Save Changes'}
+          </Button>
+        </div>
+      </div>
+
       <div className="flex-1 overflow-y-auto pr-2">
         {/* Profile Photo Section */}
         <div className="mb-8">
@@ -476,58 +490,45 @@ export default function PersonalInfoForm() {
           <label className="form-label block mb-2">Phone</label>
           <div className="flex gap-2">
             {/* Country Code Dropdown */}
-            <div className="relative" ref={countryDropdownRef}>
-              <button
-                type="button"
-                onClick={() => setCountryDropdownOpen(!countryDropdownOpen)}
-                className="form-input w-32 flex items-center justify-between gap-2"
-                style={{ cursor: 'pointer' }}
-              >
-                <span>
-                  {getFlagEmoji(countryCodes.find(c => c.dialCode === formData.countryCode)?.code || 'US')}{' '}
-                  {formData.countryCode}
-                </span>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M6 9l6 6 6-6" />
-                </svg>
-              </button>
-              {countryDropdownOpen && (
-                <div
-                  className="absolute top-full left-0 mt-1 w-64 max-h-60 overflow-y-auto rounded-lg shadow-xl z-50"
-                  style={{ background: 'var(--sidebar-background)', border: '1px solid var(--border-subtle)' }}
+            <Popover open={countryDropdownOpen} onOpenChange={setCountryDropdownOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="form-input flex items-center justify-between gap-1 flex-shrink-0"
+                  style={{ cursor: 'pointer', width: '108px' }}
                 >
-                  <div className="p-2 sticky top-0" style={{ background: 'var(--sidebar-background)' }}>
-                    <Input
-                      type="text"
-                      className="form-input w-full"
-                      placeholder="Search country..."
-                      value={countrySearch}
-                      onChange={(e) => setCountrySearch(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  </div>
-                  {filteredCountries.map((country) => (
-                    <button
-                      key={country.code}
-                      type="button"
-                      className="w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors"
-                      style={{ background: 'transparent' }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = 'var(--hover-background)'}
-                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                      onClick={() => {
-                        handleInputChange('countryCode', country.dialCode);
-                        setCountryDropdownOpen(false);
-                        setCountrySearch('');
-                      }}
-                    >
-                      <span>{getFlagEmoji(country.code)}</span>
-                      <span>{country.name}</span>
-                      <span style={{ color: 'var(--foreground-muted)' }}>{country.dialCode}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+                  <span className="truncate text-sm">
+                    {getFlagEmoji(countryCodes.find(c => c.dialCode === formData.countryCode)?.code || 'US')}{' '}
+                    {formData.countryCode}
+                  </span>
+                  <ChevronDownIcon style={{ width: '10px', height: '10px', flexShrink: 0 }} />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search country..." />
+                  <CommandList className="max-h-60">
+                    <CommandEmpty>No countries found</CommandEmpty>
+                    <CommandGroup>
+                      {countryCodes.map((country) => (
+                        <CommandItem
+                          key={country.code}
+                          value={`${country.name} ${country.dialCode}`}
+                          onSelect={() => {
+                            handleInputChange('countryCode', country.dialCode);
+                            setCountryDropdownOpen(false);
+                          }}
+                        >
+                          <span>{getFlagEmoji(country.code)}</span>
+                          <span>{country.name}</span>
+                          <span className="ml-auto text-xs text-muted-foreground">{country.dialCode}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
             {/* Phone Number */}
             <Input
               type="tel"
@@ -729,41 +730,6 @@ export default function PersonalInfoForm() {
         </div>
       </div>
 
-      {/* Footer with Save/Cancel */}
-      <div
-        className="flex items-center justify-between pt-4 mt-4"
-        style={{ borderTop: '1px solid var(--border-subtle)' }}
-      >
-        <div>
-          {saveMessage && (
-            <span
-              className="text-sm"
-              style={{ color: saveMessage.type === 'success' ? '#22c55e' : '#ef4444' }}
-            >
-              {saveMessage.text}
-            </span>
-          )}
-        </div>
-        <div className="flex gap-3">
-          {hasChanges && (
-            <Button
-              type="button"
-              onClick={handleCancel}
-              variant="outline"
-              disabled={isSubmitting}
-            >
-              Cancel
-            </Button>
-          )}
-          <Button
-            type="button"
-            onClick={handleSave}
-            disabled={!hasChanges || isSubmitting}
-          >
-            {isSubmitting ? 'Saving...' : 'Save Changes'}
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }

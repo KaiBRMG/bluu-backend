@@ -1,6 +1,7 @@
 'use client';
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import {
   collection,
   onSnapshot,
@@ -100,6 +101,10 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
                     actionUrl: doc.actionUrl,
                   });
                 }
+                toast(doc.title, {
+                  description: doc.message,
+                  position: 'top-left',
+                });
               }
             }
           } else {

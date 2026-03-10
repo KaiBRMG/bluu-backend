@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb, adminAuth } from '@/lib/firebase-admin';
 import { getUserById, invalidateUserCache } from '@/lib/services/userService';
 import { recomputeUserPermissions } from '@/lib/services/pageService';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -73,19 +73,22 @@ export const POST = withAuth(async (
     // Invalidate in-process cache for all modified users
     for (const uid of uids) invalidateUserCache(uid);
 
-    // Recompute permittedPageIds for each affected user (non-blocking).
-    // Batch-read all user docs in one round-trip instead of N sequential reads.
-    Promise.all(
-      uids.map(uid => adminDb.collection('users').doc(uid))
-    ).then(refs =>
-      adminDb.getAll(...refs)
-    ).then(snaps =>
+    // Refresh Custom JWT Claims for affected users so Firestore rules reflect
+    // the updated group membership (e.g. admin claim) without requiring re-login.
+    // Non-blocking — claim update takes effect on next token refresh (~1 hour)
+    // or immediately if the client calls user.getIdToken(true).
+    const refs = uids.map(uid => adminDb.collection('users').doc(uid));
+    adminDb.getAll(...refs).then(snaps =>
       Promise.all(snaps.map(snap => {
         if (!snap.exists) return;
         const userGroups: string[] = snap.data()?.groups ?? [];
-        return recomputeUserPermissions(snap.id, userGroups);
+        const isAdmin = userGroups.includes('admin');
+        return Promise.all([
+          adminAuth.setCustomUserClaims(snap.id, { admin: isAdmin }),
+          recomputeUserPermissions(snap.id, userGroups),
+        ]);
       }))
-    ).catch(err => console.error('[GroupMembers POST] Failed to recompute permissions:', err));
+    ).catch(err => console.error('[GroupMembers POST] Failed to update claims/permissions:', err));
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
@@ -144,10 +147,13 @@ export const DELETE = withAuth(async (
     await batch.commit();
     invalidateUserCache(uid);
 
-    // Recompute permittedPageIds for the removed user (non-blocking)
+    // Refresh Custom JWT Claims and recompute permissions (non-blocking)
     const updatedGroups = needsUnassigned ? ['unassigned'] : remainingGroups;
-    recomputeUserPermissions(uid, updatedGroups)
-      .catch(err => console.error('[GroupMembers DELETE] Failed to recompute permissions:', err));
+    const isAdmin = updatedGroups.includes('admin');
+    Promise.all([
+      adminAuth.setCustomUserClaims(uid, { admin: isAdmin }),
+      recomputeUserPermissions(uid, updatedGroups),
+    ]).catch(err => console.error('[GroupMembers DELETE] Failed to update claims/permissions:', err));
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

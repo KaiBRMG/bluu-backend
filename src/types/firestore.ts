@@ -266,6 +266,35 @@ export interface ScreenshotDocument {
   screenIndex: number;  // 0-based index of this screen in the capture group
 }
 
+// ─── Disputes ────────────────────────────────────────────────────────
+
+export type ApprovalStatus = 'Pending' | 'Approved' | 'Rejected';
+
+/** Serialised shape returned from the disputes API (Timestamps converted to ISO strings) */
+export interface DisputeDocument {
+  id: string;
+  createdAt: string | null;
+  assignedTo: string;              // UID or 'No One'
+  assignedToName: string;          // resolved from users.displayName or 'No One'
+  assignedToPhotoURL: string | null;
+  CaApproval: ApprovalStatus;
+  AdminApproval: ApprovalStatus;
+  Creator: string;                 // creatorID (raw)
+  creatorName: string;             // resolved from creators.stageName
+  saleDate: string | null;         // UTC ISO string — convert to user tz on display
+  saleAmount: number;
+  fanName: string;
+  Comment: string;
+  createdBy: string;               // UID
+  createdByName: string;           // resolved from users.displayName
+  createdByPhotoURL: string | null;
+}
+
+export interface CreatorDocument {
+  creatorID: string;
+  stageName: string;
+}
+
 // ─── Resolved access (returned to client after permission resolution) ─
 
 export interface ResolvedAccess {

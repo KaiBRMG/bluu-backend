@@ -11,6 +11,8 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Loader } from '@/components/ui/loader';
 import { RefreshCcw, ChevronDownIcon } from 'lucide-react';
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
@@ -85,7 +87,7 @@ export default function AdminShifts() {
   const [weekStart, setWeekStart] = useState(() => getMondayOfWeek(today));
   const [weekPickerOpen, setWeekPickerOpen] = useState(false);
   const [groupFilter,    setGroupFilter]    = useState('all');
-  const [showUnscheduled, setShowUnscheduled] = useState(true);
+  const [showUnscheduled, setShowUnscheduled] = useState(false);
   const [modalState,     setModalState]     = useState<ModalState | null>(null);
 
   const { shifts, users, loading, error, refetch, createShift, updateShift, deleteShift } = useShifts(weekStart);
@@ -113,19 +115,18 @@ export default function AdminShifts() {
   }, [users]);
 
   // ── Map shifts to cells ───────────────────────────────────────────
+  // Group by admin's timezone so the grid columns match what the admin sees
   const shiftMap = useMemo(() => {
     const map = new Map<string, ExpandedShift[]>();
     for (const shift of shifts) {
-      const user = users.find(u => u.uid === shift.userId);
-      const tz   = user?.timezone ?? 'UTC';
-      const localDate = toLocalDateStr(shift.occurrenceStart, tz);
+      const localDate = toLocalDateStr(shift.occurrenceStart, viewerTimezone);
       const key = `${shift.userId}:${localDate}`;
       const existing = map.get(key) ?? [];
       existing.push(shift);
       map.set(key, existing);
     }
     return map;
-  }, [shifts, users]);
+  }, [shifts, viewerTimezone]);
 
   // ── Save handler ──────────────────────────────────────────────────
   async function handleSave(
@@ -144,36 +145,6 @@ export default function AdminShifts() {
   async function handleDelete(shiftId: string, mode: 'single' | 'future' | 'series', overrideDate?: string) {
     await deleteShift(shiftId, mode, overrideDate);
   }
-
-  // ── Toggle styles ─────────────────────────────────────────────────
-  const toggleStyle: React.CSSProperties = {
-    position: 'relative',
-    display: 'inline-block',
-    width: '32px',
-    height: '18px',
-    flexShrink: 0,
-  };
-
-  const sliderStyle: React.CSSProperties = {
-    position: 'absolute',
-    inset: 0,
-    borderRadius: '18px',
-    background: showUnscheduled ? '#4B8FCC' : 'var(--border-subtle)',
-    transition: 'background 0.2s',
-    cursor: 'pointer',
-  };
-
-  const knobStyle: React.CSSProperties = {
-    position: 'absolute',
-    top: '2px',
-    left: showUnscheduled ? '16px' : '2px',
-    width: '14px',
-    height: '14px',
-    borderRadius: '50%',
-    background: '#fff',
-    transition: 'left 0.2s',
-    pointerEvents: 'none',
-  };
 
   // ── Grid styles ───────────────────────────────────────────────────
   const controlStyle: React.CSSProperties = {
@@ -273,10 +244,10 @@ export default function AdminShifts() {
           <span style={{ fontSize: '12px', color: 'var(--foreground-secondary)', whiteSpace: 'nowrap' }}>
             Show Unscheduled
           </span>
-          <div style={toggleStyle} onClick={() => setShowUnscheduled(v => !v)}>
-            <div style={sliderStyle} />
-            <div style={knobStyle} />
-          </div>
+          <Switch
+            checked={showUnscheduled}
+            onCheckedChange={setShowUnscheduled}
+          />
         </div>
 
         {/* Refresh icon button — pushed to far right */}
@@ -298,9 +269,9 @@ export default function AdminShifts() {
         </div>
       )}
       {error && (
-        <div style={{ padding: '12px', background: 'rgba(239,68,68,0.1)', borderRadius: '8px', color: '#ef4444', fontSize: '13px', marginBottom: '12px' }}>
-          {error}
-        </div>
+        <Alert variant="destructive" className="mb-3">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {/* ── Calendar grid ─────────────────────────────────────────── */}
@@ -387,6 +358,7 @@ export default function AdminShifts() {
                             <ShiftCard
                               shift={shift}
                               user={user}
+                              viewerTimezone={viewerTimezone}
                               onClick={() => setModalState({ mode: 'edit', shift })}
                             />
                           </div>
@@ -409,6 +381,7 @@ export default function AdminShifts() {
           prefillUserId={modalState.mode === 'create' ? modalState.userId : undefined}
           prefillDate={modalState.mode === 'create' ? modalState.date : undefined}
           users={users}
+          viewerTimezone={viewerTimezone}
           onSave={handleSave}
           onDelete={modalState.mode === 'edit' ? handleDelete : undefined}
           onClose={() => setModalState(null)}
