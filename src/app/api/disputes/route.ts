@@ -147,10 +147,11 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       const snap = await col.where('createdBy', '==', uid).get();
       rawDocs = snap.docs
         .map(d => ({ _id: d.id, ...d.data() }))
-        .filter(d =>
-          (d.CaApproval === 'Approved' || d.assignedTo === 'No One') &&
-          (d.AdminApproval === 'Approved' || d.AdminApproval === 'Rejected')
-        );
+        .filter(d => {
+          const doc = d as DocumentData;
+          return (doc['CaApproval'] === 'Approved' || doc['assignedTo'] === 'No One') &&
+            (doc['AdminApproval'] === 'Approved' || doc['AdminApproval'] === 'Rejected');
+        });
 
     } else if (filter === 'admin-all') {
       const caller = await getUserById(uid);
@@ -181,7 +182,10 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       const snap = await col.where('AdminApproval', '==', 'Pending').get();
       rawDocs = snap.docs
         .map(d => ({ _id: d.id, ...d.data() }))
-        .filter(d => d.CaApproval === 'Approved' || d.assignedTo === 'No One');
+        .filter(d => {
+          const doc = d as DocumentData;
+          return doc['CaApproval'] === 'Approved' || doc['assignedTo'] === 'No One';
+        });
 
     } else if (filter === 'admin-resolved') {
       const caller = await getUserById(uid);
