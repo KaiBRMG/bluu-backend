@@ -207,7 +207,7 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 
     // ── 5. Fetch leave requests for all shift IDs in the week ─────────
     const shiftIds = [...new Set(expandedShifts.map(s => s.shiftId))];
-    type LeaveInfo = { leaveId: string; leaveType: 'paid' | 'unpaid'; status: 'pending' | 'approved' | 'denied'; userId: string };
+    type LeaveInfo = { leaveId: string; leaveType: 'paid' | 'unpaid'; status: 'pending' | 'approved' | 'denied'; userId: string; shiftId: string; occurrenceStart: number };
     const leaveMap = new Map<string, LeaveInfo>();
 
     if (shiftIds.length > 0) {
@@ -226,8 +226,8 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
             leaveType: d.leaveType,
             status: d.status,
             userId: d.userId,
-            // occurrenceStart used as part of the key below
-            ...d,
+            shiftId: d.shiftId,
+            occurrenceStart: d.occurrenceStart,
           });
         }
       }
