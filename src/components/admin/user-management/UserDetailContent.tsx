@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
-import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
+import type { AdminFullUser } from '@/hooks/useAdminUsers';
 import { validateEmail, validatePhoneNumber, validateRequired } from '@/lib/validation';
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -29,6 +29,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { useAdminData } from '@/hooks/useAdminData';
 
 const AVATAR_COLORS = [
   '#E57373', '#F06292', '#BA68C8', '#7986CB', '#64B5F6',
@@ -55,7 +56,6 @@ function getInitials(name: string): string {
 }
 interface UserDetailContentProps {
   user: AdminFullUser;
-  groups: AdminGroup[];
   onUpdateUser: (uid: string, updates: Record<string, unknown>) => Promise<void>;
 }
 
@@ -84,6 +84,9 @@ interface FormData {
   userComments: string;
   includeIdleTime: boolean;
   enableScreenshots: boolean;
+  hasPaidLeave: boolean;
+  remainingUnpaidLeave: number;
+  remainingPaidLeave: number;
 }
 
 function buildFormData(user: AdminFullUser): FormData {
@@ -112,14 +115,17 @@ function buildFormData(user: AdminFullUser): FormData {
     userComments: user.userComments || '',
     includeIdleTime: user.includeIdleTime ?? false,
     enableScreenshots: user.enableScreenshots ?? true,
+    hasPaidLeave: user.hasPaidLeave ?? false,
+    remainingUnpaidLeave: user.remainingUnpaidLeave ?? 4,
+    remainingPaidLeave: user.remainingPaidLeave ?? 10,
   };
 }
 
 export default function UserDetailContent({
   user,
-  groups,
   onUpdateUser,
 }: UserDetailContentProps) {
+  const { pagePermissions, updatePermission } = useAdminData();
   const [formData, setFormData] = useState<FormData>(() => buildFormData(user));
   const [dobOpen, setDobOpen] = useState(false);
   const originalDataRef = useRef<FormData>(buildFormData(user));
@@ -130,6 +136,10 @@ export default function UserDetailContent({
   const [isActive, setIsActive] = useState<boolean>(user.isActive ?? true);
   const [isActiveUpdating, setIsActiveUpdating] = useState(false);
   const [pendingIsActive, setPendingIsActive] = useState<boolean | null>(null);
+  const [isTimeTrackingUpdating, setIsTimeTrackingUpdating] = useState(false);
+
+  const timeTrackingPermDoc = pagePermissions.find((p) => p.pageId === 'time-tracking');
+  const enableTimeTracking = user.permittedPageIds?.includes('time-tracking') ?? false;
 
   // Change detection
   useEffect(() => {
@@ -163,7 +173,25 @@ export default function UserDetailContent({
     }
   };
 
-  const handleChange = (field: keyof FormData, value: string | boolean | string[]) => {
+  const handleTimeTrackingToggle = async (checked: boolean) => {
+    setIsTimeTrackingUpdating(true);
+    try {
+      const currentGroups = { ...(timeTrackingPermDoc?.groups || {}) } as Record<string, true>;
+      const currentUsers = { ...(timeTrackingPermDoc?.users || {}) } as Record<string, true>;
+      if (checked) {
+        currentUsers[user.uid] = true;
+      } else {
+        delete currentUsers[user.uid];
+      }
+      await updatePermission('time-tracking', { groups: currentGroups, users: currentUsers });
+    } catch (err) {
+      console.error('Failed to update time tracking permission:', err);
+    } finally {
+      setIsTimeTrackingUpdating(false);
+    }
+  };
+
+  const handleChange = (field: keyof FormData, value: string | boolean | string[] | number) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) {
       setErrors((prev) => {
@@ -235,6 +263,9 @@ export default function UserDetailContent({
         userComments: formData.userComments,
         includeIdleTime: formData.includeIdleTime,
         enableScreenshots: formData.enableScreenshots,
+        hasPaidLeave: formData.hasPaidLeave,
+        remainingUnpaidLeave: formData.remainingUnpaidLeave,
+        remainingPaidLeave: formData.remainingPaidLeave,
       };
 
       // Update profile fields
@@ -432,26 +463,6 @@ export default function UserDetailContent({
               />
             </div>
 
-            <div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox
-                  checked={formData.includeIdleTime}
-                  onCheckedChange={(checked) => handleChange('includeIdleTime', checked === true)}
-                />
-                <span className="text-sm">Include Idle Time in Totals</span>
-              </label>
-            </div>
-
-            <div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox
-                  checked={formData.enableScreenshots}
-                  onCheckedChange={(checked) => handleChange('enableScreenshots', checked === true)}
-                />
-                <span className="text-sm">Enable Screenshots</span>
-              </label>
-            </div>
-
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="form-label block mb-1">Created At</label>
@@ -471,6 +482,87 @@ export default function UserDetailContent({
                   value={user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleDateString('en-US', { timeZone: user.timezone || undefined, year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A'}
                   disabled
                   style={{ opacity: 0.6 }}
+                />
+              </div>
+            </div>
+          </div>
+          </AccordionContent>
+        </AccordionItem>
+
+        {/* Time Tracking Section */}
+        <AccordionItem value="time-tracking">
+          <AccordionTrigger>Time Tracking</AccordionTrigger>
+          <AccordionContent>
+          <div className="space-y-4">
+            <div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <Checkbox
+                  checked={enableTimeTracking}
+                  onCheckedChange={(checked) => handleTimeTrackingToggle(checked === true)}
+                  disabled={isTimeTrackingUpdating}
+                />
+                <span className="text-sm">Enable Time Tracking</span>
+              </label>
+              <p className="text-xs mt-1 ml-6" style={{ color: 'var(--foreground-muted)' }}>
+                Controls whether this user has access to the Time Tracking page.
+              </p>
+            </div>
+
+            <div style={{ opacity: enableTimeTracking ? 1 : 0.4, pointerEvents: enableTimeTracking ? 'auto' : 'none' }}>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <Checkbox
+                  checked={formData.includeIdleTime}
+                  onCheckedChange={(checked) => handleChange('includeIdleTime', checked === true)}
+                  disabled={!enableTimeTracking}
+                />
+                <span className="text-sm">Include Idle Time in Totals</span>
+              </label>
+            </div>
+
+            <div style={{ opacity: enableTimeTracking ? 1 : 0.4, pointerEvents: enableTimeTracking ? 'auto' : 'none' }}>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <Checkbox
+                  checked={formData.enableScreenshots}
+                  onCheckedChange={(checked) => handleChange('enableScreenshots', checked === true)}
+                  disabled={!enableTimeTracking}
+                />
+                <span className="text-sm">Enable Screenshots</span>
+              </label>
+            </div>
+
+            <div style={{ opacity: enableTimeTracking ? 1 : 0.4, pointerEvents: enableTimeTracking ? 'auto' : 'none' }}>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <Checkbox
+                  checked={formData.hasPaidLeave}
+                  onCheckedChange={(checked) => handleChange('hasPaidLeave', checked === true)}
+                  disabled={!enableTimeTracking}
+                />
+                <span className="text-sm">Has Paid Leave</span>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3" style={{ opacity: enableTimeTracking ? 1 : 0.4, pointerEvents: enableTimeTracking ? 'auto' : 'none' }}>
+              <div>
+                <label className="form-label block mb-1">Unpaid Leave Remaining</label>
+                <Input
+                  type="number"
+                  min={0}
+                  className="form-input w-full"
+                  value={formData.remainingUnpaidLeave}
+                  onChange={(e) => handleChange('remainingUnpaidLeave', Math.max(0, parseInt(e.target.value, 10) || 0))}
+                  disabled={!enableTimeTracking}
+                />
+              </div>
+              <div>
+                <label className="form-label block mb-1">Paid Leave Remaining</label>
+                <Input
+                  type="number"
+                  min={0}
+                  className="form-input w-full"
+                  value={formData.remainingPaidLeave}
+                  onChange={(e) => handleChange('remainingPaidLeave', Math.max(0, parseInt(e.target.value, 10) || 0))}
+                  disabled={!enableTimeTracking || !formData.hasPaidLeave}
+                  style={{ opacity: formData.hasPaidLeave ? 1 : 0.4 }}
                 />
               </div>
             </div>

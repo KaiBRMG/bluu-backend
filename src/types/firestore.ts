@@ -71,6 +71,8 @@ export interface UserDocument {
   timezoneOffset?: string;
   additionalTimezones?: string[];
   hasPaidLeave?: boolean;
+  remainingUnpaidLeave?: number;
+  remainingPaidLeave?: number;
   includeIdleTime?: boolean;
   enableScreenshots?: boolean;
 
@@ -109,6 +111,20 @@ export interface NotificationDocument {
   actionUrl?: string | null;
   announcement?: boolean;
   announcementExpiry?: Timestamp | null;
+}
+
+// ─── Leave Requests ───────────────────────────────────────────────────
+
+export interface LeaveRequestDocument {
+  leaveId: string;
+  shiftId: string;
+  occurrenceStart: number;    // ms UTC — identifies the specific occurrence
+  userId: string;
+  leaveType: 'paid' | 'unpaid';
+  status: 'pending' | 'approved' | 'denied';
+  requestedAt: Timestamp;
+  resolvedAt?: Timestamp | null;
+  resolvedBy?: string | null;  // admin UID
 }
 
 // ─── Group ──────────────────────────────────────────────────────────

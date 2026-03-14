@@ -41,7 +41,11 @@ export interface AdminFullUser {
   userComments?: string;
   includeIdleTime?: boolean;
   enableScreenshots?: boolean;
+  hasPaidLeave?: boolean;
+  remainingUnpaidLeave?: number;
+  remainingPaidLeave?: number;
   timezone?: string;
+  permittedPageIds?: string[];
 }
 
 export interface AdminGroup {

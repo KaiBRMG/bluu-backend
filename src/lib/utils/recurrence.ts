@@ -30,6 +30,8 @@ export interface RawApiShift {
   // Attendance / time-worked (pre-computed server-side for past shifts)
   timeWorkedSeconds: number | null;
   attendanceStatus: 'on-time' | 'late' | 'absent' | null;
+  // Leave request for this shift occurrence (pre-fetched server-side)
+  leaveRequest?: { leaveId: string; leaveType: 'paid' | 'unpaid'; status: 'pending' | 'approved' | 'denied'; } | null;
 }
 
 export interface ExpandedShift extends RawApiShift {

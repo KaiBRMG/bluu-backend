@@ -71,6 +71,8 @@ export async function ensureUserExists(userData: CreateUserData): Promise<string
       timezone: '',
       timezoneOffset: '',
       hasPaidLeave: false,
+      remainingUnpaidLeave: 4,
+      remainingPaidLeave: 10,
       includeIdleTime: false,
       enableScreenshots: true,
       sessionToken,

@@ -205,6 +205,37 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     // start/end time (not the root document's original timestamp).
     const expandedShifts = expandShiftsForWindow(eligibleRaw, weekStartMs, weekEndMs);
 
+    // ── 5. Fetch leave requests for all shift IDs in the week ─────────
+    const shiftIds = [...new Set(expandedShifts.map(s => s.shiftId))];
+    type LeaveInfo = { leaveId: string; leaveType: 'paid' | 'unpaid'; status: 'pending' | 'approved' | 'denied'; userId: string };
+    const leaveMap = new Map<string, LeaveInfo>();
+
+    if (shiftIds.length > 0) {
+      const CHUNK_SIZE = 30;
+      const allLeaveDocs: LeaveInfo[] = [];
+      for (let i = 0; i < shiftIds.length; i += CHUNK_SIZE) {
+        const chunk = shiftIds.slice(i, i + CHUNK_SIZE);
+        const snap = await adminDb
+          .collection('leave_requests')
+          .where('shiftId', 'in', chunk)
+          .get();
+        for (const doc of snap.docs) {
+          const d = doc.data();
+          allLeaveDocs.push({
+            leaveId: d.leaveId,
+            leaveType: d.leaveType,
+            status: d.status,
+            userId: d.userId,
+            // occurrenceStart used as part of the key below
+            ...d,
+          });
+        }
+      }
+      for (const lr of allLeaveDocs) {
+        leaveMap.set(`${lr.shiftId}:${lr.occurrenceStart}:${lr.userId}`, lr);
+      }
+    }
+
     const serialisedShifts = expandedShifts.map(s => {
       const shiftStartMs = s.occurrenceStart;
       const shiftEndMs   = s.occurrenceEnd;
@@ -228,7 +259,12 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         );
       }
 
-      return { ...s, timeWorkedSeconds, attendanceStatus };
+      const leaveEntry = leaveMap.get(`${s.shiftId}:${s.occurrenceStart}:${s.userId}`);
+      const leaveRequest = leaveEntry
+        ? { leaveId: leaveEntry.leaveId, leaveType: leaveEntry.leaveType, status: leaveEntry.status }
+        : null;
+
+      return { ...s, timeWorkedSeconds, attendanceStatus, leaveRequest };
     });
 
     const users = [...eligibleUserIds].map(uid => {

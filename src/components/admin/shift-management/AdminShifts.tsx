@@ -360,6 +360,7 @@ export default function AdminShifts() {
                               user={user}
                               viewerTimezone={viewerTimezone}
                               onClick={() => setModalState({ mode: 'edit', shift })}
+                              onLeaveAction={refetch}
                             />
                           </div>
                         ))}

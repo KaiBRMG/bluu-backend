@@ -42,6 +42,9 @@ export const PUT = withAuth(async (
       'photoURL',
       'includeIdleTime',
       'enableScreenshots',
+      'hasPaidLeave',
+      'remainingUnpaidLeave',
+      'remainingPaidLeave',
     ];
 
     // Filter and sanitize updates

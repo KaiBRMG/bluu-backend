@@ -23,7 +23,6 @@ interface UserDetailDrawerProps {
 export default function UserDetailDrawer({
   userId,
   users,
-  groups,
   onClose,
   onUpdateUser,
   onAddGroupMembers,
@@ -47,7 +46,6 @@ export default function UserDetailDrawer({
           <UserDetailContent
             key={user.uid}
             user={user}
-            groups={groups}
             onUpdateUser={onUpdateUser}
           />
         )}
