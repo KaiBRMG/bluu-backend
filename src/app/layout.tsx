@@ -6,11 +6,10 @@ import "./globals.css";
 import { AuthProvider } from "@/components/AuthProvider";
 import { NetworkStatusProvider } from "@/contexts/NetworkStatusContext";
 import { UserDataProvider } from "@/hooks/useUserData";
-import { TimeTrackingProvider } from "@/contexts/TimeTrackingContext";
-import { NotificationsProvider } from "@/hooks/useNotifications";
 import AuthWrapper from "@/components/AuthWrapper";
 import ErrorLogger from "@/components/ErrorLogger";
 import UpdateBanner from "@/components/UpdateBanner";
+import LazyProviders from "@/components/LazyProviders";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -44,17 +43,15 @@ export default function RootLayout({
           <NetworkStatusProvider>
             <UserDataProvider>
               <ErrorLogger />
-              <NotificationsProvider>
-                <TimeTrackingProvider>
-                  <AuthWrapper>
-                    {children}
-                  </AuthWrapper>
-                  <UpdateBanner />
-                  <Toaster />
-                  <SpeedInsights />
-                  <Analytics />
-                </TimeTrackingProvider>
-              </NotificationsProvider>
+              <LazyProviders>
+                <AuthWrapper>
+                  {children}
+                </AuthWrapper>
+                <UpdateBanner />
+                <Toaster />
+                <SpeedInsights />
+                <Analytics />
+              </LazyProviders>
             </UserDataProvider>
           </NetworkStatusProvider>
         </AuthProvider>

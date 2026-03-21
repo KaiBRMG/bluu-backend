@@ -16,8 +16,20 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
 
   const isLoggedIn = !!user;
   const prevIsLoggedInRef = useRef<boolean>(isLoggedIn);
+  const hasSignaledReady = useRef(false);
 
   const isAuthRoute = pathname?.startsWith('/auth/') || pathname?.startsWith('/onboarding/');
+
+  // Signal the Electron main process that React has mounted and auth state has resolved.
+  // Fires once per session — gives main.js a hook to dismiss splash screens or log readiness.
+  useEffect(() => {
+    if (loading) return;
+    if (hasSignaledReady.current) return;
+    hasSignaledReady.current = true;
+    if (typeof window !== 'undefined' && window.electronAPI) {
+      window.electronAPI.app.signalReady();
+    }
+  }, [loading]);
 
   // Redirect to revoked page if AuthProvider detected isActive=false at login time
   useEffect(() => {

@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Platform info
   app: {
     getPlatform: () => ipcRenderer.invoke('app:getPlatform'),
+    signalReady: () => ipcRenderer.send('app:ready'),
   },
 
   // OS permission prompts

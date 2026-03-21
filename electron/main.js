@@ -219,6 +219,15 @@ ipcMain.on('window:set-size', (_event, width, height) => {
   }
 });
 
+// Renderer signals that React has mounted and is ready.
+// Re-registered on each page load so we always catch the first mount.
+function registerAppReadyHandler() {
+  ipcMain.once('app:ready', () => {
+    console.log('[main] app:ready received — React mounted');
+  });
+}
+registerAppReadyHandler();
+
 function createWindow() {
   // Set app icon for macOS dock
   const iconPath = path.join(__dirname, './public/logo/icon.icns');
@@ -274,6 +283,20 @@ function createWindow() {
     mainWindow.show();
   });
 
+  // Retry once on cold-start failures (e.g. Vercel 500 before Next.js boots).
+  // A raw error response from the infra layer won't have <!DOCTYPE html>, causing Quirks Mode.
+  mainWindow.webContents.on('did-fail-load', (_e, errorCode, _desc, validatedURL) => {
+    const base = isDev ? 'http://localhost:3000' : 'https://bluu-backend.vercel.app';
+    if (validatedURL.startsWith(base)) {
+      console.log(`[main] did-fail-load (${errorCode}) for ${validatedURL} — retrying in 2s`);
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.loadURL(validatedURL);
+        }
+      }, 2000);
+    }
+  });
+
   // Handle stored deep link after window is ready
   mainWindow.webContents.on('did-finish-load', () => {
     if (deeplinkUrl) {
@@ -281,6 +304,9 @@ function createWindow() {
       handleDeepLink(deeplinkUrl);
       deeplinkUrl = null;
     }
+    // Re-register so each new page load gets a fresh app:ready listener
+    ipcMain.removeAllListeners('app:ready');
+    registerAppReadyHandler();
   });
 
   return mainWindow;
