@@ -27,7 +27,7 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
     if (hasSignaledReady.current) return;
     hasSignaledReady.current = true;
     if (typeof window !== 'undefined' && window.electronAPI) {
-      window.electronAPI.app.signalReady();
+      window.electronAPI.app.signalReady?.();
     }
   }, [loading]);
 
