@@ -25,6 +25,7 @@ interface ElectronAPI {
   removeAppClosingListeners: () => void;
   app: {
     getPlatform: () => Promise<string>;
+    signalReady: () => void;
   };
   permissions: {
     requestScreenAccess: () => Promise<{ success: boolean }>;
