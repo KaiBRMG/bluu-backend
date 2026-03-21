@@ -17,6 +17,16 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.admin == true;
     }
 
+    // Helper: Check if the authenticated user has been granted access to a
+    // specific page via the page-permissions system. Reads the user's own doc
+    // (1 Firestore read) and checks the permittedPageIds array, which is kept
+    // up-to-date by recomputeUserPermissions / recomputePermissionsForGroup
+    // whenever group membership or page permissions change.
+    function hasPagePermission(pageId) {
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return userDoc.get('permittedPageIds', []).hasAny([pageId]);
+    }
+
     // 1. Users collection
     // Client listener: hooks/useUserData.ts (onSnapshot users/{uid})
     // Admin panel reads other users' docs via the listener — needs isAdmin() bypass.
@@ -62,10 +72,11 @@ service cloud.firestore {
 
     // 6. Active sessions (new session model)
     // Client-side onSnapshot used by useActiveUsers (admin panel).
-    // User reads own doc; admin reads all. Writes via Admin SDK only.
+    // User reads own doc; admin or any user with shift-management page access reads all.
+    // Writes via Admin SDK only.
     match /active_sessions/{userId} {
-      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow list: if isAdmin();
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin() || hasPagePermission('shift-management'));
+      allow list: if isAdmin() || hasPagePermission('shift-management');
       allow write: if false;
     }
 

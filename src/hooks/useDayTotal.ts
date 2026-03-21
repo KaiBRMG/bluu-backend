@@ -39,7 +39,7 @@ export function useDayTotal(timezone: string, includeIdleTime: boolean): number 
     }
 
     compute();
-    tickRef.current = setInterval(compute, 1000);
+    tickRef.current = setInterval(compute, 10000);
 
     // Schedule reset at next midnight in the user's timezone
     const msUntilMidnight = getMsUntilMidnight(timezone);

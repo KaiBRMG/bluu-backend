@@ -1,11 +1,26 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import AppLayout from "@/components/AppLayout";
-import AdminTimesheets from "@/components/admin/shift-management/AdminTimesheets";
-import AdminScreenshots from "@/components/admin/shift-management/AdminScreenshots";
-import AdminActiveUsers from "@/components/admin/shift-management/AdminActiveUsers";
 import AdminShifts from "@/components/admin/shift-management/AdminShifts";
+
+const AdminActiveUsers = dynamic(
+  () => import("@/components/admin/shift-management/AdminActiveUsers"),
+  { loading: () => <div style={{ minHeight: 400 }} /> }
+);
+const AdminTimesheets = dynamic(
+  () => import("@/components/admin/shift-management/AdminTimesheets"),
+  { loading: () => <div style={{ minHeight: 400 }} /> }
+);
+const AdminScreenshots = dynamic(
+  () => import("@/components/admin/shift-management/AdminScreenshots"),
+  { loading: () => <div style={{ minHeight: 400 }} /> }
+);
+const AdminLeave = dynamic(
+  () => import("@/components/admin/shift-management/AdminLeave"),
+  { loading: () => <div style={{ minHeight: 400 }} /> }
+);
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export default function ShiftManagementPage() {
@@ -35,6 +50,7 @@ export default function ShiftManagementPage() {
                 <TabsTrigger value="active-users">Active Users</TabsTrigger>
                 <TabsTrigger value="timesheets">Timesheets</TabsTrigger>
                 <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
+                <TabsTrigger value="leave">Leave</TabsTrigger>
               </TabsList>
             </div>
 
@@ -47,6 +63,7 @@ export default function ShiftManagementPage() {
               <TabsContent value="screenshots">
                 <AdminScreenshots selectedUserId={selectedUserId} onUserChange={setSelectedUserId} />
               </TabsContent>
+              <TabsContent value="leave"><AdminLeave /></TabsContent>
             </div>
           </Tabs>
         </div>

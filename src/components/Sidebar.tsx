@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { Settings, House, ChevronLeft, ChevronDown, type LucideIcon } from "lucide-react";
 import {
@@ -109,19 +110,11 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
               <SidebarMenuButton size="lg" asChild>
                 {state === "collapsed" ? (
                   <button onClick={toggleSidebar} className="flex items-center">
-                    <img
-                      src="/logo/bluu_uu.svg"
-                      alt="Bluu"
-                      className="h-5 w-auto"
-                    />
+                    <Image src="/logo/bluu_uu.svg" alt="Bluu" width={20} height={20} priority style={{ height: '1.25rem', width: 'auto' }} />
                   </button>
                 ) : (
                   <Link href="/">
-                    <img
-                      src="/logo/bluu_long.svg"
-                      alt="Bluu"
-                      className="h-7 w-auto"
-                    />
+                    <Image src="/logo/bluu_long.svg" alt="Bluu" width={120} height={28} priority style={{ height: '1.75rem', width: 'auto' }} />
                   </Link>
                 )}
               </SidebarMenuButton>

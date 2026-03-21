@@ -24,7 +24,7 @@ import {
   AlertDialogFooter,
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
-import { ChevronDownIcon } from 'lucide-react';
+import { ChevronDownIcon, InfoIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
@@ -33,6 +33,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useRouter } from 'next/navigation';
 
 function toDateString(date: Date): string {
   const y = date.getFullYear();
@@ -81,7 +83,13 @@ function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const timeTrackedUsers = useMemo(() => users, [users]);
+  const timeTrackedUsers = useMemo(() =>
+    [...users].sort((a, b) => {
+      const nameA = (a.displayName || `${a.firstName} ${a.lastName}`).toLowerCase();
+      const nameB = (b.displayName || `${b.firstName} ${b.lastName}`).toLowerCase();
+      return nameA.localeCompare(nameB);
+    }),
+  [users]);
 
   // Fetch screenshot counts for all time-tracked users once they load
   useEffect(() => {
@@ -330,6 +338,7 @@ function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
 // ---------------------------------------------------------------------------
 
 export default function AdminScreenshots({ selectedUserId, onUserChange }: AdminScreenshotsProps) {
+  const router = useRouter();
   const { user } = useAuth();
   const { users, loading: usersLoading } = useAdminUsers();
   const { userData: viewerData } = useUserData();
@@ -345,7 +354,13 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
   const [isDeleting, setIsDeleting] = useState(false);
   const [showBatchDelete, setShowBatchDelete] = useState(false);
 
-  const timeTrackedUsers = useMemo(() => users, [users]);
+  const timeTrackedUsers = useMemo(() =>
+    [...users].sort((a, b) => {
+      const nameA = (a.displayName || `${a.firstName} ${a.lastName}`).toLowerCase();
+      const nameB = (b.displayName || `${b.firstName} ${b.lastName}`).toLowerCase();
+      return nameA.localeCompare(nameB);
+    }),
+  [users]);
 
   const { groups, loading, error, refetch } = useAdminScreenshots(
     selectedUserId,
@@ -472,9 +487,27 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
     <div>
       {/* Header row with Batch Delete button */}
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold tracking-tight">
-          Screenshots
-        </h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold tracking-tight">
+            Screenshots
+          </h2>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <InfoIcon
+                style={{ width: '14px', height: '14px', cursor: 'default', flexShrink: 0, color: 'var(--foreground-muted)' }}
+              />
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs text-center">
+              Screenshots can be enabled in the user&apos;s profile information in{' '}
+              <span
+                className="underline cursor-pointer"
+                onClick={() => router.push('/admin/user-management')}
+              >
+                User Management &gt; Employee Registry &gt; Time Tracking
+              </span>
+            </TooltipContent>
+          </Tooltip>
+        </div>
         <Button
           onClick={() => setShowBatchDelete(true)}
           variant="outline"

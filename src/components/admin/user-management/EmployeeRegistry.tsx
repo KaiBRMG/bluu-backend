@@ -24,19 +24,36 @@ export default function EmployeeRegistry({
   onRefetch,
 }: EmployeeRegistryProps) {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const [groupFilter, setGroupFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [employmentTypeFilter, setEmploymentTypeFilter] = useState('');
 
   const filteredUsers = useMemo(() => {
-    return users.filter((u) => {
-      if (groupFilter && !u.groups?.includes(groupFilter)) return false;
-      if (statusFilter === 'active' && !u.isActive) return false;
-      if (statusFilter === 'inactive' && u.isActive) return false;
-      if (employmentTypeFilter && u.employmentType !== employmentTypeFilter) return false;
-      return true;
-    });
-  }, [users, groupFilter, statusFilter, employmentTypeFilter]);
+    const q = searchQuery.trim().toLowerCase();
+    return users
+      .filter((u) => {
+        if (groupFilter && !u.groups?.includes(groupFilter)) return false;
+        if (statusFilter === 'active' && !u.isActive) return false;
+        if (statusFilter === 'inactive' && u.isActive) return false;
+        if (employmentTypeFilter && u.employmentType !== employmentTypeFilter) return false;
+        if (q) {
+          const first = (u.firstName || '').toLowerCase();
+          const last = (u.lastName || '').toLowerCase();
+          const display = (u.displayName || '').toLowerCase();
+          if (!first.includes(q) && !last.includes(q) && !display.includes(q)) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const aFirst = (a.firstName || '').toLowerCase();
+        const aLast = (a.lastName || '').toLowerCase();
+        const bFirst = (b.firstName || '').toLowerCase();
+        const bLast = (b.lastName || '').toLowerCase();
+        if (aFirst !== bFirst) return aFirst.localeCompare(bFirst);
+        return aLast.localeCompare(bLast);
+      });
+  }, [users, searchQuery, groupFilter, statusFilter, employmentTypeFilter]);
 
   const selectedUser = selectedUserId
     ? users.find((u) => u.uid === selectedUserId) ?? null
@@ -49,9 +66,11 @@ export default function EmployeeRegistry({
         groupFilter={groupFilter}
         statusFilter={statusFilter}
         employmentTypeFilter={employmentTypeFilter}
+        searchQuery={searchQuery}
         onGroupFilterChange={setGroupFilter}
         onStatusFilterChange={setStatusFilter}
         onEmploymentTypeFilterChange={setEmploymentTypeFilter}
+        onSearchQueryChange={setSearchQuery}
       />
 
       {filteredUsers.length === 0 ? (

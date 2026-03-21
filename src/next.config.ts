@@ -28,7 +28,7 @@ const nextConfig: NextConfig = {
   // Experimental optimizations for package imports
   experimental: {
     // Optimize Firebase imports to reduce bundle size
-    optimizePackageImports: ['firebase/app', 'firebase/auth', 'firebase/firestore'],
+    optimizePackageImports: ['firebase/app', 'firebase/auth', 'firebase/firestore', 'lucide-react', '@tabler/icons-react'],
   },
 };
 

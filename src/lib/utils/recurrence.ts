@@ -316,8 +316,14 @@ export function expandShiftsForWindow(
         ? occurrenceEndMs + 24 * 3_600_000
         : occurrenceEndMs;
 
-      // Only include if the occurrence overlaps the window
-      if (adjustedEndMs > windowStartMs && occurrenceStartMs < windowEndMs) {
+      // Only include if the occurrence overlaps the window.
+      // We extend the upper bound by 24 h because midnight-spanning shifts for
+      // employees in UTC- timezones have a UTC occurrenceStart that falls on the
+      // next calendar day (e.g. Sunday 23:00 EDT = Monday 03:00 UTC), which would
+      // otherwise fail the < windowEndMs check. The candidate generator already
+      // constrains candidates to the local week via localWindowTo, so no
+      // next-week occurrences can slip through from the candidate side.
+      if (adjustedEndMs > windowStartMs && occurrenceStartMs < windowEndMs + 24 * 60 * 60 * 1000) {
         result.push({
           ...root,
           occurrenceStart: occurrenceStartMs,

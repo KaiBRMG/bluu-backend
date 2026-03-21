@@ -1,11 +1,26 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import AppLayout from "@/components/AppLayout";
 import { useTimeTracking } from "@/hooks/useTimeTracking";
-import UserTimesheet from "@/components/timesheet/UserTimesheet";
-import TodayTimeline from "@/components/timesheet/TodayTimeline";
 import type { TimerDisplayState } from "@/types/firestore";
-import UserUpcomingShifts from "@/components/shifts/UserUpcomingShifts";
+
+const TodayTimeline = dynamic(
+  () => import("@/components/timesheet/TodayTimeline"),
+  { loading: () => <div style={{ minHeight: 200 }} /> }
+);
+const UserTimesheet = dynamic(
+  () => import("@/components/timesheet/UserTimesheet"),
+  { loading: () => <div style={{ minHeight: 200 }} /> }
+);
+const UserUpcomingShifts = dynamic(
+  () => import("@/components/shifts/UserUpcomingShifts"),
+  { loading: () => <div style={{ minHeight: 200 }} /> }
+);
+const UserScreenshots = dynamic(
+  () => import("@/components/timesheet/UserScreenshots"),
+  { loading: () => <div style={{ minHeight: 200 }} /> }
+);
 import { useUserData } from "@/hooks/useUserData";
 import { useDayTotal } from "@/hooks/useDayTotal";
 import { Clock4, ClockCheck, ClockAlert, Coffee, CirclePause } from 'lucide-react';
@@ -205,10 +220,12 @@ export default function TimeTrackingPage() {
             <TabsTrigger value="today">Today's Timesheet</TabsTrigger>
             <TabsTrigger value="previous">Previous Timesheets</TabsTrigger>
             <TabsTrigger value="upcoming">Upcoming Shifts</TabsTrigger>
+            <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
           </TabsList>
           <TabsContent value="today" className="mt-4"><TodayTimeline /></TabsContent>
           <TabsContent value="previous" className="mt-4"><UserTimesheet /></TabsContent>
           <TabsContent value="upcoming" className="mt-4"><UserUpcomingShifts /></TabsContent>
+          <TabsContent value="screenshots" className="mt-4"><UserScreenshots /></TabsContent>
         </Tabs>
       </div>
     </AppLayout>

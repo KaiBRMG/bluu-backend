@@ -44,7 +44,13 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
   const [startOpen, setStartOpen] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
 
-  const timeTrackedUsers = useMemo(() => users, [users]);
+  const timeTrackedUsers = useMemo(() =>
+    [...users].sort((a, b) => {
+      const nameA = (a.displayName || `${a.firstName} ${a.lastName}`).toLowerCase();
+      const nameB = (b.displayName || `${b.firstName} ${b.lastName}`).toLowerCase();
+      return nameA.localeCompare(nameB);
+    }),
+  [users]);
 
   // Validate date range
   const dateError = useMemo(() => {

@@ -14,9 +14,11 @@ interface RegistryFiltersProps {
   groupFilter: string;
   statusFilter: string;
   employmentTypeFilter: string;
+  searchQuery: string;
   onGroupFilterChange: (value: string) => void;
   onStatusFilterChange: (value: string) => void;
   onEmploymentTypeFilterChange: (value: string) => void;
+  onSearchQueryChange: (value: string) => void;
 }
 
 export default function RegistryFilters({
@@ -24,16 +26,18 @@ export default function RegistryFilters({
   groupFilter,
   statusFilter,
   employmentTypeFilter,
+  searchQuery,
   onGroupFilterChange,
   onStatusFilterChange,
   onEmploymentTypeFilterChange,
+  onSearchQueryChange,
 }: RegistryFiltersProps) {
   const groupLabel = groupFilter ? (groups.find(g => g.id === groupFilter)?.name ?? 'All Groups') : 'All Groups';
   const statusLabel = statusFilter === 'active' ? 'Active' : statusFilter === 'inactive' ? 'Inactive' : 'All Status';
   const employmentLabel = employmentTypeFilter || 'All Employment Types';
 
   return (
-    <div className="flex gap-3 mb-5">
+    <div className="flex items-center gap-3 mb-5">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
@@ -90,6 +94,15 @@ export default function RegistryFilters({
           <DropdownMenuItem onSelect={() => onEmploymentTypeFilterChange('Intern')}>Intern</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <input
+        type="text"
+        placeholder="Search by name..."
+        value={searchQuery}
+        onChange={(e) => onSearchQueryChange(e.target.value)}
+        className="form-input text-sm ml-auto"
+        style={{ minWidth: '200px', maxWidth: '260px' }}
+      />
     </div>
   );
 }
