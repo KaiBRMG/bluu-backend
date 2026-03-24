@@ -11,7 +11,6 @@ interface TimesheetViewProps {
   startDate: string; // YYYY-MM-DD
   endDate: string;   // YYYY-MM-DD
   loading: boolean;
-  includeIdleTime: boolean;
 }
 
 /**
@@ -71,12 +70,11 @@ function computeDailyTotal(
   entries: TimesheetEntry[],
   dayStart: number,
   dayEnd: number,
-  includeIdleTime: boolean,
 ): string {
   let totalMs = 0;
   for (const entry of entries) {
     if (entry.state === 'paused') continue;
-    if (entry.state === 'idle' && !includeIdleTime) continue;
+    if (entry.state === 'idle') continue;
 
     const entryStart = new Date(entry.createdTime).getTime();
     const entryEnd = new Date(entry.lastTime).getTime();
@@ -103,7 +101,6 @@ export default function TimesheetView({
   startDate,
   endDate,
   loading,
-  includeIdleTime,
 }: TimesheetViewProps) {
   const dates = useMemo(() => generateDates(startDate, endDate), [startDate, endDate]);
 
@@ -156,7 +153,7 @@ export default function TimesheetView({
         {[...dates].reverse().map((date) => {
           const dayEntries = entriesByDate[date] || [];
           const { start, end } = getDayBoundsUTC(date, timezone);
-          const total = computeDailyTotal(dayEntries, start, end, includeIdleTime);
+          const total = computeDailyTotal(dayEntries, start, end);
 
           return (
             <div key={date} className="flex items-center gap-3">

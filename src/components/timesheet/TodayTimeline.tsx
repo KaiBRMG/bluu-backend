@@ -168,8 +168,6 @@ export default function TodayTimeline() {
   const { sessionId, displayState } = useTimeTracking();
   const { userData } = useUserData();
   const timezone = userData?.timezone || 'UTC';
-  const includeIdleTime = userData?.includeIdleTime ?? false;
-
   const [buffers, setBuffers] = useState<LocalSessionBuffer[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const [lastRefreshed, setLastRefreshed] = useState(() => Date.now());
@@ -219,9 +217,9 @@ export default function TodayTimeline() {
         ? now
         : (buf.events.find(e => e.type === 'clock-out')?.timestamp ?? now);
       const totals = parseBuffer(buf.events, closeMs);
-      return sum + totals.workingSeconds + totals.breakSeconds + (includeIdleTime ? totals.idleSeconds : 0);
+      return sum + totals.workingSeconds;
     }, 0);
-  }, [buffers, sessionId, now, includeIdleTime]);
+  }, [buffers, sessionId, now]);
 
   const toPercent = (ms: number) =>
     Math.max(0, Math.min(100, ((ms - dayStart) / dayDuration) * 100));

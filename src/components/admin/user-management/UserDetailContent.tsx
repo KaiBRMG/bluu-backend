@@ -82,7 +82,7 @@ interface FormData {
   paymentMethod: string;
   paymentInfo: string;
   userComments: string;
-  includeIdleTime: boolean;
+  enableIdleTimeout: boolean;
   enableScreenshots: boolean;
   hasPaidLeave: boolean;
   remainingUnpaidLeave: number;
@@ -113,7 +113,7 @@ function buildFormData(user: AdminFullUser): FormData {
     paymentMethod: user.paymentMethod || '',
     paymentInfo: user.paymentInfo || '',
     userComments: user.userComments || '',
-    includeIdleTime: user.includeIdleTime ?? false,
+    enableIdleTimeout: user.enableIdleTimeout ?? true,
     enableScreenshots: user.enableScreenshots ?? true,
     hasPaidLeave: user.hasPaidLeave ?? false,
     remainingUnpaidLeave: user.remainingUnpaidLeave ?? 4,
@@ -261,7 +261,7 @@ export default function UserDetailContent({
         paymentMethod: formData.paymentMethod,
         paymentInfo: formData.paymentInfo,
         userComments: formData.userComments,
-        includeIdleTime: formData.includeIdleTime,
+        enableIdleTimeout: formData.enableIdleTimeout,
         enableScreenshots: formData.enableScreenshots,
         hasPaidLeave: formData.hasPaidLeave,
         remainingUnpaidLeave: formData.remainingUnpaidLeave,
@@ -511,11 +511,11 @@ export default function UserDetailContent({
             <div style={{ opacity: enableTimeTracking ? 1 : 0.4, pointerEvents: enableTimeTracking ? 'auto' : 'none' }}>
               <label className="flex items-center gap-2 cursor-pointer">
                 <Checkbox
-                  checked={formData.includeIdleTime}
-                  onCheckedChange={(checked) => handleChange('includeIdleTime', checked === true)}
+                  checked={formData.enableIdleTimeout}
+                  onCheckedChange={(checked) => handleChange('enableIdleTimeout', checked === true)}
                   disabled={!enableTimeTracking}
                 />
-                <span className="text-sm">Include Idle Time in Totals</span>
+                <span className="text-sm">Enable Idle Timeout</span>
               </label>
             </div>
 

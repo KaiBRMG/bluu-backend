@@ -94,6 +94,19 @@ export default function UserScreenshots() {
 
   return (
     <div>
+      {/* Info notice */}
+      <div className="flex items-center gap-1.5 mb-4">
+        <span
+          className="flex items-center justify-center rounded-full text-[9px] font-bold leading-none flex-shrink-0"
+          style={{ width: '0.9rem', height: '0.9rem', border: '1px solid var(--foreground-muted)', color: 'var(--foreground-muted)' }}
+        >
+          i
+        </span>
+        <span className="text-xs" style={{ color: 'var(--foreground-muted)' }}>
+          You must contact management if you wish to delete one or more screenshots
+        </span>
+      </div>
+
       {/* Date picker */}
       <div className="flex flex-wrap items-end gap-4 mb-6">
         <div>

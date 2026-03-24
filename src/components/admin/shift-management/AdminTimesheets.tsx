@@ -69,7 +69,7 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
     return null;
   }, [startDate, endDate]);
 
-  const { entries, timezone, includeIdleTime, loading: entriesLoading, error } = useTimesheetData(
+  const { entries, timezone, loading: entriesLoading, error } = useTimesheetData(
     selectedUserId,
     dateError ? null : startDate,
     dateError ? null : endDate,
@@ -184,7 +184,6 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
           startDate={startDate}
           endDate={endDate}
           loading={entriesLoading}
-          includeIdleTime={includeIdleTime}
         />
       ) : null}
     </div>

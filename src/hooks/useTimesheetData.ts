@@ -12,14 +12,12 @@ export interface TimesheetEntry {
 interface CachedTimesheetData {
   entries: TimesheetEntry[];
   timezone: string;
-  includeIdleTime: boolean;
   cachedAt: number;
 }
 
 interface UseTimesheetDataReturn {
   entries: TimesheetEntry[];
   timezone: string;
-  includeIdleTime: boolean;
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
@@ -80,7 +78,6 @@ export function useTimesheetData(
   const { user } = useAuth();
   const [entries, setEntries] = useState<TimesheetEntry[]>([]);
   const [timezone, setTimezone] = useState('UTC');
-  const [includeIdleTime, setIncludeIdleTime] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -95,7 +92,6 @@ export function useTimesheetData(
       if (cached) {
         setEntries(cached.entries);
         setTimezone(cached.timezone);
-        setIncludeIdleTime(cached.includeIdleTime);
         return;
       }
     }
@@ -117,11 +113,9 @@ export function useTimesheetData(
       const data = await res.json();
       setEntries(data.entries);
       setTimezone(data.timezone || 'UTC');
-      setIncludeIdleTime(data.includeIdleTime ?? false);
       writeCache(key, {
         entries: data.entries,
         timezone: data.timezone || 'UTC',
-        includeIdleTime: data.includeIdleTime ?? false,
       });
     } catch (err) {
       console.error('[useTimesheetData] Fetch failed:', err);
@@ -136,5 +130,5 @@ export function useTimesheetData(
   // refetch() always bypasses the cache so the user can force-refresh
   const refetch = useCallback(() => fetchData(true), [fetchData]);
 
-  return { entries, timezone, includeIdleTime, loading, error, refetch };
+  return { entries, timezone, loading, error, refetch };
 }

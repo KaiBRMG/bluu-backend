@@ -60,8 +60,7 @@ export default function TimeTrackingPage() {
 
   const { userData } = useUserData();
   const timezone = userData?.timezone || 'UTC';
-  const includeIdleTime = userData?.includeIdleTime ?? false;
-  const dayTotalSeconds = useDayTotal(timezone, includeIdleTime);
+  const dayTotalSeconds = useDayTotal(timezone);
 
   const config = STATE_CONFIG[displayState];
 
@@ -90,12 +89,29 @@ export default function TimeTrackingPage() {
             {/* Left: state indicator + timer + buttons */}
             <div className="flex-1">
               {/* State indicator */}
-              <div className="flex items-center gap-3 mb-6">
+              <div className="flex items-center gap-3 mb-1.5">
                 <config.Icon style={{ color: config.color, width: '1.125rem', height: '1.125rem', flexShrink: 0 }} />
                 <span className="text-lg font-medium" style={{ color: config.color }}>
                   {config.label}
                 </span>
               </div>
+
+              {/* Clock-out reminder */}
+              {displayState !== 'clocked-out' ? (
+                <div className="flex items-center gap-1.5 mb-6">
+                  <span
+                    className="flex items-center justify-center rounded-full text-[9px] font-bold leading-none flex-shrink-0"
+                    style={{ width: '0.9rem', height: '0.9rem', border: '1px solid var(--foreground-muted)', color: 'var(--foreground-muted)' }}
+                  >
+                    i
+                  </span>
+                  <span className="text-xs" style={{ color: 'var(--foreground-muted)' }}>
+                    You must explicitly clock out to save your time
+                  </span>
+                </div>
+              ) : (
+                <div className="mb-6" />
+              )}
 
               {/* Timer display */}
               <div

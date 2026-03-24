@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   timeTracking: {
     getIdleTime: () => ipcRenderer.invoke('timeTracking:getIdleTime'),
     captureScreenshot: () => ipcRenderer.invoke('timeTracking:captureScreenshot'),
+    setPowerSaveBlocker: (enable) => ipcRenderer.invoke('timeTracking:setPowerSaveBlocker', enable),
   },
 
   // Notifications

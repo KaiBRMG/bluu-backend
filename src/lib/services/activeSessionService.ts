@@ -86,7 +86,7 @@ export async function commitSession(
   parsedTotals: ParsedSessionTotals,
   eventLog: SessionEvent[],
   timezone: string,
-  includeIdleTime: boolean,
+  enableIdleTimeout: boolean,
 ): Promise<void> {
   const batch = adminDb.batch();
 
@@ -107,7 +107,7 @@ export async function commitSession(
     isManual: false,
     modifications: [],
     originalData: { ...parsedTotals },
-    includeIdleTime,
+    enableIdleTimeout,
     timezone,
     createdAt: FieldValue.serverTimestamp(),
   };

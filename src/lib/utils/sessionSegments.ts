@@ -113,8 +113,8 @@ export function sessionToSegments(
 
 /**
  * Given a session's event log and its absolute start/end times, compute
- * how many seconds of "worked" time (working + optionally idle) fall
- * within [windowStartMs, windowEndMs].
+ * how many seconds of "worked" time fall within [windowStartMs, windowEndMs].
+ * Idle, break, and pause time are always excluded.
  *
  * Used by the shifts/week API route to calculate "Time worked" for a
  * past shift without re-querying Firestore per shift.
@@ -125,7 +125,6 @@ export function computeWorkedInWindow(
   sessionEndMs: number,
   windowStartMs: number,
   windowEndMs: number,
-  includeIdleTime: boolean,
 ): number {
   // Clip the session itself to the window first
   const clippedSessionStart = Math.max(sessionStartMs, windowStartMs);
@@ -141,7 +140,7 @@ export function computeWorkedInWindow(
 
   // Walk the segments produced by the event log and clip each to the window
   const addSeconds = (startMs: number, endMs: number, isIdle: boolean) => {
-    if (isIdle && !includeIdleTime) return;
+    if (isIdle) return;
     const s = Math.max(startMs, windowStartMs);
     const e = Math.min(endMs,   windowEndMs);
     if (e > s) total += Math.round((e - s) / 1000);

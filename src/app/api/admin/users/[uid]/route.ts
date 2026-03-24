@@ -40,7 +40,7 @@ export const PUT = withAuth(async (
       'paymentInfo',
       'userComments',
       'photoURL',
-      'includeIdleTime',
+      'enableIdleTimeout',
       'enableScreenshots',
       'hasPaidLeave',
       'remainingUnpaidLeave',

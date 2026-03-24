@@ -10,7 +10,7 @@ export interface ShiftUser {
   displayName: string;
   photoURL: string | null;
   timezone: string;
-  includeIdleTime: boolean;
+  enableIdleTimeout: boolean;
   groups: string[];
 }
 

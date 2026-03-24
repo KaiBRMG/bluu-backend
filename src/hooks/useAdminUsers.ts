@@ -39,7 +39,7 @@ export interface AdminFullUser {
   paymentMethod?: string;
   paymentInfo?: string;
   userComments?: string;
-  includeIdleTime?: boolean;
+  enableIdleTimeout?: boolean;
   enableScreenshots?: boolean;
   hasPaidLeave?: boolean;
   remainingUnpaidLeave?: number;

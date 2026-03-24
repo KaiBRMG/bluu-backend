@@ -38,7 +38,7 @@ export default function UserTimesheet() {
     endDate: selectedDate,
   }), [selectedDate]);
 
-  const { entries, timezone, includeIdleTime, loading, error } = useTimesheetData(null, startDate, endDate, userTimezone);
+  const { entries, timezone, loading, error } = useTimesheetData(null, startDate, endDate, userTimezone);
 
   return (
     <div
@@ -94,7 +94,6 @@ export default function UserTimesheet() {
         startDate={startDate}
         endDate={endDate}
         loading={loading}
-        includeIdleTime={includeIdleTime}
       />
     </div>
   );

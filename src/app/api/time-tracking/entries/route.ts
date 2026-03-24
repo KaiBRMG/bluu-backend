@@ -93,7 +93,7 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       entries: allRows,
       timezone:        targetUser?.timezone        ?? 'UTC',
       timezoneOffset:  targetUser?.timezoneOffset  ?? '+00:00',
-      includeIdleTime: targetUser?.includeIdleTime ?? false,
+      enableIdleTimeout: targetUser?.enableIdleTimeout ?? true,
     });
   } catch (error: unknown) {
     console.error('Error fetching time entries:', error);

@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, shell, nativeImage, ipcMain, powerMonitor, desktopCapturer, Notification } = require('electron');
+const { app, BrowserWindow, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
@@ -116,6 +116,24 @@ ipcMain.handle('auth:start-google-oauth', async () => {
 // IPC handler for idle time detection
 ipcMain.handle('timeTracking:getIdleTime', () => {
   return powerMonitor.getSystemIdleTime();
+});
+
+// IPC handler to prevent/allow display sleep based on timer state
+let powerSaveBlockerId = null;
+ipcMain.handle('timeTracking:setPowerSaveBlocker', (_event, enable) => {
+  if (enable) {
+    if (powerSaveBlockerId === null) {
+      powerSaveBlockerId = powerSaveBlocker.start('prevent-display-sleep');
+      console.log('[main] powerSaveBlocker started, id:', powerSaveBlockerId);
+    }
+  } else {
+    if (powerSaveBlockerId !== null) {
+      powerSaveBlocker.stop(powerSaveBlockerId);
+      console.log('[main] powerSaveBlocker stopped, id:', powerSaveBlockerId);
+      powerSaveBlockerId = null;
+    }
+  }
+  return { success: true };
 });
 
 // IPC handler for screenshot capture (all screens)

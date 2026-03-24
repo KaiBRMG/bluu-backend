@@ -73,7 +73,7 @@ export async function ensureUserExists(userData: CreateUserData): Promise<string
       hasPaidLeave: false,
       remainingUnpaidLeave: 4,
       remainingPaidLeave: 10,
-      includeIdleTime: false,
+      enableIdleTimeout: true,
       enableScreenshots: true,
       sessionToken,
       hasAcceptedTerms: false,

@@ -41,7 +41,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       parsedTotals,
       buffer.events,
       userData?.timezone ?? 'UTC',
-      userData?.includeIdleTime ?? false,
+      userData?.enableIdleTimeout ?? true,
     );
 
     return NextResponse.json({ success: true });

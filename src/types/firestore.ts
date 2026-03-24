@@ -73,7 +73,7 @@ export interface UserDocument {
   hasPaidLeave?: boolean;
   remainingUnpaidLeave?: number;
   remainingPaidLeave?: number;
-  includeIdleTime?: boolean;
+  enableIdleTimeout?: boolean;
   enableScreenshots?: boolean;
 
   notificationPreferences?: {
@@ -237,7 +237,7 @@ export interface TimeEntryLedgerDocument {
   isManual: boolean;
   modifications: SessionModification[];
   originalData: ParsedSessionTotals;
-  includeIdleTime: boolean;
+  enableIdleTimeout: boolean;
   timezone: string;
   createdAt: Timestamp;
 }

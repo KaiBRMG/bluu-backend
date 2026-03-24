@@ -278,6 +278,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   }, [displayState, apiCall]);
 
   // ─── Idle Detection ──────────────────────────────────────────────────
+  const enableIdleTimeout = userData?.enableIdleTimeout ?? true;
+
   useEffect(() => {
     if (idleCheckRef.current) {
       clearInterval(idleCheckRef.current);
@@ -286,6 +288,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
 
     const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
     if (!electronAPI?.timeTracking) return;
+    if (!enableIdleTimeout) return;
 
     if (displayState === 'working') {
       idleCheckRef.current = setInterval(async () => {
@@ -354,7 +357,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         idleCheckRef.current = null;
       }
     };
-  }, [displayState, apiCall]);
+  }, [displayState, enableIdleTimeout, apiCall]);
 
   // ─── Timer Tick (1s) ─────────────────────────────────────────────────
   useEffect(() => {
@@ -428,6 +431,19 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [displayState, entryStartTime, breakStartTime, apiCall]);
+
+  // ─── Power Save Blocker (Electron) ──────────────────────────────────
+  useEffect(() => {
+    const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
+    if (!electronAPI?.timeTracking?.setPowerSaveBlocker) return;
+
+    const shouldBlock = displayState !== 'clocked-out' && displayState !== 'paused';
+    electronAPI.timeTracking.setPowerSaveBlocker(shouldBlock).catch(() => {});
+
+    return () => {
+      electronAPI.timeTracking.setPowerSaveBlocker!(false).catch(() => {});
+    };
+  }, [displayState]);
 
   // ─── Screenshot Scheduling ───────────────────────────────────────────
   useEffect(() => {

@@ -78,7 +78,6 @@ function computeTimeWorked(
   shiftEndMs: number,
   sessions: TimeEntryLedgerDocument[],
   activeSession: ActiveSessionDocument | undefined,
-  includeIdleTime: boolean,
 ): number {
   let total = 0;
 
@@ -94,7 +93,6 @@ function computeTimeWorked(
       sessionEndMs,
       shiftStartMs,
       shiftEndMs,
-      includeIdleTime,
     );
   }
 
@@ -252,7 +250,6 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         const effectiveEnd = isPast ? shiftEndMs : now;
         timeWorkedSeconds = computeTimeWorked(
           shiftStartMs, effectiveEnd, sessions, activeSession,
-          userMap.get(s.userId)?.includeIdleTime ?? false,
         );
         attendanceStatus = computeAttendance(
           shiftStartMs, shiftEndMs, sessions, activeSession,
@@ -274,7 +271,7 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         displayName:    u?.displayName    ?? uid,
         photoURL:       u?.photoURL       ?? null,
         timezone:       u?.timezone       ?? 'UTC',
-        includeIdleTime: u?.includeIdleTime ?? false,
+        enableIdleTimeout: u?.enableIdleTimeout ?? true,
         groups:         u?.groups         ?? [],
       };
     });

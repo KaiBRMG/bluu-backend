@@ -8,14 +8,14 @@ import { parseBuffer } from '@/lib/parseBuffer';
  * Returns the total "time worked" seconds tracked today (in the user's timezone),
  * summed across all sessions whose clock-in falls within today's calendar day.
  *
- * Counts: working + idle (only when includeIdleTime is true).
- * Excludes: break time and pause time.
+ * Counts: working seconds only.
+ * Excludes: idle, break, and pause time.
  *
  * - Ticks every second.
  * - Resets automatically at midnight in the user's timezone by re-running the
  *   effect (driven by a `day` state that increments at midnight).
  */
-export function useDayTotal(timezone: string, includeIdleTime: boolean): number {
+export function useDayTotal(timezone: string): number {
   const [totalSeconds, setTotalSeconds] = useState(0);
   // Incrementing this triggers the effect to re-run after midnight
   const [day, setDay] = useState(0);
@@ -33,7 +33,7 @@ export function useDayTotal(timezone: string, includeIdleTime: boolean): number 
       let total = 0;
       for (const buf of sessions) {
         const t = parseBuffer(buf.events, now);
-        total += t.workingSeconds + t.breakSeconds + (includeIdleTime ? t.idleSeconds : 0);
+        total += t.workingSeconds;
       }
       if (!cancelled) setTotalSeconds(total);
     }
@@ -55,7 +55,7 @@ export function useDayTotal(timezone: string, includeIdleTime: boolean): number 
       if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
       if (midnightRef.current) { clearTimeout(midnightRef.current); midnightRef.current = null; }
     };
-  }, [timezone, includeIdleTime, day]); // re-runs on timezone change, setting change, or day rollover
+  }, [timezone, day]); // re-runs on timezone change or day rollover
 
   return totalSeconds;
 }

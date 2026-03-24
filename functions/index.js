@@ -127,7 +127,7 @@ exports.cleanupStaleSessions = onSchedule({ schedule: '0 2 * * *', timeZone: 'UT
       isManual:             false,
       modifications:        [],
       originalData:         { workingSeconds: 0, idleSeconds: 0, breakSeconds: 0, pauseSeconds: 0 },
-      includeIdleTime:      false, // unknown without user doc; client upload will not update this
+      enableIdleTimeout:    true,  // unknown without user doc; default to enabled
       timezone:             'UTC',
       createdAt:            now,
     });
