@@ -104,7 +104,7 @@ export default function AdminShifts() {
       const usersWithShifts = new Set(shifts.map(s => s.userId));
       list = list.filter(u => usersWithShifts.has(u.uid));
     }
-    return list;
+    return list.sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
   }, [users, shifts, groupFilter, showUnscheduled]);
 
   // All unique groups across eligible users

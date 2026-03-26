@@ -50,7 +50,7 @@ export default function UserTimesheet() {
     >
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-lg font-semibold tracking-tight">
-          Timesheet
+          Timesheets
         </h2>
         <div className="flex items-center gap-2">
           <Button

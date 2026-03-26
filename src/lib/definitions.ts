@@ -24,7 +24,7 @@ export const TEAMSPACES: TeamspaceDef[] = [
 
 export const PAGES: PageDef[] = [
   // CA Portal
-  { pageId: 'ca-home', title: 'Home', teamspaceId: 'ca-portal', href: '/ca-portal/home', icon: 'House', order: 0 },
+  { pageId: 'ca-dashboard', title: 'Dashboard', teamspaceId: 'ca-portal', href: '/ca-portal/dashboard', icon: 'LayoutDashboard', order: 0 },
   { pageId: 'ca-shifts', title: 'Shifts', teamspaceId: 'ca-portal', href: '/ca-portal/shifts', icon: 'CalendarClock', order: 1 },
   { pageId: 'ca-disputes', title: 'Disputes', teamspaceId: 'ca-portal', href: '/ca-portal/disputes', icon: 'MessageCircleQuestionMark', order: 2 },
   { pageId: 'ca-admin', title: 'Admin', teamspaceId: 'ca-portal', href: '/ca-portal/admin', icon: 'Cog', order: 3 },
