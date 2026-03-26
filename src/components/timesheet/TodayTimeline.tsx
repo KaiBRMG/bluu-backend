@@ -217,7 +217,7 @@ export default function TodayTimeline() {
         ? now
         : (buf.events.find(e => e.type === 'clock-out')?.timestamp ?? now);
       const totals = parseBuffer(buf.events, closeMs);
-      return sum + totals.workingSeconds;
+      return sum + totals.workingSeconds + totals.breakSeconds;
     }, 0);
   }, [buffers, sessionId, now]);
 
@@ -331,7 +331,7 @@ export default function TodayTimeline() {
             ? now
             : (buf.events.find(e => e.type === 'clock-out')?.timestamp ?? now);
           const totals = parseBuffer(buf.events, closeMs);
-          const workedSeconds = totals.workingSeconds;
+          const workedSeconds = totals.workingSeconds + totals.breakSeconds;
           const h = Math.floor(workedSeconds / 3600);
           const m = Math.floor((workedSeconds % 3600) / 60);
           const sessionTotal = workedSeconds === 0 ? '—' : h === 0 ? `${m}m` : `${h}h ${m}m`;

@@ -114,7 +114,8 @@ export function sessionToSegments(
 /**
  * Given a session's event log and its absolute start/end times, compute
  * how many seconds of "worked" time fall within [windowStartMs, windowEndMs].
- * Idle, break, and pause time are always excluded.
+ * Idle and pause time are excluded; break time is included (breaks are part
+ * of the total reported worked time).
  *
  * Used by the shifts/week API route to calculate "Time worked" for a
  * past shift without re-querying Firestore per shift.
@@ -171,7 +172,7 @@ export function computeWorkedInWindow(
         breakStart = t;
         break;
       case 'break-end':
-        // Break time is not counted as worked time
+        if (breakStart !== null) addSeconds(breakStart, t, false);
         breakStart = null;
         segStart = t;
         break;
@@ -187,7 +188,7 @@ export function computeWorkedInWindow(
         break;
       case 'clock-out':
         if (idleStart !== null) { addSeconds(idleStart, t, true); idleStart = null; }
-        else if (breakStart !== null) { breakStart = null; }
+        else if (breakStart !== null) { addSeconds(breakStart, t, false); breakStart = null; }
         else if (pauseStart !== null) { pauseStart = null; }
         else addSeconds(segStart, t, false);
         segStart = t;
@@ -200,7 +201,7 @@ export function computeWorkedInWindow(
   // Close any open segment against the session end (clipped to window)
   const endMs = sessionEndMs;
   if (idleStart !== null) addSeconds(idleStart, endMs, true);
-  else if (breakStart !== null) { /* break not counted */ }
+  else if (breakStart !== null) addSeconds(breakStart, endMs, false);
   else if (pauseStart !== null) { /* pause not counted */ }
   else addSeconds(segStart, endMs, false);
 
