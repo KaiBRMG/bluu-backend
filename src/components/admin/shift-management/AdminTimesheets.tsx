@@ -9,11 +9,13 @@ import { ChevronDownIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 
 function toDateString(date: Date): string {
   const y = date.getFullYear();
@@ -43,6 +45,7 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
   const [endDate, setEndDate] = useState(today);
   const [startOpen, setStartOpen] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
+  const [employeeOpen, setEmployeeOpen] = useState(false);
 
   const timeTrackedUsers = useMemo(() =>
     [...users].sort((a, b) => {
@@ -86,8 +89,8 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
       <div className="flex flex-wrap items-end gap-4 mb-6">
         <div>
           <label className="form-label block mb-1">Employee</label>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+          <Popover open={employeeOpen} onOpenChange={setEmployeeOpen}>
+            <PopoverTrigger asChild>
               <button
                 type="button"
                 className="form-input flex items-center justify-between gap-2"
@@ -101,18 +104,30 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
                 </span>
                 <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
               </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="dark min-w-[180px]">
-              <DropdownMenuItem onSelect={() => onUserChange(null)}>
-                Select a user...
-              </DropdownMenuItem>
-              {timeTrackedUsers.map((u) => (
-                <DropdownMenuItem key={u.uid} onSelect={() => onUserChange(u.uid)}>
-                  {u.displayName || `${u.firstName} ${u.lastName}`}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </PopoverTrigger>
+            <PopoverContent className="w-[220px] p-0" align="start">
+              <Command>
+                <CommandInput placeholder="Search employee..." />
+                <CommandList>
+                  <CommandEmpty>No employee found.</CommandEmpty>
+                  <CommandGroup>
+                    <CommandItem onSelect={() => { onUserChange(null); setEmployeeOpen(false); }}>
+                      Select a user...
+                    </CommandItem>
+                    {timeTrackedUsers.map((u) => (
+                      <CommandItem
+                        key={u.uid}
+                        value={u.displayName || `${u.firstName} ${u.lastName}`}
+                        onSelect={() => { onUserChange(u.uid); setEmployeeOpen(false); }}
+                      >
+                        {u.displayName || `${u.firstName} ${u.lastName}`}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
         </div>
 
         <div>

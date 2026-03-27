@@ -28,13 +28,28 @@ import { ChevronDownIcon, InfoIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationPrevious,
+  PaginationNext,
+} from '@/components/ui/pagination';
 import { useRouter } from 'next/navigation';
+
+function addDays(dateStr: string, days: number): string {
+  const date = new Date(dateStr + 'T00:00:00');
+  date.setDate(date.getDate() + days);
+  return toDateString(date);
+}
 
 function toDateString(date: Date): string {
   const y = date.getFullYear();
@@ -347,6 +362,7 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
 
   const [selectedDate, setSelectedDate] = useState(today);
   const [dateOpen, setDateOpen] = useState(false);
+  const [employeeOpen, setEmployeeOpen] = useState(false);
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
   // Modal state: [groupIndex, screenIndexWithinGroup]
   const [modalPos, setModalPos] = useState<[number, number] | null>(null);
@@ -521,8 +537,8 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
       <div className="flex flex-wrap items-end gap-4 mb-6">
         <div>
           <label className="form-label block mb-1">Employee</label>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+          <Popover open={employeeOpen} onOpenChange={setEmployeeOpen}>
+            <PopoverTrigger asChild>
               <button
                 type="button"
                 className="form-input flex items-center justify-between gap-2"
@@ -536,18 +552,30 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
                 </span>
                 <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
               </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="dark min-w-[180px]">
-              <DropdownMenuItem onSelect={() => onUserChange(null)}>
-                Select a user...
-              </DropdownMenuItem>
-              {timeTrackedUsers.map((u) => (
-                <DropdownMenuItem key={u.uid} onSelect={() => onUserChange(u.uid)}>
-                  {u.displayName || `${u.firstName} ${u.lastName}`}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </PopoverTrigger>
+            <PopoverContent className="w-[220px] p-0" align="start">
+              <Command>
+                <CommandInput placeholder="Search employee..." />
+                <CommandList>
+                  <CommandEmpty>No employee found.</CommandEmpty>
+                  <CommandGroup>
+                    <CommandItem onSelect={() => { onUserChange(null); setEmployeeOpen(false); }}>
+                      Select a user...
+                    </CommandItem>
+                    {timeTrackedUsers.map((u) => (
+                      <CommandItem
+                        key={u.uid}
+                        value={u.displayName || `${u.firstName} ${u.lastName}`}
+                        onSelect={() => { onUserChange(u.uid); setEmployeeOpen(false); }}
+                      >
+                        {u.displayName || `${u.firstName} ${u.lastName}`}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
         </div>
 
         <div>
@@ -654,6 +682,35 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
             })}
           </div>
         </>
+      )}
+
+      {/* Day navigation */}
+      {selectedUserId && (
+        <div className="mt-6">
+          <Pagination>
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  href="#"
+                  onClick={(e) => { e.preventDefault(); setSelectedDate(addDays(selectedDate, -1)); }}
+                />
+              </PaginationItem>
+              <PaginationItem>
+                <span className="px-4 text-sm" style={{ color: 'var(--foreground-secondary)' }}>
+                  {selectedDate}
+                </span>
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationNext
+                  href="#"
+                  onClick={(e) => { e.preventDefault(); if (selectedDate < today) setSelectedDate(addDays(selectedDate, 1)); }}
+                  aria-disabled={selectedDate >= today}
+                  className={selectedDate >= today ? 'pointer-events-none opacity-50' : ''}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        </div>
       )}
 
       {/* Full-screen modal */}
