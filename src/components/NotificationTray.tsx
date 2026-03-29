@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Bell, Trash2, CheckCheck } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useAuth } from '@/components/AuthProvider';
 import { NotificationDocument, NotificationType } from '@/types/firestore';
@@ -94,13 +95,11 @@ function NotificationRow({
     <button
       type="button"
       onClick={() => onMarkRead(notification.id, notification.actionUrl)}
-      className="w-full text-left flex items-stretch transition-colors relative overflow-hidden"
-      style={{
-        background: isUnread ? 'var(--hover-background)' : 'transparent',
-        borderBottom: '1px solid var(--border-subtle)',
-      }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--hover-background)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = isUnread ? 'var(--hover-background)' : 'transparent'; }}
+      className={cn(
+        "w-full text-left flex items-stretch transition-colors relative overflow-hidden border-b border-border-subtle",
+        "hover:bg-hover-bg",
+        isUnread ? "bg-hover-bg" : "bg-transparent",
+      )}
     >
       {/* Type stripe */}
       <div className="flex-shrink-0 w-1 self-stretch" style={{ background: stripe }} />
@@ -251,11 +250,8 @@ export default function NotificationTray() {
       {/* Bell button */}
       <button
         type="button"
-        className="relative p-2 rounded-lg transition-colors"
-        style={{ background: 'transparent' }}
+        className="relative p-2 rounded-lg transition-colors bg-transparent hover:bg-hover-bg"
         onClick={() => setIsOpen((v) => !v)}
-        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--hover-background)'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         aria-label="Notifications"
       >
         <Bell className="w-5 h-5" style={{ opacity: 'var(--icon-inactive)' }} />
@@ -293,10 +289,7 @@ export default function NotificationTray() {
                   type="button"
                   onClick={handleMarkAllRead}
                   disabled={isMarkingAll}
-                  className="flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors"
-                  style={{ color: 'var(--foreground-secondary)' }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--hover-background)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors text-foreground-secondary hover:bg-hover-bg"
                   title="Mark all as read"
                 >
                   <CheckCheck className="w-3.5 h-3.5" />
@@ -307,17 +300,12 @@ export default function NotificationTray() {
                 type="button"
                 onClick={handleDismissRead}
                 disabled={isDismissing || !hasReadNotifications}
-                className="p-1.5 rounded transition-colors"
-                style={{
-                  color: hasReadNotifications ? 'var(--foreground-muted)' : 'var(--border-subtle)',
-                  cursor: hasReadNotifications ? 'pointer' : 'default',
-                }}
-                onMouseEnter={(e) => {
-                  if (hasReadNotifications) e.currentTarget.style.color = '#ef4444';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.color = hasReadNotifications ? 'var(--foreground-muted)' : 'var(--border-subtle)';
-                }}
+                className={cn(
+                  "p-1.5 rounded transition-colors",
+                  hasReadNotifications
+                    ? "text-foreground-muted hover:text-[#ef4444] cursor-pointer"
+                    : "text-border-subtle cursor-default",
+                )}
                 title="Clear read notifications"
               >
                 <Trash2 className="w-4 h-4" />

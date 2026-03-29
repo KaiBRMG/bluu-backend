@@ -5,7 +5,7 @@ import { useUserShifts } from '@/hooks/useUserShifts';
 import { useUserData } from '@/hooks/useUserData';
 import { useLeaveRequests, type LeaveRequest } from '@/hooks/useLeaveRequests';
 import { Button } from "@/components/ui/button";
-import { RefreshCcw } from 'lucide-react';
+import { RefreshCcw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Loader } from "@/components/ui/loader";
 import {
   DropdownMenu,
@@ -158,33 +158,33 @@ function UserShiftCard({
   const leaveTypeLabel = leaveRequest ? (leaveRequest.leaveType === 'paid' ? 'Paid' : 'Unpaid') : null;
 
   return (
-    <div style={{ ...cardStyle, padding: '10px 14px', position: 'relative', marginBottom: '8px' }}>
+    <div style={cardStyle} className="px-3.5 py-2.5 relative mb-2">
       {/* Top row: shift info (left) + leave action (right) */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+      <div className="flex items-start justify-between gap-3">
         {/* Left: time, duration, attendance badge, time worked */}
-        <div style={{ minWidth: 0 }}>
+        <div className="min-w-0">
           {/* Attendance badge — past/current only */}
           {(isPast || isCurrent) && badge && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '2px' }}>
-              <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: badge.color }} />
-              <span style={{ fontSize: '11px', color: badge.color, fontWeight: 500 }}>{badge.label}</span>
+            <div className="flex items-center gap-1 mb-0.5">
+              <div className="w-[7px] h-[7px] rounded-full flex-shrink-0" style={{ background: badge.color }} />
+              <span className="text-[11px] font-medium" style={{ color: badge.color }}>{badge.label}</span>
             </div>
           )}
 
           {/* Times */}
-          <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--foreground)' }}>
+          <div className="font-semibold text-sm text-foreground">
             {formatLocalTime(startMs, timezone)} – {formatLocalTime(endMs, timezone)}
           </div>
 
           {/* Duration */}
-          <div style={{ fontSize: '12px', color: 'var(--foreground-secondary)', marginTop: '2px' }}>
+          <div className="text-xs text-foreground-secondary mt-0.5">
             {Math.round((endMs - startMs) / 3_600_000 * 10) / 10}h shift
             {shift.isRecurring && ' · Recurring'}
           </div>
 
           {/* Time worked */}
           {isPast && shift.timeWorkedSeconds !== null && (
-            <div style={{ fontSize: '12px', color: 'var(--foreground-muted)', marginTop: '4px' }}>
+            <div className="text-xs text-foreground-muted mt-1">
               Time worked: {formatWorked(shift.timeWorkedSeconds)}
             </div>
           )}
@@ -192,12 +192,11 @@ function UserShiftCard({
 
         {/* Right: leave controls — future shifts only */}
         {isFuture && (
-          <div style={{ flexShrink: 0 }}>
+          <div className="flex-shrink-0">
             {leaveRequest ? (
               <Button
                 size="sm"
                 variant="destructive"
-                style={{ fontSize: '12px', height: '30px', paddingLeft: '12px', paddingRight: '12px' }}
                 onClick={() => setCancelDialogOpen(true)}
                 disabled={isSubmitting}
               >
@@ -209,7 +208,6 @@ function UserShiftCard({
                   <Button
                     size="sm"
                     variant="outline"
-                    style={{ fontSize: '12px', height: '30px', paddingLeft: '12px', paddingRight: '12px' }}
                     disabled={isSubmitting}
                   >
                     Take Leave
@@ -251,9 +249,9 @@ function UserShiftCard({
 
       {/* Leave status indicator — shown below when a leave request exists */}
       {isFuture && leaveRequest && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '8px' }}>
-          <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: leaveStatusColor ?? '#F59E0B', flexShrink: 0 }} />
-          <span style={{ fontSize: '11px', color: leaveStatusColor ?? '#F59E0B', fontWeight: 500 }}>
+        <div className="flex items-center gap-[5px] mt-2">
+          <div className="w-[7px] h-[7px] rounded-full flex-shrink-0" style={{ background: leaveStatusColor ?? '#F59E0B' }} />
+          <span className="text-[11px] font-medium" style={{ color: leaveStatusColor ?? '#F59E0B' }}>
             {leaveTypeLabel} {leaveStatusLabel}
           </span>
         </div>
@@ -265,7 +263,7 @@ function UserShiftCard({
           <AlertDialogHeader>
             <AlertDialogTitle>No {noBalanceDialogType} leave remaining</AlertDialogTitle>
             <AlertDialogDescription>
-              You have no remaining {noBalanceDialogType} leave days. 
+              You have no remaining {noBalanceDialogType} leave days.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -331,7 +329,7 @@ function UserShiftCard({
           <AlertDialogFooter>
             <AlertDialogCancel>Keep</AlertDialogCancel>
             <AlertDialogAction
-              style={{ background: '#ef4444' }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={async () => {
                 setIsSubmitting(true);
                 try {
@@ -405,64 +403,58 @@ export default function UserUpcomingShifts() {
   return (
     <div>
       {/* Leave balance summary */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-        <div style={{
-          flex: 1,
-          padding: '12px 16px',
-          background: 'var(--container-background)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: '10px',
-        }}>
-          <div style={{ fontSize: '11px', color: 'var(--foreground-muted)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+      <div className="flex gap-2.5 mb-5">
+        <div className="flex-1 p-3 px-4 bg-container-bg border border-border-subtle rounded-[10px]">
+          <div className="text-[11px] text-foreground-muted font-medium uppercase tracking-[0.05em] mb-1">
             Unpaid Leave
           </div>
-          <div style={{ fontSize: '22px', fontWeight: 700, color: remainingUnpaidLeave > 0 ? 'var(--foreground)' : '#ef4444', lineHeight: 1 }}>
+          <div
+            className="text-[22px] font-bold leading-none"
+            style={{ color: remainingUnpaidLeave > 0 ? 'var(--foreground)' : '#ef4444' }}
+          >
             {remainingUnpaidLeave}
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--foreground-muted)', marginTop: '3px' }}>days remaining</div>
+          <div className="text-[11px] text-foreground-muted mt-0.5">days remaining</div>
         </div>
         {hasPaidLeave && (
-          <div style={{
-            flex: 1,
-            padding: '12px 16px',
-            background: 'var(--container-background)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '10px',
-          }}>
-            <div style={{ fontSize: '11px', color: 'var(--foreground-muted)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+          <div className="flex-1 p-3 px-4 bg-container-bg border border-border-subtle rounded-[10px]">
+            <div className="text-[11px] text-foreground-muted font-medium uppercase tracking-[0.05em] mb-1">
               Paid Leave
             </div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: remainingPaidLeave > 0 ? 'var(--foreground)' : '#ef4444', lineHeight: 1 }}>
+            <div
+              className="text-[22px] font-bold leading-none"
+              style={{ color: remainingPaidLeave > 0 ? 'var(--foreground)' : '#ef4444' }}
+            >
               {remainingPaidLeave}
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--foreground-muted)', marginTop: '3px' }}>days remaining</div>
+            <div className="text-[11px] text-foreground-muted mt-0.5">days remaining</div>
           </div>
         )}
       </div>
 
       {/* Toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+      <div className="flex items-center gap-2 mb-4">
         <Button
           onClick={() => !isCurrentWeek && setWeekStart(addDays(weekStart, -7))}
           disabled={isCurrentWeek}
           variant="outline"
           size="sm"
         >
-          ←
+          <ChevronLeft width={16} height={16} />
         </Button>
         <Button
           onClick={() => setWeekStart(addDays(weekStart, 7))}
           variant="outline"
           size="sm"
         >
-          →
+          <ChevronRight width={16} height={16} />
         </Button>
         <Button
           onClick={() => !isCurrentWeek && setWeekStart(currentWeek)}
           disabled={isCurrentWeek}
           variant="outline"
           size="sm"
-          style={{ color: 'var(--foreground-secondary)', fontSize: '12px' }}
+          className="text-foreground-secondary text-xs"
         >
           This Week
         </Button>
@@ -477,43 +469,29 @@ export default function UserUpcomingShifts() {
       </div>
 
       {loading && (
-        <div style={{ padding: '32px', display: 'flex', justifyContent: 'center' }}>
+        <div className="flex justify-center p-8">
           <Loader />
         </div>
       )}
 
       {error && (
-        <div style={{ padding: '12px', background: 'rgba(239,68,68,0.1)', borderRadius: '8px', color: '#ef4444', fontSize: '13px', marginBottom: '12px' }}>
+        <div className="p-3 rounded-lg text-[13px] mb-3 text-[#ef4444] bg-[rgba(239,68,68,0.1)]">
           {error}
         </div>
       )}
 
       {!loading && weekShifts.length === 0 && (
-        <div
-          style={{
-            padding: '32px',
-            textAlign: 'center',
-            color: 'var(--foreground-muted)',
-            fontSize: '13px',
-            background: 'var(--container-background)',
-            borderRadius: '8px',
-            border: '1px solid var(--border-subtle)',
-          }}
-        >
+        <div className="p-8 text-center text-foreground-muted text-[13px] bg-container-bg rounded-lg border border-border-subtle">
           No shifts scheduled for this week.
         </div>
       )}
 
       {sortedDates.map(dateStr => (
-        <div key={dateStr} style={{ marginBottom: '20px' }}>
-          <h3 style={{
-            fontSize: '13px',
-            fontWeight: 600,
-            color: dateStr === today ? 'var(--foreground)' : 'var(--foreground-secondary)',
-            marginBottom: '8px',
-            paddingBottom: '6px',
-            borderBottom: '1px solid var(--border-subtle)',
-          }}>
+        <div key={dateStr} className="mb-5">
+          <h3
+            className="text-[13px] font-semibold mb-2 pb-1.5 border-b border-border-subtle"
+            style={{ color: dateStr === today ? 'var(--foreground)' : 'var(--foreground-secondary)' }}
+          >
             {dateStr === today ? 'Today — ' : ''}{formatDateHeader(byDate.get(dateStr)![0].occurrenceStart, tz)}
           </h3>
           {(byDate.get(dateStr) ?? []).map(shift => {

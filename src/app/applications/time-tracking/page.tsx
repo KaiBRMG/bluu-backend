@@ -3,7 +3,6 @@
 import dynamic from "next/dynamic";
 import AppLayout from "@/components/AppLayout";
 import { useTimeTracking } from "@/hooks/useTimeTracking";
-import type { TimerDisplayState } from "@/types/firestore";
 
 const TodayTimeline = dynamic(
   () => import("@/components/timesheet/TodayTimeline"),
@@ -23,17 +22,10 @@ const UserScreenshots = dynamic(
 );
 import { useUserData } from "@/hooks/useUserData";
 import { useDayTotal } from "@/hooks/useDayTotal";
-import { Clock4, ClockCheck, ClockAlert, Coffee, CirclePause } from 'lucide-react';
+import { Coffee, Info } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-
-const STATE_CONFIG: Record<TimerDisplayState, { color: string; bgAlpha: string; label: string; Icon: React.ElementType }> = {
-  working:       { color: '#86C27E', bgAlpha: 'rgba(134,194,126,0.1)', label: 'Working',     Icon: ClockCheck  },
-  idle:          { color: '#E37836', bgAlpha: 'rgba(227,120,54,0.1)',  label: 'Idle',         Icon: ClockAlert  },
-  'on-break':    { color: '#4B8FCC', bgAlpha: 'rgba(75,143,204,0.1)', label: 'On Break',     Icon: Coffee      },
-  paused:        { color: '#8B5CF6', bgAlpha: 'rgba(139,92,246,0.1)', label: 'Paused',       Icon: CirclePause },
-  'clocked-out': { color: '#DF626E', bgAlpha: 'rgba(223,98,110,0.1)', label: 'Clocked Out',  Icon: Clock4      },
-};
+import { STATE_CONFIG } from "@/lib/stateColors";
 
 
 function formatTime(totalSeconds: number): string {
@@ -99,12 +91,10 @@ export default function TimeTrackingPage() {
               {/* Clock-out reminder */}
               {displayState !== 'clocked-out' ? (
                 <div className="flex items-center gap-1.5 mb-6">
-                  <span
-                    className="flex items-center justify-center rounded-full text-[9px] font-bold leading-none flex-shrink-0"
-                    style={{ width: '0.9rem', height: '0.9rem', border: '1px solid var(--foreground-muted)', color: 'var(--foreground-muted)' }}
-                  >
-                    i
-                  </span>
+                  <Info
+                    className="flex-shrink-0"
+                    style={{ width: '0.9rem', height: '0.9rem', color: 'var(--foreground-muted)' }}
+                  />
                   <span className="text-xs" style={{ color: 'var(--foreground-muted)' }}>
                     You must explicitly clock out to save your time
                   </span>
@@ -151,7 +141,7 @@ export default function TimeTrackingPage() {
                     <Button
                       onClick={pauseTracking}
                       disabled={isLoading}
-                      style={{ background: '#8B5CF6', color: '#fff' }}
+                      style={{ background: STATE_CONFIG.paused.color, color: '#fff' }}
                     >
                       {isLoading ? 'Pausing...' : 'Pause'}
                     </Button>

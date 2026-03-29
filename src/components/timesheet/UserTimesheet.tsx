@@ -29,7 +29,7 @@ export default function UserTimesheet() {
 
   const yesterday = useMemo(() => addDays(toDateString(new Date()), -1), []);
   const [selectedDate, setSelectedDate] = useState(yesterday);
-  const [dateOpen, setDateOpen] = useState(false);
+  const [dateOpen, setDateOpen] = useState(false);    
 
   // Selected date is the END date (shown at top); show 7 days ending on that date.
   // Today is never included — timesheets are only available from yesterday back.

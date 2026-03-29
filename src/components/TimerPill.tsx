@@ -1,22 +1,10 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { Clock4, ClockCheck, ClockAlert, Coffee, CirclePause, ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import { useTimeTracking } from '@/hooks/useTimeTracking';
 import { useUserData } from '@/hooks/useUserData';
-import type { TimerDisplayState } from '@/types/firestore';
-
-const STATE_CONFIG: Record<TimerDisplayState, {
-  color: string;
-  Icon: React.ElementType;
-  label: string;
-}> = {
-  'clocked-out': { color: '#DF626E', Icon: Clock4,      label: 'Clocked Out' },
-  working:       { color: '#86C27E', Icon: ClockCheck,  label: 'Working'     },
-  idle:          { color: '#E37836', Icon: ClockAlert,  label: 'Idle'        },
-  'on-break':    { color: '#4B8FCC', Icon: Coffee,      label: 'On Break'    },
-  paused:        { color: '#8B5CF6', Icon: CirclePause, label: 'Paused'      },
-};
+import { STATE_CONFIG } from '@/lib/stateColors';
 
 function formatTime(totalSeconds: number): string {
   const hours   = Math.floor(totalSeconds / 3600);
@@ -51,7 +39,7 @@ export default function TimerPill() {
       <Icon style={{ color, width: 16, height: 16, flexShrink: 0 }} />
       <span
         className="font-mono text-sm font-medium"
-        style={{ fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em', color: isOnBreak ? '#4B8FCC' : '#ffffff' }}
+        style={{ fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em', color: isOnBreak ? STATE_CONFIG['on-break'].color : '#ffffff' }}
       >
         {formatTime(displaySeconds)}
       </span>

@@ -6,18 +6,11 @@ import { useAuth } from "@/components/AuthProvider";
 import { useUserData } from "@/hooks/useUserData";
 import { useTimeTracking } from "@/hooks/useTimeTracking";
 import { useNotifications } from "@/hooks/useNotifications";
-import type { NotificationDocument, NotificationType, TimerDisplayState } from "@/types/firestore";
-import { Clock4, ClockCheck, ClockAlert, Coffee, CirclePause } from 'lucide-react';
+import type { NotificationDocument, NotificationType } from "@/types/firestore";
+import { Coffee } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-
-const STATE_CONFIG: Record<TimerDisplayState, { color: string; bgAlpha: string; label: string; Icon: React.ElementType }> = {
-  working:       { color: '#86C27E', bgAlpha: 'rgba(134,194,126,0.1)', label: 'Working',    Icon: ClockCheck  },
-  idle:          { color: '#E37836', bgAlpha: 'rgba(227,120,54,0.1)',  label: 'Idle',        Icon: ClockAlert  },
-  'on-break':    { color: '#4B8FCC', bgAlpha: 'rgba(75,143,204,0.1)', label: 'On Break',    Icon: Coffee      },
-  paused:        { color: '#8B5CF6', bgAlpha: 'rgba(139,92,246,0.1)', label: 'Paused',      Icon: CirclePause },
-  'clocked-out': { color: '#DF626E', bgAlpha: 'rgba(223,98,110,0.1)', label: 'Clocked Out', Icon: Clock4      },
-};
+import { STATE_CONFIG } from "@/lib/stateColors";
 
 function formatTime(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
@@ -252,7 +245,7 @@ function TimeTrackingWidget() {
             className="text-2xl font-mono font-semibold"
             style={{
               fontVariantNumeric: 'tabular-nums',
-              color: isOnBreak ? '#4B8FCC' : undefined,
+              color: isOnBreak ? STATE_CONFIG['on-break'].color : undefined,
               transition: 'color 0.2s ease',
             }}
           >

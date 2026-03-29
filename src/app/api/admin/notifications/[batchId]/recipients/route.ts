@@ -9,7 +9,7 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
  * Returns the read/dismissedByUser status for each notification in a batch.
  */
 export const GET = withAuth(
-  async (_request: NextRequest, token: DecodedIdToken, params: { batchId: string }) => {
+  async (_request: NextRequest, token: DecodedIdToken, params: Promise<{ batchId: string }>) => {
     try {
       const caller = await getUserById(token.uid);
       if (!caller?.permittedPageIds?.includes('notifications')) {
