@@ -34,7 +34,7 @@ export const PAGES: PageDef[] = [
   { pageId: 'user-management', title: 'User Management', teamspaceId: 'admin', href: '/admin/user-management', icon: 'UserRoundCog', order: 0 },
   { pageId: 'sharing', title: 'Sharing', teamspaceId: 'admin', href: '/admin/sharing', icon: 'Share2', order: 1 },
   { pageId: 'shift-management', title: 'Shift Management', teamspaceId: 'admin', href: '/admin/shift-management', icon: 'CalendarCog', order: 2 },
-  { pageId: 'admin-notifications', title: 'Notifications', teamspaceId: 'admin', href: '/admin/notifications', icon: 'CalendarCog', order: 2 },
+  { pageId: 'admin-notifications', title: 'Notifications', teamspaceId: 'admin', href: '/admin/notifications', icon: 'BellPlus', order: 3 },
   
   // Apps
   { pageId: 'time-tracking', title: 'Time Tracking', teamspaceId: 'apps', href: '/applications/time-tracking', icon: 'ClockFading', order: 0 },

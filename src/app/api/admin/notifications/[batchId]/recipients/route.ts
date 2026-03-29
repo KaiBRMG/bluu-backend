@@ -12,7 +12,7 @@ export const GET = withAuth(
   async (_request: NextRequest, token: DecodedIdToken, params: Promise<{ batchId: string }>) => {
     try {
       const caller = await getUserById(token.uid);
-      if (!caller?.permittedPageIds?.includes('notifications')) {
+      if (!caller?.permittedPageIds?.includes('admin-notifications')) {
         return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }
 

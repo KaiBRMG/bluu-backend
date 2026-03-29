@@ -15,7 +15,7 @@ const ADMIN_NOTIF_TYPES: NotificationType[] = ['shift', 'alert', 'success', 'act
 export const GET = withAuth(async (_request: NextRequest, token: DecodedIdToken) => {
   try {
     const caller = await getUserById(token.uid);
-    if (!caller?.permittedPageIds?.includes('notifications')) {
+    if (!caller?.permittedPageIds?.includes('admin-notifications')) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
@@ -49,7 +49,7 @@ export const GET = withAuth(async (_request: NextRequest, token: DecodedIdToken)
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
     const caller = await getUserById(token.uid);
-    if (!caller?.permittedPageIds?.includes('notifications')) {
+    if (!caller?.permittedPageIds?.includes('admin-notifications')) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
