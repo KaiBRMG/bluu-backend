@@ -58,13 +58,27 @@ function computeAttendance(
   const clockIns: number[] = [];
 
   for (const s of sessions) {
-    const t = s.startTime.toMillis();
-    if (t >= onTimeFrom && t <= shiftEndMs) clockIns.push(t);
+    const startMs = s.startTime.toMillis();
+    const endMs   = s.endTime.toMillis();
+    if (startMs >= onTimeFrom && startMs <= shiftEndMs) {
+      // Session started within the attendance window
+      clockIns.push(startMs);
+    } else if (startMs < onTimeFrom && endMs > shiftStartMs) {
+      // Session started before the window but was still running at shift start
+      // (e.g. carrying over from a previous back-to-back shift) — treat as on time
+      clockIns.push(shiftStartMs);
+    }
   }
 
   if (activeSession) {
-    const t = activeSession.startTime.toMillis();
-    if (t >= onTimeFrom && t <= shiftEndMs) clockIns.push(t);
+    const startMs = activeSession.startTime.toMillis();
+    if (startMs >= onTimeFrom && startMs <= shiftEndMs) {
+      clockIns.push(startMs);
+    } else if (startMs < onTimeFrom) {
+      // Active session started before the window and is still running — was
+      // present at shift start, treat as on time
+      clockIns.push(shiftStartMs);
+    }
   }
 
   if (clockIns.length === 0) return 'absent';

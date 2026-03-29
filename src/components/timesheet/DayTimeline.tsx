@@ -77,7 +77,7 @@ function formatTimeInTZ(date: Date, timezone: string): string {
     timeZone: timezone,
     hour: '2-digit',
     minute: '2-digit',
-    hour12: true,
+    hour12: false,
   });
 }
 

@@ -111,6 +111,20 @@ export interface NotificationDocument {
   actionUrl?: string | null;
   announcement?: boolean;
   announcementExpiry?: Timestamp | null;
+  batchId?: string;
+}
+
+export interface AdminNotificationBatch {
+  id: string;
+  title: string;
+  message: string;
+  type: NotificationType;
+  sentBy: string;
+  sentByName: string;
+  sentAt: Timestamp;
+  recipientUserIds: string[];
+  recipientGroupIds: string[];
+  recipientCount: number;
 }
 
 // ─── Leave Requests ───────────────────────────────────────────────────
