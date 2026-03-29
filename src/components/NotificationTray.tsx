@@ -8,6 +8,7 @@ import { useNotifications } from '@/hooks/useNotifications';
 import { useAuth } from '@/components/AuthProvider';
 import { NotificationDocument, NotificationType } from '@/types/firestore';
 import type { Timestamp } from '@/types/firestore';
+import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card';
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -128,12 +129,28 @@ function NotificationRow({
             )}
           </div>
         </div>
-        <p
-          className="text-xs mt-0.5 line-clamp-2"
-          style={{ color: 'var(--foreground-secondary)' }}
-        >
-          {notification.message}
-        </p>
+        <HoverCard openDelay={300}>
+          <HoverCardTrigger asChild>
+            <p
+              className="text-xs mt-0.5 line-clamp-2 cursor-default"
+              style={{ color: 'var(--foreground-secondary)' }}
+            >
+              {notification.message}
+            </p>
+          </HoverCardTrigger>
+          <HoverCardContent
+            side="left"
+            align="start"
+            className="w-72 text-xs"
+            style={{
+              background: 'var(--sidebar-background)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--foreground-secondary)',
+            }}
+          >
+            {notification.message}
+          </HoverCardContent>
+        </HoverCard>
       </div>
     </button>
   );
