@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Check, ChevronDown, X, Users, Layers } from 'lucide-react';
+import { Check, ChevronDown, X, Users, Layers, Link, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -28,10 +28,22 @@ import {
   CommandItem,
   CommandSeparator,
 } from '@/components/ui/command';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { PAGES } from '@/lib/definitions';
 import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
 import type { NotificationType } from '@/types/firestore';
 import type { CreateBatchPayload } from '@/hooks/useAdminNotifications';
+
+type ActionUrlMode = 'none' | 'internal' | 'external';
+
+const INTERNAL_PAGES = PAGES.filter(p => p.href !== null);
 
 interface CreateNotificationDialogProps {
   users: AdminFullUser[];
@@ -68,12 +80,24 @@ export default function CreateNotificationDialog({
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [type, setType] = useState<NotificationType>('shift');
+  const [actionUrlMode, setActionUrlMode] = useState<ActionUrlMode>('none');
+  const [internalPage, setInternalPage] = useState('');
+  const [externalUrl, setExternalUrl] = useState('');
 
   function resetForm() {
     setRecipients([]);
     setTitle('');
     setMessage('');
     setType('shift');
+    setActionUrlMode('none');
+    setInternalPage('');
+    setExternalUrl('');
+  }
+
+  function resolvedActionUrl(): string | null {
+    if (actionUrlMode === 'internal') return internalPage || null;
+    if (actionUrlMode === 'external') return externalUrl.trim() || null;
+    return null;
   }
 
   function toggleRecipient(recipient: Recipient) {
@@ -101,7 +125,7 @@ export default function CreateNotificationDialog({
 
     setSubmitting(true);
     try {
-      await onCreate({ title: title.trim(), message: message.trim(), type, userIds, groupIds });
+      await onCreate({ title: title.trim(), message: message.trim(), type, userIds, groupIds, actionUrl: resolvedActionUrl() });
       toast.success('Notification sent successfully');
       resetForm();
       setOpen(false);
@@ -254,6 +278,61 @@ export default function CreateNotificationDialog({
                 value={message}
                 onChange={e => setMessage(e.target.value)}
               />
+            </div>
+
+            {/* Action URL */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">On-click action</label>
+              <div className="flex rounded-md border overflow-hidden">
+                {(['none', 'internal', 'external'] as ActionUrlMode[]).map(mode => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setActionUrlMode(mode)}
+                    className={cn(
+                      'flex-1 py-1.5 text-xs font-medium transition-colors',
+                      actionUrlMode === mode
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-transparent text-muted-foreground hover:bg-accent'
+                    )}
+                  >
+                    {mode === 'none' && 'None'}
+                    {mode === 'internal' && 'App page'}
+                    {mode === 'external' && 'External URL'}
+                  </button>
+                ))}
+              </div>
+
+              {actionUrlMode === 'internal' && (
+                <Select value={internalPage} onValueChange={setInternalPage}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a page…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {INTERNAL_PAGES.map(page => (
+                      <SelectItem key={page.pageId} value={page.href!}>
+                        <span className="flex items-center gap-2">
+                          <Link className="h-3.5 w-3.5 text-muted-foreground" />
+                          {page.title}
+                          <span className="text-xs text-muted-foreground">{page.href}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+              {actionUrlMode === 'external' && (
+                <div className="relative">
+                  <ExternalLink className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    className="pl-8"
+                    placeholder="https://example.com"
+                    value={externalUrl}
+                    onChange={e => setExternalUrl(e.target.value)}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Type */}

@@ -54,12 +54,13 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     }
 
     const body = await request.json();
-    const { title, message, type, userIds = [], groupIds = [] } = body as {
+    const { title, message, type, userIds = [], groupIds = [], actionUrl = null } = body as {
       title: string;
       message: string;
       type: NotificationType;
       userIds: string[];
       groupIds: string[];
+      actionUrl?: string | null;
     };
 
     if (!title?.trim() || !message?.trim()) {
@@ -119,7 +120,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         read: false,
         dismissedByUser: false,
         createdAt: FieldValue.serverTimestamp(),
-        actionUrl: null,
+        actionUrl: actionUrl ?? null,
         announcement: false,
         announcementExpiry: null,
         batchId,

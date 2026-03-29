@@ -201,7 +201,11 @@ export default function NotificationTray() {
     }
 
     if (actionUrl) {
-      router.push(actionUrl);
+      if (actionUrl.startsWith('http://') || actionUrl.startsWith('https://')) {
+        window.open(actionUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        router.push(actionUrl);
+      }
       setIsOpen(false);
     }
   }

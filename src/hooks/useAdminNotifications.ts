@@ -19,6 +19,7 @@ export interface CreateBatchPayload {
   type: NotificationType;
   userIds: string[];
   groupIds: string[];
+  actionUrl?: string | null;
 }
 
 const CACHE_KEY = 'bluu_admin_notifications_v1';
