@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { SpeedInsights } from "@vercel/speed-insights/next"
 import { Analytics } from "@vercel/analytics/next"
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { AuthProvider } from "@/components/AuthProvider";
 import { NetworkStatusProvider } from "@/contexts/NetworkStatusContext";
@@ -13,15 +13,20 @@ import LazyProviders from "@/components/LazyProviders";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 
-const geistSans = Geist({
+const googleSans = localFont({
+  src: [
+    {
+      path: "../public/fonts/GoogleSans-VariableFont_GRAD,opsz,wght.ttf",
+      style: "normal",
+    },
+    {
+      path: "../public/fonts/GoogleSans-Italic-VariableFont_GRAD,opsz,wght.ttf",
+      style: "italic",
+    },
+  ],
   variable: "--font-geist-sans",
-  subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "Bluu Backend",
@@ -36,7 +41,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased bg-background text-foreground`}
+        className={`${googleSans.variable} font-sans antialiased bg-background text-foreground`}
       >
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
         <AuthProvider>

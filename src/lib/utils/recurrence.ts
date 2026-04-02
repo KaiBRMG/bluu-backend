@@ -6,10 +6,10 @@
  * combined with the wall-clock time and converted to UTC — so a "09:00 NY"
  * shift stays at 09:00 wall-clock time year-round even across DST transitions.
  *
- * No external library required; uses the Intl API available in all modern
- * runtimes (Node 18+, all browsers).
+ * Uses @date-fns/tz for accurate wall-clock→UTC conversion.
  */
 
+import { TZDate } from '@date-fns/tz';
 import type { ShiftRecurrence } from '@/types/firestore';
 
 // ─── Wire types (from API response — Timestamps serialised to ISO strings) ───
@@ -45,9 +45,9 @@ export interface ExpandedShift extends RawApiShift {
 /**
  * Convert a local date + wall-clock time in a given IANA timezone to UTC ms.
  *
- * Strategy: construct a Date from the naive local string, then measure the
- * offset that the Intl formatter applies and correct for it. This avoids
- * any dependency on external libraries while correctly handling DST.
+ * Uses TZDate from @date-fns/tz which correctly interprets the year/month/day/
+ * hour/minute values as wall-clock time in the given timezone, returning the
+ * correct UTC timestamp even across month boundaries and DST transitions.
  */
 function wallClockToUtcMs(
   localDateStr: string,  // "YYYY-MM-DD"
@@ -56,45 +56,7 @@ function wallClockToUtcMs(
 ): number {
   const [year, month, day] = localDateStr.split('-').map(Number);
   const [hour, minute] = timeStr.split(':').map(Number);
-
-  // Build a naive Date as if it were UTC, then find the true UTC equivalent
-  // by using the Intl formatter to determine what local time that UTC instant
-  // represents in the target timezone. Iterate until we converge (handles DST gaps).
-  let guessMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
-
-  for (let i = 0; i < 3; i++) {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).formatToParts(new Date(guessMs));
-
-    const get = (type: string) => parseInt(parts.find(p => p.type === type)?.value ?? '0', 10);
-    const localYear   = get('year');
-    const localMonth  = get('month');
-    const localDay    = get('day');
-    let   localHour   = get('hour');
-    const localMinute = get('minute');
-
-    // Intl uses 24 for midnight in some environments — normalise
-    if (localHour === 24) localHour = 0;
-
-    const diffMs =
-      (year  - localYear)   * 365.25 * 24 * 3_600_000 +
-      (month - localMonth)  *    30  * 24 * 3_600_000 +
-      (day   - localDay)    *          24 * 3_600_000 +
-      (hour  - localHour)   *               3_600_000 +
-      (minute - localMinute) *                  60_000;
-
-    if (Math.abs(diffMs) < 60_000) break;  // converged to within 1 minute
-    guessMs += diffMs;
-  }
-
-  return guessMs;
+  return new TZDate(year, month - 1, day, hour, minute, tz).getTime();
 }
 
 // ─── Date arithmetic helpers ─────────────────────────────────────────
@@ -146,13 +108,15 @@ function* generateCandidateDates(
   toDateStr: string,              // window end (exclusive)
   tz: string,
 ): Generator<string> {
+  // endDate is stored as UTC midnight of the local date string (same convention as overrideDate),
+  // so extract it using 'UTC' — not the employee's timezone — to get back the original date string.
   const endDateStr = rule.endDate
     ? toLocalDateStr(
         typeof rule.endDate === 'string'
           ? new Date(rule.endDate).getTime()
           : (rule.endDate as unknown as { toMillis?: () => number; seconds?: number })
               .toMillis?.() ?? ((rule.endDate as unknown as { seconds: number }).seconds * 1000),
-        tz,
+        'UTC',
       )
     : null;
 
@@ -175,7 +139,13 @@ function* generateCandidateDates(
       cursor = addCalendarDays(cursor, rule.interval);
     }
   } else if (rule.frequency === 'weekly') {
-    const days = rule.daysOfWeek.length > 0 ? [...rule.daysOfWeek].sort() : [dayOfWeek(originDateStr)];
+    // Sort by offset from Monday (Mon=0...Sat=5, Sun=6) so iteration is chronological
+    // within the week. Without this, Sunday (dow=0) sorts first numerically but maps
+    // to weekMonday+6 (last day), causing premature generator termination when endDate
+    // falls mid-week: Sunday's candidate exceeds endDate before Monday/Tuesday are yielded.
+    const days = rule.daysOfWeek.length > 0
+      ? [...rule.daysOfWeek].sort((a, b) => (a + 6) % 7 - (b + 6) % 7)
+      : [dayOfWeek(originDateStr)];
     // Find the Monday of the week containing `originDateStr`
     const [oy, om, od] = originDateStr.split('-').map(Number);
     const originDow = new Date(Date.UTC(oy, om - 1, od)).getUTCDay();

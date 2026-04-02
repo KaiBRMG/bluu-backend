@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { TZDate } from '@date-fns/tz';
 import type { ExpandedShift } from '@/lib/utils/recurrence';
 import type { ShiftUser, CreateShiftPayload, UpdateShiftPayload } from '@/hooks/useShifts';
 import { Button } from "@/components/ui/button";
@@ -66,35 +67,9 @@ function toLocalTimeString(ms: number, tz: string): string {
 
 /** Convert a local "YYYY-MM-DD HH:mm" in a given IANA tz to a UTC ISO string. */
 function localToUtcIso(dateStr: string, timeStr: string, tz: string): string {
-  // Use the same iterative approach as recurrence.ts wallClockToUtcMs
   const [y, m, d] = dateStr.split('-').map(Number);
   const [h, min]  = timeStr.split(':').map(Number);
-
-  let guessMs = Date.UTC(y, m - 1, d, h, min, 0, 0);
-
-  for (let i = 0; i < 3; i++) {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hour12: false,
-    }).formatToParts(new Date(guessMs));
-
-    const get = (type: string) => parseInt(parts.find(p => p.type === type)?.value ?? '0', 10);
-    let lh = get('hour');
-    if (lh === 24) lh = 0;
-
-    const diffMs =
-      (y   - get('year'))   * 365.25 * 24 * 3_600_000 +
-      (m   - get('month'))  *    30  * 24 * 3_600_000 +
-      (d   - get('day'))    *          24 * 3_600_000 +
-      (h   - lh)            *               3_600_000 +
-      (min - get('minute')) *                  60_000;
-
-    if (Math.abs(diffMs) < 60_000) break;
-    guessMs += diffMs;
-  }
-
-  return new Date(guessMs).toISOString();
+  return new TZDate(y, m - 1, d, h, min, tz).toISOString();
 }
 
 // ─── Styles shared across form fields ────────────────────────────────
@@ -230,7 +205,7 @@ export default function ShiftModal({
       frequency,
       interval,
       daysOfWeek: frequency === 'weekly' ? daysOfWeek : [],
-      endDate: endCondition === 'date' && recurEndDate ? localToUtcIso(recurEndDate, '00:00', viewerTimezone) : null,
+      endDate: endCondition === 'date' && recurEndDate ? recurEndDate + 'T00:00:00.000Z' : null,
       count:   endCondition === 'count' ? count : null,
       parentShiftId: null,
     } : null;
