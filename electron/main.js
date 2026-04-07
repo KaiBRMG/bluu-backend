@@ -118,6 +118,23 @@ ipcMain.handle('timeTracking:getIdleTime', () => {
   return powerMonitor.getSystemIdleTime();
 });
 
+// Activity sampling for productivity % calculation (used at each screenshot interval)
+let activitySamples = [];
+const SAMPLE_RETENTION_MS = 45 * 60 * 1000;
+
+setInterval(() => {
+  const now = Date.now();
+  activitySamples.push({ sampleMs: now, idleSeconds: powerMonitor.getSystemIdleTime() });
+  const cutoff = now - SAMPLE_RETENTION_MS;
+  if (activitySamples.length > 0 && activitySamples[0].sampleMs < cutoff) {
+    activitySamples = activitySamples.filter(s => s.sampleMs >= cutoff);
+  }
+}, 5000);
+
+ipcMain.handle('timeTracking:getActivitySince', (_event, sinceMs) => {
+  return activitySamples.filter(s => s.sampleMs >= sinceMs);
+});
+
 // IPC handler to prevent/allow display sleep based on timer state
 let powerSaveBlockerId = null;
 ipcMain.handle('timeTracking:setPowerSaveBlocker', (_event, enable) => {

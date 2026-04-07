@@ -7,6 +7,7 @@ const COLLECTION = 'screenshots';
 export async function saveScreenshots(
   userId: string,
   screens: string[],
+  activityPercent?: number | null,
 ): Promise<string[]> {
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
@@ -44,6 +45,7 @@ export async function saveScreenshots(
       thumbnailPath: null,
       captureGroup,
       screenIndex: i,
+      activityPercent: activityPercent ?? null,
     });
   });
   await batch.commit();
@@ -58,6 +60,7 @@ export interface ScreenshotRow {
   thumbnailPath: string | null;
   captureGroup: string;
   screenIndex: number;
+  activityPercent: number | null;
 }
 
 /**
@@ -109,6 +112,7 @@ export async function getScreenshotsByDate(
       thumbnailPath: data.thumbnailPath || '',
       captureGroup: data.captureGroup || doc.id,
       screenIndex: data.screenIndex ?? 0,
+      activityPercent: data.activityPercent ?? null,
     };
   });
 }

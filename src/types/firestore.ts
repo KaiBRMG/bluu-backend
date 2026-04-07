@@ -216,6 +216,7 @@ export interface ActiveSessionDocument {
   lastUpdated: Timestamp; // updated by heartbeat (working state only)
   currentState: ActiveSessionState;
   userClockOut: boolean; // true = app closed gracefully without explicit clock-out
+  lastActivityPercent?: number | null; // most recent activity % from screenshot interval
 }
 
 export interface SessionModification {
@@ -294,6 +295,7 @@ export interface ScreenshotDocument {
   thumbnailPath: string;
   captureGroup: string; // shared ID to group multi-screen captures
   screenIndex: number;  // 0-based index of this screen in the capture group
+  activityPercent?: number | null; // % of 1-min slots with input between this and previous screenshot
 }
 
 // ─── Disputes ────────────────────────────────────────────────────────

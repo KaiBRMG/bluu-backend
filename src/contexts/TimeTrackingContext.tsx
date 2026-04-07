@@ -48,6 +48,23 @@ interface TimeTrackingContextType {
 
 const TimeTrackingContext = createContext<TimeTrackingContextType | null>(null);
 
+/** Compute activity % from powerMonitor idle-time samples between windowStart and windowEnd. */
+function calcActivityPercent(
+  samples: Array<{ sampleMs: number; idleSeconds: number }>,
+  windowStart: number,
+  windowEnd: number,
+): number {
+  const totalSlots = Math.max(1, Math.ceil((windowEnd - windowStart) / 60_000));
+  const activeSlots = new Set<number>();
+  for (const { sampleMs, idleSeconds } of samples) {
+    const lastActiveMs = sampleMs - idleSeconds * 1000;
+    if (lastActiveMs >= windowStart && lastActiveMs < windowEnd) {
+      activeSlots.add(Math.floor((lastActiveMs - windowStart) / 60_000));
+    }
+  }
+  return Math.round((activeSlots.size / totalSlots) * 100);
+}
+
 export function useTimeTrackingContext(): TimeTrackingContextType {
   const ctx = useContext(TimeTrackingContext);
   if (!ctx) throw new Error('useTimeTrackingContext must be used within a TimeTrackingProvider');
@@ -83,12 +100,15 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
   useEffect(() => { entryStartTimeRef.current = entryStartTime; }, [entryStartTime]);
 
-  const heartbeatRef      = useRef<ReturnType<typeof setInterval> | null>(null);
-  const idleCheckRef      = useRef<ReturnType<typeof setInterval> | null>(null);
-  const tickRef           = useRef<ReturnType<typeof setInterval> | null>(null);
-  const screenshotTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isTransitioningRef = useRef(false);
-  const hasHydratedRef    = useRef(false);
+  const heartbeatRef         = useRef<ReturnType<typeof setInterval> | null>(null);
+  const idleCheckRef         = useRef<ReturnType<typeof setInterval> | null>(null);
+  const tickRef              = useRef<ReturnType<typeof setInterval> | null>(null);
+  const screenshotTimeoutRef          = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const consecutiveScreenshotFailsRef = useRef(0);
+  const isTransitioningRef            = useRef(false);
+  const hasHydratedRef       = useRef(false);
+  const sessionStartMsRef    = useRef<number | null>(null);
+  const prevScreenshotMsRef  = useRef<number | null>(null);
 
   const apiCall = useCallback(async (path: string, method: 'GET' | 'POST' = 'POST', body?: object) => {
     const idToken = await user?.getIdToken();
@@ -210,6 +230,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       setEnableScreenshots(false);
       sessionBaseSecondsRef.current = 0;
       breakUsedSecondsRef.current = 0;
+      sessionStartMsRef.current = null;
+      prevScreenshotMsRef.current = null;
     }
   }, [user]);
 
@@ -456,20 +478,44 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     if (!electronAPI?.timeTracking?.captureScreenshot) return;
     if (!enableScreenshots || displayState !== 'working') return;
 
-    const scheduleNextCapture = () => {
-      const delay = Math.floor(Math.random() * SCREENSHOT_WINDOW_MS);
+    const scheduleNextCapture = (overrideDelayMs?: number) => {
+      const delay = overrideDelayMs ?? Math.floor(Math.random() * SCREENSHOT_WINDOW_MS);
       screenshotTimeoutRef.current = setTimeout(async () => {
         if (displayStateRef.current !== 'working') return;
+
+        let failed = false;
+        let failureMessage = '';
+        let failureContext = '';
+        let failureStack: string | undefined;
+
         try {
           const result = await electronAPI.timeTracking.captureScreenshot();
           if (result.success && result.screens && result.screens.length > 0) {
+            consecutiveScreenshotFailsRef.current = 0;
             const idToken = await user?.getIdToken();
             if (idToken) {
+              const windowEnd = Date.now();
+              const windowStart = prevScreenshotMsRef.current ?? sessionStartMsRef.current ?? windowEnd;
+
+              let activityPercent: number | null = null;
+              if (electronAPI.timeTracking.getActivitySince) {
+                try {
+                  const samples = await electronAPI.timeTracking.getActivitySince(windowStart);
+                  activityPercent = calcActivityPercent(samples, windowStart, windowEnd);
+                } catch {
+                  // Non-critical — proceed without activity data
+                }
+              }
+
               await fetch('/api/time-tracking/screenshots/upload', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
-                body: JSON.stringify({ screens: result.screens }),
+                body: JSON.stringify({
+                  screens: result.screens,
+                  ...(activityPercent !== null && { activityPercent }),
+                }),
               });
+              prevScreenshotMsRef.current = windowEnd;
               // Note screenshot in local buffer for audit trail
               const sid = sessionIdRef.current;
               if (sid) {
@@ -485,12 +531,44 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
               }
             }
           } else {
-            // Capture failed — likely a missing screen recording permission.
-            console.error('[TimeTracking] Screenshot capture failed — check screen recording permissions.');
+            failed = true;
+            failureMessage = result.error ?? 'Screenshot capture failed — check screen recording permissions.';
+            failureContext = 'screenshot:capture-failed';
           }
         } catch (err) {
-          console.error('[TimeTracking] Screenshot capture/upload failed:', err);
+          failed = true;
+          failureMessage = err instanceof Error ? err.message : String(err);
+          failureStack = err instanceof Error ? err.stack : undefined;
+          failureContext = 'screenshot:capture-upload-failed';
         }
+
+        if (failed) {
+          const failCount = ++consecutiveScreenshotFailsRef.current;
+          console.error(`[TimeTracking] Screenshot failed (attempt ${failCount}/3):`, failureMessage);
+          if (failCount < 3) {
+            // Transient failure — retry in 30s without notifying the user
+            scheduleNextCapture(30_000);
+            return;
+          }
+          // 3 consecutive failures — notify and reset the counter
+          consecutiveScreenshotFailsRef.current = 0;
+          electronAPI.notifications?.show({
+            title: 'Bluu Backend',
+            body: 'Screenshot Failed. Please enable this in your OS settings ASAP.',
+            playSound: false,
+          }).catch(() => {});
+          fetch('/api/bugs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: failureMessage,
+              ...(failureStack && { stack: failureStack }),
+              context: failureContext,
+              uid: user?.uid ?? null,
+            }),
+          }).catch(() => {});
+        }
+
         scheduleNextCapture();
       }, delay);
     };
@@ -521,6 +599,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         await initBuffer(fresh.sessionId, user!.uid, fresh.startTime);
         sessionBaseSecondsRef.current = 0;
         breakUsedSecondsRef.current = 0;
+        sessionStartMsRef.current = Date.now();
+        prevScreenshotMsRef.current = null;
         setBreakAllowanceSeconds(BREAK_DURATION_SECONDS);
         setSessionId(fresh.sessionId);
         setEntryStartTime(Date.now());
@@ -532,6 +612,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       await initBuffer(data.sessionId, user!.uid, data.startTime);
       sessionBaseSecondsRef.current = 0;
       breakUsedSecondsRef.current = 0;
+      sessionStartMsRef.current = Date.now();
+      prevScreenshotMsRef.current = null;
       setBreakAllowanceSeconds(BREAK_DURATION_SECONDS);
       setSessionId(data.sessionId);
       setEntryStartTime(Date.now());
@@ -564,6 +646,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       setBreakAllowanceSeconds(BREAK_DURATION_SECONDS);
       sessionBaseSecondsRef.current = 0;
       breakUsedSecondsRef.current = 0;
+      sessionStartMsRef.current = null;
+      prevScreenshotMsRef.current = null;
       if (user) invalidateTimesheetCache(user.uid);
     } catch (err) {
       console.error('[TimeTracking] Stop failed:', err);

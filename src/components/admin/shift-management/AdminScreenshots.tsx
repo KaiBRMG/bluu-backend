@@ -25,6 +25,7 @@ import {
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { ChevronDownIcon, InfoIcon } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
@@ -677,6 +678,12 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
                   >
                     {formatTime(group.timestampUTC, viewerTimezone)} &bull; {group.screenCount} screen{group.screenCount !== 1 ? 's' : ''}
                   </p>
+                  <div className="flex items-center gap-2 mt-1 px-1">
+                    <Progress value={group.activityPercent ?? 100} className="flex-1 h-1.5" />
+                    <span className="text-xs flex-shrink-0" style={{ color: 'var(--foreground-muted)' }}>
+                      {group.activityPercent ?? 100}%
+                    </span>
+                  </div>
                 </div>
               );
             })}

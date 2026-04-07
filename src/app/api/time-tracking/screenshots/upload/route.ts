@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { getUserById } from '@/lib/services/userService';
 import { saveScreenshots } from '@/lib/services/screenshotService';
+import { updateActivityPercent } from '@/lib/services/activeSessionService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 const MAX_BASE64_LENGTH = 10 * 1024 * 1024; // ~10MB per screen
@@ -16,6 +17,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
 
     const body = await request.json();
     const screens: string[] = body.screens;
+    const activityPercent: number | undefined = typeof body.activityPercent === 'number' ? body.activityPercent : undefined;
 
     if (!Array.isArray(screens) || screens.length === 0) {
       return NextResponse.json({ error: 'Missing screens data' }, { status: 400 });
@@ -31,7 +33,15 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       }
     }
 
-    const screenshotIds = await saveScreenshots(token.uid, screens);
+    const screenshotIds = await saveScreenshots(token.uid, screens, activityPercent);
+
+    // Fire-and-forget: update active session with latest activity %. Never block the upload.
+    if (activityPercent != null) {
+      updateActivityPercent(token.uid, activityPercent).catch(err =>
+        console.error('[screenshots/upload] updateActivityPercent failed:', err)
+      );
+    }
+
     return NextResponse.json({ screenshotIds });
   } catch (error: unknown) {
     console.error('Error uploading screenshot:', error);

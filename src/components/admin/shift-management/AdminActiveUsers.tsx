@@ -6,6 +6,7 @@ import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useUserData } from '@/hooks/useUserData';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Loader } from '@/components/ui/loader';
+import { Progress } from '@/components/ui/progress';
 import { ChevronDownIcon } from 'lucide-react';
 import {
   DropdownMenu,
@@ -188,6 +189,14 @@ export default function AdminActiveUsers() {
                   style={{ color: 'var(--foreground-muted)', minWidth: '130px', textAlign: 'right' }}
                 >
                   Last activity at {formatTime(session.lastUpdated, viewerTimezone)}
+                </div>
+
+                {/* Activity % */}
+                <div className="flex items-center gap-1.5 flex-shrink-0" style={{ minWidth: '110px' }}>
+                  <Progress value={session.lastActivityPercent ?? 100} className="flex-1 h-1.5" />
+                  <span className="text-xs" style={{ color: 'var(--foreground-muted)' }}>
+                    {session.lastActivityPercent ?? 100}%
+                  </span>
                 </div>
               </div>
             );
