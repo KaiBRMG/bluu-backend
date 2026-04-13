@@ -35,31 +35,7 @@ interface TimelineSegment {
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-function getDayBoundsUTC(dateStr: string, timezone: string): { start: number; end: number } {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const noonUTC = Date.UTC(year, month - 1, day, 12, 0, 0);
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-  const parts = fmt.formatToParts(new Date(noonUTC));
-  const noonH = parseInt(parts.find(p => p.type === 'hour')!.value,   10);
-  const noonM = parseInt(parts.find(p => p.type === 'minute')!.value, 10);
-  const offsetMs = ((noonH * 60 + noonM) - (12 * 60)) * 60 * 1000;
-  const dayStartUTC = Date.UTC(year, month - 1, day, 0, 0, 0) - offsetMs;
-  return { start: dayStartUTC, end: dayStartUTC + 24 * 60 * 60 * 1000 - 1 };
-}
-
-function todayInTZ(timezone: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-}
+import { getDayBoundsUTC, todayStr as todayInTZ } from '@/lib/utils/timezone';
 
 function formatTimeInTZ(ms: number, timezone: string): string {
   return new Date(ms).toLocaleTimeString('en-US', {

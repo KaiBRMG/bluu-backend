@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo, ReactNode } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import type { TimerDisplayState, LocalSessionBuffer } from '@/types/firestore';
 import { invalidateTimesheetCache } from '@/hooks/useTimesheetData';
@@ -673,22 +673,28 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     }
   }, [isLoading, displayState, sessionId, breakStartTime, apiCall]);
 
+  const value = useMemo(() => ({
+    displayState,
+    sessionId,
+    elapsedSeconds,
+    breakRemainingSeconds,
+    breakUsedSeconds,
+    breakAllowanceSeconds,
+    startTracking,
+    stopTracking,
+    pauseTracking,
+    resumeFromPause,
+    startBreak,
+    endBreak,
+    isLoading,
+  }), [
+    displayState, sessionId, elapsedSeconds, breakRemainingSeconds,
+    breakUsedSeconds, breakAllowanceSeconds, startTracking, stopTracking,
+    pauseTracking, resumeFromPause, startBreak, endBreak, isLoading,
+  ]);
+
   return (
-    <TimeTrackingContext.Provider value={{
-      displayState,
-      sessionId,
-      elapsedSeconds,
-      breakRemainingSeconds,
-      breakUsedSeconds,
-      breakAllowanceSeconds,
-      startTracking,
-      stopTracking,
-      pauseTracking,
-      resumeFromPause,
-      startBreak,
-      endBreak,
-      isLoading,
-    }}>
+    <TimeTrackingContext.Provider value={value}>
       {children}
     </TimeTrackingContext.Provider>
   );

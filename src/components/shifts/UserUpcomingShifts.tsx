@@ -27,24 +27,7 @@ import type { ExpandedShift } from '@/lib/utils/recurrence';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-const SHIFT_COLORS = ['#4B8FCC', '#86C27E', '#E37836', '#8B5CF6'];
-
-function hashString(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-
-function getShiftColor(userId: string): string {
-  return SHIFT_COLORS[hashString(userId) % SHIFT_COLORS.length];
-}
-
-function hexToRgb(hex: string): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `${r},${g},${b}`;
-}
+import { getShiftColor, hexToRgb } from '@/lib/utils/avatar';
 
 function formatLocalTime(ms: number, tz: string): string {
   return new Date(ms).toLocaleTimeString('en-US', {
@@ -68,25 +51,7 @@ function formatDateHeader(ms: number, tz: string): string {
   });
 }
 
-function toLocalDateStr(ms: number, tz: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date(ms));
-}
-
-function getMondayOfWeek(dateStr: string): string {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  const dow = dt.getUTCDay();
-  const mondayOffset = (dow + 6) % 7;
-  const monday = new Date(dt.getTime() - mondayOffset * 86_400_000);
-  return monday.toISOString().slice(0, 10);
-}
-
-function addDays(dateStr: string, n: number): string {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
-}
+import { toLocalDateStr, getMondayOfWeek, addCalendarDays as addDays } from '@/lib/utils/timezone';
 
 const BADGE_CONFIG = {
   'on-time': { color: '#86C27E', label: 'On Time' },

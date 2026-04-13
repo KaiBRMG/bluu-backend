@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useAuth } from '@/components/AuthProvider';
+import { getCache, setCache } from '@/lib/queryCache';
 import type { DisputeDocument, CreatorDocument, ApprovalStatus } from '@/types/firestore';
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -32,33 +33,7 @@ export interface CreateDisputePayload {
   Comment: string;
 }
 
-// ─── Cache helpers (sessionStorage, 5 min TTL) ────────────────────────
-
 const CACHE_TTL_MS = 5 * 60 * 1000;
-
-function readCache<T>(key: string): T | null {
-  try {
-    const raw = sessionStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { data: T; cachedAt: number };
-    if (Date.now() - parsed.cachedAt > CACHE_TTL_MS) {
-      sessionStorage.removeItem(key);
-      return null;
-    }
-    return parsed.data;
-  } catch {
-    return null;
-  }
-}
-
-function writeCache<T>(key: string, data: T): void {
-  try {
-    sessionStorage.setItem(key, JSON.stringify({ data, cachedAt: Date.now() }));
-  } catch {
-    // non-fatal
-  }
-}
-
 const CREATORS_KEY = 'bluu_disputes_creators_v1';
 const CA_USERS_KEY = 'bluu_disputes_ca_users_v1';
 
@@ -95,12 +70,12 @@ export function useDisputesData() {
   // ── Load creators (cached) ──────────────────────────────────────────
 
   const loadCreators = useCallback(async () => {
-    const cached = readCache<CreatorDocument[]>(CREATORS_KEY);
+    const cached = getCache<CreatorDocument[]>(CREATORS_KEY, CACHE_TTL_MS);
     if (cached) { setCreators(cached); return; }
     try {
       const data = await authFetch('/api/disputes/creators');
       setCreators(data.creators);
-      writeCache(CREATORS_KEY, data.creators);
+      setCache(CREATORS_KEY, data.creators);
     } catch (err) {
       console.error('[useDisputesData] loadCreators failed:', err);
     }
@@ -109,12 +84,12 @@ export function useDisputesData() {
   // ── Load CA users (cached) ──────────────────────────────────────────
 
   const loadCaUsers = useCallback(async () => {
-    const cached = readCache<CaUser[]>(CA_USERS_KEY);
+    const cached = getCache<CaUser[]>(CA_USERS_KEY, CACHE_TTL_MS);
     if (cached) { setCaUsers(cached); return; }
     try {
       const data = await authFetch('/api/disputes/ca-users');
       setCaUsers(data.users);
-      writeCache(CA_USERS_KEY, data.users);
+      setCache(CA_USERS_KEY, data.users);
     } catch (err) {
       console.error('[useDisputesData] loadCaUsers failed:', err);
     }
@@ -207,7 +182,7 @@ export function useDisputesData() {
     }
   }, [authFetch]);
 
-  return {
+  return useMemo(() => ({
     creators,
     caUsers,
     loading,
@@ -216,5 +191,5 @@ export function useDisputesData() {
     createDispute,
     setCaApproval,
     setAdminApproval,
-  };
+  }), [creators, caUsers, loading, error, fetchDisputes, createDispute, setCaApproval, setAdminApproval]);
 }

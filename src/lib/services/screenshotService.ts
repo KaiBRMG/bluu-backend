@@ -60,37 +60,14 @@ export interface ScreenshotRow {
   screenIndex: number;
 }
 
-/**
- * Computes UTC bounds for a calendar date in the given IANA timezone.
- * Handles sub-hour offsets (e.g. India +5:30, Nepal +5:45) and DST by
- * sampling the exact offset at noon on that day.
- */
-function dayBoundsUTC(dateStr: string, timezone: string): { start: Date; end: Date } {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const noonUTC = Date.UTC(year, month - 1, day, 12, 0, 0);
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-  const parts = fmt.formatToParts(new Date(noonUTC));
-  const noonH = parseInt(parts.find(p => p.type === 'hour')!.value,   10);
-  const noonM = parseInt(parts.find(p => p.type === 'minute')!.value, 10);
-  const offsetMs = ((noonH * 60 + noonM) - (12 * 60)) * 60 * 1000;
-  const startMs = Date.UTC(year, month - 1, day, 0, 0, 0) - offsetMs;
-  return {
-    start: new Date(startMs),
-    end:   new Date(startMs + 24 * 60 * 60 * 1000 - 1),
-  };
-}
+import { getDayBoundsUTCDates } from '@/lib/utils/timezone';
 
 export async function getScreenshotsByDate(
   userId: string,
   date: string,
   timezone = 'UTC',
 ): Promise<ScreenshotRow[]> {
-  const { start: dayStart, end: dayEnd } = dayBoundsUTC(date, timezone);
+  const { start: dayStart, end: dayEnd } = getDayBoundsUTCDates(date, timezone);
 
   const snap = await adminDb
     .collection(COLLECTION)
@@ -98,6 +75,7 @@ export async function getScreenshotsByDate(
     .where('timestampUTC', '>=', Timestamp.fromDate(dayStart))
     .where('timestampUTC', '<=', Timestamp.fromDate(dayEnd))
     .orderBy('timestampUTC', 'asc')
+    .limit(500)
     .get();
 
   return snap.docs.map(doc => {

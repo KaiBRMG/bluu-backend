@@ -22,29 +22,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-const AVATAR_COLORS = [
-  '#E57373', '#F06292', '#BA68C8', '#7986CB', '#64B5F6',
-  '#4DD0E1', '#4DB6AC', '#81C784', '#FFB74D', '#A1887F',
-];
-// 
-function hashString(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function getAvatarColor(name: string): string {
-  return AVATAR_COLORS[hashString(name) % AVATAR_COLORS.length];
-}
-
-function getInitials(name: string): string {
-  if (!name?.trim()) return '?';
-  return name.split(' ').map((p) => p[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
-}
+import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -59,18 +37,7 @@ function getWeekDays(mondayStr: string): string[] {
 
 const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-function toLocalDateStr(ms: number, tz: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date(ms));
-}
-
-function addDays(dateStr: string, n: number): string {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d + n));
-  return dt.toISOString().slice(0, 10);
-}
+import { toLocalDateStr, addCalendarDays as addDays } from '@/lib/utils/timezone';
 
 // ─── Modal state types ───────────────────────────────────────────────
 

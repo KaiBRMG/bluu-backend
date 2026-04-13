@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
-import { FieldValue } from 'firebase-admin/firestore';
+import { checkPageAccess, addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { ApprovalStatus } from '@/types/firestore';
 
@@ -17,10 +17,8 @@ export const PATCH = withAuth(async (
   params: Promise<{ disputeId: string }> | { disputeId: string },
 ) => {
   try {
-    const caller = await getUserById(token.uid);
-    if (!caller?.permittedPageIds?.includes('ca-admin')) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-    }
+    const denied = await checkPageAccess(token.uid, 'ca-admin');
+    if (denied) return denied;
 
     const { disputeId } = await Promise.resolve(params);
     const body = await request.json();
@@ -47,18 +45,14 @@ export const PATCH = withAuth(async (
       ? `Good news 🎉 your dispute has been approved! It will be added to your Earnings Report soon.`
       : reason ? `${rejectBase} REASON: ${reason}` : rejectBase;
 
-    batch.set(adminDb.collection('notifications').doc(), {
-      userId: dispute.createdBy,
-      title: AdminApproval === 'Approved' ? 'Dispute Approved' : 'Dispute Rejected',
-      message: notifMessage,
-      type: AdminApproval === 'Approved' ? 'success' : 'alert',
-      read: false,
-      dismissedByUser: false,
-      createdAt: FieldValue.serverTimestamp(),
-      actionUrl: '/ca-portal/disputes',
-      announcement: false,
-      announcementExpiry: null,
-    });
+    addNotificationToBatch(
+      batch,
+      dispute.createdBy,
+      AdminApproval === 'Approved' ? 'Dispute Approved' : 'Dispute Rejected',
+      notifMessage,
+      AdminApproval === 'Approved' ? 'success' : 'alert',
+      '/ca-portal/disputes',
+    );
 
     await batch.commit();
 

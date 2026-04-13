@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
+import { getCache, setCache, invalidateCacheByPrefix } from '@/lib/queryCache';
 export interface TimesheetEntry {
   id: string;
   state: 'working' | 'idle' | 'on-break' | 'paused';
@@ -12,7 +13,6 @@ export interface TimesheetEntry {
 interface CachedTimesheetData {
   entries: TimesheetEntry[];
   timezone: string;
-  cachedAt: number;
 }
 
 interface UseTimesheetDataReturn {
@@ -32,41 +32,8 @@ function cacheKey(uid: string, userId: string | null, startDate: string, endDate
   return `bluu_timesheet_v1:${uid}:${userId ?? 'self'}:${startDate}:${endDate}:${timezone}`;
 }
 
-function readCache(key: string): CachedTimesheetData | null {
-  try {
-    const raw = sessionStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as CachedTimesheetData;
-    if (Date.now() - parsed.cachedAt > CACHE_TTL_MS) {
-      sessionStorage.removeItem(key);
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function writeCache(key: string, data: Omit<CachedTimesheetData, 'cachedAt'>): void {
-  try {
-    sessionStorage.setItem(key, JSON.stringify({ ...data, cachedAt: Date.now() }));
-  } catch {
-    // sessionStorage may be full; non-fatal
-  }
-}
-
 export function invalidateTimesheetCache(uid: string): void {
-  try {
-    const prefix = `bluu_timesheet_v1:${uid}:`;
-    const toRemove: string[] = [];
-    for (let i = 0; i < sessionStorage.length; i++) {
-      const k = sessionStorage.key(i);
-      if (k && k.startsWith(prefix)) toRemove.push(k);
-    }
-    for (const k of toRemove) sessionStorage.removeItem(k);
-  } catch {
-    // ignore
-  }
+  invalidateCacheByPrefix(`bluu_timesheet_v1:${uid}:`);
 }
 
 export function useTimesheetData(
@@ -88,7 +55,7 @@ export function useTimesheetData(
 
     // Serve from cache on re-navigation unless caller explicitly requests refresh
     if (!forceRefresh) {
-      const cached = readCache(key);
+      const cached = getCache<CachedTimesheetData>(key, CACHE_TTL_MS);
       if (cached) {
         setEntries(cached.entries);
         setTimezone(cached.timezone);
@@ -113,7 +80,7 @@ export function useTimesheetData(
       const data = await res.json();
       setEntries(data.entries);
       setTimezone(data.timezone || 'UTC');
-      writeCache(key, {
+      setCache<CachedTimesheetData>(key, {
         entries: data.entries,
         timezone: data.timezone || 'UTC',
       });

@@ -201,29 +201,38 @@ export async function truncateSeriesAt(
 // ─── Reads ───────────────────────────────────────────────────────────
 
 /**
- * Fetch all shift documents whose startTime falls within [startMs, endMs],
- * PLUS all recurring root shifts that started before startMs (they may still
- * have occurrences within the window).
+ * Fetch shift documents within [startMs, endMs], optionally filtered to a
+ * single user. Also fetches recurring root shifts that started before the
+ * window (they may still generate occurrences within it) and any
+ * override/tombstone documents for those recurring series.
+ *
+ * When userId is null, returns shifts for ALL users.
  */
 export async function getShiftsByRange(
   startMs: number,
   endMs: number,
+  userId: string | null = null,
 ): Promise<ShiftDocument[]> {
   const startTs = Timestamp.fromMillis(startMs);
   const endTs   = Timestamp.fromMillis(endMs);
 
+  // Build queries — optionally scoped to a single user
+  let rangeQuery = adminDb.collection(SHIFTS)
+    .where('startTime', '>=', startTs)
+    .where('startTime', '<=', endTs);
+  let recurringQuery = adminDb.collection(SHIFTS)
+    .where('isRecurring', '==', true)
+    .where('seriesId', '==', null)
+    .where('startTime', '<', startTs);
+
+  if (userId) {
+    rangeQuery = rangeQuery.where('userId', '==', userId);
+    recurringQuery = recurringQuery.where('userId', '==', userId);
+  }
+
   const [rangeSnap, recurringSnap] = await Promise.all([
-    // Shifts whose startTime is within the window (one-time + root recurring + overrides)
-    adminDb.collection(SHIFTS)
-      .where('startTime', '>=', startTs)
-      .where('startTime', '<=', endTs)
-      .get(),
-    // Recurring roots that started BEFORE the window (may still generate occurrences in it)
-    adminDb.collection(SHIFTS)
-      .where('isRecurring', '==', true)
-      .where('seriesId', '==', null)
-      .where('startTime', '<', startTs)
-      .get(),
+    rangeQuery.get(),
+    recurringQuery.get(),
   ]);
 
   const seen = new Set<string>();
@@ -243,12 +252,17 @@ export async function getShiftsByRange(
     .map(s => s.shiftId);
 
   if (seriesIds.length > 0) {
-    // Chunk into groups of 30 (Firestore 'in' limit)
+    // Chunk into groups of 30 (Firestore 'in' limit) and query in parallel
+    const chunks: string[][] = [];
     for (let i = 0; i < seriesIds.length; i += 30) {
-      const chunk = seriesIds.slice(i, i + 30);
-      const overridesSnap = await adminDb.collection(SHIFTS)
-        .where('seriesId', 'in', chunk)
-        .get();
+      chunks.push(seriesIds.slice(i, i + 30));
+    }
+    const overrideSnaps = await Promise.all(
+      chunks.map(chunk =>
+        adminDb.collection(SHIFTS).where('seriesId', 'in', chunk).get()
+      )
+    );
+    for (const overridesSnap of overrideSnaps) {
       for (const doc of overridesSnap.docs) {
         if (seen.has(doc.id)) continue;
         seen.add(doc.id);
@@ -261,62 +275,15 @@ export async function getShiftsByRange(
 }
 
 /**
- * Fetch all shift documents for a specific user within [startMs, endMs],
- * plus recurring roots for that user that started before the window.
+ * Fetch all shift documents for a specific user within [startMs, endMs].
+ * Convenience wrapper around getShiftsByRange.
  */
 export async function getShiftsByUserAndRange(
   userId: string,
   startMs: number,
   endMs: number,
 ): Promise<ShiftDocument[]> {
-  const startTs = Timestamp.fromMillis(startMs);
-  const endTs   = Timestamp.fromMillis(endMs);
-
-  const [rangeSnap, recurringSnap] = await Promise.all([
-    adminDb.collection(SHIFTS)
-      .where('userId', '==', userId)
-      .where('startTime', '>=', startTs)
-      .where('startTime', '<=', endTs)
-      .get(),
-    adminDb.collection(SHIFTS)
-      .where('userId', '==', userId)
-      .where('isRecurring', '==', true)
-      .where('seriesId', '==', null)
-      .where('startTime', '<', startTs)
-      .get(),
-  ]);
-
-  const seen = new Set<string>();
-  const results: ShiftDocument[] = [];
-
-  for (const snap of [rangeSnap, recurringSnap]) {
-    for (const doc of snap.docs) {
-      if (seen.has(doc.id)) continue;
-      seen.add(doc.id);
-      results.push(doc.data() as ShiftDocument);
-    }
-  }
-
-  // Fetch overrides for any recurring series found
-  const seriesIds = results
-    .filter(s => s.isRecurring && !s.seriesId)
-    .map(s => s.shiftId);
-
-  if (seriesIds.length > 0) {
-    for (let i = 0; i < seriesIds.length; i += 30) {
-      const chunk = seriesIds.slice(i, i + 30);
-      const overridesSnap = await adminDb.collection(SHIFTS)
-        .where('seriesId', 'in', chunk)
-        .get();
-      for (const doc of overridesSnap.docs) {
-        if (seen.has(doc.id)) continue;
-        seen.add(doc.id);
-        results.push(doc.data() as ShiftDocument);
-      }
-    }
-  }
-
-  return results;
+  return getShiftsByRange(startMs, endMs, userId);
 }
 
 /**

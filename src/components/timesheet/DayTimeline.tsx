@@ -36,41 +36,7 @@ interface DayTimelineProps {
   timezone: string;
 }
 
-/**
- * Returns UTC millisecond bounds for a calendar date (YYYY-MM-DD) as observed
- * in `timezone`. Handles sub-hour offsets (India +5:30, Nepal +5:45, etc.) and
- * DST correctly by sampling the actual timezone offset at noon on that day.
- *
- * Strategy: format noon-UTC as H and M in the target timezone, compute the
- * exact offset in minutes (including sub-hour), then derive day-start UTC.
- * Noon is used because it is far from both midnight boundaries, so a single
- * DST transition within the day does not affect the noon offset we read.
- */
-function getDayBoundsUTC(dateStr: string, timezone: string): { start: number; end: number } {
-  const [year, month, day] = dateStr.split('-').map(Number);
-
-  // Sample the offset at noon UTC → what H:M does the timezone show?
-  const noonUTC = Date.UTC(year, month - 1, day, 12, 0, 0);
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-  const parts = fmt.formatToParts(new Date(noonUTC));
-  const noonHourInTZ   = parseInt(parts.find(p => p.type === 'hour')!.value,   10);
-  const noonMinuteInTZ = parseInt(parts.find(p => p.type === 'minute')!.value, 10);
-
-  // offset = local noon − UTC noon, in minutes (positive = east of UTC)
-  const offsetMinutes = (noonHourInTZ * 60 + noonMinuteInTZ) - (12 * 60);
-  const offsetMs = offsetMinutes * 60 * 1000;
-
-  // UTC timestamp of midnight in the target timezone for that calendar date
-  const dayStartUTC = Date.UTC(year, month - 1, day, 0, 0, 0) - offsetMs;
-  const dayEndUTC   = dayStartUTC + 24 * 60 * 60 * 1000 - 1; // 23:59:59.999
-
-  return { start: dayStartUTC, end: dayEndUTC };
-}
+import { getDayBoundsUTC } from '@/lib/utils/timezone';
 
 function formatTimeInTZ(date: Date, timezone: string): string {
   return date.toLocaleTimeString('en-US', {

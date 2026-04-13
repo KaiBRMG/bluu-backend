@@ -9,26 +9,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 
 // ─── Color palette (matches STATE_CONFIG in time-tracking page) ───────
 
-const SHIFT_COLORS = ['#4B8FCC', '#86C27E', '#E37836', '#8B5CF6'];
-
-function hashString(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) {
-    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
-  }
-  return Math.abs(h);
-}
-
-function getShiftColor(userId: string): string {
-  return SHIFT_COLORS[hashString(userId) % SHIFT_COLORS.length];
-}
-
-function hexToRgb(hex: string): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `${r},${g},${b}`;
-}
+import { getShiftColor, hexToRgb } from '@/lib/utils/avatar';
 
 // ─── Format helpers ──────────────────────────────────────────────────
 

@@ -11,6 +11,7 @@
  */
 
 import type { ShiftRecurrence } from '@/types/firestore';
+import { toLocalDateStr, addCalendarDays } from '@/lib/utils/timezone';
 
 // ─── Wire types (from API response — Timestamps serialised to ISO strings) ───
 
@@ -99,24 +100,7 @@ function wallClockToUtcMs(
 
 // ─── Date arithmetic helpers ─────────────────────────────────────────
 
-/** Returns "YYYY-MM-DD" for a UTC timestamp, optionally shifted to a timezone. */
-function toLocalDateStr(utcMs: number, tz: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date(utcMs));
-}
-
-/**
- * Add `n` calendar days to a "YYYY-MM-DD" string, staying in wall-clock space
- * (no timezone arithmetic needed — just date arithmetic).
- */
-function addCalendarDays(dateStr: string, n: number): string {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d + n));
-  return dt.toISOString().slice(0, 10);
+// toLocalDateStr and addCalendarDays are imported from '@/lib/utils/timezone'
 }
 
 /** Add `n` calendar months to a "YYYY-MM-DD" string. */

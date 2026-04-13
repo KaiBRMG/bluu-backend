@@ -5,29 +5,7 @@ import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from "@/components/ui/button";
 
-const AVATAR_COLORS = [
-  '#E57373', '#F06292', '#BA68C8', '#7986CB', '#64B5F6',
-  '#4DD0E1', '#4DB6AC', '#81C784', '#FFB74D', '#A1887F',
-];
-
-function hashString(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function getAvatarColor(name: string): string {
-  return AVATAR_COLORS[hashString(name) % AVATAR_COLORS.length];
-}
-
-function getInitials(name: string): string {
-  if (!name?.trim()) return '?';
-  return name.split(' ').map((p) => p[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || '?';
-}
+import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import AddMembersDropdown from './AddMembersDropdown';
 import { getGroupColor } from './groupColors';
 

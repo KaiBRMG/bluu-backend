@@ -1,9 +1,14 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import type { ExpandedShift } from '@/lib/utils/recurrence';
 import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
+import { getMondayOfWeek as _getMondayOfWeek, todayStr as _todayStr } from '@/lib/utils/timezone';
+
+// Re-export from shared module for backward compatibility
+export const getMondayOfWeek = _getMondayOfWeek;
+export const todayStr = _todayStr;
 
 export interface ShiftUser {
   uid: string;
@@ -47,25 +52,6 @@ function cacheKey(weekStart: string): string {
   return `bluu_shifts_week_v1:${weekStart}`;
 }
 
-/** Compute the Monday of the week that contains `dateStr` (YYYY-MM-DD). */
-export function getMondayOfWeek(dateStr: string): string {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  const dow = dt.getUTCDay(); // 0=Sun
-  const mondayOffset = (dow + 6) % 7;
-  const monday = new Date(dt.getTime() - mondayOffset * 86_400_000);
-  return monday.toISOString().slice(0, 10);
-}
-
-/** Today's date as YYYY-MM-DD in the given IANA timezone (defaults to UTC). */
-export function todayStr(timezone = 'UTC'): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-}
 
 export function useShifts(weekStart: string) {
   const { user } = useAuth();
@@ -197,11 +183,11 @@ export function useShifts(weekStart: string) {
     await fetchData(true);
   }, [user, weekStart, fetchData]);
 
-  return {
+  return useMemo(() => ({
     ...state,
     refetch: () => fetchData(true),
     createShift,
     updateShift,
     deleteShift,
-  };
+  }), [state, fetchData, createShift, updateShift, deleteShift]);
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import type { PagePermissionDoc } from '@/types/firestore';
 import type { PageDef, TeamspaceDef } from '@/lib/definitions';
@@ -130,9 +130,9 @@ export function useAdminData() {
     [user, fetchAdminData]
   );
 
-  return {
+  return useMemo(() => ({
     ...state,
     refetch: () => fetchAdminData(true),
     updatePermission,
-  };
+  }), [state, fetchAdminData, updatePermission]);
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { getCache, setCache } from '@/lib/queryCache';
 
@@ -98,5 +98,5 @@ export function useAdminScreenshots(
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  return { groups, loading, error, refetch: () => fetchData(true) };
+  return useMemo(() => ({ groups, loading, error, refetch: () => fetchData(true) }), [groups, loading, error, fetchData]);
 }

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
-import { FieldValue } from 'firebase-admin/firestore';
+import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { ApprovalStatus } from '@/types/firestore';
 
@@ -48,18 +48,14 @@ export const PATCH = withAuth(async (
       ? `${assignedToName} has approved your dispute! It will now be passed to your team leader for approval.`
       : reason ? `${rejectBase} REASON: ${reason}` : rejectBase;
 
-    batch.set(adminDb.collection('notifications').doc(), {
-      userId: dispute.createdBy,
-      title: CaApproval === 'Approved' ? 'Dispute Partially Approved' : 'Dispute Rejected',
-      message: notifMessage,
-      type: CaApproval === 'Approved' ? 'success' : 'alert',
-      read: false,
-      dismissedByUser: false,
-      createdAt: FieldValue.serverTimestamp(),
-      actionUrl: '/ca-portal/disputes',
-      announcement: false,
-      announcementExpiry: null,
-    });
+    addNotificationToBatch(
+      batch,
+      dispute.createdBy,
+      CaApproval === 'Approved' ? 'Dispute Partially Approved' : 'Dispute Rejected',
+      notifMessage,
+      CaApproval === 'Approved' ? 'success' : 'alert',
+      '/ca-portal/disputes',
+    );
 
     await batch.commit();
 

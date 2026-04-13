@@ -56,9 +56,7 @@ interface Props {
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-function toLocalDateString(ms: number, tz: string): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
-}
+import { toLocalDateStr as toLocalDateString } from '@/lib/utils/timezone';
 
 function toLocalTimeString(ms: number, tz: string): string {
   return new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(ms));

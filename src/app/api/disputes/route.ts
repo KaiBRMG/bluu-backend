@@ -3,6 +3,7 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
 import { FieldValue, Timestamp, DocumentData } from 'firebase-admin/firestore';
+import { checkPageAccess, serializeTimestamp, addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { DisputeDocument } from '@/types/firestore';
 
@@ -24,8 +25,8 @@ function serialiseDispute(
   const createdByInfo = userMap[data.createdBy] ?? { displayName: data.createdBy, photoURL: null };
   return {
     id,
-    createdAt: data.createdAt?.toDate?.()?.toISOString() ?? null,
-    saleDate: data.saleDate?.toDate?.()?.toISOString() ?? null,
+    createdAt: serializeTimestamp(data.createdAt),
+    saleDate: serializeTimestamp(data.saleDate),
     assignedTo: data.assignedTo,
     assignedToName: assignedToInfo.displayName,
     assignedToPhotoURL: assignedToInfo.photoURL,
@@ -154,18 +155,14 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         });
 
     } else if (filter === 'admin-all') {
-      const caller = await getUserById(uid);
-      if (!caller?.permittedPageIds?.includes('ca-admin')) {
-        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-      }
-      const snap = await col.get();
+      const denied = await checkPageAccess(uid, 'ca-admin');
+      if (denied) return denied;
+      const snap = await col.orderBy('createdAt', 'desc').limit(500).get();
       rawDocs = snap.docs.map(d => ({ _id: d.id, ...d.data() }));
 
     } else if (filter === 'admin-unresolved') {
-      const caller = await getUserById(uid);
-      if (!caller?.permittedPageIds?.includes('ca-admin')) {
-        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-      }
+      const denied = await checkPageAccess(uid, 'ca-admin');
+      if (denied) return denied;
       // Composite index: CaApproval ASC, AdminApproval ASC, createdAt DESC
       const snap = await col
         .where('CaApproval', '==', 'Pending')
@@ -174,10 +171,8 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       rawDocs = snap.docs.map(d => ({ _id: d.id, ...d.data() }));
 
     } else if (filter === 'admin-ca-approved') {
-      const caller = await getUserById(uid);
-      if (!caller?.permittedPageIds?.includes('ca-admin')) {
-        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-      }
+      const denied = await checkPageAccess(uid, 'ca-admin');
+      if (denied) return denied;
       // Fetch all, filter in-process for OR condition
       const snap = await col.where('AdminApproval', '==', 'Pending').get();
       rawDocs = snap.docs
@@ -188,14 +183,12 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         });
 
     } else if (filter === 'admin-resolved') {
-      const caller = await getUserById(uid);
-      if (!caller?.permittedPageIds?.includes('ca-admin')) {
-        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-      }
-      // Two parallel queries merged
+      const denied = await checkPageAccess(uid, 'ca-admin');
+      if (denied) return denied;
+      // Two parallel queries merged — capped at 250 each to prevent unbounded reads
       const [approvedSnap, rejectedSnap] = await Promise.all([
-        col.where('AdminApproval', '==', 'Approved').get(),
-        col.where('AdminApproval', '==', 'Rejected').get(),
+        col.where('AdminApproval', '==', 'Approved').orderBy('createdAt', 'desc').limit(250).get(),
+        col.where('AdminApproval', '==', 'Rejected').orderBy('createdAt', 'desc').limit(250).get(),
       ]);
       rawDocs = [
         ...approvedSnap.docs.map(d => ({ _id: d.id, ...d.data() })),
@@ -269,18 +262,14 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       const createdByUser = await getUserById(token.uid);
       const createdByName = createdByUser?.displayName ?? 'Someone';
 
-      batch.set(adminDb.collection('notifications').doc(), {
-        userId: assignedTo,
-        title: 'New Dispute',
-        message: `${createdByName} has submitted a dispute against a sale assigned to you. Click here to check it out ASAP!`,
-        type: 'action',
-        read: false,
-        dismissedByUser: false,
-        createdAt: FieldValue.serverTimestamp(),
-        actionUrl: '/ca-portal/disputes',
-        announcement: false,
-        announcementExpiry: null,
-      });
+      addNotificationToBatch(
+        batch,
+        assignedTo,
+        'New Dispute',
+        `${createdByName} has submitted a dispute against a sale assigned to you. Click here to check it out ASAP!`,
+        'action',
+        '/ca-portal/disputes',
+      );
 
       await batch.commit();
     } else {

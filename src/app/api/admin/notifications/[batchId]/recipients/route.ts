@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
-import { getUserById } from '@/lib/services/userService';
+import { checkPageAccess } from '@/lib/middleware/apiHelpers';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
@@ -11,10 +11,8 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 export const GET = withAuth(
   async (_request: NextRequest, token: DecodedIdToken, params: Promise<{ batchId: string }>) => {
     try {
-      const caller = await getUserById(token.uid);
-      if (!caller?.permittedPageIds?.includes('admin-notifications')) {
-        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-      }
+      const denied = await checkPageAccess(token.uid, 'admin-notifications');
+      if (denied) return denied;
 
       const { batchId } = await params;
       if (!batchId) {
@@ -30,16 +28,17 @@ export const GET = withAuth(
         return NextResponse.json({ recipients: [] });
       }
 
-      // Fetch display names for all recipients in parallel
+      // Batch-fetch display names for all recipients in a single round-trip
       const userIds = snap.docs.map(doc => doc.data().userId as string);
       const uniqueUserIds = [...new Set(userIds)];
-      const userDocs = await Promise.all(
-        uniqueUserIds.map(uid => adminDb.collection('users').doc(uid).get())
-      );
       const displayNameMap: Record<string, string> = {};
-      for (const userDoc of userDocs) {
-        if (userDoc.exists) {
-          displayNameMap[userDoc.id] = userDoc.data()?.displayName ?? userDoc.id;
+      if (uniqueUserIds.length > 0) {
+        const refs = uniqueUserIds.map(uid => adminDb.collection('users').doc(uid));
+        const userDocs = await adminDb.getAll(...refs);
+        for (const userDoc of userDocs) {
+          if (userDoc.exists) {
+            displayNameMap[userDoc.id] = userDoc.data()?.displayName ?? userDoc.id;
+          }
         }
       }
 

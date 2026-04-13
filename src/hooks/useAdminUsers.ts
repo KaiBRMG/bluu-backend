@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
 
@@ -204,11 +204,11 @@ export function useAdminUsers() {
     [user, fetchData]
   );
 
-  return {
+  return useMemo(() => ({
     ...state,
     refetch: () => fetchData(true),
     updateUser,
     addGroupMembers,
     removeGroupMember,
-  };
+  }), [state, fetchData, updateUser, addGroupMembers, removeGroupMember]);
 }

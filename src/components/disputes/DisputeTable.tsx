@@ -59,23 +59,7 @@ interface DisputeTableProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-const AVATAR_COLORS = [
-  '#E57373', '#F06292', '#BA68C8', '#7986CB', '#64B5F6',
-  '#4DD0E1', '#4DB6AC', '#81C784', '#FFB74D', '#A1887F',
-];
-
-function hashString(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function getAvatarColor(name: string): string {
-  return AVATAR_COLORS[hashString(name) % AVATAR_COLORS.length];
-}
+import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 
 function formatInUserTz(isoString: string | null, timezone: string): string {
   if (!isoString) return '—';
@@ -90,14 +74,6 @@ function formatInUserTz(isoString: string | null, timezone: string): string {
   }
 }
 
-function initials(name: string): string {
-  return name
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(w => w[0].toUpperCase())
-    .join('');
-}
 
 // ─── ApprovalBadge ────────────────────────────────────────────────────
 
@@ -118,7 +94,7 @@ function UserChip({ name, photoURL }: { name: string; photoURL: string | null })
     <Button variant="outline" className="rounded-full p-0! pe-3! h-8 gap-0 text-sm font-normal">
       <Avatar className="size-7" style={{ background: getAvatarColor(name) }}>
         {photoURL && <AvatarImage src={photoURL} alt={name} />}
-        <AvatarFallback className="text-xs" style={{ background: getAvatarColor(name), color: '#fff' }}>{initials(name)}</AvatarFallback>
+        <AvatarFallback className="text-xs" style={{ background: getAvatarColor(name), color: '#fff' }}>{getInitials(name)}</AvatarFallback>
       </Avatar>
       <span className="pl-1.5">{name}</span>
     </Button>
@@ -149,7 +125,7 @@ function CommentCell({
         <div className="flex gap-3">
           <Avatar className="size-9 shrink-0" style={{ background: getAvatarColor(createdByName) }}>
             {createdByPhotoURL && <AvatarImage src={createdByPhotoURL} alt={createdByName} />}
-            <AvatarFallback className="text-xs" style={{ background: getAvatarColor(createdByName), color: '#fff' }}>{initials(createdByName)}</AvatarFallback>
+            <AvatarFallback className="text-xs" style={{ background: getAvatarColor(createdByName), color: '#fff' }}>{getInitials(createdByName)}</AvatarFallback>
           </Avatar>
           <div className="space-y-1 min-w-0">
             <p className="text-sm font-semibold">{createdByName}</p>

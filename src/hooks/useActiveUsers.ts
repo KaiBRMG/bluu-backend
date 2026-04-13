@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '@/firebase-config';
 import type { ActiveSessionState } from '@/types/firestore';
@@ -83,5 +83,5 @@ export function useActiveUsers(): { activeSessions: ActiveUserSummary[]; isLoadi
     };
   }, []);
 
-  return { activeSessions, isLoading };
+  return useMemo(() => ({ activeSessions, isLoading }), [activeSessions, isLoading]);
 }
