@@ -59,6 +59,7 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
           captureGroup,
           timestampUTC: screens[0].timestampUTC,
           screenCount: screens.length,
+          activityPercent: screens[0].activityPercent ?? null,
           screens: screensWithUrls,
         };
       })

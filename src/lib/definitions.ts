@@ -19,15 +19,17 @@ export interface PageDef {
 export const TEAMSPACES: TeamspaceDef[] = [
   { id: 'ca-portal', name: 'CA Portal', icon: 'MessageSquareQuote', order: 0 },
   { id: 'admin', name: 'Admin', icon: 'ShieldUser', order: 1 },
-  { id: 'apps', name: 'Apps', icon: 'PanelLeft', order: 2 },
+  { id: 'creators', name: 'Creators', icon: 'ShieldUser', order: 2 },
+  { id: 'apps', name: 'Apps', icon: 'PanelLeft', order: 3 },
 ];
 
 export const PAGES: PageDef[] = [
   // CA Portal
-  { pageId: 'ca-dashboard', title: 'Dashboard', teamspaceId: 'ca-portal', href: '/ca-portal/dashboard', icon: 'LayoutDashboard', order: 0 },
-  { pageId: 'ca-shifts', title: 'Shifts', teamspaceId: 'ca-portal', href: '/ca-portal/shifts', icon: 'CalendarClock', order: 1 },
-  { pageId: 'ca-disputes', title: 'Disputes', teamspaceId: 'ca-portal', href: '/ca-portal/disputes', icon: 'MessageCircleQuestionMark', order: 2 },
-  { pageId: 'ca-admin', title: 'Admin', teamspaceId: 'ca-portal', href: '/ca-portal/admin', icon: 'Cog', order: 3 },
+  { pageId: 'ca-admin', title: 'Admin', teamspaceId: 'ca-portal', href: '/ca-portal/admin', icon: 'Cog', order: 0 },
+  { pageId: 'ca-dashboard', title: 'Dashboard', teamspaceId: 'ca-portal', href: '/ca-portal/dashboard', icon: 'LayoutDashboard', order: 1 },
+  { pageId: 'ca-shifts', title: 'Shifts', teamspaceId: 'ca-portal', href: '/ca-portal/shifts', icon: 'CalendarClock', order: 2 },
+  { pageId: 'ca-disputes', title: 'Disputes', teamspaceId: 'ca-portal', href: '/ca-portal/disputes', icon: 'MessageCircleQuestionMark', order: 3 },
+  { pageId: 'ca-custom-requests', title: 'Custom Requests', teamspaceId: 'ca-portal', href: '/ca-portal/custom-requests', icon: 'ImagePlay', order: 4 },
   // { pageId: 'calendar', title: 'Calendar', teamspaceId: 'ca-portal', href: '/ca-portal/calendar', icon: null, order: 2 },
   
   // Admin
@@ -35,10 +37,14 @@ export const PAGES: PageDef[] = [
   { pageId: 'sharing', title: 'Sharing', teamspaceId: 'admin', href: '/admin/sharing', icon: 'Share2', order: 1 },
   { pageId: 'shift-management', title: 'Shift Management', teamspaceId: 'admin', href: '/admin/shift-management', icon: 'CalendarCog', order: 2 },
   { pageId: 'admin-notifications', title: 'Notifications', teamspaceId: 'admin', href: '/admin/notifications', icon: 'BellPlus', order: 3 },
+  { pageId: 'admin-creator-management', title: 'Creator Management', teamspaceId: 'admin', href: '/admin/creator-management', icon: 'UserStar', order: 4 },
   
+  // Creators
+  { pageId: 'creator-custom-requests', title: 'Custom Requests', teamspaceId: 'creators', href: '/admin/user-management', icon: 'ImagePlay', order: 0 },
+
   // Apps
   { pageId: 'time-tracking', title: 'Time Tracking', teamspaceId: 'apps', href: '/applications/time-tracking', icon: 'ClockFading', order: 0 },
-  // { pageId: 'app-2', title: 'App 2 (Placeholder)', teamspaceId: 'apps', href: null, icon: null, order: 1 },
+  { pageId: 'apps-password-manager', title: 'Password Manager', teamspaceId: 'apps', href: '/applications/password-manager', icon: 'KeyRound', order: 1 },
   // { pageId: 'app-3', title: 'App 3 (Placeholder)', teamspaceId: 'apps', href: null, icon: null, order: 2 },
 ];
 

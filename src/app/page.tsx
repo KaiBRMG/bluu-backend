@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import AppLayout from "@/components/AppLayout";
 import { useAuth } from "@/components/AuthProvider";
 import { useUserData } from "@/hooks/useUserData";
@@ -11,6 +12,7 @@ import { Coffee } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { STATE_CONFIG } from "@/lib/stateColors";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
 
 function formatTime(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
@@ -283,6 +285,105 @@ function TimeTrackingWidget() {
   );
 }
 
+function getTypeStripe(type: NotificationType): string {
+  switch (type) {
+    case 'shift':   return '#3b82f6';
+    case 'alert':   return '#ef4444';
+    case 'success': return '#22c55e';
+    case 'action':  return '#eab308';
+    default:        return 'var(--border-subtle)';
+  }
+}
+
+function NotificationsWidget() {
+  const { notifications } = useNotifications();
+  const { user } = useAuth();
+  const router = useRouter();
+  const unread = notifications.filter((n) => !n.read && !n.announcement);
+
+  async function handleClick(notificationId: string, actionUrl?: string | null) {
+    try {
+      const idToken = user ? await user.getIdToken() : null;
+      if (idToken) {
+        await fetch('/api/notifications/mark-read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+          body: JSON.stringify({ notificationId }),
+        });
+      }
+    } catch (err) {
+      console.error('[NotificationsWidget] mark-read error:', err);
+    }
+
+    if (actionUrl) {
+      if (actionUrl.startsWith('http://') || actionUrl.startsWith('https://')) {
+        window.open(actionUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        router.push(actionUrl);
+      }
+    }
+  }
+
+  return (
+    <Card style={{ background: '#171717' }} className="border-0 shadow-none py-0 gap-0">
+      <CardContent className="p-6">
+        <h3 className="text-sm font-medium uppercase tracking-wide mb-4 text-muted-foreground">
+          Notifications
+        </h3>
+        {unread.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No unread notifications.</p>
+        ) : (
+          <div className="flex flex-col gap-0 overflow-y-auto" style={{ maxHeight: '240px' }}>
+            {unread.map((n) => {
+              const stripe = getTypeStripe(n.type);
+              const hasAction = !!n.actionUrl;
+              return (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => handleClick(n.id, n.actionUrl)}
+                  disabled={!hasAction}
+                  className="w-full text-left flex items-stretch border-b border-border-subtle last:border-b-0 transition-colors"
+                  style={{ cursor: hasAction ? 'pointer' : 'default', background: 'transparent' }}
+                >
+                  <div className="flex-shrink-0 w-1 self-stretch rounded-full mr-3" style={{ background: stripe }} />
+                  <div className="flex-1 py-2 min-w-0">
+                    <span className="text-sm font-semibold leading-snug" style={{ color: 'var(--foreground)' }}>
+                      {n.title}
+                    </span>
+                    <HoverCard openDelay={300}>
+                      <HoverCardTrigger asChild>
+                        <p
+                          className="text-xs mt-0.5 line-clamp-2 cursor-default"
+                          style={{ color: 'var(--foreground-secondary)' }}
+                        >
+                          {n.message}
+                        </p>
+                      </HoverCardTrigger>
+                      <HoverCardContent
+                        side="left"
+                        align="start"
+                        className="w-72 text-xs"
+                        style={{
+                          background: 'var(--sidebar-background)',
+                          border: '1px solid var(--border-subtle)',
+                          color: 'var(--foreground-secondary)',
+                        }}
+                      >
+                        {n.message}
+                      </HoverCardContent>
+                    </HoverCard>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Home() {
   const { user } = useAuth();
   const { userData } = useUserData();
@@ -333,6 +434,8 @@ export default function Home() {
           {showTimeTracking && <TimeTrackingWidget />}
 
           <ClockWidget />
+
+          <NotificationsWidget />
         </div>
       </div>
     </AppLayout>

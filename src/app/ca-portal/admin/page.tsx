@@ -201,6 +201,9 @@ export default function CaAdminPage() {
     <AppLayout>
       <div className="max-w-7xl">
         <h1 className="text-2xl font-bold tracking-tight mb-2">CA Admin</h1>
+        <p className="text-sm text-muted-foreground">
+          Admin-only view of CA processes. Chat Agents should not have access to this page.
+        </p>
 
         <h2 className="text-lg font-semibold mb-3">Disputes</h2>
 

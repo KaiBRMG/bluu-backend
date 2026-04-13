@@ -150,6 +150,16 @@ export async function ledgerDocExists(sessionId: string): Promise<boolean> {
 }
 
 /**
+ * Update the most recent activity % recorded for a user's active session.
+ * Called fire-and-forget from the screenshot upload route.
+ */
+export async function updateActivityPercent(userId: string, percent: number): Promise<void> {
+  await adminDb.collection(ACTIVE_SESSIONS).doc(userId).update({
+    lastActivityPercent: percent,
+  });
+}
+
+/**
  * Delete an active_sessions doc without creating a time_entries entry.
  * Used by /discard when the buffer is orphaned or the user explicitly discards.
  */

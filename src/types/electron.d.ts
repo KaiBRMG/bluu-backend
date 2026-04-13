@@ -14,6 +14,7 @@ interface ElectronAPI {
     getIdleTime: () => Promise<number>;
     captureScreenshot: () => Promise<{ success: boolean; screens?: string[]; error?: string }>;
     setPowerSaveBlocker?: (enable: boolean) => Promise<{ success: boolean }>;
+    getActivitySince?: (sinceMs: number) => Promise<Array<{ sampleMs: number; idleSeconds: number }>>;
   };
   notifications: {
     show: (options: { title: string; body: string; playSound: boolean; actionUrl?: string | null }) => Promise<{ success: boolean }>;

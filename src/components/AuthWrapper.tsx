@@ -18,7 +18,10 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
   const prevIsLoggedInRef = useRef<boolean>(isLoggedIn);
   const hasSignaledReady = useRef(false);
 
-  const isAuthRoute = pathname?.startsWith('/auth/') || pathname?.startsWith('/onboarding/');
+  const isAuthRoute =
+    pathname?.startsWith('/auth/') ||
+    pathname?.startsWith('/onboarding/') ||
+    pathname?.startsWith('/creator-portal');
 
   // Signal the Electron main process that React has mounted and auth state has resolved.
   // Fires once per session — gives main.js a hook to dismiss splash screens or log readiness.

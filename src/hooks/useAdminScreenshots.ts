@@ -16,6 +16,7 @@ export interface ScreenshotGroup {
   captureGroup: string;
   timestampUTC: string;
   screenCount: number;
+  activityPercent: number | null;
   screens: ScreenshotScreen[];
 }
 
@@ -33,7 +34,7 @@ interface UseAdminScreenshotsReturn {
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 function cacheKey(userId: string, date: string, timezone: string): string {
-  return `bluu_screenshots_v1:${userId}:${date}:${timezone}`;
+  return `bluu_screenshots_v2:${userId}:${date}:${timezone}`;
 }
 
 export function useAdminScreenshots(

@@ -11,6 +11,7 @@ export interface ActiveUserSummary {
   currentState: ActiveSessionState;
   startTime: Date;
   lastUpdated: Date;
+  lastActivityPercent: number | null;
 }
 
 /**
@@ -47,11 +48,12 @@ export function useActiveUsers(): { activeSessions: ActiveUserSummary[]; isLoadi
           const sessions: ActiveUserSummary[] = snap.docs.map(doc => {
             const data = doc.data();
             return {
-              userId:       data.userId as string,
-              sessionId:    data.sessionId as string,
-              currentState: data.currentState as ActiveSessionState,
-              startTime:    data.startTime?.toDate?.() ?? new Date(0),
-              lastUpdated:  data.lastUpdated?.toDate?.() ?? new Date(0),
+              userId:              data.userId as string,
+              sessionId:           data.sessionId as string,
+              currentState:        data.currentState as ActiveSessionState,
+              startTime:           data.startTime?.toDate?.() ?? new Date(0),
+              lastUpdated:         data.lastUpdated?.toDate?.() ?? new Date(0),
+              lastActivityPercent: data.lastActivityPercent ?? null,
             };
           });
           setActiveSessions(sessions);

@@ -506,6 +506,9 @@ export default function UserDetailContent({
                 />
                 <span className="text-sm">Enable Screenshots</span>
               </label>
+              <p className="text-xs mt-1 ml-6" style={{ color: 'var(--foreground-muted)' }}>
+                Activity % is not monitored when disabled.
+              </p>
             </div>
 
             <div style={{ opacity: enableTimeTracking ? 1 : 0.4, pointerEvents: enableTimeTracking ? 'auto' : 'none' }}>
