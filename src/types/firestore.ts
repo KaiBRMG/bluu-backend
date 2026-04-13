@@ -327,6 +327,21 @@ export interface CreatorDocument {
   stageName: string;
 }
 
+export interface CreatorFullDocument {
+  uid: string;
+  creatorID: string;        // same as uid
+  stageName: string;
+  userEmail: string;
+  displayName: string;      // same as stageName
+  photoURL: string | null;
+  photoStoragePath: string | null;
+  OFID: string;             // '@handle' format
+  isActive: boolean;
+  isArchived: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 // ─── Resolved access (returned to client after permission resolution) ─
 
 export interface ResolvedAccess {

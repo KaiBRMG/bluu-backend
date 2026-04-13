@@ -23,9 +23,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser && currentUser.email) {
-        // Verify the email domain
+        // Only manage auth state for internal employees (@bluurock.com).
+        // Creator accounts (non-bluurock email) are handled by CreatorAuthProvider
+        // in the creator portal — do not sign them out from here.
         if (!currentUser.email.endsWith('@bluurock.com')) {
-          await auth.signOut();
           setUser(null);
           setLoading(false);
           return;
