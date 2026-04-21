@@ -35,7 +35,7 @@ const nextConfig: NextConfig = {
   // Ensure module resolution always includes src/node_modules, even when the
   // dev server is invoked from the monorepo root (CSS @import "tailwindcss"
   // otherwise fails to resolve because no root-level node_modules exists).
-  Turbopack: (config) => {
+  webpack: (config) => {
     config.resolve = config.resolve || {};
     config.resolve.modules = [
       path.resolve(__dirname, 'node_modules'),
