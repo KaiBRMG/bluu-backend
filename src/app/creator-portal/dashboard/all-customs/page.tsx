@@ -18,11 +18,9 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { MoreHorizontal, ArrowLeft, ExternalLink } from "lucide-react";
-import { type CampaignEntry, type CRType, STATUS_COLORS, formatAmount, formatDueDate, firestoreToEntry } from "@/lib/campaignTracking";
+import { type CampaignEntry, STATUS_COLORS, TYPE_LABELS, formatAmount, formatDueDate, firestoreToEntry } from "@/lib/campaignTracking";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
-
-const TYPE_LABELS: Record<CRType, string> = { CR: "Custom Request", Call: "Call", Item: "Item" };
 const PAGE_SIZE = 20;
 
 // ─── Detail View Card ─────────────────────────────────────────────────────────
@@ -142,6 +140,11 @@ export default function AllCustomsPage() {
     }
   };
 
+  const totalPages = entries.length === 0 ? 1 : Math.ceil(entries.length / PAGE_SIZE);
+  const page = Math.min(currentPage, totalPages);
+  const pageEntries = entries.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const goTo = (p: number) => setCurrentPage(Math.max(1, Math.min(p, totalPages)));
+
   return (
     <div className="min-h-screen" style={{ background: "#09090b", color: "white" }}>
       {/* Top bar */}
@@ -179,119 +182,112 @@ export default function AllCustomsPage() {
           >
             <p className="text-zinc-500 text-sm">No custom requests found.</p>
           </div>
-        ) : (() => {
-          const totalPages = Math.ceil(entries.length / PAGE_SIZE);
-          const page = Math.min(currentPage, totalPages);
-          const pageEntries = entries.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-          const goTo = (p: number) => setCurrentPage(Math.max(1, Math.min(p, totalPages)));
-
-          return (
-            <>
-              <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>CR</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Fan Name</TableHead>
-                      <TableHead>Due Date</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="w-12"></TableHead>
+        ) : (
+          <>
+            <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>CR</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Fan Name</TableHead>
+                    <TableHead>Due Date</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="w-12"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pageEntries.map(entry => (
+                    <TableRow key={entry.id}>
+                      <TableCell className="font-mono text-sm text-violet-300">{entry.CR}</TableCell>
+                      <TableCell className="text-sm text-zinc-400">{TYPE_LABELS[entry.type]}</TableCell>
+                      <TableCell className="text-sm">{entry.fanName}</TableCell>
+                      <TableCell className="text-sm text-zinc-400">
+                        {entry.dueDate ? `${formatDueDate(entry.dueDate)}${entry.dueDateTimezone ? ` (${entry.dueDateTimezone})` : ""}` : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[entry.status]}`}>
+                          {entry.status}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreHorizontal className="w-4 h-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => setViewEntry(entry)}>View</DropdownMenuItem>
+                            {entry.status === "In Progress" && (
+                              <DropdownMenuItem onClick={() => handleStatusChange(entry, false)}>
+                                Mark as Complete
+                              </DropdownMenuItem>
+                            )}
+                            {entry.status === "Completed" && !entry.isArchived && (
+                              <DropdownMenuItem onClick={() => handleStatusChange(entry, true)}>
+                                Mark as Incomplete
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {pageEntries.map(entry => (
-                      <TableRow key={entry.id}>
-                        <TableCell className="font-mono text-sm text-violet-300">{entry.CR}</TableCell>
-                        <TableCell className="text-sm text-zinc-400">{TYPE_LABELS[entry.type]}</TableCell>
-                        <TableCell className="text-sm">{entry.fanName}</TableCell>
-                        <TableCell className="text-sm text-zinc-400">
-                          {entry.dueDate ? `${formatDueDate(entry.dueDate)}${entry.dueDateTimezone ? ` (${entry.dueDateTimezone})` : ""}` : "—"}
-                        </TableCell>
-                        <TableCell>
-                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[entry.status]}`}>
-                            {entry.status}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8">
-                                <MoreHorizontal className="w-4 h-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => setViewEntry(entry)}>View</DropdownMenuItem>
-                              {entry.status === "In Progress" && (
-                                <DropdownMenuItem onClick={() => handleStatusChange(entry, false)}>
-                                  Mark as Complete
-                                </DropdownMenuItem>
-                              )}
-                              {entry.status === "Completed" && !entry.isArchived && (
-                                <DropdownMenuItem onClick={() => handleStatusChange(entry, true)}>
-                                  Mark as Incomplete
-                                </DropdownMenuItem>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
 
-              {totalPages > 1 && (
-                <Pagination className="mt-6">
-                  <PaginationContent>
-                    <PaginationItem>
-                      <PaginationPrevious
-                        href="#"
-                        onClick={e => { e.preventDefault(); goTo(page - 1); }}
-                        aria-disabled={page === 1}
-                        className={page === 1 ? "pointer-events-none opacity-40" : ""}
-                      />
-                    </PaginationItem>
+            {totalPages > 1 && (
+              <Pagination className="mt-6">
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      href="#"
+                      onClick={e => { e.preventDefault(); goTo(page - 1); }}
+                      aria-disabled={page === 1}
+                      className={page === 1 ? "pointer-events-none opacity-40" : ""}
+                    />
+                  </PaginationItem>
 
-                    {Array.from({ length: totalPages }, (_, i) => i + 1)
-                      .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
-                      .reduce<(number | "ellipsis")[]>((acc, p, idx, arr) => {
-                        if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push("ellipsis");
-                        acc.push(p);
-                        return acc;
-                      }, [])
-                      .map((item, idx) =>
-                        item === "ellipsis" ? (
-                          <PaginationItem key={`ellipsis-${idx}`}>
-                            <PaginationEllipsis />
-                          </PaginationItem>
-                        ) : (
-                          <PaginationItem key={item}>
-                            <PaginationLink
-                              href="#"
-                              isActive={item === page}
-                              onClick={e => { e.preventDefault(); goTo(item); }}
-                            >
-                              {item}
-                            </PaginationLink>
-                          </PaginationItem>
-                        )
-                      )}
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+                    .reduce<(number | "ellipsis")[]>((acc, p, idx, arr) => {
+                      if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push("ellipsis");
+                      acc.push(p);
+                      return acc;
+                    }, [])
+                    .map((item, idx) =>
+                      item === "ellipsis" ? (
+                        <PaginationItem key={`ellipsis-${idx}`}>
+                          <PaginationEllipsis />
+                        </PaginationItem>
+                      ) : (
+                        <PaginationItem key={item}>
+                          <PaginationLink
+                            href="#"
+                            isActive={item === page}
+                            onClick={e => { e.preventDefault(); goTo(item); }}
+                          >
+                            {item}
+                          </PaginationLink>
+                        </PaginationItem>
+                      )
+                    )}
 
-                    <PaginationItem>
-                      <PaginationNext
-                        href="#"
-                        onClick={e => { e.preventDefault(); goTo(page + 1); }}
-                        aria-disabled={page === totalPages}
-                        className={page === totalPages ? "pointer-events-none opacity-40" : ""}
-                      />
-                    </PaginationItem>
-                  </PaginationContent>
-                </Pagination>
-              )}
-            </>
-          );
-        })()}
+                  <PaginationItem>
+                    <PaginationNext
+                      href="#"
+                      onClick={e => { e.preventDefault(); goTo(page + 1); }}
+                      aria-disabled={page === totalPages}
+                      className={page === totalPages ? "pointer-events-none opacity-40" : ""}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            )}
+          </>
+        )}
       </main>
 
       {viewEntry && (

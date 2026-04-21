@@ -3,6 +3,7 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById } from '@/lib/services/userService';
+import { getOFAMUids } from '@/lib/services/campaignTrackingService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { CRStatus } from '@/lib/campaignTracking';
 
@@ -12,15 +13,6 @@ const EDITABLE_FIELDS = [
   'status', 'priority', 'managerComment', 'isArchived',
 ] as const;
 
-async function getOFAMUids(): Promise<string[]> {
-  const snap = await adminDb.collection('groups').doc('OFAM').get();
-  return (snap.data()?.members as string[]) ?? [];
-}
-
-/**
- * PATCH /api/campaign-tracking/[id]
- * Updates an entry. Handles status-change notifications.
- */
 export const PATCH = withAuth(async (request: NextRequest, token: DecodedIdToken, params: Promise<{ id: string }>) => {
   try {
     const caller = await getUserById(token.uid);
@@ -75,7 +67,7 @@ export const PATCH = withAuth(async (request: NextRequest, token: DecodedIdToken
           read: false,
           dismissedByUser: false,
           createdAt: FieldValue.serverTimestamp(),
-          actionUrl: 'ca-portal/custom-requests',
+          actionUrl: '/ca-portal/custom-requests',
           announcement: false,
           announcementExpiry: null,
         });
@@ -95,7 +87,7 @@ export const PATCH = withAuth(async (request: NextRequest, token: DecodedIdToken
               read: false,
               dismissedByUser: false,
               createdAt: FieldValue.serverTimestamp(),
-              actionUrl: 'creators/custom-requests',
+              actionUrl: '/creators/custom-requests',
               announcement: false,
               announcementExpiry: null,
             });
@@ -112,10 +104,6 @@ export const PATCH = withAuth(async (request: NextRequest, token: DecodedIdToken
   }
 });
 
-/**
- * DELETE /api/campaign-tracking/[id]
- * Permanently deletes an entry. Requires manager permission.
- */
 export const DELETE = withAuth(async (_request: NextRequest, token: DecodedIdToken, params: Promise<{ id: string }>) => {
   try {
     const caller = await getUserById(token.uid);

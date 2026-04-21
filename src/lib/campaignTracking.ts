@@ -134,6 +134,13 @@ export const COMMON_TIMEZONES = [
   { label: 'Sydney (AEST)', value: 'Australia/Sydney' },
 ];
 
+export interface Creator {
+  creatorID: string;
+  stageName: string;
+}
+
+export const TYPE_LABELS: Record<CRType, string> = { CR: 'Custom Request', Call: 'Call', Item: 'Item' };
+
 export function firestoreToEntry(id: string, data: Record<string, unknown>): CampaignEntry {
   // dueDate may be a legacy Firestore Timestamp or a plain "YYYY-MM-DD" string (new format)
   const rawDue = data.dueDate as { toDate?: () => Date } | string | null | undefined;

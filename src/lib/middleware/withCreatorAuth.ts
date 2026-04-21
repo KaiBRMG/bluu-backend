@@ -13,8 +13,8 @@ export function withCreatorAuth(
 ): (req: NextRequest) => Promise<NextResponse>;
 
 export function withCreatorAuth<TParams>(
-  handler: (req: NextRequest, token: DecodedIdToken, params: TParams) => Promise<NextResponse>
-): (req: NextRequest, context: { params: TParams }) => Promise<NextResponse>;
+  handler: (req: NextRequest, token: DecodedIdToken, params: Promise<TParams>) => Promise<NextResponse>
+): (req: NextRequest, context: { params: Promise<TParams> }) => Promise<NextResponse>;
 
 export function withCreatorAuth(handler: Function) {
   return async (req: NextRequest, context?: { params: unknown }) => {

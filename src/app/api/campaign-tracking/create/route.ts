@@ -3,14 +3,10 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById } from '@/lib/services/userService';
+import { getOFAMUids } from '@/lib/services/campaignTrackingService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { CRType, CallType } from '@/lib/campaignTracking';
 import { formatCR } from '@/lib/campaignTracking';
-
-async function getOFAMUids(): Promise<string[]> {
-  const snap = await adminDb.collection('groups').doc('OFAM').get();
-  return (snap.data()?.members as string[]) ?? [];
-}
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
@@ -63,8 +59,10 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       const creatorSnap = await tx.get(creatorRef);
       if (!creatorSnap.exists) throw new Error('Creator not found');
 
-      const nextNum = (creatorSnap.data()?.lastCRID ?? 0) + 1;
+      const creatorData = creatorSnap.data()!;
+      const nextNum = (creatorData.lastCRID ?? 0) + 1;
       const cr = formatCR(nextNum);
+      const stageName = (creatorData.stageName as string | undefined) ?? creatorID;
 
       const entryData: Record<string, unknown> = {
         CR: cr,
@@ -103,25 +101,23 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       tx.update(creatorRef, { lastCRID: nextNum });
       tx.set(entryRef, entryData);
 
-      return { id: entryRef.id, CR: cr };
+      return { id: entryRef.id, CR: cr, stageName };
     });
 
     // Notify OFAM
     const ofamUids = await getOFAMUids();
     if (ofamUids.length > 0) {
-      const creatorSnap = await adminDb.collection('creators').doc(creatorID).get();
-      const stageName = creatorSnap.data()?.stageName ?? creatorID;
       const notifBatch = adminDb.batch();
       for (const uid of ofamUids) {
         notifBatch.set(adminDb.collection('notifications').doc(), {
           userId: uid,
           title: '📷 A New CR has been Created!',
-          message: `${caller.displayName ?? token.uid} has added a new CR for ${stageName}. Review the details and approve ASAP!`,
+          message: `${caller.displayName ?? token.uid} has added a new CR for ${result.stageName}. Review the details and approve ASAP!`,
           type: 'action',
           read: false,
           dismissedByUser: false,
           createdAt: FieldValue.serverTimestamp(),
-          actionUrl: 'creators/custom-requests',
+          actionUrl: '/creators/custom-requests',
           announcement: false,
           announcementExpiry: null,
         });
@@ -129,7 +125,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       await notifBatch.commit();
     }
 
-    return NextResponse.json({ success: true, ...result });
+    return NextResponse.json({ success: true, id: result.id, CR: result.CR });
   } catch (error: unknown) {
     console.error('[POST /api/campaign-tracking/create]', error);
     return NextResponse.json({ error: 'Failed to create entry' }, { status: 500 });

@@ -4,7 +4,7 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 
 export type AuthedHandler<TParams = undefined> = TParams extends undefined
   ? (req: NextRequest, token: DecodedIdToken) => Promise<NextResponse>
-  : (req: NextRequest, token: DecodedIdToken, params: TParams) => Promise<NextResponse>;
+  : (req: NextRequest, token: DecodedIdToken, params: Promise<TParams>) => Promise<NextResponse>;
 
 /**
  * Wraps a route handler with Firebase token verification.
@@ -16,8 +16,8 @@ export function withAuth(
 ): (req: NextRequest) => Promise<NextResponse>;
 
 export function withAuth<TParams>(
-  handler: (req: NextRequest, token: DecodedIdToken, params: TParams) => Promise<NextResponse>
-): (req: NextRequest, context: { params: TParams }) => Promise<NextResponse>;
+  handler: (req: NextRequest, token: DecodedIdToken, params: Promise<TParams>) => Promise<NextResponse>
+): (req: NextRequest, context: { params: Promise<TParams> }) => Promise<NextResponse>;
 
 export function withAuth(handler: Function) {
   return async (req: NextRequest, context?: { params: unknown }) => {

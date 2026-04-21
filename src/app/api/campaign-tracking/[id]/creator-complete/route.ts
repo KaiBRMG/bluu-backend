@@ -2,18 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withCreatorAuth } from '@/lib/middleware/withCreatorAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
+import { getOFAMUids } from '@/lib/services/campaignTrackingService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
-async function getOFAMUids(): Promise<string[]> {
-  const snap = await adminDb.collection('groups').doc('OFAM').get();
-  return (snap.data()?.members as string[]) ?? [];
-}
-
-/**
- * POST /api/campaign-tracking/[id]/creator-complete
- * Creator marks an entry as Completed (or reverts to Awaiting Approval).
- * Only the creator whose creatorID matches may call this.
- */
 export const POST = withCreatorAuth(async (_request: NextRequest, token: DecodedIdToken, params: Promise<{ id: string }>) => {
   try {
     const { id } = await params;
@@ -37,9 +28,11 @@ export const POST = withCreatorAuth(async (_request: NextRequest, token: Decoded
     });
 
     if (newStatus === 'Completed') {
-      const ofamUids = await getOFAMUids();
+      const [ofamUids, creatorSnap] = await Promise.all([
+        getOFAMUids(),
+        adminDb.collection('creators').doc(data.creatorID).get(),
+      ]);
       if (ofamUids.length > 0) {
-        const creatorSnap = await adminDb.collection('creators').doc(data.creatorID).get();
         const stageName = creatorSnap.data()?.stageName ?? data.creatorID;
         const notifBatch = adminDb.batch();
         for (const uid of ofamUids) {

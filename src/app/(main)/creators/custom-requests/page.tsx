@@ -23,20 +23,13 @@ import { Plus, MoreHorizontal, Check } from "lucide-react";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "@/firebase-config";
 import {
-  type CampaignEntry, type CRType, type CRStatus, type CRPriority, type CallType,
-  STATUS_COLORS, STATUS_DOT, STATUS_SORT, PRIORITY_COLORS, truncate, formatAmount, sortByStatus,
+  type CampaignEntry, type CRType, type CRStatus, type CRPriority, type CallType, type Creator,
+  STATUS_COLORS, STATUS_DOT, STATUS_SORT, PRIORITY_COLORS, TYPE_LABELS, truncate, formatAmount, sortByStatus,
   firestoreToEntry, formatInTimezone, COMMON_TIMEZONES,
 } from "@/lib/campaignTracking";
 import { useUserData } from "@/hooks/useUserData";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface Creator {
-  creatorID: string;
-  stageName: string;
-}
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
@@ -152,6 +145,7 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onRe
   const hasChanged =
     fields.fanName !== entry.fanName ||
     fields.profileLink !== entry.profileLink ||
+    fields.description !== entry.description ||
     fields.length !== (entry.length ?? "") ||
     fields.address !== (entry.address ?? "") ||
     fields.socialUsername !== (entry.socialUsername ?? "") ||
@@ -526,7 +520,7 @@ function SummaryTile({ title, children }: { title: string; children: React.React
   );
 }
 
-// ─── New Entry Wizard (same as CA portal) ─────────────────────────────────────
+// ─── New Entry Wizard ─────────────────────────────────────────────────────────
 
 interface NewEntryWizardProps {
   creators: Creator[];
@@ -542,11 +536,8 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
     creatorID: "", fanName: "", profileLink: "", description: "",
     length: "", totalAmount: "", amountPaid: "",
     address: "", socialUsername: "", socialPlatform: "", callType: "", dueDate: "",
-    dueDateTimezone: "",
+    dueDateTimezone: userData?.timezone ?? "",
   });
-  useEffect(() => {
-    if (userData?.timezone) setForm(prev => ({ ...prev, dueDateTimezone: prev.dueDateTimezone || userData.timezone! }));
-  }, [userData?.timezone]);
   const [submitting, setSubmitting] = useState(false);
 
   const setField = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -670,8 +661,6 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
 }
 
 // ─── Manager Creator Table ────────────────────────────────────────────────────
-
-const TYPE_LABELS: Record<CRType, string> = { CR: "Custom Request", Call: "Call", Item: "Item" };
 
 interface ManagerTableProps {
   creatorID: string;

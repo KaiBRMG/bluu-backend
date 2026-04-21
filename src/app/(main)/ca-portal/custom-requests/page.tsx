@@ -24,20 +24,13 @@ import { MoreHorizontal, Plus, AlertCircle } from "lucide-react";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "@/firebase-config";
 import {
-  type CampaignEntry, type CRType, type CRStatus, type CallType,
-  STATUS_COLORS, STATUS_SORT, PRIORITY_COLORS, truncate, formatAmount, sortByStatus,
+  type CampaignEntry, type CRType, type CRStatus, type CallType, type Creator,
+  STATUS_COLORS, STATUS_SORT, PRIORITY_COLORS, TYPE_LABELS, truncate, formatAmount, sortByStatus,
   firestoreToEntry, formatInTimezone, COMMON_TIMEZONES,
 } from "@/lib/campaignTracking";
 import { useUserData } from "@/hooks/useUserData";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface Creator {
-  creatorID: string;
-  stageName: string;
-}
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
@@ -56,10 +49,9 @@ interface ViewCardProps {
   creatorName: string;
   readOnly: boolean;
   onClose: () => void;
-  onSaved: () => void;
 }
 
-function ViewCard({ entry, creatorName, readOnly, onClose, onSaved }: ViewCardProps) {
+function ViewCard({ entry, creatorName, readOnly, onClose }: ViewCardProps) {
   const { userData } = useUserData();
   const userTz = userData?.timezone || undefined;
   const [amountPaid, setAmountPaid] = useState(String(entry.amountPaid));
@@ -114,7 +106,6 @@ function ViewCard({ entry, creatorName, readOnly, onClose, onSaved }: ViewCardPr
       });
       if (!res.ok) throw new Error("Save failed");
       toast.success("Saved");
-      onSaved();
       onClose();
     } catch {
       toast.error("Failed to save");
@@ -241,10 +232,9 @@ interface RejectedCardProps {
   entry: CampaignEntry;
   creatorName: string;
   onClose: () => void;
-  onSaved: () => void;
 }
 
-function RejectedCard({ entry, creatorName, onClose, onSaved }: RejectedCardProps) {
+function RejectedCard({ entry, creatorName, onClose }: RejectedCardProps) {
   const [fields, setFields] = useState({
     fanName: entry.fanName,
     profileLink: entry.profileLink,
@@ -292,7 +282,6 @@ function RejectedCard({ entry, creatorName, onClose, onSaved }: RejectedCardProp
       });
       if (!res.ok) throw new Error();
       toast.success("Resubmitted");
-      onSaved();
       onClose();
     } catch {
       toast.error("Failed to resubmit");
@@ -576,7 +565,6 @@ interface CreatorTableProps {
   onCreated: () => void;
 }
 
-const TYPE_LABELS: Record<CRType, string> = { CR: "Custom Request", Call: "Call", Item: "Item" };
 const PAGE_SIZE = 20;
 
 function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onCreated }: CreatorTableProps) {
@@ -759,7 +747,6 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
           creatorName={creatorName}
           readOnly={viewEntry.status === "In Progress" || viewEntry.status === "Completed"}
           onClose={() => setViewEntry(null)}
-          onSaved={() => {}}
         />
       )}
     </div>
@@ -780,32 +767,23 @@ function MyCustomsKanban({ currentUserUid, creators }: MyCustomsProps) {
   const [rejectedEntries, setRejectedEntries] = useState<CampaignEntry[]>([]);
   const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
   const [showNew, setShowNew] = useState(false);
-  const unsubActive = useRef<(() => void) | null>(null);
-  const unsubRejected = useRef<(() => void) | null>(null);
+  const unsubRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    const qActive = query(
+    const q = query(
       collection(db, "campaign-tracking"),
       where("createdBy", "==", currentUserUid),
-      where("status", "in", ["Awaiting Approval", "In Progress"])
+      where("status", "in", ["Awaiting Approval", "In Progress", "Rejected"])
     );
-    unsubActive.current = onSnapshot(qActive, snap => {
+    unsubRef.current = onSnapshot(q, snap => {
       const docs = snap.docs.map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>));
-      // Sort: Awaiting Approval first
-      docs.sort((a, b) => STATUS_SORT[a.status] - STATUS_SORT[b.status]);
-      setActiveEntries(docs);
+      const active = docs.filter(e => e.status !== "Rejected");
+      active.sort((a, b) => STATUS_SORT[a.status] - STATUS_SORT[b.status]);
+      setActiveEntries(active);
+      setRejectedEntries(docs.filter(e => e.status === "Rejected"));
     });
 
-    const qRejected = query(
-      collection(db, "campaign-tracking"),
-      where("createdBy", "==", currentUserUid),
-      where("status", "==", "Rejected")
-    );
-    unsubRejected.current = onSnapshot(qRejected, snap => {
-      setRejectedEntries(snap.docs.map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>)));
-    });
-
-    return () => { unsubActive.current?.(); unsubRejected.current?.(); };
+    return () => { unsubRef.current?.(); };
   }, [currentUserUid]);
 
   const creatorMap = Object.fromEntries(creators.map(c => [c.creatorID, c.stageName]));
@@ -822,8 +800,7 @@ function MyCustomsKanban({ currentUserUid, creators }: MyCustomsProps) {
   const outstandingAmount = [...activeEntries, ...rejectedEntries]
     .reduce((sum, e) => sum + (e.totalAmount - e.amountPaid), 0);
 
-  const selectedEntry = viewEntry;
-  const isRejectedView = selectedEntry && selectedEntry.status === "Rejected";
+  const isRejectedView = viewEntry && viewEntry.status === "Rejected";
 
   return (
     <div>
@@ -926,21 +903,19 @@ function MyCustomsKanban({ currentUserUid, creators }: MyCustomsProps) {
           onCreated={() => {}}
         />
       )}
-      {selectedEntry && isRejectedView && (
+      {viewEntry && isRejectedView && (
         <RejectedCard
-          entry={selectedEntry}
-          creatorName={creatorMap[selectedEntry.creatorID] ?? selectedEntry.creatorID}
+          entry={viewEntry}
+          creatorName={creatorMap[viewEntry.creatorID] ?? viewEntry.creatorID}
           onClose={() => setViewEntry(null)}
-          onSaved={() => {}}
         />
       )}
-      {selectedEntry && !isRejectedView && (
+      {viewEntry && !isRejectedView && (
         <ViewCard
-          entry={selectedEntry}
-          creatorName={creatorMap[selectedEntry.creatorID] ?? selectedEntry.creatorID}
-          readOnly={selectedEntry.status === "In Progress" || selectedEntry.status === "Completed"}
+          entry={viewEntry}
+          creatorName={creatorMap[viewEntry.creatorID] ?? viewEntry.creatorID}
+          readOnly={viewEntry.status === "In Progress" || viewEntry.status === "Completed"}
           onClose={() => setViewEntry(null)}
-          onSaved={() => {}}
         />
       )}
     </div>
