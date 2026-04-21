@@ -16,6 +16,7 @@ import {
 import { useUserData } from '@/hooks/useUserData';
 
 const HEARTBEAT_INTERVAL_MS   = 15 * 60 * 1000; // 15 minutes — working state only
+const SLEEP_GAP_THRESHOLD_MS  = HEARTBEAT_INTERVAL_MS + 5 * 60 * 1000; // 20 min — gap larger than this implies the process was suspended
 const IDLE_CHECK_INTERVAL_MS  = 30_000;          // poll for idle every 30s
 const IDLE_RESUME_CHECK_MS    = 5_000;           // poll for resume every 5s
 const IDLE_THRESHOLD_SECONDS  = 900;             // 15 minutes without input = idle
@@ -280,11 +281,44 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     }
 
     if (displayState === 'working') {
-      heartbeatRef.current = setInterval(() => {
+      heartbeatRef.current = setInterval(async () => {
         const sid = sessionIdRef.current;
-        if (sid) {
-          appendEvent(sid, { type: 'activity', timestamp: Date.now() }).catch(() => {});
+        if (!sid) return;
+
+        const now = Date.now();
+
+        // Sleep gap detection: if the process was suspended (OS sleep), the
+        // frozen interval fires on wake with a gap far larger than the heartbeat
+        // period. Retroactively inject pause/resume so the sleep time is excluded
+        // from working seconds rather than silently counted as worked time.
+        try {
+          const buf = await getBuffer(sid);
+          if (buf && buf.events.length > 0) {
+            const lastEvent = buf.events.at(-1)!;
+            const gap = now - lastEvent.timestamp;
+            const inWorkingSegment = !['pause', 'idle-start', 'break-start', 'clock-out'].includes(lastEvent.type);
+
+            if (gap > SLEEP_GAP_THRESHOLD_MS && inWorkingSegment) {
+              await appendEvent(sid, { type: 'pause', timestamp: lastEvent.timestamp + 1000 });
+              await appendEvent(sid, { type: 'resume', timestamp: now });
+              const patchedBuf = await getBuffer(sid);
+              if (patchedBuf) {
+                const totals = parseBuffer(patchedBuf.events);
+                sessionBaseSecondsRef.current = totals.workingSeconds;
+                breakUsedSecondsRef.current   = totals.breakSeconds;
+                // Update the ref immediately so the next tick uses the correct base;
+                // setEntryStartTime keeps React state consistent and restarts the tick.
+                entryStartTimeRef.current = now;
+                setEntryStartTime(now);
+                setElapsedSeconds(totals.workingSeconds);
+              }
+            }
+          }
+        } catch {
+          // Non-critical — proceed with the normal heartbeat regardless
         }
+
+        appendEvent(sid, { type: 'activity', timestamp: now }).catch(() => {});
         apiCall('heartbeat', 'POST').catch(err => {
           console.error('[TimeTracking] Heartbeat failed:', err);
         });

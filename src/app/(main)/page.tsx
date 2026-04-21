@@ -412,7 +412,7 @@ export default function Home() {
         <AnnouncementBanner announcements={announcements} />
 
         {/* Quick stats or widgets can go here */}
-        <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+        <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
           <Card
             style={{
               background: userGroup === 'unassigned' ? 'rgba(223,98,110,0.1)' : '#171717',

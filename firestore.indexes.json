@@ -33,13 +33,6 @@
       ]
     },
     {
-      "collectionGroup": "screenshots",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "storagePath", "order": "ASCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "active_sessions",
       "queryScope": "COLLECTION",
       "fields": [
@@ -91,19 +84,48 @@
       ]
     },
     {
-      "collectionGroup": "shifts",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "seriesId", "order": "ASCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "notifications",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "userId", "order": "ASCENDING" },
         { "fieldPath": "dismissedByUser", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "campaign-tracking",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "creatorID", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdTime", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "campaign-tracking",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "creatorID", "order": "ASCENDING" },
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "campaign-tracking",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "createdBy", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdTime", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "campaign-tracking",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isArchived", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "lastEditedTime", "order": "DESCENDING" }
       ]
     }
   ],

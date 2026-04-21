@@ -1,15 +1,6 @@
 import type { Metadata } from "next";
-import { SpeedInsights } from "@vercel/speed-insights/next"
-import { Analytics } from "@vercel/analytics/next"
 import localFont from "next/font/local";
 import "./globals.css";
-import { AuthProvider } from "@/components/AuthProvider";
-import { NetworkStatusProvider } from "@/contexts/NetworkStatusContext";
-import { UserDataProvider } from "@/hooks/useUserData";
-import AuthWrapper from "@/components/AuthWrapper";
-import ErrorLogger from "@/components/ErrorLogger";
-import UpdateBanner from "@/components/UpdateBanner";
-import LazyProviders from "@/components/LazyProviders";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -27,7 +18,6 @@ const googleSans = localFont({
   variable: "--font-geist-sans",
 });
 
-
 export const metadata: Metadata = {
   title: "Bluu Backend",
   description: "Internal company application",
@@ -44,22 +34,8 @@ export default function RootLayout({
         className={`${googleSans.variable} font-sans antialiased bg-background text-foreground`}
       >
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
-        <AuthProvider>
-          <NetworkStatusProvider>
-            <UserDataProvider>
-              <ErrorLogger />
-              <LazyProviders>
-                <AuthWrapper>
-                  {children}
-                </AuthWrapper>
-                <UpdateBanner />
-                <Toaster />
-                <SpeedInsights />
-                <Analytics />
-              </LazyProviders>
-            </UserDataProvider>
-          </NetworkStatusProvider>
-        </AuthProvider>
+          {children}
+          <Toaster />
         </ThemeProvider>
       </body>
     </html>

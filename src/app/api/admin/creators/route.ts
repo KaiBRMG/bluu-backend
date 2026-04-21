@@ -49,7 +49,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     }
 
     const body = await request.json();
-    const { stageName, userEmail, password, OFID } = body;
+    const { stageName, userEmail, password, OFID, driveLink = '' } = body;
 
     if (!stageName || !userEmail || !password || !OFID) {
       return NextResponse.json({ error: 'stageName, userEmail, password, and OFID are required' }, { status: 400 });
@@ -95,6 +95,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       OFID,
       isActive: true,
       isArchived: false,
+      driveLink: driveLink || '',
+      lastCRID: 0,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });

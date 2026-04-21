@@ -143,10 +143,9 @@ Pages are code-defined in `src/lib/definitions.ts` (not Firestore). `page-permis
 
 - shadcn/ui components (`src/components/ui/`) — Radix UI primitives with Tailwind
 - ONLY use visual components and styling from `src/components/ui`.
-- `@tabler/icons-react` and `lucide-react` for icons
+- ONLY use `@tabler/icons-react` and `lucide-react` for icons
 - CSS variables for theming (`var(--foreground)`, etc.)
 - `sonner` for toast notifications
-- `@tanstack/react-table` for data tables
 - `@dnd-kit` for drag-and-drop
 
 

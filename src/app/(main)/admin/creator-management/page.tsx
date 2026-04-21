@@ -18,7 +18,7 @@ import {
 import {
   Card, CardHeader, CardTitle, CardContent, CardFooter,
 } from "@/components/ui/card";
-import { MoreHorizontal, UserCircle } from "lucide-react";
+import { MoreHorizontal, UserCircle, Copy, Check } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +35,7 @@ interface Creator {
   isArchived: boolean;
   createdAt: string | null;
   updatedAt: string | null;
+  driveLink?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -79,12 +80,21 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
   const [stageName, setStageName] = useState(initial?.stageName ?? '');
   const [OFID, setOFID] = useState(initial?.OFID ?? '');
   const [userEmail, setUserEmail] = useState(initial?.userEmail ?? '');
+  const [driveLink, setDriveLink] = useState(initial?.driveLink ?? '');
   const [password, setPassword] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(initial?.photoURL ?? null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  const copyPassword = () => {
+    if (!password) return;
+    navigator.clipboard.writeText(password);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -101,7 +111,7 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
     try {
       if (isEdit && initial) {
         // Update existing
-        const updateBody: Record<string, unknown> = { stageName, OFID };
+        const updateBody: Record<string, unknown> = { stageName, OFID, driveLink };
         if (password) updateBody.newPassword = password;
         const res = await apiRequest(`/api/admin/creators/${initial.uid}`, {
           method: 'PUT',
@@ -125,7 +135,7 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
         // Create new
         const res = await apiRequest('/api/admin/creators', {
           method: 'POST',
-          body: JSON.stringify({ stageName, userEmail, password, OFID }),
+          body: JSON.stringify({ stageName, userEmail, password, OFID, driveLink }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? 'Create failed');
@@ -167,13 +177,14 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
                   : <UserCircle className="w-10 h-10 text-zinc-500" />
                 }
               </div>
-              <button
+              <Button
                 type="button"
-                className="text-xs text-zinc-400 hover:text-white transition-colors"
+                variant="ghost"
+                className="text-xs text-zinc-400 hover:text-white h-auto px-2 py-1"
                 onClick={() => fileInputRef.current?.click()}
               >
                 {photoPreview ? 'Change photo' : 'Upload photo'}
-              </button>
+              </Button>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -211,6 +222,18 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
               </div>
             </div>
 
+            {/* Drive Link */}
+            <div>
+              <label className="block text-sm text-zinc-400 mb-1">Google Drive Link</label>
+              <input
+                type="url"
+                value={driveLink}
+                onChange={e => setDriveLink(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
+                placeholder="https://drive.google.com/..."
+              />
+            </div>
+
             {/* Email */}
             <div>
               <label className="block text-sm text-zinc-400 mb-1">Email</label>
@@ -229,15 +252,25 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
               <label className="block text-sm text-zinc-400 mb-1">
                 {isEdit ? 'New Password (optional)' : 'Password'}
               </label>
-              <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required={!isEdit}
-                autoComplete="new-password"
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
-                placeholder={isEdit ? 'Leave blank to keep current' : '••••••••'}
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  required={!isEdit}
+                  autoComplete="new-password"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 pr-10 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
+                  placeholder={isEdit ? 'Leave blank to keep current' : 'Enter password'}
+                />
+                <button
+                  type="button"
+                  onClick={copyPassword}
+                  disabled={!password}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
 
             {error && <p className="text-red-400 text-sm">{error}</p>}

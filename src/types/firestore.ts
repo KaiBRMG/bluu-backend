@@ -340,6 +340,8 @@ export interface CreatorFullDocument {
   isArchived: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+  driveLink?: string;
+  lastCRID?: number;
 }
 
 // ─── Resolved access (returned to client after permission resolution) ─

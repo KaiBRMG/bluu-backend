@@ -10,7 +10,7 @@ async function checkPermission(uid: string): Promise<boolean> {
   return !!caller?.permittedPageIds?.includes('admin-creator-management');
 }
 
-const ALLOWED_UPDATE_FIELDS = ['stageName', 'OFID', 'isActive', 'isArchived'] as const;
+const ALLOWED_UPDATE_FIELDS = ['stageName', 'OFID', 'isActive', 'isArchived', 'driveLink'] as const;
 
 /**
  * PUT /api/admin/creators/[creatorId]

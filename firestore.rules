@@ -23,8 +23,9 @@ service cloud.firestore {
     // up-to-date by recomputeUserPermissions / recomputePermissionsForGroup
     // whenever group membership or page permissions change.
     function hasPagePermission(pageId) {
-      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      return userDoc.get('permittedPageIds', []).hasAny([pageId]);
+      // get() returns null for missing docs — guard before chaining .data
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      return userDoc != null && userDoc.data.get('permittedPageIds', []).hasAny([pageId]);
     }
 
     // 1. Users collection
@@ -137,6 +138,19 @@ service cloud.firestore {
     // Admins may read all. No direct client writes permitted.
     match /leave_requests/{leaveId} {
       allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
+
+    // 14. Campaign tracking
+    // CA agents and managers read all entries; creators read only their own.
+    // All writes via Admin SDK (API routes).
+    match /campaign-tracking/{entryId} {
+      allow read: if isSignedIn() && (
+        isAdmin() ||
+        hasPagePermission('ca-custom-requests') ||
+        hasPagePermission('creator-custom-requests') ||
+        resource.data.creatorID == request.auth.uid
+      );
       allow write: if false;
     }
 

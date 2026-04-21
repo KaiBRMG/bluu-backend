@@ -63,7 +63,6 @@ function wallClockToUtcMs(
 // ─── Date arithmetic helpers ─────────────────────────────────────────
 
 // toLocalDateStr and addCalendarDays are imported from '@/lib/utils/timezone'
-}
 
 /** Add `n` calendar months to a "YYYY-MM-DD" string. */
 function addCalendarMonths(dateStr: string, n: number): string {
