@@ -23,13 +23,16 @@ export default function CreatorLoginPage() {
       if (!snap.exists()) {
         await auth.signOut();
         setError('No creator account found for this email.');
+        setLoading(false);
         return;
       }
       if (snap.data()?.isActive !== true) {
         await auth.signOut();
         setError('This account has been deactivated. Please contact your administrator.');
+        setLoading(false);
         return;
       }
+      // Success: keep loading=true, layout will redirect to dashboard
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code;
       if (code === 'auth/invalid-credential' || code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-login-credentials') {
@@ -41,7 +44,6 @@ export default function CreatorLoginPage() {
       } else {
         setError('Login failed. Please try again.');
       }
-    } finally {
       setLoading(false);
     }
   };

@@ -22,7 +22,10 @@ function CreatorAuthWrapper({ children }: { children: React.ReactNode }) {
     }
   }, [creatorUser, loading, isLoginRoute, router]);
 
-  if (loading) {
+  const redirecting =
+    !loading && ((!creatorUser && !isLoginRoute) || (creatorUser && isLoginRoute));
+
+  if (loading || redirecting) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-black">
         <Loader />
