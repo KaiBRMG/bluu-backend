@@ -773,6 +773,7 @@ function MyCustomsKanban({ currentUserUid, creators }: MyCustomsProps) {
   const userTz = userData?.timezone || undefined;
   const [activeEntries, setActiveEntries] = useState<CampaignEntry[]>([]);
   const [rejectedEntries, setRejectedEntries] = useState<CampaignEntry[]>([]);
+  const [completedUnpaidEntries, setCompletedUnpaidEntries] = useState<CampaignEntry[]>([]);
   const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
   const [showNew, setShowNew] = useState(false);
   const unsubRef = useRef<(() => void) | null>(null);
@@ -781,14 +782,16 @@ function MyCustomsKanban({ currentUserUid, creators }: MyCustomsProps) {
     const q = query(
       collection(db, "campaign-tracking"),
       where("createdBy", "==", currentUserUid),
-      where("status", "in", ["Awaiting Approval", "In Progress", "Rejected"])
+      where("status", "in", ["Awaiting Approval", "In Progress", "Rejected", "Completed"])
     );
     unsubRef.current = onSnapshot(q, snap => {
       const docs = snap.docs.map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>));
-      const active = docs.filter(e => e.status !== "Rejected");
+      const active = docs.filter(e => e.status === "Awaiting Approval" || e.status === "In Progress");
       active.sort((a, b) => STATUS_SORT[a.status] - STATUS_SORT[b.status]);
+      const completedUnpaid = docs.filter(e => e.status === "Completed" && e.amountPaid < e.totalAmount);
       setActiveEntries(active);
       setRejectedEntries(docs.filter(e => e.status === "Rejected"));
+      setCompletedUnpaidEntries(completedUnpaid);
     });
 
     return () => { unsubRef.current?.(); };
@@ -796,16 +799,17 @@ function MyCustomsKanban({ currentUserUid, creators }: MyCustomsProps) {
 
   const creatorMap = Object.fromEntries(creators.map(c => [c.creatorID, c.stageName]));
 
-  // Group active entries by creator
+  // Group active + completed-unpaid entries by creator
+  const kanbanEntries = [...activeEntries, ...completedUnpaidEntries];
   const byCreator: Record<string, CampaignEntry[]> = {};
-  for (const e of activeEntries) {
+  for (const e of kanbanEntries) {
     if (!byCreator[e.creatorID]) byCreator[e.creatorID] = [];
     byCreator[e.creatorID].push(e);
   }
 
   const activeCreators = creators.filter(c => byCreator[c.creatorID]?.length);
 
-  const outstandingAmount = [...activeEntries, ...rejectedEntries]
+  const outstandingAmount = [...activeEntries, ...completedUnpaidEntries, ...rejectedEntries]
     .reduce((sum, e) => sum + (e.totalAmount - e.amountPaid), 0);
 
   const isRejectedView = viewEntry && viewEntry.status === "Rejected";
@@ -866,7 +870,7 @@ function MyCustomsKanban({ currentUserUid, creators }: MyCustomsProps) {
             <div key={creator.creatorID} className="shrink-0 w-72">
               <div className="mb-3 px-1">
                 <h3 className="text-sm font-semibold text-zinc-300">{creator.stageName}</h3>
-                <p className="text-xs text-zinc-500">{byCreator[creator.creatorID].length} active</p>
+                <p className="text-xs text-zinc-500">{byCreator[creator.creatorID].length} entries</p>
               </div>
               <div className="flex flex-col gap-3">
                 {byCreator[creator.creatorID].map(entry => (
@@ -877,7 +881,12 @@ function MyCustomsKanban({ currentUserUid, creators }: MyCustomsProps) {
                   >
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <span className="font-mono text-xs text-zinc-400">{entry.CR}</span>
-                      <StatusBadge status={entry.status} />
+                      <div className="flex flex-col items-end gap-1">
+                        <StatusBadge status={entry.status} />
+                        {entry.amountPaid < entry.totalAmount && (
+                          <span className="text-xs font-medium text-red-400">Unpaid</span>
+                        )}
+                      </div>
                     </div>
                     <p className="text-sm font-medium text-zinc-200 mb-1">{entry.fanName}</p>
                     <p className="text-xs text-zinc-500 mb-3">{formatInTimezone(entry.createdTime, userTz)}</p>
