@@ -216,6 +216,7 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onRe
         <CardContent className="flex flex-col gap-4 max-h-[55vh] overflow-y-auto">
           <Field label="Fan Name"><input value={fields.fanName} onChange={set("fanName")} className={inputClass} /></Field>
           <Field label="Profile Link"><input value={fields.profileLink} onChange={set("profileLink")} className={inputClass} /></Field>
+          <Field label="Description"><textarea value={fields.description} onChange={set("description")} rows={3} className={`${inputClass} resize-none`} /></Field>
           {(entry.type === "CR" || entry.type === "Call") && (
             <Field label="Length"><input value={fields.length} onChange={set("length")} className={inputClass} /></Field>
           )}
@@ -462,8 +463,8 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
 
       {/* Outstanding Customs */}
       {outstandingEntries.length > 0 && (
-        <div className="rounded-xl p-4 border border-orange-500/30 bg-orange-500/5">
-          <h3 className="text-sm font-semibold text-orange-400 mb-3">Outstanding Customs</h3>
+        <div className="rounded-xl p-4 border border-blue-500/30 bg-blue-500/5">
+          <h3 className="text-sm font-semibold text-blue-400 mb-3">Outstanding Customs</h3>
           <div className="overflow-x-auto">
             <table className="text-xs w-full">
               <thead>
