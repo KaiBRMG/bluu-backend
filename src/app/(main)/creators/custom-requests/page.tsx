@@ -323,6 +323,7 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
   const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
   const [rejectEntry, setRejectEntry] = useState<CampaignEntry | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (unsubRef.current) unsubRef.current();
@@ -336,6 +337,19 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
     });
     return () => { unsubRef.current?.(); };
   }, []);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof window === "undefined" || !window.electronAPI) return;
+    const observer = new ResizeObserver(entries => {
+      const h = entries[0].contentRect.height;
+      if (h === 0) return;
+      const target = Math.max(870, Math.min(Math.ceil(h) + 220, screen.availHeight - 40));
+      window.electronAPI.window.setSize(1430, target);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loading]);
 
   const creatorMap = Object.fromEntries(creators.map(c => [c.creatorID, c.stageName]));
 
@@ -395,10 +409,24 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
     }
   };
 
+  const handleDismissAll = async () => {
+    try {
+      await Promise.all(recentCompleted.map(e =>
+        apiRequest(`/api/campaign-tracking/${e.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ isArchived: true }),
+        })
+      ));
+      toast.success("All dismissed");
+    } catch {
+      toast.error("Failed to dismiss all");
+    }
+  };
+
   if (loading) return <div className="text-sm text-zinc-500 p-8">Loading...</div>;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div ref={containerRef} className="flex flex-col gap-6">
       {/* Summary tiles */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <SummaryTile title="Awaiting Approval">
@@ -445,7 +473,12 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
       {/* Recently Completed */}
       {recentCompleted.length > 0 && (
         <div className="rounded-xl p-4 border border-green-500/30 bg-green-500/5">
-          <h3 className="text-sm font-semibold text-green-400 mb-3">Recently Completed</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-green-400">Recently Completed</h3>
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleDismissAll}>
+              Dismiss All
+            </Button>
+          </div>
           <div className="flex flex-col gap-2">
             {recentCompleted.map(e => (
               <div key={e.id} className="grid items-center gap-4 text-sm" style={{ gridTemplateColumns: "7rem 1fr auto auto" }}>
@@ -940,6 +973,12 @@ export default function ManagerCustomRequestsPage() {
       window.electronAPI.window.setSize(1430, 870);
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.electronAPI && activeTab !== "overview") {
+      window.electronAPI.window.setSize(1430, 870);
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (!user) return;
