@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Settings, House, ChevronLeft, ChevronDown, type LucideIcon } from "lucide-react";
+import { House, ChevronLeft, ChevronDown, type LucideIcon } from "lucide-react";
 import {
   MessageSquareQuote,
   ShieldUser,
@@ -134,29 +134,23 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
             </div>
           </SidebarMenuItem>
         </SidebarMenu>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              isActive={pathname === "/"}
+              tooltip="Home"
+            >
+              <Link href="/">
+                <House />
+                <span>Home</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarHeader>
 
       <SidebarContent>
-        {/* Home */}
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname === "/"}
-                  tooltip="Home"
-                >
-                  <Link href="/">
-                    <House />
-                    <span>Home</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
         {/* Teamspace groups */}
         {sortedTeamspaces.map((ts) => {
           const pages = accessiblePages
@@ -201,25 +195,6 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
           );
         })}
 
-        {/* Settings — pinned to bottom */}
-        <SidebarGroup className="mt-auto">
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/applications/settings")}
-                  tooltip="Settings"
-                >
-                  <Link href="/applications/settings/">
-                    <Settings />
-                    <span>Settings</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter>

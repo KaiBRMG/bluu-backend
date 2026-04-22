@@ -1,6 +1,7 @@
 "use client";
 
-import { IconDotsVertical, IconLogout } from "@tabler/icons-react";
+import { IconDotsVertical, IconLogout, IconSettings } from "@tabler/icons-react";
+import Link from "next/link";
 import { auth } from "@/firebase-config";
 import { clearPermissionsCache } from "@/lib/permissionsCache";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -86,6 +87,12 @@ export function NavUser({ user }: NavUserProps) {
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href="/applications/settings/">
+                <IconSettings />
+                Settings
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={handleSignOut} className="text-red-400">
               <IconLogout />
               Sign out
