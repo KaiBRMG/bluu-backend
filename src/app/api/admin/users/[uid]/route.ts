@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { getUserById, invalidateUserCache } from '@/lib/services/userService';
+import { invalidateAdminUsersCache } from '@/app/api/admin/users/route';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -72,6 +73,7 @@ export const PUT = withAuth(async (
       updatedAt: FieldValue.serverTimestamp(),
     });
     invalidateUserCache(targetUid);
+    invalidateAdminUsersCache();
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

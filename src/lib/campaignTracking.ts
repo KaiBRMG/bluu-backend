@@ -137,6 +137,7 @@ export const COMMON_TIMEZONES = [
 export interface Creator {
   creatorID: string;
   stageName: string;
+  defaultTimezone?: string;
 }
 
 export const TYPE_LABELS: Record<CRType, string> = { CR: 'Custom Request', Call: 'Call', Item: 'Item' };

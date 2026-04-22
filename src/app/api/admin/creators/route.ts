@@ -5,6 +5,32 @@ import { getUserById } from '@/lib/services/userService';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
+const CACHE_TTL_MS = 30_000;
+let cache: { data: Record<string, unknown>[]; expiresAt: number } | null = null;
+
+export function invalidateAdminCreatorsCache(): void {
+  cache = null;
+}
+
+async function fetchCreators() {
+  if (cache && Date.now() < cache.expiresAt) {
+    return cache.data;
+  }
+
+  const snapshot = await adminDb.collection('creators').get();
+  const creators = snapshot.docs.map(doc => {
+    const data = doc.data();
+    return {
+      ...data,
+      createdAt: data.createdAt?.toDate?.()?.toISOString() ?? null,
+      updatedAt: data.updatedAt?.toDate?.()?.toISOString() ?? null,
+    };
+  });
+
+  cache = { data: creators, expiresAt: Date.now() + CACHE_TTL_MS };
+  return creators;
+}
+
 async function checkPermission(uid: string): Promise<boolean> {
   const caller = await getUserById(uid);
   return !!caller?.permittedPageIds?.includes('admin-creator-management');
@@ -20,16 +46,7 @@ export const GET = withAuth(async (_request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    const snapshot = await adminDb.collection('creators').get();
-    const creators = snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        ...data,
-        createdAt: data.createdAt?.toDate?.()?.toISOString() ?? null,
-        updatedAt: data.updatedAt?.toDate?.()?.toISOString() ?? null,
-      };
-    });
-
+    const creators = await fetchCreators();
     return NextResponse.json({ creators });
   } catch (error: unknown) {
     console.error('[GET /api/admin/creators]', error);
@@ -49,7 +66,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     }
 
     const body = await request.json();
-    const { stageName, userEmail, password, OFID, driveLink = '' } = body;
+    const { stageName, userEmail, password, OFID, driveLink = '', defaultTimezone = '' } = body;
 
     if (!stageName || !userEmail || !password || !OFID) {
       return NextResponse.json({ error: 'stageName, userEmail, password, and OFID are required' }, { status: 400 });
@@ -96,11 +113,13 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       isActive: true,
       isArchived: false,
       driveLink: driveLink || '',
+      defaultTimezone: defaultTimezone || '',
       lastCRID: 0,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });
 
+    invalidateAdminCreatorsCache();
     return NextResponse.json({ success: true, uid });
   } catch (error: unknown) {
     console.error('[POST /api/admin/creators]', error);

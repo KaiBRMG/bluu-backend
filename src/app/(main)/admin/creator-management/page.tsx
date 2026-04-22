@@ -19,6 +19,8 @@ import {
   Card, CardHeader, CardTitle, CardContent, CardFooter,
 } from "@/components/ui/card";
 import { MoreHorizontal, UserCircle, Copy, Check } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { COMMON_TIMEZONES } from "@/lib/campaignTracking";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,6 +38,7 @@ interface Creator {
   createdAt: string | null;
   updatedAt: string | null;
   driveLink?: string;
+  defaultTimezone?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -81,6 +84,7 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
   const [OFID, setOFID] = useState(initial?.OFID ?? '');
   const [userEmail, setUserEmail] = useState(initial?.userEmail ?? '');
   const [driveLink, setDriveLink] = useState(initial?.driveLink ?? '');
+  const [defaultTimezone, setDefaultTimezone] = useState(initial?.defaultTimezone ?? '');
   const [password, setPassword] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(initial?.photoURL ?? null);
@@ -111,7 +115,7 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
     try {
       if (isEdit && initial) {
         // Update existing
-        const updateBody: Record<string, unknown> = { stageName, OFID, driveLink };
+        const updateBody: Record<string, unknown> = { stageName, OFID, driveLink, defaultTimezone };
         if (password) updateBody.newPassword = password;
         const res = await apiRequest(`/api/admin/creators/${initial.uid}`, {
           method: 'PUT',
@@ -135,7 +139,7 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
         // Create new
         const res = await apiRequest('/api/admin/creators', {
           method: 'POST',
-          body: JSON.stringify({ stageName, userEmail, password, OFID, driveLink }),
+          body: JSON.stringify({ stageName, userEmail, password, OFID, driveLink, defaultTimezone }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? 'Create failed');
@@ -232,6 +236,21 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
                 placeholder="https://drive.google.com/..."
               />
+            </div>
+
+            {/* Default Timezone */}
+            <div>
+              <label className="block text-sm text-zinc-400 mb-1">Default Timezone</label>
+              <Select value={defaultTimezone} onValueChange={setDefaultTimezone}>
+                <SelectTrigger className="bg-zinc-800 border-zinc-700">
+                  <SelectValue placeholder="Select timezone..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {COMMON_TIMEZONES.map(tz => (
+                    <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Email */}

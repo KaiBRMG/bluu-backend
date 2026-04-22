@@ -383,6 +383,14 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
   const setField = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }));
   const setVal = (k: string) => (v: string) => setForm(prev => ({ ...prev, [k]: v }));
+  const setCreator = (creatorID: string) => {
+    const creator = creators.find(c => c.creatorID === creatorID);
+    setForm(prev => ({
+      ...prev,
+      creatorID,
+      dueDateTimezone: creator?.defaultTimezone ?? prev.dueDateTimezone,
+    }));
+  };
 
   const handleNext = () => {
     if (step === 1 && !type) return;
@@ -449,7 +457,7 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
           <div className="flex flex-col gap-3 py-4 max-h-[60vh] overflow-y-auto">
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Creator</label>
-              <Select value={form.creatorID} onValueChange={setVal("creatorID")}>
+              <Select value={form.creatorID} onValueChange={setCreator}>
                 <SelectTrigger className="bg-zinc-800 border-zinc-700">
                   <SelectValue placeholder="Select creator..." />
                 </SelectTrigger>
@@ -929,6 +937,12 @@ export default function CACustomRequestsPage() {
   const [creators, setCreators] = useState<Creator[]>([]);
   const [userNames, setUserNames] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState("my-customs");
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.electronAPI) {
+      window.electronAPI.window.setSize(1430, 870);
+    }
+  }, []);
 
   useEffect(() => {
     if (!user) return;

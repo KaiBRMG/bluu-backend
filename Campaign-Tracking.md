@@ -126,3 +126,9 @@ Create a new notification for the following conditions:
 - All interfaces must look modern and appealing.
 - All interfaces must feel snappy.
 
+
+# Updates
+
+- creator timeZone
+- update all interfaces to size
+- cache

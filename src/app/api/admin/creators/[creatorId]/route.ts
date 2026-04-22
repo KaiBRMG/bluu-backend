@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminAuth, adminDb, adminStorage } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
+import { invalidateAdminCreatorsCache } from '@/app/api/admin/creators/route';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -10,7 +11,7 @@ async function checkPermission(uid: string): Promise<boolean> {
   return !!caller?.permittedPageIds?.includes('admin-creator-management');
 }
 
-const ALLOWED_UPDATE_FIELDS = ['stageName', 'OFID', 'isActive', 'isArchived', 'driveLink'] as const;
+const ALLOWED_UPDATE_FIELDS = ['stageName', 'OFID', 'isActive', 'isArchived', 'driveLink', 'defaultTimezone'] as const;
 
 /**
  * PUT /api/admin/creators/[creatorId]
@@ -52,6 +53,7 @@ export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken, 
         ? adminAuth.updateUser(creatorId, authUpdate)
         : Promise.resolve(),
     ]);
+    invalidateAdminCreatorsCache();
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
@@ -84,6 +86,7 @@ export const DELETE = withAuth(async (request: NextRequest, token: DecodedIdToke
         ? adminStorage.bucket().file(photoStoragePath).delete().catch(() => null)
         : Promise.resolve(),
     ]);
+    invalidateAdminCreatorsCache();
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

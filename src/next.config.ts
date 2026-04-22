@@ -28,8 +28,22 @@ const nextConfig: NextConfig = {
 
   // Experimental optimizations for package imports
   experimental: {
-    // Optimize Firebase imports to reduce bundle size
-    optimizePackageImports: ['firebase/app', 'firebase/auth', 'firebase/firestore', 'lucide-react', '@tabler/icons-react'],
+    // Incremental PPR: opt routes in with `export const experimental_ppr = true`
+    cacheComponents: true,
+    // Optimize barrel imports to reduce bundle size
+    optimizePackageImports: [
+      'firebase/app',
+      'firebase/auth',
+      'firebase/firestore',
+      'firebase/storage',
+      'lucide-react',
+      '@tabler/icons-react',
+      'date-fns',
+      '@dnd-kit/core',
+      '@dnd-kit/sortable',
+      '@dnd-kit/utilities',
+      'embla-carousel-react',
+    ],
   },
 
   turbopack: {},

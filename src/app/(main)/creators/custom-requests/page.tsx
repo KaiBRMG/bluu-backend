@@ -24,7 +24,7 @@ import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "@/firebase-config";
 import {
   type CampaignEntry, type CRType, type CRStatus, type CRPriority, type CallType, type Creator,
-  STATUS_COLORS, STATUS_DOT, STATUS_SORT, PRIORITY_COLORS, TYPE_LABELS, truncate, formatAmount, sortByStatus,
+  STATUS_COLORS, STATUS_DOT, PRIORITY_COLORS, TYPE_LABELS, truncate, formatAmount, sortByStatus,
   firestoreToEntry, formatInTimezone, COMMON_TIMEZONES,
 } from "@/lib/campaignTracking";
 import { useUserData } from "@/hooks/useUserData";
@@ -890,6 +890,12 @@ export default function ManagerCustomRequestsPage() {
   const [creators, setCreators] = useState<Creator[]>([]);
   const [userNames, setUserNames] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState("overview");
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.electronAPI) {
+      window.electronAPI.window.setSize(1430, 870);
+    }
+  }, []);
 
   useEffect(() => {
     if (!user) return;

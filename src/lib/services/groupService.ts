@@ -71,7 +71,7 @@ export async function ensureDefaultGroups(): Promise<void> {
  * Gets all groups.
  */
 export async function getAllGroups(): Promise<any[]> {
-  const snapshot = await adminDb.collection('groups').get();
+  const snapshot = await adminDb.collection('groups').limit(200).get();
   return snapshot.docs.map(doc => doc.data());
 }
 
