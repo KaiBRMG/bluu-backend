@@ -323,7 +323,6 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
   const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
   const [rejectEntry, setRejectEntry] = useState<CampaignEntry | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (unsubRef.current) unsubRef.current();
@@ -337,20 +336,6 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
     });
     return () => { unsubRef.current?.(); };
   }, []);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    const electronAPI = typeof window !== "undefined" ? window.electronAPI : undefined;
-    if (!el || !electronAPI) return;
-    const observer = new ResizeObserver(entries => {
-      const h = entries[0].contentRect.height;
-      if (h === 0) return;
-      const target = Math.max(870, Math.min(Math.ceil(h) + 220, screen.availHeight - 40));
-      electronAPI.window.setSize(1430, target);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [loading]);
 
   const creatorMap = Object.fromEntries(creators.map(c => [c.creatorID, c.stageName]));
 
@@ -427,7 +412,7 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
   if (loading) return <div className="text-sm text-zinc-500 p-8">Loading...</div>;
 
   return (
-    <div ref={containerRef} className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       {/* Summary tiles */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <SummaryTile title="Awaiting Approval">
@@ -970,14 +955,8 @@ export default function ManagerCustomRequestsPage() {
   const [activeTab, setActiveTab] = useState("overview");
 
   useEffect(() => {
-    if (typeof window !== "undefined" && window.electronAPI) {
-      window.electronAPI.window.setSize(1430, 870);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.electronAPI && activeTab !== "overview") {
-      window.electronAPI.window.setSize(1430, 870);
+    if (activeTab === "overview" && typeof window !== "undefined" && window.electronAPI) {
+      window.electronAPI.window.setSize(1700, 920);
     }
   }, [activeTab]);
 

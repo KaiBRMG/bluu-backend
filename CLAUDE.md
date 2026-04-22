@@ -139,6 +139,22 @@ Sessions use an event log architecture:
 
 Pages are code-defined in `src/lib/definitions.ts` (not Firestore). `page-permissions/{pageId}` maps each page to allowed groups/users. Resolved access is denormalised onto `users/{uid}.permittedPageIds` for fast sidebar rendering.
 
+### Dynamically resizing the window.
+
+Some pages resize the Electron window via `window.electronAPI.window.setSize(width, height)` when the active tab changes. The resize only fires when entering a specific wide tab — the window is never shrunk when switching away. Pattern:
+
+```ts
+useEffect(() => {
+  if (activeTab === "overview" && typeof window !== "undefined" && window.electronAPI) {
+    window.electronAPI.window.setSize(1700, 920);
+  }
+}, [activeTab]);
+```
+
+Pages using this pattern:
+- `src/app/(main)/creators/custom-requests/page.tsx` — resizes to 1700×920 on the **Overview** tab
+- `src/app/(main)/ca-portal/custom-requests/page.tsx` — resizes to 1700×920 on the **My Customs** tab
+
 ### UI Stack
 
 - shadcn/ui components (`src/components/ui/`) — Radix UI primitives with Tailwind

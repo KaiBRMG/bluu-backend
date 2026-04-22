@@ -7,6 +7,7 @@ interface BugPayload {
   stack?: string;
   context?: string;
   uid?: string;
+  displayName?: string;
 }
 
 export function reportBug(payload: BugPayload): void {

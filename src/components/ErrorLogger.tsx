@@ -7,6 +7,7 @@ import { useUserData } from '@/hooks/useUserData';
 export default function ErrorLogger() {
   const { userData } = useUserData();
   const uid = userData?.uid ?? undefined;
+  const displayName = userData?.displayName ?? undefined;
 
   useEffect(() => {
     const handleError = (event: ErrorEvent) => {
@@ -15,6 +16,7 @@ export default function ErrorLogger() {
         stack: event.error?.stack,
         context: 'renderer',
         uid,
+        displayName,
       });
     };
 
@@ -25,6 +27,7 @@ export default function ErrorLogger() {
         stack: reason instanceof Error ? reason.stack : undefined,
         context: 'renderer:unhandledRejection',
         uid,
+        displayName,
       });
     };
 
@@ -34,7 +37,7 @@ export default function ErrorLogger() {
     // Electron: receive forwarded main-process errors
     const electronAPI = (window as Window & { electronAPI?: { bugs?: { onReport: (cb: (p: { context: string; message: string; stack?: string }) => void) => void; removeReportListener: () => void } } }).electronAPI;
     electronAPI?.bugs?.onReport(({ context, message, stack }) => {
-      reportBug({ message, stack, context, uid });
+      reportBug({ message, stack, context, uid, displayName });
     });
 
     return () => {
@@ -42,7 +45,7 @@ export default function ErrorLogger() {
       window.removeEventListener('unhandledrejection', handleUnhandledRejection);
       electronAPI?.bugs?.removeReportListener();
     };
-  }, [uid]);
+  }, [uid, displayName]);
 
   return null;
 }

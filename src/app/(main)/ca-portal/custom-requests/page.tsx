@@ -948,10 +948,10 @@ export default function CACustomRequestsPage() {
   const [activeTab, setActiveTab] = useState("my-customs");
 
   useEffect(() => {
-    if (typeof window !== "undefined" && window.electronAPI) {
-      window.electronAPI.window.setSize(1430, 870);
+    if (activeTab === "my-customs" && typeof window !== "undefined" && window.electronAPI) {
+      window.electronAPI.window.setSize(1700, 920);
     }
-  }, []);
+  }, [activeTab]);
 
   useEffect(() => {
     if (!user) return;
