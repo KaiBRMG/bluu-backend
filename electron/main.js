@@ -275,7 +275,7 @@ function createWindow() {
     width: 1430,
     height: 870,
     resizable: false,  // Start with window locked (login page)
-    show: false,  // Don't show until ready (prevents white flash)
+    show: true,
     backgroundColor: '#002333',     // Match your logo's dark background
     icon: iconPath,  // App icon for window
     title: `Bluu Backend (${app.getVersion()})`,
@@ -293,8 +293,11 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:3000');
     // mainWindow.webContents.openDevTools();
   } else {
-    // In production, load your hosted site
-    mainWindow.loadURL('https://bluu-backend.vercel.app');
+    // Show local loading screen instantly, then navigate to the hosted app once it's ready
+    mainWindow.loadFile(path.join(__dirname, 'loading.html'));
+    mainWindow.webContents.once('did-finish-load', () => {
+      mainWindow.loadURL('https://bluu-backend.vercel.app');
+    });
   }
 
   // Open external links (target=_blank) in default browser
@@ -311,11 +314,6 @@ function createWindow() {
       e.preventDefault();
       shell.openExternal(url);
     }
-  });
-
-  // Show window only when content is ready (prevents white flash)
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
   });
 
   // Retry once on cold-start failures (e.g. Vercel 500 before Next.js boots).
