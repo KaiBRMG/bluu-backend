@@ -376,6 +376,12 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
     creators.map(c => [c.creatorID, outstandingEntries.filter(e => e.creatorID === c.creatorID)])
   );
 
+  // Outstanding payments (any entry with amountPaid < totalAmount)
+  const outstandingPaymentEntries = allEntries.filter(e => e.amountPaid < e.totalAmount);
+  const outstandingPaymentsByCreator = Object.fromEntries(
+    creators.map(c => [c.creatorID, outstandingPaymentEntries.filter(e => e.creatorID === c.creatorID)])
+  );
+
   const handleDismiss = async (id: string) => {
     try {
       await apiRequest(`/api/campaign-tracking/${id}`, {
@@ -456,8 +462,8 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
 
       {/* Outstanding Customs */}
       {outstandingEntries.length > 0 && (
-        <div className="rounded-xl p-4 border border-red-500/30 bg-red-500/5">
-          <h3 className="text-sm font-semibold text-red-400 mb-3">Outstanding Customs</h3>
+        <div className="rounded-xl p-4 border border-orange-500/30 bg-orange-500/5">
+          <h3 className="text-sm font-semibold text-orange-400 mb-3">Outstanding Customs</h3>
           <div className="overflow-x-auto">
             <table className="text-xs w-full">
               <thead>
@@ -478,6 +484,43 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
                           <div key={e.id} className="flex items-center gap-1.5">
                             <StatusDot status={e.status} />
                             <button onClick={() => setViewEntry(e)} className="font-mono text-zinc-300 hover:text-white hover:underline underline-offset-2 transition-colors">{e.CR}</button>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Outstanding Payments */}
+      {outstandingPaymentEntries.length > 0 && (
+        <div className="rounded-xl p-4 border border-red-500/30 bg-red-500/5">
+          <h3 className="text-sm font-semibold text-red-400 mb-3">Outstanding Payments</h3>
+          <div className="overflow-x-auto">
+            <table className="text-xs w-full">
+              <thead>
+                <tr>
+                  {creators.map(c => (
+                    <th key={c.creatorID} className="text-left px-2 pb-2 text-zinc-400 font-medium">
+                      {c.stageName}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="align-top">
+                  {creators.map(c => (
+                    <td key={c.creatorID} className="px-2 pb-2">
+                      <div className="flex flex-col gap-1">
+                        {(outstandingPaymentsByCreator[c.creatorID] ?? []).map(e => (
+                          <div key={e.id} className="flex items-center gap-1.5">
+                            <StatusDot status={e.status} />
+                            <button onClick={() => setViewEntry(e)} className="font-mono text-zinc-300 hover:text-white hover:underline underline-offset-2 transition-colors">{e.CR}</button>
+                            <span className="text-red-400 font-medium">{formatAmount(e.totalAmount - e.amountPaid)}</span>
                           </div>
                         ))}
                       </div>
