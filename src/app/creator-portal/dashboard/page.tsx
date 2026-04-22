@@ -489,7 +489,7 @@ export default function CreatorDashboardPage() {
       </header>
 
       {/* Content */}
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12 flex flex-col gap-8">
+      <main className="max-w-4xl md:max-w-none mx-auto px-4 sm:px-6 py-8 sm:py-12 flex flex-col gap-8">
 
         {/* Welcome */}
         <div>
