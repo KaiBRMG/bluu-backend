@@ -340,12 +340,13 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
 
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || typeof window === "undefined" || !window.electronAPI) return;
+    const electronAPI = typeof window !== "undefined" ? window.electronAPI : undefined;
+    if (!el || !electronAPI) return;
     const observer = new ResizeObserver(entries => {
       const h = entries[0].contentRect.height;
       if (h === 0) return;
       const target = Math.max(870, Math.min(Math.ceil(h) + 220, screen.availHeight - 40));
-      window.electronAPI.window.setSize(1430, target);
+      electronAPI.window.setSize(1430, target);
     });
     observer.observe(el);
     return () => observer.disconnect();
