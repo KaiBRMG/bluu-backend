@@ -436,6 +436,28 @@ export default function Home() {
           <ClockWidget />
 
           <NotificationsWidget />
+
+          <Card style={{ background: '#171717' }} className="border-0 shadow-none py-0 gap-0">
+            <CardContent className="p-6">
+              <h3 className="text-sm font-medium uppercase tracking-wide mb-2 text-muted-foreground">
+                Welcome to Bluu Backend!
+              </h3>
+    
+              <p className="text-sm text-muted-foreground">
+                {"We're still a work-in-progress. See a bug? Have a suggestion? "}
+                <a
+                  href="https://t.me/KaiJN"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline"
+                  style={{ color: 'var(--foreground)' }}
+                >
+                  Reach out to Kai
+                </a>
+                {" to help us improve your experience."}
+              </p>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </AppLayout>
