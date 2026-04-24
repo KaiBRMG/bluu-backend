@@ -1,12 +1,17 @@
 'use strict';
 // Run from repo root: cd src && node scripts/import-campaign-tracking.js
+//
+// What this script does:
+//   CR / Call / Item entries — already exist in Firestore; patches createdBy + lastEditedBy.
+//   BFE / VIP / Hubby entries — were skipped in the original import; creates them now.
+//   Re-running is safe: duplicate detection via creatorID|fan|createdMs key.
 
 const fs = require('fs');
 const path = require('path');
 const admin = require('firebase-admin');
 const { Timestamp } = require('firebase-admin/firestore');
 
-// Load .env.local
+// ─── .env.local ───────────────────────────────────────────────────────────────
 const envPath = path.join(__dirname, '../.env.local');
 const envLines = fs.readFileSync(envPath, 'utf8').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
 for (const line of envLines) {
@@ -24,7 +29,7 @@ admin.initializeApp({
 });
 const db = admin.firestore();
 
-// CSV parser — handles quoted fields with embedded commas and newlines
+// ─── CSV parser — handles quoted fields with embedded commas and newlines ─────
 function parseCSV(text) {
   const rows = [];
   let row = [];
@@ -82,16 +87,20 @@ function formatCR(n) {
   return `CR${String(n).padStart(4, '0')}`;
 }
 
-// Returns { type, callType } or null to skip
+// Returns { type, callType, isCampaign } or null if the type string is unrecognised.
+// isCampaign=true → BFE/VIP/Hubby (create path); isCampaign=false → CR/Call/Item (update path).
 function mapType(s) {
   switch (s.trim()) {
-    case 'CR':                     return { type: 'CR',   callType: null };
-    case 'Item':                   return { type: 'Item', callType: null };
-    case 'Call - Voice (Clean)':   return { type: 'Call', callType: 'Clean Voice' };
-    case 'Call - Video (Clean)':   return { type: 'Call', callType: 'Clean Video' };
-    case 'Call - Video (Explicit)':return { type: 'Call', callType: 'NSFW Video' };
-    case 'Call - Voice (Explicit)':return { type: 'Call', callType: 'NSFW Voice' };
-    default: return null; // VIP, BF Experience, Hubby — skip
+    case 'CR':                        return { type: 'CR',    callType: null,          isCampaign: false };
+    case 'Item':                      return { type: 'Item',  callType: null,          isCampaign: false };
+    case 'Call - Voice (Clean)':      return { type: 'Call',  callType: 'Clean Voice', isCampaign: false };
+    case 'Call - Video (Clean)':      return { type: 'Call',  callType: 'Clean Video', isCampaign: false };
+    case 'Call - Video (Explicit)':   return { type: 'Call',  callType: 'NSFW Video',  isCampaign: false };
+    case 'Call - Voice (Explicit)':   return { type: 'Call',  callType: 'NSFW Voice',  isCampaign: false };
+    case 'BF Experience':             return { type: 'BFE',   callType: null,          isCampaign: true  };
+    case 'VIP':                       return { type: 'VIP',   callType: null,          isCampaign: true  };
+    case 'Hubby':                     return { type: 'Hubby', callType: null,          isCampaign: true  };
+    default:                          return null;
   }
 }
 
@@ -108,9 +117,9 @@ const USER_ALIASES = {
   'ajise damilola feranmi': 'damilola feranmi',
   'jessy':                  'jessiree sese',
   'mannie':                 'adeniran adebari',
-  'queen':                 'queen oyindamola',
-  'kai': 'kai nell',
-  'ayomide': 'ayomide olujimi'
+  'queen':                  'queen oyindamola',
+  'kai':                    'kai nell',
+  'ayomide':                'ayomide olujimi',
 };
 
 // CSV short name → Firestore stageName (lowercase) for creators whose CSV name differs
@@ -121,7 +130,7 @@ const CREATOR_ALIASES = {
   'liam':    'liam heng',
 };
 
-
+// ─── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
   console.log('Loading creators...');
   const creatorsSnap = await db.collection('creators').get();
@@ -133,7 +142,6 @@ async function main() {
     if (key) creatorsByName[key] = { uid: doc.id, stageName: data.stageName };
     creatorUidToName[doc.id] = data.stageName || doc.id;
   }
-  // Register aliases so CSV short names resolve correctly
   for (const [alias, fullName] of Object.entries(CREATOR_ALIASES)) {
     if (creatorsByName[fullName] && !creatorsByName[alias]) {
       creatorsByName[alias] = creatorsByName[fullName];
@@ -147,7 +155,7 @@ async function main() {
   for (const doc of usersSnap.docs) {
     const data = doc.data();
     const first = (data.firstName || '').toLowerCase().trim();
-    const last = (data.lastName || '').toLowerCase().trim();
+    const last  = (data.lastName  || '').toLowerCase().trim();
     const fullName = [first, last].filter(Boolean).join(' ');
     if (fullName) usersByName[fullName] = doc.id;
   }
@@ -168,40 +176,75 @@ async function main() {
   // 12:Payment Progress(skip)  13:Profile Link  14:Remaining Amount(skip)
   // 15:Social Platform  16:Social Username  17:Status  18:Total Amount  19:Type
 
-  const skippedEntries = []; // { reason, creator, fanName, type, CR }
-  const valid = [];
+  // skippedEntries does NOT include duplicates (those are reported separately).
+  const skippedEntries = []; // { reason, creator, fanName, type }
+  const standardValid  = []; // CR / Call / Item → update createdBy / lastEditedBy
+  const campaignValid  = []; // BFE / VIP / Hubby → create new docs
 
   for (const row of rows.slice(1)) {
     if (row.length < 18) continue;
 
-    const rawType = (row[19] || '').trim();
-    const typeInfo = mapType(rawType);
+    const rawType    = (row[19] || '').trim();
+    const typeInfo   = mapType(rawType);
+    const creatorRaw = (row[5]  || '').trim();
+    const fanRaw     = (row[7]  || '').trim();
+    const crRaw      = (row[2]  || '').trim();
+
     if (!typeInfo) {
-      skippedEntries.push({ reason: rawType || '(blank)', creator: (row[5] || '—').trim(), fanName: (row[7] || '—').trim(), type: rawType || '—', CR: (row[2] || '—').trim() });
+      skippedEntries.push({
+        reason:  `Unknown type: "${rawType || '(blank)'}"`,
+        creator: creatorRaw || '—',
+        fanName: fanRaw     || '—',
+        type:    rawType    || '—',
+        CR:      crRaw      || '—',
+      });
       continue;
     }
 
-    const creatorName = (row[5] || '').trim().toLowerCase();
-    const creator = creatorName ? creatorsByName[creatorName] : null;
+    const creatorKey = creatorRaw.toLowerCase();
+    const creator    = creatorKey ? creatorsByName[creatorKey] : null;
     if (!creator) {
-      skippedEntries.push({ reason: 'Unknown creator', creator: (row[5] || '—').trim(), fanName: (row[7] || '—').trim(), type: rawType, CR: (row[2] || '—').trim() });
+      skippedEntries.push({
+        reason:  'Unknown creator',
+        creator: creatorRaw || '—',
+        fanName: fanRaw     || '—',
+        type:    rawType,
+        CR:      crRaw      || '—',
+      });
       continue;
     }
 
-    valid.push({ row, typeInfo, creator, crCode: parseCRCode(row[2]) });
+    if (typeInfo.isCampaign) {
+      campaignValid.push({ row, typeInfo, creator });
+    } else {
+      standardValid.push({ row, typeInfo, creator, crCode: parseCRCode(crRaw) });
+    }
   }
 
+  // ── Load existing Firestore entries for duplicate detection ──────────────────
+  console.log('\nLoading existing campaign-tracking entries...');
+  const existingSnap = await db.collection('campaign-tracking').get();
+  const existingByKey = {}; // "creatorID|fan:…|ms:…" → docId
+  for (const doc of existingSnap.docs) {
+    const d   = doc.data();
+    const fan = (d.fanName || '').trim().toLowerCase();
+    const ms  = d.createdTime?.toMillis?.() ?? 0;
+    existingByKey[`${d.creatorID}|fan:${fan}|ms:${ms}`] = doc.id;
+  }
+  console.log(`  ${Object.keys(existingByKey).length} existing entries indexed`);
+
+  // ── Standard entries: assign CR codes then patch createdBy / lastEditedBy ───
+
   // Track max existing CR per creator, then assign codes to entries that need them
-  const creatorMaxCR = {}; // uid → highest numeric CR seen
-  for (const e of valid) {
+  const creatorMaxCR  = {}; // uid → highest numeric CR seen in CSV
+  for (const e of standardValid) {
     if (e.crCode) {
       const n = crToNum(e.crCode);
       if (n > (creatorMaxCR[e.creator.uid] || 0)) creatorMaxCR[e.creator.uid] = n;
     }
   }
-
   const creatorNextCR = { ...creatorMaxCR };
-  for (const e of valid) {
+  for (const e of standardValid) {
     if (!e.crCode) {
       const uid = e.creator.uid;
       creatorNextCR[uid] = (creatorNextCR[uid] || 0) + 1;
@@ -209,83 +252,138 @@ async function main() {
     }
   }
 
-  // Index existing entries by creatorID|fan|createdMs so we can match without relying on CR
-  // (CR may have been auto-generated and won't appear in the CSV row)
-  console.log('\nLoading existing campaign-tracking entries...');
-  const existingSnap = await db.collection('campaign-tracking').get();
-  const existingByKey = {}; // "creatorID|fan|ms" → docId
-  for (const doc of existingSnap.docs) {
-    const d = doc.data();
-    const fan = (d.fanName || '').trim().toLowerCase();
-    const createdMs = d.createdTime?.toMillis?.() ?? 0;
-    const key = `${d.creatorID}|fan:${fan}|ms:${createdMs}`;
-    existingByKey[key] = doc.id;
-  }
-  console.log(`  ${Object.keys(existingByKey).length} existing entries indexed`);
+  const updates        = [];
+  let   standardNotFound = 0;
+  const unmatchedNames = {}; // raw name → Set of "fan" labels
 
-  // Build updates: match each CSV row to its existing Firestore doc, then fix createdBy/lastEditedBy
-  const updates = [];
-  let notFound = 0;
-  const unmatchedNames = {}; // raw name → Set of "CR / fan" labels
-
-  for (const { row, creator } of valid) {
+  for (const { row, creator } of standardValid) {
     const createdDate = parseDate(row[4]);
-    const fan = (row[7] || '').trim().toLowerCase();
-    const createdMs = createdDate ? createdDate.getTime() : 0;
-    const key = `${creator.uid}|fan:${fan}|ms:${createdMs}`;
+    const fan         = (row[7] || '').trim().toLowerCase();
+    const ms          = createdDate ? createdDate.getTime() : 0;
+    const key         = `${creator.uid}|fan:${fan}|ms:${ms}`;
 
     const docId = existingByKey[key];
-    if (!docId) { notFound++; continue; }
+    if (!docId) { standardNotFound++; continue; }
 
-    const chatterRaw = (row[3] || '').trim();
-    const chatterKey = chatterRaw.split(',')[0].trim().toLowerCase();
-    const createdBy = chatterKey ? (usersByName[chatterKey] || '') : '';
+    const chatterRaw    = (row[3] || '').trim();
+    const chatterKey    = chatterRaw.split(',')[0].trim().toLowerCase();
+    const createdBy     = chatterKey ? (usersByName[chatterKey] || '') : '';
 
     const lastEditedRaw = (row[8] || '').trim();
-    const lastEditedBy = lastEditedRaw ? (usersByName[lastEditedRaw.toLowerCase()] || '') : '';
+    const lastEditedBy  = lastEditedRaw ? (usersByName[lastEditedRaw.toLowerCase()] || '') : '';
 
-    const label = `${(row[2] || '—').trim()} / ${(row[7] || '—').trim()}`;
-    if (chatterKey && !createdBy) {
-      (unmatchedNames[chatterRaw] = unmatchedNames[chatterRaw] || new Set()).add(label);
-    }
-    if (lastEditedRaw && !lastEditedBy) {
-      (unmatchedNames[lastEditedRaw] = unmatchedNames[lastEditedRaw] || new Set()).add(label);
-    }
+    const label = (row[7] || '—').trim();
+    if (chatterKey && !createdBy)   (unmatchedNames[chatterRaw]    = unmatchedNames[chatterRaw]    || new Set()).add(label);
+    if (lastEditedRaw && !lastEditedBy) (unmatchedNames[lastEditedRaw] = unmatchedNames[lastEditedRaw] || new Set()).add(label);
 
     updates.push({ docId, createdBy, lastEditedBy });
   }
 
-  console.log(`\nUpdating ${updates.length} entries (${notFound} CSV rows had no matching Firestore doc, ${skippedEntries.length} skipped)`);
+  console.log(`\nPatching ${updates.length} standard entries (${standardNotFound} had no matching doc, ${standardValid.length - updates.length - standardNotFound} other)`);
 
   if (Object.keys(unmatchedNames).length > 0) {
-    console.log(`\n── Unmatched names (${Object.keys(unmatchedNames).length}) ──────────────────────────────`);
+    console.log(`\n── Unmatched user names (${Object.keys(unmatchedNames).length}) ──────────────────────────────`);
     for (const [name, labels] of Object.entries(unmatchedNames)) {
       console.log(`  "${name}"  (${labels.size} entries)`);
       for (const l of labels) console.log(`    ${l}`);
     }
-    console.log('');
   }
 
-  if (updates.length === 0) {
-    console.log('Nothing to update.');
-  } else {
+  if (updates.length > 0) {
     const BATCH_SIZE = 400;
-    let updated = 0;
+    let patched = 0;
     for (let i = 0; i < updates.length; i += BATCH_SIZE) {
       const batch = db.batch();
       for (const { docId, createdBy, lastEditedBy } of updates.slice(i, i + BATCH_SIZE)) {
         batch.update(db.collection('campaign-tracking').doc(docId), { createdBy, lastEditedBy });
       }
       await batch.commit();
-      updated += Math.min(BATCH_SIZE, updates.length - i);
-      console.log(`  Updated ${updated}/${updates.length}`);
+      patched += Math.min(BATCH_SIZE, updates.length - i);
+      process.stdout.write(`\r  Patched ${patched}/${updates.length}`);
+    }
+    console.log('');
+  }
+
+  // ── Campaign entries (BFE / VIP / Hubby): create new docs ───────────────────
+  const toCreate          = [];
+  let   campaignDuplicates = 0;
+  const campaignUnmatched  = {}; // raw name → Set of fan labels
+
+  for (const { row, typeInfo, creator } of campaignValid) {
+    const createdDate = parseDate(row[4]);
+    const fanRaw      = (row[7] || '').trim();
+    const fanKey      = fanRaw.toLowerCase();
+    const ms          = createdDate ? createdDate.getTime() : 0;
+    const key         = `${creator.uid}|fan:${fanKey}|ms:${ms}`;
+
+    if (existingByKey[key]) {
+      campaignDuplicates++;
+      continue; // already imported — skip silently (not counted in skippedEntries)
+    }
+
+    const chatterRaw    = (row[3] || '').trim();
+    const chatterKey    = chatterRaw.split(',')[0].trim().toLowerCase();
+    const createdBy     = chatterKey ? (usersByName[chatterKey] || '') : '';
+
+    const lastEditedRaw = (row[8] || '').trim();
+    const lastEditedBy  = lastEditedRaw ? (usersByName[lastEditedRaw.toLowerCase()] || '') : '';
+
+    const lastEditedDate = parseDate(row[9]);
+
+    if (chatterKey && !createdBy)       (campaignUnmatched[chatterRaw]    = campaignUnmatched[chatterRaw]    || new Set()).add(fanRaw || '—');
+    if (lastEditedRaw && !lastEditedBy) (campaignUnmatched[lastEditedRaw] = campaignUnmatched[lastEditedRaw] || new Set()).add(fanRaw || '—');
+
+    const doc = {
+      creatorID:      creator.uid,
+      type:           typeInfo.type,
+      fanName:        fanRaw,
+      profileLink:    (row[13] || '').trim(),
+      description:    (row[0]  || '').trim(),
+      totalAmount:    parseAmount(row[18]),
+      amountPaid:     parseAmount(row[11]),
+      isArchived:     false,
+      // 'In Progress' is the sentinel status for campaign entries (not surfaced on the campaigns page)
+      status:         'In Progress',
+      createdBy:      createdBy     || '',
+      lastEditedBy:   lastEditedBy  || '',
+      createdTime:    createdDate    ? Timestamp.fromDate(createdDate)    : Timestamp.now(),
+      lastEditedTime: lastEditedDate ? Timestamp.fromDate(lastEditedDate) : (createdDate ? Timestamp.fromDate(createdDate) : Timestamp.now()),
+    };
+
+    // BFE has a length field; VIP and Hubby do not
+    if (typeInfo.type === 'BFE') doc.length = (row[10] || '').trim();
+
+    toCreate.push(doc);
+  }
+
+  console.log(`\nCreating ${toCreate.length} campaign entries (${campaignDuplicates} duplicates skipped)`);
+
+  if (Object.keys(campaignUnmatched).length > 0) {
+    console.log(`\n── Unmatched user names in campaign entries (${Object.keys(campaignUnmatched).length}) ──`);
+    for (const [name, labels] of Object.entries(campaignUnmatched)) {
+      console.log(`  "${name}"  (${labels.size} entries)`);
+      for (const l of labels) console.log(`    ${l}`);
     }
   }
 
-  // Skipped entries summary
+  if (toCreate.length > 0) {
+    const BATCH_SIZE = 400;
+    let created = 0;
+    for (let i = 0; i < toCreate.length; i += BATCH_SIZE) {
+      const batch = db.batch();
+      for (const doc of toCreate.slice(i, i + BATCH_SIZE)) {
+        batch.set(db.collection('campaign-tracking').doc(), doc);
+      }
+      await batch.commit();
+      created += Math.min(BATCH_SIZE, toCreate.length - i);
+      process.stdout.write(`\r  Created ${created}/${toCreate.length}`);
+    }
+    console.log('');
+  }
+
+  // ── Skipped entries summary (excludes duplicates) ────────────────────────────
   if (skippedEntries.length > 0) {
-    console.log(`\n── Skipped entries (${skippedEntries.length}) ──────────────────────────────`);
-    // Group by reason
+    console.log(`\n── Skipped entries (${skippedEntries.length}) ──────────────────────────────────────────`);
     const byReason = {};
     for (const e of skippedEntries) {
       (byReason[e.reason] = byReason[e.reason] || []).push(e);
@@ -297,9 +395,16 @@ async function main() {
         console.log(`    ${cr}${e.creator} / ${e.fanName}  (${e.type})`);
       }
     }
-    console.log('');
   }
 
+  // ── Final summary ─────────────────────────────────────────────────────────────
+  console.log('\n─────────────────────────────────────────────────────────────────────');
+  console.log(`  Standard entries (CR/Call/Item) patched : ${updates.length}`);
+  console.log(`  Standard entries with no matching doc   : ${standardNotFound}`);
+  console.log(`  Campaign entries (BFE/VIP/Hubby) created: ${toCreate.length}`);
+  console.log(`  Campaign duplicates skipped             : ${campaignDuplicates}`);
+  console.log(`  Rows skipped (unknown type/creator)     : ${skippedEntries.length}`);
+  console.log('─────────────────────────────────────────────────────────────────────');
   console.log('Done!');
 }
 

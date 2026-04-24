@@ -18,14 +18,16 @@ import {
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Check } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Plus, MoreHorizontal, Check, Info, Search } from "lucide-react";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "@/firebase-config";
 import {
   type CampaignEntry, type CRType, type CRStatus, type CRPriority, type CallType, type Creator,
   STATUS_COLORS, STATUS_DOT, PRIORITY_COLORS, TYPE_LABELS, truncate, formatAmount, sortByStatus,
-  firestoreToEntry, formatInTimezone, COMMON_TIMEZONES,
+  firestoreToEntry, formatInTimezone, COMMON_TIMEZONES, CAMPAIGN_TYPES,
 } from "@/lib/campaignTracking";
 import { useUserData } from "@/hooks/useUserData";
 import { apiRequest } from "@/lib/clientApi";
@@ -141,6 +143,7 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onRe
   const [priority, setPriority] = useState<CRPriority | "">(entry.priority ?? "");
   const [saving, setSaving] = useState(false);
   const [approveSaving, setApproveSaving] = useState(false);
+  const [completeSaving, setCompleteSaving] = useState(false);
 
   const hasChanged =
     fields.fanName !== entry.fanName ||
@@ -183,6 +186,24 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onRe
     }
   };
 
+  const handleMarkComplete = async () => {
+    setCompleteSaving(true);
+    try {
+      const res = await apiRequest(`/api/campaign-tracking/${entry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "Completed", isArchived: true }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Marked as complete");
+      onSaved();
+      onClose();
+    } catch {
+      toast.error("Failed to mark as complete");
+    } finally {
+      setCompleteSaving(false);
+    }
+  };
+
   const handleApprove = async () => {
     setApproveSaving(true);
     try {
@@ -204,16 +225,84 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onRe
   const inputClass = "w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 overflow-y-auto py-8">
-      <Card className="w-full max-w-lg mx-4">
-        <CardHeader>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <Card className="w-full max-w-lg mx-4 flex flex-col max-h-[90vh]">
+        <CardHeader className="shrink-0 pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg">{entry.CR}</CardTitle>
             <StatusBadge status={entry.status} />
           </div>
           <p className="text-sm text-zinc-400">{creatorName} · {entry.type}</p>
+          {(entry.status === "Awaiting Approval" || entry.status === "In Progress") && (
+            <div className="mt-3 rounded-lg border border-zinc-700/60 bg-zinc-900/60 px-3 py-2.5">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-zinc-300">Approve this custom request?</span>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button type="button" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+                      <Info className="w-3.5 h-3.5" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="text-xs text-zinc-300 w-72">
+                    Approving a CR will send it to the creator, ensure all info is 100% correct before approving. If a CR requires more info, Reject it to send it back to the CA to resubmit.
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1 h-7 text-xs"
+                  onClick={handleApprove}
+                  disabled={approveSaving || entry.status === "In Progress"}
+                >
+                  {approveSaving ? "Approving..." : "Approve"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="flex-1 h-7 text-xs"
+                  onClick={() => onReject(entry)}
+                >
+                  Reject
+                </Button>
+              </div>
+            </div>
+          )}
+          {entry.status === "Rejected" && (
+            <p className="mt-3 text-xs text-zinc-400 rounded-lg border border-zinc-700/60 bg-zinc-900/60 px-3 py-2.5">
+              This custom has been sent back to the chatter and must be resubmitted.
+            </p>
+          )}
         </CardHeader>
-        <CardContent className="flex flex-col gap-4 max-h-[55vh] overflow-y-auto">
+        <CardContent className="flex flex-col gap-4 overflow-y-auto flex-1 pt-0">
+          <div className="grid grid-cols-2 gap-3 p-3 rounded-lg border border-zinc-800 bg-zinc-900/50 text-sm">
+            <div><p className="text-xs text-zinc-500">Created By</p><p className="text-zinc-300">{userNames[entry.createdBy] ?? entry.createdBy}</p></div>
+            <div><p className="text-xs text-zinc-500">Last Edited By</p><p className="text-zinc-300">{userNames[entry.lastEditedBy] ?? entry.lastEditedBy}</p></div>
+            <div><p className="text-xs text-zinc-500">Created</p><p className="text-zinc-300">{formatInTimezone(entry.createdTime, userTz)}</p></div>
+            <div><p className="text-xs text-zinc-500">Last Edited</p><p className="text-zinc-300">{formatInTimezone(entry.lastEditedTime, userTz)}</p></div>
+          </div>
+          <div className={`rounded-lg p-3 border ${Number(fields.amountPaid) >= Number(fields.totalAmount) ? "bg-green-500/5 border-green-500/20" : "bg-red-500/5 border-red-500/20"}`}>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Total Amount"><input type="number" value={fields.totalAmount} onChange={set("totalAmount")} className={inputClass} /></Field>
+              <div>
+                <div className="flex items-center gap-1 mb-1">
+                  <p className="text-xs text-zinc-400">Amount Paid</p>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button type="button" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+                        <Info className="w-3 h-3" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="text-xs text-zinc-300 w-60">
+                      Always aim to complete payment plans with a fan!
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <input type="number" value={fields.amountPaid} onChange={set("amountPaid")} className={inputClass} />
+              </div>
+            </div>
+          </div>
           <Field label="Fan Name"><input value={fields.fanName} onChange={set("fanName")} className={inputClass} /></Field>
           <Field label="Profile Link"><input value={fields.profileLink} onChange={set("profileLink")} className={inputClass} /></Field>
           <Field label="Description"><textarea value={fields.description} onChange={set("description")} rows={3} className={`${inputClass} resize-none`} /></Field>
@@ -250,10 +339,6 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onRe
               </SelectContent>
             </Select>
           </Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Total Amount"><input type="number" value={fields.totalAmount} onChange={set("totalAmount")} className={inputClass} /></Field>
-            <Field label="Amount Paid"><input type="number" value={fields.amountPaid} onChange={set("amountPaid")} className={inputClass} /></Field>
-          </div>
           <Field label="Priority">
             <Select value={priority || "none"} onValueChange={v => setPriority(v === "none" ? "" : v as CRPriority)}>
               <SelectTrigger className="bg-zinc-800 border-zinc-700">
@@ -272,34 +357,15 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onRe
               <p className="text-sm text-zinc-300 italic p-2 rounded bg-zinc-800">{entry.managerComment}</p>
             </Field>
           )}
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div><p className="text-xs text-zinc-500">Created By</p><p className="text-zinc-300">{userNames[entry.createdBy] ?? entry.createdBy}</p></div>
-            <div><p className="text-xs text-zinc-500">Created</p><p className="text-zinc-300">{formatInTimezone(entry.createdTime, userTz)}</p></div>
-          </div>
-
-          <div className="border-t border-zinc-700/50 pt-3">
-            <div className="flex gap-3">
-              <Button
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-                onClick={handleApprove}
-                disabled={approveSaving || entry.status === "In Progress" || entry.status === "Completed"}
-              >
-                {approveSaving ? "Approving..." : "Approve"}
-              </Button>
-              <Button
-                className="flex-1 bg-red-600 hover:bg-red-700 text-white"
-                onClick={() => onReject(entry)}
-                disabled={entry.status === "Completed"}
-              >
-                Reject
-              </Button>
-            </div>
-            <p className="text-xs text-zinc-500 mt-2 text-center">
-              Approving a CR will send it to the creator, ensure all info is 100% correct before approving. If a CR requires more info, Reject it to send it back to the CA to resubmit.
-            </p>
-          </div>
         </CardContent>
         <CardFooter className="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={handleMarkComplete}
+            disabled={completeSaving || entry.status === "Completed"}
+          >
+            {completeSaving ? "Completing..." : "Mark as Complete"}
+          </Button>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={handleSave} disabled={saving || !hasChanged}>{saving ? "Saving..." : "Save"}</Button>
         </CardFooter>
@@ -331,7 +397,10 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
       where("isArchived", "==", false)
     );
     unsubRef.current = onSnapshot(q, snap => {
-      setAllEntries(snap.docs.map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>)));
+      setAllEntries(snap.docs
+        .map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>))
+        .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type))
+      );
       setLoading(false);
     });
     return () => { unsubRef.current?.(); };
@@ -371,14 +440,20 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
     .filter(e => e.status === "Completed" && !e.isArchived)
     .sort((a, b) => new Date(b.lastEditedTime).getTime() - new Date(a.lastEditedTime).getTime());
 
-  // Outstanding customs (Awaiting + In Progress)
-  const outstandingEntries = allEntries.filter(e => e.status === "Awaiting Approval" || e.status === "In Progress");
+  // Outstanding customs (Awaiting + In Progress), excluding campaign-only types which have no CR code
+  const outstandingEntries = allEntries.filter(e =>
+    (e.status === "Awaiting Approval" || e.status === "In Progress" || e.status === "Rejected") &&
+    !(CAMPAIGN_TYPES as readonly string[]).includes(e.type)
+  );
   const outstandingByCreator = Object.fromEntries(
     creators.map(c => [c.creatorID, outstandingEntries.filter(e => e.creatorID === c.creatorID)])
   );
 
-  // Outstanding payments (any entry with amountPaid < totalAmount)
-  const outstandingPaymentEntries = allEntries.filter(e => e.amountPaid < e.totalAmount);
+  // Outstanding payments (any entry with amountPaid < totalAmount), excluding campaign-only types
+  const outstandingPaymentEntries = allEntries.filter(e =>
+    e.amountPaid < e.totalAmount &&
+    !(CAMPAIGN_TYPES as readonly string[]).includes(e.type)
+  );
   const outstandingPaymentsByCreator = Object.fromEntries(
     creators.map(c => [c.creatorID, outstandingPaymentEntries.filter(e => e.creatorID === c.creatorID)])
   );
@@ -743,6 +818,7 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames }: Ma
   const [rejectEntry, setRejectEntry] = useState<CampaignEntry | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CampaignEntry | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const unsubRef = useRef<(() => void) | null>(null);
 
   const subscribe = useCallback(() => {
@@ -757,7 +833,9 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames }: Ma
       where("status", "in", statusFilter)
     );
     unsubRef.current = onSnapshot(q, snap => {
-      const docs = snap.docs.map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>));
+      const docs = snap.docs
+        .map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>))
+        .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type));
       setEntries(sortByStatus(docs));
     });
   }, [creatorID, showCompleted]);
@@ -767,7 +845,16 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames }: Ma
     return () => { unsubRef.current?.(); };
   }, [subscribe]);
 
-  const displayed = entries.filter(e => typeFilter.has(e.type));
+  const typeFiltered = entries.filter(e => typeFilter.has(e.type));
+  const searchLower = searchQuery.toLowerCase();
+  const displayed = searchLower
+    ? typeFiltered.filter(e =>
+        e.CR.toLowerCase().includes(searchLower) ||
+        e.fanName.toLowerCase().includes(searchLower) ||
+        e.profileLink.toLowerCase().includes(searchLower) ||
+        (userNames[e.createdBy] ?? e.createdBy).toLowerCase().includes(searchLower)
+      )
+    : typeFiltered;
 
   const toggleType = (t: CRType) => setTypeFilter(prev => {
     const next = new Set(prev);
@@ -820,6 +907,15 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames }: Ma
               {TYPE_LABELS[t]}
             </Button>
           ))}
+        </div>
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
+          <Input
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search for CR Code, Fans, Profile Links, Users..."
+            className="pl-8 h-8 text-xs bg-zinc-800 border-zinc-700"
+          />
         </div>
         <div className="flex items-center gap-2 ml-auto">
           <Switch checked={showCompleted} onCheckedChange={setShowCompleted} id={`mgr-show-completed-${creatorID}`} />

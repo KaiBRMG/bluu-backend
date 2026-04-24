@@ -125,10 +125,10 @@ Create a new notification for the following conditions:
 - Created Composite Indexes where required
 - All interfaces must look modern and appealing.
 - All interfaces must feel snappy.
+- All dates and times must be converted and stored on firestore in UTC.
+- All dates and times displayed must be converted from UTC to the user's selected time zone. See `src\lib\services\userService.ts`.
 
 
-# Updates
 
-- creator timeZone
-- update all interfaces to size
-- cache
+
+

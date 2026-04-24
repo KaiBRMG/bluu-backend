@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import { Carousel, CarouselContent, CarouselItem, CarouselPrevious, CarouselNext } from "@/components/ui/carousel";
 import {
@@ -20,13 +21,14 @@ import {
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, Plus, AlertCircle } from "lucide-react";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { MoreHorizontal, Plus, AlertCircle, Info, Search } from "lucide-react";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "@/firebase-config";
 import {
   type CampaignEntry, type CRType, type CRStatus, type CallType, type Creator,
   STATUS_COLORS, STATUS_SORT, PRIORITY_COLORS, TYPE_LABELS, truncate, formatAmount, sortByStatus,
-  firestoreToEntry, formatInTimezone, COMMON_TIMEZONES,
+  firestoreToEntry, formatInTimezone, COMMON_TIMEZONES, CAMPAIGN_TYPES,
 } from "@/lib/campaignTracking";
 import { useUserData } from "@/hooks/useUserData";
 import { apiRequest } from "@/lib/clientApi";
@@ -49,9 +51,10 @@ interface ViewCardProps {
   creatorName: string;
   readOnly: boolean;
   onClose: () => void;
+  userNames?: Record<string, string>;
 }
 
-function ViewCard({ entry, creatorName, readOnly, onClose }: ViewCardProps) {
+function ViewCard({ entry, creatorName, readOnly, onClose, userNames = {} }: ViewCardProps) {
   const { userData } = useUserData();
   const userTz = userData?.timezone || undefined;
   const [amountPaid, setAmountPaid] = useState(String(entry.amountPaid));
@@ -128,13 +131,53 @@ function ViewCard({ entry, creatorName, readOnly, onClose }: ViewCardProps) {
           <p className="text-sm text-zinc-400">{creatorName} · {entry.type}</p>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 max-h-[60vh] overflow-y-auto">
+          <div className="grid grid-cols-2 gap-3 p-3 rounded-lg border border-zinc-800 bg-zinc-900/50 text-sm">
+            <div>
+              <p className="text-xs text-zinc-500">Created By</p>
+              <p className="text-zinc-300">{userNames[entry.createdBy] ?? entry.createdBy}</p>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500">Last Edited By</p>
+              <p className="text-zinc-300">{userNames[entry.lastEditedBy] ?? entry.lastEditedBy}</p>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500">Created</p>
+              <p className="text-zinc-300">{formatInTimezone(entry.createdTime, userTz)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500">Last Edited</p>
+              <p className="text-zinc-300">{formatInTimezone(entry.lastEditedTime, userTz)}</p>
+            </div>
+          </div>
+          <div className={`rounded-lg p-3 border ${Number(amountPaid) >= Number(totalAmount) ? "bg-green-500/5 border-green-500/20" : "bg-red-500/5 border-red-500/20"}`}>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Total Amount">
+                <input type="number" value={totalAmount} onChange={e => setTotalAmount(e.target.value)} disabled={!isEditable} className={isEditable ? inputClass : readOnlyClass} />
+              </Field>
+              <div>
+                <div className="flex items-center gap-1 mb-1">
+                  <p className="text-xs text-zinc-400">Amount Paid</p>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button type="button" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+                        <Info className="w-3 h-3" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="text-xs text-zinc-300 w-60">
+                      Always aim to complete payment plans with a fan!
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <input type="number" value={amountPaid} onChange={e => setAmountPaid(e.target.value)} className={inputClass} />
+              </div>
+            </div>
+          </div>
           {entry.managerComment && (
             <div className="rounded-lg p-3 bg-red-500/10 border border-red-500/30">
               <p className="text-xs font-medium text-red-400 mb-1">Manager Comment</p>
               <p className="text-sm text-zinc-300 italic">{entry.managerComment}</p>
             </div>
           )}
-
           <Field label="Fan Name">
             <input value={fanName} onChange={e => setFanName(e.target.value)} disabled={!isEditable} className={isEditable ? inputClass : readOnlyClass} />
           </Field>
@@ -179,14 +222,6 @@ function ViewCard({ entry, creatorName, readOnly, onClose }: ViewCardProps) {
               <p className={readOnlyClass}>{dueDateTimezone || "—"}</p>
             )}
           </Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Total Amount">
-              <input type="number" value={totalAmount} onChange={e => setTotalAmount(e.target.value)} disabled={!isEditable} className={isEditable ? inputClass : readOnlyClass} />
-            </Field>
-            <Field label="Amount Paid">
-              <input type="number" value={amountPaid} onChange={e => setAmountPaid(e.target.value)} className={inputClass} />
-            </Field>
-          </div>
           {entry.priority && (
             <div>
               <p className="text-xs text-zinc-400 mb-1">Priority</p>
@@ -195,16 +230,6 @@ function ViewCard({ entry, creatorName, readOnly, onClose }: ViewCardProps) {
               </span>
             </div>
           )}
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="text-xs text-zinc-500">Created</p>
-              <p className="text-zinc-300">{formatInTimezone(entry.createdTime, userTz)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-zinc-500">Last Edited</p>
-              <p className="text-zinc-300">{formatInTimezone(entry.lastEditedTime, userTz)}</p>
-            </div>
-          </div>
         </CardContent>
         <CardFooter className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>Close</Button>
@@ -583,6 +608,7 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
   const [showCompleted, setShowCompleted] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [page, setPage] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
   const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
 
@@ -598,7 +624,9 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
       where("status", "in", statusFilter)
     );
     unsubRef.current = onSnapshot(q, snap => {
-      const docs = snap.docs.map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>));
+      const docs = snap.docs
+        .map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>))
+        .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type));
       setEntries(sortByStatus(docs));
     });
   }, [creatorID, showCompleted]);
@@ -608,7 +636,16 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
     return () => { unsubRef.current?.(); };
   }, [subscribe]);
 
-  const filtered = entries.filter(e => typeFilter.has(e.type));
+  const typeFiltered = entries.filter(e => typeFilter.has(e.type));
+  const searchLower = searchQuery.toLowerCase();
+  const filtered = searchLower
+    ? typeFiltered.filter(e =>
+        e.CR.toLowerCase().includes(searchLower) ||
+        e.fanName.toLowerCase().includes(searchLower) ||
+        e.profileLink.toLowerCase().includes(searchLower) ||
+        (userNames[e.createdBy] ?? e.createdBy).toLowerCase().includes(searchLower)
+      )
+    : typeFiltered;
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages - 1);
   const displayed = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
@@ -637,6 +674,15 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
               {TYPE_LABELS[t]}
             </Button>
           ))}
+        </div>
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
+          <Input
+            value={searchQuery}
+            onChange={e => { setSearchQuery(e.target.value); setPage(0); }}
+            placeholder="Search for CR Code, Fans, Profile Links, Users..."
+            className="pl-8 h-8 text-xs bg-zinc-800 border-zinc-700"
+          />
         </div>
         <div className="flex items-center gap-2 ml-auto">
           <Switch checked={showCompleted} onCheckedChange={v => { setShowCompleted(v); setPage(0); }} id={`show-completed-${creatorID}`} />
@@ -755,6 +801,7 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
           creatorName={creatorName}
           readOnly={viewEntry.status === "In Progress" || viewEntry.status === "Completed"}
           onClose={() => setViewEntry(null)}
+          userNames={userNames}
         />
       )}
     </div>
@@ -766,9 +813,10 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
 interface MyCustomsProps {
   currentUserUid: string;
   creators: Creator[];
+  userNames: Record<string, string>;
 }
 
-function MyCustomsKanban({ currentUserUid, creators }: MyCustomsProps) {
+function MyCustomsKanban({ currentUserUid, creators, userNames }: MyCustomsProps) {
   const { userData } = useUserData();
   const userTz = userData?.timezone || undefined;
   const [activeEntries, setActiveEntries] = useState<CampaignEntry[]>([]);
@@ -785,7 +833,9 @@ function MyCustomsKanban({ currentUserUid, creators }: MyCustomsProps) {
       where("status", "in", ["Awaiting Approval", "In Progress", "Rejected", "Completed"])
     );
     unsubRef.current = onSnapshot(q, snap => {
-      const docs = snap.docs.map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>));
+      const docs = snap.docs
+        .map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>))
+        .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type));
       const active = docs.filter(e => e.status === "Awaiting Approval" || e.status === "In Progress");
       active.sort((a, b) => STATUS_SORT[a.status] - STATUS_SORT[b.status]);
       const completedUnpaid = docs.filter(e => e.status === "Completed" && e.amountPaid < e.totalAmount);
@@ -933,6 +983,7 @@ function MyCustomsKanban({ currentUserUid, creators }: MyCustomsProps) {
           creatorName={creatorMap[viewEntry.creatorID] ?? viewEntry.creatorID}
           readOnly={viewEntry.status === "In Progress" || viewEntry.status === "Completed"}
           onClose={() => setViewEntry(null)}
+          userNames={userNames}
         />
       )}
     </div>
@@ -996,7 +1047,7 @@ export default function CACustomRequestsPage() {
 
           <div className="flex-1 min-w-0">
             <TabsContent value="my-customs">
-              {uid && <MyCustomsKanban currentUserUid={uid} creators={creators} />}
+              {uid && <MyCustomsKanban currentUserUid={uid} creators={creators} userNames={userNames} />}
             </TabsContent>
             {creators.map(c => (
               <TabsContent key={c.creatorID} value={c.creatorID}>

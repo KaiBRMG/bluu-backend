@@ -1,9 +1,13 @@
 import type { Timestamp } from '@/types/firestore';
 
 export type CRStatus = 'Awaiting Approval' | 'In Progress' | 'Rejected' | 'Completed';
-export type CRType = 'CR' | 'Call' | 'Item';
+export type CRType = 'CR' | 'Call' | 'Item' | 'BFE' | 'Hubby' | 'VIP';
 export type CRPriority = 'Low' | 'Medium' | 'High';
 export type CallType = 'Clean Video' | 'Clean Voice' | 'NSFW Video' | 'NSFW Voice';
+
+// The three campaign-only types (no approval workflow, no CR code)
+export const CAMPAIGN_TYPES = ['BFE', 'Hubby', 'VIP'] as const;
+export type CampaignType = (typeof CAMPAIGN_TYPES)[number];
 
 export interface CampaignEntry {
   id: string;
@@ -140,7 +144,14 @@ export interface Creator {
   defaultTimezone?: string;
 }
 
-export const TYPE_LABELS: Record<CRType, string> = { CR: 'Custom Request', Call: 'Call', Item: 'Item' };
+export const TYPE_LABELS: Record<CRType, string> = {
+  CR: 'Custom Request',
+  Call: 'Call',
+  Item: 'Item',
+  BFE: 'BF Experience',
+  Hubby: 'Hubby',
+  VIP: 'VIP',
+};
 
 export function firestoreToEntry(id: string, data: Record<string, unknown>): CampaignEntry {
   // dueDate may be a legacy Firestore Timestamp or a plain "YYYY-MM-DD" string (new format)

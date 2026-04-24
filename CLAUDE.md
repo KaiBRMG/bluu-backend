@@ -1,10 +1,12 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. Whenever making critical changes to the codebase that 
 
 ## Context
 
 This is an internal management platform for Bluu Rock MGMT.
+
+Always notify the user if changes are made to firestore rules or firestore indexes.
 
 ## Repository Structure
 

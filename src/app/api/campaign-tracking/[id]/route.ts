@@ -17,7 +17,8 @@ export const PATCH = withAuth(async (request: NextRequest, token: DecodedIdToken
   try {
     const caller = await getUserById(token.uid);
     const canEdit = caller?.permittedPageIds?.includes('ca-custom-requests') ||
-                    caller?.permittedPageIds?.includes('creator-custom-requests');
+                    caller?.permittedPageIds?.includes('creator-custom-requests') ||
+                    caller?.permittedPageIds?.includes('ca-campaigns');
     if (!canEdit) return NextResponse.json({ error: 'Access denied' }, { status: 403 });
 
     const { id } = await params;

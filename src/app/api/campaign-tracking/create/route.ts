@@ -6,19 +6,70 @@ import { getUserById } from '@/lib/services/userService';
 import { getOFAMUids } from '@/lib/services/campaignTrackingService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { CRType, CallType } from '@/lib/campaignTracking';
-import { formatCR } from '@/lib/campaignTracking';
+import { formatCR, CAMPAIGN_TYPES } from '@/lib/campaignTracking';
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
     const caller = await getUserById(token.uid);
+    const body = await request.json();
+    const { creatorID, type } = body as { creatorID: string; type: CRType };
+
+    if (!creatorID || !type) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    // ── Campaign types (BFE / Hubby / VIP): no approval workflow, no CR code ──
+    if ((CAMPAIGN_TYPES as readonly string[]).includes(type)) {
+      const canCreate = caller?.permittedPageIds?.includes('ca-campaigns') ||
+                        caller?.permittedPageIds?.includes('ca-custom-requests');
+      if (!canCreate) return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+
+      const { fanName, profileLink, description, totalAmount, amountPaid, length } = body as {
+        fanName: string;
+        profileLink?: string;
+        description?: string;
+        totalAmount: number;
+        amountPaid?: number;
+        length?: string;
+      };
+
+      if (!fanName || !totalAmount) {
+        return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+      }
+
+      const creatorSnap = await adminDb.collection('creators').doc(creatorID).get();
+      if (!creatorSnap.exists) return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
+
+      const entryRef = adminDb.collection('campaign-tracking').doc();
+      const entryData: Record<string, unknown> = {
+        creatorID,
+        type,
+        fanName,
+        profileLink: profileLink ?? '',
+        description: description ?? '',
+        totalAmount: Number(totalAmount),
+        amountPaid: Number(amountPaid ?? 0),
+        isArchived: false,
+        status: 'In Progress', // sentinel — not surfaced on the campaigns page
+        createdBy: token.uid,
+        lastEditedBy: token.uid,
+        createdTime: FieldValue.serverTimestamp(),
+        lastEditedTime: FieldValue.serverTimestamp(),
+      };
+
+      // BFE has a length field
+      if (type === 'BFE') entryData.length = length ?? '';
+
+      await entryRef.set(entryData);
+      return NextResponse.json({ success: true, id: entryRef.id });
+    }
+
+    // ── Standard types (CR / Call / Item): approval workflow + CR code ──────────
     if (!caller?.permittedPageIds?.includes('ca-custom-requests')) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    const body = await request.json();
     const {
-      creatorID,
-      type,
       fanName,
       profileLink,
       description,
@@ -32,8 +83,6 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       dueDate,
       dueDateTimezone,
     } = body as {
-      creatorID: string;
-      type: CRType;
       fanName: string;
       profileLink: string;
       description: string;
@@ -48,7 +97,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       dueDateTimezone?: string | null;
     };
 
-    if (!creatorID || !type || !fanName || !description) {
+    if (!fanName || !description) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 

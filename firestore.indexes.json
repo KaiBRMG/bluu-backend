@@ -127,6 +127,24 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "lastEditedTime", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "campaign-tracking",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "isArchived", "order": "ASCENDING" },
+        { "fieldPath": "createdTime", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "campaign-tracking",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "createdBy", "order": "ASCENDING" },
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "isArchived", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

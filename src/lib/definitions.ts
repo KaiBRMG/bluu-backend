@@ -30,6 +30,7 @@ export const PAGES: PageDef[] = [
   { pageId: 'ca-shifts', title: 'Shifts', teamspaceId: 'ca-portal', href: '/ca-portal/shifts', icon: 'CalendarClock', order: 2 },
   { pageId: 'ca-disputes', title: 'Disputes', teamspaceId: 'ca-portal', href: '/ca-portal/disputes', icon: 'MessageCircleQuestionMark', order: 3 },
   { pageId: 'ca-custom-requests', title: 'Custom Requests', teamspaceId: 'ca-portal', href: '/ca-portal/custom-requests', icon: 'ImagePlay', order: 4 },
+  { pageId: 'ca-campaigns', title: 'Campaigns', teamspaceId: 'ca-portal', href: '/ca-portal/campaigns', icon: 'SquareStar', order: 5 },
   // { pageId: 'calendar', title: 'Calendar', teamspaceId: 'ca-portal', href: '/ca-portal/calendar', icon: null, order: 2 },
   
   // Admin

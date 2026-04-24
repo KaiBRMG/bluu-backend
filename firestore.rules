@@ -148,6 +148,7 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         isAdmin() ||
         hasPagePermission('ca-custom-requests') ||
+        hasPagePermission('ca-campaigns') ||
         hasPagePermission('creator-custom-requests') ||
         resource.data.creatorID == request.auth.uid
       );

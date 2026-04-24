@@ -18,7 +18,7 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { MoreHorizontal, ArrowLeft, ExternalLink } from "lucide-react";
-import { type CampaignEntry, STATUS_COLORS, TYPE_LABELS, formatAmount, formatDueDate, firestoreToEntry } from "@/lib/campaignTracking";
+import { type CampaignEntry, STATUS_COLORS, TYPE_LABELS, formatAmount, formatDueDate, firestoreToEntry, CAMPAIGN_TYPES } from "@/lib/campaignTracking";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
 const PAGE_SIZE = 20;
@@ -113,7 +113,9 @@ export default function AllCustomsPage() {
       where("status", "in", ["In Progress", "Completed"])
     );
     const unsub = onSnapshot(q, snap => {
-      const docs = snap.docs.map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>));
+      const docs = snap.docs
+        .map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>))
+        .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type));
       docs.sort((a, b) => {
         if (a.status !== b.status) return a.status === "In Progress" ? -1 : 1;
         return new Date(b.createdTime).getTime() - new Date(a.createdTime).getTime();

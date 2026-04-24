@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import {
   type CampaignEntry, type CRType, type CRPriority,
-  PRIORITY_COLORS, formatAmount, formatDueDate, firestoreToEntry, sortByPriority,
+  PRIORITY_COLORS, formatAmount, formatDueDate, firestoreToEntry, sortByPriority, CAMPAIGN_TYPES,
 } from "@/lib/campaignTracking";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
@@ -267,7 +267,7 @@ function EntryCard({ entry, onComplete, completing, driveLink, accentHex }: Entr
 
 // ─── Type Tile ────────────────────────────────────────────────────────────────
 
-const TYPE_META: Record<CRType, { label: string; infoText?: string; accentHex: string }> = {
+const TYPE_META: Record<"CR" | "Call" | "Item", { label: string; infoText?: string; accentHex: string }> = {
   CR: {
     label: "Customs",
     infoText: "Please upload content to your Google Drive folder using the CR code as the name. For multiple files, create a folder with the CR code as the name.",
@@ -284,7 +284,7 @@ const TYPE_META: Record<CRType, { label: string; infoText?: string; accentHex: s
 };
 
 interface TypeTileProps {
-  type: CRType;
+  type: "CR" | "Call" | "Item";
   entries: CampaignEntry[];
   onComplete: (id: string) => void;
   completing: string | null;
@@ -423,7 +423,10 @@ export default function CreatorDashboardPage() {
       where("status", "==", "In Progress")
     );
     const unsub = onSnapshot(q, snap => {
-      setEntries(snap.docs.map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>)));
+      setEntries(snap.docs
+        .map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>))
+        .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type))
+      );
     }, (error) => {
       console.error('[dashboard] campaign-tracking listener error:', error);
     });
@@ -448,7 +451,7 @@ export default function CreatorDashboardPage() {
     }
   };
 
-  const entriesByType = useMemo(() => ({
+  const entriesByType = useMemo<Record<"CR" | "Call" | "Item", CampaignEntry[]>>(() => ({
     CR: sortByPriority(entries.filter(e => e.type === "CR")),
     Call: sortByPriority(entries.filter(e => e.type === "Call")),
     Item: sortByPriority(entries.filter(e => e.type === "Item")),
@@ -516,7 +519,7 @@ export default function CreatorDashboardPage() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {(["CR", "Call", "Item"] as CRType[]).map(type => (
+            {(["CR", "Call", "Item"] as ("CR" | "Call" | "Item")[]).map(type => (
               <TypeTile
                 key={type}
                 type={type}
