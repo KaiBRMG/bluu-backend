@@ -11,7 +11,7 @@ export const PATCH = withAuth(async (
   params: Promise<{ id: string }>,
 ) => {
   try {
-    const denied = await checkPageAccess(token.uid, 'content-planning');
+    const denied = await checkPageAccess(token.uid, 'creators-content-planning');
     if (denied) return denied;
 
     const { id } = await params;
@@ -23,7 +23,7 @@ export const PATCH = withAuth(async (
       if (key in body) updates[key] = body[key];
     }
 
-    await adminDb.collection('content-planning').doc(id).update(updates);
+    await adminDb.collection('creators-content-planning').doc(id).update(updates);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('[PATCH /api/content-planning/:id]', error);
@@ -37,11 +37,11 @@ export const DELETE = withAuth(async (
   params: Promise<{ id: string }>,
 ) => {
   try {
-    const denied = await checkPageAccess(token.uid, 'content-planning');
+    const denied = await checkPageAccess(token.uid, 'creators-content-planning');
     if (denied) return denied;
 
     const { id } = await params;
-    await adminDb.collection('content-planning').doc(id).delete();
+    await adminDb.collection('creators-content-planning').doc(id).delete();
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('[DELETE /api/content-planning/:id]', error);

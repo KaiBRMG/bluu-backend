@@ -7,7 +7,7 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
-    const denied = await checkPageAccess(token.uid, 'content-planning');
+    const denied = await checkPageAccess(token.uid, 'creators-content-planning');
     if (denied) return denied;
 
     const body = await request.json() as {
@@ -30,7 +30,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
     }
 
-    const ref = adminDb.collection('content-planning').doc();
+    const ref = adminDb.collection('creators-content-planning').doc();
     await ref.set({
       contentType,
       contentSummary,

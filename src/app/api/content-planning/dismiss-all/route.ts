@@ -11,11 +11,11 @@ export const POST = withAuth(async (
   token: DecodedIdToken,
 ) => {
   try {
-    const denied = await checkPageAccess(token.uid, 'content-planning');
+    const denied = await checkPageAccess(token.uid, 'creators-content-planning');
     if (denied) return denied;
 
     const snap = await adminDb
-      .collection('content-planning')
+      .collection('creators-content-planning')
       .where('status', '==', 'Completed')
       .where('isArchived', '==', false)
       .get();

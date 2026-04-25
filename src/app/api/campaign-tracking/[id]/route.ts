@@ -19,7 +19,7 @@ export const PATCH = withAuth(async (request: NextRequest, token: DecodedIdToken
   try {
     const caller = await getUserById(token.uid);
     const canEdit = caller?.permittedPageIds?.includes('ca-custom-requests') ||
-                    caller?.permittedPageIds?.includes('creator-custom-requests') ||
+                    caller?.permittedPageIds?.includes('creators-custom-requests') ||
                     caller?.permittedPageIds?.includes('ca-campaigns');
     if (!canEdit) return NextResponse.json({ error: 'Access denied' }, { status: 403 });
 
@@ -88,7 +88,7 @@ export const PATCH = withAuth(async (request: NextRequest, token: DecodedIdToken
 export const DELETE = withAuth(async (_request: NextRequest, token: DecodedIdToken, params: Promise<{ id: string }>) => {
   try {
     const caller = await getUserById(token.uid);
-    if (!caller?.permittedPageIds?.includes('creator-custom-requests')) {
+    if (!caller?.permittedPageIds?.includes('creators-custom-requests')) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 

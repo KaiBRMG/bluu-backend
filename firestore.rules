@@ -149,7 +149,7 @@ service cloud.firestore {
         isAdmin() ||
         hasPagePermission('ca-custom-requests') ||
         hasPagePermission('ca-campaigns') ||
-        hasPagePermission('creator-custom-requests') ||
+        hasPagePermission('creators-custom-requests') ||
         resource.data.creatorID == request.auth.uid
       );
       allow write: if false;
@@ -161,8 +161,7 @@ service cloud.firestore {
     match /content-planning/{entryId} {
       allow read: if isSignedIn() && (
         isAdmin() ||
-        hasPagePermission('content-planning') ||
-        hasPagePermission('creator-custom-requests') ||
+        hasPagePermission('creators-content-planning') ||
         resource.data.creatorID == request.auth.uid
       );
       allow write: if false;
