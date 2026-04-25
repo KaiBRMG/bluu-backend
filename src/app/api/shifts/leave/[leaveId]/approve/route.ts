@@ -3,6 +3,8 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById, invalidateUserCache } from '@/lib/services/userService';
+import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
+import { notifications } from '@/lib/notificationContent';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { LeaveRequestDocument } from '@/types/firestore';
 
@@ -74,20 +76,13 @@ export const POST = withAuth(async (
       });
     }
 
-    batch.set(adminDb.collection('notifications').doc(), {
-      userId: leave.userId,
-      title: action === 'approve' ? '✅ Leave Request Approved' : '❗️Leave Request Denied',
-      message: action === 'approve'
-        ? `Your ${leaveLabel} leave request on ${dateStr} has been approved.`
-        : `Your ${leaveLabel} leave request on ${dateStr} has been denied.`,
-      type: action === 'approve' ? 'success' : 'alert',
-      read: false,
-      dismissedByUser: false,
-      createdAt: FieldValue.serverTimestamp(),
-      actionUrl: '/applications/time-tracking',
-      announcement: false,
-      announcementExpiry: null,
-    });
+    addNotificationToBatch(
+      batch,
+      leave.userId,
+      action === 'approve'
+        ? notifications.leaveApproved(leaveLabel, dateStr)
+        : notifications.leaveDenied(leaveLabel, dateStr),
+    );
 
     await batch.commit();
 

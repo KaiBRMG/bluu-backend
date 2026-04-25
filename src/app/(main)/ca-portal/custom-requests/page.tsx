@@ -22,7 +22,8 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { MoreHorizontal, Plus, AlertCircle, Info, Search } from "lucide-react";
+import { Calendar } from "@/components/ui/calendar";
+import { MoreHorizontal, Plus, AlertCircle, Info, Search, CalendarIcon } from "lucide-react";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "@/firebase-config";
 import {
@@ -33,6 +34,42 @@ import {
 import { useUserData } from "@/hooks/useUserData";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
+
+// ─── Date picker ─────────────────────────────────────────────────────────────
+
+function DatePickerInput({ value, onChange, disabled, className, disabledClassName }: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  className: string;
+  disabledClassName?: string;
+}) {
+  const dateObj = value ? new Date(value + "T12:00:00") : undefined;
+  const label = dateObj?.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  if (disabled) {
+    return <p className={disabledClassName ?? className}>{label ?? "—"}</p>;
+  }
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button type="button" className={`${className} flex items-center gap-2 text-left`}>
+          <CalendarIcon className="w-4 h-4 text-zinc-400 shrink-0" />
+          {label ?? <span className="text-zinc-500">Pick a date</span>}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start">
+        <Calendar
+          mode="single"
+          selected={dateObj}
+          onSelect={d => {
+            if (!d) { onChange(""); return; }
+            onChange(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
@@ -208,7 +245,13 @@ function ViewCard({ entry, creatorName, readOnly, onClose, userNames = {} }: Vie
             </>
           )}
           <Field label="Due Date">
-            <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} disabled={!isEditable} className={isEditable ? inputClass : readOnlyClass} />
+            <DatePickerInput
+              value={dueDate}
+              onChange={setDueDate}
+              disabled={!isEditable}
+              className={inputClass}
+              disabledClassName={readOnlyClass}
+            />
           </Field>
           <Field label="Due Date Timezone">
             {isEditable ? (
@@ -346,7 +389,13 @@ function RejectedCard({ entry, creatorName, onClose }: RejectedCardProps) {
               <Field label="Social Username"><input value={fields.socialUsername} onChange={set("socialUsername")} className={inputClass} /></Field>
             </>
           )}
-          <Field label="Due Date"><input type="date" value={fields.dueDate} onChange={set("dueDate")} className={inputClass} /></Field>
+          <Field label="Due Date">
+            <DatePickerInput
+              value={fields.dueDate}
+              onChange={v => { setFields(prev => ({ ...prev, dueDate: v })); setDirty(true); }}
+              className={inputClass}
+            />
+          </Field>
           <Field label="Due Date Timezone">
             <Select value={fields.dueDateTimezone} onValueChange={v => { setFields(prev => ({ ...prev, dueDateTimezone: v })); setDirty(true); }}>
               <SelectTrigger className="bg-zinc-800 border-zinc-700"><SelectValue placeholder="Select timezone..." /></SelectTrigger>
@@ -502,7 +551,14 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
             {type === "Item" && (
               <div><label className="block text-xs text-zinc-400 mb-1">Address</label><input value={form.address} onChange={setField("address")} className={inputClass} /></div>
             )}
-            <div><label className="block text-xs text-zinc-400 mb-1">Due Date</label><input type="date" value={form.dueDate} onChange={setField("dueDate")} className={inputClass} /></div>
+            <div>
+              <label className="block text-xs text-zinc-400 mb-1">Due Date</label>
+              <DatePickerInput
+                value={form.dueDate}
+                onChange={v => setForm(prev => ({ ...prev, dueDate: v }))}
+                className={inputClass}
+              />
+            </div>
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Due Date Timezone</label>
               <Select value={form.dueDateTimezone} onValueChange={setVal("dueDateTimezone")}>
@@ -1014,7 +1070,7 @@ export default function CACustomRequestsPage() {
         fetch("/api/users/display-names", { headers }).then(r => r.json()),
       ]).then(([creatorsData, usersData]) => {
         if (cancelled) return;
-        setCreators(creatorsData.creators ?? []);
+        setCreators((creatorsData.creators ?? []).filter((c: Creator & { isActive?: boolean }) => c.isActive !== false));
         const map: Record<string, string> = {};
         for (const u of (usersData.users ?? [])) map[u.uid] = u.displayName;
         setUserNames(map);

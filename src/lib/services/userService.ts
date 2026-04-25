@@ -1,6 +1,8 @@
 import { adminDb } from '../firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { randomUUID } from 'crypto';
+import { notifications } from '@/lib/notificationContent';
+import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 
 export interface CreateUserData {
   uid: string;
@@ -88,42 +90,9 @@ export async function ensureUserExists(userData: CreateUserData): Promise<string
     // Send welcome notifications (non-blocking) — batched for atomicity and fewer round-trips
     // To do: notify admin as well (create super admin)
     const notifBatch = adminDb.batch();
-    notifBatch.set(adminDb.collection('notifications').doc(), {
-      userId: userData.uid,
-      title: 'Action Required',
-      message: `To complete your onboarding, click here to update your personal information.`,
-      type: 'action',
-      read: false,
-      dismissedByUser: false,
-      createdAt: FieldValue.serverTimestamp(),
-      actionUrl: '/applications/settings',
-      announcement: false,
-      announcementExpiry: null,
-    });
-    notifBatch.set(adminDb.collection('notifications').doc(), {
-      userId: userData.uid,
-      title: 'Welcome to Bluu Rock!',
-      message: `Hi ${firstName || userData.displayName}, welcome to the team! You will be assigned to a group soon.`,
-      type: 'success',
-      read: false,
-      dismissedByUser: false,
-      createdAt: FieldValue.serverTimestamp(),
-      actionUrl: null,
-      announcement: false,
-      announcementExpiry: null,
-    });
-    notifBatch.set(adminDb.collection('notifications').doc(), {
-      userId: "VoRCp0wmgvSgKG8yzxOyMyZ4cSv1",
-      title: 'Action Required',
-      message: `A new user has logged in, assign them to a group asap to complete onboarding.`,
-      type: 'action',
-      read: false,
-      dismissedByUser: false,
-      createdAt: FieldValue.serverTimestamp(),
-      actionUrl: '/admin/user-management',
-      announcement: false,
-      announcementExpiry: null,
-    });
+    addNotificationToBatch(notifBatch, userData.uid, notifications.onboardingActionRequired());
+    addNotificationToBatch(notifBatch, userData.uid, notifications.welcomeToTeam(firstName || userData.displayName));
+    addNotificationToBatch(notifBatch, 'VoRCp0wmgvSgKG8yzxOyMyZ4cSv1', notifications.adminNewUserAlert());
 
     notifBatch.commit().catch((err) => {
       console.error('[UserService] Failed to create welcome notifications:', err);

@@ -20,8 +20,129 @@ import {
   type CampaignEntry, type CRType, type CRPriority,
   PRIORITY_COLORS, formatAmount, formatDueDate, firestoreToEntry, sortByPriority, CAMPAIGN_TYPES,
 } from "@/lib/campaignTracking";
+import { orderBy } from "firebase/firestore";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
+
+// ─── Content Planning types ───────────────────────────────────────────────────
+
+interface CPDescriptionRow { qty: string; content: string; }
+
+interface CPEntry {
+  id: string;
+  contentType: "SFW" | "NSFW";
+  contentSummary: string;
+  description: CPDescriptionRow[];
+  comment: string;
+  dueDate: string | null;
+  status: "Outstanding" | "Completed";
+  creatorID: string;
+  isArchived: boolean;
+}
+
+function firestoreToCP(id: string, data: Record<string, unknown>): CPEntry {
+  return {
+    id,
+    contentType: (data.contentType as "SFW" | "NSFW") ?? "SFW",
+    contentSummary: (data.contentSummary as string) ?? "",
+    description: (data.description as CPDescriptionRow[]) ?? [],
+    comment: (data.comment as string) ?? "",
+    dueDate: typeof data.dueDate === "string" ? data.dueDate : null,
+    status: (data.status as "Outstanding" | "Completed") ?? "Outstanding",
+    creatorID: (data.creatorID as string) ?? "",
+    isArchived: (data.isArchived as boolean) ?? false,
+  };
+}
+
+function isCPOverdue(dueDate: string | null): boolean {
+  if (!dueDate) return false;
+  return new Date(dueDate + "T23:59:59Z") < new Date();
+}
+
+function formatCPDate(dateStr: string | null): string {
+  if (!dateStr) return "—";
+  try {
+    return new Date(dateStr + "T12:00:00Z").toLocaleDateString("en-US", {
+      month: "short", day: "numeric", year: "numeric",
+    });
+  } catch { return dateStr; }
+}
+
+// ─── Content Planning Card ────────────────────────────────────────────────────
+
+interface CPCardProps {
+  entry: CPEntry;
+  onComplete: (id: string) => void;
+  completing: boolean;
+}
+
+function CPCard({ entry, onComplete, completing }: CPCardProps) {
+  const overdue = isCPOverdue(entry.dueDate);
+  return (
+    <div
+      className="relative rounded-2xl border p-4 flex flex-col gap-3 h-full min-h-[240px]"
+      style={{
+        background: "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)",
+        borderColor: overdue ? "rgba(239,68,68,0.25)" : "rgba(255,255,255,0.08)",
+        boxShadow: "0 4px 24px rgba(0,0,0,0.3)",
+      }}
+    >
+      {/* Header */}
+      <div className="flex items-start justify-between gap-2 flex-wrap">
+        <p className="text-sm font-semibold text-zinc-100 leading-tight flex-1">{entry.contentSummary}</p>
+        <span
+          className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md shrink-0 ${
+            entry.contentType === "NSFW"
+              ? "bg-orange-500/15 text-orange-400"
+              : "bg-blue-500/15 text-blue-400"
+          }`}
+        >
+          {entry.contentType}
+        </span>
+      </div>
+
+      {/* Description */}
+      {entry.description.length > 0 && entry.description.some(r => r.qty || r.content) && (
+        <div className="flex flex-col gap-0.5">
+          {entry.description.filter(r => r.qty || r.content).map((r, i) => (
+            <p key={i} className="text-xs text-zinc-400">
+              <span className="text-zinc-300 font-medium">{r.qty}</span>
+              {r.qty && r.content ? " × " : ""}
+              {r.content}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {/* Comment */}
+      {entry.comment && (
+        <p className="text-xs text-zinc-500 leading-relaxed line-clamp-2">{entry.comment}</p>
+      )}
+
+      {/* Due date */}
+      <p className={`text-xs mt-auto ${overdue ? "text-red-400 font-medium" : "text-zinc-500"}`}>
+        {overdue ? "Overdue · " : "Due "}{formatCPDate(entry.dueDate)}
+      </p>
+
+      {/* Footer */}
+      <div className="pt-1 border-t" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
+        <Button
+          onClick={() => onComplete(entry.id)}
+          disabled={completing}
+          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 h-auto rounded-lg transition-all disabled:opacity-50 w-full justify-center"
+          style={{
+            background: "linear-gradient(135deg, #059669, #10b981)",
+            color: "white",
+            boxShadow: completing ? "none" : "0 0 12px rgba(16,185,129,0.35)",
+          }}
+        >
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          {completing ? "Saving…" : "Completed"}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 // ─── Entry Card ───────────────────────────────────────────────────────────────
 
@@ -414,6 +535,8 @@ export default function CreatorDashboardPage() {
   const router = useRouter();
   const [entries, setEntries] = useState<CampaignEntry[]>([]);
   const [completing, setCompleting] = useState<string | null>(null);
+  const [cpEntries, setCpEntries] = useState<CPEntry[]>([]);
+  const [cpCompleting, setCpCompleting] = useState<string | null>(null);
 
   useEffect(() => {
     if (!creatorUser) return;
@@ -432,6 +555,37 @@ export default function CreatorDashboardPage() {
     });
     return unsub;
   }, [creatorUser?.creatorID]);
+
+  useEffect(() => {
+    if (!creatorUser) return;
+    const q = query(
+      collection(db, "content-planning"),
+      where("creatorID", "==", creatorUser.creatorID),
+      where("status", "==", "Outstanding"),
+      orderBy("dueDate", "asc")
+    );
+    const unsub = onSnapshot(q, snap => {
+      setCpEntries(snap.docs.map(d => firestoreToCP(d.id, d.data() as Record<string, unknown>)));
+    }, (error) => {
+      console.error('[dashboard] content-planning listener error:', error);
+    });
+    return unsub;
+  }, [creatorUser?.creatorID]);
+
+  const handleCpComplete = async (id: string) => {
+    setCpCompleting(id);
+    const removed = cpEntries.find(e => e.id === id);
+    setCpEntries(prev => prev.filter(e => e.id !== id));
+    try {
+      const res = await apiRequest(`/api/content-planning/${id}/creator-complete`, { method: "POST" });
+      if (!res.ok) throw new Error();
+    } catch {
+      if (removed) setCpEntries(prev => [...prev, removed].sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? "")));
+      toast.error("Failed to mark as completed");
+    } finally {
+      setCpCompleting(null);
+    }
+  };
 
   const handleComplete = async (id: string) => {
     setCompleting(id);
@@ -502,10 +656,10 @@ export default function CreatorDashboardPage() {
           </h1>
         </div>
 
-        {/* Section 1: Outstanding Custom Requests */}
+        {/* Section 1: Custom Requests */}
         <section className="flex flex-col gap-4">
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold text-zinc-100">Outstanding Custom Requests</h2>
+            <h2 className="text-lg font-semibold text-zinc-100">Custom Requests</h2>
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-6 w-6 text-zinc-600 hover:text-zinc-400 flex-shrink-0">
@@ -532,7 +686,64 @@ export default function CreatorDashboardPage() {
           </div>
         </section>
 
-        {/* Section 2: Google Drive */}
+        {/* Section 2: Content Planning */}
+        <section className="flex flex-col gap-4">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-zinc-100">Content Planning</h2>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-6 w-6 text-zinc-600 hover:text-zinc-400 flex-shrink-0">
+                  <Info className="w-4 h-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="max-w-sm text-xs text-zinc-300 leading-relaxed">
+                This is the content we need to maintain your page. Please try sticking to your due dates as we follow a strict content upload schedule!
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div
+            className="rounded-2xl p-4 w-full"
+            style={{
+              background: "rgba(255,255,255,0.025)",
+              border: "1px solid rgba(255,255,255,0.07)",
+            }}
+          >
+            {cpEntries.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <div
+                  className="w-8 h-8 rounded-full flex items-center justify-center mb-2"
+                  style={{ background: "rgba(16,185,129,0.1)" }}
+                >
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                </div>
+                <p className="text-xs text-zinc-600">All caught up — no pending content requests!</p>
+              </div>
+            ) : (
+              <Carousel className="w-full" opts={{ align: "start" }}>
+                <CarouselContent className="-ml-3">
+                  {cpEntries.map(e => (
+                    <CarouselItem key={e.id} className="pl-3 basis-[90%] sm:basis-[48%]">
+                      <CPCard
+                        entry={e}
+                        onComplete={handleCpComplete}
+                        completing={cpCompleting === e.id}
+                      />
+                    </CarouselItem>
+                  ))}
+                </CarouselContent>
+                {cpEntries.length > 1 && (
+                  <>
+                    <CarouselPrevious className="left-0 -translate-x-1/2" />
+                    <CarouselNext className="right-0 translate-x-1/2" />
+                  </>
+                )}
+              </Carousel>
+            )}
+          </div>
+        </section>
+
+        {/* Section 3: Google Drive */}
         <section
           className="rounded-2xl px-5 py-4 flex items-center justify-between gap-4"
           style={{
@@ -566,7 +777,7 @@ export default function CreatorDashboardPage() {
           )}
         </section>
 
-        {/* Section 3: All Custom Requests */}
+        {/* Section 4: All Custom Requests */}
         <Button
           variant="ghost"
           className="w-full flex items-center justify-between px-5 py-4 h-auto rounded-2xl transition-all hover:brightness-110 active:scale-[0.99]"
@@ -579,6 +790,23 @@ export default function CreatorDashboardPage() {
           <div className="flex flex-col items-start gap-0.5">
             <span className="text-sm font-semibold text-zinc-200">All Custom Requests</span>
             <span className="text-xs text-zinc-500">View your full history</span>
+          </div>
+          <ChevronRight className="w-5 h-5 text-zinc-500" />
+        </Button>
+
+        {/* Section 5: All Content Requests */}
+        <Button
+          variant="ghost"
+          className="w-full flex items-center justify-between px-5 py-4 h-auto rounded-2xl transition-all hover:brightness-110 active:scale-[0.99]"
+          style={{
+            background: "rgba(255,255,255,0.025)",
+            border: "1px solid rgba(255,255,255,0.07)",
+          }}
+          onClick={() => router.push("/creator-portal/dashboard/content-requests")}
+        >
+          <div className="flex flex-col items-start gap-0.5">
+            <span className="text-sm font-semibold text-zinc-200">All Content Requests</span>
+            <span className="text-xs text-zinc-500">View your full content schedule</span>
           </div>
           <ChevronRight className="w-5 h-5 text-zinc-500" />
         </Button>

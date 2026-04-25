@@ -3,6 +3,7 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
 import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
+import { notifications } from '@/lib/notificationContent';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { ApprovalStatus } from '@/types/firestore';
 
@@ -43,18 +44,12 @@ export const PATCH = withAuth(async (
 
     batch.update(disputeRef, { CaApproval });
 
-    const rejectBase = `${assignedToName} has rejected your dispute! Please contact them privately to settle your dispute.`;
-    const notifMessage = CaApproval === 'Approved'
-      ? `${assignedToName} has approved your dispute! It will now be passed to your team leader for approval.`
-      : reason ? `${rejectBase} REASON: ${reason}` : rejectBase;
-
     addNotificationToBatch(
       batch,
       dispute.createdBy,
-      CaApproval === 'Approved' ? 'Dispute Partially Approved' : 'Dispute Rejected',
-      notifMessage,
-      CaApproval === 'Approved' ? 'success' : 'alert',
-      '/ca-portal/disputes',
+      CaApproval === 'Approved'
+        ? notifications.disputeCaApproved(assignedToName)
+        : notifications.disputeCaRejected(assignedToName, reason),
     );
 
     await batch.commit();

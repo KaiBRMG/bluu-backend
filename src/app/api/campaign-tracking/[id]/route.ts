@@ -4,6 +4,8 @@ import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById } from '@/lib/services/userService';
 import { getOFAMUids } from '@/lib/services/campaignTrackingService';
+import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
+import { notifications } from '@/lib/notificationContent';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { CRStatus } from '@/lib/campaignTracking';
 
@@ -60,18 +62,7 @@ export const PATCH = withAuth(async (request: NextRequest, token: DecodedIdToken
 
       if (newStatus === 'Rejected') {
         const notifBatch = adminDb.batch();
-        notifBatch.set(adminDb.collection('notifications').doc(), {
-          userId: current.createdBy,
-          title: '❗Custom Request Rejected',
-          message: `${editorName} has rejected ${current.CR} on ${stageName}. Please review the details and resubmit ASAP!`,
-          type: 'alert',
-          read: false,
-          dismissedByUser: false,
-          createdAt: FieldValue.serverTimestamp(),
-          actionUrl: '/ca-portal/custom-requests',
-          announcement: false,
-          announcementExpiry: null,
-        });
+        addNotificationToBatch(notifBatch, current.createdBy, notifications.crRejected(editorName, current.CR, stageName));
         await notifBatch.commit();
       }
 
@@ -80,18 +71,7 @@ export const PATCH = withAuth(async (request: NextRequest, token: DecodedIdToken
         if (ofamUids.length > 0) {
           const notifBatch = adminDb.batch();
           for (const uid of ofamUids) {
-            notifBatch.set(adminDb.collection('notifications').doc(), {
-              userId: uid,
-              title: '✅ Custom Request Completed',
-              message: `${current.CR} has been completed on ${stageName}. Please review and send to the fan ASAP!`,
-              type: 'success',
-              read: false,
-              dismissedByUser: false,
-              createdAt: FieldValue.serverTimestamp(),
-              actionUrl: '/creators/custom-requests',
-              announcement: false,
-              announcementExpiry: null,
-            });
+            addNotificationToBatch(notifBatch, uid, notifications.crCompleted(current.CR, stageName));
           }
           await notifBatch.commit();
         }

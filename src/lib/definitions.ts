@@ -41,7 +41,8 @@ export const PAGES: PageDef[] = [
   { pageId: 'admin-creator-management', title: 'Creator Management', teamspaceId: 'admin', href: '/admin/creator-management', icon: 'UserStar', order: 4 },
   
   // Creators
-  { pageId: 'creator-custom-requests', title: 'Custom Requests', teamspaceId: 'creators', href: '/creators/custom-requests', icon: 'ImagePlay', order: 0 },
+  { pageId: 'creators-custom-requests', title: 'Custom Requests', teamspaceId: 'creators', href: '/creators/custom-requests', icon: 'ImagePlay', order: 0 },
+  { pageId: 'creators-content-planning', title: 'Content Planning', teamspaceId: 'creators', href: '/creators/content-planning', icon: 'CalendarCheck', order: 1 },
 
   // Apps
   { pageId: 'time-tracking', title: 'Time Tracking', teamspaceId: 'apps', href: '/applications/time-tracking', icon: 'ClockFading', order: 0 },

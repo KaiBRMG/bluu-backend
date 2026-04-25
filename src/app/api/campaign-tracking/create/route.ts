@@ -4,6 +4,8 @@ import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById } from '@/lib/services/userService';
 import { getOFAMUids } from '@/lib/services/campaignTrackingService';
+import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
+import { notifications } from '@/lib/notificationContent';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { CRType, CallType } from '@/lib/campaignTracking';
 import { formatCR, CAMPAIGN_TYPES } from '@/lib/campaignTracking';
@@ -158,18 +160,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     if (ofamUids.length > 0) {
       const notifBatch = adminDb.batch();
       for (const uid of ofamUids) {
-        notifBatch.set(adminDb.collection('notifications').doc(), {
-          userId: uid,
-          title: '📷 A New CR has been Created!',
-          message: `${caller.displayName ?? token.uid} has added a new CR for ${result.stageName}. Review the details and approve ASAP!`,
-          type: 'action',
-          read: false,
-          dismissedByUser: false,
-          createdAt: FieldValue.serverTimestamp(),
-          actionUrl: '/creators/custom-requests',
-          announcement: false,
-          announcementExpiry: null,
-        });
+        addNotificationToBatch(notifBatch, uid, notifications.crCreated(caller.displayName ?? token.uid, result.stageName));
       }
       await notifBatch.commit();
     }

@@ -4,6 +4,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
 import { FieldValue, Timestamp, DocumentData } from 'firebase-admin/firestore';
 import { checkPageAccess, serializeTimestamp, addNotificationToBatch } from '@/lib/middleware/apiHelpers';
+import { notifications } from '@/lib/notificationContent';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { DisputeDocument } from '@/types/firestore';
 
@@ -262,14 +263,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       const createdByUser = await getUserById(token.uid);
       const createdByName = createdByUser?.displayName ?? 'Someone';
 
-      addNotificationToBatch(
-        batch,
-        assignedTo,
-        'New Dispute',
-        `${createdByName} has submitted a dispute against a sale assigned to you. Click here to check it out ASAP!`,
-        'action',
-        '/ca-portal/disputes',
-      );
+      addNotificationToBatch(batch, assignedTo, notifications.disputeAssigned(createdByName));
 
       await batch.commit();
     } else {

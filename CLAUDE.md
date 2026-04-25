@@ -157,6 +157,39 @@ Pages using this pattern:
 - `src/app/(main)/creators/custom-requests/page.tsx` — resizes to 1700×920 on the **Overview** tab
 - `src/app/(main)/ca-portal/custom-requests/page.tsx` — resizes to 1700×920 on the **My Customs** tab
 
+### Notification System
+
+All notification content (titles, messages, types, actionUrls) is centralised in `src/lib/notificationContent.ts`. Each notification is a named factory function that returns a `NotificationContent` object. When adding or editing notification copy, **only edit this file**.
+
+To write a notification to Firestore, use `addNotificationToBatch` from `src/lib/middleware/apiHelpers.ts`, which handles the boilerplate fields (`read`, `dismissedByUser`, `createdAt`, `announcement`, `announcementExpiry`):
+
+```ts
+import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
+import { notifications } from '@/lib/notificationContent';
+
+const batch = adminDb.batch();
+addNotificationToBatch(batch, userId, notifications.crCompleted(cr, stageName));
+await batch.commit();
+```
+
+Current notification events and their factory functions:
+
+| Event | Factory |
+|---|---|
+| New user — complete onboarding | `notifications.onboardingActionRequired()` |
+| New user — welcome message | `notifications.welcomeToTeam(firstName)` |
+| New user — admin alert | `notifications.adminNewUserAlert()` |
+| CR submitted | `notifications.crCreated(creatorName, stageName)` |
+| CR rejected | `notifications.crRejected(editorName, cr, stageName)` |
+| CR completed | `notifications.crCompleted(cr, stageName)` |
+| Leave approved | `notifications.leaveApproved(leaveLabel, dateStr)` |
+| Leave denied | `notifications.leaveDenied(leaveLabel, dateStr)` |
+| Dispute assigned | `notifications.disputeAssigned(createdByName)` |
+| Dispute — admin approved | `notifications.disputeAdminApproved()` |
+| Dispute — admin rejected | `notifications.disputeAdminRejected(reason?)` |
+| Dispute — CA approved | `notifications.disputeCaApproved(assignedToName)` |
+| Dispute — CA rejected | `notifications.disputeCaRejected(assignedToName, reason?)` |
+
 ### UI Stack
 
 - shadcn/ui components (`src/components/ui/`) — Radix UI primitives with Tailwind

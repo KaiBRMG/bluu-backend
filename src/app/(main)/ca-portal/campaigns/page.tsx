@@ -745,7 +745,7 @@ export default function CACampaignsPage() {
         fetch("/api/users/display-names", { headers }).then(r => r.json()),
       ]).then(([creatorsData, usersData]) => {
         if (cancelled) return;
-        setCreators(creatorsData.creators ?? []);
+        setCreators((creatorsData.creators ?? []).filter((c: Creator & { isActive?: boolean }) => c.isActive !== false));
         const map: Record<string, string> = {};
         for (const u of (usersData.users ?? [])) map[u.uid] = u.displayName;
         setUserNames(map);

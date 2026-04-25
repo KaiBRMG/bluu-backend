@@ -3,6 +3,8 @@ import { withCreatorAuth } from '@/lib/middleware/withCreatorAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getOFAMUids } from '@/lib/services/campaignTrackingService';
+import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
+import { notifications } from '@/lib/notificationContent';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 export const POST = withCreatorAuth(async (_request: NextRequest, token: DecodedIdToken, params: Promise<{ id: string }>) => {
@@ -36,18 +38,7 @@ export const POST = withCreatorAuth(async (_request: NextRequest, token: Decoded
         const stageName = creatorSnap.data()?.stageName ?? data.creatorID;
         const notifBatch = adminDb.batch();
         for (const uid of ofamUids) {
-          notifBatch.set(adminDb.collection('notifications').doc(), {
-            userId: uid,
-            title: '✅ Custom Request Completed',
-            message: `${data.CR} has been completed on ${stageName}. Please review and send to the fan ASAP!`,
-            type: 'success',
-            read: false,
-            dismissedByUser: false,
-            createdAt: FieldValue.serverTimestamp(),
-            actionUrl: '/creators/custom-requests',
-            announcement: false,
-            announcementExpiry: null,
-          });
+          addNotificationToBatch(notifBatch, uid, notifications.crCompleted(data.CR, stageName));
         }
         await notifBatch.commit();
       }

@@ -344,6 +344,28 @@ export interface CreatorFullDocument {
   lastCRID?: number;
 }
 
+// ─── Content Planning ────────────────────────────────────────────────
+
+export interface ContentPlanningDescription {
+  qty: string;
+  content: string;
+}
+
+export interface ContentPlanningDocument {
+  contentType: 'SFW' | 'NSFW';
+  contentSummary: string;
+  description: ContentPlanningDescription[];
+  comment: string;
+  dueDate: Timestamp;
+  createdAt: Timestamp;
+  completedAt: Timestamp | null;
+  lastEditedAt: Timestamp | null;
+  lastEditedBy: string | null;
+  status: 'Outstanding' | 'Completed';
+  creatorID: string;
+  isArchived: boolean;
+}
+
 // ─── Resolved access (returned to client after permission resolution) ─
 
 export interface ResolvedAccess {

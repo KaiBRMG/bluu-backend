@@ -3,6 +3,7 @@ import { getUserById } from '@/lib/services/userService';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { WriteBatch } from 'firebase-admin/firestore';
+import type { NotificationContent } from '@/lib/notificationContent';
 
 // ─── Permission check ───────────────────────────────────────────────
 
@@ -50,29 +51,21 @@ export function serializeTimestamp(
 
 // ─── Notification helper ────────────────────────────────────────────
 
-export type NotificationType = 'action' | 'success' | 'alert' | 'info';
-
 /**
  * Add a notification document to an existing Firestore batch.
- * Centralises the notification schema so all routes use the same structure.
+ * Content must come from notificationContent.ts to keep all copy centralised.
  */
 export function addNotificationToBatch(
   batch: WriteBatch,
   userId: string,
-  title: string,
-  message: string,
-  type: NotificationType,
-  actionUrl?: string,
+  content: NotificationContent,
 ): void {
   batch.set(adminDb.collection('notifications').doc(), {
     userId,
-    title,
-    message,
-    type,
+    ...content,
     read: false,
     dismissedByUser: false,
     createdAt: FieldValue.serverTimestamp(),
-    actionUrl: actionUrl ?? null,
     announcement: false,
     announcementExpiry: null,
   });

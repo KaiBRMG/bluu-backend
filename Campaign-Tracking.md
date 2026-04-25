@@ -97,21 +97,21 @@ Create a new notification for the following conditions:
 - title: "📷 A New CR has been Created!",
 - message: "[createdBy] has added a new CR for [creatorID]. Review the details and approve ASAP!"
 - type: 'action',
-- actionURL: 'creators/custom-requests'
+- actionURL: '/creators/custom-requests'
 
 2. 'status' is set to "Rejected":
 - userId: createdBy,
 - title: "❗Custom Request Rejected",
 - message: "[lastEditedBy] has rejected [CRID] on [creatorID]. Please review the details and resubmit ASAP!"
 - type: 'alert',
-- actionURL: 'ca-portal/custom-requests'
+- actionURL: '/ca-portal/custom-requests'
 
 3. 'status' is set to "Completed":
 - userId: all users in the "OFAM" user group,
 - title: "✅ Custom Request Completed",
 - message: "[CRID] has been completed on [creatorID]. Please review and send to the fan ASAP!"
 - type: 'success',
-- actionURL: 'creators/custom-requests'
+- actionURL: '/creators/custom-requests'
 
 
 # Important Considerations

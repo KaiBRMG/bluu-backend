@@ -155,5 +155,18 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 15. Content planning
+    // Managers read all entries; creators read only their own.
+    // All writes via Admin SDK (API routes).
+    match /content-planning/{entryId} {
+      allow read: if isSignedIn() && (
+        isAdmin() ||
+        hasPagePermission('content-planning') ||
+        hasPagePermission('creator-custom-requests') ||
+        resource.data.creatorID == request.auth.uid
+      );
+      allow write: if false;
+    }
+
   }
 }
