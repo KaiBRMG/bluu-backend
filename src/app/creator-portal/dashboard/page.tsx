@@ -565,7 +565,15 @@ export default function CreatorDashboardPage() {
       orderBy("dueDate", "asc")
     );
     const unsub = onSnapshot(q, snap => {
-      setCpEntries(snap.docs.map(d => firestoreToCP(d.id, d.data() as Record<string, unknown>)));
+      const sorted = snap.docs
+        .map(d => firestoreToCP(d.id, d.data() as Record<string, unknown>))
+        .sort((a, b) => {
+          if (!a.dueDate && !b.dueDate) return 0;
+          if (!a.dueDate) return 1;
+          if (!b.dueDate) return -1;
+          return a.dueDate.localeCompare(b.dueDate);
+        });
+      setCpEntries(sorted);
     }, (error) => {
       console.error('[dashboard] content-planning listener error:', error);
     });
@@ -580,7 +588,12 @@ export default function CreatorDashboardPage() {
       const res = await apiRequest(`/api/content-planning/${id}/creator-complete`, { method: "POST" });
       if (!res.ok) throw new Error();
     } catch {
-      if (removed) setCpEntries(prev => [...prev, removed].sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? "")));
+      if (removed) setCpEntries(prev => [...prev, removed].sort((a, b) => {
+        if (!a.dueDate && !b.dueDate) return 0;
+        if (!a.dueDate) return 1;
+        if (!b.dueDate) return -1;
+        return a.dueDate.localeCompare(b.dueDate);
+      }));
       toast.error("Failed to mark as completed");
     } finally {
       setCpCompleting(null);

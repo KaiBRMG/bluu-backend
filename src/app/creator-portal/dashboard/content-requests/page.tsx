@@ -190,6 +190,7 @@ export default function AllContentRequestsPage() {
     const q = query(
       collection(db, "content-planning"),
       where("creatorID", "==", creatorUser.creatorID),
+      where("status", "in", ["Outstanding", "Completed"]),
       orderBy("dueDate", "asc")
     );
     const unsub = onSnapshot(q, snap => {
