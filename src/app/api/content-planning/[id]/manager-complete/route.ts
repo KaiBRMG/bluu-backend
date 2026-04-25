@@ -16,7 +16,7 @@ export const POST = withAuth(async (
     if (denied) return denied;
 
     const { id } = await params;
-    await adminDb.collection('creators-content-planning').doc(id).update({
+    await adminDb.collection('content-planning').doc(id).update({
       status: 'Completed',
       isArchived: true,
       completedAt: FieldValue.serverTimestamp(),

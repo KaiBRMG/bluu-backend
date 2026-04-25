@@ -110,7 +110,7 @@ export default function WelcomePage() {
 // ─── Section ──────────────────────────────────────────────────────────────────
 
 interface SectionProps {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
   iconColor: string;
   title: string;
   children: React.ReactNode;
@@ -144,7 +144,7 @@ function Section({ icon: Icon, iconColor, title, children }: SectionProps) {
 // ─── Dashboard Item ───────────────────────────────────────────────────────────
 
 interface DashboardItemProps {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
   iconColor: string;
   title: string;
   body: string;

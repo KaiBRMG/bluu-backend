@@ -30,7 +30,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
     }
 
-    const ref = adminDb.collection('creators-content-planning').doc();
+    const ref = adminDb.collection('content-planning').doc();
     await ref.set({
       contentType,
       contentSummary,

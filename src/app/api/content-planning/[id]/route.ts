@@ -23,7 +23,7 @@ export const PATCH = withAuth(async (
       if (key in body) updates[key] = body[key];
     }
 
-    await adminDb.collection('creators-content-planning').doc(id).update(updates);
+    await adminDb.collection('content-planning').doc(id).update(updates);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('[PATCH /api/content-planning/:id]', error);
@@ -41,7 +41,7 @@ export const DELETE = withAuth(async (
     if (denied) return denied;
 
     const { id } = await params;
-    await adminDb.collection('creators-content-planning').doc(id).delete();
+    await adminDb.collection('content-planning').doc(id).delete();
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('[DELETE /api/content-planning/:id]', error);

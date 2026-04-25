@@ -15,7 +15,7 @@ export const POST = withAuth(async (
     if (denied) return denied;
 
     const snap = await adminDb
-      .collection('creators-content-planning')
+      .collection('content-planning')
       .where('status', '==', 'Completed')
       .where('isArchived', '==', false)
       .get();
