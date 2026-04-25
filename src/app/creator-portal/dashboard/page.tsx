@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
 import { useCreatorAuth } from "@/components/CreatorAuthProvider";
 import { auth, db } from "@/firebase-config";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
@@ -532,7 +531,6 @@ function ProfileMenu({ stageName, email, photoURL }: ProfileMenuProps) {
 
 export default function CreatorDashboardPage() {
   const { creatorUser } = useCreatorAuth();
-  const router = useRouter();
   const [entries, setEntries] = useState<CampaignEntry[]>([]);
   const [completing, setCompleting] = useState<string | null>(null);
   const [cpEntries, setCpEntries] = useState<CPEntry[]>([]);
@@ -790,39 +788,6 @@ export default function CreatorDashboardPage() {
           )}
         </section>
 
-        {/* Section 4: All Custom Requests */}
-        <Button
-          variant="ghost"
-          className="w-full flex items-center justify-between px-5 py-4 h-auto rounded-2xl transition-all hover:brightness-110 active:scale-[0.99]"
-          style={{
-            background: "rgba(255,255,255,0.025)",
-            border: "1px solid rgba(255,255,255,0.07)",
-          }}
-          onClick={() => router.push("/creator-portal/dashboard/all-customs")}
-        >
-          <div className="flex flex-col items-start gap-0.5">
-            <span className="text-sm font-semibold text-zinc-200">All Custom Requests</span>
-            <span className="text-xs text-zinc-500">View your full history</span>
-          </div>
-          <ChevronRight className="w-5 h-5 text-zinc-500" />
-        </Button>
-
-        {/* Section 5: All Content Requests */}
-        <Button
-          variant="ghost"
-          className="w-full flex items-center justify-between px-5 py-4 h-auto rounded-2xl transition-all hover:brightness-110 active:scale-[0.99]"
-          style={{
-            background: "rgba(255,255,255,0.025)",
-            border: "1px solid rgba(255,255,255,0.07)",
-          }}
-          onClick={() => router.push("/creator-portal/dashboard/content-requests")}
-        >
-          <div className="flex flex-col items-start gap-0.5">
-            <span className="text-sm font-semibold text-zinc-200">All Content Requests</span>
-            <span className="text-xs text-zinc-500">View your full content schedule</span>
-          </div>
-          <ChevronRight className="w-5 h-5 text-zinc-500" />
-        </Button>
 
       </main>
     </div>
