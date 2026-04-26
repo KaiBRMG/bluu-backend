@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useCreatorAuth } from "@/components/CreatorAuthProvider";
 import { db } from "@/firebase-config";
 import { collection, query, where, onSnapshot, orderBy } from "firebase/firestore";
@@ -17,7 +16,8 @@ import {
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, ArrowLeft, CheckCircle2, X } from "lucide-react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { MoreHorizontal, CheckCircle2, X } from "lucide-react";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
 import { createPortal } from "react-dom";
@@ -179,7 +179,6 @@ function DetailModal({ entry, onClose, onMarkComplete }: DetailModalProps) {
 
 export default function AllContentRequestsPage() {
   const { creatorUser } = useCreatorAuth();
-  const router = useRouter();
   const [entries, setEntries] = useState<CPEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewEntry, setViewEntry] = useState<CPEntry | null>(null);
@@ -222,27 +221,19 @@ export default function AllContentRequestsPage() {
     <div className="min-h-screen" style={{ background: "#09090b", color: "white" }}>
       {/* Top bar */}
       <header
-        className="sticky top-0 z-40 flex items-center gap-3 px-4 sm:px-6 h-14"
+        className="sticky top-0 z-40 flex items-center gap-2 px-3 sm:px-6 h-14"
         style={{
           background: "rgba(9,9,11,0.9)",
           backdropFilter: "blur(12px)",
           borderBottom: "1px solid rgba(255,255,255,0.06)",
         }}
       >
-        <Button
-          variant="ghost"
-          className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white h-auto px-2 py-1"
-          onClick={() => router.push("/creator-portal/dashboard")}
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Dashboard
-        </Button>
-        <span className="text-zinc-700">/</span>
-        <span className="text-sm font-medium text-zinc-300">All Content Requests</span>
+        <SidebarTrigger className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5" />
+        <span className="text-sm font-medium text-zinc-300 truncate">All Content Requests</span>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-        <h1 className="text-2xl font-semibold mb-6">All Content Requests</h1>
+      <main className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-8">
+        <h1 className="text-xl sm:text-2xl font-semibold mb-4 sm:mb-6">All Content Requests</h1>
 
         {loading ? (
           <div className="flex items-center justify-center py-20">
@@ -257,7 +248,8 @@ export default function AllContentRequestsPage() {
           </div>
         ) : (
           <>
-            <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
+            {/* Desktop table */}
+            <div className="hidden md:block rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -314,6 +306,45 @@ export default function AllContentRequestsPage() {
                   })}
                 </TableBody>
               </Table>
+            </div>
+
+            {/* Mobile card list */}
+            <div className="md:hidden flex flex-col gap-2">
+              {pageEntries.map(entry => {
+                const overdue = isOverdue(entry.dueDate) && entry.status === "Outstanding";
+                return (
+                  <button
+                    key={entry.id}
+                    onClick={() => setViewEntry(entry)}
+                    className="text-left rounded-xl px-4 py-3 flex flex-col gap-2 transition-colors active:bg-white/[0.04]"
+                    style={{
+                      background: "rgba(255,255,255,0.025)",
+                      border: `1px solid ${overdue ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.07)"}`,
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm text-zinc-100 font-medium leading-tight flex-1 min-w-0">
+                        {entry.contentSummary}
+                      </p>
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md shrink-0 ${
+                        entry.contentType === "NSFW" ? "bg-orange-500/15 text-orange-400" : "bg-blue-500/15 text-blue-400"
+                      }`}>
+                        {entry.contentType}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`text-[11px] ${overdue ? "text-red-400 font-medium" : "text-zinc-500"}`}>
+                        {overdue ? "Overdue · " : "Due "}{formatDate(entry.dueDate)}
+                      </span>
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                        entry.status === "Completed" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
+                      }`}>
+                        {entry.status}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
 
             {totalPages > 1 && (

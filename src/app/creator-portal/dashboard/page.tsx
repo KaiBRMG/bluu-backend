@@ -8,6 +8,7 @@ import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
   Carousel, CarouselContent, CarouselItem,
   CarouselPrevious, CarouselNext,
@@ -641,14 +642,14 @@ export default function CreatorDashboardPage() {
     >
       {/* Top bar */}
       <header
-        className="sticky top-0 z-40 flex items-center justify-between px-4 sm:px-6 h-14"
+        className="sticky top-0 z-40 flex items-center justify-between gap-2 px-3 sm:px-6 h-14"
         style={{
           background: "rgba(9,9,11,0.85)",
           backdropFilter: "blur(12px)",
           borderBottom: "1px solid rgba(255,255,255,0.06)",
         }}
       >
-        <img src="/logo/bluu_long.svg" alt="Bluu" className="h-6" />
+        <SidebarTrigger className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5" />
         <ProfileMenu
           stageName={creatorUser.stageName || creatorUser.displayName}
           email={creatorUser.userEmail}
@@ -657,12 +658,12 @@ export default function CreatorDashboardPage() {
       </header>
 
       {/* Content */}
-      <main className="max-w-4xl md:max-w-none mx-auto px-4 sm:px-6 py-8 sm:py-12 flex flex-col gap-8">
+      <main className="max-w-4xl md:max-w-none mx-auto px-3 sm:px-6 py-6 sm:py-12 flex flex-col gap-6 sm:gap-8">
 
         {/* Welcome */}
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-zinc-600 mb-1">Creator Portal</p>
-          <h1 className="text-2xl sm:text-3xl font-semibold text-zinc-100">
+          <h1 className="text-xl sm:text-3xl font-semibold text-zinc-100">
             Hey, {creatorUser.stageName || creatorUser.displayName} 👋
           </h1>
         </div>
@@ -756,13 +757,13 @@ export default function CreatorDashboardPage() {
 
         {/* Section 3: Google Drive */}
         <section
-          className="rounded-2xl px-5 py-4 flex items-center justify-between gap-4"
+          className="rounded-2xl px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
           style={{
             background: "rgba(255,255,255,0.025)",
             border: "1px solid rgba(255,255,255,0.07)",
           }}
         >
-          <div className="flex flex-col gap-0.5">
+          <div className="flex flex-col gap-0.5 min-w-0">
             <h3 className="text-sm font-semibold text-zinc-200">Google Drive Upload Link</h3>
             <p className="text-xs text-zinc-500">
               Your content folder. Please upload content in{" "}
@@ -774,7 +775,7 @@ export default function CreatorDashboardPage() {
               href={creatorUser.driveLink}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap transition-all hover:brightness-110"
+              className="flex items-center justify-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap transition-all hover:brightness-110 self-stretch sm:self-auto"
               style={{
                 background: "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.2))",
                 border: "1px solid rgba(99,102,241,0.3)",

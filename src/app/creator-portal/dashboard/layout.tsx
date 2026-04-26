@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { House, ImagePlay, CalendarCheck } from "lucide-react";
+import { House, HeartHandshake, ImagePlay, CalendarCheck } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -14,22 +14,26 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
+  useSidebar,
 } from "@/components/ui/sidebar";
 
 const navItems = [
-  { title: "Welcome to Bluu Rock", href: "/creator-portal/dashboard/welcome", icon: House },
+  { title: "Dashboard", href: "/creator-portal/dashboard", icon: House },
+  { title: "Welcome to Bluu Rock", href: "/creator-portal/dashboard/welcome", icon: HeartHandshake },
   { title: "Custom Requests", href: "/creator-portal/dashboard/all-customs", icon: ImagePlay },
   { title: "Content Planning", href: "/creator-portal/dashboard/content-requests", icon: CalendarCheck },
 ];
 
 function CreatorSidebar() {
   const pathname = usePathname();
+  const { setOpenMobile, isMobile } = useSidebar();
+
+  const handleNavClick = () => {
+    if (isMobile) setOpenMobile(false);
+  };
 
   return (
-    <Sidebar
-      collapsible="none"
-      style={{ background: "#111113", borderRight: "1px solid rgba(255,255,255,0.06)" }}
-    >
+    <Sidebar>
       <SidebarHeader
         className="px-5 py-4 border-b"
         style={{ borderColor: "rgba(255,255,255,0.06)" }}
@@ -45,9 +49,9 @@ function CreatorSidebar() {
                   <SidebarMenuButton
                     asChild
                     isActive={pathname === href}
-                    className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5 data-[active=true]:bg-white/10 data-[active=true]:text-zinc-100 rounded-lg"
+                    className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5 data-[active=true]:bg-white/10 data-[active=true]:text-zinc-100 rounded-lg h-10"
                   >
-                    <Link href={href}>
+                    <Link href={href} onClick={handleNavClick}>
                       <Icon className="w-4 h-4 shrink-0" />
                       <span className="text-sm">{title}</span>
                     </Link>
@@ -64,7 +68,16 @@ function CreatorSidebar() {
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <SidebarProvider>
+    <SidebarProvider
+      style={{
+        ["--sidebar" as string]: "#111113",
+        ["--sidebar-foreground" as string]: "#fafafa",
+        ["--sidebar-border" as string]: "rgba(255,255,255,0.06)",
+        ["--sidebar-accent" as string]: "rgba(255,255,255,0.05)",
+        ["--sidebar-accent-foreground" as string]: "#fafafa",
+        ["--sidebar-ring" as string]: "rgba(139,92,246,0.5)",
+      } as React.CSSProperties}
+    >
       <CreatorSidebar />
       <SidebarInset className="bg-[#09090b]">
         {children}

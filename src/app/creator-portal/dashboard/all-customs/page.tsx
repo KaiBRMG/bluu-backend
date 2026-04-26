@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useCreatorAuth } from "@/components/CreatorAuthProvider";
 import { db } from "@/firebase-config";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
@@ -17,7 +16,8 @@ import {
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, ArrowLeft, ExternalLink } from "lucide-react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { MoreHorizontal, ExternalLink } from "lucide-react";
 import { type CampaignEntry, STATUS_COLORS, TYPE_LABELS, formatAmount, formatDueDate, firestoreToEntry, CAMPAIGN_TYPES } from "@/lib/campaignTracking";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
@@ -100,7 +100,6 @@ function Row({ label, value }: { label: string; value: string }) {
 
 export default function AllCustomsPage() {
   const { creatorUser } = useCreatorAuth();
-  const router = useRouter();
   const [entries, setEntries] = useState<CampaignEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
@@ -151,27 +150,19 @@ export default function AllCustomsPage() {
     <div className="min-h-screen" style={{ background: "#09090b", color: "white" }}>
       {/* Top bar */}
       <header
-        className="sticky top-0 z-40 flex items-center gap-3 px-4 sm:px-6 h-14"
+        className="sticky top-0 z-40 flex items-center gap-2 px-3 sm:px-6 h-14"
         style={{
           background: "rgba(9,9,11,0.9)",
           backdropFilter: "blur(12px)",
           borderBottom: "1px solid rgba(255,255,255,0.06)",
         }}
       >
-        <Button
-          variant="ghost"
-          className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white h-auto px-2 py-1"
-          onClick={() => router.push("/creator-portal/dashboard")}
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Dashboard
-        </Button>
-        <span className="text-zinc-700">/</span>
-        <span className="text-sm font-medium text-zinc-300">All Custom Requests</span>
+        <SidebarTrigger className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5" />
+        <span className="text-sm font-medium text-zinc-300 truncate">All Custom Requests</span>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-        <h1 className="text-2xl font-semibold mb-6">All Custom Requests</h1>
+      <main className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-8">
+        <h1 className="text-xl sm:text-2xl font-semibold mb-4 sm:mb-6">All Custom Requests</h1>
 
         {loading ? (
           <div className="flex items-center justify-center py-20">
@@ -186,7 +177,8 @@ export default function AllCustomsPage() {
           </div>
         ) : (
           <>
-            <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
+            {/* Desktop table */}
+            <div className="hidden md:block rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -238,6 +230,38 @@ export default function AllCustomsPage() {
                   ))}
                 </TableBody>
               </Table>
+            </div>
+
+            {/* Mobile card list */}
+            <div className="md:hidden flex flex-col gap-2">
+              {pageEntries.map(entry => (
+                <button
+                  key={entry.id}
+                  onClick={() => setViewEntry(entry)}
+                  className="text-left rounded-xl px-4 py-3 flex flex-col gap-2 transition-colors active:bg-white/[0.04]"
+                  style={{
+                    background: "rgba(255,255,255,0.025)",
+                    border: "1px solid rgba(255,255,255,0.07)",
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-xs font-semibold text-violet-300 tracking-wider">{entry.CR}</span>
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${STATUS_COLORS[entry.status]}`}>
+                      {entry.status}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <p className="text-sm text-zinc-100 font-medium truncate">{entry.fanName}</p>
+                    <p className="text-[11px] text-zinc-500">{TYPE_LABELS[entry.type]}</p>
+                  </div>
+                  {entry.dueDate && (
+                    <p className="text-[11px] text-zinc-500">
+                      Due {formatDueDate(entry.dueDate)}
+                      {entry.dueDateTimezone ? ` (${entry.dueDateTimezone})` : ""}
+                    </p>
+                  )}
+                </button>
+              ))}
             </div>
 
             {totalPages > 1 && (

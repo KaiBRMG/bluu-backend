@@ -2,6 +2,7 @@ import {
   Users, LayoutDashboard, ImagePlay, CalendarCheck,
   FolderOpen, Rocket, ExternalLink,
 } from "lucide-react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 
 export default function WelcomePage() {
   return (
@@ -13,7 +14,20 @@ export default function WelcomePage() {
         color: "white",
       }}
     >
-      <main className="max-w-2xl mx-auto px-6 py-12 flex flex-col gap-10">
+      {/* Top bar */}
+      <header
+        className="sticky top-0 z-40 flex items-center gap-2 px-3 sm:px-6 h-14"
+        style={{
+          background: "rgba(9,9,11,0.85)",
+          backdropFilter: "blur(12px)",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+        }}
+      >
+        <SidebarTrigger className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5" />
+        <span className="text-sm font-medium text-zinc-300 truncate">Welcome to Bluu Rock</span>
+      </header>
+
+      <main className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12 flex flex-col gap-8 sm:gap-10">
 
         {/* Hero */}
         <div className="flex flex-col gap-2">
@@ -54,7 +68,7 @@ export default function WelcomePage() {
               icon={CalendarCheck}
               iconColor="#3b82f6"
               title="Content Plan"
-              body="We follow a structured approach to planning and scheduling content. PPVs, timeline posts, social media posts, campaign content, etc. Aim to fulfil requirements by the due date. Mark new items as In Progress once seen, then Completed when done."
+              body="We follow a structured approach to planning and scheduling content. PPVs, timeline posts, social media posts, campaign content, etc. Aim to fulfil requirements by the due date. Mark items as Completed when done."
             />
             <DashboardItem
               icon={FolderOpen}
@@ -119,7 +133,7 @@ interface SectionProps {
 function Section({ icon: Icon, iconColor, title, children }: SectionProps) {
   return (
     <section
-      className="rounded-2xl px-6 py-6 flex flex-col gap-4"
+      className="rounded-2xl px-4 sm:px-6 py-5 sm:py-6 flex flex-col gap-4"
       style={{
         background: "rgba(255,255,255,0.025)",
         border: "1px solid rgba(255,255,255,0.07)",
@@ -134,7 +148,7 @@ function Section({ icon: Icon, iconColor, title, children }: SectionProps) {
         </div>
         <h2 className="text-base font-semibold text-zinc-100">{title}</h2>
       </div>
-      <div className="flex flex-col gap-3 pl-11">
+      <div className="flex flex-col gap-3 sm:pl-11">
         {children}
       </div>
     </section>
