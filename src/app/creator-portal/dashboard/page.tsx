@@ -642,7 +642,7 @@ export default function CreatorDashboardPage() {
     >
       {/* Top bar */}
       <header
-        className="sticky top-0 z-40 flex items-center justify-between gap-2 px-3 sm:px-6 h-14"
+        className="sticky top-0 z-40 flex items-center justify-between gap-2 px-3 sm:px-6 h-14 relative"
         style={{
           background: "rgba(9,9,11,0.85)",
           backdropFilter: "blur(12px)",
@@ -650,6 +650,11 @@ export default function CreatorDashboardPage() {
         }}
       >
         <SidebarTrigger className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5" />
+        <img
+          src="/logo/bluu-logo.png"
+          alt="Bluu Rock"
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-8 rounded-md pointer-events-none"
+        />
         <ProfileMenu
           stageName={creatorUser.stageName || creatorUser.displayName}
           email={creatorUser.userEmail}

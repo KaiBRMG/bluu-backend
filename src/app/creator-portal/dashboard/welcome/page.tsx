@@ -16,7 +16,7 @@ export default function WelcomePage() {
     >
       {/* Top bar */}
       <header
-        className="sticky top-0 z-40 flex items-center gap-2 px-3 sm:px-6 h-14"
+        className="sticky top-0 z-40 flex items-center gap-2 px-3 sm:px-6 h-14 relative"
         style={{
           background: "rgba(9,9,11,0.85)",
           backdropFilter: "blur(12px)",
@@ -24,7 +24,11 @@ export default function WelcomePage() {
         }}
       >
         <SidebarTrigger className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5" />
-        <span className="text-sm font-medium text-zinc-300 truncate">Welcome to Bluu Rock</span>
+        <img
+          src="/logo/bluu-logo.png"
+          alt="Bluu Rock"
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-8 rounded-md pointer-events-none"
+        />
       </header>
 
       <main className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12 flex flex-col gap-8 sm:gap-10">

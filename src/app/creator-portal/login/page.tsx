@@ -49,8 +49,19 @@ export default function CreatorLoginPage() {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-black">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-12 max-w-md w-full">
+    <div
+      className="flex items-center justify-center min-h-screen bg-black px-4 relative"
+      style={{
+        backgroundImage: "url('/backgrounds/2_blur.png')",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+      }}
+    >
+      {/* Dark overlay for readability */}
+      <div className="absolute inset-0 bg-black/50" />
+
+      <div className="relative bg-zinc-900/80 backdrop-blur-md border border-white/10 rounded-lg p-12 max-w-md w-full shadow-2xl">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
             <img

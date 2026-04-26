@@ -150,7 +150,7 @@ export default function AllCustomsPage() {
     <div className="min-h-screen" style={{ background: "#09090b", color: "white" }}>
       {/* Top bar */}
       <header
-        className="sticky top-0 z-40 flex items-center gap-2 px-3 sm:px-6 h-14"
+        className="sticky top-0 z-40 flex items-center gap-2 px-3 sm:px-6 h-14 relative"
         style={{
           background: "rgba(9,9,11,0.9)",
           backdropFilter: "blur(12px)",
@@ -158,7 +158,11 @@ export default function AllCustomsPage() {
         }}
       >
         <SidebarTrigger className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5" />
-        <span className="text-sm font-medium text-zinc-300 truncate">All Custom Requests</span>
+        <img
+          src="/logo/bluu-logo.png"
+          alt="Bluu Rock"
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-8 rounded-md pointer-events-none"
+        />
       </header>
 
       <main className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-8">
