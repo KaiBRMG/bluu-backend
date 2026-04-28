@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useAuth } from "@/components/AuthProvider";
 import AppLayout from "@/components/AppLayout";
+import { useCreators } from "@/hooks/useCreators";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -843,6 +844,7 @@ function OverviewTab({ creators }: { creators: Creator[] }) {
   }, []);
 
   const creatorMap = Object.fromEntries(creators.map(c => [c.creatorID, c.stageName]));
+  const creatorPhotoMap = Object.fromEntries(creators.map(c => [c.creatorID, c.photoURL ?? undefined]));
 
   // Kanban: one column per active creator that has outstanding entries
   const byCreator: Record<string, CPEntry[]> = {};
@@ -908,7 +910,13 @@ function OverviewTab({ creators }: { creators: Creator[] }) {
                 >
                   {e.contentSummary}
                 </button>
-                <span className="text-zinc-400 truncate text-xs">{creatorMap[e.creatorID] ?? e.creatorID}</span>
+                <span className="flex items-center gap-1.5 text-zinc-400 text-xs min-w-0">
+                  <Avatar className="size-4 shrink-0">
+                    <AvatarImage src={creatorPhotoMap[e.creatorID]} />
+                    <AvatarFallback className="text-[8px]">{(creatorMap[e.creatorID] ?? e.creatorID).charAt(0)}</AvatarFallback>
+                  </Avatar>
+                  <span className="truncate">{creatorMap[e.creatorID] ?? e.creatorID}</span>
+                </span>
                 <Button size="sm" variant="outline" className="h-7 text-xs shrink-0" onClick={() => handleDismiss(e.id)}>
                   Dismiss
                 </Button>
@@ -937,7 +945,13 @@ function OverviewTab({ creators }: { creators: Creator[] }) {
                   }}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <p className="text-xs font-semibold text-zinc-300 truncate">{creator.stageName}</p>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Avatar className="size-4 shrink-0">
+                        <AvatarImage src={creator.photoURL ?? undefined} />
+                        <AvatarFallback className="text-[8px]">{creator.stageName.charAt(0)}</AvatarFallback>
+                      </Avatar>
+                      <p className="text-xs font-semibold text-zinc-300 truncate">{creator.stageName}</p>
+                    </div>
                     <span className="text-xs text-zinc-500 shrink-0">{byCreator[creator.creatorID].length}</span>
                   </div>
                   {byCreator[creator.creatorID].map(entry => {
@@ -1004,8 +1018,7 @@ function OverviewTab({ creators }: { creators: Creator[] }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ContentPlanningPage() {
-  const { user } = useAuth();
-  const [creators, setCreators] = useState<Creator[]>([]);
+  const creators = useCreators();
   const [activeTab, setActiveTab] = useState("overview");
 
   useEffect(() => {
@@ -1013,21 +1026,6 @@ export default function ContentPlanningPage() {
       window.electronAPI.window.setSize(1700, 920);
     }
   }, [activeTab]);
-
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    user.getIdToken().then(token => {
-      fetch("/api/disputes/creators", { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.json())
-        .then(data => {
-          if (cancelled) return;
-          setCreators((data.creators ?? []).filter((c: Creator & { isActive?: boolean }) => c.isActive !== false));
-        })
-        .catch(() => {});
-    });
-    return () => { cancelled = true; };
-  }, [user]);
 
   return (
     <AppLayout>

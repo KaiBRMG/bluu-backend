@@ -13,17 +13,19 @@ const PAGE_SIZE = 10;
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 interface UserInfo { displayName: string; photoURL: string | null; }
+interface CreatorInfo { stageName: string; photoURL: string | null; }
 
 function serialiseDispute(
   id: string,
   data: DocumentData,
   userMap: Record<string, UserInfo>,
-  creatorMap: Record<string, string>,
+  creatorMap: Record<string, CreatorInfo>,
 ): DisputeDocument {
   const assignedToInfo = data.assignedTo === 'No One'
     ? { displayName: 'No One', photoURL: null }
     : (userMap[data.assignedTo] ?? { displayName: data.assignedTo, photoURL: null });
   const createdByInfo = userMap[data.createdBy] ?? { displayName: data.createdBy, photoURL: null };
+  const creatorInfo = creatorMap[data.Creator];
   return {
     id,
     createdAt: serializeTimestamp(data.createdAt),
@@ -34,7 +36,8 @@ function serialiseDispute(
     CaApproval: data.CaApproval,
     AdminApproval: data.AdminApproval,
     Creator: data.Creator,
-    creatorName: creatorMap[data.Creator] ?? data.Creator,
+    creatorName: creatorInfo?.stageName ?? data.Creator,
+    creatorPhotoURL: creatorInfo?.photoURL ?? null,
     saleAmount: data.saleAmount,
     fanName: data.fanName,
     Comment: data.Comment,
@@ -67,9 +70,9 @@ async function resolveNames(
     }
   }
 
-  // Batch-fetch creator names via 'in' query (max 30 per Firestore limit)
+  // Batch-fetch creator names + photos via 'in' query (max 30 per Firestore limit)
   const uniqueCreatorIds = [...new Set(ids.map(d => d.Creator).filter(Boolean))];
-  const creatorMap: Record<string, string> = {};
+  const creatorMap: Record<string, CreatorInfo> = {};
   if (uniqueCreatorIds.length > 0) {
     const chunks: string[][] = [];
     for (let i = 0; i < uniqueCreatorIds.length; i += 30) {
@@ -78,7 +81,10 @@ async function resolveNames(
     await Promise.all(chunks.map(async chunk => {
       const snap = await adminDb.collection('creators').where('creatorID', 'in', chunk).get();
       for (const doc of snap.docs) {
-        creatorMap[doc.data().creatorID] = doc.data().stageName ?? doc.data().creatorID;
+        creatorMap[doc.data().creatorID] = {
+          stageName: doc.data().stageName ?? doc.data().creatorID,
+          photoURL: doc.data().photoURL ?? null,
+        };
       }
     }));
   }

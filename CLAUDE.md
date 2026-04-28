@@ -101,6 +101,7 @@ Three distinct portals, each with its own layout/auth:
 - `useUserData` — live `onSnapshot` on the user doc (serves from IndexedDB cache on reload)
 - `useTimesheetData` — sessionStorage cache (5 min TTL); call `invalidateTimesheetCache(uid)` after clock-in/out
 - `useDisputesData` — wraps all disputes API routes; creator/CA user lists cached in sessionStorage (5 min)
+- `useCreators` — fetches the active creator list (including `photoURL`) with a 5-min sessionStorage cache (`bluu_creators_v2`). Use this hook on any page that needs creator names or profile pictures; do not fetch `/api/disputes/creators` directly.
 - Permissions are cached in localStorage via `src/lib/permissionsCache.ts` (no TTL)
 
 ### Firestore Collections
@@ -198,5 +199,11 @@ Current notification events and their factory functions:
 - CSS variables for theming (`var(--foreground)`, etc.)
 - `sonner` for toast notifications
 - `@dnd-kit` for drag-and-drop
+
+### Profile Pictures
+
+Always use `src/components/ui/avatar.tsx` (`Avatar`, `AvatarImage`, `AvatarFallback`) to render profile pictures. Never use a plain `<img>` tag for avatars.
+
+Creator profile pictures (`photoURL`) are included in the data returned by `useCreators` and by `/api/disputes/creators`. The `DisputeDocument` type carries `creatorPhotoURL`, `createdByPhotoURL`, and `assignedToPhotoURL` — all resolved server-side in `/api/disputes/route.ts`.
 
 

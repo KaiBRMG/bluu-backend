@@ -142,6 +142,7 @@ export interface Creator {
   creatorID: string;
   stageName: string;
   defaultTimezone?: string;
+  photoURL?: string | null;
 }
 
 export const TYPE_LABELS: Record<CRType, string> = {

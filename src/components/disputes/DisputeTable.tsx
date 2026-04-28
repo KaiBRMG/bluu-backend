@@ -428,7 +428,7 @@ function DisputeRow({
       case 'fanName':
         return dispute.fanName;
       case 'creatorName':
-        return dispute.creatorName;
+        return <UserChip name={dispute.creatorName} photoURL={dispute.creatorPhotoURL} />;
       case 'createdByName':
         return <UserChip name={dispute.createdByName} photoURL={dispute.createdByPhotoURL} />;
       case 'assignedToName':

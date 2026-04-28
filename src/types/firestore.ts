@@ -313,6 +313,7 @@ export interface DisputeDocument {
   AdminApproval: ApprovalStatus;
   Creator: string;                 // creatorID (raw)
   creatorName: string;             // resolved from creators.stageName
+  creatorPhotoURL: string | null;
   saleDate: string | null;         // UTC ISO string — convert to user tz on display
   saleAmount: number;
   fanName: string;

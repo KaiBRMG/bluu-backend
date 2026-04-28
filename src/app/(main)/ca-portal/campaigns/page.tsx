@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import AppLayout from "@/components/AppLayout";
+import { useCreators } from "@/hooks/useCreators";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -402,6 +404,7 @@ function OverviewPanel({ creators, userNames, isActive, uid }: OverviewPanelProp
   }, [isActive, uid]);
 
   const creatorMap = Object.fromEntries(creators.map(c => [c.creatorID, c.stageName]));
+  const creatorPhotoMap = Object.fromEntries(creators.map(c => [c.creatorID, c.photoURL ?? undefined]));
   const pendingPayments = entries.filter(e => e.amountPaid < e.totalAmount);
   const outstandingTotal = pendingPayments.reduce((sum, e) => sum + (e.totalAmount - e.amountPaid), 0);
 
@@ -445,6 +448,10 @@ function OverviewPanel({ creators, userNames, isActive, uid }: OverviewPanelProp
                     <span className="text-xs px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-300 font-medium">
                       {TYPE_LABELS[entry.type]}
                     </span>
+                    <Avatar className="size-4 shrink-0">
+                      <AvatarImage src={creatorPhotoMap[entry.creatorID]} />
+                      <AvatarFallback className="text-[8px]">{(creatorMap[entry.creatorID] ?? entry.creatorID).charAt(0)}</AvatarFallback>
+                    </Avatar>
                     <span className="text-xs text-zinc-500">{creatorMap[entry.creatorID] ?? entry.creatorID}</span>
                   </div>
                   <p className="text-sm text-zinc-200 truncate">{entry.fanName}</p>
@@ -739,7 +746,7 @@ function CreatorCampaignsTable({ creatorID, creatorName, creators, userNames, is
 
 export default function CACampaignsPage() {
   const { user } = useAuth();
-  const [creators, setCreators] = useState<Creator[]>([]);
+  const creators = useCreators();
   const [userNames, setUserNames] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState("overview");
 
@@ -754,17 +761,15 @@ export default function CACampaignsPage() {
     if (!user) return;
     let cancelled = false;
     user.getIdToken().then(token => {
-      const headers = { Authorization: `Bearer ${token}` };
-      Promise.all([
-        fetch("/api/disputes/creators", { headers }).then(r => r.json()),
-        fetch("/api/users/display-names", { headers }).then(r => r.json()),
-      ]).then(([creatorsData, usersData]) => {
-        if (cancelled) return;
-        setCreators((creatorsData.creators ?? []).filter((c: Creator & { isActive?: boolean }) => c.isActive !== false));
-        const map: Record<string, string> = {};
-        for (const u of (usersData.users ?? [])) map[u.uid] = u.displayName;
-        setUserNames(map);
-      }).catch(() => {});
+      fetch("/api/users/display-names", { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(data => {
+          if (cancelled) return;
+          const map: Record<string, string> = {};
+          for (const u of (data.users ?? [])) map[u.uid] = u.displayName;
+          setUserNames(map);
+        })
+        .catch(() => {});
     });
     return () => { cancelled = true; };
   }, [user]);

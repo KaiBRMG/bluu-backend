@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import AppLayout from "@/components/AppLayout";
+import { useCreators } from "@/hooks/useCreators";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -975,7 +977,13 @@ function MyCustomsKanban({ currentUserUid, creators, userNames }: MyCustomsProps
           {activeCreators.map(creator => (
             <div key={creator.creatorID} className="shrink-0 w-72">
               <div className="mb-3 px-1">
-                <h3 className="text-sm font-semibold text-zinc-300">{creator.stageName}</h3>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <Avatar className="size-6 shrink-0">
+                    <AvatarImage src={creator.photoURL ?? undefined} />
+                    <AvatarFallback className="text-[10px]">{creator.stageName.charAt(0)}</AvatarFallback>
+                  </Avatar>
+                  <h3 className="text-sm font-semibold text-zinc-300">{creator.stageName}</h3>
+                </div>
                 <p className="text-xs text-zinc-500">{byCreator[creator.creatorID].length} entries</p>
               </div>
               <div className="flex flex-col gap-3">
@@ -1050,7 +1058,7 @@ function MyCustomsKanban({ currentUserUid, creators, userNames }: MyCustomsProps
 
 export default function CACustomRequestsPage() {
   const { user } = useAuth();
-  const [creators, setCreators] = useState<Creator[]>([]);
+  const creators = useCreators();
   const [userNames, setUserNames] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState("my-customs");
 
@@ -1064,17 +1072,15 @@ export default function CACustomRequestsPage() {
     if (!user) return;
     let cancelled = false;
     user.getIdToken().then(token => {
-      const headers = { Authorization: `Bearer ${token}` };
-      Promise.all([
-        fetch("/api/disputes/creators", { headers }).then(r => r.json()),
-        fetch("/api/users/display-names", { headers }).then(r => r.json()),
-      ]).then(([creatorsData, usersData]) => {
-        if (cancelled) return;
-        setCreators((creatorsData.creators ?? []).filter((c: Creator & { isActive?: boolean }) => c.isActive !== false));
-        const map: Record<string, string> = {};
-        for (const u of (usersData.users ?? [])) map[u.uid] = u.displayName;
-        setUserNames(map);
-      }).catch(() => {});
+      fetch("/api/users/display-names", { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(data => {
+          if (cancelled) return;
+          const map: Record<string, string> = {};
+          for (const u of (data.users ?? [])) map[u.uid] = u.displayName;
+          setUserNames(map);
+        })
+        .catch(() => {});
     });
     return () => { cancelled = true; };
   }, [user]);

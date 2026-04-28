@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import AppLayout from "@/components/AppLayout";
+import { useCreators } from "@/hooks/useCreators";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -531,9 +533,15 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
         <SummaryTile title="Awaiting Approval">
           <div className="flex flex-col gap-1 mt-2">
             {creators.map(c => (
-              <div key={c.creatorID} className="flex justify-between text-sm">
-                <span className="text-zinc-400 truncate">{c.stageName}</span>
-                <span className={`font-semibold ${awaitingByCreator[c.creatorID] ? "text-orange-400" : "text-zinc-500"}`}>
+              <div key={c.creatorID} className="flex justify-between items-center gap-2 text-sm">
+                <span className="flex items-center gap-1.5 text-zinc-400 min-w-0">
+                  <Avatar className="size-4 shrink-0">
+                    <AvatarImage src={c.photoURL ?? undefined} />
+                    <AvatarFallback className="text-[8px]">{c.stageName.charAt(0)}</AvatarFallback>
+                  </Avatar>
+                  <span className="truncate">{c.stageName}</span>
+                </span>
+                <span className={`font-semibold shrink-0 ${awaitingByCreator[c.creatorID] ? "text-orange-400" : "text-zinc-500"}`}>
                   {awaitingByCreator[c.creatorID]}
                 </span>
               </div>
@@ -543,9 +551,15 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
         <SummaryTile title="In Progress">
           <div className="flex flex-col gap-1 mt-2">
             {creators.map(c => (
-              <div key={c.creatorID} className="flex justify-between text-sm">
-                <span className="text-zinc-400 truncate">{c.stageName}</span>
-                <span className={`font-semibold ${inProgressByCreator[c.creatorID] ? "text-blue-400" : "text-zinc-500"}`}>
+              <div key={c.creatorID} className="flex justify-between items-center gap-2 text-sm">
+                <span className="flex items-center gap-1.5 text-zinc-400 min-w-0">
+                  <Avatar className="size-4 shrink-0">
+                    <AvatarImage src={c.photoURL ?? undefined} />
+                    <AvatarFallback className="text-[8px]">{c.stageName.charAt(0)}</AvatarFallback>
+                  </Avatar>
+                  <span className="truncate">{c.stageName}</span>
+                </span>
+                <span className={`font-semibold shrink-0 ${inProgressByCreator[c.creatorID] ? "text-blue-400" : "text-zinc-500"}`}>
                   {inProgressByCreator[c.creatorID]}
                 </span>
               </div>
@@ -603,7 +617,13 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
                 <tr>
                   {creators.map(c => (
                     <th key={c.creatorID} className="text-left px-2 pb-2 text-zinc-400 font-medium">
-                      {c.stageName}
+                      <div className="flex items-center gap-1.5">
+                        <Avatar className="size-4 shrink-0">
+                          <AvatarImage src={c.photoURL ?? undefined} />
+                          <AvatarFallback className="text-[8px]">{c.stageName.charAt(0)}</AvatarFallback>
+                        </Avatar>
+                        {c.stageName}
+                      </div>
                     </th>
                   ))}
                 </tr>
@@ -639,7 +659,13 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
                 <tr>
                   {creators.map(c => (
                     <th key={c.creatorID} className="text-left px-2 pb-2 text-zinc-400 font-medium">
-                      {c.stageName}
+                      <div className="flex items-center gap-1.5">
+                        <Avatar className="size-4 shrink-0">
+                          <AvatarImage src={c.photoURL ?? undefined} />
+                          <AvatarFallback className="text-[8px]">{c.stageName.charAt(0)}</AvatarFallback>
+                        </Avatar>
+                        {c.stageName}
+                      </div>
                     </th>
                   ))}
                 </tr>
@@ -1091,7 +1117,7 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames }: Ma
 
 export default function ManagerCustomRequestsPage() {
   const { user } = useAuth();
-  const [creators, setCreators] = useState<Creator[]>([]);
+  const creators = useCreators();
   const [userNames, setUserNames] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState("overview");
 
@@ -1105,17 +1131,15 @@ export default function ManagerCustomRequestsPage() {
     if (!user) return;
     let cancelled = false;
     user.getIdToken().then(token => {
-      const headers = { Authorization: `Bearer ${token}` };
-      Promise.all([
-        fetch("/api/disputes/creators", { headers }).then(r => r.json()),
-        fetch("/api/users/display-names", { headers }).then(r => r.json()),
-      ]).then(([creatorsData, usersData]) => {
-        if (cancelled) return;
-        setCreators((creatorsData.creators ?? []).filter((c: Creator & { isActive?: boolean }) => c.isActive !== false));
-        const map: Record<string, string> = {};
-        for (const u of (usersData.users ?? [])) map[u.uid] = u.displayName;
-        setUserNames(map);
-      }).catch(() => {});
+      fetch("/api/users/display-names", { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(data => {
+          if (cancelled) return;
+          const map: Record<string, string> = {};
+          for (const u of (data.users ?? [])) map[u.uid] = u.displayName;
+          setUserNames(map);
+        })
+        .catch(() => {});
     });
     return () => { cancelled = true; };
   }, [user]);
