@@ -233,6 +233,9 @@ async function main() {
   }
   console.log(`  ${Object.keys(existingByKey).length} existing entries indexed`);
 
+  const existingDataById = {};
+  for (const doc of existingSnap.docs) existingDataById[doc.id] = doc.data();
+
   // ── Standard entries: assign CR codes then patch createdBy / lastEditedBy ───
 
   // Track max existing CR per creator, then assign codes to entries that need them
@@ -254,6 +257,7 @@ async function main() {
 
   const updates        = [];
   let   standardNotFound = 0;
+  let   alreadyPatched   = 0;
   const unmatchedNames = {}; // raw name → Set of "fan" labels
 
   for (const { row, creator } of standardValid) {
@@ -264,6 +268,9 @@ async function main() {
 
     const docId = existingByKey[key];
     if (!docId) { standardNotFound++; continue; }
+
+    // Skip entries already patched — preserves any manual edits made after import
+    if (existingDataById[docId]?.createdBy) { alreadyPatched++; continue; }
 
     const chatterRaw    = (row[3] || '').trim();
     const chatterKey    = chatterRaw.split(',')[0].trim().toLowerCase();
@@ -279,7 +286,7 @@ async function main() {
     updates.push({ docId, createdBy, lastEditedBy });
   }
 
-  console.log(`\nPatching ${updates.length} standard entries (${standardNotFound} had no matching doc, ${standardValid.length - updates.length - standardNotFound} other)`);
+  console.log(`\nPatching ${updates.length} standard entries (${standardNotFound} had no matching doc, ${alreadyPatched} already patched/skipped)`);
 
   if (Object.keys(unmatchedNames).length > 0) {
     console.log(`\n── Unmatched user names (${Object.keys(unmatchedNames).length}) ──────────────────────────────`);
@@ -381,9 +388,9 @@ async function main() {
     console.log('');
   }
 
-  // ── Skipped entries summary (excludes duplicates) ────────────────────────────
+  // ── Skipped entries detail (unknown type / unknown creator) ──────────────────
   if (skippedEntries.length > 0) {
-    console.log(`\n── Skipped entries (${skippedEntries.length}) ──────────────────────────────────────────`);
+    console.log(`\n── Unrecognised rows (${skippedEntries.length}) ─────────────────────────────────────────`);
     const byReason = {};
     for (const e of skippedEntries) {
       (byReason[e.reason] = byReason[e.reason] || []).push(e);
@@ -398,13 +405,24 @@ async function main() {
   }
 
   // ── Final summary ─────────────────────────────────────────────────────────────
-  console.log('\n─────────────────────────────────────────────────────────────────────');
-  console.log(`  Standard entries (CR/Call/Item) patched : ${updates.length}`);
-  console.log(`  Standard entries with no matching doc   : ${standardNotFound}`);
-  console.log(`  Campaign entries (BFE/VIP/Hubby) created: ${toCreate.length}`);
-  console.log(`  Campaign duplicates skipped             : ${campaignDuplicates}`);
-  console.log(`  Rows skipped (unknown type/creator)     : ${skippedEntries.length}`);
-  console.log('─────────────────────────────────────────────────────────────────────');
+  const unknownTypeCount    = skippedEntries.filter(e => e.reason.startsWith('Unknown type')).length;
+  const unknownCreatorCount = skippedEntries.filter(e => e.reason === 'Unknown creator').length;
+  const totalSkipped = campaignDuplicates + alreadyPatched + standardNotFound + skippedEntries.length;
+
+  console.log('\n══════════════════════════════════════════════════════════════════════');
+  console.log('  SUMMARY');
+  console.log('──────────────────────────────────────────────────────────────────────');
+  console.log('  Added');
+  console.log(`    Campaign entries created (BFE/VIP/Hubby)   : ${toCreate.length}`);
+  console.log(`    Standard entries patched (CR/Call/Item)     : ${updates.length}`);
+  console.log('  Skipped');
+  console.log(`    Already imported — campaign duplicates      : ${campaignDuplicates}`);
+  console.log(`    Already patched  — standard entries         : ${alreadyPatched}`);
+  console.log(`    No matching Firestore doc                   : ${standardNotFound}`);
+  console.log(`    Unrecognised type                           : ${unknownTypeCount}`);
+  console.log(`    Unrecognised creator                        : ${unknownCreatorCount}`);
+  console.log(`    Total skipped                               : ${totalSkipped}`);
+  console.log('══════════════════════════════════════════════════════════════════════');
   console.log('Done!');
 }
 

@@ -492,24 +492,34 @@ function CreatorCampaignsTable({ creatorID, creatorName, creators, userNames, is
   const { userData } = useUserData();
   const userTz = userData?.timezone || undefined;
   const [entries, setEntries] = useState<CampaignEntry[]>([]);
-  const [typeFilter, setTypeFilter] = useState<CampaignType>("BFE");
+  const [typeFilters, setTypeFilters] = useState<Set<CampaignType>>(new Set(CAMPAIGN_TYPES as readonly CampaignType[]));
   const [showArchived, setShowArchived] = useState(false);
   const [page, setPage] = useState(0);
   const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
   const [showWizard, setShowWizard] = useState(false);
   const unsubRef = useRef<(() => void) | null>(null);
 
+  const toggleType = (t: CampaignType) => {
+    setTypeFilters(prev => {
+      if (prev.size === 1 && prev.has(t)) return prev;
+      const next = new Set(prev);
+      next.has(t) ? next.delete(t) : next.add(t);
+      return next;
+    });
+    setPage(0);
+  };
+
   const subscribe = useCallback(() => {
     unsubRef.current?.();
     const q = query(
       collection(db, "campaign-tracking"),
       where("creatorID", "==", creatorID),
-      where("type", "==", typeFilter)
+      where("type", "in", [...typeFilters])
     );
     unsubRef.current = onSnapshot(q, snap => {
       setEntries(snap.docs.map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>)));
     });
-  }, [creatorID, typeFilter]);
+  }, [creatorID, typeFilters]);
 
   useEffect(() => {
     if (!isActive) {
@@ -560,14 +570,13 @@ function CreatorCampaignsTable({ creatorID, creatorName, creators, userNames, is
     <div>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
-        {/* Single-select type filter */}
         <div className="flex gap-2">
           {(CAMPAIGN_TYPES as readonly CampaignType[]).map(t => (
             <Button
               key={t}
               size="sm"
-              variant={typeFilter === t ? "default" : "outline"}
-              onClick={() => { setTypeFilter(t); setPage(0); }}
+              variant={typeFilters.has(t) ? "default" : "outline"}
+              onClick={() => toggleType(t)}
             >
               {TYPE_BUTTON_LABELS[t]}
             </Button>
@@ -601,6 +610,7 @@ function CreatorCampaignsTable({ creatorID, creatorName, creators, userNames, is
                 <TableRow>
                   <TableHead>Created By</TableHead>
                   <TableHead>Fan Name</TableHead>
+                  <TableHead>Type</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead>Amount Paid</TableHead>
                   <TableHead>Total</TableHead>
@@ -614,6 +624,11 @@ function CreatorCampaignsTable({ creatorID, creatorName, creators, userNames, is
                       {userNames[entry.createdBy] ?? entry.createdBy}
                     </TableCell>
                     <TableCell className="text-sm font-medium">{entry.fanName}</TableCell>
+                    <TableCell>
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-300 font-medium">
+                        {TYPE_LABELS[entry.type]}
+                      </span>
+                    </TableCell>
                     <TableCell className="text-sm text-zinc-400">
                       {formatInTimezone(entry.createdTime, userTz)}
                     </TableCell>
