@@ -230,9 +230,9 @@ export default function AllContentRequestsPage() {
       >
         <SidebarTrigger className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5" />
         <img
-          src="/logo/bluu-logo.png"
+          src="/logo/bluu_long.svg"
           alt="Bluu Rock"
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-8 rounded-md pointer-events-none"
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-6 pointer-events-none"
         />
       </header>
 
