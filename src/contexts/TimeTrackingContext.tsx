@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo, ReactNode } from 'react';
 import { useAuth } from '@/components/AuthProvider';
-import type { TimerDisplayState, LocalSessionBuffer } from '@/types/firestore';
+import type { TimerDisplayState, LocalSessionBuffer, SessionEvent } from '@/types/firestore';
 import { invalidateTimesheetCache } from '@/hooks/useTimesheetData';
 import {
   initBuffer,
@@ -49,21 +49,27 @@ interface TimeTrackingContextType {
 
 const TimeTrackingContext = createContext<TimeTrackingContextType | null>(null);
 
-/** Compute activity % from powerMonitor idle-time samples between windowStart and windowEnd. */
+/**
+ * Compute activity % for a screenshot window by comparing working vs idle
+ * seconds parsed from the session event log. parseBuffer accumulates totals
+ * up to a given moment, so the window's totals are the difference between
+ * snapshots at windowEnd and windowStart.
+ */
 function calcActivityPercent(
-  samples: Array<{ sampleMs: number; idleSeconds: number }>,
+  events: SessionEvent[],
   windowStart: number,
   windowEnd: number,
 ): number {
-  const totalSlots = Math.max(1, Math.ceil((windowEnd - windowStart) / 60_000));
-  const activeSlots = new Set<number>();
-  for (const { sampleMs, idleSeconds } of samples) {
-    const lastActiveMs = sampleMs - idleSeconds * 1000;
-    if (lastActiveMs >= windowStart && lastActiveMs < windowEnd) {
-      activeSlots.add(Math.floor((lastActiveMs - windowStart) / 60_000));
-    }
-  }
-  return Math.round((activeSlots.size / totalSlots) * 100);
+  const eventsToEnd = events.filter(e => e.timestamp <= windowEnd);
+  const eventsToStart = events.filter(e => e.timestamp <= windowStart);
+  const totalsAtEnd = parseBuffer(eventsToEnd, windowEnd);
+  const totalsAtStart = parseBuffer(eventsToStart, windowStart);
+
+  const working = Math.max(0, totalsAtEnd.workingSeconds - totalsAtStart.workingSeconds);
+  const idle = Math.max(0, totalsAtEnd.idleSeconds - totalsAtStart.idleSeconds);
+  const denominator = working + idle;
+  if (denominator === 0) return 100;
+  return Math.round((working / denominator) * 100);
 }
 
 export function useTimeTrackingContext(): TimeTrackingContextType {
@@ -532,10 +538,13 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
               const windowStart = prevScreenshotMsRef.current ?? sessionStartMsRef.current ?? windowEnd;
 
               let activityPercent: number | null = null;
-              if (electronAPI.timeTracking.getActivitySince) {
+              const sid = sessionIdRef.current;
+              if (sid) {
                 try {
-                  const samples = await electronAPI.timeTracking.getActivitySince(windowStart);
-                  activityPercent = calcActivityPercent(samples, windowStart, windowEnd);
+                  const buf = await getBuffer(sid);
+                  if (buf) {
+                    activityPercent = calcActivityPercent(buf.events, windowStart, windowEnd);
+                  }
                 } catch {
                   // Non-critical — proceed without activity data
                 }
@@ -550,8 +559,6 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
                 }),
               });
               prevScreenshotMsRef.current = windowEnd;
-              // Note screenshot in local buffer for audit trail
-              const sid = sessionIdRef.current;
               if (sid) {
                 appendEvent(sid, { type: 'screenshot', timestamp: Date.now() }).catch(() => {});
               }

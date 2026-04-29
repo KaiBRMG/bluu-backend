@@ -44,16 +44,27 @@ export async function updatePagePermissions(
     throw new Error(`Unknown page: ${pageId}`);
   }
 
+  // Read the existing doc BEFORE overwriting so we can detect removed groups/users.
+  // Without this, unsharing a group leaves that group's members with stale permittedPageIds.
+  const prevDoc = await adminDb.collection('page-permissions').doc(pageId).get();
+  const prevGroups: Record<string, true> = prevDoc.exists ? (prevDoc.data()?.groups ?? {}) : {};
+  const prevUsers: Record<string, true> = prevDoc.exists ? (prevDoc.data()?.users ?? {}) : {};
+
   await adminDb.collection('page-permissions').doc(pageId).set({
     pageId,
     groups: permissions.groups || {},
     users: permissions.users || {},
   });
 
-  // Recompute for all groups that now have (or had) access to this page.
-  // Fetch all group members who belong to any group touching this page, then recompute.
-  const affectedGroupIds = Object.keys(permissions.groups || {});
-  const affectedUserIds = Object.keys(permissions.users || {});
+  // Union old + new: both added and removed groups/users need their permittedPageIds recomputed.
+  const affectedGroupIds = [...new Set([
+    ...Object.keys(prevGroups),
+    ...Object.keys(permissions.groups || {}),
+  ])];
+  const affectedUserIds = [...new Set([
+    ...Object.keys(prevUsers),
+    ...Object.keys(permissions.users || {}),
+  ])];
 
   // Collect all unique uids from affected groups
   if (affectedGroupIds.length > 0) {

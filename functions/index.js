@@ -75,6 +75,119 @@ exports.generateThumbnail = onObjectFinalized({ bucket: STORAGE_BUCKET }, async 
  * between 15 min and 6 h stale), the startup hydration logic handles it via
  * the /upload-log route instead.
  */
+// Page IDs that exist in the app — must be kept in sync with src/lib/definitions.ts.
+const KNOWN_PAGE_IDS = [
+  'ca-admin', 'ca-dashboard', 'ca-shifts', 'ca-disputes',
+  'ca-custom-requests', 'ca-campaigns',
+  'user-management', 'sharing', 'shift-management',
+  'admin-notifications', 'admin-creator-management',
+  'creators-custom-requests', 'creators-content-planning',
+  'time-tracking', 'apps-password-manager',
+];
+
+/**
+ * Resolves which page IDs a user should have access to.
+ * Mirrors src/lib/services/permissionResolver.ts — resolveAccessiblePages.
+ *
+ * @param {Map<string, {groups?: Record<string,boolean>, users?: Record<string,boolean>}>} permMap
+ * @param {string} uid
+ * @param {string[]} userGroups
+ * @returns {string[]}
+ */
+function resolvePageIds(permMap, uid, userGroups) {
+  const accessible = [];
+  for (const pageId of KNOWN_PAGE_IDS) {
+    const perm = permMap.get(pageId);
+    if (!perm) continue;
+    if (perm.users?.[uid]) { accessible.push(pageId); continue; }
+    for (const g of userGroups) {
+      if (perm.groups?.[g]) { accessible.push(pageId); break; }
+    }
+  }
+  return accessible;
+}
+
+/**
+ * Page-permissions sync — runs once per day at 03:00 UTC.
+ *
+ * Iterates every document in the users collection and compares its
+ * permittedPageIds against what the page-permissions collection actually
+ * grants (based on the user's groups and any direct-user grants).
+ *
+ * Any user whose permittedPageIds is missing, stale, or contains pages
+ * they should no longer have access to is corrected in a single batch write.
+ * permissionsVersion is incremented so the client-side cache invalidates
+ * immediately on the next onSnapshot tick.
+ *
+ * This acts as a daily safety net that catches drift caused by:
+ *   - Bugs in the cascade logic (e.g. removed groups not recomputed)
+ *   - Out-of-band Firestore writes (console edits, migration scripts)
+ *   - Group membership changes that didn't trigger a recompute
+ */
+exports.syncPagePermissions = onSchedule({ schedule: '0 3 * * *', timeZone: 'UTC' }, async () => {
+  const db = admin.firestore();
+
+  const [usersSnap, permSnap] = await Promise.all([
+    db.collection('users').get(),
+    db.collection('page-permissions').get(),
+  ]);
+
+  // Build a pageId → permission doc map
+  const permMap = new Map();
+  for (const doc of permSnap.docs) {
+    permMap.set(doc.id, doc.data());
+  }
+
+  // Warn about pages with no permission doc (missing seed)
+  for (const pageId of KNOWN_PAGE_IDS) {
+    if (!permMap.has(pageId)) {
+      console.warn(`[syncPagePermissions] No page-permissions doc for page: ${pageId}`);
+    }
+  }
+
+  const batch = db.batch();
+  let correctedCount = 0;
+
+  for (const userDoc of usersSnap.docs) {
+    const uid = userDoc.id;
+    const data = userDoc.data();
+    const groups = Array.isArray(data.groups) ? data.groups : [];
+    const actual = Array.isArray(data.permittedPageIds) ? data.permittedPageIds : null;
+
+    const expected = resolvePageIds(permMap, uid, groups);
+
+    // Fast equality check using sorted join — avoids Set construction for matching docs
+    const actualSorted   = actual ? [...actual].sort().join(',') : null;
+    const expectedSorted = [...expected].sort().join(',');
+
+    if (actualSorted === expectedSorted) continue;
+
+    const actualSet   = new Set(actual ?? []);
+    const expectedSet = new Set(expected);
+    const missing = expected.filter(id => !actualSet.has(id));
+    const extra   = (actual ?? []).filter(id => !expectedSet.has(id));
+
+    console.log(`[syncPagePermissions] Correcting user ${uid} (${data.displayName ?? 'unknown'})`);
+    if (missing.length) console.log(`  + adding  : ${missing.join(', ')}`);
+    if (extra.length)   console.log(`  - removing: ${extra.join(', ')}`);
+
+    batch.update(db.collection('users').doc(uid), {
+      permittedPageIds: expected,
+      permissionsVersion: admin.firestore.FieldValue.increment(1),
+    });
+    correctedCount++;
+  }
+
+  if (correctedCount === 0) {
+    console.log('[syncPagePermissions] All users are in sync. No corrections needed.');
+    return;
+  }
+
+  await batch.commit();
+  console.log(`[syncPagePermissions] Corrected ${correctedCount} user(s).`);
+});
+
+
 exports.cleanupStaleSessions = onSchedule({ schedule: '0 2 * * *', timeZone: 'UTC' }, async () => {
   const STALE_HOURS = 6;
   const cutoff = admin.firestore.Timestamp.fromDate(
