@@ -13,7 +13,17 @@ export default function DesktopOnlyPage() {
         </h1>
         <p className="mt-4 text-sm text-muted-foreground">
           The Bluu Backend employee portal is only available through the Bluu
-          Rock desktop application. Please open the desktop app to sign in.
+          Rock desktop application. Please open the desktop app to sign in, or
+          download the app{' '}
+          <a
+            href="https://www.notion.so/Download-Bluu-Backend-31d6a3e187d98080b341e4ed2c9d1917"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-foreground underline underline-offset-4 hover:opacity-80"
+          >
+            here
+          </a>
+          .
         </p>
         <p className="mt-6 text-sm text-muted-foreground">
           Are you a creator?{' '}
