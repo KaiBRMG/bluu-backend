@@ -138,6 +138,64 @@ Sessions use an event log architecture:
 3. On clock-out, the full event log is uploaded and `time_entries/{sessionId}` is written
 4. The daily Cloud Function closes stale sessions (no heartbeat for 6+ hours) that weren't explicitly clocked out
 
+### Activity Percent (Screenshots & Active Users)
+
+`activityPercent` is currently derived from the session event log by comparing
+`workingSeconds` vs `idleSeconds` within each screenshot window
+(`src/contexts/TimeTrackingContext.tsx` → `calcActivityPercent`). This is
+coarse: because the time tracker only flips to `idle` after 15 minutes
+without input (`IDLE_THRESHOLD_SECONDS`), low-input periods under that
+threshold register as 100% active.
+
+**Preferred (more accurate) method — powerMonitor input samples.** Once a new
+Electron update is pushed to all users (so every desktop client exposes
+`window.electronAPI.timeTracking.getActivitySince`), the screenshot upload
+path in `src/contexts/TimeTrackingContext.tsx` should be reverted to the
+sample-based calculation below. It buckets the window into 1-minute slots
+and marks each slot active if any keyboard/mouse input occurred — measured
+at the OS level via `powerMonitor.getSystemIdleTime()`.
+
+```ts
+/** Compute activity % from powerMonitor idle-time samples between windowStart and windowEnd. */
+function calcActivityPercent(
+  samples: Array<{ sampleMs: number; idleSeconds: number }>,
+  windowStart: number,
+  windowEnd: number,
+): number {
+  const totalSlots = Math.max(1, Math.ceil((windowEnd - windowStart) / 60_000));
+  const activeSlots = new Set<number>();
+  for (const { sampleMs, idleSeconds } of samples) {
+    const lastActiveMs = sampleMs - idleSeconds * 1000;
+    if (lastActiveMs >= windowStart && lastActiveMs < windowEnd) {
+      activeSlots.add(Math.floor((lastActiveMs - windowStart) / 60_000));
+    }
+  }
+  return Math.round((activeSlots.size / totalSlots) * 100);
+}
+```
+
+Call site (inside the screenshot capture `useEffect`, after `windowStart`/
+`windowEnd` are computed):
+
+```ts
+let activityPercent: number | null = null;
+if (electronAPI.timeTracking.getActivitySince) {
+  try {
+    const samples = await electronAPI.timeTracking.getActivitySince(windowStart);
+    activityPercent = calcActivityPercent(samples, windowStart, windowEnd);
+  } catch {
+    // Non-critical — proceed without activity data
+  }
+}
+```
+
+The IPC handler is already wired in `electron/main.js` (`timeTracking:getActivitySince`)
+and exposed via `electron/preload.js`; the type is in `src/types/electron.d.ts`.
+The reason the sample-based path was swapped out is that older installed
+Electron builds may not expose `getActivitySince`, so the event-log
+fallback runs reliably across all clients in the meantime. Switch back
+once the Electron rollout is confirmed.
+
 ### Permissions System
 
 Pages are code-defined in `src/lib/definitions.ts` (not Firestore). `page-permissions/{pageId}` maps each page to allowed groups/users. Resolved access is denormalised onto `users/{uid}.permittedPageIds` for fast sidebar rendering.
