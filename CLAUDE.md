@@ -63,11 +63,37 @@ FIREBASE_SERVICE_ACCOUNT   # JSON string of service account key
 
 ## Architecture
 
+### Browser Access Middleware
+
+`src/middleware.ts` blocks all non-Electron browser access to the app. The matcher covers every page route (excludes `_next`, `api`, and static assets).
+
+**Logic:**
+1. If the request path starts with a `BROWSER_ALLOWED_PREFIXES` entry → allow through unconditionally.
+2. If the `User-Agent` header contains `Electron/` → allow through (this is the desktop app).
+3. Otherwise → rewrite the request to `/desktop-only` (a browser-safe page telling users to use the desktop app).
+
+**Currently allowed browser prefixes:**
+- `/auth` — OAuth flow pages (`/auth/google`, `/auth/callback`). These run in the system browser during login and must be reachable without Electron.
+- `/creator-portal` — External creator interface, browser-accessible by design.
+- `/desktop-only` — The "use the desktop app" landing page itself.
+
+When adding a new route that legitimately needs browser access, add its prefix to `BROWSER_ALLOWED_PREFIXES` in `src/middleware.ts`. The `api` routes are already excluded from the matcher and are unaffected by this middleware.
+
 ### Auth Flow
 
-Authentication is Google OAuth only, handled server-side via two API routes:
-1. `/api/auth/google-url` — generates OAuth URL
-2. `/api/auth/exchange-code` — exchanges code for Firebase custom token, sets custom claims (`admin: true/false`), creates/updates the user document
+Authentication is Google OAuth only. The full login sequence for internal employees is:
+
+1. User clicks **Login** in the Electron app.
+2. Electron opens the system browser to `/auth/google`.
+3. `/auth/google` (server component) immediately redirects to `accounts.google.com` with the OAuth params.
+4. Google redirects back to `/auth/callback?code=...` (still in the browser).
+5. `/auth/callback` (client component) reads the `code` param and redirects to `bluu://callback?code=...` — a custom deep link that hands the code back to Electron.
+6. Electron calls `/api/auth/exchange-code`, which exchanges the code for a Firebase custom token, sets custom claims (`admin: true/false`), and creates/updates the user document.
+7. The Electron app signs in to Firebase with the custom token.
+
+API routes involved:
+- `/api/auth/google-url` — generates OAuth URL (used by Electron directly; `/auth/google` builds the URL itself server-side)
+- `/api/auth/exchange-code` — exchanges code for Firebase custom token, sets custom claims, creates/updates the user document
 
 Admin status comes from a **JWT Custom Claim** (`token.admin`), not a Firestore read. The claim is set at login and refreshed when group membership changes.
 
