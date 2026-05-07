@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useActiveUsers } from '@/hooks/useActiveUsers';
-import { useAdminUsers } from '@/hooks/useAdminUsers';
+import { useBasicUsers } from '@/hooks/useBasicUsers';
 import { useUserData } from '@/hooks/useUserData';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Loader } from '@/components/ui/loader';
@@ -37,7 +37,7 @@ function formatTime(date: Date, timezone?: string): string {
 
 export default function AdminActiveUsers() {
   const { activeSessions, isLoading: sessionsLoading } = useActiveUsers();
-  const { users, groups, loading: usersLoading, refetch } = useAdminUsers();
+  const { users, groups, loading: usersLoading, refetch } = useBasicUsers();
   const { userData: viewerData } = useUserData();
   const viewerTimezone = viewerData?.timezone || 'UTC';
   const [selectedGroup, setSelectedGroup] = useState<string>('all');

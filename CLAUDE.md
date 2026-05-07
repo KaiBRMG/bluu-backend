@@ -107,6 +107,19 @@ All API routes are wrapped with one of two middleware functions:
 - **`withAuth`** (`src/lib/middleware/withAuth.ts`) — verifies Firebase Bearer token, injects `DecodedIdToken`
 - **`withCreatorAuth`** (`src/lib/middleware/withCreatorAuth.ts`) — same as above, but also verifies the user exists in the `creators` Firestore collection and `isActive !== false`
 
+#### Authorization tiers
+
+Inside handlers, authorization layers on top of the middleware. From least to most privileged:
+
+1. **Authenticated only** — `withAuth` alone. Use for general reference data (e.g. `/api/creators`, `/api/users/display-names`, `/api/disputes/users`) needed across many pages where a single page-permission check would block legitimate callers.
+2. **Page permission** — `checkPageAccess(token.uid, '<pageId>')` from `apiHelpers.ts` or inline `caller.permittedPageIds.includes(...)`. Most admin/feature endpoints use this tier.
+3. **Admin claim** — `token.admin !== true` guard. Reserve for actions that gate access to the system itself or the authorization graph. Required for:
+   - **Admin group membership writes** (`/api/admin/groups/admin/members` POST/DELETE) — also blocks self-promotion (`uids.includes(token.uid)`).
+   - **`isActive` field on `/api/admin/users/[uid]`** — disabling an account is a security action; other profile fields (leave balances, screenshot toggles, payment info) remain at the page-permission tier.
+   - **Page-permission map writes** (`/api/admin/pages/[pageId]/permissions` PUT) — editing this map is the root of all other authorization decisions, so it must require admin even though `'sharing'` page permission still gates the read.
+
+When adding a new admin-action route, decide which tier applies; do not default to "page permission" if the action affects the auth graph or account state.
+
 ### Portal Structure
 
 Three distinct portals, each with its own layout/auth:
@@ -127,7 +140,7 @@ Three distinct portals, each with its own layout/auth:
 - `useUserData` — live `onSnapshot` on the user doc (serves from IndexedDB cache on reload)
 - `useTimesheetData` — sessionStorage cache (5 min TTL); call `invalidateTimesheetCache(uid)` after clock-in/out
 - `useDisputesData` — wraps all disputes API routes; creator/CA user lists cached in sessionStorage (5 min)
-- `useCreators` — fetches the active creator list (including `photoURL`) with a 5-min sessionStorage cache (`bluu_creators_v2`). Use this hook on any page that needs creator names or profile pictures; do not fetch `/api/disputes/creators` directly.
+- `useCreators` — fetches the active creator list (including `photoURL`) with a 5-min sessionStorage cache (`bluu_creators_v2`). Use this hook on any page that needs creator names or profile pictures; do not fetch `/api/creators` directly.
 - Permissions are cached in localStorage via `src/lib/permissionsCache.ts` (no TTL)
 
 ### Firestore Collections
@@ -226,6 +239,10 @@ once the Electron rollout is confirmed.
 
 Pages are code-defined in `src/lib/definitions.ts` (not Firestore). `page-permissions/{pageId}` maps each page to allowed groups/users. Resolved access is denormalised onto `users/{uid}.permittedPageIds` for fast sidebar rendering.
 
+Page permissions are one of three authorization tiers — see **API Route Auth Middleware → Authorization tiers** above. Some actions (admin group membership, `isActive`, the page-permission map itself) require the `token.admin` JWT claim and cannot be granted through page sharing alone.
+
+The page-permission map at `/api/admin/pages/[pageId]/permissions` (PUT) requires the admin claim to write, even though `'sharing'` page permission still gates the read on `/api/admin/pages` (GET). This asymmetry is intentional: any user with `'sharing'` could otherwise grant themselves any other page and chain into account-level changes.
+
 ### Dynamically resizing the window.
 
 Some pages resize the Electron window via `window.electronAPI.window.setSize(width, height)` when the active tab changes. The resize only fires when entering a specific wide tab — the window is never shrunk when switching away. Pattern:
@@ -263,7 +280,7 @@ Current notification events and their factory functions:
 |---|---|
 | New user — complete onboarding | `notifications.onboardingActionRequired()` |
 | New user — welcome message | `notifications.welcomeToTeam(firstName)` |
-| New user — admin alert | `notifications.adminNewUserAlert()` |
+| New user — admin alert | `notifications.adminNewUserAlert()` — fans out to every uid in `groups/admin.members` (do not hardcode an admin uid) |
 | CR submitted | `notifications.crCreated(creatorName, stageName)` |
 | CR rejected | `notifications.crRejected(editorName, cr, stageName)` |
 | CR completed | `notifications.crCompleted(cr, stageName)` |
@@ -288,6 +305,6 @@ Current notification events and their factory functions:
 
 Always use `src/components/ui/avatar.tsx` (`Avatar`, `AvatarImage`, `AvatarFallback`) to render profile pictures. Never use a plain `<img>` tag for avatars.
 
-Creator profile pictures (`photoURL`) are included in the data returned by `useCreators` and by `/api/disputes/creators`. The `DisputeDocument` type carries `creatorPhotoURL`, `createdByPhotoURL`, and `assignedToPhotoURL` — all resolved server-side in `/api/disputes/route.ts`.
+Creator profile pictures (`photoURL`) are included in the data returned by `useCreators` and by `/api/creators`. The `DisputeDocument` type carries `creatorPhotoURL`, `createdByPhotoURL`, and `assignedToPhotoURL` — all resolved server-side in `/api/disputes/route.ts`.
 
 

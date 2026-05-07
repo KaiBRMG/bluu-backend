@@ -3,8 +3,9 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 
 /**
- * GET /api/disputes/ca-users
+ * GET /api/disputes/users
  * Returns all users in the 'CA' group (uid + displayName only).
+ * Used in both the disputes (assignee picker) and ca-admin (filter dropdown) contexts.
  */
 export const GET = withAuth(async (_request: NextRequest) => {
   try {
@@ -16,7 +17,7 @@ export const GET = withAuth(async (_request: NextRequest) => {
 
     return NextResponse.json({ users });
   } catch (error) {
-    console.error('[disputes/ca-users GET]', error);
-    return NextResponse.json({ error: 'Failed to fetch CA users' }, { status: 500 });
+    console.error('[disputes/users GET]', error);
+    return NextResponse.json({ error: 'Failed to fetch users' }, { status: 500 });
   }
 });

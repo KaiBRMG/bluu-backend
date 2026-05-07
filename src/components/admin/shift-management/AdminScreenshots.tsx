@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { useAdminUsers } from '@/hooks/useAdminUsers';
+import { useBasicUsers } from '@/hooks/useBasicUsers';
 import { useAdminScreenshots, ScreenshotGroup } from '@/hooks/useAdminScreenshots';
 import { useAuth } from '@/components/AuthProvider';
 import { useUserData } from '@/hooks/useUserData';
@@ -85,7 +85,7 @@ interface BatchDeleteDialogProps {
 
 function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
   const { user } = useAuth();
-  const { users, loading: usersLoading } = useAdminUsers();
+  const { users, loading: usersLoading } = useBasicUsers();
   const today = toDateString(new Date());
 
   const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
@@ -356,7 +356,7 @@ function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
 export default function AdminScreenshots({ selectedUserId, onUserChange }: AdminScreenshotsProps) {
   const router = useRouter();
   const { user } = useAuth();
-  const { users, loading: usersLoading } = useAdminUsers();
+  const { users, loading: usersLoading } = useBasicUsers();
   const { userData: viewerData } = useUserData();
   const viewerTimezone = viewerData?.timezone || 'UTC';
   const today = toDateString(new Date());

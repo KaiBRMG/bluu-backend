@@ -3,8 +3,9 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 
 /**
- * GET /api/disputes/creators
+ * GET /api/creators
  * Returns all creators sorted alphabetically by stageName.
+ * Used across the app wherever creator names/avatars are displayed.
  */
 export const GET = withAuth(async (_request: NextRequest) => {
   try {
@@ -24,7 +25,7 @@ export const GET = withAuth(async (_request: NextRequest) => {
 
     return NextResponse.json({ creators });
   } catch (error) {
-    console.error('[disputes/creators GET]', error);
+    console.error('[creators GET]', error);
     return NextResponse.json({ error: 'Failed to fetch creators' }, { status: 500 });
   }
 });

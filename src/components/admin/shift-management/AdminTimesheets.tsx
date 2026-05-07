@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useAdminUsers } from '@/hooks/useAdminUsers';
+import { useBasicUsers } from '@/hooks/useBasicUsers';
 import { useTimesheetData } from '@/hooks/useTimesheetData';
 import { useUserData } from '@/hooks/useUserData';
 import TimesheetView from '@/components/timesheet/TimesheetView';
@@ -37,7 +37,7 @@ interface AdminTimesheetsProps {
 }
 
 export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminTimesheetsProps) {
-  const { users, loading: usersLoading } = useAdminUsers();
+  const { users, loading: usersLoading } = useBasicUsers();
   const { userData: viewerData } = useUserData();
   const viewerTimezone = viewerData?.timezone || 'UTC';
   const today = toDateString(new Date());

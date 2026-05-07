@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
-import { getUserById } from '@/lib/services/userService';
 import { updatePagePermissions } from '@/lib/services/pageService';
 import { getAllGroups } from '@/lib/services/groupService';
 import { getPageDef } from '@/lib/definitions';
@@ -17,8 +16,7 @@ export const PUT = withAuth(async (
   params: Promise<{ pageId: string }>
 ) => {
   try {
-    const caller = await getUserById(token.uid);
-    if (!caller?.permittedPageIds?.includes('sharing')) {
+    if (token.admin !== true) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 

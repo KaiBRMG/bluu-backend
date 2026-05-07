@@ -3,7 +3,7 @@
 import { useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import { Loader } from "@/components/ui/loader";
-import { useAdminUsers } from "@/hooks/useAdminUsers";
+import { useBasicUsers } from "@/hooks/useBasicUsers";
 import { useAdminNotifications } from "@/hooks/useAdminNotifications";
 import CreateNotificationDialog from "@/components/admin/notifications/CreateNotificationDialog";
 import NotificationHistoryList from "@/components/admin/notifications/NotificationHistoryList";
@@ -11,7 +11,7 @@ import NotificationRecipientsDialog from "@/components/admin/notifications/Notif
 import type { AdminNotificationBatch } from "@/types/firestore";
 
 export default function AdminNotificationsPage() {
-  const { users, groups, loading: usersLoading } = useAdminUsers();
+  const { users, groups, loading: usersLoading } = useBasicUsers();
   const { batches, loading: batchesLoading, refetch, createBatch } = useAdminNotifications();
   const [selectedBatch, setSelectedBatch] = useState<AdminNotificationBatch | null>(null);
 

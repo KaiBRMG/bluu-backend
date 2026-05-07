@@ -239,6 +239,7 @@ function DetailDialog({ entry, creatorName, creators, onClose, onSaved, onDelete
 
   const [saving, setSaving] = useState(false);
   const [completing, setCompleting] = useState(false);
+  const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -360,26 +361,28 @@ function DetailDialog({ entry, creatorName, creators, onClose, onSaved, onDelete
             />
           </Field>
         </CardContent>
-        <CardFooter className="flex flex-wrap justify-between gap-2 shrink-0">
-          <div className="flex gap-2">
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setShowDeleteConfirm(true)}
-              disabled={deleting}
-            >
-              Delete
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleMarkComplete}
-              disabled={completing || entry.status === "Completed" || hasChanged}
-              title={hasChanged ? "Save or discard changes first" : undefined}
-            >
-              {completing ? "Completing..." : "Mark as Complete"}
-            </Button>
-          </div>
+        <CardFooter className="flex justify-between gap-2 shrink-0">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">Actions</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem
+                onClick={() => setShowCompleteConfirm(true)}
+                disabled={completing || entry.status === "Completed"}
+              >
+                Mark as Complete
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => setShowDeleteConfirm(true)}
+                disabled={deleting}
+              >
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
             <Button size="sm" onClick={handleSave} disabled={saving || !hasChanged}>
@@ -388,6 +391,21 @@ function DetailDialog({ entry, creatorName, creators, onClose, onSaved, onDelete
           </div>
         </CardFooter>
       </Card>
+
+      <AlertDialog open={showCompleteConfirm} onOpenChange={open => { if (!open) setShowCompleteConfirm(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Mark as Complete?</AlertDialogTitle>
+            <AlertDialogDescription>This will mark the content request as completed.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={completing}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleMarkComplete} disabled={completing}>
+              {completing ? "Completing..." : "Mark as Complete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>
