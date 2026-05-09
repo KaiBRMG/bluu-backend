@@ -41,7 +41,7 @@ interface DescriptionRow { qty: string; content: string; }
 
 interface CPEntry {
   id: string;
-  contentType: "SFW" | "NSFW";
+  contentType: "SFW" | "NSFW" | "OF TL" | "PPV" | "Dripfeed";
   contentSummary: string;
   description: DescriptionRow[];
   comment: string;
@@ -109,11 +109,16 @@ function StatusBadge({ status }: { status: "Outstanding" | "Completed" }) {
   );
 }
 
-function ContentTypeBadge({ type }: { type: "SFW" | "NSFW" }) {
+function ContentTypeBadge({ type }: { type: "SFW" | "NSFW" | "OF TL" | "PPV" | "Dripfeed" }) {
+  const styles: Record<string, string> = {
+    NSFW: "bg-orange-500/15 text-orange-400",
+    SFW: "bg-blue-500/15 text-blue-400",
+    "OF TL": "bg-purple-500/15 text-purple-400",
+    PPV: "bg-pink-500/15 text-pink-400",
+    Dripfeed: "bg-teal-500/15 text-teal-400",
+  };
   return (
-    <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium ${
-      type === "NSFW" ? "bg-orange-500/15 text-orange-400" : "bg-blue-500/15 text-blue-400"
-    }`}>
+    <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium ${styles[type] ?? "bg-zinc-500/15 text-zinc-400"}`}>
       {type}
     </span>
   );
@@ -229,7 +234,7 @@ function DetailDialog({ entry, creatorName, creators, onClose, onSaved, onDelete
   const initDesc = entry.description.length > 0 ? entry.description : [{ qty: "", content: "" }];
 
   const [fields, setFields] = useState({
-    contentType: entry.contentType as "SFW" | "NSFW",
+    contentType: entry.contentType as "SFW" | "NSFW" | "OF TL" | "PPV" | "Dripfeed",
     contentSummary: entry.contentSummary,
     description: initDesc as DescriptionRow[],
     comment: entry.comment,
@@ -325,11 +330,14 @@ function DetailDialog({ entry, creatorName, creators, onClose, onSaved, onDelete
             />
           </Field>
           <Field label="Content Type">
-            <Select value={fields.contentType} onValueChange={v => setField("contentType")(v as "SFW" | "NSFW")}>
+            <Select value={fields.contentType} onValueChange={v => setField("contentType")(v as "SFW" | "NSFW" | "OF TL" | "PPV" | "Dripfeed")}>
               <SelectTrigger className="bg-zinc-800 border-zinc-700"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="SFW">SFW</SelectItem>
                 <SelectItem value="NSFW">NSFW</SelectItem>
+                <SelectItem value="OF TL">OF TL</SelectItem>
+                <SelectItem value="PPV">PPV</SelectItem>
+                <SelectItem value="Dripfeed">Dripfeed</SelectItem>
               </SelectContent>
             </Select>
           </Field>
@@ -421,7 +429,7 @@ function NewEntryWizard({ creators, onClose, onCreated }: {
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({
     contentSummary: "",
-    contentType: "SFW" as "SFW" | "NSFW",
+    contentType: "SFW" as "SFW" | "NSFW" | "OF TL" | "PPV" | "Dripfeed",
     dueDate: "",
     description: [{ qty: "", content: "" }] as DescriptionRow[],
     comment: "",
@@ -474,11 +482,14 @@ function NewEntryWizard({ creators, onClose, onCreated }: {
             </div>
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Content Type</label>
-              <Select value={form.contentType} onValueChange={v => setField("contentType")(v as "SFW" | "NSFW")}>
+              <Select value={form.contentType} onValueChange={v => setField("contentType")(v as "SFW" | "NSFW" | "OF TL" | "PPV" | "Dripfeed")}>
                 <SelectTrigger className="bg-zinc-800 border-zinc-700"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="SFW">SFW</SelectItem>
                   <SelectItem value="NSFW">NSFW</SelectItem>
+                  <SelectItem value="OF TL">OF TL</SelectItem>
+                  <SelectItem value="PPV">PPV</SelectItem>
+                  <SelectItem value="Dripfeed">Dripfeed</SelectItem>
                 </SelectContent>
               </Select>
             </div>

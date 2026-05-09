@@ -28,9 +28,19 @@ const PAGE_SIZE = 20;
 
 interface DescriptionRow { qty: string; content: string; }
 
+type ContentType = "SFW" | "NSFW" | "OF TL" | "PPV" | "Dripfeed";
+
+const contentTypeBadgeClass: Record<ContentType, string> = {
+  NSFW: "bg-orange-500/15 text-orange-400",
+  SFW: "bg-blue-500/15 text-blue-400",
+  "OF TL": "bg-purple-500/15 text-purple-400",
+  PPV: "bg-pink-500/15 text-pink-400",
+  Dripfeed: "bg-teal-500/15 text-teal-400",
+};
+
 interface CPEntry {
   id: string;
-  contentType: "SFW" | "NSFW";
+  contentType: ContentType;
   contentSummary: string;
   description: DescriptionRow[];
   comment: string;
@@ -48,7 +58,7 @@ function firestoreToCP(id: string, data: Record<string, unknown>): CPEntry {
   };
   return {
     id,
-    contentType: (data.contentType as "SFW" | "NSFW") ?? "SFW",
+    contentType: (data.contentType as ContentType) ?? "SFW",
     contentSummary: (data.contentSummary as string) ?? "",
     description: (data.description as DescriptionRow[]) ?? [],
     comment: (data.comment as string) ?? "",
@@ -96,9 +106,7 @@ function DetailModal({ entry, onClose, onMarkComplete }: DetailModalProps) {
         <div className="flex items-center justify-between gap-2 px-6 pt-6 pb-0">
           <div className="flex items-center gap-2 flex-wrap">
             <CardTitle className="text-base text-zinc-100">{entry.contentSummary}</CardTitle>
-            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${
-              entry.contentType === "NSFW" ? "bg-orange-500/15 text-orange-400" : "bg-blue-500/15 text-blue-400"
-            }`}>
+            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${contentTypeBadgeClass[entry.contentType] ?? "bg-zinc-500/15 text-zinc-400"}`}>
               {entry.contentType}
             </span>
           </div>
@@ -271,9 +279,7 @@ export default function AllContentRequestsPage() {
                       <TableRow key={entry.id}>
                         <TableCell className="text-sm font-medium max-w-[200px] truncate">{entry.contentSummary}</TableCell>
                         <TableCell>
-                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${
-                            entry.contentType === "NSFW" ? "bg-orange-500/15 text-orange-400" : "bg-blue-500/15 text-blue-400"
-                          }`}>
+                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${contentTypeBadgeClass[entry.contentType] ?? "bg-zinc-500/15 text-zinc-400"}`}>
                             {entry.contentType}
                           </span>
                         </TableCell>
@@ -330,9 +336,7 @@ export default function AllContentRequestsPage() {
                       <p className="text-sm text-zinc-100 font-medium leading-tight flex-1 min-w-0">
                         {entry.contentSummary}
                       </p>
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md shrink-0 ${
-                        entry.contentType === "NSFW" ? "bg-orange-500/15 text-orange-400" : "bg-blue-500/15 text-blue-400"
-                      }`}>
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md shrink-0 ${contentTypeBadgeClass[entry.contentType] ?? "bg-zinc-500/15 text-zinc-400"}`}>
                         {entry.contentType}
                       </span>
                     </div>
