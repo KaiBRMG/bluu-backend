@@ -154,10 +154,11 @@ interface ManagerViewCardProps {
   userNames: Record<string, string>;
   onClose: () => void;
   onSaved: () => void;
+  onDeleted?: () => void;
   onReject: (e: CampaignEntry) => void;
 }
 
-function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onReject }: ManagerViewCardProps) {
+function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDeleted, onReject }: ManagerViewCardProps) {
   const { userData } = useUserData();
   const userTz = userData?.timezone || undefined;
   const [fields, setFields] = useState({
@@ -178,6 +179,9 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onRe
   const [saving, setSaving] = useState(false);
   const [approveSaving, setApproveSaving] = useState(false);
   const [completeSaving, setCompleteSaving] = useState(false);
+  const [deleteSaving, setDeleteSaving] = useState(false);
+  const [confirmComplete, setConfirmComplete] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const hasChanged =
     fields.fanName !== entry.fanName ||
@@ -235,6 +239,23 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onRe
       toast.error("Failed to mark as complete");
     } finally {
       setCompleteSaving(false);
+      setConfirmComplete(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleteSaving(true);
+    try {
+      const res = await apiRequest(`/api/campaign-tracking/${entry.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      toast.success("Deleted");
+      onDeleted?.();
+      onClose();
+    } catch {
+      toast.error("Failed to delete");
+    } finally {
+      setDeleteSaving(false);
+      setConfirmDelete(false);
     }
   };
 
@@ -399,17 +420,64 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onRe
           )}
         </CardContent>
         <CardFooter className="flex justify-end gap-2">
-          <Button
-            variant="outline"
-            onClick={handleMarkComplete}
-            disabled={completeSaving || entry.status === "Completed"}
-          >
-            {completeSaving ? "Completing..." : "Mark as Complete"}
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">Actions</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => setConfirmComplete(true)}
+                disabled={entry.status === "Completed"}
+              >
+                Mark as Complete
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => setConfirmDelete(true)}
+              >
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={handleSave} disabled={saving || !hasChanged}>{saving ? "Saving..." : "Save"}</Button>
         </CardFooter>
       </Card>
+
+      <AlertDialog open={confirmComplete} onOpenChange={open => { if (!open) setConfirmComplete(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Mark {entry.CR} as Complete?</AlertDialogTitle>
+            <AlertDialogDescription>This will mark the entry as completed and archive it.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={completeSaving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleMarkComplete} disabled={completeSaving}>
+              {completeSaving ? "Completing..." : "Mark as Complete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmDelete} onOpenChange={open => { if (!open) setConfirmDelete(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {entry.CR}?</AlertDialogTitle>
+            <AlertDialogDescription>This action is permanent and cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteSaving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDelete}
+              disabled={deleteSaving}
+            >
+              {deleteSaving ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

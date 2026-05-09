@@ -27,7 +27,7 @@ export function useCreators(): Creator[] {
 
     let cancelled = false;
     user.getIdToken().then(token => {
-      fetch('/api/disputes/creators', { headers: { Authorization: `Bearer ${token}` } })
+      fetch('/api/creators', { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.json())
         .then(data => {
           if (cancelled) return;

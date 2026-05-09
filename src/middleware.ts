@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 const BROWSER_ALLOWED_PREFIXES = [
+  '/auth',
   '/creator-portal',
   '/desktop-only',
 ];

@@ -88,13 +88,16 @@ export async function ensureUserExists(userData: CreateUserData): Promise<string
     });
 
     // Send welcome notifications (non-blocking) — batched for atomicity and fewer round-trips
-    // To do: notify admin as well (create super admin)
-    const notifBatch = adminDb.batch();
-    addNotificationToBatch(notifBatch, userData.uid, notifications.onboardingActionRequired());
-    addNotificationToBatch(notifBatch, userData.uid, notifications.welcomeToTeam(firstName || userData.displayName));
-    addNotificationToBatch(notifBatch, 'VoRCp0wmgvSgKG8yzxOyMyZ4cSv1', notifications.adminNewUserAlert());
-
-    notifBatch.commit().catch((err) => {
+    adminDb.collection('groups').doc('admin').get().then(async (adminGroupSnap) => {
+      const adminUids: string[] = adminGroupSnap.data()?.members ?? [];
+      const notifBatch = adminDb.batch();
+      addNotificationToBatch(notifBatch, userData.uid, notifications.onboardingActionRequired());
+      addNotificationToBatch(notifBatch, userData.uid, notifications.welcomeToTeam(firstName || userData.displayName));
+      for (const adminUid of adminUids) {
+        addNotificationToBatch(notifBatch, adminUid, notifications.adminNewUserAlert());
+      }
+      await notifBatch.commit();
+    }).catch((err) => {
       console.error('[UserService] Failed to create welcome notifications:', err);
     });
   } else {

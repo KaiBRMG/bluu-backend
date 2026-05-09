@@ -238,6 +238,9 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 // ─── POST /api/disputes ───────────────────────────────────────────────
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
+  const denied = await checkPageAccess(token.uid, 'ca-disputes');
+  if (denied) return denied;
+
   try {
     const body = await request.json();
     const { assignedTo, Creator, saleDate, saleAmount, fanName, Comment } = body;

@@ -3,6 +3,7 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { getUserById, invalidateUserCache } from '@/lib/services/userService';
 import { invalidateAdminUsersCache } from '@/app/api/admin/users/route';
+import { invalidateDisplayNamesCache } from '@/app/api/users/display-names/route';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -25,7 +26,7 @@ export const PUT = withAuth(async (
     const { uid: targetUid } = await params;
     const updates = await request.json();
 
-    // Whitelist of allowed fields
+    // Fields any user-management holder may set.
     const allowedFields = [
       'firstName',
       'lastName',
@@ -34,7 +35,6 @@ export const PUT = withAuth(async (
       'DOB',
       'jobTitle',
       'employmentType',
-      'isActive',
       'address',
       'contactInfo',
       'paymentMethod',
@@ -48,10 +48,22 @@ export const PUT = withAuth(async (
       'remainingPaidLeave',
     ];
 
+    // Account-state fields that gate access to the system itself — admin claim only.
+    const adminOnlyFields = ['isActive'];
+
+    const hasAdminOnlyField = adminOnlyFields.some(f => updates[f] !== undefined);
+    if (hasAdminOnlyField && token.admin !== true) {
+      return NextResponse.json({ error: 'Admin claim required for sensitive fields' }, { status: 403 });
+    }
+
+    const effectiveFields = token.admin === true
+      ? [...allowedFields, ...adminOnlyFields]
+      : allowedFields;
+
     // Filter and sanitize updates
     const sanitizedUpdates: Record<string, unknown> = {};
 
-    for (const field of allowedFields) {
+    for (const field of effectiveFields) {
       if (updates[field] !== undefined) {
         if (field === 'DOB' && updates[field]) {
           sanitizedUpdates[field] = Timestamp.fromDate(new Date(updates[field]));
@@ -74,6 +86,7 @@ export const PUT = withAuth(async (
     });
     invalidateUserCache(targetUid);
     invalidateAdminUsersCache();
+    invalidateDisplayNamesCache();
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

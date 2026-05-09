@@ -29,6 +29,16 @@ export const POST = withAuth(async (
       return NextResponse.json({ error: 'uids array is required' }, { status: 400 });
     }
 
+    // Only existing admins may add members to the admin group; self-promotion is forbidden.
+    if (groupId === 'admin') {
+      if (token.admin !== true) {
+        return NextResponse.json({ error: 'Only admins may modify the admin group' }, { status: 403 });
+      }
+      if (uids.includes(token.uid)) {
+        return NextResponse.json({ error: 'Cannot self-promote to admin' }, { status: 403 });
+      }
+    }
+
     // Fetch current user docs to determine which are in 'unassigned'
     const userRefs = uids.map(uid => adminDb.collection('users').doc(uid));
     const userSnaps = await adminDb.getAll(...userRefs);
@@ -118,6 +128,11 @@ export const DELETE = withAuth(async (
 
     if (!uid) {
       return NextResponse.json({ error: 'uid is required' }, { status: 400 });
+    }
+
+    // Only existing admins may remove members from the admin group.
+    if (groupId === 'admin' && token.admin !== true) {
+      return NextResponse.json({ error: 'Only admins may modify the admin group' }, { status: 403 });
     }
 
     // Fetch current user doc to compute remaining groups after removal

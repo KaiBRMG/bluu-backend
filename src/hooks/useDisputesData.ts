@@ -73,7 +73,7 @@ export function useDisputesData() {
     const cached = getCache<CreatorDocument[]>(CREATORS_KEY, CACHE_TTL_MS);
     if (cached) { setCreators(cached); return; }
     try {
-      const data = await authFetch('/api/disputes/creators');
+      const data = await authFetch('/api/creators');
       setCreators(data.creators);
       setCache(CREATORS_KEY, data.creators);
     } catch (err) {
@@ -87,7 +87,7 @@ export function useDisputesData() {
     const cached = getCache<CaUser[]>(CA_USERS_KEY, CACHE_TTL_MS);
     if (cached) { setCaUsers(cached); return; }
     try {
-      const data = await authFetch('/api/disputes/ca-users');
+      const data = await authFetch('/api/disputes/users');
       setCaUsers(data.users);
       setCache(CA_USERS_KEY, data.users);
     } catch (err) {

@@ -37,7 +37,8 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { PAGES } from '@/lib/definitions';
-import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
+import type { BasicUser } from '@/hooks/useBasicUsers';
+import type { AdminGroup } from '@/hooks/useAdminUsers';
 import type { NotificationType } from '@/types/firestore';
 import type { CreateBatchPayload } from '@/hooks/useAdminNotifications';
 
@@ -46,7 +47,7 @@ type ActionUrlMode = 'none' | 'internal' | 'external';
 const INTERNAL_PAGES = PAGES.filter(p => p.href !== null);
 
 interface CreateNotificationDialogProps {
-  users: AdminFullUser[];
+  users: BasicUser[];
   groups: AdminGroup[];
   onCreated: () => void;
   onCreate: (payload: CreateBatchPayload) => Promise<string>;
