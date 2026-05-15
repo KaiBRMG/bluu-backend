@@ -497,6 +497,7 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
     socialPlatform: "",
     callType: "",
     dueDate: "",
+    dueTime: "",
     dueDateTimezone: userData?.timezone ?? "",
   });
   const [submitting, setSubmitting] = useState(false);
@@ -521,10 +522,15 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
+      const { dueTime, ...formToSave } = form;
+      const saveDueDate = formToSave.dueDate
+        ? (type === "Call" && dueTime ? `${formToSave.dueDate}T${dueTime}` : formToSave.dueDate)
+        : "";
       const res = await apiRequest("/api/campaign-tracking/create", {
         method: "POST",
         body: JSON.stringify({
-          ...form,
+          ...formToSave,
+          dueDate: saveDueDate || null,
           type,
           totalAmount: Number(form.totalAmount),
           amountPaid: Number(form.amountPaid || 0),
@@ -599,12 +605,28 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
               <div><label className="block text-xs text-zinc-400 mb-1">Address</label><input value={form.address} onChange={setField("address")} className={inputClass} /></div>
             )}
             <div>
-              <label className="block text-xs text-zinc-400 mb-1">Due Date</label>
-              <DatePickerInput
-                value={form.dueDate}
-                onChange={v => setForm(prev => ({ ...prev, dueDate: v }))}
-                className={inputClass}
-              />
+              <label className="block text-xs text-zinc-400 mb-1">{type === "Call" ? "Call Time" : "Due Date"}</label>
+              {type === "Call" ? (
+                <div className="flex gap-2">
+                  <DatePickerInput
+                    value={form.dueDate}
+                    onChange={v => setForm(prev => ({ ...prev, dueDate: v }))}
+                    className={inputClass}
+                  />
+                  <input
+                    type="time"
+                    value={form.dueTime}
+                    onChange={e => setForm(prev => ({ ...prev, dueTime: e.target.value }))}
+                    className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500 [color-scheme:dark]"
+                  />
+                </div>
+              ) : (
+                <DatePickerInput
+                  value={form.dueDate}
+                  onChange={v => setForm(prev => ({ ...prev, dueDate: v }))}
+                  className={inputClass}
+                />
+              )}
             </div>
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Due Date Timezone</label>
@@ -658,7 +680,7 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
             {form.length && <Row label="Length" value={form.length} />}
             {form.address && <Row label="Address" value={form.address} />}
             {form.callType && <Row label="Call Type" value={form.callType} />}
-            {form.dueDate && <Row label="Due Date" value={form.dueDate} />}
+            {form.dueDate && <Row label={type === "Call" ? "Call Time" : "Due Date"} value={type === "Call" && form.dueTime ? `${form.dueDate} at ${form.dueTime}` : form.dueDate} />}
             <div className="flex justify-end gap-2 pt-4">
               <Button variant="outline" onClick={() => setStep(s => s - 1)}>Back</Button>
               <Button variant="outline" onClick={onClose}>Cancel</Button>
