@@ -125,20 +125,36 @@ export function formatDueDate(dueDate: string | null | undefined): string {
   return dateStr;
 }
 
-export const COMMON_TIMEZONES = [
-  { label: 'UTC', value: 'UTC' },
-  { label: 'Eastern Time (US)', value: 'America/New_York' },
-  { label: 'Central Time (US)', value: 'America/Chicago' },
-  { label: 'Mountain Time (US)', value: 'America/Denver' },
-  { label: 'Pacific Time (US)', value: 'America/Los_Angeles' },
-  { label: 'São Paulo (BRT)', value: 'America/Sao_Paulo' },
-  { label: 'London (GMT/BST)', value: 'Europe/London' },
-  { label: 'Paris / Berlin (CET)', value: 'Europe/Paris' },
-  { label: 'South Africa (SAST, GMT+2)', value: 'Africa/Johannesburg' },
-  { label: 'Dubai (GST, GMT+4)', value: 'Asia/Dubai' },
-  { label: 'Tokyo (JST, GMT+9)', value: 'Asia/Tokyo' },
-  { label: 'Sydney (AEST)', value: 'Australia/Sydney' },
-];
+function _buildTimezoneList(): { label: string; value: string }[] {
+  try {
+    const now = new Date();
+    return Intl.supportedValuesOf('timeZone').map(tz => {
+      let offset = '';
+      try {
+        const parts = new Intl.DateTimeFormat('en', { timeZone: tz, timeZoneName: 'shortOffset' }).formatToParts(now);
+        offset = parts.find(p => p.type === 'timeZoneName')?.value ?? '';
+      } catch {
+        // leave offset blank
+      }
+      const label = offset ? `${tz.replace(/_/g, ' ')} (${offset})` : tz.replace(/_/g, ' ');
+      return { value: tz, label };
+    });
+  } catch {
+    return [
+      { label: 'UTC', value: 'UTC' },
+      { label: 'Eastern Time (America/New_York)', value: 'America/New_York' },
+      { label: 'Central Time (America/Chicago)', value: 'America/Chicago' },
+      { label: 'Mountain Time (America/Denver)', value: 'America/Denver' },
+      { label: 'Pacific Time (America/Los_Angeles)', value: 'America/Los_Angeles' },
+      { label: 'London (Europe/London)', value: 'Europe/London' },
+      { label: 'Paris (Europe/Paris)', value: 'Europe/Paris' },
+      { label: 'Tokyo (Asia/Tokyo)', value: 'Asia/Tokyo' },
+      { label: 'Sydney (Australia/Sydney)', value: 'Australia/Sydney' },
+    ];
+  }
+}
+
+export const COMMON_TIMEZONES = _buildTimezoneList();
 
 export interface Creator {
   creatorID: string;

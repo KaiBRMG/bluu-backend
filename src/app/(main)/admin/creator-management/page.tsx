@@ -19,8 +19,7 @@ import {
   Card, CardHeader, CardTitle, CardContent, CardFooter,
 } from "@/components/ui/card";
 import { MoreHorizontal, UserCircle, Copy, Check } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { COMMON_TIMEZONES } from "@/lib/campaignTracking";
+import { TimezoneCombobox } from "@/components/ui/timezone-combobox";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -241,16 +240,7 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
             {/* Default Timezone */}
             <div>
               <label className="block text-sm text-zinc-400 mb-1">Default Timezone</label>
-              <Select value={defaultTimezone} onValueChange={setDefaultTimezone}>
-                <SelectTrigger className="bg-zinc-800 border-zinc-700">
-                  <SelectValue placeholder="Select timezone..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {COMMON_TIMEZONES.map(tz => (
-                    <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <TimezoneCombobox value={defaultTimezone} onChange={setDefaultTimezone} />
             </div>
 
             {/* Email */}

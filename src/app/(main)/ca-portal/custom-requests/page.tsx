@@ -24,6 +24,7 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { TimezoneCombobox } from "@/components/ui/timezone-combobox";
 import { Calendar } from "@/components/ui/calendar";
 import { MoreHorizontal, Plus, AlertCircle, Info, Search, CalendarIcon } from "lucide-react";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
@@ -31,7 +32,7 @@ import { db } from "@/firebase-config";
 import {
   type CampaignEntry, type CRType, type CRStatus, type CallType, type Creator,
   STATUS_COLORS, STATUS_SORT, PRIORITY_COLORS, TYPE_LABELS, truncate, formatAmount, sortByStatus,
-  firestoreToEntry, formatInTimezone, formatDueDate, COMMON_TIMEZONES, CAMPAIGN_TYPES,
+  firestoreToEntry, formatInTimezone, formatDueDate, CAMPAIGN_TYPES,
 } from "@/lib/campaignTracking";
 import { useUserData } from "@/hooks/useUserData";
 import { apiRequest } from "@/lib/clientApi";
@@ -283,12 +284,7 @@ function ViewCard({ entry, creatorName, readOnly, onClose, userNames = {} }: Vie
           </Field>
           <Field label="Due Date Timezone">
             {isEditable ? (
-              <Select value={dueDateTimezone} onValueChange={setDueDateTimezone}>
-                <SelectTrigger className="bg-zinc-800 border-zinc-700"><SelectValue placeholder="Select timezone..." /></SelectTrigger>
-                <SelectContent>
-                  {COMMON_TIMEZONES.map(tz => <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <TimezoneCombobox value={dueDateTimezone} onChange={setDueDateTimezone} />
             ) : (
               <p className={readOnlyClass}>{dueDateTimezone || "—"}</p>
             )}
@@ -444,12 +440,7 @@ function RejectedCard({ entry, creatorName, onClose }: RejectedCardProps) {
             )}
           </Field>
           <Field label="Due Date Timezone">
-            <Select value={fields.dueDateTimezone} onValueChange={v => { setFields(prev => ({ ...prev, dueDateTimezone: v })); setDirty(true); }}>
-              <SelectTrigger className="bg-zinc-800 border-zinc-700"><SelectValue placeholder="Select timezone..." /></SelectTrigger>
-              <SelectContent>
-                {COMMON_TIMEZONES.map(tz => <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <TimezoneCombobox value={fields.dueDateTimezone} onChange={v => { setFields(prev => ({ ...prev, dueDateTimezone: v })); setDirty(true); }} />
           </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Total Amount"><input type="number" value={fields.totalAmount} onChange={set("totalAmount")} className={inputClass} /></Field>
@@ -473,6 +464,7 @@ function RejectedCard({ entry, creatorName, onClose }: RejectedCardProps) {
 }
 
 // ─── New Entry Wizard ─────────────────────────────────────────────────────────
+
 
 interface NewEntryWizardProps {
   creators: Creator[];
@@ -597,7 +589,22 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
             </div>
             <div><label className="block text-xs text-zinc-400 mb-1">Fan Name</label><input value={form.fanName} onChange={setField("fanName")} required className={inputClass} /></div>
             <div><label className="block text-xs text-zinc-400 mb-1">Profile Link</label><input value={form.profileLink} onChange={setField("profileLink")} className={inputClass} /></div>
-            <div><label className="block text-xs text-zinc-400 mb-1">Description</label><textarea value={form.description} onChange={setField("description")} rows={3} required className={`${inputClass} resize-none`} /></div>
+            <div>
+              <div className="flex items-center gap-1 mb-1">
+                <label className="block text-xs text-zinc-400">Description</label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button type="button" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+                      <Info size={12} />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="max-w-xs text-xs" side="right">
+                    This is the instructions for the creator. Ensure you describe in detail what they need to do and what is expected of them. Ensure it is clear and legible, the creator will see this!
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <textarea value={form.description} onChange={setField("description")} rows={3} required className={`${inputClass} resize-none`} />
+            </div>
             {(type === "CR" || type === "Call") && (
               <div><label className="block text-xs text-zinc-400 mb-1">Length</label><input value={form.length} onChange={setField("length")} className={inputClass} /></div>
             )}
@@ -629,13 +636,20 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
               )}
             </div>
             <div>
-              <label className="block text-xs text-zinc-400 mb-1">Due Date Timezone</label>
-              <Select value={form.dueDateTimezone} onValueChange={setVal("dueDateTimezone")}>
-                <SelectTrigger className="bg-zinc-800 border-zinc-700"><SelectValue placeholder="Select timezone..." /></SelectTrigger>
-                <SelectContent>
-                  {COMMON_TIMEZONES.map(tz => <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-1 mb-1">
+                <label className="block text-xs text-zinc-400">Due Date Timezone</label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button type="button" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+                      <Info size={12} />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="max-w-xs text-xs" side="right">
+                    This is the creator&apos;s default time zone. If this custom requires a different time zone, please select it here.
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <TimezoneCombobox value={form.dueDateTimezone} onChange={setVal("dueDateTimezone")} />
             </div>
             {type === "Call" && (
               <>
