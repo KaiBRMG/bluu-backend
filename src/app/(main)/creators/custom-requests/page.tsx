@@ -172,6 +172,7 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
     totalAmount: String(entry.totalAmount),
     amountPaid: String(entry.amountPaid),
     dueDate: entry.dueDate ? entry.dueDate.split("T")[0] : "",
+    dueTime: entry.dueDate?.includes("T") ? (entry.dueDate.split("T")[1]?.substring(0, 5) ?? "") : "",
     dueDateTimezone: entry.dueDateTimezone ?? "",
     callType: entry.callType ?? "",
   });
@@ -195,6 +196,7 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
     fields.totalAmount !== String(entry.totalAmount) ||
     fields.amountPaid !== String(entry.amountPaid) ||
     fields.dueDate !== (entry.dueDate ? entry.dueDate.split("T")[0] : "") ||
+    fields.dueTime !== (entry.dueDate?.includes("T") ? (entry.dueDate.split("T")[1]?.substring(0, 5) ?? "") : "") ||
     fields.dueDateTimezone !== (entry.dueDateTimezone ?? "") ||
     priority !== (entry.priority ?? "");
 
@@ -204,10 +206,15 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
   const handleSave = async () => {
     setSaving(true);
     try {
+      const { dueTime, ...fieldsToSave } = fields;
+      const saveDueDate = fields.dueDate
+        ? (entry.type === "Call" && dueTime ? `${fields.dueDate}T${dueTime}` : fields.dueDate)
+        : null;
       const res = await apiRequest(`/api/campaign-tracking/${entry.id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          ...fields,
+          ...fieldsToSave,
+          dueDate: saveDueDate,
           totalAmount: Number(fields.totalAmount),
           amountPaid: Number(fields.amountPaid),
           priority: priority || null,
@@ -385,12 +392,28 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
               <Field label="Social Username"><input value={fields.socialUsername} onChange={set("socialUsername")} className={inputClass} /></Field>
             </>
           )}
-          <Field label="Due Date">
-            <DatePickerInput
-              value={fields.dueDate}
-              onChange={v => setFields(prev => ({ ...prev, dueDate: v }))}
-              className={inputClass}
-            />
+          <Field label={entry.type === "Call" ? "Call Time" : "Due Date"}>
+            {entry.type === "Call" ? (
+              <div className="flex gap-2">
+                <DatePickerInput
+                  value={fields.dueDate}
+                  onChange={v => setFields(prev => ({ ...prev, dueDate: v }))}
+                  className={inputClass}
+                />
+                <input
+                  type="time"
+                  value={fields.dueTime}
+                  onChange={e => setFields(prev => ({ ...prev, dueTime: e.target.value }))}
+                  className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500 [color-scheme:dark]"
+                />
+              </div>
+            ) : (
+              <DatePickerInput
+                value={fields.dueDate}
+                onChange={v => setFields(prev => ({ ...prev, dueDate: v }))}
+                className={inputClass}
+              />
+            )}
           </Field>
           <Field label="Due Date Timezone">
             <Select value={fields.dueDateTimezone} onValueChange={v => setFields(prev => ({ ...prev, dueDateTimezone: v }))}>

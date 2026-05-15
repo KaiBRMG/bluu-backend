@@ -57,7 +57,7 @@ function DetailCard({ entry, onClose, onMarkComplete, onMarkIncomplete }: Detail
           )}
           <Row label="Description" value={entry.description} />
           {entry.dueDate && (
-            <Row label="Due Date" value={`${formatDueDate(entry.dueDate)}${entry.dueDateTimezone ? ` (${entry.dueDateTimezone})` : ""}`} />
+            <Row label={entry.type === "Call" ? "Call Time" : "Due Date"} value={`${formatDueDate(entry.dueDate)}${entry.dueDateTimezone ? ` (${entry.dueDateTimezone})` : ""}`} />
           )}
           {(entry.type === "CR" || entry.type === "Call") && entry.length && <Row label="Length" value={entry.length} />}
           {entry.type === "Call" && entry.socialPlatform && <Row label="Social Platform" value={entry.socialPlatform} />}

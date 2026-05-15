@@ -114,13 +114,15 @@ export function formatInTimezone(isoString: string | null | undefined, timezone:
   });
 }
 
-/** Format a dueDate string ("YYYY-MM-DD" or ISO) — no timezone conversion, just pretty-print. */
+/** Format a dueDate string ("YYYY-MM-DD" or "YYYY-MM-DDTHH:MM") — no timezone conversion, just pretty-print. */
 export function formatDueDate(dueDate: string | null | undefined): string {
   if (!dueDate) return '—';
-  const datePart = dueDate.split('T')[0];
+  const [datePart, timePart] = dueDate.split('T');
   if (!datePart || !/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return dueDate;
   const [y, m, d] = datePart.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  const dateStr = new Date(y, m - 1, d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  if (timePart) return `${dateStr} at ${timePart.substring(0, 5)}`;
+  return dateStr;
 }
 
 export const COMMON_TIMEZONES = [

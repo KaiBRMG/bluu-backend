@@ -106,6 +106,7 @@ function ViewCard({ entry, creatorName, readOnly, onClose, userNames = {} }: Vie
   const [socialPlatform, setSocialPlatform] = useState(entry.socialPlatform ?? "");
   const [totalAmount, setTotalAmount] = useState(String(entry.totalAmount));
   const [dueDate, setDueDate] = useState(entry.dueDate ? entry.dueDate.split("T")[0] : "");
+  const [dueTime, setDueTime] = useState(entry.dueDate?.includes("T") ? (entry.dueDate.split("T")[1]?.substring(0, 5) ?? "") : "");
   const [dueDateTimezone, setDueDateTimezone] = useState(entry.dueDateTimezone ?? "");
   const [saving, setSaving] = useState(false);
 
@@ -122,6 +123,7 @@ function ViewCard({ entry, creatorName, readOnly, onClose, userNames = {} }: Vie
     socialPlatform !== (entry.socialPlatform ?? "") ||
     totalAmount !== String(entry.totalAmount) ||
     dueDate !== (entry.dueDate ? entry.dueDate.split("T")[0] : "") ||
+    dueTime !== (entry.dueDate?.includes("T") ? (entry.dueDate.split("T")[1]?.substring(0, 5) ?? "") : "") ||
     dueDateTimezone !== (entry.dueDateTimezone ?? "");
 
   const handleSave = async () => {
@@ -133,7 +135,9 @@ function ViewCard({ entry, creatorName, readOnly, onClose, userNames = {} }: Vie
         body.profileLink = profileLink;
         body.description = description;
         body.totalAmount = Number(totalAmount);
-        body.dueDate = dueDate || null;
+        body.dueDate = dueDate
+          ? (entry.type === "Call" && dueTime ? `${dueDate}T${dueTime}` : dueDate)
+          : null;
         body.dueDateTimezone = dueDateTimezone || null;
         if (entry.type !== "Item") body.length = length;
         if (entry.type === "Item") body.address = address;
@@ -246,14 +250,36 @@ function ViewCard({ entry, creatorName, readOnly, onClose, userNames = {} }: Vie
               </Field>
             </>
           )}
-          <Field label="Due Date">
-            <DatePickerInput
-              value={dueDate}
-              onChange={setDueDate}
-              disabled={!isEditable}
-              className={inputClass}
-              disabledClassName={readOnlyClass}
-            />
+          <Field label={entry.type === "Call" ? "Call Time" : "Due Date"}>
+            {entry.type === "Call" ? (
+              <div className="flex gap-2">
+                <DatePickerInput
+                  value={dueDate}
+                  onChange={setDueDate}
+                  disabled={!isEditable}
+                  className={inputClass}
+                  disabledClassName={readOnlyClass}
+                />
+                {isEditable ? (
+                  <input
+                    type="time"
+                    value={dueTime}
+                    onChange={e => setDueTime(e.target.value)}
+                    className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500 [color-scheme:dark]"
+                  />
+                ) : (
+                  <p className={readOnlyClass}>{dueTime || "—"}</p>
+                )}
+              </div>
+            ) : (
+              <DatePickerInput
+                value={dueDate}
+                onChange={setDueDate}
+                disabled={!isEditable}
+                className={inputClass}
+                disabledClassName={readOnlyClass}
+              />
+            )}
           </Field>
           <Field label="Due Date Timezone">
             {isEditable ? (
@@ -316,6 +342,7 @@ function RejectedCard({ entry, creatorName, onClose }: RejectedCardProps) {
     totalAmount: String(entry.totalAmount),
     amountPaid: String(entry.amountPaid),
     dueDate: entry.dueDate ? entry.dueDate.split("T")[0] : "",
+    dueTime: entry.dueDate?.includes("T") ? (entry.dueDate.split("T")[1]?.substring(0, 5) ?? "") : "",
     dueDateTimezone: entry.dueDateTimezone ?? "",
   });
   const [dirty, setDirty] = useState(false);
@@ -344,7 +371,9 @@ function RejectedCard({ entry, creatorName, onClose }: RejectedCardProps) {
           socialPlatform: fields.socialPlatform,
           totalAmount: Number(fields.totalAmount),
           amountPaid: Number(fields.amountPaid),
-          dueDate: fields.dueDate || null,
+          dueDate: fields.dueDate
+            ? (entry.type === "Call" && fields.dueTime ? `${fields.dueDate}T${fields.dueTime}` : fields.dueDate)
+            : null,
           dueDateTimezone: fields.dueDateTimezone || null,
           status: "Awaiting Approval",
           managerComment: updatedComment,
@@ -391,12 +420,28 @@ function RejectedCard({ entry, creatorName, onClose }: RejectedCardProps) {
               <Field label="Social Username"><input value={fields.socialUsername} onChange={set("socialUsername")} className={inputClass} /></Field>
             </>
           )}
-          <Field label="Due Date">
-            <DatePickerInput
-              value={fields.dueDate}
-              onChange={v => { setFields(prev => ({ ...prev, dueDate: v })); setDirty(true); }}
-              className={inputClass}
-            />
+          <Field label={entry.type === "Call" ? "Call Time" : "Due Date"}>
+            {entry.type === "Call" ? (
+              <div className="flex gap-2">
+                <DatePickerInput
+                  value={fields.dueDate}
+                  onChange={v => { setFields(prev => ({ ...prev, dueDate: v })); setDirty(true); }}
+                  className={inputClass}
+                />
+                <input
+                  type="time"
+                  value={fields.dueTime}
+                  onChange={e => { setFields(prev => ({ ...prev, dueTime: e.target.value })); setDirty(true); }}
+                  className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500 [color-scheme:dark]"
+                />
+              </div>
+            ) : (
+              <DatePickerInput
+                value={fields.dueDate}
+                onChange={v => { setFields(prev => ({ ...prev, dueDate: v })); setDirty(true); }}
+                className={inputClass}
+              />
+            )}
           </Field>
           <Field label="Due Date Timezone">
             <Select value={fields.dueDateTimezone} onValueChange={v => { setFields(prev => ({ ...prev, dueDateTimezone: v })); setDirty(true); }}>
