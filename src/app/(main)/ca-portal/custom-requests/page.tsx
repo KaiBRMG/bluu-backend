@@ -31,7 +31,7 @@ import { db } from "@/firebase-config";
 import {
   type CampaignEntry, type CRType, type CRStatus, type CallType, type Creator,
   STATUS_COLORS, STATUS_SORT, PRIORITY_COLORS, TYPE_LABELS, truncate, formatAmount, sortByStatus,
-  firestoreToEntry, formatInTimezone, COMMON_TIMEZONES, CAMPAIGN_TYPES,
+  firestoreToEntry, formatInTimezone, formatDueDate, COMMON_TIMEZONES, CAMPAIGN_TYPES,
 } from "@/lib/campaignTracking";
 import { useUserData } from "@/hooks/useUserData";
 import { apiRequest } from "@/lib/clientApi";
@@ -184,8 +184,8 @@ function ViewCard({ entry, creatorName, readOnly, onClose, userNames = {} }: Vie
               <p className="text-zinc-300">{userNames[entry.lastEditedBy] ?? entry.lastEditedBy}</p>
             </div>
             <div>
-              <p className="text-xs text-zinc-500">Created</p>
-              <p className="text-zinc-300">{formatInTimezone(entry.createdTime, userTz)}</p>
+              <p className="text-xs text-zinc-500">Due Date</p>
+              <p className="text-zinc-300">{formatDueDate(entry.dueDate)}</p>
             </div>
             <div>
               <p className="text-xs text-zinc-500">Last Edited</p>
@@ -834,7 +834,7 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
                   <TableHead>CR</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
+                  <TableHead>Due Date</TableHead>
                   <TableHead>Fan Name</TableHead>
                   <TableHead>Paid</TableHead>
                   <TableHead>Total</TableHead>
@@ -849,7 +849,7 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
                     <TableCell className="text-sm">{TYPE_LABELS[entry.type]}</TableCell>
                     <TableCell><StatusBadge status={entry.status} /></TableCell>
                     <TableCell className="text-sm text-zinc-400">
-                      {formatInTimezone(entry.createdTime, userTz)}
+                      {formatDueDate(entry.dueDate)}
                     </TableCell>
                     <TableCell className="text-sm">{entry.fanName}</TableCell>
                     <TableCell className={`text-sm font-medium ${entry.amountPaid < entry.totalAmount ? "text-red-400" : "text-green-400"}`}>{formatAmount(entry.amountPaid)}</TableCell>
