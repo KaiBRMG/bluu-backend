@@ -448,6 +448,14 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
               <Button variant="outline">Actions</Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {entry.status === "Rejected" && (
+                <>
+                  <DropdownMenuItem onClick={handleApprove} disabled={approveSaving}>
+                    {approveSaving ? "Approving..." : "Approve"}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuItem
                 onClick={() => setConfirmComplete(true)}
                 disabled={entry.status === "Completed"}
