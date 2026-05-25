@@ -297,9 +297,11 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
                 type="button"
                 title="Copy creator link"
                 onClick={() => {
-                  navigator.clipboard.writeText(
-                    `${window.location.origin}/creator-portal/dashboard?crId=${entry.id}`
-                  );
+                  const typeLabel = entry.type === "Item" ? "Item Request" : TYPE_LABELS[entry.type] ?? entry.type;
+                  const url = `${window.location.origin}/creator-portal/dashboard?crId=${entry.id}`;
+                  const duePart = entry.dueDate ? ` is due on ${formatDueDate(entry.dueDate)},` : ",";
+                  const message = `Hey ${creatorName} 👋🏻\nYou have a new ${typeLabel} from ${entry.fanName}! This ${formatAmount(entry.totalAmount)} request${duePart} check your Portal for the details: ${url}`;
+                  navigator.clipboard.writeText(message);
                   toast.success("Link copied");
                 }}
                 className="text-zinc-500 hover:text-zinc-300 transition-colors"
@@ -540,6 +542,7 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
   const userTz = userData?.timezone || undefined;
   const [allEntries, setAllEntries] = useState<CampaignEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [aging, setAging] = useState({ "0-24h": 0, "1-7d": 0, "7-30d": 0, ">30d": 0 });
   const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
   const [rejectEntry, setRejectEntry] = useState<CampaignEntry | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
@@ -551,11 +554,22 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
       where("isArchived", "==", false)
     );
     unsubRef.current = onSnapshot(q, snap => {
-      setAllEntries(snap.docs
+      const entries = snap.docs
         .map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>))
-        .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type))
-      );
+        .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type));
+      setAllEntries(entries);
       setLoading(false);
+      const now = Date.now();
+      const result = { "0-24h": 0, "1-7d": 0, "7-30d": 0, ">30d": 0 };
+      for (const e of entries.filter(e => e.status === "Awaiting Approval" || e.status === "In Progress")) {
+        const ageMs = now - (e.createdTime ? new Date(e.createdTime).getTime() : now);
+        const ageDays = ageMs / (1000 * 60 * 60 * 24);
+        if (ageDays < 1) result["0-24h"]++;
+        else if (ageDays < 7) result["1-7d"]++;
+        else if (ageDays < 30) result["7-30d"]++;
+        else result[">30d"]++;
+      }
+      setAging(result);
     });
     return () => { unsubRef.current?.(); };
   }, []);
@@ -576,18 +590,6 @@ function OverviewTab({ creators, userNames }: OverviewProps) {
   const outstanding = allEntries
     .filter(e => e.status !== "Completed")
     .reduce((sum, e) => sum + (e.totalAmount - e.amountPaid), 0);
-
-  // Aging
-  const now = Date.now();
-  const aging = { "0-24h": 0, "1-7d": 0, "7-30d": 0, ">30d": 0 };
-  for (const e of allEntries.filter(e => e.status === "Awaiting Approval" || e.status === "In Progress")) {
-    const ageMs = now - (e.createdTime ? new Date(e.createdTime).getTime() : now);
-    const ageDays = ageMs / (1000 * 60 * 60 * 24);
-    if (ageDays < 1) aging["0-24h"]++;
-    else if (ageDays < 7) aging["1-7d"]++;
-    else if (ageDays < 30) aging["7-30d"]++;
-    else aging[">30d"]++;
-  }
 
   // Recently completed (not archived)
   const recentCompleted = allEntries
