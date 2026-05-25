@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useCreatorAuth } from "@/components/CreatorAuthProvider";
+import { useSearchParams } from "next/navigation";
 import { auth, db } from "@/firebase-config";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { collection, doc, getDoc, query, where, onSnapshot } from "firebase/firestore";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -144,6 +145,157 @@ function CPCard({ entry, onComplete, completing }: CPCardProps) {
   );
 }
 
+// ─── CR Detail Overlay ────────────────────────────────────────────────────────
+
+interface CRDetailOverlayProps {
+  entry: CampaignEntry;
+  accentHex: string;
+  driveLink?: string | null;
+  onComplete: (id: string) => void;
+  completing: boolean;
+  onClose: () => void;
+}
+
+function CRDetailOverlay({ entry, accentHex, driveLink, onComplete, completing, onClose }: CRDetailOverlayProps) {
+  const dueDateLabel = entry.dueDate
+    ? `${formatDueDate(entry.dueDate)}${entry.dueDateTimezone ? ` (${entry.dueDateTimezone})` : ""}`
+    : null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}
+      onClick={onClose}
+    >
+      <Card
+        className="w-full max-w-md max-h-[80vh] overflow-y-auto"
+        style={{ background: "#111113", border: "1px solid rgba(255,255,255,0.1)", color: "white" }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-2 px-6 pt-6 pb-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span
+              className="font-mono text-xs font-semibold tracking-widest px-2 py-0.5 rounded-md"
+              style={{ background: `${accentHex}25`, color: accentHex }}
+            >
+              {entry.CR}
+            </span>
+            {entry.priority && (
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_COLORS[entry.priority as CRPriority]}`}>
+                {entry.priority} Priority
+              </span>
+            )}
+          </div>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors flex-shrink-0">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <CardContent className="flex flex-col gap-4 pt-4">
+          {/* Fan */}
+          <div>
+            <p className="text-[11px] uppercase tracking-wider text-zinc-500 mb-0.5">Fan</p>
+            <p className="text-sm font-medium text-zinc-100">{entry.fanName}</p>
+            {entry.profileLink && (
+              <a
+                href={entry.profileLink}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] transition-colors flex items-center gap-1 mt-0.5"
+                style={{ color: accentHex }}
+              >
+                View Profile <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+          </div>
+
+          {/* Description */}
+          {entry.description && (
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Description</p>
+              <p className="text-sm text-zinc-300 leading-relaxed">{entry.description}</p>
+            </div>
+          )}
+
+          {/* Meta details */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
+            {dueDateLabel && (
+              <div>
+                <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Due Date</p>
+                <p className="text-rose-400/80">{dueDateLabel}</p>
+              </div>
+            )}
+            {entry.length && (
+              <div>
+                <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Length</p>
+                <p className="text-zinc-300">{entry.length}</p>
+              </div>
+            )}
+            {entry.socialPlatform && (
+              <div>
+                <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Platform</p>
+                <p className="text-zinc-300">{entry.socialPlatform}</p>
+              </div>
+            )}
+            {entry.socialUsername && (
+              <div>
+                <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Username</p>
+                <p className="text-zinc-300">@{entry.socialUsername}</p>
+              </div>
+            )}
+            {entry.address && (
+              <div className="col-span-2">
+                <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Address</p>
+                <p className="text-zinc-300">{entry.address}</p>
+              </div>
+            )}
+            {entry.totalAmount != null && (
+              <div>
+                <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Amount</p>
+                <p className="text-zinc-200 font-semibold">{formatAmount(entry.totalAmount)}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-2 pt-2 border-t" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+            {driveLink && (
+              <a
+                href={driveLink}
+                target="_blank"
+                rel="noreferrer"
+                className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition-all hover:brightness-110"
+                style={{
+                  background: "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.2))",
+                  border: "1px solid rgba(99,102,241,0.3)",
+                  color: "#93c5fd",
+                }}
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                Upload
+              </a>
+            )}
+            <Button
+              onClick={() => { onComplete(entry.id); onClose(); }}
+              disabled={completing}
+              className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 h-auto rounded-lg transition-all disabled:opacity-50"
+              style={{
+                background: "linear-gradient(135deg, #059669, #10b981)",
+                color: "white",
+                boxShadow: completing ? "none" : "0 0 12px rgba(16,185,129,0.35)",
+              }}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              {completing ? "Saving…" : "Completed"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>,
+    document.body
+  );
+}
+
 // ─── Entry Card ───────────────────────────────────────────────────────────────
 
 interface EntryCardProps {
@@ -241,146 +393,15 @@ function EntryCard({ entry, onComplete, completing, driveLink, accentHex }: Entr
         </div>
       </div>
 
-      {/* Detail overlay */}
-      {detailOpen && createPortal(
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}
-          onClick={() => setDetailOpen(false)}
-        >
-          <Card
-            className="w-full max-w-md max-h-[80vh] overflow-y-auto"
-            style={{
-              background: "#111113",
-              border: "1px solid rgba(255,255,255,0.1)",
-              color: "white",
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between gap-2 px-6 pt-6 pb-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span
-                  className="font-mono text-xs font-semibold tracking-widest px-2 py-0.5 rounded-md"
-                  style={{ background: `${accentHex}25`, color: accentHex }}
-                >
-                  {entry.CR}
-                </span>
-                {entry.priority && (
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_COLORS[entry.priority as CRPriority]}`}>
-                    {entry.priority} Priority
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={() => setDetailOpen(false)}
-                className="text-zinc-500 hover:text-zinc-300 transition-colors flex-shrink-0"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <CardContent className="flex flex-col gap-4 pt-4">
-              {/* Fan */}
-              <div>
-                <p className="text-[11px] uppercase tracking-wider text-zinc-500 mb-0.5">Fan</p>
-                <p className="text-sm font-medium text-zinc-100">{entry.fanName}</p>
-                {entry.profileLink && (
-                  <a
-                    href={entry.profileLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[11px] transition-colors flex items-center gap-1 mt-0.5"
-                    style={{ color: accentHex }}
-                  >
-                    View Profile <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
-              </div>
-
-              {/* Description */}
-              {entry.description && (
-                <div>
-                  <p className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Description</p>
-                  <p className="text-sm text-zinc-300 leading-relaxed">{entry.description}</p>
-                </div>
-              )}
-
-              {/* Meta details */}
-              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
-                {dueDateLabel && (
-                  <div>
-                    <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Due Date</p>
-                    <p className="text-rose-400/80">{dueDateLabel}</p>
-                  </div>
-                )}
-                {entry.length && (
-                  <div>
-                    <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Length</p>
-                    <p className="text-zinc-300">{entry.length}</p>
-                  </div>
-                )}
-                {entry.socialPlatform && (
-                  <div>
-                    <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Platform</p>
-                    <p className="text-zinc-300">{entry.socialPlatform}</p>
-                  </div>
-                )}
-                {entry.socialUsername && (
-                  <div>
-                    <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Username</p>
-                    <p className="text-zinc-300">@{entry.socialUsername}</p>
-                  </div>
-                )}
-                {entry.address && (
-                  <div className="col-span-2">
-                    <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Address</p>
-                    <p className="text-zinc-300">{entry.address}</p>
-                  </div>
-                )}
-                {entry.totalAmount != null && (
-                  <div>
-                    <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Amount</p>
-                    <p className="text-zinc-200 font-semibold">{formatAmount(entry.totalAmount)}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Actions */}
-              <div className="flex gap-2 pt-2 border-t" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-                {driveLink && (
-                  <a
-                    href={driveLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition-all hover:brightness-110"
-                    style={{
-                      background: "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.2))",
-                      border: "1px solid rgba(99,102,241,0.3)",
-                      color: "#93c5fd",
-                    }}
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    Upload
-                  </a>
-                )}
-                <Button
-                  onClick={() => { onComplete(entry.id); setDetailOpen(false); }}
-                  disabled={completing}
-                  className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 h-auto rounded-lg transition-all disabled:opacity-50"
-                  style={{
-                    background: "linear-gradient(135deg, #059669, #10b981)",
-                    color: "white",
-                    boxShadow: completing ? "none" : "0 0 12px rgba(16,185,129,0.35)",
-                  }}
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  {completing ? "Saving…" : "Completed"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>,
-        document.body
+      {detailOpen && (
+        <CRDetailOverlay
+          entry={entry}
+          accentHex={accentHex}
+          driveLink={driveLink}
+          onComplete={onComplete}
+          completing={completing}
+          onClose={() => setDetailOpen(false)}
+        />
       )}
     </>
   );
@@ -532,10 +553,17 @@ function ProfileMenu({ stageName, email, photoURL }: ProfileMenuProps) {
 
 export default function CreatorDashboardPage() {
   const { creatorUser } = useCreatorAuth();
+  const searchParams = useSearchParams();
+  const crId = searchParams.get('crId');
+
   const [entries, setEntries] = useState<CampaignEntry[]>([]);
   const [completing, setCompleting] = useState<string | null>(null);
   const [cpEntries, setCpEntries] = useState<CPEntry[]>([]);
   const [cpCompleting, setCpCompleting] = useState<string | null>(null);
+  const [entriesLoaded, setEntriesLoaded] = useState(false);
+  const [linkedEntry, setLinkedEntry] = useState<CampaignEntry | null>(null);
+  const [linkedError, setLinkedError] = useState<string | null>(null);
+  const linkedResolvedRef = useRef(false);
 
   useEffect(() => {
     if (!creatorUser) return;
@@ -549,11 +577,45 @@ export default function CreatorDashboardPage() {
         .map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>))
         .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type))
       );
+      setEntriesLoaded(true);
     }, (error) => {
       console.error('[dashboard] campaign-tracking listener error:', error);
     });
     return unsub;
   }, [creatorUser?.creatorID]);
+
+  // Resolve deep-linked CR from ?crId= query param
+  useEffect(() => {
+    if (!crId || !creatorUser || !entriesLoaded || linkedResolvedRef.current) return;
+
+    const found = entries.find(e => e.id === crId);
+    if (found) {
+      linkedResolvedRef.current = true;
+      setLinkedEntry(found);
+      return;
+    }
+
+    // Not in current "In Progress" list — wait briefly for a server snapshot,
+    // then fetch the doc directly to determine why.
+    const timer = setTimeout(async () => {
+      if (linkedResolvedRef.current) return;
+      linkedResolvedRef.current = true;
+      try {
+        const snap = await getDoc(doc(db, 'campaign-tracking', crId));
+        if (!snap.exists()) {
+          toast.error('Custom request not found.');
+        } else if ((snap.data() as Record<string, unknown>).creatorID !== creatorUser.creatorID) {
+          setLinkedError('This request belongs to a different account.');
+        } else {
+          toast.error("This request isn't currently active.");
+        }
+      } catch {
+        toast.error("This request couldn't be loaded.");
+      }
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [crId, entries, creatorUser, entriesLoaded]);
 
   useEffect(() => {
     if (!creatorUser) return;
@@ -794,8 +856,46 @@ export default function CreatorDashboardPage() {
           )}
         </section>
 
-
       </main>
+
+      {/* Deep-linked CR detail */}
+      {linkedEntry && (
+        <CRDetailOverlay
+          entry={linkedEntry}
+          accentHex={TYPE_META[linkedEntry.type as "CR" | "Call" | "Item"]?.accentHex ?? "#8b5cf6"}
+          driveLink={creatorUser.driveLink}
+          onComplete={(id) => { handleComplete(id); setLinkedEntry(null); }}
+          completing={completing === linkedEntry.id}
+          onClose={() => setLinkedEntry(null)}
+        />
+      )}
+
+      {/* Wrong-account error */}
+      {linkedError && createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}
+          onClick={() => setLinkedError(null)}
+        >
+          <Card
+            className="w-full max-w-sm"
+            style={{ background: "#111113", border: "1px solid rgba(239,68,68,0.25)", color: "white" }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex flex-col items-center gap-3 p-6 text-center">
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center"
+                style={{ background: "rgba(239,68,68,0.1)" }}
+              >
+                <X className="w-5 h-5 text-red-400" />
+              </div>
+              <p className="text-sm font-medium text-zinc-100">{linkedError}</p>
+              <Button variant="outline" size="sm" onClick={() => setLinkedError(null)}>Dismiss</Button>
+            </div>
+          </Card>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

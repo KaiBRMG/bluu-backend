@@ -24,7 +24,7 @@ import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Plus, MoreHorizontal, Check, Info, Search, CalendarIcon } from "lucide-react";
+import { Plus, MoreHorizontal, Check, Info, Search, CalendarIcon, Link2 } from "lucide-react";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "@/firebase-config";
 import {
@@ -291,7 +291,22 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
       <Card className="w-full max-w-lg mx-4 flex flex-col max-h-[90vh]">
         <CardHeader className="shrink-0 pb-3">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">{entry.CR}</CardTitle>
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-lg">{entry.CR}</CardTitle>
+              <button
+                type="button"
+                title="Copy creator link"
+                onClick={() => {
+                  navigator.clipboard.writeText(
+                    `${window.location.origin}/creator-portal/dashboard?crId=${entry.id}`
+                  );
+                  toast.success("Link copied");
+                }}
+                className="text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                <Link2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
             <StatusBadge status={entry.status} />
           </div>
           <p className="text-sm text-zinc-400">{creatorName} · {entry.type}</p>
