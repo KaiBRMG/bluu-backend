@@ -299,8 +299,7 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
                 onClick={() => {
                   const typeLabel = entry.type === "Item" ? "Item Request" : TYPE_LABELS[entry.type] ?? entry.type;
                   const url = `${window.location.origin}/creator-portal/dashboard?crId=${entry.id}`;
-                  const duePart = entry.dueDate ? ` is due on ${formatDueDate(entry.dueDate)},` : ",";
-                  const message = `Hey ${creatorName} 👋🏻\nYou have a new ${typeLabel} from ${entry.fanName}! This ${formatAmount(entry.totalAmount)} request${duePart} check your Portal for the details: ${url}`;
+                  const message = `You have a new ${typeLabel} from ${entry.fanName} for ${formatAmount(entry.totalAmount)}! Check your Portal for the details: ${url}`;
                   navigator.clipboard.writeText(message);
                   toast.success("Link copied");
                 }}
