@@ -22,7 +22,11 @@ let _client: Client | null = null;
 function getClient(): Client {
   if (!_client) {
     const auth = process.env.NOTION_TOKEN;
-    if (!auth) throw new Error('NOTION_TOKEN env var is not set');
+    if (!auth) {
+      throw new Error(
+        'NOTION_TOKEN env var is not set. ',
+      );
+    }
     _client = new Client({ auth });
   }
   return _client;
@@ -30,7 +34,11 @@ function getClient(): Client {
 
 function getDatabaseId(): string {
   const id = process.env.NOTION_DATABASE_ID;
-  if (!id) throw new Error('NOTION_DATABASE_ID env var is not set');
+  if (!id) {
+    throw new Error(
+      'NOTION_DATABASE_ID env var is not set.',
+    );
+  }
   return id;
 }
 

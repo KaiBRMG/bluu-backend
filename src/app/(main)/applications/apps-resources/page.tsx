@@ -55,9 +55,9 @@ export default function ResourcesPage() {
     <AppLayout>
       <div className="max-w-5xl">
         <h1 className="text-2xl font-bold tracking-tight mb-2">Resources</h1>
-        <p className="text-sm text-muted-foreground">
+        {/* <p className="text-sm text-muted-foreground">
           Internal documents and Notion pages shared with your team.
-        </p>
+        </p> */}
 
         <div className="mt-8 flex flex-col gap-4">
           {/* Search */}
