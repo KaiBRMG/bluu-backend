@@ -19,33 +19,51 @@ import { DocumentRow } from './components/DocumentRow';
 import { colorForType } from './components/typeColors';
 
 const PAGE_SIZE = 10;
+const ALL_VALUE = '__ALL__';
 
 export default function ResourcesPage() {
   const { documents, types, loading, error } = useResources();
 
   const [query, setQuery] = useState('');
-  // null = "all available types selected" (default state until the user
-  // touches the toggle group). Switching to a concrete array on first
-  // interaction avoids a setState-in-effect just to seed the toggles.
-  const [activeTypes, setActiveTypes] = useState<string[] | null>(null);
+  // Empty array means the "All" pseudo-toggle is on (show every document).
+  // Any non-empty array means the user has picked specific types and "All" is off.
+  const [activeTypes, setActiveTypes] = useState<string[]>([]);
   const [page, setPage] = useState(1);
 
-  const effectiveActiveTypes = useMemo(
-    () => activeTypes ?? types ?? [],
-    [activeTypes, types],
-  );
+  const isAllOn = activeTypes.length === 0;
+  const toggleValue = isAllOn ? [ALL_VALUE] : activeTypes;
+
+  const handleToggleChange = (next: string[]) => {
+    const hadAll = isAllOn;
+    const hasAll = next.includes(ALL_VALUE);
+
+    // User clicked "All" while it was off — clear every type filter.
+    if (hasAll && !hadAll) {
+      setActiveTypes([]);
+      setPage(1);
+      return;
+    }
+    // Drop the sentinel; what remains is the explicit type selection.
+    const onlyTypes = next.filter(v => v !== ALL_VALUE);
+    // Block "all off" — clicking the lone "All" chip is a no-op rather than
+    // showing an empty list. Toggle a type instead to deselect "All".
+    if (onlyTypes.length === 0 && hadAll) return;
+    setActiveTypes(onlyTypes);
+    setPage(1);
+  };
 
   const filtered = useMemo(() => {
     if (!documents) return [];
     const q = query.trim().toLowerCase();
-    const activeSet = new Set(effectiveActiveTypes);
+    const activeSet = new Set(activeTypes);
+    const allOn = activeSet.size === 0;
     return documents.filter(d => {
       if (q && !d.name.toLowerCase().includes(q)) return false;
-      if (activeSet.size === 0) return false;
+      if (allOn) return true;
       if (d.types.length === 0) return false;
       return d.types.some(t => activeSet.has(t));
     });
-  }, [documents, query, effectiveActiveTypes]);
+  }, [documents, query, activeTypes]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const visible = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -67,6 +85,8 @@ export default function ResourcesPage() {
               value={query}
               onChange={e => {
                 setQuery(e.target.value);
+                // Typing always searches the full set — reset to "All".
+                setActiveTypes([]);
                 setPage(1);
               }}
               placeholder="Search all resources"
@@ -84,13 +104,20 @@ export default function ResourcesPage() {
           ) : types.length === 0 ? null : (
             <ToggleGroup
               type="multiple"
-              value={effectiveActiveTypes}
-              onValueChange={(v: string[]) => {
-                setActiveTypes(v);
-                setPage(1);
-              }}
+              value={toggleValue}
+              onValueChange={handleToggleChange}
               className="flex flex-wrap gap-2 w-full justify-start"
             >
+              <ToggleGroupItem
+                value={ALL_VALUE}
+                aria-label="Show all resources"
+                variant="outline"
+                size="sm"
+                className="!rounded-md !border gap-2 data-[state=on]:bg-slate-100 data-[state=on]:text-slate-900 data-[state=on]:border-slate-300 dark:data-[state=on]:bg-slate-500/15 dark:data-[state=on]:text-slate-100 dark:data-[state=on]:border-slate-500/30"
+              >
+                <span className="h-2 w-2 rounded-full bg-slate-500" aria-hidden />
+                All
+              </ToggleGroupItem>
               {types.map(t => {
                 const c = colorForType(t);
                 return (
