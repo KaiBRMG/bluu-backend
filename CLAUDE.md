@@ -301,6 +301,16 @@ Current notification events and their factory functions:
 - `sonner` for toast notifications
 - `@dnd-kit` for drag-and-drop
 
+### Notion Resources Integration
+
+The `/applications/apps-resources` page lists documents from a single Notion database.
+
+- **Service**: `src/lib/services/notionService.ts` wraps `@notionhq/client`. Two `unstable_cache`-wrapped exports: `getActiveDocuments()` (5 min revalidate) and `getDocumentTypes()` (1 hr revalidate). Both share the cache tag `notion-resources` — call `revalidateTag('notion-resources')` if a future write path needs to bust both at once.
+- **Env vars**: `NOTION_TOKEN` and `NOTION_DATABASE_ID` in `src/.env.local`. Server-only — never expose to the client.
+- **Notion schema expected**: `Name` (title), `URL` (url, optional — if empty, the Notion page URL is used), `Groups` (multi-select; values must match `users.groups`), `Type` (multi-select), `Status` (status; only `Active` rows are returned, `Unlisted` is filtered out at the service), `Last Edited Time` (Notion built-in).
+- **Group filter**: applied server-side in `/api/resources` — a doc is visible if any of its `Groups` overlap with the caller's `users.groups`. Admins (`token.admin === true`) bypass this filter. The page itself is gated by the standard sidebar `apps-resources` page permission, so no per-page `permittedPageIds` check runs inside the route.
+- **Client cache**: `src/hooks/useResources.ts` mirrors the `useCreators` pattern (sessionStorage, 5 min TTL, key `bluu_resources_v1`).
+
 ### Profile Pictures
 
 Always use `src/components/ui/avatar.tsx` (`Avatar`, `AvatarImage`, `AvatarFallback`) to render profile pictures. Never use a plain `<img>` tag for avatars.

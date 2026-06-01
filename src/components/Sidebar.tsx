@@ -8,6 +8,7 @@ import { House, ChevronLeft, ChevronDown, type LucideIcon } from "lucide-react";
 import {
   MessageSquareQuote,
   ShieldUser,
+  BookOpen,
   PanelLeft,
   CalendarClock,
   KeyRound,
@@ -52,6 +53,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   House,
   MessageSquareQuote,
   ShieldUser,
+  BookOpen,
   PanelLeft,
   CalendarClock,
   SquareStar,
