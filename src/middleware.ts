@@ -5,6 +5,7 @@ const BROWSER_ALLOWED_PREFIXES = [
   '/auth',
   '/creator-portal',
   '/desktop-only',
+  '/raffle',
 ];
 
 export function middleware(request: NextRequest) {
