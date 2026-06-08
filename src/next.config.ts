@@ -63,19 +63,39 @@ const nextConfig: NextConfig = {
 };
 
 export default withSentryConfig(withBundleAnalyzer(nextConfig), {
-  // Sentry org/project — set via SENTRY_ORG / SENTRY_PROJECT env vars
-  org: process.env.SENTRY_ORG,
-  project: process.env.SENTRY_PROJECT,
+  // For all available options, see:
+  // https://www.npmjs.com/package/@sentry/webpack-plugin#options
 
-  // Source map upload auth token (.env.sentry-build-plugin or CI secret)
-  authToken: process.env.SENTRY_AUTH_TOKEN,
+  org: "bluurock",
 
-  // Upload a wider set of client source files for better stack trace resolution
+  project: "javascript-nextjs",
+
+  // Only print logs for uploading source maps in CI
+  silent: !process.env.CI,
+
+  // For all available options, see:
+  // https://docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup/
+
+  // Upload a larger set of source maps for prettier stack traces (increases build time)
   widenClientFileUpload: true,
 
-  // Note: tunnelRoute is intentionally omitted — this app's middleware rewrites
-  // all non-Electron traffic to /desktop-only, which would break a tunnel route.
+  // Uncomment to route browser requests to Sentry through a Next.js rewrite to circumvent ad-blockers.
+  // This can increase your server load as well as your hosting bill.
+  // Note: Check that the configured route will not match with your Next.js middleware, otherwise reporting of client-
+  // side errors will fail.
+  // tunnelRoute: "/monitoring",
 
-  // Suppress non-CI build output
-  silent: !process.env.CI,
+  webpack: {
+    // Enables automatic instrumentation of Vercel Cron Monitors. (Does not yet work with App Router route handlers.)
+    // See the following for more information:
+    // https://docs.sentry.io/product/crons/
+    // https://vercel.com/docs/cron-jobs
+    automaticVercelMonitors: true,
+
+    // Tree-shaking options for reducing bundle size
+    treeshake: {
+      // Automatically tree-shake Sentry logger statements to reduce bundle size
+      removeDebugLogging: true,
+    },
+  },
 });
