@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import path from "path";
+import { withSentryConfig } from "@sentry/nextjs";
 
 // Bundle analyzer configuration (enabled via ANALYZE=true environment variable)
 const withBundleAnalyzer = require('@next/bundle-analyzer')({
@@ -61,4 +62,20 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default withBundleAnalyzer(nextConfig);
+export default withSentryConfig(withBundleAnalyzer(nextConfig), {
+  // Sentry org/project — set via SENTRY_ORG / SENTRY_PROJECT env vars
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+
+  // Source map upload auth token (.env.sentry-build-plugin or CI secret)
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+
+  // Upload a wider set of client source files for better stack trace resolution
+  widenClientFileUpload: true,
+
+  // Note: tunnelRoute is intentionally omitted — this app's middleware rewrites
+  // all non-Electron traffic to /desktop-only, which would break a tunnel route.
+
+  // Suppress non-CI build output
+  silent: !process.env.CI,
+});
