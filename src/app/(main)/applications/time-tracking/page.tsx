@@ -26,6 +26,7 @@ import { Coffee, Info } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { STATE_CONFIG } from "@/lib/stateColors";
+import { useState } from "react";
 
 
 function formatTime(totalSeconds: number): string {
@@ -53,6 +54,12 @@ export default function TimeTrackingPage() {
   const { userData } = useUserData();
   const timezone = userData?.timezone || 'UTC';
   const dayTotalSeconds = useDayTotal(timezone);
+
+  const [mountedTabs, setMountedTabs] = useState<Set<string>>(new Set(["today"]));
+
+  const handleTabChange = (value: string) => {
+    setMountedTabs(prev => prev.has(value) ? prev : new Set([...prev, value]));
+  };
 
   const config = STATE_CONFIG[displayState];
 
@@ -221,17 +228,17 @@ export default function TimeTrackingPage() {
         </div>
 
         {/* Tabbed container */}
-        <Tabs defaultValue="today" className="mt-8">
+        <Tabs defaultValue="today" className="mt-8" onValueChange={handleTabChange}>
           <TabsList>
             <TabsTrigger value="today">Today's Timesheet</TabsTrigger>
             <TabsTrigger value="previous">Previous Timesheets</TabsTrigger>
             <TabsTrigger value="upcoming">Upcoming Shifts</TabsTrigger>
             <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
           </TabsList>
-          <TabsContent value="today" className="mt-4"><TodayTimeline /></TabsContent>
-          <TabsContent value="previous" className="mt-4"><UserTimesheet /></TabsContent>
-          <TabsContent value="upcoming" className="mt-4"><UserUpcomingShifts /></TabsContent>
-          <TabsContent value="screenshots" className="mt-4"><UserScreenshots /></TabsContent>
+          <TabsContent value="today" className="mt-4">{mountedTabs.has("today") && <TodayTimeline />}</TabsContent>
+          <TabsContent value="previous" className="mt-4">{mountedTabs.has("previous") && <UserTimesheet />}</TabsContent>
+          <TabsContent value="upcoming" className="mt-4">{mountedTabs.has("upcoming") && <UserUpcomingShifts />}</TabsContent>
+          <TabsContent value="screenshots" className="mt-4">{mountedTabs.has("screenshots") && <UserScreenshots />}</TabsContent>
         </Tabs>
       </div>
     </AppLayout>
