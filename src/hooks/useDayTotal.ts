@@ -2,20 +2,24 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { getTodaySessions } from '@/lib/localBuffer';
-import { parseBuffer } from '@/lib/parseBuffer';
+import { parseBuffer, sessionCloseMs } from '@/lib/parseBuffer';
+import { useTimeTracking } from '@/hooks/useTimeTracking';
 
 /**
  * Returns the total "time worked" seconds tracked today (in the user's timezone),
  * summed across all sessions whose clock-in falls within today's calendar day.
  *
- * Counts: working seconds only.
- * Excludes: idle, break, and pause time.
+ * Counts: working + break seconds. This MUST match the "Total worked" figure in
+ * TodayTimeline (working + break) so the timer page's "TODAY" total and the
+ * timesheet below it always show the same value.
+ * Excludes: idle and pause time.
  *
  * - Ticks every second.
  * - Resets automatically at midnight in the user's timezone by re-running the
  *   effect (driven by a `day` state that increments at midnight).
  */
 export function useDayTotal(timezone: string): number {
+  const { sessionId, displayState } = useTimeTracking();
   const [totalSeconds, setTotalSeconds] = useState(0);
   // Incrementing this triggers the effect to re-run after midnight
   const [day, setDay] = useState(0);
@@ -32,8 +36,11 @@ export function useDayTotal(timezone: string): number {
       const now = Date.now();
       let total = 0;
       for (const buf of sessions) {
-        const t = parseBuffer(buf.events, now);
-        total += t.workingSeconds;
+        // Only the live session grows to `now`; everything else is closed at its
+        // clock-out / last event so an orphaned buffer can't inflate the total.
+        const isActive = buf.sessionId === sessionId && displayState !== 'clocked-out';
+        const t = parseBuffer(buf.events, sessionCloseMs(buf, isActive, now));
+        total += t.workingSeconds + t.breakSeconds;
       }
       if (!cancelled) setTotalSeconds(total);
     }
@@ -55,7 +62,7 @@ export function useDayTotal(timezone: string): number {
       if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
       if (midnightRef.current) { clearTimeout(midnightRef.current); midnightRef.current = null; }
     };
-  }, [timezone, day]); // re-runs on timezone change or day rollover
+  }, [timezone, day, sessionId, displayState]); // re-runs on tz change, day rollover, or session state change
 
   return totalSeconds;
 }

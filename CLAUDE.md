@@ -176,6 +176,53 @@ Sessions use an event log architecture:
 3. On clock-out, the full event log is uploaded and `time_entries/{sessionId}` is written
 4. The daily Cloud Function closes stale sessions (no heartbeat for 6+ hours) that weren't explicitly clocked out
 
+`active_sessions/{userId}` is keyed by uid, so a user can only ever have **one**
+server-side active session. "Two active sessions" symptoms are always a
+client-side rendering/buffer issue, never two server docs.
+
+#### Session close time — `sessionCloseMs` (single source of truth)
+
+Any client-side code that derives elapsed time from local buffers MUST close a
+session's open segments with `sessionCloseMs(buf, isActive, now)` from
+`src/lib/parseBuffer.ts`, then pass the result as `parseBuffer`'s `nowMs` arg.
+
+- **Active session only** (`buf.sessionId === sessionId && displayState !== 'clocked-out'`) extends to `now`.
+- Every other buffer closes at its `clock-out` event, or — if it has none (an
+  abandoned/orphaned session) — at its **last recorded event**.
+
+Without this, a clock-out-less buffer's open working segment is counted all the
+way to `now`, inflating totals and rendering as a phantom "live, working"
+session while the user is clocked out. Consumers: `TodayTimeline.tsx` (timeline
+bars + per-row totals) and `useDayTotal.ts` (the "TODAY" total). Do not call
+`parseBuffer(buf.events, Date.now())` directly over a set of buffers.
+
+`useDayTotal` and `TodayTimeline`'s *Total worked* MUST stay in sync: both sum
+`workingSeconds + breakSeconds` (idle and pause excluded). The "TODAY" figure on
+the timer page is required to equal the timesheet's *Total worked* exactly.
+
+#### Crash / restart robustness
+
+- **App close appends a real `clock-out` event** to the local buffer (in
+  `TimeTrackingContext`'s `clockOutAndFlush`) before marking
+  `active_sessions.userClockOut = true`, so the buffer is self-describing and can
+  never render as live even if later orphaned.
+- **Hydration is gated by `isHydrating`** (exposed on the context). On startup the
+  pending-buffer reconciliation is `await`ed and the Clock In button is disabled
+  until it finishes. This prevents an impatient click from starting a second
+  session that races the in-flight upload and orphans the old buffer.
+- **`startTracking` reconciles, never blindly discards.** When `/start` returns
+  `alreadyActive`, it commits a matching local buffer (`silentLogUpload` →
+  `commitSession`, which both writes `time_entries` and deletes the
+  `active_sessions` doc) instead of discarding; it only `/discard`s when there is
+  genuinely no local buffer (session started on another device).
+- **Display self-heal**: the 1s timer tick freezes when the main thread is blocked
+  (e.g. a heavy page load), so a `visibilitychange`/`focus` listener recomputes
+  elapsed from `entryStartTime + Date.now()` to snap the display back immediately.
+- App close is a deliberate soft clock-out — reopening never auto-resumes a
+  gracefully-closed session; it commits it and shows a toast. Orphaned
+  server-side sessions are cleaned by the daily Cloud Function (above); the client
+  does not force-delete server sessions during hydration.
+
 ### Activity Percent (Screenshots & Active Users)
 
 `activityPercent` is currently derived from the session event log by comparing

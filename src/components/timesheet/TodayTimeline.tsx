@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTimeTracking } from '@/hooks/useTimeTracking';
 import { useUserData } from '@/hooks/useUserData';
 import { getTodaySessions } from '@/lib/localBuffer';
-import { parseBuffer } from '@/lib/parseBuffer';
+import { parseBuffer, sessionCloseMs } from '@/lib/parseBuffer';
 import type { LocalSessionBuffer, SessionEvent } from '@/types/firestore';
 import { RefreshCcw } from 'lucide-react';
 import { Button } from "@/components/ui/button";
@@ -134,26 +134,6 @@ function buildSegments(events: SessionEvent[], nowMs: number): TimelineSegment[]
   if (pauseStart !== null)   segments.push({ kind: 'pause',   startMs: pauseStart,   endMs: nowMs });
 
   return segments;
-}
-
-/**
- * The timestamp at which a session's open segments should be closed for
- * rendering.
- *
- * Only the genuinely active session (the one the timer is currently running)
- * extends to `now`. Any other buffer is closed at its clock-out event, or — if
- * it has none (an abandoned/orphaned session whose clock-out never got
- * recorded) — at its last recorded event. Without this, a clock-out-less
- * buffer would be drawn growing in real time to `now`, appearing as a phantom
- * "live, working" session even while the user is clocked out.
- */
-function sessionCloseMs(buf: LocalSessionBuffer, isActive: boolean, now: number): number {
-  if (isActive) return now;
-  const clockOut = buf.events.find(e => e.type === 'clock-out');
-  if (clockOut) return clockOut.timestamp;
-  return buf.events.length > 0
-    ? buf.events[buf.events.length - 1].timestamp
-    : buf.startTime;
 }
 
 // ─── Component ────────────────────────────────────────────────────────

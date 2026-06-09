@@ -1,4 +1,27 @@
-import type { SessionEvent, ParsedSessionTotals } from '@/types/firestore';
+import type { SessionEvent, ParsedSessionTotals, LocalSessionBuffer } from '@/types/firestore';
+
+/**
+ * The timestamp at which a session buffer's open segments should be closed when
+ * computing elapsed time or rendering its timeline.
+ *
+ * Only the genuinely active session (the one the timer is currently running)
+ * extends to `now`. Any other buffer is closed at its `clock-out` event, or — if
+ * it never recorded one (an abandoned/orphaned session) — at its last recorded
+ * event. Without this, a clock-out-less buffer's open working segment is counted
+ * all the way to `now`, inflating "time worked" and rendering as a phantom live
+ * session even while the user is clocked out.
+ *
+ * Pass the result as `parseBuffer`'s `nowMs` argument so every consumer (day
+ * total, today's timeline, etc.) agrees on the same value.
+ */
+export function sessionCloseMs(buf: LocalSessionBuffer, isActive: boolean, now: number): number {
+  if (isActive) return now;
+  const clockOut = buf.events.find(e => e.type === 'clock-out');
+  if (clockOut) return clockOut.timestamp;
+  return buf.events.length > 0
+    ? buf.events[buf.events.length - 1].timestamp
+    : buf.startTime;
+}
 
 /**
  * Walk the event log and compute total working/idle/break/pause seconds.
