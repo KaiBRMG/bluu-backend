@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
 import RegistryFilters from './RegistryFilters';
 import UserCard from './UserCard';
@@ -13,6 +13,8 @@ interface EmployeeRegistryProps {
   onAddGroupMembers: (groupId: string, uids: string[]) => Promise<void>;
   onRemoveGroupMember: (groupId: string, uid: string) => Promise<void>;
   onRefetch: () => Promise<void>;
+  onDeleteUser: (uid: string) => Promise<void>;
+  showArchived?: boolean;
 }
 
 export default function EmployeeRegistry({
@@ -22,6 +24,8 @@ export default function EmployeeRegistry({
   onAddGroupMembers,
   onRemoveGroupMember,
   onRefetch,
+  onDeleteUser,
+  showArchived = false,
 }: EmployeeRegistryProps) {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -33,6 +37,7 @@ export default function EmployeeRegistry({
     const q = searchQuery.trim().toLowerCase();
     return users
       .filter((u) => {
+        if (showArchived ? !u.isArchived : u.isArchived) return false;
         if (groupFilter && !u.groups?.includes(groupFilter)) return false;
         if (statusFilter === 'active' && !u.isActive) return false;
         if (statusFilter === 'inactive' && u.isActive) return false;
@@ -53,11 +58,13 @@ export default function EmployeeRegistry({
         if (aFirst !== bFirst) return aFirst.localeCompare(bFirst);
         return aLast.localeCompare(bLast);
       });
-  }, [users, searchQuery, groupFilter, statusFilter, employmentTypeFilter]);
+  }, [users, searchQuery, groupFilter, statusFilter, employmentTypeFilter, showArchived]);
 
-  const selectedUser = selectedUserId
-    ? users.find((u) => u.uid === selectedUserId) ?? null
-    : null;
+  const handleDeleteUser = useCallback(async () => {
+    if (!selectedUserId) return;
+    await onDeleteUser(selectedUserId);
+    setSelectedUserId(null);
+  }, [selectedUserId, onDeleteUser]);
 
   return (
     <div>
@@ -76,7 +83,7 @@ export default function EmployeeRegistry({
       {filteredUsers.length === 0 ? (
         <div className="flex items-center justify-center h-40">
           <p className="text-sm" style={{ color: 'var(--foreground-muted)' }}>
-            No users found matching the selected filters.
+            {showArchived ? 'No archived users.' : 'No users found matching the selected filters.'}
           </p>
         </div>
       ) : (
@@ -101,6 +108,7 @@ export default function EmployeeRegistry({
         onAddGroupMembers={onAddGroupMembers}
         onRemoveGroupMember={onRemoveGroupMember}
         onRefetch={onRefetch}
+        onDeleteUser={handleDeleteUser}
       />
     </div>
   );

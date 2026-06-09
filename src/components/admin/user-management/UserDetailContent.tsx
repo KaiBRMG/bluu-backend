@@ -13,6 +13,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
@@ -35,6 +36,8 @@ import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 interface UserDetailContentProps {
   user: AdminFullUser;
   onUpdateUser: (uid: string, updates: Record<string, unknown>) => Promise<void>;
+  onDeleteUser?: () => Promise<void>;
+  onClose?: () => void;
 }
 
 interface FormData {
@@ -102,6 +105,8 @@ function buildFormData(user: AdminFullUser): FormData {
 export default function UserDetailContent({
   user,
   onUpdateUser,
+  onDeleteUser,
+  onClose,
 }: UserDetailContentProps) {
   const { pagePermissions, updatePermission } = useAdminData();
   const [formData, setFormData] = useState<FormData>(() => buildFormData(user));
@@ -115,6 +120,9 @@ export default function UserDetailContent({
   const [isActiveUpdating, setIsActiveUpdating] = useState(false);
   const [pendingIsActive, setPendingIsActive] = useState<boolean | null>(null);
   const [isTimeTrackingUpdating, setIsTimeTrackingUpdating] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isActionSubmitting, setIsActionSubmitting] = useState(false);
 
   const timeTrackingPermDoc = pagePermissions.find((p) => p.pageId === 'time-tracking');
   const enableTimeTracking = user.permittedPageIds?.includes('time-tracking') ?? false;
@@ -132,6 +140,32 @@ export default function UserDetailContent({
       return () => clearTimeout(timer);
     }
   }, [saveMessage]);
+
+  const confirmArchive = async () => {
+    setIsActionSubmitting(true);
+    try {
+      await onUpdateUser(user.uid, { isActive: false, isArchived: true });
+      onClose?.();
+    } catch (err) {
+      console.error('Failed to archive user:', err);
+    } finally {
+      setIsActionSubmitting(false);
+      setShowArchiveConfirm(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!onDeleteUser) return;
+    setIsActionSubmitting(true);
+    try {
+      await onDeleteUser();
+    } catch (err) {
+      console.error('Failed to delete user:', err);
+    } finally {
+      setIsActionSubmitting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
 
   const handleIsActiveToggle = (checked: boolean) => {
     setPendingIsActive(checked);
@@ -760,9 +794,77 @@ export default function UserDetailContent({
           >
             {isSubmitting ? 'Saving...' : 'Save Changes'}
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="outline">
+                Actions
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="dark min-w-[140px]">
+              {!user.isArchived && (
+                <DropdownMenuItem
+                  onSelect={() => setShowArchiveConfirm(true)}
+                  className="text-yellow-400 focus:text-yellow-400"
+                >
+                  Archive
+                </DropdownMenuItem>
+              )}
+              {!user.isArchived && <DropdownMenuSeparator />}
+              <DropdownMenuItem
+                onSelect={() => setShowDeleteConfirm(true)}
+                className="text-red-400 focus:text-red-400"
+              >
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </div>
+      {/* Archive confirmation */}
+      <AlertDialog open={showArchiveConfirm} onOpenChange={(open) => { if (!open) setShowArchiveConfirm(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive this user?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will deactivate {user.firstName || user.displayName}&apos;s account and move them to the Archived Users list. They will be immediately signed out and blocked from logging in. This action can be undone by an admin.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isActionSubmitting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmArchive}
+              disabled={isActionSubmitting}
+              style={{ background: '#f59e0b' }}
+            >
+              {isActionSubmitting ? 'Archiving...' : 'Archive User'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={(open) => { if (!open) setShowDeleteConfirm(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Permanently delete this user?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete {user.firstName || user.displayName}&apos;s account, remove them from all groups, and revoke all page permissions. <strong>This action cannot be undone.</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isActionSubmitting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              disabled={isActionSubmitting}
+              style={{ background: '#ef4444' }}
+            >
+              {isActionSubmitting ? 'Deleting...' : 'Delete Permanently'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={pendingIsActive !== null} onOpenChange={(open) => { if (!open) setPendingIsActive(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>

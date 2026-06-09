@@ -47,6 +47,7 @@ export const PUT = withAuth(async (
       'remainingUnpaidLeave',
       'remainingPaidLeave',
       'isActive',
+      'isArchived',
     ];
 
     // Filter and sanitize updates
@@ -87,5 +88,62 @@ export const PUT = withAuth(async (
   } catch (error: unknown) {
     console.error('Error updating user:', error);
     return NextResponse.json({ error: 'Failed to update user' }, { status: 500 });
+  }
+});
+
+/**
+ * DELETE /api/admin/users/[uid]
+ * Admin-only. Permanently deletes a user and removes them from groups and page-permissions.
+ */
+export const DELETE = withAuth(async (
+  _request: NextRequest,
+  token: DecodedIdToken,
+  params: Promise<{ uid: string }>
+) => {
+  try {
+    const caller = await getUserById(token.uid);
+    if (!caller?.permittedPageIds?.includes('user-management')) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
+    const { uid: targetUid } = await params;
+
+    if (targetUid === token.uid) {
+      return NextResponse.json({ error: 'Cannot delete your own account' }, { status: 400 });
+    }
+
+    const batch = adminDb.batch();
+
+    // Delete user document
+    batch.delete(adminDb.collection('users').doc(targetUid));
+
+    // Remove from all groups
+    const groupsSnap = await adminDb.collection('groups').get();
+    for (const groupDoc of groupsSnap.docs) {
+      const members: string[] = groupDoc.data().members || [];
+      if (members.includes(targetUid)) {
+        batch.update(groupDoc.ref, { members: FieldValue.arrayRemove(targetUid) });
+      }
+    }
+
+    // Remove from page-permissions users maps
+    const pagePermsSnap = await adminDb.collection('page-permissions').get();
+    for (const permDoc of pagePermsSnap.docs) {
+      const users = permDoc.data().users || {};
+      if (users[targetUid]) {
+        batch.update(permDoc.ref, { [`users.${targetUid}`]: FieldValue.delete() });
+      }
+    }
+
+    await batch.commit();
+
+    invalidateUserCache(targetUid);
+    invalidateAdminUsersCache();
+    invalidateDisplayNamesCache();
+
+    return NextResponse.json({ success: true });
+  } catch (error: unknown) {
+    console.error('Error deleting user:', error);
+    return NextResponse.json({ error: 'Failed to delete user' }, { status: 500 });
   }
 });

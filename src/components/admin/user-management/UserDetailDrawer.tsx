@@ -18,6 +18,7 @@ interface UserDetailDrawerProps {
   onAddGroupMembers: (groupId: string, uids: string[]) => Promise<void>;
   onRemoveGroupMember: (groupId: string, uid: string) => Promise<void>;
   onRefetch: () => Promise<void>;
+  onDeleteUser?: () => Promise<void>;
 }
 
 export default function UserDetailDrawer({
@@ -28,6 +29,7 @@ export default function UserDetailDrawer({
   onAddGroupMembers,
   onRemoveGroupMember,
   onRefetch,
+  onDeleteUser,
 }: UserDetailDrawerProps) {
   const user = userId ? users.find((u) => u.uid === userId) ?? null : null;
 
@@ -47,6 +49,8 @@ export default function UserDetailDrawer({
             key={user.uid}
             user={user}
             onUpdateUser={onUpdateUser}
+            onDeleteUser={onDeleteUser}
+            onClose={onClose}
           />
         )}
       </SheetContent>

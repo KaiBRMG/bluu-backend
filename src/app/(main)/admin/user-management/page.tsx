@@ -10,7 +10,7 @@ import { Loader } from "@/components/ui/loader";
 
 export default function UserManagementPage() {
   const [activeSection, setActiveSection] = useState('employee-registry');
-  const { users, groups, loading, error, refetch, updateUser, addGroupMembers, removeGroupMember } =
+  const { users, groups, loading, error, refetch, updateUser, addGroupMembers, removeGroupMember, deleteUser } =
     useAdminUsers();
 
   if (loading) {
@@ -63,6 +63,7 @@ export default function UserManagementPage() {
               <TabsList>
                 <TabsTrigger value="employee-registry">Employee Registry</TabsTrigger>
                 <TabsTrigger value="user-groups">User Groups</TabsTrigger>
+                <TabsTrigger value="archived-users">Archived Users</TabsTrigger>
               </TabsList>
             </div>
 
@@ -75,6 +76,7 @@ export default function UserManagementPage() {
                   onAddGroupMembers={addGroupMembers}
                   onRemoveGroupMember={removeGroupMember}
                   onRefetch={refetch}
+                  onDeleteUser={deleteUser}
                 />
               </TabsContent>
               <TabsContent value="user-groups">
@@ -83,6 +85,18 @@ export default function UserManagementPage() {
                   groups={groups}
                   onAddGroupMembers={addGroupMembers}
                   onRemoveGroupMember={removeGroupMember}
+                />
+              </TabsContent>
+              <TabsContent value="archived-users">
+                <EmployeeRegistry
+                  users={users}
+                  groups={groups}
+                  onUpdateUser={updateUser}
+                  onAddGroupMembers={addGroupMembers}
+                  onRemoveGroupMember={removeGroupMember}
+                  onRefetch={refetch}
+                  onDeleteUser={deleteUser}
+                  showArchived
                 />
               </TabsContent>
             </div>

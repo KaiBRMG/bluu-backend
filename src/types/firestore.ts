@@ -37,6 +37,7 @@ export interface UserDocument {
   createdAt: Timestamp;
   lastLoginAt: Timestamp;
   isActive: boolean;
+  isArchived?: boolean;
   role?: 'admin' | 'member';
 
   address?: {

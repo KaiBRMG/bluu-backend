@@ -15,6 +15,7 @@ export interface AdminFullUser {
   createdAt: string | null;
   lastLoginAt: string | null;
   isActive: boolean;
+  isArchived?: boolean;
   role?: 'admin' | 'member';
   jobTitle?: string;
   employmentType?: string;
@@ -204,11 +205,34 @@ export function useAdminUsers() {
     [user, fetchData]
   );
 
+  const deleteUser = useCallback(
+    async (targetUid: string) => {
+      if (!user) throw new Error('Not authenticated');
+      const idToken = await user.getIdToken();
+
+      const res = await fetch(`/api/admin/users/${targetUid}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to delete user');
+      }
+
+      invalidateCache(CACHE_KEY);
+      invalidateCache(ADMIN_DATA_CACHE_KEY);
+      await fetchData(true);
+    },
+    [user, fetchData]
+  );
+
   return useMemo(() => ({
     ...state,
     refetch: () => fetchData(true),
     updateUser,
     addGroupMembers,
     removeGroupMember,
-  }), [state, fetchData, updateUser, addGroupMembers, removeGroupMember]);
+    deleteUser,
+  }), [state, fetchData, updateUser, addGroupMembers, removeGroupMember, deleteUser]);
 }

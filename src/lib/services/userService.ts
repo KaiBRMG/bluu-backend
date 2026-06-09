@@ -40,6 +40,7 @@ export async function ensureUserExists(userData: CreateUserData): Promise<string
       createdAt: FieldValue.serverTimestamp(),
       lastLoginAt: FieldValue.serverTimestamp(),
       isActive: true,
+      isArchived: false,
 
       address: {
         street: '',
