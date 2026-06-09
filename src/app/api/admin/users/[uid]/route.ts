@@ -5,6 +5,7 @@ import { getUserById, invalidateUserCache } from '@/lib/services/userService';
 import { invalidateAdminUsersCache } from '@/app/api/admin/users/route';
 import { invalidateDisplayNamesCache } from '@/app/api/users/display-names/route';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { randomUUID } from 'crypto';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
@@ -26,8 +27,7 @@ export const PUT = withAuth(async (
     const { uid: targetUid } = await params;
     const updates = await request.json();
 
-    // Fields any user-management holder may set.
-    const allowedFields = [
+    const effectiveFields = [
       'firstName',
       'lastName',
       'displayName',
@@ -46,19 +46,8 @@ export const PUT = withAuth(async (
       'hasPaidLeave',
       'remainingUnpaidLeave',
       'remainingPaidLeave',
+      'isActive',
     ];
-
-    // Account-state fields that gate access to the system itself — admin claim only.
-    const adminOnlyFields = ['isActive'];
-
-    const hasAdminOnlyField = adminOnlyFields.some(f => updates[f] !== undefined);
-    if (hasAdminOnlyField && token.admin !== true) {
-      return NextResponse.json({ error: 'Admin claim required for sensitive fields' }, { status: 403 });
-    }
-
-    const effectiveFields = token.admin === true
-      ? [...allowedFields, ...adminOnlyFields]
-      : allowedFields;
 
     // Filter and sanitize updates
     const sanitizedUpdates: Record<string, unknown> = {};
@@ -77,6 +66,12 @@ export const PUT = withAuth(async (
 
     if (Object.keys(sanitizedUpdates).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
+    }
+
+    // Rotating sessionToken forces an immediate sign-out via the onSnapshot
+    // mismatch check in useUserData — required when deactivating an account.
+    if (sanitizedUpdates.isActive === false) {
+      sanitizedUpdates.sessionToken = randomUUID();
     }
 
     const userRef = adminDb.collection('users').doc(targetUid);

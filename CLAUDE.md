@@ -115,7 +115,6 @@ Inside handlers, authorization layers on top of the middleware. From least to mo
 2. **Page permission** — `checkPageAccess(token.uid, '<pageId>')` from `apiHelpers.ts` or inline `caller.permittedPageIds.includes(...)`. Most admin/feature endpoints use this tier.
 3. **Admin claim** — `token.admin !== true` guard. Reserve for actions that gate access to the system itself or the authorization graph. Required for:
    - **Admin group membership writes** (`/api/admin/groups/admin/members` POST/DELETE) — also blocks self-promotion (`uids.includes(token.uid)`).
-   - **`isActive` field on `/api/admin/users/[uid]`** — disabling an account is a security action; other profile fields (leave balances, screenshot toggles, payment info) remain at the page-permission tier.
    - **Page-permission map writes** (`/api/admin/pages/[pageId]/permissions` PUT) — editing this map is the root of all other authorization decisions, so it must require admin even though `'sharing'` page permission still gates the read.
 
 When adding a new admin-action route, decide which tier applies; do not default to "page permission" if the action affects the auth graph or account state.
