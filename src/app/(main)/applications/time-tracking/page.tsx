@@ -49,6 +49,7 @@ export default function TimeTrackingPage() {
     startBreak,
     endBreak,
     isLoading,
+    isHydrating,
   } = useTimeTracking();
 
   const { userData } = useUserData();
@@ -137,9 +138,9 @@ export default function TimeTrackingPage() {
                 {displayState === 'clocked-out' && (
                   <Button
                     onClick={startTracking}
-                    disabled={isLoading}
+                    disabled={isLoading || isHydrating}
                   >
-                    {isLoading ? 'Starting...' : 'Clock In'}
+                    {isHydrating ? 'Loading…' : isLoading ? 'Starting...' : 'Clock In'}
                   </Button>
                 )}
 

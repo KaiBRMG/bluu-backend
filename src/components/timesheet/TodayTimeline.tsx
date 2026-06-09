@@ -136,6 +136,26 @@ function buildSegments(events: SessionEvent[], nowMs: number): TimelineSegment[]
   return segments;
 }
 
+/**
+ * The timestamp at which a session's open segments should be closed for
+ * rendering.
+ *
+ * Only the genuinely active session (the one the timer is currently running)
+ * extends to `now`. Any other buffer is closed at its clock-out event, or — if
+ * it has none (an abandoned/orphaned session whose clock-out never got
+ * recorded) — at its last recorded event. Without this, a clock-out-less
+ * buffer would be drawn growing in real time to `now`, appearing as a phantom
+ * "live, working" session even while the user is clocked out.
+ */
+function sessionCloseMs(buf: LocalSessionBuffer, isActive: boolean, now: number): number {
+  if (isActive) return now;
+  const clockOut = buf.events.find(e => e.type === 'clock-out');
+  if (clockOut) return clockOut.timestamp;
+  return buf.events.length > 0
+    ? buf.events[buf.events.length - 1].timestamp
+    : buf.startTime;
+}
+
 // ─── Component ────────────────────────────────────────────────────────
 
 const HOUR_MARKERS = [0, 6, 12, 18, 24];
@@ -174,28 +194,27 @@ export default function TodayTimeline() {
   );
   const dayDuration = dayEnd - dayStart + 1;
 
-  // Build segments per buffer; active session uses live nowMs for open segments
+  // A buffer is "active" (its open segments grow to `now`) only when it is the
+  // session the timer is currently running — i.e. we are not clocked out.
+  const isActiveBuffer = useCallback(
+    (buf: LocalSessionBuffer) => buf.sessionId === sessionId && displayState !== 'clocked-out',
+    [sessionId, displayState],
+  );
+
+  // Build segments per buffer; only the active session uses live nowMs.
   const allSessionSegments = useMemo(() => {
-    return buffers.map(buf => {
-      const isActive = buf.sessionId === sessionId;
-      const closeMs = isActive
-        ? now
-        : (buf.events.find(e => e.type === 'clock-out')?.timestamp ?? now);
-      return buildSegments(buf.events, closeMs);
-    });
-  }, [buffers, sessionId, now]);
+    return buffers.map(buf =>
+      buildSegments(buf.events, sessionCloseMs(buf, isActiveBuffer(buf), now)),
+    );
+  }, [buffers, isActiveBuffer, now]);
 
   // Total worked seconds across all today's sessions
   const totalWorkedSeconds = useMemo(() => {
     return buffers.reduce((sum, buf) => {
-      const isActive = buf.sessionId === sessionId;
-      const closeMs = isActive
-        ? now
-        : (buf.events.find(e => e.type === 'clock-out')?.timestamp ?? now);
-      const totals = parseBuffer(buf.events, closeMs);
+      const totals = parseBuffer(buf.events, sessionCloseMs(buf, isActiveBuffer(buf), now));
       return sum + totals.workingSeconds + totals.breakSeconds;
     }, 0);
-  }, [buffers, sessionId, now]);
+  }, [buffers, isActiveBuffer, now]);
 
   const toPercent = (ms: number) =>
     Math.max(0, Math.min(100, ((ms - dayStart) / dayDuration) * 100));
@@ -302,11 +321,7 @@ export default function TodayTimeline() {
       <div className="flex flex-col gap-1.5">
         {allSessionSegments.map((segments, bi) => {
           const buf = buffers[bi];
-          const isActive = buf.sessionId === sessionId;
-          const closeMs = isActive
-            ? now
-            : (buf.events.find(e => e.type === 'clock-out')?.timestamp ?? now);
-          const totals = parseBuffer(buf.events, closeMs);
+          const totals = parseBuffer(buf.events, sessionCloseMs(buf, isActiveBuffer(buf), now));
           const workedSeconds = totals.workingSeconds + totals.breakSeconds;
           const h = Math.floor(workedSeconds / 3600);
           const m = Math.floor((workedSeconds % 3600) / 60);

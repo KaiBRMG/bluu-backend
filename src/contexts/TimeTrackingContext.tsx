@@ -14,6 +14,7 @@ import {
   pruneOldSessions,
 } from '@/lib/localBuffer';
 import { useUserData } from '@/hooks/useUserData';
+import { toast } from 'sonner';
 
 const HEARTBEAT_INTERVAL_MS   = 15 * 60 * 1000; // 15 minutes — working state only
 const SLEEP_GAP_THRESHOLD_MS  = HEARTBEAT_INTERVAL_MS + 5 * 60 * 1000; // 20 min — gap larger than this implies the process was suspended
@@ -45,6 +46,7 @@ interface TimeTrackingContextType {
   startBreak:            () => Promise<void>;
   endBreak:              () => Promise<void>;
   isLoading:             boolean;
+  isHydrating:           boolean;
 }
 
 const TimeTrackingContext = createContext<TimeTrackingContextType | null>(null);
@@ -91,6 +93,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   const [breakUsedSeconds, setBreakUsedSeconds]         = useState(0);
   const [breakAllowanceSeconds, setBreakAllowanceSeconds] = useState(BREAK_DURATION_SECONDS);
   const [isLoading, setIsLoading]                       = useState(false);
+  const [isHydrating, setIsHydrating]                   = useState(true);
   const [enableScreenshots, setEnableScreenshots]       = useState(false);
 
   // Cumulative working seconds across the session (restored from buffer on crash recovery)
@@ -145,6 +148,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user || hasHydratedRef.current) return;
     hasHydratedRef.current = true;
+    setIsHydrating(true);
 
     (async () => {
       try {
@@ -187,38 +191,47 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
             }
             return; // Done — session resumed
           }
+          // Case C: stale session (> 15 min) — fall through to buffer reconciliation
+        }
 
-          // Case C: stale session (> 15 min) — don't resume, but upload buffer
-          if (lastSessionId) {
-            const buf = await getBuffer(lastSessionId);
-            if (buf) {
-              silentLogUpload(buf).catch(() => {});
-            }
-          }
-        } else {
-          // Case A: no active session. Check for an orphaned local buffer.
-          if (lastSessionId) {
-            const buf = await getBuffer(lastSessionId);
-            if (buf) {
-              silentLogUpload(buf).catch(() => {});
+        // Case A (no/closed active session) or Case C (stale): don't resume.
+        // Reconcile any orphaned local buffer by uploading it. We AWAIT this so
+        // the Clock In button stays disabled (isHydrating) until reconciliation
+        // finishes — otherwise an impatient click could start a second session
+        // that races with this upload and orphans the old buffer.
+        if (lastSessionId) {
+          const buf = await getBuffer(lastSessionId);
+          if (buf) {
+            const action = await silentLogUpload(buf);
+            if (action === 'committed' || action === 'log-merged') {
+              toast.info('Your previous session was saved when the app closed. Clock in to continue.');
             }
           }
         }
       } catch (err) {
         console.error('[TimeTracking] Hydration failed:', err);
+      } finally {
+        setIsHydrating(false);
       }
     })();
   }, [user, apiCall]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Upload a local buffer silently in the background; clear it on success. */
-  const silentLogUpload = useCallback(async (buf: LocalSessionBuffer) => {
+  /**
+   * Upload a local buffer; clear it unless the server discarded it.
+   * Returns the server action ('committed' | 'log-merged' | 'discarded') or
+   * null on failure, so callers can react (e.g. notify the user a session was
+   * saved, or know the buffer was orphaned and left in place).
+   */
+  const silentLogUpload = useCallback(async (buf: LocalSessionBuffer): Promise<string | null> => {
     try {
       const res = await apiCall('upload-log', 'POST', { buffer: buf });
       if (res.action !== 'discarded') {
         await clearBuffer(buf.sessionId);
       }
+      return res.action ?? null;
     } catch (err) {
       console.error('[TimeTracking] Silent log upload failed:', err);
+      return null;
     }
   }, [apiCall]);
 
@@ -226,6 +239,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user) {
       hasHydratedRef.current = false;
+      setIsHydrating(false);
       setDisplayState('clocked-out');
       setSessionId(null);
       setEntryStartTime(null);
@@ -252,6 +266,16 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       if (state === 'clocked-out') return;
 
       try {
+        // Append a clock-out event to the local buffer so it is self-describing:
+        // its open segment closes at this timestamp instead of being left open.
+        // This guarantees the session never renders as "live" (extending to now)
+        // on the next startup, even if the server-side reconciliation below fails
+        // or the buffer is later orphaned by a race.
+        const sid = sessionIdRef.current;
+        if (sid) {
+          await appendEvent(sid, { type: 'clock-out', timestamp: Date.now() }).catch(() => {});
+        }
+
         const idToken = await user?.getIdToken();
         if (idToken) {
           // Mark active_sessions.userClockOut = true so startup knows not to resume
@@ -494,6 +518,33 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     };
   }, [displayState, entryStartTime, breakStartTime, apiCall]);
 
+  // ─── Display self-heal on focus / visibility ────────────────────────
+  // The 1s tick is throttled or frozen while the main thread is blocked (e.g.
+  // a heavy page load) or the window is backgrounded, so the on-screen timer
+  // can appear stuck. Elapsed time is always derived from entryStartTime +
+  // Date.now(), so recomputing on focus/visibility snaps the display back to
+  // the true wall-clock value immediately instead of waiting for the next tick.
+  useEffect(() => {
+    const recompute = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      const state = displayStateRef.current;
+      if (state === 'working' && entryStartTimeRef.current) {
+        const segment = Math.floor((Date.now() - entryStartTimeRef.current) / 1000);
+        const total = sessionBaseSecondsRef.current + segment;
+        setElapsedSeconds(total);
+        setBreakAllowanceSeconds(computeBreakAllowance(total));
+      } else if (state === 'idle' || state === 'paused') {
+        setElapsedSeconds(sessionBaseSecondsRef.current);
+      }
+    };
+    document.addEventListener('visibilitychange', recompute);
+    window.addEventListener('focus', recompute);
+    return () => {
+      document.removeEventListener('visibilitychange', recompute);
+      window.removeEventListener('focus', recompute);
+    };
+  }, []);
+
   // ─── Power Save Blocker (Electron) ──────────────────────────────────
   useEffect(() => {
     const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
@@ -627,16 +678,36 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   // ─── Actions ──────────────────────────────────────────────────────────
 
   const startTracking = useCallback(async () => {
-    if (isLoading || displayState !== 'clocked-out') return;
+    // Block while hydration is still reconciling a previous session's buffer —
+    // starting now would race that upload and orphan the old buffer (it would
+    // then render forever as a phantom "live" session in Today's Timesheet).
+    if (isLoading || isHydrating || displayState !== 'clocked-out') return;
     setIsLoading(true);
     try {
       const data = await apiCall('start', 'POST');
 
       if (data.alreadyActive) {
-        // An active session exists from another device or a previous run.
-        // The client has no local buffer for it — discard it and start fresh.
-        await apiCall('discard', 'POST');
-        const fresh = await apiCall('start', 'POST');
+        // An active session already exists (a previous run on this machine, or
+        // another device). Reconcile it before starting fresh: if we hold the
+        // local buffer for it, commit that buffer (writes time_entries AND
+        // deletes the active_sessions doc) rather than discarding — discarding
+        // would lose the worked time and leave the buffer orphaned. Only discard
+        // when there is genuinely no local buffer (session started elsewhere).
+        const existingBuf = await getBuffer(data.sessionId);
+        if (existingBuf) {
+          await silentLogUpload(existingBuf);
+        } else {
+          await apiCall('discard', 'POST');
+        }
+
+        let fresh = await apiCall('start', 'POST');
+        if (fresh.alreadyActive) {
+          // Reconciliation didn't clear the server session (e.g. upload was
+          // discarded due to a mismatch) — force a discard so we can start.
+          await apiCall('discard', 'POST');
+          fresh = await apiCall('start', 'POST');
+        }
+
         await initBuffer(fresh.sessionId, user!.uid, fresh.startTime);
         sessionBaseSecondsRef.current = 0;
         breakUsedSecondsRef.current = 0;
@@ -665,7 +736,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, displayState, apiCall, user]);
+  }, [isLoading, isHydrating, displayState, apiCall, user, silentLogUpload]);
 
   const stopTracking = useCallback(async () => {
     if (isLoading || displayState === 'clocked-out') return;
@@ -812,10 +883,11 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     startBreak,
     endBreak,
     isLoading,
+    isHydrating,
   }), [
     displayState, sessionId, elapsedSeconds, breakRemainingSeconds,
     breakUsedSeconds, breakAllowanceSeconds, startTracking, stopTracking,
-    pauseTracking, resumeFromPause, startBreak, endBreak, isLoading,
+    pauseTracking, resumeFromPause, startBreak, endBreak, isLoading, isHydrating,
   ]);
 
   return (
