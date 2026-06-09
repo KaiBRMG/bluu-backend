@@ -121,6 +121,7 @@ export default function UserDetailContent({
   const [pendingIsActive, setPendingIsActive] = useState<boolean | null>(null);
   const [isTimeTrackingUpdating, setIsTimeTrackingUpdating] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [showEnableConfirm, setShowEnableConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isActionSubmitting, setIsActionSubmitting] = useState(false);
 
@@ -154,6 +155,19 @@ export default function UserDetailContent({
     }
   };
 
+  const confirmEnable = async () => {
+    setIsActionSubmitting(true);
+    try {
+      await onUpdateUser(user.uid, { isArchived: false, isActive: true });
+      onClose?.();
+    } catch (err) {
+      console.error('Failed to enable user:', err);
+    } finally {
+      setIsActionSubmitting(false);
+      setShowEnableConfirm(false);
+    }
+  };
+
   const confirmDelete = async () => {
     if (!onDeleteUser) return;
     setIsActionSubmitting(true);
@@ -175,7 +189,11 @@ export default function UserDetailContent({
     if (pendingIsActive === null) return;
     setIsActiveUpdating(true);
     try {
-      await onUpdateUser(user.uid, { isActive: pendingIsActive });
+      const updates: Record<string, unknown> = { isActive: pendingIsActive };
+      if (pendingIsActive === true && user.isArchived) {
+        updates.isArchived = false;
+      }
+      await onUpdateUser(user.uid, updates);
       setIsActive(pendingIsActive);
     } catch (err) {
       console.error('Failed to update isActive:', err);
@@ -801,7 +819,11 @@ export default function UserDetailContent({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="dark min-w-[140px]">
-              {!user.isArchived && (
+              {user.isArchived ? (
+                <DropdownMenuItem onSelect={() => setShowEnableConfirm(true)}>
+                  Enable
+                </DropdownMenuItem>
+              ) : (
                 <DropdownMenuItem
                   onSelect={() => setShowArchiveConfirm(true)}
                   className="text-yellow-400 focus:text-yellow-400"
@@ -809,7 +831,7 @@ export default function UserDetailContent({
                   Archive
                 </DropdownMenuItem>
               )}
-              {!user.isArchived && <DropdownMenuSeparator />}
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 onSelect={() => setShowDeleteConfirm(true)}
                 className="text-red-400 focus:text-red-400"
@@ -827,7 +849,7 @@ export default function UserDetailContent({
           <AlertDialogHeader>
             <AlertDialogTitle>Archive this user?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will deactivate {user.firstName || user.displayName}&apos;s account and move them to the Archived Users list. They will be immediately signed out and blocked from logging in. This action can be undone by an admin.
+              This will deactivate {user.firstName || user.displayName}&apos;s account and move them to the Archived Users list. They will be immediately signed out and blocked from logging in.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -838,6 +860,27 @@ export default function UserDetailContent({
               style={{ background: '#f59e0b' }}
             >
               {isActionSubmitting ? 'Archiving...' : 'Archive User'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Enable confirmation */}
+      <AlertDialog open={showEnableConfirm} onOpenChange={(open) => { if (!open) setShowEnableConfirm(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Re-enable this user?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will restore {user.firstName || user.displayName}&apos;s account, move them back to the Employee Registry, and allow them to log in immediately.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isActionSubmitting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmEnable}
+              disabled={isActionSubmitting}
+            >
+              {isActionSubmitting ? 'Enabling...' : 'Enable User'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
