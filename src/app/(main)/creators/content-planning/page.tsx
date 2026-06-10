@@ -1065,7 +1065,7 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  );
+  ); 
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
