@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useCreators } from "@/hooks/useCreators";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -588,10 +587,11 @@ function NewEntryWizard({ creators, onClose, onCreated }: {
 
 // ─── Creator Content Table ────────────────────────────────────────────────────
 
-function CreatorContentTable({ creatorID, creatorName, creators }: {
+function CreatorContentTable({ creatorID, creatorName, creators, isActive }: {
   creatorID: string;
   creatorName: string;
   creators: Creator[];
+  isActive: boolean;
 }) {
   const { userData } = useUserData();
   const userTz = userData?.timezone || undefined;
@@ -623,9 +623,14 @@ function CreatorContentTable({ creatorID, creatorName, creators }: {
   }, [creatorID, showCompleted]);
 
   useEffect(() => {
+    if (!isActive) {
+      unsubRef.current?.();
+      unsubRef.current = null;
+      return;
+    }
     subscribe();
     return () => { unsubRef.current?.(); };
-  }, [subscribe]);
+  }, [isActive, subscribe]);
 
   useEffect(() => { setCurrentPage(1); }, [showCompleted]);
 
@@ -829,7 +834,7 @@ function CreatorContentTable({ creatorID, creatorName, creators }: {
 
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
 
-function OverviewTab({ creators }: { creators: Creator[] }) {
+function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: boolean }) {
   const { userData } = useUserData();
   const userTz = userData?.timezone || undefined;
   const [completedEntries, setCompletedEntries] = useState<CPEntry[]>([]);
@@ -843,6 +848,13 @@ function OverviewTab({ creators }: { creators: Creator[] }) {
   const outstandingUnsubRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
+    if (!isActive) {
+      completedUnsubRef.current?.();
+      completedUnsubRef.current = null;
+      outstandingUnsubRef.current?.();
+      outstandingUnsubRef.current = null;
+      return;
+    }
     if (completedUnsubRef.current) completedUnsubRef.current();
     const q = query(
       collection(db, "content-planning"),
@@ -870,7 +882,7 @@ function OverviewTab({ creators }: { creators: Creator[] }) {
       completedUnsubRef.current?.();
       outstandingUnsubRef.current?.();
     };
-  }, []);
+  }, [isActive]);
 
   const creatorMap = Object.fromEntries(creators.map(c => [c.creatorID, c.stageName]));
   const creatorPhotoMap = Object.fromEntries(creators.map(c => [c.creatorID, c.photoURL ?? undefined]));
@@ -1049,50 +1061,54 @@ function OverviewTab({ creators }: { creators: Creator[] }) {
 export default function ContentPlanningPage() {
   const creators = useCreators();
   const [activeTab, setActiveTab] = useState("overview");
+  const [loadedTabs, setLoadedTabs] = useState<Set<string>>(() => new Set(["overview"]));
 
-  useEffect(() => {
-    if (activeTab === "overview" && typeof window !== "undefined" && window.electronAPI) {
-      window.electronAPI.window.setSize(1700, 920);
-    }
-  }, [activeTab]);
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    setLoadedTabs(prev => (prev.has(value) ? prev : new Set(prev).add(value)));
+  };
 
   return (
     <AppLayout>
       <div className="max-w-7xl">
         <h1 className="text-2xl font-bold tracking-tight mb-2">Content Planning</h1>
 
-        <Tabs
-          orientation="vertical"
-          value={activeTab}
-          onValueChange={setActiveTab}
-          className="mt-6 flex flex-row gap-4 items-start"
-        >
-          <TabsList className="flex flex-col h-auto w-48 shrink-0 items-stretch p-1">
-            <TabsTrigger value="overview" className="justify-start">Overview</TabsTrigger>
-            {creators.map(c => (
-              <TabsTrigger key={c.creatorID} value={c.creatorID} className="justify-start">
-                {c.stageName}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+        <div className="mt-6 flex items-center gap-3">
+          <label htmlFor="creator-select" className="text-sm font-medium text-zinc-300 shrink-0">
+            Select a Creator
+          </label>
+          <Select value={activeTab} onValueChange={handleTabChange}>
+            <SelectTrigger id="creator-select" className="w-64 bg-zinc-800 border-zinc-700">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="overview">Overview</SelectItem>
+              {creators.map(c => (
+                <SelectItem key={c.creatorID} value={c.creatorID}>{c.stageName}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-          <div className="flex-1 min-w-0">
-            <TabsContent value="overview">
-              <OverviewTab creators={creators} />
-            </TabsContent>
-            {creators.map(c => (
-              <TabsContent key={c.creatorID} value={c.creatorID}>
-                {activeTab === c.creatorID && (
-                  <CreatorContentTable
-                    creatorID={c.creatorID}
-                    creatorName={c.stageName}
-                    creators={creators}
-                  />
-                )}
-              </TabsContent>
-            ))}
-          </div>
-        </Tabs>
+        <div className="mt-6">
+          {loadedTabs.has("overview") && (
+            <div className={activeTab === "overview" ? "" : "hidden"}>
+              <OverviewTab creators={creators} isActive={activeTab === "overview"} />
+            </div>
+          )}
+          {creators.map(c => (
+            loadedTabs.has(c.creatorID) && (
+              <div key={c.creatorID} className={activeTab === c.creatorID ? "" : "hidden"}>
+                <CreatorContentTable
+                  creatorID={c.creatorID}
+                  creatorName={c.stageName}
+                  creators={creators}
+                  isActive={activeTab === c.creatorID}
+                />
+              </div>
+            )
+          ))}
+        </div>
       </div>
     </AppLayout>
   );

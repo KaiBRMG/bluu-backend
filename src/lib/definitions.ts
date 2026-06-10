@@ -48,6 +48,8 @@ export const PAGES: PageDef[] = [
   { pageId: 'time-tracking', title: 'Time Tracking', teamspaceId: 'apps', href: '/applications/time-tracking', icon: 'ClockFading', order: 0 },
   { pageId: 'apps-password-manager', title: 'Password Manager', teamspaceId: 'apps', href: '/applications/password-manager', icon: 'KeyRound', order: 5 },
   { pageId: 'apps-resources', title: 'Resources', teamspaceId: 'apps', href: '/applications/apps-resources', icon: 'BookOpen', order: 1 },
+  { pageId: 'apps-onlyfans', title: 'OnlyFans', teamspaceId: 'apps', href: '/applications/apps-onlyfans', icon: '', order: 2 },
+
 ];
 
 export function getTeamspace(id: string): TeamspaceDef | undefined {

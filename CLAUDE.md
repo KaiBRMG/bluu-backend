@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. Whenever making critical changes to the codebase that 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Context
 
@@ -288,22 +288,6 @@ Pages are code-defined in `src/lib/definitions.ts` (not Firestore). `page-permis
 Page permissions are one of three authorization tiers — see **API Route Auth Middleware → Authorization tiers** above. Some actions (admin group membership, `isActive`, the page-permission map itself) require the `token.admin` JWT claim and cannot be granted through page sharing alone.
 
 The page-permission map at `/api/admin/pages/[pageId]/permissions` (PUT) requires the admin claim to write, even though `'sharing'` page permission still gates the read on `/api/admin/pages` (GET). This asymmetry is intentional: any user with `'sharing'` could otherwise grant themselves any other page and chain into account-level changes.
-
-### Dynamically resizing the window.
-
-Some pages resize the Electron window via `window.electronAPI.window.setSize(width, height)` when the active tab changes. The resize only fires when entering a specific wide tab — the window is never shrunk when switching away. Pattern:
-
-```ts
-useEffect(() => {
-  if (activeTab === "overview" && typeof window !== "undefined" && window.electronAPI) {
-    window.electronAPI.window.setSize(1700, 920);
-  }
-}, [activeTab]);
-```
-
-Pages using this pattern:
-- `src/app/(main)/creators/custom-requests/page.tsx` — resizes to 1700×920 on the **Overview** tab
-- `src/app/(main)/ca-portal/custom-requests/page.tsx` — resizes to 1700×920 on the **My Customs** tab
 
 ### Notification System
 

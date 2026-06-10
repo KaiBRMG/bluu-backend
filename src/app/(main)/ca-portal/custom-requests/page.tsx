@@ -5,7 +5,6 @@ import { useAuth } from "@/components/AuthProvider";
 import AppLayout from "@/components/AppLayout";
 import { useCreators } from "@/hooks/useCreators";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -735,13 +734,12 @@ interface CreatorTableProps {
   creators: Creator[];
   userNames: Record<string, string>;
   onCreated: () => void;
+  isActive: boolean;
 }
 
 const PAGE_SIZE = 20;
 
-function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onCreated }: CreatorTableProps) {
-  const { userData } = useUserData();
-  const userTz = userData?.timezone || undefined;
+function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onCreated, isActive }: CreatorTableProps) {
   const [entries, setEntries] = useState<CampaignEntry[]>([]);
   const [typeFilter, setTypeFilter] = useState<Set<CRType>>(new Set(["CR", "Call", "Item"]));
   const [showCompleted, setShowCompleted] = useState(false);
@@ -771,9 +769,14 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
   }, [creatorID, showCompleted]);
 
   useEffect(() => {
+    if (!isActive) {
+      unsubRef.current?.();
+      unsubRef.current = null;
+      return;
+    }
     subscribe();
     return () => { unsubRef.current?.(); };
-  }, [subscribe]);
+  }, [isActive, subscribe]);
 
   const typeFiltered = entries.filter(e => typeFilter.has(e.type));
   const searchLower = searchQuery.toLowerCase();
@@ -953,9 +956,10 @@ interface MyCustomsProps {
   currentUserUid: string;
   creators: Creator[];
   userNames: Record<string, string>;
+  isActive: boolean;
 }
 
-function MyCustomsKanban({ currentUserUid, creators, userNames }: MyCustomsProps) {
+function MyCustomsKanban({ currentUserUid, creators, userNames, isActive }: MyCustomsProps) {
   const { userData } = useUserData();
   const userTz = userData?.timezone || undefined;
   const [activeEntries, setActiveEntries] = useState<CampaignEntry[]>([]);
@@ -963,9 +967,15 @@ function MyCustomsKanban({ currentUserUid, creators, userNames }: MyCustomsProps
   const [completedUnpaidEntries, setCompletedUnpaidEntries] = useState<CampaignEntry[]>([]);
   const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [page, setPage] = useState(0);
   const unsubRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
+    if (!isActive) {
+      unsubRef.current?.();
+      unsubRef.current = null;
+      return;
+    }
     const q = query(
       collection(db, "campaign-tracking"),
       where("createdBy", "==", currentUserUid),
@@ -984,7 +994,7 @@ function MyCustomsKanban({ currentUserUid, creators, userNames }: MyCustomsProps
     });
 
     return () => { unsubRef.current?.(); };
-  }, [currentUserUid]);
+  }, [isActive, currentUserUid]);
 
   const creatorMap = Object.fromEntries(creators.map(c => [c.creatorID, c.stageName]));
 
@@ -997,6 +1007,11 @@ function MyCustomsKanban({ currentUserUid, creators, userNames }: MyCustomsProps
   }
 
   const activeCreators = creators.filter(c => byCreator[c.creatorID]?.length);
+
+  const CREATORS_PER_PAGE = 9;
+  const totalPages = Math.max(1, Math.ceil(activeCreators.length / CREATORS_PER_PAGE));
+  const safePage = Math.min(page, totalPages - 1);
+  const pagedCreators = activeCreators.slice(safePage * CREATORS_PER_PAGE, (safePage + 1) * CREATORS_PER_PAGE);
 
   const outstandingAmount = [...activeEntries, ...completedUnpaidEntries, ...rejectedEntries]
     .reduce((sum, e) => sum + (e.totalAmount - e.amountPaid), 0);
@@ -1054,9 +1069,10 @@ function MyCustomsKanban({ currentUserUid, creators, userNames }: MyCustomsProps
           <p className="text-sm text-muted-foreground">No active custom requests.</p>
         </div>
       ) : (
-        <div className="flex gap-4 overflow-x-auto pb-4">
-          {activeCreators.map(creator => (
-            <div key={creator.creatorID} className="shrink-0 w-72">
+        <>
+        <div className="grid grid-cols-3 gap-4 pb-4">
+          {pagedCreators.map(creator => (
+            <div key={creator.creatorID} className="min-w-0">
               <div className="mb-3 px-1">
                 <div className="flex items-center gap-2 mb-0.5">
                   <Avatar className="size-6 shrink-0">
@@ -1106,6 +1122,45 @@ function MyCustomsKanban({ currentUserUid, creators, userNames }: MyCustomsProps
             </div>
           ))}
         </div>
+        {totalPages > 1 && (
+          <Pagination>
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  onClick={e => { e.preventDefault(); setPage(p => Math.max(0, p - 1)); }}
+                  aria-disabled={safePage === 0}
+                  className={safePage === 0 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                />
+              </PaginationItem>
+              {Array.from({ length: totalPages }, (_, i) => {
+                if (totalPages <= 7 || i === 0 || i === totalPages - 1 || Math.abs(i - safePage) <= 1) {
+                  return (
+                    <PaginationItem key={i}>
+                      <PaginationLink
+                        isActive={i === safePage}
+                        onClick={e => { e.preventDefault(); setPage(i); }}
+                        className="cursor-pointer"
+                      >
+                        {i + 1}
+                      </PaginationLink>
+                    </PaginationItem>
+                  );
+                }
+                if (i === 1 && safePage > 3) return <PaginationItem key="ellipsis-start"><PaginationEllipsis /></PaginationItem>;
+                if (i === totalPages - 2 && safePage < totalPages - 4) return <PaginationItem key="ellipsis-end"><PaginationEllipsis /></PaginationItem>;
+                return null;
+              })}
+              <PaginationItem>
+                <PaginationNext
+                  onClick={e => { e.preventDefault(); setPage(p => Math.min(totalPages - 1, p + 1)); }}
+                  aria-disabled={safePage === totalPages - 1}
+                  className={safePage === totalPages - 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        )}
+        </>
       )}
 
       {showNew && (
@@ -1142,12 +1197,12 @@ export default function CACustomRequestsPage() {
   const creators = useCreators();
   const [userNames, setUserNames] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState("my-customs");
+  const [loadedTabs, setLoadedTabs] = useState<Set<string>>(() => new Set(["my-customs"]));
 
-  useEffect(() => {
-    if (activeTab === "my-customs" && typeof window !== "undefined" && window.electronAPI) {
-      window.electronAPI.window.setSize(1700, 920);
-    }
-  }, [activeTab]);
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    setLoadedTabs(prev => (prev.has(value) ? prev : new Set(prev).add(value)));
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -1173,40 +1228,44 @@ export default function CACustomRequestsPage() {
       <div className="max-w-7xl">
         <h1 className="text-2xl font-bold tracking-tight mb-2">Custom Requests</h1>
 
-        <Tabs
-          orientation="vertical"
-          value={activeTab}
-          onValueChange={setActiveTab}
-          className="mt-6 flex flex-row gap-4 items-start"
-        >
-          <TabsList className="flex flex-col h-auto w-48 shrink-0 items-stretch p-1">
-            <TabsTrigger value="my-customs" className="justify-start">My Customs</TabsTrigger>
-            {creators.map(c => (
-              <TabsTrigger key={c.creatorID} value={c.creatorID} className="justify-start">
-                {c.stageName}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+        <div className="mt-6 flex items-center gap-3">
+          <label htmlFor="creator-select" className="text-sm font-medium text-zinc-300 shrink-0">
+            Select a Creator
+          </label>
+          <Select value={activeTab} onValueChange={handleTabChange}>
+            <SelectTrigger id="creator-select" className="w-64 bg-zinc-800 border-zinc-700">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="my-customs">My Customs</SelectItem>
+              {creators.map(c => (
+                <SelectItem key={c.creatorID} value={c.creatorID}>{c.stageName}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-          <div className="flex-1 min-w-0">
-            <TabsContent value="my-customs">
-              {uid && <MyCustomsKanban currentUserUid={uid} creators={creators} userNames={userNames} />}
-            </TabsContent>
-            {creators.map(c => (
-              <TabsContent key={c.creatorID} value={c.creatorID}>
-                {activeTab === c.creatorID && (
-                  <CreatorRequestsTable
-                    creatorID={c.creatorID}
-                    creatorName={c.stageName}
-                    creators={creators}
-                    userNames={userNames}
-                    onCreated={() => {}}
-                  />
-                )}
-              </TabsContent>
-            ))}
-          </div>
-        </Tabs>
+        <div className="mt-6">
+          {loadedTabs.has("my-customs") && uid && (
+            <div className={activeTab === "my-customs" ? "" : "hidden"}>
+              <MyCustomsKanban currentUserUid={uid} creators={creators} userNames={userNames} isActive={activeTab === "my-customs"} />
+            </div>
+          )}
+          {creators.map(c => (
+            loadedTabs.has(c.creatorID) && (
+              <div key={c.creatorID} className={activeTab === c.creatorID ? "" : "hidden"}>
+                <CreatorRequestsTable
+                  creatorID={c.creatorID}
+                  creatorName={c.stageName}
+                  creators={creators}
+                  userNames={userNames}
+                  onCreated={() => {}}
+                  isActive={activeTab === c.creatorID}
+                />
+              </div>
+            )
+          ))}
+        </div>
       </div>
     </AppLayout>
   );

@@ -5,7 +5,6 @@ import { useAuth } from "@/components/AuthProvider";
 import AppLayout from "@/components/AppLayout";
 import { useCreators } from "@/hooks/useCreators";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -749,13 +748,12 @@ export default function CACampaignsPage() {
   const creators = useCreators();
   const [userNames, setUserNames] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState("overview");
+  const [loadedTabs, setLoadedTabs] = useState<Set<string>>(() => new Set(["overview"]));
 
-  // Electron window resize — match the pattern used by other wide tabs
-  useEffect(() => {
-    if (activeTab === "overview" && typeof window !== "undefined" && window.electronAPI) {
-      window.electronAPI.window.setSize(1700, 920);
-    }
-  }, [activeTab]);
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    setLoadedTabs(prev => (prev.has(value) ? prev : new Set(prev).add(value)));
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -779,32 +777,37 @@ export default function CACampaignsPage() {
       <div className="max-w-7xl">
         <h1 className="text-2xl font-bold tracking-tight mb-2">Campaigns</h1>
 
-        <Tabs
-          orientation="vertical"
-          value={activeTab}
-          onValueChange={setActiveTab}
-          className="mt-6 flex flex-row gap-4 items-start"
-        >
-          <TabsList className="flex flex-col h-auto w-48 shrink-0 items-stretch p-1">
-            <TabsTrigger value="overview" className="justify-start">Overview</TabsTrigger>
-            {creators.map(c => (
-              <TabsTrigger key={c.creatorID} value={c.creatorID} className="justify-start">
-                {c.stageName}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+        <div className="mt-6 flex items-center gap-3">
+          <label htmlFor="creator-select" className="text-sm font-medium text-zinc-300 shrink-0">
+            Select a Creator
+          </label>
+          <Select value={activeTab} onValueChange={handleTabChange}>
+            <SelectTrigger id="creator-select" className="w-64 bg-zinc-800 border-zinc-700">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="overview">Overview</SelectItem>
+              {creators.map(c => (
+                <SelectItem key={c.creatorID} value={c.creatorID}>{c.stageName}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-          <div className="flex-1 min-w-0">
-            <TabsContent value="overview">
+        <div className="mt-6">
+          {loadedTabs.has("overview") && (
+            <div className={activeTab === "overview" ? "" : "hidden"}>
               <OverviewPanel
                 creators={creators}
                 userNames={userNames}
                 isActive={activeTab === "overview"}
                 uid={user?.uid ?? ""}
               />
-            </TabsContent>
-            {creators.map(c => (
-              <TabsContent key={c.creatorID} value={c.creatorID}>
+            </div>
+          )}
+          {creators.map(c => (
+            loadedTabs.has(c.creatorID) && (
+              <div key={c.creatorID} className={activeTab === c.creatorID ? "" : "hidden"}>
                 <CreatorCampaignsTable
                   creatorID={c.creatorID}
                   creatorName={c.stageName}
@@ -812,10 +815,10 @@ export default function CACampaignsPage() {
                   userNames={userNames}
                   isActive={activeTab === c.creatorID}
                 />
-              </TabsContent>
-            ))}
-          </div>
-        </Tabs>
+              </div>
+            )
+          ))}
+        </div>
       </div>
     </AppLayout>
   );
