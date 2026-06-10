@@ -973,50 +973,53 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
         {kanbanCreators.length === 0 ? (
           <p className="text-sm text-zinc-500">No outstanding content requests.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <div className="flex gap-4" style={{ minWidth: "max-content" }}>
-              {kanbanCreators.map(creator => (
-                <div
-                  key={creator.creatorID}
-                  className="flex flex-col gap-2 rounded-xl p-3"
-                  style={{
-                    width: "220px",
-                    background: "rgba(255,255,255,0.025)",
-                    border: "1px solid rgba(255,255,255,0.07)",
-                  }}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <Avatar className="size-4 shrink-0">
-                        <AvatarImage src={creator.photoURL ?? undefined} />
-                        <AvatarFallback className="text-[8px]">{creator.stageName.charAt(0)}</AvatarFallback>
-                      </Avatar>
-                      <p className="text-xs font-semibold text-zinc-300 truncate">{creator.stageName}</p>
-                    </div>
-                    <span className="text-xs text-zinc-500 shrink-0">{byCreator[creator.creatorID].length}</span>
+          <div style={{ columnCount: 5, columnGap: "0.75rem" }}>
+            {kanbanCreators.map(creator => (
+              <div
+                key={creator.creatorID}
+                className="break-inside-avoid mb-3 flex flex-col gap-1.5 rounded-xl p-2.5"
+                style={{
+                  background: "rgba(255,255,255,0.025)",
+                  border: "1px solid rgba(255,255,255,0.07)",
+                }}
+              >
+                <div className="flex items-center justify-between mb-0.5">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Avatar className="size-4 shrink-0">
+                      <AvatarImage src={creator.photoURL ?? undefined} />
+                      <AvatarFallback className="text-[8px]">{creator.stageName.charAt(0)}</AvatarFallback>
+                    </Avatar>
+                    <p className="text-xs font-semibold text-zinc-300 truncate">{creator.stageName}</p>
                   </div>
-                  {byCreator[creator.creatorID].map(entry => {
-                    const overdue = isOverdue(entry.dueDate);
-                    return (
-                      <button
-                        key={entry.id}
-                        onClick={() => setViewEntry(entry)}
-                        className="text-left rounded-lg p-2.5 transition-all hover:brightness-110 active:scale-[0.98]"
-                        style={{
-                          background: "rgba(255,255,255,0.04)",
-                          border: overdue ? "1px solid rgba(239,68,68,0.3)" : "1px solid rgba(255,255,255,0.06)",
-                        }}
-                      >
-                        <p className="text-xs font-medium text-zinc-200 line-clamp-2 mb-1">{entry.contentSummary}</p>
-                        <p className={`text-[11px] ${overdue ? "text-red-400 font-medium" : "text-zinc-500"}`}>
-                          {overdue ? "Overdue · " : "Due "}{formatDate(entry.dueDate, userTz)}
-                        </p>
-                      </button>
-                    );
-                  })}
+                  <span className="text-xs text-zinc-500 shrink-0">{byCreator[creator.creatorID].length}</span>
                 </div>
-              ))}
-            </div>
+                {byCreator[creator.creatorID].map(entry => {
+                  const overdue = isOverdue(entry.dueDate);
+                  return (
+                    <button
+                      key={entry.id}
+                      onClick={() => setViewEntry(entry)}
+                      className="flex items-center gap-2 text-left rounded-md border-l-2 py-1.5 pl-2 pr-1.5 transition-all hover:brightness-110 active:scale-[0.98]"
+                      style={{
+                        background: "rgba(255,255,255,0.04)",
+                        borderLeftColor: overdue ? "rgb(239,68,68)" : "rgba(255,255,255,0.14)",
+                      }}
+                    >
+                      <span className="flex-1 min-w-0 truncate text-xs font-medium text-zinc-200">{entry.contentSummary}</span>
+                      {(overdue || entry.dueDate) && (
+                        <span
+                          className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                            overdue ? "bg-red-500/15 text-red-400" : "bg-white/5 text-zinc-400"
+                          }`}
+                        >
+                          {overdue ? "Overdue" : formatDate(entry.dueDate, userTz)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         )}
       </div>
