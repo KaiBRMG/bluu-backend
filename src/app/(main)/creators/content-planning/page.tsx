@@ -349,9 +349,18 @@ function DetailDialog({ entry, creatorName, creators, onClose, onSaved, onDelete
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Due Date">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <p className="text-xs text-zinc-400">Due Date</p>
+              {isOverdue(entry.dueDate) && entry.status === "Outstanding" && (
+                <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-red-500/15 text-red-400">
+                  <span className="size-1.5 rounded-full bg-red-400" />
+                  Overdue
+                </span>
+              )}
+            </div>
             <DatePickerInput value={fields.dueDate} onChange={v => setField("dueDate")(v)} />
-          </Field>
+          </div>
           <Field label="Description">
             <DescriptionEditor
               rows={fields.description}
@@ -973,7 +982,7 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
         {kanbanCreators.length === 0 ? (
           <p className="text-sm text-zinc-500">No outstanding content requests.</p>
         ) : (
-          <div style={{ columnCount: 5, columnGap: "0.75rem" }}>
+          <div style={{ columnCount: 4, columnGap: "0.75rem" }}>
             {kanbanCreators.map(creator => (
               <div
                 key={creator.creatorID}
