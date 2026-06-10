@@ -926,7 +926,7 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
   if (loading) return <div className="text-sm text-zinc-500 p-8">Loading...</div>;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 min-w-0">
       {/* Toolbar */}
       <div className="flex justify-end">
         <Button size="sm" onClick={() => setShowNew(true)}>
@@ -982,7 +982,7 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
         {kanbanCreators.length === 0 ? (
           <p className="text-sm text-zinc-500">No outstanding content requests.</p>
         ) : (
-          <div style={{ columnCount: 4, columnGap: "0.75rem" }}>
+          <div style={{ columnWidth: "13rem", columnCount: 4, columnGap: "0.75rem" }}>
             {kanbanCreators.map(creator => (
               <div
                 key={creator.creatorID}
@@ -1082,7 +1082,7 @@ export default function ContentPlanningPage() {
 
   return (
     <AppLayout>
-      <div className="max-w-7xl">
+      <div className="max-w-7xl min-w-0">
         <h1 className="text-2xl font-bold tracking-tight mb-2">Content Planning</h1>
 
         <div className="mt-6 flex items-center gap-3">

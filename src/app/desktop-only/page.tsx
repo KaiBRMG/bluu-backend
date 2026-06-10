@@ -12,8 +12,7 @@ export default function DesktopOnlyPage() {
           Desktop app required
         </h1>
         <p className="mt-4 text-sm text-muted-foreground">
-          The Bluu Backend employee portal is only available through the Bluu
-          Rock desktop application. Please open the desktop app to sign in, or
+          Bluu Backend is only available through the desktop application. Please open the desktop app to sign in, or
           download the app{' '}
           <a
             href="https://www.notion.so/Download-Bluu-Backend-31d6a3e187d98080b341e4ed2c9d1917"
