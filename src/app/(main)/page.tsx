@@ -10,6 +10,7 @@ import { useTimeTracking } from "@/hooks/useTimeTracking";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useResources } from "@/hooks/useResources";
 import { usePinnedResources } from "@/hooks/usePinnedResources";
+import { useLoadingGate } from "@/contexts/LoadingGateContext";
 import type { NotificationDocument, NotificationType } from "@/types/firestore";
 import type { NotionDocument } from "@/lib/services/notionService";
 import { Coffee, Info, Link as LinkIcon } from 'lucide-react';
@@ -231,7 +232,10 @@ function TimeTrackingWidget() {
     startBreak,
     endBreak,
     isLoading,
+    isHydrating,
   } = useTimeTracking();
+
+  useLoadingGate('home-timetracking', isHydrating);
 
   const config = STATE_CONFIG[displayState];
   const isOnBreak = displayState === 'on-break';
@@ -303,9 +307,10 @@ function getTypeStripe(type: NotificationType): string {
 }
 
 function NotificationsWidget() {
-  const { notifications } = useNotifications();
+  const { notifications, loading } = useNotifications();
   const { user } = useAuth();
   const router = useRouter();
+  useLoadingGate('home-notifications', loading);
   const unread = notifications.filter((n) => !n.read && !n.announcement);
 
   async function handleClick(notificationId: string, actionUrl?: string | null) {
@@ -469,6 +474,7 @@ function PinnedResourceCard({ doc }: { doc: NotionDocument }) {
 function PinnedResourcesWidget() {
   const { documents, loading } = useResources();
   const { pinned } = usePinnedResources();
+  useLoadingGate('home-resources', loading);
 
   // Resolve pinned IDs to documents, preserving pin order and dropping any that
   // are no longer shared with the user (so a hidden/removed doc just disappears).
@@ -615,17 +621,22 @@ export default function Home() {
 
         {/* Quick stats or widgets can go here */}
         <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-          {/* Left two columns: stacked widgets (clock moved to the bottom) */}
+          {/* Left two columns: each is an independent vertical stack, so a
+              widget growing/shrinking never leaves a gap in the other column. */}
           <div
-            className={`grid grid-cols-1 sm:grid-cols-2 gap-6 items-start content-start ${
+            className={`flex flex-col sm:flex-row gap-6 items-start ${
               showResources ? 'md:col-span-2' : 'md:col-span-3'
             }`}
           >
-            {groupCard}
-            {showTimeTracking && <TimeTrackingWidget />}
-            <NotificationsWidget />
-            {welcomeCard}
-            <ClockWidget />
+            <div className="flex flex-col gap-6 w-full sm:flex-1 min-w-0">
+              {groupCard}
+              <NotificationsWidget />
+              <ClockWidget />
+            </div>
+            <div className="flex flex-col gap-6 w-full sm:flex-1 min-w-0">
+              {showTimeTracking && <TimeTrackingWidget />}
+              {welcomeCard}
+            </div>
           </div>
 
           {/* Right column: pinned resources, spanning all the way to the right */}
