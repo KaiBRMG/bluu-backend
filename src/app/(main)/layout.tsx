@@ -1,6 +1,7 @@
 import { AuthProvider } from "@/components/AuthProvider";
 import { NetworkStatusProvider } from "@/contexts/NetworkStatusContext";
 import { UserDataProvider } from "@/hooks/useUserData";
+import { BootLoaderProvider } from "@/contexts/BootLoaderContext";
 import AuthWrapper from "@/components/AuthWrapper";
 import ErrorLogger from "@/components/ErrorLogger";
 import UpdateBanner from "@/components/UpdateBanner";
@@ -15,9 +16,11 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         <UserDataProvider>
           <ErrorLogger />
           <LazyProviders>
-            <AuthWrapper>
-              {children}
-            </AuthWrapper>
+            <BootLoaderProvider>
+              <AuthWrapper>
+                {children}
+              </AuthWrapper>
+            </BootLoaderProvider>
             <UpdateBanner />
             <SpeedInsights />
             <Analytics />

@@ -10,7 +10,7 @@ import { useTimeTracking } from "@/hooks/useTimeTracking";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useResources } from "@/hooks/useResources";
 import { usePinnedResources } from "@/hooks/usePinnedResources";
-import { useLoadingGate } from "@/contexts/LoadingGateContext";
+import { useBootPhase } from "@/contexts/BootLoaderContext";
 import type { NotificationDocument, NotificationType } from "@/types/firestore";
 import type { NotionDocument } from "@/lib/services/notionService";
 import { Coffee, Info, Link as LinkIcon } from 'lucide-react';
@@ -235,7 +235,7 @@ function TimeTrackingWidget() {
     isHydrating,
   } = useTimeTracking();
 
-  useLoadingGate('home-timetracking', isHydrating);
+  useBootPhase('home-timetracking', isHydrating);
 
   const config = STATE_CONFIG[displayState];
   const isOnBreak = displayState === 'on-break';
@@ -310,7 +310,7 @@ function NotificationsWidget() {
   const { notifications, loading } = useNotifications();
   const { user } = useAuth();
   const router = useRouter();
-  useLoadingGate('home-notifications', loading);
+  useBootPhase('home-notifications', loading);
   const unread = notifications.filter((n) => !n.read && !n.announcement);
 
   async function handleClick(notificationId: string, actionUrl?: string | null) {
@@ -474,7 +474,7 @@ function PinnedResourceCard({ doc }: { doc: NotionDocument }) {
 function PinnedResourcesWidget() {
   const { documents, loading } = useResources();
   const { pinned } = usePinnedResources();
-  useLoadingGate('home-resources', loading);
+  useBootPhase('home-resources', loading);
 
   // Resolve pinned IDs to documents, preserving pin order and dropping any that
   // are no longer shared with the user (so a hidden/removed doc just disappears).

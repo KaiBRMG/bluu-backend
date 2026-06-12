@@ -17,6 +17,7 @@ export default function LoadingScreen() {
         muted
         loop
         playsInline
+        preload="auto"
       />
     </div>
   );

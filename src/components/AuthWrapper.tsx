@@ -6,13 +6,16 @@ import { useUserData } from '@/hooks/useUserData';
 import Login from './Login';
 import { usePathname, useRouter } from 'next/navigation';
 import { auth } from '@/firebase-config';
-import LoadingScreen from '@/components/LoadingScreen';
+import { useBootPhase } from '@/contexts/BootLoaderContext';
 
 export default function AuthWrapper({ children }: { children: React.ReactNode }) {
   const { user, loading, revokedRedirect } = useAuth();
   const { userData, loading: userDataLoading, displaced } = useUserData();
   const pathname = usePathname();
   const router = useRouter();
+
+  // Hold the boot loader while Firebase auth resolves.
+  useBootPhase('auth', loading);
 
   const isLoggedIn = !!user;
   const prevIsLoggedInRef = useRef<boolean>(isLoggedIn);
@@ -94,8 +97,10 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
     }
   }, [userData, userDataLoading, user, isAuthRoute, router]);
 
+  // While auth resolves, render nothing — the persistent boot loader (rendered by
+  // BootLoaderProvider above this component) covers the screen.
   if (loading) {
-    return <LoadingScreen />;
+    return null;
   }
 
   if (isAuthRoute) {
