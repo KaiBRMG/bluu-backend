@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import TopBar from "@/components/TopBar";
+import LoadingScreen from "@/components/LoadingScreen";
 import { useAuth } from "@/components/AuthProvider";
 import { useUserData } from "@/hooks/useUserData";
 import { usePermissions, getHighestGroupName } from "@/hooks/usePermissions";
@@ -18,10 +19,15 @@ const ALWAYS_ACCESSIBLE = ['/', '/applications/settings'];
 
 export default function AppLayout({ children }: AppLayoutProps) {
   const { user } = useAuth();
-  const { userData: firestoreUserData } = useUserData();
+  const { userData: firestoreUserData, loading: userDataLoading } = useUserData();
   const { teamspaces, accessiblePages, loading: permissionsLoading } = usePermissions();
   const pathname = usePathname();
   const router = useRouter();
+
+  // Keep the loading screen up until both the user doc (groups) and page
+  // permissions have resolved. Otherwise the home page flashes the "Unassigned"
+  // group card and the sidebar renders empty before data lands.
+  const isDataLoading = userDataLoading || permissionsLoading;
 
   const userData = {
     name: firestoreUserData?.displayName || user?.displayName || "User",
@@ -43,6 +49,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
       router.replace('/');
     }
   }, [pathname, accessiblePages, teamspaces, permissionsLoading, router]);
+
+  if (isDataLoading) {
+    return <LoadingScreen />;
+  }
 
   return (
     <SidebarProvider>

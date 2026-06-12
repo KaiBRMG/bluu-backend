@@ -1,6 +1,6 @@
 'use client';
 
-import { Link as LinkIcon } from 'lucide-react';
+import { Link as LinkIcon, Star } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -9,6 +9,8 @@ import { colorForType } from './typeColors';
 
 interface DocumentRowProps {
   doc: NotionDocument;
+  isPinned?: boolean;
+  onTogglePin?: (id: string) => void;
 }
 
 function formatLastEdited(iso: string): string {
@@ -41,8 +43,13 @@ function DocIcon({ icon }: { icon: NotionDocument['icon'] }) {
   );
 }
 
-export function DocumentRow({ doc }: DocumentRowProps) {
+export function DocumentRow({ doc, isPinned, onTogglePin }: DocumentRowProps) {
   const targetUrl = doc.url ?? doc.notionPageUrl;
+
+  const togglePin = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onTogglePin?.(doc.id);
+  };
 
   const openDoc = () => {
     if (!targetUrl) return;
@@ -101,13 +108,32 @@ export function DocumentRow({ doc }: DocumentRowProps) {
         })}
       </div>
 
+      {onTogglePin && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={togglePin}
+              aria-label={isPinned ? 'Unpin resource' : 'Pin resource'}
+              aria-pressed={isPinned}
+              className="ml-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              <Star
+                className={`h-4 w-4 ${isPinned ? 'fill-yellow-400 text-yellow-400' : ''}`}
+              />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">{isPinned ? 'Unpin' : 'Pin'}</TooltipContent>
+        </Tooltip>
+      )}
+
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
             onClick={copyLink}
             aria-label="Copy link"
-            className="ml-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             <LinkIcon className="h-4 w-4" />
           </button>

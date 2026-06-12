@@ -71,6 +71,8 @@ export interface UserDocument {
   timezone?: string;
   timezoneOffset?: string;
   additionalTimezones?: string[];
+  // Notion document IDs the user has pinned to their home dashboard (max 10).
+  pinnedResources?: string[];
   hasPaidLeave?: boolean;
   remainingUnpaidLeave?: number;
   remainingPaidLeave?: number;

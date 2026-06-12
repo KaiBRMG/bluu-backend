@@ -1,16 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import AppLayout from "@/components/AppLayout";
 import { useAuth } from "@/components/AuthProvider";
 import { useUserData } from "@/hooks/useUserData";
 import { useTimeTracking } from "@/hooks/useTimeTracking";
 import { useNotifications } from "@/hooks/useNotifications";
+import { useResources } from "@/hooks/useResources";
+import { usePinnedResources } from "@/hooks/usePinnedResources";
 import type { NotificationDocument, NotificationType } from "@/types/firestore";
-import { Coffee } from 'lucide-react';
+import type { NotionDocument } from "@/lib/services/notionService";
+import { Coffee, Info, Link as LinkIcon } from 'lucide-react';
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { STATE_CONFIG } from "@/lib/stateColors";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
 
@@ -384,6 +391,156 @@ function NotificationsWidget() {
   );
 }
 
+function PinnedDocIcon({ icon }: { icon: NotionDocument['icon'] }) {
+  if (!icon) {
+    return (
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-xs text-muted-foreground">
+        •
+      </span>
+    );
+  }
+  if (icon.type === 'emoji') {
+    return (
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-sm leading-none">
+        {icon.value}
+      </span>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={icon.value} alt="" className="h-5 w-5 shrink-0 rounded-sm object-cover" />
+  );
+}
+
+function PinnedResourceCard({ doc }: { doc: NotionDocument }) {
+  const targetUrl = doc.url ?? doc.notionPageUrl;
+
+  const openDoc = () => {
+    if (!targetUrl) return;
+    window.open(targetUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const copyLink = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!targetUrl) return;
+    try {
+      await navigator.clipboard.writeText(targetUrl);
+      toast('Link Copied!');
+    } catch {
+      toast.error('Could not copy link');
+    }
+  };
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={openDoc}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openDoc();
+        }
+      }}
+      className="group flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      style={{ border: '1px solid var(--border-subtle)' }}
+    >
+      <PinnedDocIcon icon={doc.icon} />
+      <span className="flex-1 truncate text-sm font-medium text-foreground">
+        {doc.name || 'Untitled'}
+      </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={copyLink}
+            aria-label="Copy link"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            <LinkIcon className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top">Copy Link</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
+function PinnedResourcesWidget() {
+  const { documents, loading } = useResources();
+  const { pinned } = usePinnedResources();
+
+  // Resolve pinned IDs to documents, preserving pin order and dropping any that
+  // are no longer shared with the user (so a hidden/removed doc just disappears).
+  const pinnedDocs = useMemo(() => {
+    if (!documents) return [];
+    const byId = new Map(documents.map((d) => [d.id, d]));
+    return pinned
+      .map((id) => byId.get(id))
+      .filter((d): d is NotionDocument => !!d)
+      .slice(0, 10);
+  }, [documents, pinned]);
+
+  return (
+    <Card style={{ background: '#171717' }} className="border-0 shadow-none py-0 gap-0">
+      <CardContent className="p-6">
+        <div className="mb-4 flex items-center gap-2">
+          <h3 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+            Pinned Resources
+          </h3>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label="About pinned resources"
+                className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-[16rem]">
+              Pin your most used resources here. Add or remove resources by heading to the{' '}
+              <Link
+                href="/applications/apps-resources"
+                className="font-medium underline underline-offset-2"
+              >
+                Resources page
+              </Link>
+              .
+            </TooltipContent>
+          </Tooltip>
+        </div>
+
+        {loading && pinnedDocs.length === 0 ? (
+          <div className="flex flex-col gap-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-10 w-full rounded-md" />
+            ))}
+          </div>
+        ) : pinnedDocs.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No pinned resources yet. Pin your most used resources from the{' '}
+            <Link
+              href="/applications/apps-resources"
+              className="underline underline-offset-2"
+              style={{ color: 'var(--foreground)' }}
+            >
+              Resources page
+            </Link>
+            .
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {pinnedDocs.map((doc) => (
+              <PinnedResourceCard key={doc.id} doc={doc} />
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Home() {
   const { user } = useAuth();
   const { userData } = useUserData();
@@ -401,6 +558,51 @@ export default function Home() {
   const displayGroup = userGroup.charAt(0).toUpperCase() + userGroup.slice(1);
 
   const showTimeTracking = userData?.permittedPageIds?.includes('time-tracking') ?? false;
+  const showResources = userData?.permittedPageIds?.includes('apps-resources') ?? false;
+
+  const groupCard = (
+    <Card
+      style={{
+        background: userGroup === 'unassigned' ? 'rgba(223,98,110,0.1)' : '#171717',
+        borderColor: userGroup === 'unassigned' ? 'rgba(223,98,110,0.3)' : 'transparent',
+      }}
+      className="py-0 gap-0"
+    >
+      <CardContent className="p-6">
+        <h3 className="text-sm font-medium uppercase tracking-wide mb-2 text-muted-foreground">Group</h3>
+        <p className="text-2xl font-semibold">{displayGroup}</p>
+        {userGroup === 'unassigned' && (
+          <p className="text-xs mt-2" style={{ color: '#DF626E' }}>
+            User functionality limited: You are currently not assigned to any groups. Please wait until a system administrator assigns you.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  const welcomeCard = (
+    <Card style={{ background: '#171717' }} className="border-0 shadow-none py-0 gap-0">
+      <CardContent className="p-6">
+        <h3 className="text-sm font-medium uppercase tracking-wide mb-2 text-muted-foreground">
+          Welcome to Bluu Backend!
+        </h3>
+
+        <p className="text-sm text-muted-foreground">
+          {"We're still a work-in-progress. See a bug? Have a suggestion? "}
+          <a
+            href="https://t.me/KaiJN"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+            style={{ color: 'var(--foreground)' }}
+          >
+            Reach out to Kai
+          </a>
+          {" to help us improve your experience."}
+        </p>
+      </CardContent>
+    </Card>
+  );
 
   return (
     <AppLayout>
@@ -412,52 +614,22 @@ export default function Home() {
         <AnnouncementBanner announcements={announcements} />
 
         {/* Quick stats or widgets can go here */}
-        <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
-          <Card
-            style={{
-              background: userGroup === 'unassigned' ? 'rgba(223,98,110,0.1)' : '#171717',
-              borderColor: userGroup === 'unassigned' ? 'rgba(223,98,110,0.3)' : 'transparent',
-            }}
-            className="py-0 gap-0"
+        <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+          {/* Left two columns: stacked widgets (clock moved to the bottom) */}
+          <div
+            className={`grid grid-cols-1 sm:grid-cols-2 gap-6 items-start content-start ${
+              showResources ? 'md:col-span-2' : 'md:col-span-3'
+            }`}
           >
-            <CardContent className="p-6">
-              <h3 className="text-sm font-medium uppercase tracking-wide mb-2 text-muted-foreground">Group</h3>
-              <p className="text-2xl font-semibold">{displayGroup}</p>
-              {userGroup === 'unassigned' && (
-                <p className="text-xs mt-2" style={{ color: '#DF626E' }}>
-                  User functionality limited: You are currently not assigned to any groups. Please wait until a system administrator assigns you.
-                </p>
-              )}
-            </CardContent>
-          </Card>
+            {groupCard}
+            {showTimeTracking && <TimeTrackingWidget />}
+            <NotificationsWidget />
+            {welcomeCard}
+            <ClockWidget />
+          </div>
 
-          {showTimeTracking && <TimeTrackingWidget />}
-
-          <ClockWidget />
-
-          <NotificationsWidget />
-
-          <Card style={{ background: '#171717' }} className="border-0 shadow-none py-0 gap-0">
-            <CardContent className="p-6">
-              <h3 className="text-sm font-medium uppercase tracking-wide mb-2 text-muted-foreground">
-                Welcome to Bluu Backend!
-              </h3>
-    
-              <p className="text-sm text-muted-foreground">
-                {"We're still a work-in-progress. See a bug? Have a suggestion? "}
-                <a
-                  href="https://t.me/KaiJN"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline"
-                  style={{ color: 'var(--foreground)' }}
-                >
-                  Reach out to Kai
-                </a>
-                {" to help us improve your experience."}
-              </p>
-            </CardContent>
-          </Card>
+          {/* Right column: pinned resources, spanning all the way to the right */}
+          {showResources && <PinnedResourcesWidget />}
         </div>
       </div>
     </AppLayout>

@@ -15,6 +15,7 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination';
 import { useResources } from '@/hooks/useResources';
+import { usePinnedResources } from '@/hooks/usePinnedResources';
 import { DocumentRow } from './components/DocumentRow';
 import { colorForType } from './components/typeColors';
 
@@ -23,6 +24,7 @@ const ALL_VALUE = '__ALL__';
 
 export default function ResourcesPage() {
   const { documents, types, loading, error } = useResources();
+  const { isPinned, togglePin } = usePinnedResources();
 
   const [query, setQuery] = useState('');
   // Empty array means the "All" pseudo-toggle is on (show every document).
@@ -181,7 +183,14 @@ export default function ResourcesPage() {
                 : 'No resources match your filters.'}
             </div>
           ) : (
-            visible.map(doc => <DocumentRow key={doc.id} doc={doc} />)
+            visible.map(doc => (
+              <DocumentRow
+                key={doc.id}
+                doc={doc}
+                isPinned={isPinned(doc.id)}
+                onTogglePin={togglePin}
+              />
+            ))
           )}
         </div>
 

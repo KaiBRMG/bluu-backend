@@ -24,8 +24,31 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       'timezone',
       'timezoneOffset',
       'additionalTimezones',
+      'pinnedResources',
       'notificationPreferences',
     ];
+
+    // Validate pinnedResources: array of strings, capped at 10 (enforced server-side
+    // so the limit can't be bypassed by a crafted request).
+    const MAX_PINNED_RESOURCES = 10;
+    if (updates.pinnedResources !== undefined) {
+      const pinned = updates.pinnedResources;
+      if (
+        !Array.isArray(pinned) ||
+        pinned.some((id: unknown) => typeof id !== 'string')
+      ) {
+        return NextResponse.json(
+          { error: 'pinnedResources must be an array of strings' },
+          { status: 400 }
+        );
+      }
+      if (pinned.length > MAX_PINNED_RESOURCES) {
+        return NextResponse.json(
+          { error: `pinnedResources is limited to ${MAX_PINNED_RESOURCES} items` },
+          { status: 400 }
+        );
+      }
+    }
 
     // Maximum byte lengths for free-text string fields
     const STRING_MAX_LENGTHS: Record<string, number> = {

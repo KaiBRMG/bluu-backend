@@ -998,7 +998,7 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
                       <AvatarImage src={creator.photoURL ?? undefined} />
                       <AvatarFallback className="text-[8px]">{creator.stageName.charAt(0)}</AvatarFallback>
                     </Avatar>
-                    <p className="text-xs font-semibold text-zinc-300 truncate">{creator.stageName}</p>
+                    <p className="text-sm font-semibold text-zinc-300 truncate">{creator.stageName}</p>
                   </div>
                   <span className="text-xs text-zinc-500 shrink-0">{byCreator[creator.creatorID].length}</span>
                 </div>

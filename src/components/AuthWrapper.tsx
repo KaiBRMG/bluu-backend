@@ -6,7 +6,7 @@ import { useUserData } from '@/hooks/useUserData';
 import Login from './Login';
 import { usePathname, useRouter } from 'next/navigation';
 import { auth } from '@/firebase-config';
-import { Loader } from '@/components/ui/loader';
+import LoadingScreen from '@/components/LoadingScreen';
 
 export default function AuthWrapper({ children }: { children: React.ReactNode }) {
   const { user, loading, revokedRedirect } = useAuth();
@@ -95,11 +95,7 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
   }, [userData, userDataLoading, user, isAuthRoute, router]);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-black">
-        <Loader />
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   if (isAuthRoute) {
