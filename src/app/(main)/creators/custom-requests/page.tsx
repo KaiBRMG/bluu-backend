@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import AppLayout from "@/components/AppLayout";
 import { useCreators } from "@/hooks/useCreators";
@@ -528,6 +528,41 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
   );
 }
 
+// ─── Kanban primitives ────────────────────────────────────────────────────────
+
+function KanbanBoard({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ columnWidth: "13rem", columnCount: 4, columnGap: "0.75rem" }}>
+      {children}
+    </div>
+  );
+}
+
+function KanbanColumn({ creator, count, children }: {
+  creator: Creator;
+  count: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="break-inside-avoid mb-3 flex flex-col gap-1.5 rounded-xl p-2.5"
+      style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)" }}
+    >
+      <div className="flex items-center justify-between mb-0.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Avatar className="size-4 shrink-0">
+            <AvatarImage src={creator.photoURL ?? undefined} />
+            <AvatarFallback className="text-[8px]">{creator.stageName.charAt(0)}</AvatarFallback>
+          </Avatar>
+          <p className="text-sm font-semibold text-zinc-300 truncate">{creator.stageName}</p>
+        </div>
+        <span className="text-xs text-zinc-500 shrink-0">{count}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
 
 interface OverviewProps {
@@ -599,6 +634,10 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
   const recentCompleted = allEntries
     .filter(e => e.status === "Completed" && !e.isArchived)
     .sort((a, b) => new Date(b.lastEditedTime).getTime() - new Date(a.lastEditedTime).getTime());
+  const recentCompletedByCreator = Object.fromEntries(
+    creators.map(c => [c.creatorID, recentCompleted.filter(e => e.creatorID === c.creatorID)])
+  );
+  const recentCompletedCreators = creators.filter(c => (recentCompletedByCreator[c.creatorID]?.length ?? 0) > 0);
 
   // Outstanding customs (Awaiting + In Progress), excluding campaign-only types which have no CR code
   const outstandingEntries = allEntries.filter(e =>
@@ -608,6 +647,7 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
   const outstandingByCreator = Object.fromEntries(
     creators.map(c => [c.creatorID, outstandingEntries.filter(e => e.creatorID === c.creatorID)])
   );
+  const outstandingKanbanCreators = creators.filter(c => (outstandingByCreator[c.creatorID]?.length ?? 0) > 0);
 
   // Outstanding payments (any entry with amountPaid < totalAmount), excluding campaign-only types
   const outstandingPaymentEntries = allEntries.filter(e =>
@@ -617,6 +657,7 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
   const outstandingPaymentsByCreator = Object.fromEntries(
     creators.map(c => [c.creatorID, outstandingPaymentEntries.filter(e => e.creatorID === c.creatorID)])
   );
+  const outstandingPaymentsKanbanCreators = creators.filter(c => (outstandingPaymentsByCreator[c.creatorID]?.length ?? 0) > 0);
 
   const handleDismiss = async (id: string) => {
     try {
@@ -706,75 +747,71 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
       {/* Recently Completed */}
       {recentCompleted.length > 0 && (
         <div className="rounded-xl p-4 border border-green-500/30 bg-green-500/5">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold text-green-400">Recently Completed</h3>
             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleDismissAll}>
               Dismiss All
             </Button>
           </div>
-          <div className="flex flex-col gap-2">
-            {recentCompleted.map(e => (
-              <div key={e.id} className="grid items-center gap-4 text-sm" style={{ gridTemplateColumns: "7rem 1fr auto auto" }}>
-                <button onClick={() => setViewEntry(e)} className="text-zinc-300 font-mono text-left hover:text-white hover:underline underline-offset-2 transition-colors">{e.CR}</button>
-                <span className="text-zinc-400 truncate">{creatorMap[e.creatorID] ?? e.creatorID}</span>
-                <span className="text-zinc-500 text-xs">{formatInTimezone(e.lastEditedTime, userTz)}</span>
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleDismiss(e.id)}>
-                  Dismiss
-                </Button>
-              </div>
+          <KanbanBoard>
+            {recentCompletedCreators.map(creator => (
+              <KanbanColumn key={creator.creatorID} creator={creator} count={recentCompletedByCreator[creator.creatorID].length}>
+                {recentCompletedByCreator[creator.creatorID].map(e => (
+                  <div
+                    key={e.id}
+                    className="flex items-center gap-2 rounded-md border-l-2 py-1.5 pl-2 pr-1.5"
+                    style={{ background: "rgba(255,255,255,0.04)", borderLeftColor: "rgba(255,255,255,0.14)" }}
+                  >
+                    <div className="flex flex-col min-w-0 flex-1">
+                      <button
+                        onClick={() => setViewEntry(e)}
+                        className="text-left truncate font-mono text-xs font-medium text-zinc-200 hover:text-white hover:underline underline-offset-2 transition-colors"
+                      >
+                        {e.CR}
+                      </button>
+                      <span className="text-[10px] text-zinc-500">{formatInTimezone(e.lastEditedTime, userTz)}</span>
+                    </div>
+                    <Button size="sm" variant="outline" className="h-6 shrink-0 text-[10px]" onClick={() => handleDismiss(e.id)}>
+                      Dismiss
+                    </Button>
+                  </div>
+                ))}
+              </KanbanColumn>
             ))}
-          </div>
+          </KanbanBoard>
         </div>
       )}
 
       {/* Outstanding Customs */}
       {outstandingEntries.length > 0 && (
-        <div className="rounded-xl p-4 border border-blue-500/30 bg-blue-500/5">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <h3 className="text-sm font-semibold text-blue-400">Outstanding Customs</h3>
-            <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
-              {(["Awaiting Approval", "In Progress", "Rejected"] as CRStatus[]).map(s => (
-                <span key={s} className="flex items-center gap-1.5">
-                  <StatusDot status={s} />
-                  {s}
-                </span>
-              ))}
-            </div>
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-3 text-xs text-zinc-400">
+            {(["Awaiting Approval", "In Progress", "Rejected"] as CRStatus[]).map(s => (
+              <span key={s} className="flex items-center gap-1.5">
+                <StatusDot status={s} />
+                {s}
+              </span>
+            ))}
           </div>
-          <div className="overflow-x-auto">
-            <table className="text-xs w-full">
-              <thead>
-                <tr>
-                  {creators.map(c => (
-                    <th key={c.creatorID} className="text-left px-2 pb-2 text-zinc-400 font-medium">
-                      <div className="flex items-center gap-1.5">
-                        <Avatar className="size-4 shrink-0">
-                          <AvatarImage src={c.photoURL ?? undefined} />
-                          <AvatarFallback className="text-[8px]">{c.stageName.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        {c.stageName}
-                      </div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="align-top">
-                  {creators.map(c => (
-                    <td key={c.creatorID} className="px-2 pb-2">
-                      <div className="flex flex-col gap-1">
-                        {(outstandingByCreator[c.creatorID] ?? []).map(e => (
-                          <div key={e.id} className="flex items-center gap-1.5">
-                            <StatusDot status={e.status} />
-                            <button onClick={() => setViewEntry(e)} className="font-mono text-zinc-300 hover:text-white hover:underline underline-offset-2 transition-colors">{e.CR}</button>
-                          </div>
-                        ))}
-                      </div>
-                    </td>
-                  ))}
-                </tr>
-              </tbody>
-            </table>
+          <div className="rounded-xl p-4 border border-blue-500/30 bg-blue-500/5">
+            <h3 className="text-sm font-semibold text-blue-400 mb-4">Outstanding Customs</h3>
+            <KanbanBoard>
+            {outstandingKanbanCreators.map(creator => (
+              <KanbanColumn key={creator.creatorID} creator={creator} count={outstandingByCreator[creator.creatorID].length}>
+                {outstandingByCreator[creator.creatorID].map(e => (
+                  <button
+                    key={e.id}
+                    onClick={() => setViewEntry(e)}
+                    className="flex items-center gap-2 text-left rounded-md border-l-2 py-1.5 pl-2 pr-1.5 transition-all hover:brightness-110 active:scale-[0.98]"
+                    style={{ background: "rgba(255,255,255,0.04)", borderLeftColor: "rgba(255,255,255,0.14)" }}
+                  >
+                    <StatusDot status={e.status} />
+                    <span className="flex-1 min-w-0 truncate font-mono text-xs font-medium text-zinc-200">{e.CR}</span>
+                  </button>
+                ))}
+              </KanbanColumn>
+            ))}
+            </KanbanBoard>
           </div>
         </div>
       )}
@@ -782,43 +819,25 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
       {/* Outstanding Payments */}
       {outstandingPaymentEntries.length > 0 && (
         <div className="rounded-xl p-4 border border-red-500/30 bg-red-500/5">
-          <h3 className="text-sm font-semibold text-red-400 mb-3">Outstanding Payments</h3>
-          <div className="overflow-x-auto">
-            <table className="text-xs w-full">
-              <thead>
-                <tr>
-                  {creators.map(c => (
-                    <th key={c.creatorID} className="text-left px-2 pb-2 text-zinc-400 font-medium">
-                      <div className="flex items-center gap-1.5">
-                        <Avatar className="size-4 shrink-0">
-                          <AvatarImage src={c.photoURL ?? undefined} />
-                          <AvatarFallback className="text-[8px]">{c.stageName.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        {c.stageName}
-                      </div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="align-top">
-                  {creators.map(c => (
-                    <td key={c.creatorID} className="px-2 pb-2">
-                      <div className="flex flex-col gap-1">
-                        {(outstandingPaymentsByCreator[c.creatorID] ?? []).map(e => (
-                          <div key={e.id} className="flex items-center gap-1.5">
-                            <StatusDot status={e.status} />
-                            <button onClick={() => setViewEntry(e)} className="font-mono text-zinc-300 hover:text-white hover:underline underline-offset-2 transition-colors">{e.CR}</button>
-                            <span className="text-red-400 font-medium">{formatAmount(e.totalAmount - e.amountPaid)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </td>
-                  ))}
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <h3 className="text-sm font-semibold text-red-400 mb-4">Outstanding Payments</h3>
+          <KanbanBoard>
+            {outstandingPaymentsKanbanCreators.map(creator => (
+              <KanbanColumn key={creator.creatorID} creator={creator} count={outstandingPaymentsByCreator[creator.creatorID].length}>
+                {outstandingPaymentsByCreator[creator.creatorID].map(e => (
+                  <button
+                    key={e.id}
+                    onClick={() => setViewEntry(e)}
+                    className="flex items-center gap-2 text-left rounded-md border-l-2 py-1.5 pl-2 pr-1.5 transition-all hover:brightness-110 active:scale-[0.98]"
+                    style={{ background: "rgba(255,255,255,0.04)", borderLeftColor: "rgba(255,255,255,0.14)" }}
+                  >
+                    <StatusDot status={e.status} />
+                    <span className="flex-1 min-w-0 truncate font-mono text-xs font-medium text-zinc-200">{e.CR}</span>
+                    <span className="shrink-0 text-[10px] font-medium text-red-400">{formatAmount(e.totalAmount - e.amountPaid)}</span>
+                  </button>
+                ))}
+              </KanbanColumn>
+            ))}
+          </KanbanBoard>
         </div>
       )}
 
@@ -1298,6 +1317,14 @@ export default function ManagerCustomRequestsPage() {
     return () => { cancelled = true; };
   }, [user]);
 
+  // Merge creator names into the name map so creator UIDs (e.g. a creator who
+  // last edited a CR from the portal) resolve to their stage name, not the raw UID.
+  const nameMap = useMemo(() => {
+    const m = { ...userNames };
+    for (const c of creators) m[c.creatorID] = c.stageName;
+    return m;
+  }, [userNames, creators]);
+
   return (
     <AppLayout>
       <div className="max-w-7xl">
@@ -1323,13 +1350,13 @@ export default function ManagerCustomRequestsPage() {
         <div className="mt-6">
           {loadedTabs.has("overview") && (
             <div className={activeTab === "overview" ? "" : "hidden"}>
-              <OverviewTab creators={creators} userNames={userNames} isActive={activeTab === "overview"} />
+              <OverviewTab creators={creators} userNames={nameMap} isActive={activeTab === "overview"} />
             </div>
           )}
           {creators.map(c => (
             loadedTabs.has(c.creatorID) && (
               <div key={c.creatorID} className={activeTab === c.creatorID ? "" : "hidden"}>
-                <ManagerCreatorTable creatorID={c.creatorID} creatorName={c.stageName} creators={creators} userNames={userNames} isActive={activeTab === c.creatorID} />
+                <ManagerCreatorTable creatorID={c.creatorID} creatorName={c.stageName} creators={creators} userNames={nameMap} isActive={activeTab === c.creatorID} />
               </div>
             )
           ))}

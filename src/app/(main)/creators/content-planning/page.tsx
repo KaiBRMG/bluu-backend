@@ -894,7 +894,6 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
   }, [isActive]);
 
   const creatorMap = Object.fromEntries(creators.map(c => [c.creatorID, c.stageName]));
-  const creatorPhotoMap = Object.fromEntries(creators.map(c => [c.creatorID, c.photoURL ?? undefined]));
 
   // Kanban: one column per active creator that has outstanding entries
   const byCreator: Record<string, CPEntry[]> = {};
@@ -903,6 +902,14 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
     byCreator[e.creatorID].push(e);
   }
   const kanbanCreators = creators.filter(c => (byCreator[c.creatorID]?.length ?? 0) > 0);
+
+  // Kanban: one column per creator that has completed entries
+  const completedByCreator: Record<string, CPEntry[]> = {};
+  for (const e of completedEntries) {
+    if (!completedByCreator[e.creatorID]) completedByCreator[e.creatorID] = [];
+    completedByCreator[e.creatorID].push(e);
+  }
+  const completedKanbanCreators = creators.filter(c => (completedByCreator[c.creatorID]?.length ?? 0) > 0);
 
   const handleDismiss = async (id: string) => {
     try {
@@ -934,10 +941,10 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
         </Button>
       </div>
 
-      {/* Completed Content */}
+      {/* Recently Completed */}
       <div className="rounded-xl p-4 border border-emerald-500/30 bg-emerald-500/5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-emerald-400">Completed Content</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-emerald-400">Recently Completed</h3>
           {completedEntries.length > 0 && (
             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setDismissAllOpen(true)}>
               Dismiss All
@@ -947,29 +954,46 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
         {completedEntries.length === 0 ? (
           <p className="text-sm text-zinc-500">No completed content to review.</p>
         ) : (
-          <div className="flex flex-col gap-2">
-            {completedEntries.map(e => (
+          <div style={{ columnWidth: "13rem", columnCount: 4, columnGap: "0.75rem" }}>
+            {completedKanbanCreators.map(creator => (
               <div
-                key={e.id}
-                className="grid items-center gap-4 text-sm"
-                style={{ gridTemplateColumns: "1fr 8rem auto" }}
+                key={creator.creatorID}
+                className="break-inside-avoid mb-3 flex flex-col gap-1.5 rounded-xl p-2.5"
+                style={{
+                  background: "rgba(255,255,255,0.025)",
+                  border: "1px solid rgba(255,255,255,0.07)",
+                }}
               >
-                <button
-                  onClick={() => setViewEntry(e)}
-                  className="text-zinc-300 text-left hover:text-white hover:underline underline-offset-2 transition-colors truncate"
-                >
-                  {e.contentSummary}
-                </button>
-                <span className="flex items-center gap-1.5 text-zinc-400 text-xs min-w-0">
-                  <Avatar className="size-4 shrink-0">
-                    <AvatarImage src={creatorPhotoMap[e.creatorID]} />
-                    <AvatarFallback className="text-[8px]">{(creatorMap[e.creatorID] ?? e.creatorID).charAt(0)}</AvatarFallback>
-                  </Avatar>
-                  <span className="truncate">{creatorMap[e.creatorID] ?? e.creatorID}</span>
-                </span>
-                <Button size="sm" variant="outline" className="h-7 text-xs shrink-0" onClick={() => handleDismiss(e.id)}>
-                  Dismiss
-                </Button>
+                <div className="flex items-center justify-between mb-0.5">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Avatar className="size-4 shrink-0">
+                      <AvatarImage src={creator.photoURL ?? undefined} />
+                      <AvatarFallback className="text-[8px]">{creator.stageName.charAt(0)}</AvatarFallback>
+                    </Avatar>
+                    <p className="text-sm font-semibold text-zinc-300 truncate">{creator.stageName}</p>
+                  </div>
+                  <span className="text-xs text-zinc-500 shrink-0">{completedByCreator[creator.creatorID].length}</span>
+                </div>
+                {completedByCreator[creator.creatorID].map(e => (
+                  <div
+                    key={e.id}
+                    className="flex flex-col gap-1.5 rounded-md border-l-2 py-1.5 pl-2 pr-1.5"
+                    style={{
+                      background: "rgba(255,255,255,0.04)",
+                      borderLeftColor: "rgba(255,255,255,0.14)",
+                    }}
+                  >
+                    <button
+                      onClick={() => setViewEntry(e)}
+                      className="text-left truncate text-xs font-medium text-zinc-200 hover:text-white hover:underline underline-offset-2 transition-colors"
+                    >
+                      {e.contentSummary}
+                    </button>
+                    <Button size="sm" variant="outline" className="h-6 w-full text-[10px]" onClick={() => handleDismiss(e.id)}>
+                      Dismiss
+                    </Button>
+                  </div>
+                ))}
               </div>
             ))}
           </div>

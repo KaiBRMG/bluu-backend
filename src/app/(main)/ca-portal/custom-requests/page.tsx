@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import AppLayout from "@/components/AppLayout";
 import { useCreators } from "@/hooks/useCreators";
@@ -1223,6 +1223,14 @@ export default function CACustomRequestsPage() {
 
   const uid = user?.uid ?? "";
 
+  // Merge creator names into the name map so creator UIDs (e.g. a creator who
+  // last edited a CR from the portal) resolve to their stage name, not the raw UID.
+  const nameMap = useMemo(() => {
+    const m = { ...userNames };
+    for (const c of creators) m[c.creatorID] = c.stageName;
+    return m;
+  }, [userNames, creators]);
+
   return (
     <AppLayout>
       <div className="max-w-7xl">
@@ -1248,7 +1256,7 @@ export default function CACustomRequestsPage() {
         <div className="mt-6">
           {loadedTabs.has("my-customs") && uid && (
             <div className={activeTab === "my-customs" ? "" : "hidden"}>
-              <MyCustomsKanban currentUserUid={uid} creators={creators} userNames={userNames} isActive={activeTab === "my-customs"} />
+              <MyCustomsKanban currentUserUid={uid} creators={creators} userNames={nameMap} isActive={activeTab === "my-customs"} />
             </div>
           )}
           {creators.map(c => (
@@ -1258,7 +1266,7 @@ export default function CACustomRequestsPage() {
                   creatorID={c.creatorID}
                   creatorName={c.stageName}
                   creators={creators}
-                  userNames={userNames}
+                  userNames={nameMap}
                   onCreated={() => {}}
                   isActive={activeTab === c.creatorID}
                 />
