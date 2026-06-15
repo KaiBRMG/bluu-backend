@@ -46,6 +46,8 @@ export interface AdminFullUser {
   remainingUnpaidLeave?: number;
   remainingPaidLeave?: number;
   timezone?: string;
+  timezoneOffset?: string;
+  additionalTimezones?: string[];
   permittedPageIds?: string[];
 }
 

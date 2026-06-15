@@ -331,6 +331,21 @@ Current notification events and their factory functions:
 - `sonner` for toast notifications
 - `@dnd-kit` for drag-and-drop
 
+### Boot Loading Screen
+
+On app start-up a single full-screen animated loader (`src/components/LoadingScreen.tsx`, plays `src/public/loader.webm`) covers the app until everything needed for a flicker-free first paint is ready. Getting this wrong reintroduces the original bugs: a flash of the "Unassigned" group card / empty sidebar, or widget skeletons appearing on the home page during boot.
+
+**Single persistent loader.** The loader is rendered in exactly one place — `BootLoaderProvider` (`src/contexts/BootLoaderContext.tsx`), mounted in `src/app/(main)/layout.tsx` **above** `AuthWrapper`. It stays mounted for the whole boot so the `<video>` element never remounts (a remount restarts the animation and causes a flicker). Do **not** render `LoadingScreen` anywhere else.
+
+**Phase gating.** Components don't show/hide the loader directly — they *report* their loading state via `useBootPhase(key, loading)`. The loader stays up while **any** phase is pending. Current phases:
+- `'auth'` — `AuthWrapper`, while Firebase auth resolves (it returns `null` during this; the provider's loader covers the screen).
+- `'app-data'` — `AppLayout`, while `useUserData` + `usePermissions` resolve (user groups + page permissions). Includes a one-commit `gatesSettled` bridge so the home widgets mount and register their phases before this clears.
+- `'home-resources'`, `'home-notifications'`, `'home-timetracking'` — the home page widgets (`src/app/(main)/page.tsx`).
+
+**Lift timing.** The loader lifts at `max(all phases cleared, MIN_LOADER_MS)`. `MIN_LOADER_MS` (3 s, in `BootLoaderContext.tsx`) is an aesthetic floor so the animation plays at least one full cycle even when data is ready sooner; it also bridges the brief gaps between phases. It is a minimum, not a fixed delay — slower loads stay up longer. Once this first boot completes, a `booted` latch prevents the loader from ever reappearing for the session; in-app navigation relies on each view's own skeletons. A full app reload resets it (a genuine new boot).
+
+> **Adding home-page content/widgets:** any new widget on the home page (`src/app/(main)/page.tsx`) that loads data asynchronously **must** gate the loader by calling `useBootPhase('home-<name>', isLoading)` with its own loading flag. Otherwise its skeleton/empty state will flash on boot before its data arrives. Widgets that read only already-gated data (e.g. the live `useUserData` snapshot) don't need their own phase. This requirement is home-page-specific — other pages use normal in-place skeletons and should not add boot phases.
+
 ### Notion Resources Integration
 
 The `/applications/apps-resources` page lists documents from a single Notion database.

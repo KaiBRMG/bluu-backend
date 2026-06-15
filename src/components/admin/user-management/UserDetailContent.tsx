@@ -493,6 +493,28 @@ export default function UserDetailContent({
               />
             </div>
 
+            <div>
+              <label className="form-label block mb-1">Time Zone</label>
+              <Input
+                type="text"
+                className="form-input w-full"
+                value={user.timezone ? `${user.timezone}${user.timezoneOffset ? ` (UTC${user.timezoneOffset})` : ''}` : 'N/A'}
+                disabled
+                style={{ opacity: 0.6 }}
+              />
+            </div>
+
+            <div>
+              <label className="form-label block mb-1">Additional Time Zones</label>
+              <Input
+                type="text"
+                className="form-input w-full"
+                value={user.additionalTimezones && user.additionalTimezones.length > 0 ? user.additionalTimezones.join(', ') : 'None'}
+                disabled
+                style={{ opacity: 0.6 }}
+              />
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="form-label block mb-1">Created At</label>
