@@ -10,6 +10,7 @@ import { DisputeTable, type ColumnKey } from '@/components/disputes/DisputeTable
 import { useDisputesData, type AdminFilters } from '@/hooks/useDisputesData';
 import { useUserData } from '@/hooks/useUserData';
 import type { DisputeDocument, ApprovalStatus } from '@/types/firestore';
+import { DeletedUser } from '@/components/DeletedUser';
 
 // ─── Column set ───────────────────────────────────────────────────────
 
@@ -58,7 +59,7 @@ function AdminFiltersBar({
         <SelectContent>
           <SelectItem value="all">All — created by</SelectItem>
           {createdByOptions.map(([uid, name]) => (
-            <SelectItem key={uid} value={uid}>{name}</SelectItem>
+            <SelectItem key={uid} value={uid}>{name || <DeletedUser />}</SelectItem>
           ))}
         </SelectContent>
       </Select>
@@ -73,7 +74,7 @@ function AdminFiltersBar({
         <SelectContent>
           <SelectItem value="all">All — assigned to</SelectItem>
           {assignedToOptions.map(([uid, name]) => (
-            <SelectItem key={uid} value={uid}>{name}</SelectItem>
+            <SelectItem key={uid} value={uid}>{name || <DeletedUser />}</SelectItem>
           ))}
         </SelectContent>
       </Select>

@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/table';
 import { Loader } from '@/components/ui/loader';
 import { useAuth } from '@/components/AuthProvider';
+import { DeletedUser } from '@/components/DeletedUser';
 import type { AdminNotificationBatch } from '@/types/firestore';
 
 interface Recipient {
@@ -149,7 +150,7 @@ export default function NotificationRecipientsDialog({
                   ) : (
                     recipients.map(r => (
                       <TableRow key={r.userId}>
-                        <TableCell className="text-sm">{r.displayName}</TableCell>
+                        <TableCell className="text-sm">{r.displayName || <DeletedUser />}</TableCell>
                         <TableCell className="text-center">
                           {r.read ? (
                             <Check className="h-4 w-4 text-green-500 mx-auto" />

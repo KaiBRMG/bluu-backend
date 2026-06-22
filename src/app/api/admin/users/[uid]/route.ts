@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb, adminStorage } from '@/lib/firebase-admin';
 import { getUserById, invalidateUserCache } from '@/lib/services/userService';
 import { invalidateAdminUsersCache } from '@/app/api/admin/users/route';
 import { invalidateDisplayNamesCache } from '@/app/api/users/display-names/route';
@@ -92,8 +92,32 @@ export const PUT = withAuth(async (
 });
 
 /**
+ * Delete every document returned by a query, chunked into batches of 500
+ * (Firestore's per-batch write limit). Returns the number of docs deleted.
+ */
+async function deleteQueryDocs(query: FirebaseFirestore.Query): Promise<number> {
+  const snap = await query.get();
+  if (snap.empty) return 0;
+
+  const refs = snap.docs.map(d => d.ref);
+  for (let i = 0; i < refs.length; i += 500) {
+    const batch = adminDb.batch();
+    refs.slice(i, i + 500).forEach(ref => batch.delete(ref));
+    await batch.commit();
+  }
+  return refs.length;
+}
+
+/**
  * DELETE /api/admin/users/[uid]
- * Admin-only. Permanently deletes a user and removes them from groups and page-permissions.
+ * Admin-only. Permanently deletes a user and ALL of their personal data:
+ * the user document, group membership, page permissions, active session,
+ * time entries (timesheets), screenshots (Firestore docs + Storage files),
+ * shifts, leave requests, notifications, bug reports, and profile photo.
+ *
+ * Shared business records (disputes, campaign-tracking, content-planning,
+ * notification batches) reference the user only as a participant/audit field
+ * and belong to creators or other employees, so they are intentionally kept.
  */
 export const DELETE = withAuth(async (
   _request: NextRequest,
@@ -112,30 +136,53 @@ export const DELETE = withAuth(async (
       return NextResponse.json({ error: 'Cannot delete your own account' }, { status: 400 });
     }
 
-    const batch = adminDb.batch();
+    // ─── 1. User doc, group membership, page permissions ────────────────
+    const membershipBatch = adminDb.batch();
 
-    // Delete user document
-    batch.delete(adminDb.collection('users').doc(targetUid));
+    membershipBatch.delete(adminDb.collection('users').doc(targetUid));
 
-    // Remove from all groups
     const groupsSnap = await adminDb.collection('groups').get();
     for (const groupDoc of groupsSnap.docs) {
       const members: string[] = groupDoc.data().members || [];
       if (members.includes(targetUid)) {
-        batch.update(groupDoc.ref, { members: FieldValue.arrayRemove(targetUid) });
+        membershipBatch.update(groupDoc.ref, { members: FieldValue.arrayRemove(targetUid) });
       }
     }
 
-    // Remove from page-permissions users maps
     const pagePermsSnap = await adminDb.collection('page-permissions').get();
     for (const permDoc of pagePermsSnap.docs) {
       const users = permDoc.data().users || {};
       if (users[targetUid]) {
-        batch.update(permDoc.ref, { [`users.${targetUid}`]: FieldValue.delete() });
+        membershipBatch.update(permDoc.ref, { [`users.${targetUid}`]: FieldValue.delete() });
       }
     }
 
-    await batch.commit();
+    // active_sessions is keyed by uid (at most one doc per user)
+    membershipBatch.delete(adminDb.collection('active_sessions').doc(targetUid));
+
+    await membershipBatch.commit();
+
+    // ─── 2. Personal data collections (queried by the user's uid) ───────
+    await Promise.all([
+      deleteQueryDocs(adminDb.collection('time_entries').where('userId', '==', targetUid)),
+      deleteQueryDocs(adminDb.collection('time-entries').where('userId', '==', targetUid)),
+      deleteQueryDocs(adminDb.collection('screenshots').where('userId', '==', targetUid)),
+      deleteQueryDocs(adminDb.collection('shifts').where('userId', '==', targetUid)),
+      deleteQueryDocs(adminDb.collection('leave_requests').where('userId', '==', targetUid)),
+      deleteQueryDocs(adminDb.collection('notifications').where('userId', '==', targetUid)),
+      deleteQueryDocs(adminDb.collection('bugs').where('uid', '==', targetUid)),
+    ]);
+
+    // ─── 3. Storage: screenshots (full-size + thumbnails) and profile photo ──
+    const bucket = adminStorage.bucket();
+    await Promise.all([
+      bucket.deleteFiles({ prefix: `screenshots/${targetUid}/` }).catch(err => {
+        console.error(`[DeleteUser] Failed to delete screenshot storage for ${targetUid}:`, err);
+      }),
+      bucket.deleteFiles({ prefix: `profile-photos/${targetUid}/` }).catch(err => {
+        console.error(`[DeleteUser] Failed to delete profile photo for ${targetUid}:`, err);
+      }),
+    ]);
 
     invalidateUserCache(targetUid);
     invalidateAdminUsersCache();

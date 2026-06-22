@@ -18,6 +18,7 @@ import {
   HoverCard, HoverCardTrigger, HoverCardContent,
 } from '@/components/ui/hover-card';
 import type { DisputeDocument, ApprovalStatus } from '@/types/firestore';
+import { DeletedUser } from '@/components/DeletedUser';
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -90,6 +91,7 @@ function ApprovalBadge({ value }: { value: ApprovalStatus }) {
 
 function UserChip({ name, photoURL }: { name: string; photoURL: string | null }) {
   if (name === 'No One') return <span className="text-muted-foreground text-sm">No One</span>;
+  if (!name) return <span className="text-sm"><DeletedUser /></span>;
   return (
     <Button variant="outline" className="rounded-full p-0! pe-3! h-8 gap-0 text-sm font-normal">
       <Avatar className="size-7" style={{ background: getAvatarColor(name) }}>
@@ -128,7 +130,7 @@ function CommentCell({
             <AvatarFallback className="text-xs" style={{ background: getAvatarColor(createdByName), color: '#fff' }}>{getInitials(createdByName)}</AvatarFallback>
           </Avatar>
           <div className="space-y-1 min-w-0">
-            <p className="text-sm font-semibold">{createdByName}</p>
+            <p className="text-sm font-semibold">{createdByName || <DeletedUser />}</p>
             <p className="text-sm break-words">{comment}</p>
           </div>
         </div>

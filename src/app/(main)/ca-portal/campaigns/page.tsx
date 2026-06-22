@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { MoreHorizontal, Plus, Info } from "lucide-react";
+import { resolveUserName } from "@/components/DeletedUser";
+import { useUserName } from "@/hooks/useUserName";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "@/firebase-config";
 import {
@@ -130,11 +132,11 @@ function CampaignViewCard({ entry, creatorName, userNames, onClose }: ViewCardPr
           <div className="grid grid-cols-2 gap-3 p-3 rounded-lg border border-zinc-800 bg-zinc-900/50 text-sm">
             <div>
               <p className="text-xs text-zinc-500">Created By</p>
-              <p className="text-zinc-300">{userNames[entry.createdBy] ?? entry.createdBy}</p>
+              <p className="text-zinc-300">{resolveUserName(entry.createdBy, userNames)}</p>
             </div>
             <div>
               <p className="text-xs text-zinc-500">Last Edited By</p>
-              <p className="text-zinc-300">{userNames[entry.lastEditedBy] ?? entry.lastEditedBy}</p>
+              <p className="text-zinc-300">{resolveUserName(entry.lastEditedBy, userNames)}</p>
             </div>
             <div>
               <p className="text-xs text-zinc-500">Created</p>
@@ -627,7 +629,7 @@ function CreatorCampaignsTable({ creatorID, creatorName, creators, userNames, is
                 {displayed.map(entry => (
                   <TableRow key={entry.id} className={entry.isArchived ? "opacity-50" : ""}>
                     <TableCell className="text-sm text-zinc-400">
-                      {userNames[entry.createdBy] ?? entry.createdBy}
+                      {resolveUserName(entry.createdBy, userNames)}
                     </TableCell>
                     <TableCell className="text-sm font-medium">{entry.fanName}</TableCell>
                     <TableCell>
@@ -746,7 +748,7 @@ function CreatorCampaignsTable({ creatorID, creatorName, creators, userNames, is
 export default function CACampaignsPage() {
   const { user } = useAuth();
   const creators = useCreators();
-  const [userNames, setUserNames] = useState<Record<string, string>>({});
+  const { names: userNames } = useUserName();
   const [activeTab, setActiveTab] = useState("overview");
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(() => new Set(["overview"]));
 
@@ -754,23 +756,6 @@ export default function CACampaignsPage() {
     setActiveTab(value);
     setLoadedTabs(prev => (prev.has(value) ? prev : new Set(prev).add(value)));
   };
-
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    user.getIdToken().then(token => {
-      fetch("/api/users/display-names", { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.json())
-        .then(data => {
-          if (cancelled) return;
-          const map: Record<string, string> = {};
-          for (const u of (data.users ?? [])) map[u.uid] = u.displayName;
-          setUserNames(map);
-        })
-        .catch(() => {});
-    });
-    return () => { cancelled = true; };
-  }, [user]);
 
   return (
     <AppLayout>

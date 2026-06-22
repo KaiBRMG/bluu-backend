@@ -32,8 +32,10 @@ export default function AddMembersDropdown({ group, allUsers, onAdd, onClose }: 
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [onClose]);
 
-  // Filter to non-members matching search
+  // Filter to non-members matching search.
+  // Archived users are removed from the system, so they can't be added to groups.
   const nonMembers = allUsers.filter((u) => {
+    if (u.isArchived) return false;
     if (group.members?.includes(u.uid)) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();

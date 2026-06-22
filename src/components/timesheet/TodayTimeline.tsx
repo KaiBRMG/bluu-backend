@@ -6,8 +6,6 @@ import { useUserData } from '@/hooks/useUserData';
 import { getTodaySessions } from '@/lib/localBuffer';
 import { parseBuffer, sessionCloseMs } from '@/lib/parseBuffer';
 import type { LocalSessionBuffer, SessionEvent } from '@/types/firestore';
-import { RefreshCcw } from 'lucide-react';
-import { Button } from "@/components/ui/button";
 
 // ─── Segment types ────────────────────────────────────────────────────
 
@@ -52,15 +50,6 @@ function formatDuration(totalSeconds: number): string {
   if (totalSeconds === 0) return '—';
   if (h === 0) return `${m}m`;
   return `${h}h ${m}m`;
-}
-
-function formatAgo(sinceMs: number): string {
-  const totalSeconds = Math.floor(sinceMs / 1000);
-  if (totalSeconds < 60) return 'just now';
-  const m = Math.floor(totalSeconds / 60);
-  const h = Math.floor(m / 60);
-  if (h === 0) return `${m}m ago`;
-  return `${h}h${String(m % 60).padStart(2, '0')}m ago`;
 }
 
 // ─── Buffer → segments ────────────────────────────────────────────────
@@ -146,14 +135,12 @@ export default function TodayTimeline() {
   const timezone = userData?.timezone || 'UTC';
   const [buffers, setBuffers] = useState<LocalSessionBuffer[]>([]);
   const [now, setNow] = useState(() => Date.now());
-  const [lastRefreshed, setLastRefreshed] = useState(() => Date.now());
   const [hoveredKey, setHoveredKey] = useState<string | null>(null); // `${bufIdx}-${segIdx}`
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
   const loadBuffers = useCallback(async () => {
     const sessions = await getTodaySessions(timezone);
     setBuffers(sessions);
-    setLastRefreshed(Date.now());
   }, [timezone]);
 
   // Reload when the session changes or a state transition appends new buffer events
@@ -271,19 +258,6 @@ export default function TodayTimeline() {
           <span className="text-xs" style={{ color: 'var(--foreground-muted)' }}>
             Total worked: {formatDuration(totalWorkedSeconds)}
           </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs" style={{ color: 'var(--foreground-muted)' }}>
-            Last updated {formatAgo(now - lastRefreshed)}
-          </span>
-          <Button
-            onClick={loadBuffers}
-            variant="ghost"
-            size="icon"
-            title="Refresh timeline"
-          >
-            <RefreshCcw width={16} height={16} />
-          </Button>
         </div>
       </div>
 

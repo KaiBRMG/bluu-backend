@@ -202,7 +202,7 @@ export default function CreateNotificationDialog({
                       <CommandSeparator />
 
                       <CommandGroup heading="Users">
-                        {users.map(user => (
+                        {users.filter(user => !user.isArchived).map(user => (
                           <CommandItem
                             key={user.uid}
                             value={`user-${user.uid}-${user.displayName}-${user.workEmail}`}

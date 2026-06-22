@@ -13,6 +13,7 @@ export interface BasicUser {
   jobTitle?: string;
   workEmail: string;
   isActive: boolean;
+  isArchived: boolean;
 }
 
 const CACHE_TTL_MS = 30_000;
@@ -50,6 +51,7 @@ export const GET = withAuth(async (_request: NextRequest) => {
         jobTitle: d.jobTitle,
         workEmail: d.workEmail ?? '',
         isActive: d.isActive !== false,
+        isArchived: d.isArchived === true,
       };
     });
 

@@ -22,9 +22,9 @@ export default function AdminLeave() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const sortedUsers = [...users].sort((a, b) =>
-    (a.displayName || '').localeCompare(b.displayName || '')
-  );
+  const sortedUsers = users
+    .filter(u => !u.isArchived)
+    .sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
 
   // Rebuild baseline whenever users reload (after save)
   useEffect(() => {

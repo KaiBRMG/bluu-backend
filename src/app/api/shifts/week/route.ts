@@ -177,13 +177,15 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       user: snap.exists ? snap.data() : null,
     }));
 
-    // Build a unified map: uid → user doc
+    // Build a unified map: uid → user doc.
+    // Archived users are excluded — they are removed from the system, so they
+    // must not appear in the shift grid or the shift-assignment picker.
     const userMap = new Map<string, any>();
     for (const u of allTtUsers) {
-      if (u?.uid) userMap.set(u.uid, u);
+      if (u?.uid && u.isArchived !== true) userMap.set(u.uid, u);
     }
     for (const { uid, user } of shiftUserDocs) {
-      if (!userMap.has(uid) && user?.permittedPageIds?.includes('time-tracking')) userMap.set(uid, user);
+      if (!userMap.has(uid) && user?.isArchived !== true && user?.permittedPageIds?.includes('time-tracking')) userMap.set(uid, user);
     }
 
     // All eligible (time-tracking permitted) user IDs

@@ -21,10 +21,12 @@ function serialiseDispute(
   userMap: Record<string, UserInfo>,
   creatorMap: Record<string, CreatorInfo>,
 ): DisputeDocument {
+  // Empty displayName signals a deleted user — the client renders an italic
+  // "Deleted User" label in place of the (now meaningless) raw UID.
   const assignedToInfo = data.assignedTo === 'No One'
     ? { displayName: 'No One', photoURL: null }
-    : (userMap[data.assignedTo] ?? { displayName: data.assignedTo, photoURL: null });
-  const createdByInfo = userMap[data.createdBy] ?? { displayName: data.createdBy, photoURL: null };
+    : (userMap[data.assignedTo] ?? { displayName: '', photoURL: null });
+  const createdByInfo = userMap[data.createdBy] ?? { displayName: '', photoURL: null };
   const creatorInfo = creatorMap[data.Creator];
   return {
     id,

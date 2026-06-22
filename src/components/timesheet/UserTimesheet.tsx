@@ -4,8 +4,7 @@ import { useState, useMemo } from 'react';
 import { useTimesheetData } from '@/hooks/useTimesheetData';
 import { useUserData } from '@/hooks/useUserData';
 import TimesheetView from './TimesheetView';
-import { RefreshCcw, ChevronDownIcon } from 'lucide-react';
-import { Button } from "@/components/ui/button";
+import { ChevronDownIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
@@ -53,14 +52,6 @@ export default function UserTimesheet() {
           Timesheets
         </h2>
         <div className="flex items-center gap-2">
-          <Button
-            onClick={() => window.location.reload()}
-            variant="ghost"
-            size="icon"
-            title="Refresh timesheet"
-          >
-            <RefreshCcw width={16} height={16} />
-          </Button>
           <Popover open={dateOpen} onOpenChange={setDateOpen}>
             <PopoverTrigger asChild>
               <button type="button" className="form-input text-sm flex items-center justify-between gap-2" style={{ cursor: 'pointer' }}>

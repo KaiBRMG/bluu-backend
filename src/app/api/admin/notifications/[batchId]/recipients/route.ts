@@ -46,7 +46,8 @@ export const GET = withAuth(
         const data = doc.data();
         return {
           userId: data.userId,
-          displayName: displayNameMap[data.userId] ?? data.userId,
+          // Empty displayName signals a deleted user → rendered as italic "Deleted User"
+          displayName: displayNameMap[data.userId] ?? '',
           read: data.read ?? false,
           dismissedByUser: data.dismissedByUser ?? false,
         };

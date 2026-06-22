@@ -10,10 +10,12 @@ import { adminDb } from '@/lib/firebase-admin';
 export const GET = withAuth(async (_request: NextRequest) => {
   try {
     const snap = await adminDb.collection('users').where('groups', 'array-contains', 'CA').get();
-    const users = snap.docs.map(doc => ({
-      uid: doc.id,
-      displayName: doc.data().displayName as string,
-    })).sort((a, b) => a.displayName.localeCompare(b.displayName));
+    const users = snap.docs
+      .filter(doc => doc.data().isArchived !== true)
+      .map(doc => ({
+        uid: doc.id,
+        displayName: doc.data().displayName as string,
+      })).sort((a, b) => a.displayName.localeCompare(b.displayName));
 
     return NextResponse.json({ users });
   } catch (error) {

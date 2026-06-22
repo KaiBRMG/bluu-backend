@@ -356,6 +356,39 @@ The `/applications/apps-resources` page lists documents from a single Notion dat
 - **Group filter**: applied server-side in `/api/resources` — a doc is visible if any of its `Groups` overlap with the caller's `users.groups`. Admins (`token.admin === true`) bypass this filter. The page itself is gated by the standard sidebar `apps-resources` page permission, so no per-page `permittedPageIds` check runs inside the route.
 - **Client cache**: `src/hooks/useResources.ts` mirrors the `useCreators` pattern (sessionStorage, 5 min TTL, key `bluu_resources_v1`).
 
+### Archived Users
+
+A user with `isArchived === true` is **removed from the system but their data is
+not deleted** from Firestore. The rule: archived users must be filtered out of any
+list/dropdown where you **select or act on a user**, but kept wherever their
+**existing data must still resolve or display**.
+
+The four sources that feed user lists, and how each handles archiving:
+
+- **`/api/users/display-names`** (`useBasicUsers`) — returns `isArchived` on each
+  `BasicUser` but does **not** filter server-side, because some pages
+  (`creators/custom-requests`, `ca-portal/campaigns`) use this endpoint to resolve
+  historical editor names by UID, including archived users. Filter archived at the
+  **consumer** when building a picker (see `AdminTimesheets`,
+  `CreateNotificationDialog`).
+- **`/api/disputes/users`** (`useDisputesData`) — filters archived server-side. It
+  only feeds the CA assignee/filter pickers; dispute names are resolved separately
+  in `/api/disputes`, so historical display is unaffected.
+- **`/api/shifts/week`** — excludes archived from its `userMap`, removing them from
+  the shift grid and the shift-assignment picker.
+- **`/api/admin/users`** (`useAdminUsers`) — returns archived users intact because
+  user-management is the surface that manages them (the Employee Registry has a
+  `showArchived` toggle). Filter archived only in the action lists drawing from it
+  (`AdminLeave`, `AddMembersDropdown`).
+
+**Exceptions that intentionally keep archived users:** the Screenshots tab
+(`AdminScreenshots`) — archived users' screenshots still exist in storage and must
+remain viewable/deletable; and `AdminActiveUsers` resolves names from the basic-user
+list (archived users have no active session, so they never render).
+
+When adding a new page or component that lists users for selection, filter
+`isArchived` out of the rendered list.
+
 ### Profile Pictures
 
 Always use `src/components/ui/avatar.tsx` (`Avatar`, `AvatarImage`, `AvatarFallback`) to render profile pictures. Never use a plain `<img>` tag for avatars.

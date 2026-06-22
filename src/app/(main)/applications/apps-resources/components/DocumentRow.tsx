@@ -98,7 +98,7 @@ export function DocumentRow({ doc, isPinned, onTogglePin }: DocumentRowProps) {
           const c = colorForType(t);
           return (
             <Badge
-              key={t}
+              key={`type-${t}`}
               variant="outline"
               className={`${c.badge} font-medium`}
             >
@@ -106,6 +106,15 @@ export function DocumentRow({ doc, isPinned, onTogglePin }: DocumentRowProps) {
             </Badge>
           );
         })}
+        {doc.groups.map(g => (
+          <Badge
+            key={`group-${g}`}
+            variant="outline"
+            className="bg-muted text-muted-foreground border-border font-medium"
+          >
+            {g}
+          </Badge>
+        ))}
       </div>
 
       {onTogglePin && (

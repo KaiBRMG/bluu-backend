@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { useAuth } from "@/components/AuthProvider";
 import AppLayout from "@/components/AppLayout";
 import { useCreators } from "@/hooks/useCreators";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -24,6 +23,8 @@ import { Calendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Plus, MoreHorizontal, Check, Info, Search, CalendarIcon, Link2 } from "lucide-react";
+import { resolveUserName } from "@/components/DeletedUser";
+import { useUserName } from "@/hooks/useUserName";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "@/firebase-config";
 import {
@@ -354,8 +355,8 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
         </CardHeader>
         <CardContent className="flex flex-col gap-4 overflow-y-auto flex-1 pt-0">
           <div className="grid grid-cols-2 gap-3 p-3 rounded-lg border border-zinc-800 bg-zinc-900/50 text-sm">
-            <div><p className="text-xs text-zinc-500">Created By</p><p className="text-zinc-300">{userNames[entry.createdBy] ?? entry.createdBy}</p></div>
-            <div><p className="text-xs text-zinc-500">Last Edited By</p><p className="text-zinc-300">{userNames[entry.lastEditedBy] ?? entry.lastEditedBy}</p></div>
+            <div><p className="text-xs text-zinc-500">Created By</p><p className="text-zinc-300">{resolveUserName(entry.createdBy, userNames)}</p></div>
+            <div><p className="text-xs text-zinc-500">Last Edited By</p><p className="text-zinc-300">{resolveUserName(entry.lastEditedBy, userNames)}</p></div>
             <div><p className="text-xs text-zinc-500">Due Date</p><p className="text-zinc-300">{formatDueDate(entry.dueDate)}</p></div>
             <div><p className="text-xs text-zinc-500">Last Edited</p><p className="text-zinc-300">{formatInTimezone(entry.lastEditedTime, userTz)}</p></div>
           </div>
@@ -1208,7 +1209,7 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
                   <TableCell className="text-sm">{entry.fanName}</TableCell>
                   <TableCell className="text-sm">{formatAmount(entry.amountPaid)}</TableCell>
                   <TableCell className="text-sm">{formatAmount(entry.totalAmount)}</TableCell>
-                  <TableCell className="text-sm text-zinc-400">{userNames[entry.createdBy] ?? entry.createdBy}</TableCell>
+                  <TableCell className="text-sm text-zinc-400">{resolveUserName(entry.createdBy, userNames)}</TableCell>
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -1289,9 +1290,8 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ManagerCustomRequestsPage() {
-  const { user } = useAuth();
   const creators = useCreators();
-  const [userNames, setUserNames] = useState<Record<string, string>>({});
+  const { names: userNames } = useUserName();
   const [activeTab, setActiveTab] = useState("overview");
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(() => new Set(["overview"]));
 
@@ -1299,23 +1299,6 @@ export default function ManagerCustomRequestsPage() {
     setActiveTab(value);
     setLoadedTabs(prev => (prev.has(value) ? prev : new Set(prev).add(value)));
   };
-
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    user.getIdToken().then(token => {
-      fetch("/api/users/display-names", { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.json())
-        .then(data => {
-          if (cancelled) return;
-          const map: Record<string, string> = {};
-          for (const u of (data.users ?? [])) map[u.uid] = u.displayName;
-          setUserNames(map);
-        })
-        .catch(() => {});
-    });
-    return () => { cancelled = true; };
-  }, [user]);
 
   // Merge creator names into the name map so creator UIDs (e.g. a creator who
   // last edited a CR from the portal) resolve to their stage name, not the raw UID.

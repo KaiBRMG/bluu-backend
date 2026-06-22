@@ -26,6 +26,8 @@ import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover
 import { TimezoneCombobox } from "@/components/ui/timezone-combobox";
 import { Calendar } from "@/components/ui/calendar";
 import { MoreHorizontal, Plus, AlertCircle, Info, Search, CalendarIcon } from "lucide-react";
+import { resolveUserName } from "@/components/DeletedUser";
+import { useUserName } from "@/hooks/useUserName";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "@/firebase-config";
 import {
@@ -177,11 +179,11 @@ function ViewCard({ entry, creatorName, readOnly, onClose, userNames = {} }: Vie
           <div className="grid grid-cols-2 gap-3 p-3 rounded-lg border border-zinc-800 bg-zinc-900/50 text-sm">
             <div>
               <p className="text-xs text-zinc-500">Created By</p>
-              <p className="text-zinc-300">{userNames[entry.createdBy] ?? entry.createdBy}</p>
+              <p className="text-zinc-300">{resolveUserName(entry.createdBy, userNames)}</p>
             </div>
             <div>
               <p className="text-xs text-zinc-500">Last Edited By</p>
-              <p className="text-zinc-300">{userNames[entry.lastEditedBy] ?? entry.lastEditedBy}</p>
+              <p className="text-zinc-300">{resolveUserName(entry.lastEditedBy, userNames)}</p>
             </div>
             <div>
               <p className="text-xs text-zinc-500">Due Date</p>
@@ -871,7 +873,7 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
                     <TableCell className="text-sm">{entry.fanName}</TableCell>
                     <TableCell className={`text-sm font-medium ${entry.amountPaid < entry.totalAmount ? "text-red-400" : "text-green-400"}`}>{formatAmount(entry.amountPaid)}</TableCell>
                     <TableCell className="text-sm">{formatAmount(entry.totalAmount)}</TableCell>
-                    <TableCell className="text-sm text-zinc-400">{userNames[entry.createdBy] ?? entry.createdBy}</TableCell>
+                    <TableCell className="text-sm text-zinc-400">{resolveUserName(entry.createdBy, userNames)}</TableCell>
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -1195,7 +1197,7 @@ function MyCustomsKanban({ currentUserUid, creators, userNames, isActive }: MyCu
 export default function CACustomRequestsPage() {
   const { user } = useAuth();
   const creators = useCreators();
-  const [userNames, setUserNames] = useState<Record<string, string>>({});
+  const { names: userNames } = useUserName();
   const [activeTab, setActiveTab] = useState("my-customs");
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(() => new Set(["my-customs"]));
 
@@ -1203,23 +1205,6 @@ export default function CACustomRequestsPage() {
     setActiveTab(value);
     setLoadedTabs(prev => (prev.has(value) ? prev : new Set(prev).add(value)));
   };
-
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    user.getIdToken().then(token => {
-      fetch("/api/users/display-names", { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.json())
-        .then(data => {
-          if (cancelled) return;
-          const map: Record<string, string> = {};
-          for (const u of (data.users ?? [])) map[u.uid] = u.displayName;
-          setUserNames(map);
-        })
-        .catch(() => {});
-    });
-    return () => { cancelled = true; };
-  }, [user]);
 
   const uid = user?.uid ?? "";
 

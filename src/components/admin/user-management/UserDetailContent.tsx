@@ -871,7 +871,7 @@ export default function UserDetailContent({
           <AlertDialogHeader>
             <AlertDialogTitle>Archive this user?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will deactivate {user.firstName || user.displayName}&apos;s account and move them to the Archived Users list. They will be immediately signed out and blocked from logging in.
+              This will deactivate {user.firstName || user.displayName}&apos;s account and move them to the Archived Users list. They will be immediately signed out and blocked from logging in. Their data, such as timesheets and screenshots, is <strong>not</strong> deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -914,7 +914,7 @@ export default function UserDetailContent({
           <AlertDialogHeader>
             <AlertDialogTitle>Permanently delete this user?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete {user.firstName || user.displayName}&apos;s account, remove them from all groups, and revoke all page permissions. <strong>This action cannot be undone.</strong>
+              This will permanently delete {user.firstName || user.displayName}&apos;s account and <strong>all of their data</strong> — including their timesheets, screenshots, shifts, leave requests, and notifications — remove them from all groups, and revoke all page permissions. <strong>This action cannot be undone.</strong>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

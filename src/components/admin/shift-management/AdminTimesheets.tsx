@@ -48,7 +48,7 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
   const [employeeOpen, setEmployeeOpen] = useState(false);
 
   const timeTrackedUsers = useMemo(() =>
-    [...users].sort((a, b) => {
+    users.filter((u) => !u.isArchived).sort((a, b) => {
       const nameA = (a.displayName || `${a.firstName} ${a.lastName}`).toLowerCase();
       const nameB = (b.displayName || `${b.firstName} ${b.lastName}`).toLowerCase();
       return nameA.localeCompare(nameB);
