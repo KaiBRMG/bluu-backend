@@ -66,11 +66,15 @@ export function BootLoaderProvider({ children }: { children: React.ReactNode }) 
     return () => clearTimeout(id);
   }, []);
 
-  // Failsafe ceiling: lift the loader unconditionally after MAX_LOADER_MS so a
-  // stuck phase can never trap the user on a black screen forever.
+  // Failsafe ceiling: lift the loader after MAX_LOADER_MS so a stuck phase can
+  // never trap the user on a black screen forever. Gated on `booted` so the
+  // timer is cancelled the moment boot completes normally — otherwise it would
+  // fire on every healthy session that simply stays open past MAX_LOADER_MS,
+  // reporting a false "ceiling hit" with no phases actually pending.
   useEffect(() => {
+    if (booted) return;
     const id = setTimeout(() => {
-      // Reaching this means some boot phase never cleared within MAX_LOADER_MS.
+      // Still not booted after MAX_LOADER_MS — a phase genuinely never cleared.
       // The auth-level timeout (12s) normally fires first, so hitting this is a
       // sign a different phase is stuck — report which ones are still pending.
       Sentry.captureMessage('Boot loader hit failsafe ceiling', {
@@ -84,7 +88,7 @@ export function BootLoaderProvider({ children }: { children: React.ReactNode }) 
       setTimedOut(true);
     }, MAX_LOADER_MS);
     return () => clearTimeout(id);
-  }, []);
+  }, [booted]);
 
   const show = !booted && !timedOut && (hasPending || !minElapsed);
 
