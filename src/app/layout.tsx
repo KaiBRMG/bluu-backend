@@ -16,6 +16,7 @@ const googleSans = localFont({
     },
   ],
   variable: "--font-geist-sans",
+  preload: false,
 });
 
 export const metadata: Metadata = {

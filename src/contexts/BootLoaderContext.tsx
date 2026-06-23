@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import * as Sentry from "@sentry/nextjs";
 import LoadingScreen from "@/components/LoadingScreen";
 
 // Minimum time the boot loader stays up so its animation plays at least one full
@@ -16,6 +17,13 @@ import LoadingScreen from "@/components/LoadingScreen";
 // Also bridges the brief hand-offs between boot phases (auth → data → widgets)
 // so the loader never blinks while one phase clears before the next registers.
 const MIN_LOADER_MS = 3000;
+
+// Hard ceiling on the boot loader. No single phase should ever be able to wedge
+// the entire app behind the loader with no escape: if something at boot never
+// resolves (e.g. Firebase auth/Firestore unreachable on a fresh device, a
+// blocked googleapis.com, a thrown async callback), force the loader to lift
+// after this long and let the app render its login/skeleton state underneath.
+const MAX_LOADER_MS = 20000;
 
 interface BootLoaderApi {
   /** Add/remove a keyed loading phase. While any phase is pending (or the
@@ -40,6 +48,7 @@ export function BootLoaderProvider({ children }: { children: React.ReactNode }) 
   // has had a chance to register.
   const [hasPending, setHasPending] = useState(true);
   const [minElapsed, setMinElapsed] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
   const [booted, setBooted] = useState(false);
 
   const setPhase = useCallback((key: string, loading: boolean) => {
@@ -57,7 +66,27 @@ export function BootLoaderProvider({ children }: { children: React.ReactNode }) 
     return () => clearTimeout(id);
   }, []);
 
-  const show = !booted && (hasPending || !minElapsed);
+  // Failsafe ceiling: lift the loader unconditionally after MAX_LOADER_MS so a
+  // stuck phase can never trap the user on a black screen forever.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      // Reaching this means some boot phase never cleared within MAX_LOADER_MS.
+      // The auth-level timeout (12s) normally fires first, so hitting this is a
+      // sign a different phase is stuck — report which ones are still pending.
+      Sentry.captureMessage('Boot loader hit failsafe ceiling', {
+        level: 'error',
+        tags: { area: 'auth-boot', reason: 'boot-loader-timeout' },
+        extra: {
+          maxLoaderMs: MAX_LOADER_MS,
+          pendingPhases: Array.from(phases.current),
+        },
+      });
+      setTimedOut(true);
+    }, MAX_LOADER_MS);
+    return () => clearTimeout(id);
+  }, []);
+
+  const show = !booted && !timedOut && (hasPending || !minElapsed);
 
   // Latch the boot as complete the first time everything is ready, so the loader
   // never reappears for the rest of the session.

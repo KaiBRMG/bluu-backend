@@ -140,6 +140,8 @@ Three distinct portals, each with its own layout/auth:
 - `useTimesheetData` — sessionStorage cache (5 min TTL); call `invalidateTimesheetCache(uid)` after clock-in/out
 - `useDisputesData` — wraps all disputes API routes; creator/CA user lists cached in sessionStorage (5 min)
 - `useCreators` — fetches the active creator list (including `photoURL`) with a 5-min sessionStorage cache (`bluu_creators_v2`). Use this hook on any page that needs creator names or profile pictures; do not fetch `/api/creators` directly.
+- `useBasicUsers` — wraps `/api/users/display-names`; the full employee list (incl. archived) for pickers and name maps, 5-min sessionStorage cache.
+- `useUserName` — `uid → displayName` map built on `useBasicUsers`; the canonical way to resolve internal user names client-side (see **User Name Resolution**). Do not fetch `/api/users/display-names` directly to build your own map.
 - Permissions are cached in localStorage via `src/lib/permissionsCache.ts` (no TTL)
 
 ### Firestore Collections
@@ -367,9 +369,9 @@ The four sources that feed user lists, and how each handles archiving:
 
 - **`/api/users/display-names`** (`useBasicUsers`) — returns `isArchived` on each
   `BasicUser` but does **not** filter server-side, because some pages
-  (`creators/custom-requests`, `ca-portal/campaigns`) use this endpoint to resolve
-  historical editor names by UID, including archived users. Filter archived at the
-  **consumer** when building a picker (see `AdminTimesheets`,
+  (`creators/custom-requests`, `ca-portal/campaigns`) use it (via `useUserName`) to
+  resolve historical editor names by UID, including archived users. Filter archived
+  at the **consumer** when building a picker (see `AdminTimesheets`,
   `CreateNotificationDialog`).
 - **`/api/disputes/users`** (`useDisputesData`) — filters archived server-side. It
   only feeds the CA assignee/filter pickers; dispute names are resolved separately
@@ -388,6 +390,62 @@ list (archived users have no active session, so they never render).
 
 When adding a new page or component that lists users for selection, filter
 `isArchived` out of the rendered list.
+
+### Deleting Users
+
+Deleting a user (`DELETE /api/admin/users/[uid]`, triggered from the Employee
+Registry detail card) is the **destructive counterpart to archiving** — it
+permanently removes the user **and all of their personal data**. Contrast with
+**Archived Users** above, where nothing is deleted. (The Delete confirmation
+dialog says so; the Archive dialog explicitly states data is *not* deleted.)
+
+What the handler removes:
+- `users/{uid}`, group membership (`groups/*.members`), page-permission entries
+  (`page-permissions/*.users.{uid}`), and `active_sessions/{uid}`.
+- Every doc owned by the user (`userId`/`uid` field) in `time_entries`, legacy
+  `time-entries`, `screenshots`, `shifts`, `leave_requests`, `notifications`,
+  and `bugs`.
+- Storage: the `screenshots/{uid}/` prefix (full-size + thumbnails) and
+  `profile-photos/{uid}/`.
+
+What it intentionally **keeps**: shared business records that reference the user
+only as a participant/audit field — `disputes` (`createdBy`/`assignedTo`),
+`campaign-tracking` & `content-planning` (`createdBy`/`lastEditedBy`), and
+`admin_notification_batches` (`sentBy`). These belong to creators/other
+employees; the deleted UID is rendered as "Deleted User" (see **User Name
+Resolution**).
+
+The cascade is **not** a single atomic transaction (too many ops) — it runs
+chunked 500-op batches per collection, then deletes Storage prefixes. Re-running
+delete on the same UID is idempotent. **When you add a new collection that stores
+per-user data, add it to this cascade.**
+
+### User Name Resolution
+
+Internal user names live on `users/{uid}` as `displayName` (+ `firstName` /
+`lastName`). The resolution chain is **`displayName` → `firstName lastName` →
+"Deleted User"**.
+
+- **Client (uid → name):** use `useUserName()` (`src/hooks/useUserName.ts`), whose
+  `names` map is sourced from `useBasicUsers`. Don't roll your own
+  `/api/users/display-names` fetch.
+- **Rendering a possibly-deleted user:** pass through
+  `resolveUserName(uid, names)` / render `<DeletedUser />`
+  (`src/components/DeletedUser.tsx`), which shows an italic *Deleted User* when the
+  UID is no longer resolvable. Deleted users are gone from `users`, so any shared
+  record still holding their UID would otherwise display the raw UID.
+- **Server (uid → name):** resolve with `getUserById` (single, cached) or
+  `adminDb.getAll(...)` over `users` refs (batch), and return an **empty string**
+  for an unresolved (deleted) user — that empty value is the signal the client
+  renders as *Deleted User*. See `/api/disputes`, `/api/shifts/week`,
+  `/api/admin/notifications/[batchId]/recipients`.
+- Creator names (`stageName`) are a **separate** path via `useCreators` /
+  `creatorMap`; that fallback still shows the raw creator ID, not "Deleted User".
+
+The name-composition precedence is **intentionally inconsistent** in a couple of
+places (`UserCard` uses `firstName lastName || displayName`; `AdminTimesheets`
+uses `displayName || firstName lastName`) — deliberate presentation choices, not
+a bug to unify.
 
 ### Profile Pictures
 
