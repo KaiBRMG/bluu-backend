@@ -39,8 +39,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // hung local (IndexedDB) auth-state restore on the user's device. Report
       // it so we can see how often this happens in the wild; the fail-open
       // below still lets them reach the Login screen.
+      // Handled recovery (we fail open to the Login screen), not a crash —
+      // log as a warning so it's a signal of how often the hang happens
+      // without polluting the error feed.
       Sentry.captureMessage('Auth state resolution timed out', {
-        level: 'error',
+        level: 'warning',
         tags: { area: 'auth-boot', reason: 'onAuthStateChanged-timeout' },
         extra: { timeoutMs: AUTH_TIMEOUT_MS },
       });

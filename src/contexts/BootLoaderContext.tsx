@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { usePathname } from "next/navigation";
 import * as Sentry from "@sentry/nextjs";
 import LoadingScreen from "@/components/LoadingScreen";
 
@@ -51,6 +52,17 @@ export function BootLoaderProvider({ children }: { children: React.ReactNode }) 
   const [timedOut, setTimedOut] = useState(false);
   const [booted, setBooted] = useState(false);
 
+  // Auth/onboarding routes are standalone pages (OAuth redirect, revoked,
+  // onboarding) with their own UI — and some, like /auth/callback, run in the
+  // system browser and sit idle after handing off to the Electron deep link.
+  // The app boot loader (and its failsafe) has no business running there: it
+  // would just overlay those pages and, on an idle tab, trip the failsafe
+  // ceiling after MAX_LOADER_MS as a false positive. Skip the loader entirely.
+  const pathname = usePathname();
+  const isAuthRoute =
+    !!pathname &&
+    (pathname.startsWith('/auth/') || pathname.startsWith('/onboarding/'));
+
   const setPhase = useCallback((key: string, loading: boolean) => {
     const set = phases.current;
     const had = set.has(key);
@@ -72,25 +84,27 @@ export function BootLoaderProvider({ children }: { children: React.ReactNode }) 
   // fire on every healthy session that simply stays open past MAX_LOADER_MS,
   // reporting a false "ceiling hit" with no phases actually pending.
   useEffect(() => {
-    if (booted) return;
+    if (booted || isAuthRoute) return;
     const id = setTimeout(() => {
-      // Still not booted after MAX_LOADER_MS — a phase genuinely never cleared.
-      // The auth-level timeout (12s) normally fires first, so hitting this is a
-      // sign a different phase is stuck — report which ones are still pending.
-      Sentry.captureMessage('Boot loader hit failsafe ceiling', {
-        level: 'error',
-        tags: { area: 'auth-boot', reason: 'boot-loader-timeout' },
-        extra: {
-          maxLoaderMs: MAX_LOADER_MS,
-          pendingPhases: Array.from(phases.current),
-        },
-      });
+      // Still not booted after MAX_LOADER_MS. Only report if a phase is actually
+      // still pending — a genuinely stuck boot. If nothing is pending we just
+      // lift silently (defensive: avoids any residual false "ceiling hit").
+      const pendingPhases = Array.from(phases.current);
+      if (pendingPhases.length > 0) {
+        // The auth-level timeout (12s) normally fires first, so reaching here is
+        // a sign a different phase is stuck — report which ones.
+        Sentry.captureMessage('Boot loader hit failsafe ceiling', {
+          level: 'error',
+          tags: { area: 'auth-boot', reason: 'boot-loader-timeout' },
+          extra: { maxLoaderMs: MAX_LOADER_MS, pendingPhases },
+        });
+      }
       setTimedOut(true);
     }, MAX_LOADER_MS);
     return () => clearTimeout(id);
-  }, [booted]);
+  }, [booted, isAuthRoute]);
 
-  const show = !booted && !timedOut && (hasPending || !minElapsed);
+  const show = !isAuthRoute && !booted && !timedOut && (hasPending || !minElapsed);
 
   // Latch the boot as complete the first time everything is ready, so the loader
   // never reappears for the rest of the session.

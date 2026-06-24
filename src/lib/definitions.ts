@@ -18,9 +18,10 @@ export interface PageDef {
 
 export const TEAMSPACES: TeamspaceDef[] = [
   { id: 'ca-portal', name: 'CA Portal', icon: 'MessageSquareQuote', order: 0 },
-  { id: 'admin', name: 'Admin', icon: 'ShieldUser', order: 1 },
+  { id: 'smm-portal', name: 'SMM Portal', icon: 'MessageSquareQuote', order: 1 },
   { id: 'creators', name: 'Creators', icon: 'ShieldUser', order: 2 },
-  { id: 'apps', name: 'Apps', icon: 'PanelLeft', order: 3 },
+  { id: 'admin', name: 'Admin', icon: 'ShieldUser', order: 3 },
+  { id: 'apps', name: 'Apps', icon: 'PanelLeft', order: 4 },
 ];
 
 export const PAGES: PageDef[] = [
@@ -33,6 +34,12 @@ export const PAGES: PageDef[] = [
   { pageId: 'ca-campaigns', title: 'Campaigns', teamspaceId: 'ca-portal', href: '/ca-portal/campaigns', icon: 'SquareStar', order: 5 },
   // { pageId: 'calendar', title: 'Calendar', teamspaceId: 'ca-portal', href: '/ca-portal/calendar', icon: null, order: 2 },
   
+  // SMM Portal
+  { pageId: 'smm-admin', title: 'Admin', teamspaceId: 'smm-portal', href: '/smm-portal/admin', icon: 'Cog', order: 0 },
+  { pageId: 'smm-dashboard', title: 'Dashboard', teamspaceId: 'smm-portal', href: '/smm-portal/dashboard', icon: 'LayoutDashboard', order: 1 },
+  { pageId: 'smm-twitterx', title: 'Twitter/X', teamspaceId: 'smm-portal', href: '/smm-portal/twitterx', icon: 'LayoutDashboard', order: 2 },
+
+
   // Admin
   { pageId: 'user-management', title: 'User Management', teamspaceId: 'admin', href: '/admin/user-management', icon: 'UserRoundCog', order: 0 },
   { pageId: 'sharing', title: 'Sharing', teamspaceId: 'admin', href: '/admin/sharing', icon: 'Share2', order: 1 },
@@ -48,7 +55,7 @@ export const PAGES: PageDef[] = [
   { pageId: 'time-tracking', title: 'Time Tracking', teamspaceId: 'apps', href: '/applications/time-tracking', icon: 'ClockFading', order: 0 },
   { pageId: 'apps-password-manager', title: 'Password Manager', teamspaceId: 'apps', href: '/applications/password-manager', icon: 'KeyRound', order: 5 },
   { pageId: 'apps-resources', title: 'Resources', teamspaceId: 'apps', href: '/applications/apps-resources', icon: 'BookOpen', order: 1 },
-  { pageId: 'apps-onlyfans', title: 'OnlyFans', teamspaceId: 'apps', href: '/applications/apps-onlyfans', icon: '', order: 2 },
+  // { pageId: 'apps-onlyfans', title: 'OnlyFans', teamspaceId: 'apps', href: '/applications/apps-onlyfans', icon: '', order: 2 },
 
 ];
 
