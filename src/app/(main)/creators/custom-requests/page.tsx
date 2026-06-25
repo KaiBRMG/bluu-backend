@@ -1208,7 +1208,7 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
                     {formatDueDate(entry.dueDate)}
                   </TableCell>
                   <TableCell className="text-sm">{entry.fanName}</TableCell>
-                  <TableCell className="text-sm">{formatAmount(entry.amountPaid)}</TableCell>
+                  <TableCell className={`text-sm font-medium ${entry.amountPaid < entry.totalAmount ? "text-red-400" : "text-green-400"}`}>{formatAmount(entry.amountPaid)}</TableCell>
                   <TableCell className="text-sm">{formatAmount(entry.totalAmount)}</TableCell>
                   <TableCell className="text-sm text-zinc-400">{resolveUserName(entry.createdBy, userNames)}</TableCell>
                   <TableCell>
@@ -1464,7 +1464,7 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
                     </span>
                   </TableCell>
                   <TableCell className="text-sm">{entry.fanName}</TableCell>
-                  <TableCell className="text-sm">{formatAmount(entry.amountPaid)}</TableCell>
+                  <TableCell className={`text-sm font-medium ${entry.amountPaid < entry.totalAmount ? "text-red-400" : "text-green-400"}`}>{formatAmount(entry.amountPaid)}</TableCell>
                   <TableCell className="text-sm">{formatAmount(entry.totalAmount)}</TableCell>
                   <TableCell>
                     <DropdownMenu>
