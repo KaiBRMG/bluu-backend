@@ -33,6 +33,7 @@ import {
   firestoreToEntry, formatInTimezone, formatDueDate, COMMON_TIMEZONES, CAMPAIGN_TYPES,
 } from "@/lib/campaignTracking";
 import { useUserData } from "@/hooks/useUserData";
+import { useBasicUsers } from "@/hooks/useBasicUsers";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
 
@@ -1287,18 +1288,311 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
   );
 }
 
+// ─── Chat Agent Table ─────────────────────────────────────────────────────────
+
+interface ChatAgentTableProps {
+  agentUid: string;
+  agentName: string;
+  creators: Creator[];
+  userNames: Record<string, string>;
+  isActive: boolean;
+}
+
+function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: ChatAgentTableProps) {
+  const [entries, setEntries] = useState<CampaignEntry[]>([]);
+  const [typeFilter, setTypeFilter] = useState<Set<CRType>>(new Set(["CR", "Call", "Item"]));
+  const [showCompleted, setShowCompleted] = useState(false);
+  const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
+  const [rejectEntry, setRejectEntry] = useState<CampaignEntry | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CampaignEntry | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const unsubRef = useRef<(() => void) | null>(null);
+
+  const creatorMap = useMemo(
+    () => Object.fromEntries(creators.map(c => [c.creatorID, c.stageName])),
+    [creators]
+  );
+
+  useEffect(() => {
+    if (!isActive) {
+      unsubRef.current?.();
+      unsubRef.current = null;
+      return;
+    }
+    if (unsubRef.current) unsubRef.current();
+    // Single-field equality query — no composite index required. Status is
+    // filtered client-side so the Show Completed toggle needs no re-subscribe.
+    const q = query(
+      collection(db, "campaign-tracking"),
+      where("createdBy", "==", agentUid)
+    );
+    unsubRef.current = onSnapshot(q, snap => {
+      const docs = snap.docs
+        .map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>))
+        .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type));
+      setEntries(sortByStatus(docs));
+    });
+    return () => { unsubRef.current?.(); };
+  }, [isActive, agentUid]);
+
+  const statusFiltered = showCompleted
+    ? entries
+    : entries.filter(e => e.status !== "Completed");
+  const typeFiltered = statusFiltered.filter(e => typeFilter.has(e.type));
+  const searchLower = searchQuery.toLowerCase();
+  const displayed = searchLower
+    ? typeFiltered.filter(e =>
+        e.CR.toLowerCase().includes(searchLower) ||
+        e.fanName.toLowerCase().includes(searchLower) ||
+        e.profileLink.toLowerCase().includes(searchLower) ||
+        (creatorMap[e.creatorID] ?? e.creatorID).toLowerCase().includes(searchLower)
+      )
+    : typeFiltered;
+
+  const toggleType = (t: CRType) => setTypeFilter(prev => {
+    const next = new Set(prev);
+    next.has(t) ? next.delete(t) : next.add(t);
+    return next;
+  });
+
+  const handleMarkComplete = async (e: CampaignEntry) => {
+    setActionLoading(true);
+    try {
+      await apiRequest(`/api/campaign-tracking/${e.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "Completed" }),
+      });
+      toast.success("Marked as completed");
+    } catch { toast.error("Failed"); }
+    setActionLoading(false);
+  };
+
+  const handleMarkIncomplete = async (e: CampaignEntry) => {
+    setActionLoading(true);
+    try {
+      await apiRequest(`/api/campaign-tracking/${e.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "Awaiting Approval" }),
+      });
+      toast.success("Marked as awaiting approval");
+    } catch { toast.error("Failed"); }
+    setActionLoading(false);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setActionLoading(true);
+    try {
+      await apiRequest(`/api/campaign-tracking/${deleteTarget.id}`, { method: "DELETE" });
+      toast.success("Deleted");
+    } catch { toast.error("Failed to delete"); }
+    setDeleteTarget(null);
+    setActionLoading(false);
+  };
+
+  return (
+    <div>
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="flex gap-2">
+          {(["CR", "Call", "Item"] as CRType[]).map(t => (
+            <Button key={t} size="sm" variant={typeFilter.has(t) ? "default" : "outline"} onClick={() => toggleType(t)}>
+              {TYPE_LABELS[t]}
+            </Button>
+          ))}
+        </div>
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
+          <Input
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search for CR Code, Fans, Profile Links, Creators..."
+            className="pl-8 h-8 text-xs bg-zinc-800 border-zinc-700"
+          />
+        </div>
+        <div className="flex items-center gap-2 ml-auto">
+          <Switch checked={showCompleted} onCheckedChange={setShowCompleted} id={`agent-show-completed-${agentUid}`} />
+          <label htmlFor={`agent-show-completed-${agentUid}`} className="text-sm text-zinc-400 cursor-pointer">Show Completed</label>
+        </div>
+      </div>
+
+      {displayed.length === 0 ? (
+        <div className="rounded-lg p-8 text-center" style={{ background: "var(--sidebar-background)", border: "1px solid var(--border-subtle)" }}>
+          <p className="text-sm text-muted-foreground">No custom requests found for {agentName}.</p>
+        </div>
+      ) : (
+        <div className="rounded-lg border overflow-hidden" style={{ borderColor: "var(--border-subtle)" }}>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>CR</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Priority</TableHead>
+                <TableHead>Due Date</TableHead>
+                <TableHead>Creator</TableHead>
+                <TableHead>Fan Name</TableHead>
+                <TableHead>Paid</TableHead>
+                <TableHead>Total</TableHead>
+                <TableHead className="w-12"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {displayed.map(entry => (
+                <TableRow key={entry.id}>
+                  <TableCell className="font-mono text-sm">{entry.CR}</TableCell>
+                  <TableCell className="text-sm">{TYPE_LABELS[entry.type]}</TableCell>
+                  <TableCell><StatusBadge status={entry.status} /></TableCell>
+                  <TableCell>
+                    {entry.priority ? (
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_COLORS[entry.priority]}`}>
+                        {entry.priority}
+                      </span>
+                    ) : <span className="text-zinc-600 text-xs">—</span>}
+                  </TableCell>
+                  <TableCell className="text-sm text-zinc-400">
+                    {formatDueDate(entry.dueDate)}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <Avatar className="size-4 shrink-0">
+                        <AvatarImage src={creators.find(c => c.creatorID === entry.creatorID)?.photoURL ?? undefined} />
+                        <AvatarFallback className="text-[8px]">{(creatorMap[entry.creatorID] ?? "?").charAt(0)}</AvatarFallback>
+                      </Avatar>
+                      <span className="truncate">{creatorMap[entry.creatorID] ?? entry.creatorID}</span>
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-sm">{entry.fanName}</TableCell>
+                  <TableCell className="text-sm">{formatAmount(entry.amountPaid)}</TableCell>
+                  <TableCell className="text-sm">{formatAmount(entry.totalAmount)}</TableCell>
+                  <TableCell>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="w-4 h-4" /></Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => setViewEntry(entry)}>View</DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        {entry.status !== "Completed" ? (
+                          <DropdownMenuItem onClick={() => handleMarkComplete(entry)} disabled={actionLoading}>
+                            <Check className="w-4 h-4 mr-2" /> Mark as Complete
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem onClick={() => handleMarkIncomplete(entry)} disabled={actionLoading}>
+                            Mark as Incomplete
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onClick={() => setDeleteTarget(entry)}
+                        >
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {viewEntry && (
+        <ManagerViewCard
+          entry={viewEntry}
+          creatorName={creatorMap[viewEntry.creatorID] ?? viewEntry.creatorID}
+          userNames={userNames}
+          onClose={() => setViewEntry(null)}
+          onSaved={() => setViewEntry(null)}
+          onReject={e => { setViewEntry(null); setRejectEntry(e); }}
+        />
+      )}
+
+      {rejectEntry && (
+        <RejectDialog
+          entry={rejectEntry}
+          onClose={() => setRejectEntry(null)}
+          onRejected={() => setRejectEntry(null)}
+        />
+      )}
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {deleteTarget?.CR}?</AlertDialogTitle>
+            <AlertDialogDescription>This action is permanent and cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={actionLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDelete}
+              disabled={actionLoading}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
+
+// A single selection drives both dropdowns: only one of "creator" / "agent"
+// can be active at a time, so selecting from one resets the other to '-'.
+type Selection =
+  | { kind: "overview" }
+  | { kind: "creator"; id: string }
+  | { kind: "agent"; uid: string };
+
+const NONE_VALUE = "__none__";
 
 export default function ManagerCustomRequestsPage() {
   const creators = useCreators();
   const { names: userNames } = useUserName();
-  const [activeTab, setActiveTab] = useState("overview");
-  const [loadedTabs, setLoadedTabs] = useState<Set<string>>(() => new Set(["overview"]));
+  const { users: basicUsers } = useBasicUsers();
+  const [selection, setSelection] = useState<Selection>({ kind: "overview" });
+  const [loadedCreators, setLoadedCreators] = useState<Set<string>>(() => new Set(["overview"]));
+  const [loadedAgents, setLoadedAgents] = useState<Set<string>>(() => new Set());
 
-  const handleTabChange = (value: string) => {
-    setActiveTab(value);
-    setLoadedTabs(prev => (prev.has(value) ? prev : new Set(prev).add(value)));
+  // Chat agents = active, non-archived users in the 'CA' group.
+  const chatAgents = useMemo(
+    () =>
+      basicUsers
+        .filter(u => !u.isArchived && u.groups.includes("CA"))
+        .map(u => ({
+          uid: u.uid,
+          name: u.displayName || `${u.firstName} ${u.lastName}`.trim() || u.uid,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [basicUsers]
+  );
+
+  const handleCreatorChange = (value: string) => {
+    if (value === NONE_VALUE) return; // the '-' placeholder is inert
+    setSelection(value === "overview" ? { kind: "overview" } : { kind: "creator", id: value });
+    if (value !== "overview") {
+      setLoadedCreators(prev => (prev.has(value) ? prev : new Set(prev).add(value)));
+    }
   };
+
+  const handleAgentChange = (value: string) => {
+    if (value === NONE_VALUE) return; // the '-' placeholder is inert
+    setSelection({ kind: "agent", uid: value });
+    setLoadedAgents(prev => (prev.has(value) ? prev : new Set(prev).add(value)));
+  };
+
+  // Each dropdown shows '-' (none) whenever the *other* dropdown owns the selection.
+  const creatorValue =
+    selection.kind === "overview" ? "overview"
+    : selection.kind === "creator" ? selection.id
+    : NONE_VALUE;
+  const agentValue = selection.kind === "agent" ? selection.uid : NONE_VALUE;
 
   // Merge creator names into the name map so creator UIDs (e.g. a creator who
   // last edited a CR from the portal) resolve to their stage name, not the raw UID.
@@ -1313,33 +1607,60 @@ export default function ManagerCustomRequestsPage() {
       <div className="max-w-7xl">
         <h1 className="text-2xl font-bold tracking-tight mb-2">Custom Requests</h1>
 
-        <div className="mt-6 flex items-center gap-3">
-          <label htmlFor="creator-select" className="text-sm font-medium text-zinc-300 shrink-0">
-            Select a Creator
-          </label>
-          <Select value={activeTab} onValueChange={handleTabChange}>
-            <SelectTrigger id="creator-select" className="w-64 bg-zinc-800 border-zinc-700">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="overview">Overview</SelectItem>
-              {creators.map(c => (
-                <SelectItem key={c.creatorID} value={c.creatorID}>{c.stageName}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="mt-6 flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-3">
+            <label htmlFor="creator-select" className="text-sm font-medium text-zinc-300 shrink-0">
+              Select a Creator
+            </label>
+            <Select value={creatorValue} onValueChange={handleCreatorChange}>
+              <SelectTrigger id="creator-select" className="w-64 bg-zinc-800 border-zinc-700">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE_VALUE}>-</SelectItem>
+                <SelectItem value="overview">Overview</SelectItem>
+                {creators.map(c => (
+                  <SelectItem key={c.creatorID} value={c.creatorID}>{c.stageName}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <label htmlFor="agent-select" className="text-sm font-medium text-zinc-300 shrink-0">
+              Select a Chat Agent
+            </label>
+            <Select value={agentValue} onValueChange={handleAgentChange}>
+              <SelectTrigger id="agent-select" className="w-64 bg-zinc-800 border-zinc-700">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE_VALUE}>-</SelectItem>
+                {chatAgents.map(a => (
+                  <SelectItem key={a.uid} value={a.uid}>{a.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <div className="mt-6">
-          {loadedTabs.has("overview") && (
-            <div className={activeTab === "overview" ? "" : "hidden"}>
-              <OverviewTab creators={creators} userNames={nameMap} isActive={activeTab === "overview"} />
+          {loadedCreators.has("overview") && (
+            <div className={selection.kind === "overview" ? "" : "hidden"}>
+              <OverviewTab creators={creators} userNames={nameMap} isActive={selection.kind === "overview"} />
             </div>
           )}
           {creators.map(c => (
-            loadedTabs.has(c.creatorID) && (
-              <div key={c.creatorID} className={activeTab === c.creatorID ? "" : "hidden"}>
-                <ManagerCreatorTable creatorID={c.creatorID} creatorName={c.stageName} creators={creators} userNames={nameMap} isActive={activeTab === c.creatorID} />
+            loadedCreators.has(c.creatorID) && (
+              <div key={c.creatorID} className={selection.kind === "creator" && selection.id === c.creatorID ? "" : "hidden"}>
+                <ManagerCreatorTable creatorID={c.creatorID} creatorName={c.stageName} creators={creators} userNames={nameMap} isActive={selection.kind === "creator" && selection.id === c.creatorID} />
+              </div>
+            )
+          ))}
+          {chatAgents.map(a => (
+            loadedAgents.has(a.uid) && (
+              <div key={a.uid} className={selection.kind === "agent" && selection.uid === a.uid ? "" : "hidden"}>
+                <ChatAgentTable agentUid={a.uid} agentName={a.name} creators={creators} userNames={nameMap} isActive={selection.kind === "agent" && selection.uid === a.uid} />
               </div>
             )
           ))}
