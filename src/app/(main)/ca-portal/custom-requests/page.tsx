@@ -124,7 +124,7 @@ function ViewCard({ entry, creatorName, onClose, userNames = {} }: ViewCardProps
     try {
       const res = await apiRequest(`/api/campaign-tracking/${entry.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ status: "Archived", totalAmount: entry.amountPaid }),
+        body: JSON.stringify({ status: "Archived", totalAmount: entry.amountPaid, isArchived: false }),
       });
       if (!res.ok) throw new Error();
       toast.success("Archived");
@@ -840,7 +840,7 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
     try {
       const res = await apiRequest(`/api/campaign-tracking/${archiveEntry.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ status: "Archived", totalAmount: archiveEntry.amountPaid }),
+        body: JSON.stringify({ status: "Archived", totalAmount: archiveEntry.amountPaid, isArchived: false }),
       });
       if (!res.ok) throw new Error();
       toast.success("Archived");

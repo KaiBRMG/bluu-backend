@@ -295,7 +295,7 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
     try {
       const res = await apiRequest(`/api/campaign-tracking/${entry.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ status: "Archived", totalAmount: entry.amountPaid }),
+        body: JSON.stringify({ status: "Archived", totalAmount: entry.amountPaid, isArchived: false }),
       });
       if (!res.ok) throw new Error();
       toast.success("Archived");
@@ -1257,7 +1257,7 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
     try {
       await apiRequest(`/api/campaign-tracking/${archiveEntry.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ status: "Archived", totalAmount: archiveEntry.amountPaid }),
+        body: JSON.stringify({ status: "Archived", totalAmount: archiveEntry.amountPaid, isArchived: false }),
       });
       toast.success("Archived");
     } catch { toast.error("Failed to archive"); }
@@ -1571,7 +1571,7 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
     try {
       await apiRequest(`/api/campaign-tracking/${archiveEntry.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ status: "Archived", totalAmount: archiveEntry.amountPaid }),
+        body: JSON.stringify({ status: "Archived", totalAmount: archiveEntry.amountPaid, isArchived: false }),
       });
       toast.success("Archived");
     } catch { toast.error("Failed to archive"); }
