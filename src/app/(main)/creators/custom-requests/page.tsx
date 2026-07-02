@@ -5,6 +5,7 @@ import AppLayout from "@/components/AppLayout";
 import { useCreators } from "@/hooks/useCreators";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
@@ -36,6 +37,7 @@ import { useUserData } from "@/hooks/useUserData";
 import { useBasicUsers } from "@/hooks/useBasicUsers";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
+import { ConfirmDialog, ARCHIVE_CR_TEXT, UNARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
 
 // ─── Date picker ─────────────────────────────────────────────────────────────
 
@@ -184,6 +186,9 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
   const [deleteSaving, setDeleteSaving] = useState(false);
   const [confirmComplete, setConfirmComplete] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [confirmUnarchive, setConfirmUnarchive] = useState(false);
+  const [archiveSaving, setArchiveSaving] = useState(false);
 
   const hasChanged =
     fields.fanName !== entry.fanName ||
@@ -282,6 +287,44 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
       toast.error("Failed to approve");
     } finally {
       setApproveSaving(false);
+    }
+  };
+
+  const handleArchive = async () => {
+    setArchiveSaving(true);
+    try {
+      const res = await apiRequest(`/api/campaign-tracking/${entry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "Archived", totalAmount: entry.amountPaid }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Archived");
+      onSaved();
+      onClose();
+    } catch {
+      toast.error("Failed to archive");
+    } finally {
+      setArchiveSaving(false);
+      setConfirmArchive(false);
+    }
+  };
+
+  const handleUnarchive = async () => {
+    setArchiveSaving(true);
+    try {
+      const res = await apiRequest(`/api/campaign-tracking/${entry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "In Progress", isArchived: false }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Unarchived");
+      onSaved();
+      onClose();
+    } catch {
+      toast.error("Failed to unarchive");
+    } finally {
+      setArchiveSaving(false);
+      setConfirmUnarchive(false);
     }
   };
 
@@ -480,6 +523,12 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
                 Mark as Complete
               </DropdownMenuItem>
               <DropdownMenuSeparator />
+              {entry.status === "Archived" ? (
+                <DropdownMenuItem onClick={() => setConfirmUnarchive(true)}>Unarchive</DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={() => setConfirmArchive(true)}>Archive</DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
                 onClick={() => setConfirmDelete(true)}
@@ -526,6 +575,25 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {confirmArchive && (
+        <ConfirmDialog
+          title="Archive Custom"
+          description={ARCHIVE_CR_TEXT}
+          onConfirm={handleArchive}
+          onClose={() => setConfirmArchive(false)}
+          loading={archiveSaving}
+        />
+      )}
+      {confirmUnarchive && (
+        <ConfirmDialog
+          title="Unarchive Custom"
+          description={UNARCHIVE_CR_TEXT}
+          onConfirm={handleUnarchive}
+          onClose={() => setConfirmUnarchive(false)}
+          loading={archiveSaving}
+        />
+      )}
     </div>
   );
 }
@@ -616,20 +684,35 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
   }, [isActive]);
 
   const creatorMap = Object.fromEntries(creators.map(c => [c.creatorID, c.stageName]));
+  // Entries whose creator is archived/inactive (absent from the active creator
+  // list) must not count toward the outstanding total.
+  const activeCreatorIds = new Set(creators.map(c => c.creatorID));
+
+  // Archived-status customs are excluded from every overview section and shown
+  // only in the dedicated "Recently Archived" panel (status=Archived while not
+  // yet dismissed, i.e. isArchived=false — the query already excludes dismissed).
+  const visibleEntries = allEntries.filter(e => e.status !== "Archived");
+  const recentArchived = allEntries
+    .filter(e => e.status === "Archived")
+    .sort((a, b) => new Date(b.lastEditedTime).getTime() - new Date(a.lastEditedTime).getTime());
+  const recentArchivedByCreator = Object.fromEntries(
+    creators.map(c => [c.creatorID, recentArchived.filter(e => e.creatorID === c.creatorID)])
+  );
+  const recentArchivedCreators = creators.filter(c => (recentArchivedByCreator[c.creatorID]?.length ?? 0) > 0);
 
   // Awaiting count per creator
   const awaitingByCreator = Object.fromEntries(
-    creators.map(c => [c.creatorID, allEntries.filter(e => e.creatorID === c.creatorID && e.status === "Awaiting Approval").length])
+    creators.map(c => [c.creatorID, visibleEntries.filter(e => e.creatorID === c.creatorID && e.status === "Awaiting Approval").length])
   );
 
   // In Progress count per creator
   const inProgressByCreator = Object.fromEntries(
-    creators.map(c => [c.creatorID, allEntries.filter(e => e.creatorID === c.creatorID && e.status === "In Progress").length])
+    creators.map(c => [c.creatorID, visibleEntries.filter(e => e.creatorID === c.creatorID && e.status === "In Progress").length])
   );
 
   // Outstanding $
   const outstanding = allEntries
-    .filter(e => e.status !== "Completed")
+    .filter(e => e.status !== "Completed" && activeCreatorIds.has(e.creatorID))
     .reduce((sum, e) => sum + (e.totalAmount - e.amountPaid), 0);
 
   // Recently completed (not archived)
@@ -642,7 +725,7 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
   const recentCompletedCreators = creators.filter(c => (recentCompletedByCreator[c.creatorID]?.length ?? 0) > 0);
 
   // Outstanding customs (Awaiting + In Progress), excluding campaign-only types which have no CR code
-  const outstandingEntries = allEntries.filter(e =>
+  const outstandingEntries = visibleEntries.filter(e =>
     (e.status === "Awaiting Approval" || e.status === "In Progress" || e.status === "Rejected") &&
     !(CAMPAIGN_TYPES as readonly string[]).includes(e.type)
   );
@@ -652,7 +735,7 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
   const outstandingKanbanCreators = creators.filter(c => (outstandingByCreator[c.creatorID]?.length ?? 0) > 0);
 
   // Outstanding payments (any entry with amountPaid < totalAmount), excluding campaign-only types
-  const outstandingPaymentEntries = allEntries.filter(e =>
+  const outstandingPaymentEntries = visibleEntries.filter(e =>
     e.amountPaid < e.totalAmount &&
     !(CAMPAIGN_TYPES as readonly string[]).includes(e.type)
   );
@@ -676,6 +759,20 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
   const handleDismissAll = async () => {
     try {
       await Promise.all(recentCompleted.map(e =>
+        apiRequest(`/api/campaign-tracking/${e.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ isArchived: true }),
+        })
+      ));
+      toast.success("All dismissed");
+    } catch {
+      toast.error("Failed to dismiss all");
+    }
+  };
+
+  const handleDismissAllArchived = async () => {
+    try {
+      await Promise.all(recentArchived.map(e =>
         apiRequest(`/api/campaign-tracking/${e.id}`, {
           method: "PATCH",
           body: JSON.stringify({ isArchived: true }),
@@ -746,41 +843,81 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
         </SummaryTile>
       </div>
 
-      {/* Recently Completed */}
-      {recentCompleted.length > 0 && (
-        <div className="rounded-xl p-4 border border-green-500/30 bg-green-500/5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-green-400">Recently Completed</h3>
-            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleDismissAll}>
-              Dismiss All
-            </Button>
-          </div>
-          <KanbanBoard>
-            {recentCompletedCreators.map(creator => (
-              <KanbanColumn key={creator.creatorID} creator={creator} count={recentCompletedByCreator[creator.creatorID].length}>
-                {recentCompletedByCreator[creator.creatorID].map(e => (
-                  <div
-                    key={e.id}
-                    className="flex items-center gap-2 rounded-md border-l-2 py-1.5 pl-2 pr-1.5"
-                    style={{ background: "rgba(255,255,255,0.04)", borderLeftColor: "rgba(255,255,255,0.14)" }}
-                  >
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <button
-                        onClick={() => setViewEntry(e)}
-                        className="text-left truncate font-mono text-xs font-medium text-zinc-200 hover:text-white hover:underline underline-offset-2 transition-colors"
+      {/* Recently Completed / Recently Archived */}
+      {(recentCompleted.length > 0 || recentArchived.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {recentCompleted.length > 0 && (
+            <div className="rounded-xl p-4 border border-green-500/30 bg-green-500/5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-green-400">Recently Completed</h3>
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleDismissAll}>
+                  Dismiss All
+                </Button>
+              </div>
+              <KanbanBoard>
+                {recentCompletedCreators.map(creator => (
+                  <KanbanColumn key={creator.creatorID} creator={creator} count={recentCompletedByCreator[creator.creatorID].length}>
+                    {recentCompletedByCreator[creator.creatorID].map(e => (
+                      <div
+                        key={e.id}
+                        className="flex items-center gap-2 rounded-md border-l-2 py-1.5 pl-2 pr-1.5"
+                        style={{ background: "rgba(255,255,255,0.04)", borderLeftColor: "rgba(255,255,255,0.14)" }}
                       >
-                        {e.CR}
-                      </button>
-                      <span className="text-[10px] text-zinc-500">{formatInTimezone(e.lastEditedTime, userTz)}</span>
-                    </div>
-                    <Button size="sm" variant="outline" className="h-6 shrink-0 text-[10px]" onClick={() => handleDismiss(e.id)}>
-                      Dismiss
-                    </Button>
-                  </div>
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <button
+                            onClick={() => setViewEntry(e)}
+                            className="text-left truncate font-mono text-xs font-medium text-zinc-200 hover:text-white hover:underline underline-offset-2 transition-colors"
+                          >
+                            {e.CR}
+                          </button>
+                          <span className="text-[10px] text-zinc-500">{formatInTimezone(e.lastEditedTime, userTz)}</span>
+                        </div>
+                        <Button size="sm" variant="outline" className="h-6 shrink-0 text-[10px]" onClick={() => handleDismiss(e.id)}>
+                          Dismiss
+                        </Button>
+                      </div>
+                    ))}
+                  </KanbanColumn>
                 ))}
-              </KanbanColumn>
-            ))}
-          </KanbanBoard>
+              </KanbanBoard>
+            </div>
+          )}
+          {recentArchived.length > 0 && (
+            <div className="rounded-xl p-4 border border-orange-500/30 bg-orange-500/5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-orange-400">Recently Archived</h3>
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleDismissAllArchived}>
+                  Dismiss All
+                </Button>
+              </div>
+              <KanbanBoard>
+                {recentArchivedCreators.map(creator => (
+                  <KanbanColumn key={creator.creatorID} creator={creator} count={recentArchivedByCreator[creator.creatorID].length}>
+                    {recentArchivedByCreator[creator.creatorID].map(e => (
+                      <div
+                        key={e.id}
+                        className="flex items-center gap-2 rounded-md border-l-2 py-1.5 pl-2 pr-1.5"
+                        style={{ background: "rgba(249,115,22,0.06)", borderLeftColor: "rgba(249,115,22,0.4)" }}
+                      >
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <button
+                            onClick={() => setViewEntry(e)}
+                            className="text-left truncate font-mono text-xs font-medium text-zinc-200 hover:text-white hover:underline underline-offset-2 transition-colors"
+                          >
+                            {e.CR}
+                          </button>
+                          <span className="text-[10px] text-zinc-500">{formatInTimezone(e.lastEditedTime, userTz)}</span>
+                        </div>
+                        <Button size="sm" variant="outline" className="h-6 shrink-0 text-[10px]" onClick={() => handleDismiss(e.id)}>
+                          Dismiss
+                        </Button>
+                      </div>
+                    ))}
+                  </KanbanColumn>
+                ))}
+              </KanbanBoard>
+            </div>
+          )}
         </div>
       )}
 
@@ -1054,19 +1191,24 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
   const [entries, setEntries] = useState<CampaignEntry[]>([]);
   const [typeFilter, setTypeFilter] = useState<Set<CRType>>(new Set(["CR", "Call", "Item"]));
   const [showCompleted, setShowCompleted] = useState(false);
+  const [archivedOnly, setArchivedOnly] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
   const [rejectEntry, setRejectEntry] = useState<CampaignEntry | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CampaignEntry | null>(null);
+  const [archiveEntry, setArchiveEntry] = useState<CampaignEntry | null>(null);
+  const [unarchiveEntry, setUnarchiveEntry] = useState<CampaignEntry | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const unsubRef = useRef<(() => void) | null>(null);
 
   const subscribe = useCallback(() => {
     if (unsubRef.current) unsubRef.current();
+    // Archived is always loaded so it stays searchable and available to the
+    // Archived badge without a re-subscribe.
     const statusFilter: CRStatus[] = showCompleted
-      ? ["Awaiting Approval", "In Progress", "Rejected", "Completed"]
-      : ["Awaiting Approval", "In Progress", "Rejected"];
+      ? ["Awaiting Approval", "In Progress", "Rejected", "Completed", "Archived"]
+      : ["Awaiting Approval", "In Progress", "Rejected", "Archived"];
 
     const q = query(
       collection(db, "campaign-tracking"),
@@ -1091,22 +1233,51 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
     return () => { unsubRef.current?.(); };
   }, [isActive, subscribe]);
 
-  const typeFiltered = entries.filter(e => typeFilter.has(e.type));
   const searchLower = searchQuery.toLowerCase();
+  const matchesSearch = (e: CampaignEntry) =>
+    e.CR.toLowerCase().includes(searchLower) ||
+    e.fanName.toLowerCase().includes(searchLower) ||
+    e.profileLink.toLowerCase().includes(searchLower) ||
+    (userNames[e.createdBy] ?? e.createdBy).toLowerCase().includes(searchLower);
   const displayed = searchLower
-    ? typeFiltered.filter(e =>
-        e.CR.toLowerCase().includes(searchLower) ||
-        e.fanName.toLowerCase().includes(searchLower) ||
-        e.profileLink.toLowerCase().includes(searchLower) ||
-        (userNames[e.createdBy] ?? e.createdBy).toLowerCase().includes(searchLower)
-      )
-    : typeFiltered;
+    ? entries.filter(matchesSearch)
+    : archivedOnly
+      ? entries.filter(e => e.status === "Archived")
+      : entries.filter(e => e.status !== "Archived" && typeFilter.has(e.type));
 
   const toggleType = (t: CRType) => setTypeFilter(prev => {
     const next = new Set(prev);
     next.has(t) ? next.delete(t) : next.add(t);
     return next;
   });
+
+  const doArchive = async () => {
+    if (!archiveEntry) return;
+    setActionLoading(true);
+    try {
+      await apiRequest(`/api/campaign-tracking/${archiveEntry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "Archived", totalAmount: archiveEntry.amountPaid }),
+      });
+      toast.success("Archived");
+    } catch { toast.error("Failed to archive"); }
+    setActionLoading(false);
+    setArchiveEntry(null);
+  };
+
+  const doUnarchive = async () => {
+    if (!unarchiveEntry) return;
+    setActionLoading(true);
+    try {
+      await apiRequest(`/api/campaign-tracking/${unarchiveEntry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "In Progress", isArchived: false }),
+      });
+      toast.success("Unarchived");
+    } catch { toast.error("Failed to unarchive"); }
+    setActionLoading(false);
+    setUnarchiveEntry(null);
+  };
 
   const handleMarkComplete = async (e: CampaignEntry) => {
     setActionLoading(true);
@@ -1149,10 +1320,22 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex gap-2">
           {(["CR", "Call", "Item"] as CRType[]).map(t => (
-            <Button key={t} size="sm" variant={typeFilter.has(t) ? "default" : "outline"} onClick={() => toggleType(t)}>
+            <Badge
+              key={t}
+              variant={!archivedOnly && typeFilter.has(t) ? "default" : "outline"}
+              onClick={() => { if (!archivedOnly) toggleType(t); }}
+              className={archivedOnly ? "opacity-40 pointer-events-none select-none" : "cursor-pointer select-none"}
+            >
               {TYPE_LABELS[t]}
-            </Button>
+            </Badge>
           ))}
+          <Badge
+            variant={archivedOnly ? "destructive" : "outline"}
+            onClick={() => setArchivedOnly(v => !v)}
+            className="cursor-pointer select-none"
+          >
+            Archived
+          </Badge>
         </div>
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
@@ -1164,8 +1347,8 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
           />
         </div>
         <div className="flex items-center gap-2 ml-auto">
-          <Switch checked={showCompleted} onCheckedChange={setShowCompleted} id={`mgr-show-completed-${creatorID}`} />
-          <label htmlFor={`mgr-show-completed-${creatorID}`} className="text-sm text-zinc-400 cursor-pointer">Show Completed</label>
+          <Switch checked={showCompleted} onCheckedChange={setShowCompleted} id={`mgr-show-completed-${creatorID}`} disabled={archivedOnly} />
+          <label htmlFor={`mgr-show-completed-${creatorID}`} className={archivedOnly ? "text-sm text-zinc-600 cursor-not-allowed" : "text-sm text-zinc-400 cursor-pointer"}>Show Completed</label>
           <Button size="sm" onClick={() => setShowNew(true)}><Plus className="w-4 h-4 mr-1" /> New</Button>
         </div>
       </div>
@@ -1229,6 +1412,12 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuSeparator />
+                        {entry.status === "Archived" ? (
+                          <DropdownMenuItem onClick={() => setUnarchiveEntry(entry)}>Unarchive</DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem onClick={() => setArchiveEntry(entry)}>Archive</DropdownMenuItem>
+                        )}
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem
                           className="text-destructive focus:text-destructive"
                           onClick={() => setDeleteTarget(entry)}
@@ -1284,6 +1473,25 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {archiveEntry && (
+        <ConfirmDialog
+          title="Archive Custom"
+          description={ARCHIVE_CR_TEXT}
+          onConfirm={doArchive}
+          onClose={() => setArchiveEntry(null)}
+          loading={actionLoading}
+        />
+      )}
+      {unarchiveEntry && (
+        <ConfirmDialog
+          title="Unarchive Custom"
+          description={UNARCHIVE_CR_TEXT}
+          onConfirm={doUnarchive}
+          onClose={() => setUnarchiveEntry(null)}
+          loading={actionLoading}
+        />
+      )}
     </div>
   );
 }
@@ -1302,9 +1510,12 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
   const [entries, setEntries] = useState<CampaignEntry[]>([]);
   const [typeFilter, setTypeFilter] = useState<Set<CRType>>(new Set(["CR", "Call", "Item"]));
   const [showCompleted, setShowCompleted] = useState(false);
+  const [archivedOnly, setArchivedOnly] = useState(false);
   const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
   const [rejectEntry, setRejectEntry] = useState<CampaignEntry | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CampaignEntry | null>(null);
+  const [archiveEntry, setArchiveEntry] = useState<CampaignEntry | null>(null);
+  const [unarchiveEntry, setUnarchiveEntry] = useState<CampaignEntry | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const unsubRef = useRef<(() => void) | null>(null);
@@ -1336,25 +1547,51 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
     return () => { unsubRef.current?.(); };
   }, [isActive, agentUid]);
 
-  const statusFiltered = showCompleted
-    ? entries
-    : entries.filter(e => e.status !== "Completed");
-  const typeFiltered = statusFiltered.filter(e => typeFilter.has(e.type));
   const searchLower = searchQuery.toLowerCase();
+  const matchesSearch = (e: CampaignEntry) =>
+    e.CR.toLowerCase().includes(searchLower) ||
+    e.fanName.toLowerCase().includes(searchLower) ||
+    e.profileLink.toLowerCase().includes(searchLower) ||
+    (creatorMap[e.creatorID] ?? e.creatorID).toLowerCase().includes(searchLower);
   const displayed = searchLower
-    ? typeFiltered.filter(e =>
-        e.CR.toLowerCase().includes(searchLower) ||
-        e.fanName.toLowerCase().includes(searchLower) ||
-        e.profileLink.toLowerCase().includes(searchLower) ||
-        (creatorMap[e.creatorID] ?? e.creatorID).toLowerCase().includes(searchLower)
-      )
-    : typeFiltered;
+    ? entries.filter(matchesSearch)
+    : archivedOnly
+      ? entries.filter(e => e.status === "Archived")
+      : entries.filter(e => e.status !== "Archived" && typeFilter.has(e.type) && (showCompleted || e.status !== "Completed"));
 
   const toggleType = (t: CRType) => setTypeFilter(prev => {
     const next = new Set(prev);
     next.has(t) ? next.delete(t) : next.add(t);
     return next;
   });
+
+  const doArchive = async () => {
+    if (!archiveEntry) return;
+    setActionLoading(true);
+    try {
+      await apiRequest(`/api/campaign-tracking/${archiveEntry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "Archived", totalAmount: archiveEntry.amountPaid }),
+      });
+      toast.success("Archived");
+    } catch { toast.error("Failed to archive"); }
+    setActionLoading(false);
+    setArchiveEntry(null);
+  };
+
+  const doUnarchive = async () => {
+    if (!unarchiveEntry) return;
+    setActionLoading(true);
+    try {
+      await apiRequest(`/api/campaign-tracking/${unarchiveEntry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "In Progress", isArchived: false }),
+      });
+      toast.success("Unarchived");
+    } catch { toast.error("Failed to unarchive"); }
+    setActionLoading(false);
+    setUnarchiveEntry(null);
+  };
 
   const handleMarkComplete = async (e: CampaignEntry) => {
     setActionLoading(true);
@@ -1397,10 +1634,22 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex gap-2">
           {(["CR", "Call", "Item"] as CRType[]).map(t => (
-            <Button key={t} size="sm" variant={typeFilter.has(t) ? "default" : "outline"} onClick={() => toggleType(t)}>
+            <Badge
+              key={t}
+              variant={!archivedOnly && typeFilter.has(t) ? "default" : "outline"}
+              onClick={() => { if (!archivedOnly) toggleType(t); }}
+              className={archivedOnly ? "opacity-40 pointer-events-none select-none" : "cursor-pointer select-none"}
+            >
               {TYPE_LABELS[t]}
-            </Button>
+            </Badge>
           ))}
+          <Badge
+            variant={archivedOnly ? "destructive" : "outline"}
+            onClick={() => setArchivedOnly(v => !v)}
+            className="cursor-pointer select-none"
+          >
+            Archived
+          </Badge>
         </div>
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
@@ -1412,8 +1661,8 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
           />
         </div>
         <div className="flex items-center gap-2 ml-auto">
-          <Switch checked={showCompleted} onCheckedChange={setShowCompleted} id={`agent-show-completed-${agentUid}`} />
-          <label htmlFor={`agent-show-completed-${agentUid}`} className="text-sm text-zinc-400 cursor-pointer">Show Completed</label>
+          <Switch checked={showCompleted} onCheckedChange={setShowCompleted} id={`agent-show-completed-${agentUid}`} disabled={archivedOnly} />
+          <label htmlFor={`agent-show-completed-${agentUid}`} className={archivedOnly ? "text-sm text-zinc-600 cursor-not-allowed" : "text-sm text-zinc-400 cursor-pointer"}>Show Completed</label>
         </div>
       </div>
 
@@ -1484,6 +1733,12 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuSeparator />
+                        {entry.status === "Archived" ? (
+                          <DropdownMenuItem onClick={() => setUnarchiveEntry(entry)}>Unarchive</DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem onClick={() => setArchiveEntry(entry)}>Archive</DropdownMenuItem>
+                        )}
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem
                           className="text-destructive focus:text-destructive"
                           onClick={() => setDeleteTarget(entry)}
@@ -1537,6 +1792,25 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {archiveEntry && (
+        <ConfirmDialog
+          title="Archive Custom"
+          description={ARCHIVE_CR_TEXT}
+          onConfirm={doArchive}
+          onClose={() => setArchiveEntry(null)}
+          loading={actionLoading}
+        />
+      )}
+      {unarchiveEntry && (
+        <ConfirmDialog
+          title="Unarchive Custom"
+          description={UNARCHIVE_CR_TEXT}
+          onConfirm={doUnarchive}
+          onClose={() => setUnarchiveEntry(null)}
+          loading={actionLoading}
+        />
+      )}
     </div>
   );
 }

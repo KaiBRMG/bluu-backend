@@ -18,7 +18,8 @@ import {
 import {
   Card, CardHeader, CardTitle, CardContent, CardFooter,
 } from "@/components/ui/card";
-import { MoreHorizontal, UserCircle, Copy, Check } from "lucide-react";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { MoreHorizontal, UserCircle, Copy, Check, Info } from "lucide-react";
 import { TimezoneCombobox } from "@/components/ui/timezone-combobox";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -327,7 +328,24 @@ function CreatorTable({ list, onEdit, onToggleActive, onArchive, onRestore, onDe
             <TableHead>Stage Name</TableHead>
             <TableHead>Email</TableHead>
             <TableHead>OFID</TableHead>
-            <TableHead>Status</TableHead>
+            <TableHead>
+              <span className="inline-flex items-center gap-1.5">
+                Status
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button type="button" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+                      <Info className="w-3.5 h-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <p className="font-medium">Deactivate</p>
+                    <p className="mb-1.5">Blocks the creator from logging into their creator portal. Their data stays fully visible to employees.</p>
+                    <p className="font-medium">Archive</p>
+                    <p>Removes the creator and their data from the employee-facing side (Custom Requests, Campaigns, Content Planning) and blocks portal login. Nothing is deleted, and it can be restored.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </span>
+            </TableHead>
             <TableHead className="w-12"></TableHead>
           </TableRow>
         </TableHeader>
@@ -467,6 +485,10 @@ export default function CreatorManagementPage() {
     try {
       await apiRequest(`/api/admin/creators/${creator.uid}`, {
         method: 'PUT',
+        // Restore only un-archives (restores employee-side visibility). Portal
+        // login is governed independently by isActive — use Reactivate to grant
+        // it back — so restoring a creator who was deactivated before archiving
+        // must not silently re-enable their portal access.
         body: JSON.stringify({ isArchived: false }),
       });
       await fetchCreators();

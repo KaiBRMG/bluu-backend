@@ -316,6 +316,7 @@ Current notification events and their factory functions:
 | CR submitted | `notifications.crCreated(creatorName, stageName)` |
 | CR rejected | `notifications.crRejected(editorName, cr, stageName)` |
 | CR completed | `notifications.crCompleted(cr, stageName)` |
+| CR/campaign transferred | `notifications.crTransferred(transferrerName, creatorName, actionUrl)` — sent to the recipient by `/api/campaign-tracking/[id]/transfer` |
 | Leave approved | `notifications.leaveApproved(leaveLabel, dateStr)` |
 | Leave denied | `notifications.leaveDenied(leaveLabel, dateStr)` |
 | Dispute assigned | `notifications.disputeAssigned(createdByName)` |
@@ -323,6 +324,52 @@ Current notification events and their factory functions:
 | Dispute — admin rejected | `notifications.disputeAdminRejected(reason?)` |
 | Dispute — CA approved | `notifications.disputeCaApproved(assignedToName)` |
 | Dispute — CA rejected | `notifications.disputeCaRejected(assignedToName, reason?)` |
+
+### Campaign Tracking (Custom Requests & Campaigns)
+
+The single `campaign-tracking` collection backs **two** surfaces, distinguished by
+`type` (`src/lib/campaignTracking.ts`):
+
+- **Custom requests** — types `CR` / `Call` / `Item`. Have the approval workflow
+  and a `CR` code. Surfaced on `ca-portal/custom-requests` (CA, incl. *My Customs*)
+  and `creators/custom-requests` (manager Overview + per-creator / per-chat-agent
+  tables). CR views filter out campaign types with
+  `!(CAMPAIGN_TYPES as readonly string[]).includes(e.type)`.
+- **Campaigns** — types in `CAMPAIGN_TYPES` (`BFE` / `Hubby` / `VIP`). No approval
+  workflow, no CR code. Surfaced on `ca-portal/campaigns` (`where type in
+  CAMPAIGN_TYPES`).
+
+**Two archive mechanisms — do not conflate them:**
+
+- **Custom requests** use the `Archived` **`status`** value (added to `CRStatus`
+  and every `STATUS_*` map). Archiving sets `status:'Archived'` **and
+  `totalAmount = amountPaid`** (zeroes outstanding for a stale/abandoned custom).
+  Unarchiving sets `status:'In Progress'` + `isArchived:false`. Archiving leaves
+  `isArchived:false` on purpose so the entry surfaces in the creators-Overview
+  **Recently Archived** panel (`status === 'Archived' && !isArchived`, mirroring
+  Recently Completed); dismissing there sets `isArchived:true`.
+- **Campaigns** use the **`isArchived`** boolean (never the `Archived` status).
+  Archiving sets `isArchived:true` **and `amountPaid = totalAmount`** (treated as
+  paid in full). Unarchiving sets `isArchived:false`.
+
+Archived customs are excluded from every default view (My Customs, all CR data
+tables, creators Overview). Data tables keep `Archived` in the `status in [...]`
+subscription filter so it loads alongside active statuses — this lets the
+destructive **Archived** badge show archived rows and lets search span them with
+no re-subscribe. Toggling the Archived badge greys out the type filters and the
+*Show Completed* toggle. Adding `Archived` to the `status in [...]` list needs no
+new composite index (indexes key on fields, not values).
+
+**Transfer** — `POST /api/campaign-tracking/[id]/transfer` reassigns `createdBy`
+to another active `CA`-group user and notifies them (`crTransferred`). Both
+dashboards update instantly via the live `onSnapshot` queries keyed on
+`createdBy`, so no cache invalidation is needed. `createdBy` is deliberately **not**
+in `EDITABLE_FIELDS` of `PATCH /api/campaign-tracking/[id]` — reassignment must go
+through the transfer route so the notification always fires.
+
+Shared UI for these actions lives in `src/components/campaign/entryActions.tsx`
+(`TransferDialog`, `ConfirmDialog`), reached from the **Actions** menu on the CA
+view cards + table rows.
 
 ### UI Stack
 

@@ -114,7 +114,7 @@ export default function AllCustomsPage() {
     const unsub = onSnapshot(q, snap => {
       const docs = snap.docs
         .map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>))
-        .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type));
+        .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type) && e.status !== "Archived");
       docs.sort((a, b) => {
         if (a.status !== b.status) return a.status === "In Progress" ? -1 : 1;
         return new Date(b.createdTime).getTime() - new Date(a.createdTime).getTime();

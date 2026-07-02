@@ -6,6 +6,7 @@ import AppLayout from "@/components/AppLayout";
 import { useCreators } from "@/hooks/useCreators";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -33,11 +34,11 @@ import {
 import { useUserData } from "@/hooks/useUserData";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
+import { TransferDialog, ConfirmDialog, ARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
 
 // ─── Shared constants ─────────────────────────────────────────────────────────
 
 const inputClass = "w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500";
-const readOnlyClass = "w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-300";
 const PAGE_SIZE = 20;
 
 const TYPE_BUTTON_LABELS: Record<CampaignType, string> = {
@@ -82,14 +83,54 @@ function CampaignViewCard({ entry, creatorName, userNames, onClose }: ViewCardPr
   const [profileLink, setProfileLink] = useState(entry.profileLink ?? "");
   const [description, setDescription] = useState(entry.description ?? "");
   const [amountPaid, setAmountPaid] = useState(String(entry.amountPaid));
+  const [totalAmount, setTotalAmount] = useState(String(entry.totalAmount));
   const [length, setLength] = useState(entry.length ?? "");
   const [saving, setSaving] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const doArchive = async () => {
+    setActionLoading(true);
+    try {
+      const res = await apiRequest(`/api/campaign-tracking/${entry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ isArchived: true, amountPaid: entry.totalAmount }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Archived");
+      onClose();
+    } catch {
+      toast.error("Failed to archive");
+    } finally {
+      setActionLoading(false);
+      setConfirmArchive(false);
+    }
+  };
+
+  const doUnarchive = async () => {
+    setActionLoading(true);
+    try {
+      const res = await apiRequest(`/api/campaign-tracking/${entry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ isArchived: false }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Unarchived");
+      onClose();
+    } catch {
+      toast.error("Failed to unarchive");
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const hasChanged =
     fanName !== entry.fanName ||
     profileLink !== (entry.profileLink ?? "") ||
     description !== (entry.description ?? "") ||
     amountPaid !== String(entry.amountPaid) ||
+    totalAmount !== String(entry.totalAmount) ||
     (entry.type === "BFE" && length !== (entry.length ?? ""));
 
   const handleSave = async () => {
@@ -100,6 +141,7 @@ function CampaignViewCard({ entry, creatorName, userNames, onClose }: ViewCardPr
         profileLink,
         description,
         amountPaid: Number(amountPaid),
+        totalAmount: Number(totalAmount),
       };
       if (entry.type === "BFE") body.length = length;
       const res = await apiRequest(`/api/campaign-tracking/${entry.id}`, {
@@ -147,10 +189,15 @@ function CampaignViewCard({ entry, creatorName, userNames, onClose }: ViewCardPr
               <p className="text-zinc-300">{formatInTimezone(entry.lastEditedTime, userTz)}</p>
             </div>
           </div>
-          <div className={`rounded-lg p-3 border ${Number(amountPaid) >= entry.totalAmount ? "bg-green-500/5 border-green-500/20" : "bg-red-500/5 border-red-500/20"}`}>
+          <div className={`rounded-lg p-3 border ${Number(amountPaid) >= Number(totalAmount) ? "bg-green-500/5 border-green-500/20" : "bg-red-500/5 border-red-500/20"}`}>
             <div className="grid grid-cols-2 gap-4">
               <Field label="Total Amount">
-                <p className={readOnlyClass}>{formatAmount(entry.totalAmount)}</p>
+                <input
+                  type="number"
+                  value={totalAmount}
+                  onChange={e => setTotalAmount(e.target.value)}
+                  className={inputClass}
+                />
               </Field>
               <div>
                 <div className="flex items-center gap-1 mb-1">
@@ -191,12 +238,38 @@ function CampaignViewCard({ entry, creatorName, userNames, onClose }: ViewCardPr
           )}
         </CardContent>
         <CardFooter className="flex justify-end gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">Actions</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setShowTransfer(true)}>Transfer</DropdownMenuItem>
+              {entry.isArchived ? (
+                <DropdownMenuItem onClick={doUnarchive}>Unarchive</DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={() => setConfirmArchive(true)}>Archive</DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" onClick={onClose}>Close</Button>
           <Button onClick={handleSave} disabled={saving || !hasChanged}>
             {saving ? "Saving..." : "Save"}
           </Button>
         </CardFooter>
       </Card>
+
+      {showTransfer && (
+        <TransferDialog entryId={entry.id} onClose={() => setShowTransfer(false)} onTransferred={onClose} />
+      )}
+      {confirmArchive && (
+        <ConfirmDialog
+          title="Archive Entry"
+          description={ARCHIVE_CR_TEXT}
+          onConfirm={doArchive}
+          onClose={() => setConfirmArchive(false)}
+          loading={actionLoading}
+        />
+      )}
     </div>
   );
 }
@@ -406,7 +479,10 @@ function OverviewPanel({ creators, userNames, isActive, uid }: OverviewPanelProp
 
   const creatorMap = Object.fromEntries(creators.map(c => [c.creatorID, c.stageName]));
   const creatorPhotoMap = Object.fromEntries(creators.map(c => [c.creatorID, c.photoURL ?? undefined]));
-  const pendingPayments = entries.filter(e => e.amountPaid < e.totalAmount);
+  // Exclude entries whose creator is archived/inactive (absent from the active
+  // creator list) so they drop out of both the list and the outstanding total.
+  const activeCreatorIds = new Set(creators.map(c => c.creatorID));
+  const pendingPayments = entries.filter(e => activeCreatorIds.has(e.creatorID) && e.amountPaid < e.totalAmount);
   const outstandingTotal = pendingPayments.reduce((sum, e) => sum + (e.totalAmount - e.amountPaid), 0);
 
   return (
@@ -504,6 +580,9 @@ function CreatorCampaignsTable({ creatorID, creatorName, creators, userNames, is
   const [showArchived, setShowArchived] = useState(false);
   const [page, setPage] = useState(0);
   const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
+  const [transferEntry, setTransferEntry] = useState<CampaignEntry | null>(null);
+  const [archiveEntry, setArchiveEntry] = useState<CampaignEntry | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const unsubRef = useRef<(() => void) | null>(null);
 
@@ -544,20 +623,21 @@ function CreatorCampaignsTable({ creatorID, creatorName, creators, userNames, is
   const safePage = Math.min(page, totalPages - 1);
   const displayed = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
 
-  const handleArchive = async (entry: CampaignEntry) => {
-    if (entry.amountPaid < entry.totalAmount) {
-      toast.error("Cannot archive — payment is still outstanding");
-      return;
-    }
+  const doArchive = async () => {
+    if (!archiveEntry) return;
+    setActionLoading(true);
     try {
-      const res = await apiRequest(`/api/campaign-tracking/${entry.id}`, {
+      const res = await apiRequest(`/api/campaign-tracking/${archiveEntry.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ isArchived: true }),
+        body: JSON.stringify({ isArchived: true, amountPaid: archiveEntry.totalAmount }),
       });
       if (!res.ok) throw new Error();
       toast.success("Archived");
     } catch {
       toast.error("Failed to archive");
+    } finally {
+      setActionLoading(false);
+      setArchiveEntry(null);
     }
   };
 
@@ -580,14 +660,14 @@ function CreatorCampaignsTable({ creatorID, creatorName, creators, userNames, is
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex gap-2">
           {(CAMPAIGN_TYPES as readonly CampaignType[]).map(t => (
-            <Button
+            <Badge
               key={t}
-              size="sm"
               variant={typeFilters.has(t) ? "default" : "outline"}
               onClick={() => toggleType(t)}
+              className="cursor-pointer select-none"
             >
               {TYPE_BUTTON_LABELS[t]}
-            </Button>
+            </Badge>
           ))}
         </div>
         <div className="flex items-center gap-2 ml-auto">
@@ -657,17 +737,14 @@ function CreatorCampaignsTable({ creatorID, creatorName, creators, userNames, is
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onClick={() => setViewEntry(entry)}>View</DropdownMenuItem>
-                          {!entry.isArchived && (
-                            <DropdownMenuItem
-                              onClick={() => handleArchive(entry)}
-                              className={entry.amountPaid < entry.totalAmount ? "opacity-40 cursor-not-allowed" : ""}
-                            >
-                              Archive
-                            </DropdownMenuItem>
-                          )}
-                          {entry.isArchived && (
+                          <DropdownMenuItem onClick={() => setTransferEntry(entry)}>Transfer</DropdownMenuItem>
+                          {entry.isArchived ? (
                             <DropdownMenuItem onClick={() => handleUnarchive(entry)}>
                               Unarchive
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem onClick={() => setArchiveEntry(entry)}>
+                              Archive
                             </DropdownMenuItem>
                           )}
                         </DropdownMenuContent>
@@ -737,6 +814,18 @@ function CreatorCampaignsTable({ creatorID, creatorName, creators, userNames, is
           creators={creators}
           defaultCreatorID={creatorID}
           onClose={() => setShowWizard(false)}
+        />
+      )}
+      {transferEntry && (
+        <TransferDialog entryId={transferEntry.id} onClose={() => setTransferEntry(null)} />
+      )}
+      {archiveEntry && (
+        <ConfirmDialog
+          title="Archive Entry"
+          description={ARCHIVE_CR_TEXT}
+          onConfirm={doArchive}
+          onClose={() => setArchiveEntry(null)}
+          loading={actionLoading}
         />
       )}
     </div>

@@ -6,6 +6,7 @@ import AppLayout from "@/components/AppLayout";
 import { useCreators } from "@/hooks/useCreators";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -38,6 +39,7 @@ import {
 import { useUserData } from "@/hooks/useUserData";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
+import { TransferDialog, ConfirmDialog, ARCHIVE_CR_TEXT, UNARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
 
 // ─── Date picker ─────────────────────────────────────────────────────────────
 
@@ -90,12 +92,11 @@ function StatusBadge({ status }: { status: CRStatus }) {
 interface ViewCardProps {
   entry: CampaignEntry;
   creatorName: string;
-  readOnly: boolean;
   onClose: () => void;
   userNames?: Record<string, string>;
 }
 
-function ViewCard({ entry, creatorName, readOnly, onClose, userNames = {} }: ViewCardProps) {
+function ViewCard({ entry, creatorName, onClose, userNames = {} }: ViewCardProps) {
   const { userData } = useUserData();
   const userTz = userData?.timezone || undefined;
   const [amountPaid, setAmountPaid] = useState(String(entry.amountPaid));
@@ -111,8 +112,50 @@ function ViewCard({ entry, creatorName, readOnly, onClose, userNames = {} }: Vie
   const [dueTime, setDueTime] = useState(entry.dueDate?.includes("T") ? (entry.dueDate.split("T")[1]?.substring(0, 5) ?? "") : "");
   const [dueDateTimezone, setDueDateTimezone] = useState(entry.dueDateTimezone ?? "");
   const [saving, setSaving] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [confirmUnarchive, setConfirmUnarchive] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
 
-  const isEditable = !readOnly || entry.status === "Awaiting Approval";
+  const isArchivedStatus = entry.status === "Archived";
+
+  const doArchive = async () => {
+    setActionLoading(true);
+    try {
+      const res = await apiRequest(`/api/campaign-tracking/${entry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "Archived", totalAmount: entry.amountPaid }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Archived");
+      onClose();
+    } catch {
+      toast.error("Failed to archive");
+    } finally {
+      setActionLoading(false);
+      setConfirmArchive(false);
+    }
+  };
+
+  const doUnarchive = async () => {
+    setActionLoading(true);
+    try {
+      const res = await apiRequest(`/api/campaign-tracking/${entry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "In Progress", isArchived: false }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Unarchived");
+      onClose();
+    } catch {
+      toast.error("Failed to unarchive");
+    } finally {
+      setActionLoading(false);
+      setConfirmUnarchive(false);
+    }
+  };
+
+  const isEditable = true;
 
   const hasChanged =
     amountPaid !== String(entry.amountPaid) ||
@@ -300,12 +343,47 @@ function ViewCard({ entry, creatorName, readOnly, onClose, userNames = {} }: Vie
           )}
         </CardContent>
         <CardFooter className="flex justify-end gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">Actions</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setShowTransfer(true)}>Transfer</DropdownMenuItem>
+              {isArchivedStatus ? (
+                <DropdownMenuItem onClick={() => setConfirmUnarchive(true)}>Unarchive</DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={() => setConfirmArchive(true)}>Archive</DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" onClick={onClose}>Close</Button>
           <Button onClick={handleSave} disabled={saving || !hasChanged}>
             {saving ? "Saving..." : "Save"}
           </Button>
         </CardFooter>
       </Card>
+
+      {showTransfer && (
+        <TransferDialog entryId={entry.id} onClose={() => setShowTransfer(false)} onTransferred={onClose} />
+      )}
+      {confirmArchive && (
+        <ConfirmDialog
+          title="Archive Custom"
+          description={ARCHIVE_CR_TEXT}
+          onConfirm={doArchive}
+          onClose={() => setConfirmArchive(false)}
+          loading={actionLoading}
+        />
+      )}
+      {confirmUnarchive && (
+        <ConfirmDialog
+          title="Unarchive Custom"
+          description={UNARCHIVE_CR_TEXT}
+          onConfirm={doUnarchive}
+          onClose={() => setConfirmUnarchive(false)}
+          loading={actionLoading}
+        />
+      )}
     </div>
   );
 }
@@ -745,17 +823,60 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
   const [entries, setEntries] = useState<CampaignEntry[]>([]);
   const [typeFilter, setTypeFilter] = useState<Set<CRType>>(new Set(["CR", "Call", "Item"]));
   const [showCompleted, setShowCompleted] = useState(false);
+  const [archivedOnly, setArchivedOnly] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [page, setPage] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
+  const [transferEntry, setTransferEntry] = useState<CampaignEntry | null>(null);
+  const [archiveEntry, setArchiveEntry] = useState<CampaignEntry | null>(null);
+  const [unarchiveEntry, setUnarchiveEntry] = useState<CampaignEntry | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
   const unsubRef = useRef<(() => void) | null>(null);
+
+  const doArchive = async () => {
+    if (!archiveEntry) return;
+    setActionLoading(true);
+    try {
+      const res = await apiRequest(`/api/campaign-tracking/${archiveEntry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "Archived", totalAmount: archiveEntry.amountPaid }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Archived");
+    } catch {
+      toast.error("Failed to archive");
+    } finally {
+      setActionLoading(false);
+      setArchiveEntry(null);
+    }
+  };
+
+  const doUnarchive = async () => {
+    if (!unarchiveEntry) return;
+    setActionLoading(true);
+    try {
+      const res = await apiRequest(`/api/campaign-tracking/${unarchiveEntry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "In Progress", isArchived: false }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Unarchived");
+    } catch {
+      toast.error("Failed to unarchive");
+    } finally {
+      setActionLoading(false);
+      setUnarchiveEntry(null);
+    }
+  };
 
   const subscribe = useCallback(() => {
     if (unsubRef.current) unsubRef.current();
+    // Archived is always loaded so it stays searchable and available to the
+    // Archived badge without a re-subscribe.
     const statusFilter: CRStatus[] = showCompleted
-      ? ["Awaiting Approval", "In Progress", "Rejected", "Completed"]
-      : ["Awaiting Approval", "In Progress", "Rejected"];
+      ? ["Awaiting Approval", "In Progress", "Rejected", "Completed", "Archived"]
+      : ["Awaiting Approval", "In Progress", "Rejected", "Archived"];
 
     const q = query(
       collection(db, "campaign-tracking"),
@@ -780,16 +901,19 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
     return () => { unsubRef.current?.(); };
   }, [isActive, subscribe]);
 
-  const typeFiltered = entries.filter(e => typeFilter.has(e.type));
   const searchLower = searchQuery.toLowerCase();
+  const matchesSearch = (e: CampaignEntry) =>
+    e.CR.toLowerCase().includes(searchLower) ||
+    e.fanName.toLowerCase().includes(searchLower) ||
+    e.profileLink.toLowerCase().includes(searchLower) ||
+    (userNames[e.createdBy] ?? e.createdBy).toLowerCase().includes(searchLower);
+  // Search spans all loaded entries (including archived); otherwise the Archived
+  // badge shows only archived entries and the default view hides them.
   const filtered = searchLower
-    ? typeFiltered.filter(e =>
-        e.CR.toLowerCase().includes(searchLower) ||
-        e.fanName.toLowerCase().includes(searchLower) ||
-        e.profileLink.toLowerCase().includes(searchLower) ||
-        (userNames[e.createdBy] ?? e.createdBy).toLowerCase().includes(searchLower)
-      )
-    : typeFiltered;
+    ? entries.filter(matchesSearch)
+    : archivedOnly
+      ? entries.filter(e => e.status === "Archived")
+      : entries.filter(e => e.status !== "Archived" && typeFilter.has(e.type));
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages - 1);
   const displayed = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
@@ -809,15 +933,22 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex gap-2">
           {(["CR", "Call", "Item"] as CRType[]).map(t => (
-            <Button
+            <Badge
               key={t}
-              size="sm"
-              variant={typeFilter.has(t) ? "default" : "outline"}
-              onClick={() => toggleType(t)}
+              variant={!archivedOnly && typeFilter.has(t) ? "default" : "outline"}
+              onClick={() => { if (!archivedOnly) toggleType(t); }}
+              className={archivedOnly ? "opacity-40 pointer-events-none select-none" : "cursor-pointer select-none"}
             >
               {TYPE_LABELS[t]}
-            </Button>
+            </Badge>
           ))}
+          <Badge
+            variant={archivedOnly ? "destructive" : "outline"}
+            onClick={() => { setArchivedOnly(v => !v); setPage(0); }}
+            className="cursor-pointer select-none"
+          >
+            Archived
+          </Badge>
         </div>
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
@@ -829,8 +960,13 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
           />
         </div>
         <div className="flex items-center gap-2 ml-auto">
-          <Switch checked={showCompleted} onCheckedChange={v => { setShowCompleted(v); setPage(0); }} id={`show-completed-${creatorID}`} />
-          <label htmlFor={`show-completed-${creatorID}`} className="text-sm text-zinc-400 cursor-pointer">
+          <Switch
+            checked={showCompleted}
+            onCheckedChange={v => { setShowCompleted(v); setPage(0); }}
+            id={`show-completed-${creatorID}`}
+            disabled={archivedOnly}
+          />
+          <label htmlFor={`show-completed-${creatorID}`} className={archivedOnly ? "text-sm text-zinc-600 cursor-not-allowed" : "text-sm text-zinc-400 cursor-pointer"}>
             Show Completed
           </label>
           <Button size="sm" onClick={() => setShowNew(true)}>
@@ -883,6 +1019,12 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onClick={() => setViewEntry(entry)}>View</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setTransferEntry(entry)}>Transfer</DropdownMenuItem>
+                          {entry.status === "Archived" ? (
+                            <DropdownMenuItem onClick={() => setUnarchiveEntry(entry)}>Unarchive</DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem onClick={() => setArchiveEntry(entry)}>Archive</DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -943,9 +1085,29 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
         <ViewCard
           entry={viewEntry}
           creatorName={creatorName}
-          readOnly={viewEntry.status === "In Progress" || viewEntry.status === "Completed"}
           onClose={() => setViewEntry(null)}
           userNames={userNames}
+        />
+      )}
+      {transferEntry && (
+        <TransferDialog entryId={transferEntry.id} onClose={() => setTransferEntry(null)} />
+      )}
+      {archiveEntry && (
+        <ConfirmDialog
+          title="Archive Custom"
+          description={ARCHIVE_CR_TEXT}
+          onConfirm={doArchive}
+          onClose={() => setArchiveEntry(null)}
+          loading={actionLoading}
+        />
+      )}
+      {unarchiveEntry && (
+        <ConfirmDialog
+          title="Unarchive Custom"
+          description={UNARCHIVE_CR_TEXT}
+          onConfirm={doUnarchive}
+          onClose={() => setUnarchiveEntry(null)}
+          loading={actionLoading}
         />
       )}
     </div>
@@ -1000,8 +1162,15 @@ function MyCustomsKanban({ currentUserUid, creators, userNames, isActive }: MyCu
 
   const creatorMap = Object.fromEntries(creators.map(c => [c.creatorID, c.stageName]));
 
+  // Drop entries whose creator is archived/inactive (absent from the active
+  // creator list) from every view and from the outstanding total.
+  const activeCreatorIds = new Set(creators.map(c => c.creatorID));
+  const visibleActive = activeEntries.filter(e => activeCreatorIds.has(e.creatorID));
+  const visibleCompletedUnpaid = completedUnpaidEntries.filter(e => activeCreatorIds.has(e.creatorID));
+  const visibleRejected = rejectedEntries.filter(e => activeCreatorIds.has(e.creatorID));
+
   // Group active + completed-unpaid entries by creator
-  const kanbanEntries = [...activeEntries, ...completedUnpaidEntries];
+  const kanbanEntries = [...visibleActive, ...visibleCompletedUnpaid];
   const byCreator: Record<string, CampaignEntry[]> = {};
   for (const e of kanbanEntries) {
     if (!byCreator[e.creatorID]) byCreator[e.creatorID] = [];
@@ -1015,7 +1184,7 @@ function MyCustomsKanban({ currentUserUid, creators, userNames, isActive }: MyCu
   const safePage = Math.min(page, totalPages - 1);
   const pagedCreators = activeCreators.slice(safePage * CREATORS_PER_PAGE, (safePage + 1) * CREATORS_PER_PAGE);
 
-  const outstandingAmount = [...activeEntries, ...completedUnpaidEntries, ...rejectedEntries]
+  const outstandingAmount = [...visibleActive, ...visibleCompletedUnpaid, ...visibleRejected]
     .reduce((sum, e) => sum + (e.totalAmount - e.amountPaid), 0);
 
   const isRejectedView = viewEntry && viewEntry.status === "Rejected";
@@ -1035,7 +1204,7 @@ function MyCustomsKanban({ currentUserUid, creators, userNames, isActive }: MyCu
       </div>
 
       {/* Needs Info Section */}
-      {rejectedEntries.length > 0 && (
+      {visibleRejected.length > 0 && (
         <div className="mb-6 rounded-xl p-4 border border-red-500/40 bg-red-500/5">
           <div className="flex items-center gap-2 mb-3">
             <AlertCircle className="w-4 h-4 text-red-400" />
@@ -1043,7 +1212,7 @@ function MyCustomsKanban({ currentUserUid, creators, userNames, isActive }: MyCu
           </div>
           <Carousel className="w-full">
             <CarouselContent>
-              {rejectedEntries.map(e => (
+              {visibleRejected.map(e => (
                 <CarouselItem key={e.id} className="basis-64">
                   <Button
                     variant="ghost"
@@ -1183,7 +1352,6 @@ function MyCustomsKanban({ currentUserUid, creators, userNames, isActive }: MyCu
         <ViewCard
           entry={viewEntry}
           creatorName={creatorMap[viewEntry.creatorID] ?? viewEntry.creatorID}
-          readOnly={viewEntry.status === "In Progress" || viewEntry.status === "Completed"}
           onClose={() => setViewEntry(null)}
           userNames={userNames}
         />

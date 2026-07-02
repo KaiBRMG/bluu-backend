@@ -132,3 +132,42 @@ Create a new notification for the following conditions:
 
 
 
+In the detailed view card of the following interfaces:
+- @src/app/(main)/ca-portal/custom-requests/page.tsx 
+- @src/app/(main)/ca-portal/campaigns/page.tsx  
+next to the "Close" and "Save" buttons, add a new button called "Actions".
+
+When clicked, a @src/components/ui/dropdown-menu.tsx  must display with the following items: Transfer, Archive.
+These options must also show in the data table, where "View" is currently displayed.
+
+1. Transfer:
+Currently, entries shown on 'My Customs' or 'Overview' are filtered to show only entires created by the user. The goal of the Transfer function is to transfer an entry to another user so it displays on their dashboards instead of the current user. When the user clicks on Transfer, a @src/components/ui/dialog.tsx  must show with text "You are about to transfer this entry to another user. Please select a user: " and 2 buttons: Cancel, Submit. Then add a @src/components/ui/dropdown-menu.tsx  for the user to select another user. Ensure to only list users from the 'CA' user group. A user must be selected from this list before clicking "Submit". Once the user clicks submit, the createdBy field of the particular entry must be changed to the selected user. Ensure the user's interface updates immediately after making the change and invalidate cache if needed so the updates are reflected immediately. When an entry has been transferred, a notification must be sent to the user that it has been transferred to. See @CLAUDE.md  on how the notification system works. Use text: "❗{user who submitted the transfer} transferred a custom on {creator} to you. You are now responsible for following up the fan, collecting the remaining balance, and completing the request."
+
+
+2. Archive:
+This only applies to @src/app/(main)/ca-portal/custom-requests/page.tsx since @src/app/(main)/ca-portal/campaigns/page.tsx already has an archival mechanism in place.
+
+An entry may go stale due to a fan not being responsive or for many other reasons. The current logic does not support entries that are incomplete and should be removed from view. Currently status has the following types: Awaiting Approval, In Progress, Completed, Rejected. Add a new type: Archived.
+
+On @src/app/(main)/ca-portal/custom-requests/page.tsx :
+When a user clicks "Archive", a @src/components/ui/dialog.tsx  must show with text "Customs may be archived if a fan goes silent or if no progress can be made to complete the custom. Customs can be unarchived if needed. Proceed?" with buttons: Cancel, Continue. If the user clicks continue, set status to 'Archived'. Total amount must be set to amount paid.
+
+Entries with status=Archived must be filtered out of all views :
+- @src/app/(main)/ca-portal/custom-requests/page.tsx > My Customs,
+- @src/app/(main)/ca-portal/custom-requests/page.tsx > All data tables,
+- @src\app\(main)\creators\custom-requests\page.tsx > Overview,
+- @src\app\(main)\creators\custom-requests\page.tsx > All data tables.
+
+Also do the following:
+- On @src\app\(main)\creators\custom-requests\page.tsx next to the 'Recently Completed' section, add another column next to it with text 'Recently Archived'. Make this section orange. Add all entries here with status=Archived and isArchived=false. Add dismiss buttons for each entry, and a dismiss all button -- just like the 'Recently Completed' section has. When a user clicks dismiss, it must set isArchived=true.
+
+- On @src\app\(main)\creators\custom-requests\page.tsx also add the 'Archive' buttons to the detailed view card, and data table options.
+
+- On @src/app/(main)/ca-portal/custom-requests/page.tsx > data tables, add a new badge alongside Custom Request, Call, Item called "Archived". Make variant="destructive". When clicked, all entries with status=Archived must display. When the archived badge is enabled, the other badges must be greyed out as well as the 'Show Completed' toggle. Only when the archived badge is untoggled should all the other filters be enabled again. Do the same on the data tables of @src\app\(main)\creators\custom-requests\page.tsx . Ensure that the search boxes on both these interfaces also include archived entries in the search.
+
+- When an entry is archived, the "Archive" button must change to "Unarchive". When clicked, show a  @src/components/ui/dialog.tsx with text "This will make the custom active again. Proceed?" with buttons: Cancel, Continue. If the user continues, set status=In Progress, and set isArchived=false.
+
+@src/app/(main)/ca-portal/campaigns/page.tsx already has an archival mechanism. Keep this as it is now. Only make the following change:
+- Currently, only entries amount paid = total amount may be archived. Remove this requirement. When the user clicks 'Archive', show the same dialog as above and then set amount paid = total amount.
+
+# Ensure the logic described above is correct before implementing.

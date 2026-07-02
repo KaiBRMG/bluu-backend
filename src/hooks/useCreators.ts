@@ -31,11 +31,13 @@ export function useCreators(): Creator[] {
         .then(r => r.json())
         .then(data => {
           if (cancelled) return;
-          const active = (data.creators ?? []).filter(
-            (c: Creator & { isActive?: boolean }) => c.isActive !== false
+          // Employee-facing visibility is governed by `isArchived` only — an
+          // inactive (portal-login-disabled) creator's data must still show here.
+          const visible = (data.creators ?? []).filter(
+            (c: Creator & { isArchived?: boolean }) => c.isArchived !== true
           );
-          setCreators(active);
-          setCache(CACHE_KEY, active);
+          setCreators(visible);
+          setCache(CACHE_KEY, visible);
         })
         .catch(() => {});
     });

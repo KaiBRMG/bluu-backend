@@ -575,7 +575,7 @@ export default function CreatorDashboardPage() {
     const unsub = onSnapshot(q, snap => {
       setEntries(snap.docs
         .map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>))
-        .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type))
+        .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type) && e.status !== "Archived")
       );
       setEntriesLoaded(true);
     }, (error) => {

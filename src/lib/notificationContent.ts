@@ -52,6 +52,13 @@ export const notifications = {
     actionUrl: '/creators/custom-requests',
   }),
 
+  crTransferred: (transferrerName: string, creatorName: string, actionUrl: string): NotificationContent => ({
+    title: '🔄 Custom Transferred to You',
+    message: `❗${transferrerName} transferred a custom on ${creatorName} to you. You are now responsible for following up the fan, collecting the remaining balance, and completing the request.`,
+    type: 'action',
+    actionUrl,
+  }),
+
   // ─── Leave requests ───────────────────────────────────────────────────────────
   leaveApproved: (leaveLabel: string, dateStr: string): NotificationContent => ({
     title: '✅ Leave Request Approved',

@@ -1,6 +1,6 @@
 import type { Timestamp } from '@/types/firestore';
 
-export type CRStatus = 'Awaiting Approval' | 'In Progress' | 'Rejected' | 'Completed';
+export type CRStatus = 'Awaiting Approval' | 'In Progress' | 'Rejected' | 'Completed' | 'Archived';
 export type CRType = 'CR' | 'Call' | 'Item' | 'BFE' | 'Hubby' | 'VIP';
 export type CRPriority = 'Low' | 'Medium' | 'High';
 export type CallType = 'Clean Video' | 'Clean Voice' | 'NSFW Video' | 'NSFW Voice';
@@ -48,6 +48,7 @@ export const STATUS_COLORS: Record<CRStatus, string> = {
   'Rejected': 'text-red-400 bg-red-500/10',
   'In Progress': 'text-blue-400 bg-blue-500/10',
   'Completed': 'text-green-400 bg-green-500/10',
+  'Archived': 'text-zinc-400 bg-zinc-500/10',
 };
 
 export const STATUS_DOT: Record<CRStatus, string> = {
@@ -55,6 +56,7 @@ export const STATUS_DOT: Record<CRStatus, string> = {
   'Rejected': 'bg-red-400',
   'In Progress': 'bg-blue-400',
   'Completed': 'bg-green-400',
+  'Archived': 'bg-zinc-400',
 };
 
 export const STATUS_SORT: Record<CRStatus, number> = {
@@ -62,6 +64,7 @@ export const STATUS_SORT: Record<CRStatus, number> = {
   'Awaiting Approval': 1,
   'In Progress': 2,
   'Completed': 3,
+  'Archived': 4,
 };
 
 export const PRIORITY_COLORS: Record<CRPriority, string> = {
