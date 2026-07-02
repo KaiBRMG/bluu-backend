@@ -895,9 +895,15 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
 
   const creatorMap = Object.fromEntries(creators.map(c => [c.creatorID, c.stageName]));
 
+  // Entries whose creator is archived/inactive (absent from the active creator
+  // list) are dropped from every section, count, and the Dismiss-All action.
+  const activeCreatorIds = new Set(creators.map(c => c.creatorID));
+  const visibleOutstanding = outstandingEntries.filter(e => activeCreatorIds.has(e.creatorID));
+  const visibleCompleted = completedEntries.filter(e => activeCreatorIds.has(e.creatorID));
+
   // Kanban: one column per active creator that has outstanding entries
   const byCreator: Record<string, CPEntry[]> = {};
-  for (const e of outstandingEntries) {
+  for (const e of visibleOutstanding) {
     if (!byCreator[e.creatorID]) byCreator[e.creatorID] = [];
     byCreator[e.creatorID].push(e);
   }
@@ -905,7 +911,7 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
 
   // Kanban: one column per creator that has completed entries
   const completedByCreator: Record<string, CPEntry[]> = {};
-  for (const e of completedEntries) {
+  for (const e of visibleCompleted) {
     if (!completedByCreator[e.creatorID]) completedByCreator[e.creatorID] = [];
     completedByCreator[e.creatorID].push(e);
   }
@@ -945,13 +951,13 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
       <div className="rounded-xl p-4 border border-emerald-500/30 bg-emerald-500/5">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-emerald-400">Recently Completed</h3>
-          {completedEntries.length > 0 && (
+          {visibleCompleted.length > 0 && (
             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setDismissAllOpen(true)}>
               Dismiss All
             </Button>
           )}
         </div>
-        {completedEntries.length === 0 ? (
+        {visibleCompleted.length === 0 ? (
           <p className="text-sm text-zinc-500">No completed content to review.</p>
         ) : (
           <div style={{ columnWidth: "13rem", columnCount: 4, columnGap: "0.75rem" }}>
@@ -1077,7 +1083,7 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
           <AlertDialogHeader>
             <AlertDialogTitle>Dismiss all completed content?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will archive all {completedEntries.length} completed content request{completedEntries.length !== 1 ? "s" : ""}. They will no longer appear in this list.
+              This will archive all {visibleCompleted.length} completed content request{visibleCompleted.length !== 1 ? "s" : ""}. They will no longer appear in this list.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -691,9 +691,10 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
   // Archived-status customs are excluded from every overview section and shown
   // only in the dedicated "Recently Archived" panel (status=Archived while not
   // yet dismissed, i.e. isArchived=false — the query already excludes dismissed).
-  const visibleEntries = allEntries.filter(e => e.status !== "Archived");
+  // Customs whose creator is archived/inactive are dropped from every section.
+  const visibleEntries = allEntries.filter(e => e.status !== "Archived" && activeCreatorIds.has(e.creatorID));
   const recentArchived = allEntries
-    .filter(e => e.status === "Archived")
+    .filter(e => e.status === "Archived" && activeCreatorIds.has(e.creatorID))
     .sort((a, b) => new Date(b.lastEditedTime).getTime() - new Date(a.lastEditedTime).getTime());
   const recentArchivedByCreator = Object.fromEntries(
     creators.map(c => [c.creatorID, recentArchived.filter(e => e.creatorID === c.creatorID)])
@@ -717,7 +718,7 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
 
   // Recently completed (not archived)
   const recentCompleted = allEntries
-    .filter(e => e.status === "Completed" && !e.isArchived)
+    .filter(e => e.status === "Completed" && !e.isArchived && activeCreatorIds.has(e.creatorID))
     .sort((a, b) => new Date(b.lastEditedTime).getTime() - new Date(a.lastEditedTime).getTime());
   const recentCompletedByCreator = Object.fromEntries(
     creators.map(c => [c.creatorID, recentCompleted.filter(e => e.creatorID === c.creatorID)])
@@ -734,7 +735,8 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
   );
   const outstandingKanbanCreators = creators.filter(c => (outstandingByCreator[c.creatorID]?.length ?? 0) > 0);
 
-  // Outstanding payments (any entry with amountPaid < totalAmount), excluding campaign-only types
+  // Outstanding payments (any entry with amountPaid < totalAmount), excluding
+  // campaign-only types (visibleEntries already drops archived-creator customs).
   const outstandingPaymentEntries = visibleEntries.filter(e =>
     e.amountPaid < e.totalAmount &&
     !(CAMPAIGN_TYPES as readonly string[]).includes(e.type)
@@ -1524,6 +1526,10 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
     () => Object.fromEntries(creators.map(c => [c.creatorID, c.stageName])),
     [creators]
   );
+  // Entries are queried by createdBy only, so they can include customs for
+  // archived creators (absent from the active `creators` list). Those must be
+  // hidden from every view here.
+  const activeCreatorIds = useMemo(() => new Set(creators.map(c => c.creatorID)), [creators]);
 
   useEffect(() => {
     if (!isActive) {
@@ -1553,11 +1559,12 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
     e.fanName.toLowerCase().includes(searchLower) ||
     e.profileLink.toLowerCase().includes(searchLower) ||
     (creatorMap[e.creatorID] ?? e.creatorID).toLowerCase().includes(searchLower);
+  const visibleEntries = entries.filter(e => activeCreatorIds.has(e.creatorID));
   const displayed = searchLower
-    ? entries.filter(matchesSearch)
+    ? visibleEntries.filter(matchesSearch)
     : archivedOnly
-      ? entries.filter(e => e.status === "Archived")
-      : entries.filter(e => e.status !== "Archived" && typeFilter.has(e.type) && (showCompleted || e.status !== "Completed"));
+      ? visibleEntries.filter(e => e.status === "Archived")
+      : visibleEntries.filter(e => e.status !== "Archived" && typeFilter.has(e.type) && (showCompleted || e.status !== "Completed"));
 
   const toggleType = (t: CRType) => setTypeFilter(prev => {
     const next = new Set(prev);
