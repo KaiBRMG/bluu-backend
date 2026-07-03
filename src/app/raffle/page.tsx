@@ -106,23 +106,58 @@ export default function RafflePage() {
 
   // -------------------------------------------------------------------------
   // Derived wheel segments (one per ticket)
+  //
+  // Built incrementally rather than rebuilt-and-reshuffled on every change: existing
+  // ticket slots keep their position in the array (and therefore their angular slot on
+  // the wheel) across renders. Only the *delta* — new tickets from an added participant,
+  // or tickets consumed by a win — touches the array. This is what keeps a segment's
+  // color anchored in place instead of the whole wheel visually reshuffling right as the
+  // winner dialog opens.
   // -------------------------------------------------------------------------
-  const segments = useMemo<Segment[]>(() => {
-    const out: Segment[] = [];
+  const segmentsRef = useRef<Segment[]>([]);
+  const [segments, setSegments] = useState<Segment[]>([]);
+
+  useEffect(() => {
+    const desired = new Map<string, { name: string; tickets: number }>();
     for (const p of participants) {
       const name = p.name.trim();
       if (!name || p.tickets < 1) continue;
-      for (let i = 0; i < p.tickets; i++) {
-        out.push({ name, participantId: p.id });
+      desired.set(p.id, { name, tickets: p.tickets });
+    }
+
+    // Keep existing slots (up to the now-desired count) in their current order/position.
+    const kept = new Map<string, number>();
+    const next: Segment[] = [];
+    for (const s of segmentsRef.current) {
+      const d = desired.get(s.participantId);
+      if (!d) continue;
+      const used = kept.get(s.participantId) ?? 0;
+      if (used >= d.tickets) continue;
+      kept.set(s.participantId, used + 1);
+      next.push(s);
+    }
+
+    // Any shortfall (new participant, or ticket count increased) becomes new slots,
+    // shuffled among themselves and spliced into random positions so they scatter
+    // rather than cluster — without disturbing any slot that was already kept above.
+    const additions: Segment[] = [];
+    for (const [participantId, d] of desired) {
+      const have = kept.get(participantId) ?? 0;
+      for (let i = have; i < d.tickets; i++) {
+        additions.push({ name: d.name, participantId });
       }
     }
-    // Shuffle so a person's tickets are scattered around the wheel rather than
-    // clustered in one sequential block (Fisher–Yates).
-    for (let i = out.length - 1; i > 0; i--) {
+    for (let i = additions.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [out[i], out[j]] = [out[j], out[i]];
+      [additions[i], additions[j]] = [additions[j], additions[i]];
     }
-    return out;
+    for (const seg of additions) {
+      const idx = Math.floor(Math.random() * (next.length + 1));
+      next.splice(idx, 0, seg);
+    }
+
+    segmentsRef.current = next;
+    setSegments(next);
   }, [participants]);
 
   const totalTickets = segments.length;
