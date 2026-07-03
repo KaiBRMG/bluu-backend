@@ -51,6 +51,7 @@ const GOLD_DEEP = "#C9961F";
 const CONFETTI_COLORS = ["#F4C752", "#FFA63D", "#ffffff", "#ff5e7e", "#5ecbff", "#8b6bff"];
 // Above this many segments, names no longer fit on the wheel — the legend picks up the slack.
 const WHEEL_LABEL_THRESHOLD = 70;
+const DEFAULT_PRIZES = ["$75", "$60", "$55", "$45", "$35", "$30", "$25", "$25", "$25", "$25"];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -81,7 +82,7 @@ const easeOutQuart = (t: number) => 1 - Math.pow(1 - t, 4);
 // ---------------------------------------------------------------------------
 export default function RafflePage() {
   const [participants, setParticipants] = useState<Participant[]>([]);
-  const [prizes, setPrizes] = useState<string[]>([]);
+  const [prizes, setPrizes] = useState<string[]>(DEFAULT_PRIZES);
   const [winners, setWinners] = useState<Winner[]>([]);
 
   const [rotation, setRotation] = useState(0);
@@ -343,7 +344,9 @@ export default function RafflePage() {
       setPrizes((prev) => prev.slice(1));
       setParticipants((prev) =>
         prev
-          .map((p) => (p.id === seg.participantId ? { ...p, tickets: p.tickets - 1 } : p))
+          .map((p) =>
+            p.id === seg.participantId ? { ...p, tickets: p.tickets - Math.ceil(p.tickets / 2) } : p,
+          )
           .filter((p) => p.tickets > 0),
       );
     },
@@ -481,7 +484,7 @@ export default function RafflePage() {
   const resetAll = () => {
     if (isSpinning) return;
     setParticipants([]);
-    setPrizes([]);
+    setPrizes(DEFAULT_PRIZES);
     setWinners([]);
     setLastWinner(null);
     setWinnerOpen(false);
@@ -907,27 +910,27 @@ export default function RafflePage() {
             </DialogDescription>
           </DialogHeader>
 
-          <ScrollArea className="max-h-[55vh]">
-            <ol className="space-y-2 pr-3">
-              {winners.map((w, i) => (
-                <li
-                  key={i}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3"
-                >
-                  <div className="flex items-center gap-3">
-                    <span
-                      className="flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-black"
-                      style={{ background: GOLD }}
-                    >
-                      {i + 1}
-                    </span>
-                    <span className="font-semibold">{w.name}</span>
-                  </div>
-                  <span className="truncate text-right text-sm text-white/70">{w.prize}</span>
-                </li>
-              ))}
-            </ol>
-          </ScrollArea>
+          {/* No scroll container here on purpose — every winner should be visible at
+              once without needing to scroll the list. */}
+          <ol className="space-y-2">
+            {winners.map((w, i) => (
+              <li
+                key={i}
+                className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3"
+              >
+                <div className="flex items-center gap-3">
+                  <span
+                    className="flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-black"
+                    style={{ background: GOLD }}
+                  >
+                    {i + 1}
+                  </span>
+                  <span className="font-semibold">{w.name}</span>
+                </div>
+                <span className="truncate text-right text-sm text-white/70">{w.prize}</span>
+              </li>
+            ))}
+          </ol>
         </DialogContent>
       </Dialog>
     </div>
