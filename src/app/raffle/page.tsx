@@ -134,7 +134,10 @@ export default function RafflePage() {
       const used = kept.get(s.participantId) ?? 0;
       if (used >= d.tickets) continue;
       kept.set(s.participantId, used + 1);
-      next.push(s);
+      // Refresh the name in place (same array position, so wheel placement is
+      // untouched) in case the participant's name changed since this slot was created —
+      // e.g. mid-typing in the participants dialog.
+      next.push(s.name === d.name ? s : { ...s, name: d.name });
     }
 
     // Any shortfall (new participant, or ticket count increased) becomes new slots,
@@ -284,12 +287,6 @@ export default function RafflePage() {
     const fontSize = Math.max(9, Math.min(20, 420 / n));
     const maxChars = Math.max(4, Math.floor(fontSize * 1.4));
 
-    // Pass 1: fill + stroke every wedge first. Doing this in its own pass (rather than
-    // interleaved with text below) guarantees no wedge's fill can ever be painted on
-    // top of a neighboring wedge's label — at high segment counts a label's inner edge
-    // can visually spill a few pixels into the next wedge, and if that wedge's fill
-    // were drawn afterward (as it was in the old interleaved loop) it would erase part
-    // of the label, leaving only a stray character or two behind.
     for (let i = 0; i < n; i++) {
       const start = i * seg - Math.PI / 2;
       const end = start + seg;
@@ -304,12 +301,8 @@ export default function RafflePage() {
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = "rgba(0,0,0,0.22)";
       ctx.stroke();
-    }
 
-    // Pass 2: labels, now that every wedge is already finalized underneath.
-    if (n <= WHEEL_LABEL_THRESHOLD) {
-      for (let i = 0; i < n; i++) {
-        const start = i * seg - Math.PI / 2;
+      if (n <= WHEEL_LABEL_THRESHOLD) {
         ctx.save();
         ctx.translate(cx, cy);
         ctx.rotate(start + seg / 2);
@@ -923,7 +916,7 @@ export default function RafflePage() {
             <DialogTitle className="text-xs font-semibold uppercase tracking-[0.3em] text-white/60">
               Winner
             </DialogTitle>
-            <p className="max-w-full break-words text-4xl font-bold tracking-tight">{lastWinner?.name}</p>
+            <p className="text-4xl font-bold tracking-tight">{lastWinner?.name}</p>
             <p className="text-white/60">wins</p>
             <Badge className="px-4 py-1.5 text-base" style={{ background: GOLD, color: "#000" }}>
               <PartyPopper className="size-4" />
