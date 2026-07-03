@@ -913,7 +913,7 @@ export default function RafflePage() {
             <DialogTitle className="text-xs font-semibold uppercase tracking-[0.3em] text-white/60">
               Winner
             </DialogTitle>
-            <p className="text-4xl font-bold tracking-tight">{lastWinner?.name}</p>
+            <p className="max-w-full break-words text-4xl font-bold tracking-tight">{lastWinner?.name}</p>
             <p className="text-white/60">wins</p>
             <Badge className="px-4 py-1.5 text-base" style={{ background: GOLD, color: "#000" }}>
               <PartyPopper className="size-4" />
