@@ -128,30 +128,35 @@ export default function RafflePage() {
   const nextPrize = prizes[0] ?? null;
   const canSpin = !isSpinning && prizes.length > 0 && totalTickets > 0;
 
-  // One stable colour per participant — shared by the wheel canvas and the legend.
+  // One stable colour per participant, assigned once on first appearance and cached
+  // for the lifetime of the raffle so it never reshuffles on spin/win/removal — shared
+  // by the wheel canvas and the legend. Keyed off `participants` (stable insertion
+  // order), not the shuffled `segments`, so removing a winner can't shift anyone
+  // else's hue.
+  const colorAssignmentsRef = useRef(new Map<string, string>());
   const participantColors = useMemo(() => {
-    const colors = new Map<string, string>();
-    for (const s of segments) {
-      if (!colors.has(s.participantId)) {
+    const colors = colorAssignmentsRef.current;
+    for (const p of participants) {
+      if (!colors.has(p.id)) {
         const hue = (colors.size * 137.508) % 360;
-        colors.set(s.participantId, `hsl(${hue} 68% 52%)`);
+        colors.set(p.id, `hsl(${hue} 68% 52%)`);
       }
     }
     return colors;
-  }, [segments]);
+  }, [participants]);
 
-  // Legend rows (one per participant, in wheel colour order) — only needed once the
-  // wheel has too many segments to print names on directly.
+  // Legend rows (one per active participant), in stable add order — only needed once
+  // the wheel has too many segments to print names on directly.
   const legendEntries = useMemo(() => {
-    const seen = new Set<string>();
-    const out: { id: string; name: string; color: string }[] = [];
-    for (const s of segments) {
-      if (seen.has(s.participantId)) continue;
-      seen.add(s.participantId);
-      out.push({ id: s.participantId, name: s.name, color: participantColors.get(s.participantId) ?? "hsl(0 0% 50%)" });
-    }
-    return out;
-  }, [segments, participantColors]);
+    const activeIds = new Set(segments.map((s) => s.participantId));
+    return participants
+      .filter((p) => activeIds.has(p.id))
+      .map((p) => ({
+        id: p.id,
+        name: p.name.trim(),
+        color: participantColors.get(p.id) ?? "hsl(0 0% 50%)",
+      }));
+  }, [participants, segments, participantColors]);
 
   // -------------------------------------------------------------------------
   // Audio setup
@@ -483,6 +488,7 @@ export default function RafflePage() {
     setSummaryOpen(false);
     rotationRef.current = 0;
     setRotation(0);
+    colorAssignmentsRef.current.clear();
     toast.success("Raffle reset");
   };
 
