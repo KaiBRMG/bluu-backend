@@ -49,6 +49,8 @@ const AUTO_ADVANCE_SECONDS = 5;
 const GOLD = "#F4C752";
 const GOLD_DEEP = "#C9961F";
 const CONFETTI_COLORS = ["#F4C752", "#FFA63D", "#ffffff", "#ff5e7e", "#5ecbff", "#8b6bff"];
+// Above this many segments, names no longer fit on the wheel — the legend picks up the slack.
+const WHEEL_LABEL_THRESHOLD = 70;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -125,6 +127,31 @@ export default function RafflePage() {
   const totalTickets = segments.length;
   const nextPrize = prizes[0] ?? null;
   const canSpin = !isSpinning && prizes.length > 0 && totalTickets > 0;
+
+  // One stable colour per participant — shared by the wheel canvas and the legend.
+  const participantColors = useMemo(() => {
+    const colors = new Map<string, string>();
+    for (const s of segments) {
+      if (!colors.has(s.participantId)) {
+        const hue = (colors.size * 137.508) % 360;
+        colors.set(s.participantId, `hsl(${hue} 68% 52%)`);
+      }
+    }
+    return colors;
+  }, [segments]);
+
+  // Legend rows (one per participant, in wheel colour order) — only needed once the
+  // wheel has too many segments to print names on directly.
+  const legendEntries = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { id: string; name: string; color: string }[] = [];
+    for (const s of segments) {
+      if (seen.has(s.participantId)) continue;
+      seen.add(s.participantId);
+      out.push({ id: s.participantId, name: s.name, color: participantColors.get(s.participantId) ?? "hsl(0 0% 50%)" });
+    }
+    return out;
+  }, [segments, participantColors]);
 
   // -------------------------------------------------------------------------
   // Audio setup
@@ -216,15 +243,6 @@ export default function RafflePage() {
     const fontSize = Math.max(9, Math.min(20, 420 / n));
     const maxChars = Math.max(4, Math.floor(fontSize * 1.4));
 
-    // One stable colour per participant — every ticket they hold shares it.
-    const colorByParticipant = new Map<string, string>();
-    for (const s of segments) {
-      if (!colorByParticipant.has(s.participantId)) {
-        const hue = (colorByParticipant.size * 137.508) % 360;
-        colorByParticipant.set(s.participantId, `hsl(${hue} 68% 52%)`);
-      }
-    }
-
     for (let i = 0; i < n; i++) {
       const start = i * seg - Math.PI / 2;
       const end = start + seg;
@@ -234,13 +252,13 @@ export default function RafflePage() {
       ctx.arc(cx, cy, r, start, end);
       ctx.closePath();
 
-      ctx.fillStyle = colorByParticipant.get(segments[i].participantId) ?? "hsl(0 0% 50%)";
+      ctx.fillStyle = participantColors.get(segments[i].participantId) ?? "hsl(0 0% 50%)";
       ctx.fill();
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = "rgba(0,0,0,0.22)";
       ctx.stroke();
 
-      if (n <= 70) {
+      if (n <= WHEEL_LABEL_THRESHOLD) {
         ctx.save();
         ctx.translate(cx, cy);
         ctx.rotate(start + seg / 2);
@@ -273,7 +291,7 @@ export default function RafflePage() {
     ctx.lineWidth = 4;
     ctx.strokeStyle = GOLD;
     ctx.stroke();
-  }, [segments]);
+  }, [segments, participantColors]);
 
   // -------------------------------------------------------------------------
   // Confetti burst
@@ -621,27 +639,49 @@ export default function RafflePage() {
               </div>
             </div>
 
-            {/* Prize queue */}
+            {/* Prize queue — clipped, not scrollable: overflow prizes stay hidden and
+                shift into view as prizes above them are awarded. */}
             {prizes.length > 0 && (
               <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                <ScrollArea className="max-h-40">
-                  <ol className="space-y-1.5 pr-3">
-                    {prizes.map((prize, i) => (
-                      <li
-                        key={`${prize}-${i}`}
-                        className={cn(
-                          "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm",
-                          i === 0 ? "text-white" : "text-white/70",
-                        )}
-                        style={i === 0 ? { background: "rgba(244,199,82,0.1)" } : undefined}
-                      >
-                        <Badge variant={i === 0 ? "default" : "secondary"} className="shrink-0">
-                          {i + 1}
-                        </Badge>
-                        <span className="truncate">{prize}</span>
+                <ol className="max-h-40 space-y-1.5 overflow-hidden">
+                  {prizes.map((prize, i) => (
+                    <li
+                      key={`${prize}-${i}`}
+                      className={cn(
+                        "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm",
+                        i === 0 ? "text-white" : "text-white/70",
+                      )}
+                      style={i === 0 ? { background: "rgba(244,199,82,0.1)" } : undefined}
+                    >
+                      <Badge variant={i === 0 ? "default" : "secondary"} className="shrink-0">
+                        {i + 1}
+                      </Badge>
+                      <span className="truncate">{prize}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
+            {/* Legend — only needed once the wheel has too many segments to label directly */}
+            {legendEntries.length > 0 && segments.length > WHEEL_LABEL_THRESHOLD && (
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                <div className="flex items-center gap-2 px-0.5 text-xs font-semibold uppercase tracking-wider text-white/45">
+                  <Users className="size-3.5" />
+                  Legend
+                </div>
+                <ScrollArea className="mt-2 max-h-40">
+                  <ul className="grid grid-cols-2 gap-x-3 gap-y-1 pr-3">
+                    {legendEntries.map((entry) => (
+                      <li key={entry.id} className="flex items-center gap-1.5 text-xs text-white/70">
+                        <span
+                          className="size-2.5 shrink-0 rounded-full"
+                          style={{ background: entry.color }}
+                        />
+                        <span className="truncate">{entry.name}</span>
                       </li>
                     ))}
-                  </ol>
+                  </ul>
                 </ScrollArea>
               </div>
             )}
