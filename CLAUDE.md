@@ -57,6 +57,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 10. **Security first** — security principles must always be followed and prioritised. No vulnerability may linger after implementing a change: validate/authorize every request at the correct tier, never trust client input, never leak server-only secrets to the client, and never widen access as a shortcut.
 11. **Keep docs current** — always update the documentation repository ([`documentation/`](documentation/) + this hub) when a change makes a spoke or a cross-cutting rule inaccurate. Treat docs as part of the change, not a follow-up.
 12. **Read docs before changing a component** — always read the relevant spoke in [`documentation/`](documentation/) (via the index above) before making any change to that component. Understand its rules, dependencies, and gotchas first — never edit a subsystem from the hub alone.
+13. **ONLY use shadcn components for UI** - existing components exist in `src/components/ui`. More components can be added using command, e.g. `npx shadcn@latest add card`.
 
 ## Maintaining This Documentation
 

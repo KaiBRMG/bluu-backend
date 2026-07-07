@@ -24,6 +24,7 @@ To create:
 - lastUpdatedBy
 - comments
 - information
+- posts
 * note that 'type' must be able to store many fields at once (multi-select).
 * 'assigned' must map to the users collection and may store more than 1 value.
 * 'lastUpdatedBy' must map the users collection.

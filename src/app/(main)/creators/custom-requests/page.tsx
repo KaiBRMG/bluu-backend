@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardDescription, CardAction, CardContent, CardFooter } from "@/components/ui/card";
 import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
   AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction,
@@ -23,6 +23,9 @@ import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
+import { Label as RechartsLabel, Pie, PieChart } from "recharts";
 import { Plus, MoreHorizontal, Check, Info, Search, CalendarIcon, Link2 } from "lucide-react";
 import { resolveUserName } from "@/components/DeletedUser";
 import { useUserName } from "@/hooks/useUserName";
@@ -635,6 +638,89 @@ function KanbanColumn({ creator, count, children }: {
 
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
 
+const AGING_BUCKETS = ["0-24h", "1-7d", "7-30d", ">30d"] as const;
+
+// "\n" marks explicit line breaks for the slice-label renderer; labels
+// without one break onto a new line at every space.
+const AGING_LABELS: Record<(typeof AGING_BUCKETS)[number], string> = {
+  "0-24h": "Today",
+  "1-7d": "This week",
+  "7-30d": "This month",
+  ">30d": "Older than\na month",
+};
+
+// Snapped from the stock --chart-1..5 dark values, which fail the dataviz
+// checks on this surface (chart-2/3 too light, chart-1 under 3:1 contrast).
+// Same hues, lightness pulled into the dark band; validated CVD-safe.
+const DONUT_COLORS = ["#4176f6", "#00a86f", "#cb7f00", "#a65af1", "#f63b5d"];
+
+// Sequential red ramp (single hue, monotone lightness) for the ordered aging
+// buckets; older = brighter/more red. Validated ordinal ramp for the dark card
+// surface; foreground slice-label text stays >= 3.5:1 on every step.
+const AGING_COLORS = ["#883835", "#af3c3a", "#d53c3d", "#ff2f3a"];
+
+const RADIAN = Math.PI / 180;
+
+// Whole-dollar display for the donut centre; rounds up so cents never show.
+const formatAmountWhole = (n: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Math.ceil(n));
+
+// Renders a slice's label outside the segment, wrapping word-by-word onto
+// extra lines so long names don't overflow the card.
+function renderWrappedSliceLabel(props: unknown) {
+  const { cx, cy, midAngle, outerRadius, payload, name } = props as {
+    cx: number; cy: number; midAngle: number; outerRadius: number;
+    payload?: { label?: string }; name?: string;
+  };
+  const cos = Math.cos(-midAngle * RADIAN);
+  const sin = Math.sin(-midAngle * RADIAN);
+  const rOut = outerRadius + 14;
+  const x = cx + rOut * cos;
+  const y = cy + rOut * sin;
+  const raw = payload?.label ?? String(name);
+  const lines = raw.includes("\n") ? raw.split("\n") : raw.split(" ");
+  const lineHeight = 12;
+  return (
+    <text
+      x={x}
+      y={y - ((lines.length - 1) * lineHeight) / 2}
+      textAnchor={cos > 0.1 ? "start" : cos < -0.1 ? "end" : "middle"}
+      dominantBaseline="central"
+      className="fill-muted-foreground text-xs"
+    >
+      {lines.map((line, i) => (
+        <tspan key={i} x={x} dy={i === 0 ? 0 : lineHeight}>{line}</tspan>
+      ))}
+    </text>
+  );
+}
+
+// Renders each aging slice's count inside the segment, plus the same wrapped
+// outer label the outstanding-payments donut uses.
+function renderAgingSliceLabel(props: unknown) {
+  const { cx, cy, midAngle, innerRadius, outerRadius, value } = props as {
+    cx: number; cy: number; midAngle: number; innerRadius: number; outerRadius: number;
+    value: number;
+  };
+  const cos = Math.cos(-midAngle * RADIAN);
+  const sin = Math.sin(-midAngle * RADIAN);
+  const rMid = (innerRadius + outerRadius) / 2;
+  return (
+    <g>
+      <text
+        x={cx + rMid * cos}
+        y={cy + rMid * sin}
+        textAnchor="middle"
+        dominantBaseline="central"
+        className="fill-foreground text-xs font-semibold tabular-nums"
+      >
+        {value}
+      </text>
+      {renderWrappedSliceLabel(props)}
+    </g>
+  );
+}
+
 interface OverviewProps {
   creators: Creator[];
   userNames: Record<string, string>;
@@ -716,6 +802,58 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
     .filter(e => e.status !== "Completed" && activeCreatorIds.has(e.creatorID))
     .reduce((sum, e) => sum + (e.totalAmount - e.amountPaid), 0);
 
+  // Donut slices: outstanding $ per creator, largest first, folded into "Other"
+  // past the 4th slice so the series count never exceeds the 5 chart colors.
+  const outstandingAmounts = creators
+    .map(c => {
+      const byChatter = new Map<string, number>();
+      for (const e of allEntries) {
+        if (e.creatorID !== c.creatorID || e.status === "Completed") continue;
+        const diff = e.totalAmount - e.amountPaid;
+        if (diff !== 0) byChatter.set(e.createdBy, (byChatter.get(e.createdBy) ?? 0) + diff);
+      }
+      return {
+        name: c.stageName,
+        amount: [...byChatter.values()].reduce((sum, v) => sum + v, 0),
+        byChatter,
+      };
+    })
+    .filter(d => d.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+  const sumChatters = (ds: typeof outstandingAmounts) => {
+    const merged = new Map<string, number>();
+    for (const d of ds) for (const [uid, amt] of d.byChatter) merged.set(uid, (merged.get(uid) ?? 0) + amt);
+    return [...merged.entries()].filter(([, amt]) => amt > 0).sort((a, b) => b[1] - a[1]);
+  };
+  const donutSlices = [
+    ...outstandingAmounts.slice(0, 4).map((d, i) => ({
+      slice: `creator${i}`, label: d.name, amount: d.amount, chatters: sumChatters([d]),
+    })),
+    ...(outstandingAmounts.length > 4
+      ? [{
+          slice: "other",
+          label: outstandingAmounts.length === 5 ? outstandingAmounts[4].name : "Other",
+          amount: outstandingAmounts.slice(4).reduce((sum, d) => sum + d.amount, 0),
+          chatters: sumChatters(outstandingAmounts.slice(4)),
+        }]
+      : []),
+  ];
+  const donutConfig = {
+    amount: { label: "Outstanding" },
+    ...Object.fromEntries(donutSlices.map((s, i) => [s.slice, { label: s.label, color: DONUT_COLORS[i] }])),
+  } satisfies ChartConfig;
+  const donutData = donutSlices.map(s => ({ ...s, fill: `var(--color-${s.slice})` }));
+
+  // Aging donut: fixed bucket order (ordinal), zero buckets dropped from the pie
+  const agingTotal = AGING_BUCKETS.reduce((sum, b) => sum + aging[b], 0);
+  const agingConfig = {
+    count: { label: "Requests" },
+    ...Object.fromEntries(AGING_BUCKETS.map((b, i) => [`b${i}`, { label: AGING_LABELS[b], color: AGING_COLORS[i] }])),
+  } satisfies ChartConfig;
+  const agingData = AGING_BUCKETS
+    .map((b, i) => ({ bucket: `b${i}`, label: AGING_LABELS[b], count: aging[b], fill: `var(--color-b${i})` }))
+    .filter(d => d.count > 0);
+
   // Recently completed (not archived)
   const recentCompleted = allEntries
     .filter(e => e.status === "Completed" && !e.isArchived && activeCreatorIds.has(e.creatorID))
@@ -725,7 +863,7 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
   );
   const recentCompletedCreators = creators.filter(c => (recentCompletedByCreator[c.creatorID]?.length ?? 0) > 0);
 
-  // Outstanding customs (Awaiting + In Progress), excluding campaign-only types which have no CR code
+  // Outstanding customs (Awaiting + In Progress + Rejected), excluding campaign-only types which have no CR code
   const outstandingEntries = visibleEntries.filter(e =>
     (e.status === "Awaiting Approval" || e.status === "In Progress" || e.status === "Rejected") &&
     !(CAMPAIGN_TYPES as readonly string[]).includes(e.type)
@@ -786,76 +924,182 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
     }
   };
 
-  if (loading) return <div className="text-sm text-zinc-500 p-8">Loading...</div>;
+  if (loading) {
+    return (
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {Array.from({ length: 4 }, (_, i) => (
+          <Skeleton key={i} className="h-64 rounded-xl" />
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6">
       {/* Summary tiles */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <SummaryTile title="Awaiting Approval">
-          <div className="flex flex-col gap-1 mt-2">
-            {creators.map(c => (
-              <div key={c.creatorID} className="flex justify-between items-center gap-2 text-sm">
-                <span className="flex items-center gap-1.5 text-zinc-400 min-w-0">
-                  <Avatar className="size-4 shrink-0">
-                    <AvatarImage src={c.photoURL ?? undefined} />
-                    <AvatarFallback className="text-[8px]">{c.stageName.charAt(0)}</AvatarFallback>
-                  </Avatar>
-                  <span className="truncate">{c.stageName}</span>
-                </span>
-                <span className={`font-semibold shrink-0 ${awaitingByCreator[c.creatorID] ? "text-orange-400" : "text-zinc-500"}`}>
-                  {awaitingByCreator[c.creatorID]}
-                </span>
-              </div>
-            ))}
-          </div>
-        </SummaryTile>
-        <SummaryTile title="In Progress">
-          <div className="flex flex-col gap-1 mt-2">
-            {creators.map(c => (
-              <div key={c.creatorID} className="flex justify-between items-center gap-2 text-sm">
-                <span className="flex items-center gap-1.5 text-zinc-400 min-w-0">
-                  <Avatar className="size-4 shrink-0">
-                    <AvatarImage src={c.photoURL ?? undefined} />
-                    <AvatarFallback className="text-[8px]">{c.stageName.charAt(0)}</AvatarFallback>
-                  </Avatar>
-                  <span className="truncate">{c.stageName}</span>
-                </span>
-                <span className={`font-semibold shrink-0 ${inProgressByCreator[c.creatorID] ? "text-blue-400" : "text-zinc-500"}`}>
-                  {inProgressByCreator[c.creatorID]}
-                </span>
-              </div>
-            ))}
-          </div>
-        </SummaryTile>
-        <SummaryTile title="Outstanding Payments">
-          <p className="text-2xl font-bold text-red-400 mt-2">{formatAmount(outstanding)}</p>
-        </SummaryTile>
-        <SummaryTile title="Aging (Awaiting + In Progress)">
-          <div className="flex flex-col gap-1 mt-2">
-            {(["0-24h", "1-7d", "7-30d", ">30d"] as const).map(bucket => (
-              <div key={bucket} className="flex justify-between text-sm">
-                <span className="text-zinc-400">{bucket}</span>
-                <span className={`font-semibold ${aging[bucket] ? "text-yellow-400" : "text-zinc-500"}`}>
-                  {aging[bucket]}
-                </span>
-              </div>
-            ))}
-          </div>
-        </SummaryTile>
+        <CreatorCountCard title="Awaiting Approval" creators={creators} counts={awaitingByCreator} />
+        <CreatorCountCard title="In Progress" creators={creators} counts={inProgressByCreator} />
+        <Card className="gap-3 py-4">
+          <CardHeader className="px-4">
+            <CardDescription>Outstanding Payments</CardDescription>
+            {donutData.length === 0 && (
+              <CardTitle className="text-2xl font-semibold tabular-nums">{formatAmount(0)}</CardTitle>
+            )}
+          </CardHeader>
+          <CardContent className="flex-1 px-4 pb-0">
+            {donutData.length > 0 ? (
+              <ChartContainer
+                config={donutConfig}
+                className="mx-auto aspect-auto h-[160px] w-full [&_.recharts-surface]:overflow-visible"
+              >
+                <PieChart>
+                  <ChartTooltip
+                    cursor={false}
+                    content={
+                      <ChartTooltipContent
+                        hideLabel
+                        formatter={(value, name, item) => {
+                          const { fill, chatters = [] } =
+                            (item as { payload?: { fill?: string; chatters?: [string, number][] } }).payload ?? {};
+                          return (
+                            <div className="flex w-full flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                <span className="size-2.5 shrink-0 rounded-[2px]" style={{ background: fill }} />
+                                <span className="text-muted-foreground">
+                                  {donutConfig[name as keyof typeof donutConfig]?.label ?? name}
+                                </span>
+                                <span className="ml-auto font-mono font-medium tabular-nums text-foreground">
+                                  {formatAmountWhole(Number(value))}
+                                </span>
+                              </div>
+                              {chatters.map(([uid, amt]) => (
+                                <div key={uid} className="flex items-center justify-between gap-4 pl-4 text-muted-foreground">
+                                  <span className="truncate">{resolveUserName(uid, userNames)}</span>
+                                  <span className="font-mono tabular-nums">{formatAmountWhole(amt)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        }}
+                      />
+                    }
+                  />
+                  <Pie
+                    data={donutData}
+                    dataKey="amount"
+                    nameKey="slice"
+                    innerRadius={48}
+                    outerRadius={62}
+                    strokeWidth={2}
+                    stroke="var(--card)"
+                    labelLine={false}
+                    label={renderWrappedSliceLabel}
+                  >
+                    <RechartsLabel
+                      content={({ viewBox }) => {
+                        if (viewBox && "cx" in viewBox && "cy" in viewBox) {
+                          return (
+                            <text
+                              x={viewBox.cx}
+                              y={viewBox.cy}
+                              textAnchor="middle"
+                              dominantBaseline="central"
+                              className="fill-foreground text-base font-bold"
+                            >
+                              {formatAmountWhole(outstanding)}
+                            </text>
+                          );
+                        }
+                      }}
+                    />
+                  </Pie>
+                </PieChart>
+              </ChartContainer>
+            ) : (
+              <p className="text-sm text-muted-foreground">Nothing outstanding.</p>
+            )}
+          </CardContent>
+        </Card>
+        <Card className="gap-3 py-4">
+          <CardHeader className="px-4">
+            <CardDescription>Pending Requests</CardDescription>
+            {agingTotal === 0 && (
+              <CardTitle className="text-2xl font-semibold tabular-nums">0</CardTitle>
+            )}
+            {aging[">30d"] > 0 && (
+              <CardAction>
+                <Badge variant="destructive" className="tabular-nums">{aging[">30d"]} over 30d</Badge>
+              </CardAction>
+            )}
+          </CardHeader>
+          <CardContent className="flex-1 px-4 pb-0">
+            {agingTotal > 0 ? (
+              <ChartContainer
+                config={agingConfig}
+                className="mx-auto aspect-auto h-[190px] w-full [&_.recharts-surface]:overflow-visible"
+              >
+                <PieChart>
+                  <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
+                  <Pie
+                    data={agingData}
+                    dataKey="count"
+                    nameKey="bucket"
+                    innerRadius={34}
+                    outerRadius={52}
+                    strokeWidth={2}
+                    stroke="var(--card)"
+                    labelLine={false}
+                    label={renderAgingSliceLabel}
+                  >
+                    <RechartsLabel
+                      content={({ viewBox }) => {
+                        if (viewBox && "cx" in viewBox && "cy" in viewBox) {
+                          return (
+                            <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle" dominantBaseline="central">
+                              <tspan
+                                x={viewBox.cx}
+                                y={(viewBox.cy || 0) - 5}
+                                className="fill-foreground text-base font-bold tabular-nums"
+                              >
+                                {agingTotal}
+                              </tspan>
+                              <tspan
+                                x={viewBox.cx}
+                                y={(viewBox.cy || 0) + 11}
+                                className="fill-muted-foreground text-[10px]"
+                              >
+                                Total
+                              </tspan>
+                            </text>
+                          );
+                        }
+                      }}
+                    />
+                  </Pie>
+                </PieChart>
+              </ChartContainer>
+            ) : (
+              <p className="text-sm text-muted-foreground">Nothing pending.</p>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Recently Completed / Recently Archived */}
       {(recentCompleted.length > 0 || recentArchived.length > 0) && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {recentCompleted.length > 0 && (
-            <div className="rounded-xl p-4 border border-green-500/30 bg-green-500/5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-green-400">Recently Completed</h3>
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleDismissAll}>
-                  Dismiss All
-                </Button>
-              </div>
+            <Card className="gap-4 py-4 border-green-500/30 bg-green-500/5">
+              <CardHeader className="px-4">
+                <CardTitle className="text-sm font-semibold text-green-400">Recently Completed</CardTitle>
+                <CardAction>
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleDismissAll}>
+                    Dismiss All
+                  </Button>
+                </CardAction>
+              </CardHeader>
+              <CardContent className="px-4">
               <KanbanBoard>
                 {recentCompletedCreators.map(creator => (
                   <KanbanColumn key={creator.creatorID} creator={creator} count={recentCompletedByCreator[creator.creatorID].length}>
@@ -882,16 +1126,20 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
                   </KanbanColumn>
                 ))}
               </KanbanBoard>
-            </div>
+              </CardContent>
+            </Card>
           )}
           {recentArchived.length > 0 && (
-            <div className="rounded-xl p-4 border border-orange-500/30 bg-orange-500/5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-orange-400">Recently Archived</h3>
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleDismissAllArchived}>
-                  Dismiss All
-                </Button>
-              </div>
+            <Card className="gap-4 py-4 border-orange-500/30 bg-orange-500/5">
+              <CardHeader className="px-4">
+                <CardTitle className="text-sm font-semibold text-orange-400">Recently Archived</CardTitle>
+                <CardAction>
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleDismissAllArchived}>
+                    Dismiss All
+                  </Button>
+                </CardAction>
+              </CardHeader>
+              <CardContent className="px-4">
               <KanbanBoard>
                 {recentArchivedCreators.map(creator => (
                   <KanbanColumn key={creator.creatorID} creator={creator} count={recentArchivedByCreator[creator.creatorID].length}>
@@ -918,24 +1166,29 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
                   </KanbanColumn>
                 ))}
               </KanbanBoard>
-            </div>
+              </CardContent>
+            </Card>
           )}
         </div>
       )}
 
       {/* Outstanding Customs */}
       {outstandingEntries.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap items-center justify-end gap-3 text-xs text-zinc-400">
-            {(["Awaiting Approval", "In Progress", "Rejected"] as CRStatus[]).map(s => (
-              <span key={s} className="flex items-center gap-1.5">
-                <StatusDot status={s} />
-                {s}
-              </span>
-            ))}
-          </div>
-          <div className="rounded-xl p-4 border border-blue-500/30 bg-blue-500/5">
-            <h3 className="text-sm font-semibold text-blue-400 mb-4">Outstanding Customs</h3>
+        <Card className="gap-4 py-4 border-blue-500/30 bg-blue-500/5">
+          <CardHeader className="px-4">
+            <CardTitle className="text-sm font-semibold text-blue-400">Outstanding Customs</CardTitle>
+            <CardAction>
+              <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+                {(["Awaiting Approval", "In Progress", "Rejected"] as CRStatus[]).map(s => (
+                  <span key={s} className="flex items-center gap-1.5">
+                    <StatusDot status={s} />
+                    {s}
+                  </span>
+                ))}
+              </div>
+            </CardAction>
+          </CardHeader>
+          <CardContent className="px-4">
             <KanbanBoard>
             {outstandingKanbanCreators.map(creator => (
               <KanbanColumn key={creator.creatorID} creator={creator} count={outstandingByCreator[creator.creatorID].length}>
@@ -953,14 +1206,17 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
               </KanbanColumn>
             ))}
             </KanbanBoard>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Outstanding Payments */}
       {outstandingPaymentEntries.length > 0 && (
-        <div className="rounded-xl p-4 border border-red-500/30 bg-red-500/5">
-          <h3 className="text-sm font-semibold text-red-400 mb-4">Outstanding Payments</h3>
+        <Card className="gap-4 py-4 border-red-500/30 bg-red-500/5">
+          <CardHeader className="px-4">
+            <CardTitle className="text-sm font-semibold text-red-400">Outstanding Payments</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4">
           <KanbanBoard>
             {outstandingPaymentsKanbanCreators.map(creator => (
               <KanbanColumn key={creator.creatorID} creator={creator} count={outstandingPaymentsByCreator[creator.creatorID].length}>
@@ -979,7 +1235,8 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
               </KanbanColumn>
             ))}
           </KanbanBoard>
-        </div>
+          </CardContent>
+        </Card>
       )}
 
       {viewEntry && (
@@ -1003,12 +1260,45 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
   );
 }
 
-function SummaryTile({ title, children }: { title: string; children: React.ReactNode }) {
+function CreatorCountCard({ title, creators, counts }: {
+  title: string;
+  creators: Creator[];
+  counts: Record<string, number>;
+}) {
+  const total = creators.reduce((sum, c) => sum + (counts[c.creatorID] ?? 0), 0);
+  const nonzero = creators
+    .map(c => ({ ...c, count: counts[c.creatorID] ?? 0 }))
+    .filter(c => c.count > 0)
+    .sort((a, b) => b.count - a.count);
+  const top = nonzero.slice(0, 3);
+  const rest = nonzero.slice(3);
   return (
-    <div className="rounded-xl p-4 border" style={{ background: "var(--sidebar-background)", borderColor: "var(--border-subtle)" }}>
-      <p className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{title}</p>
-      {children}
-    </div>
+    <Card className="gap-3 py-4">
+      <CardHeader className="px-4">
+        <CardDescription>{title}</CardDescription>
+        <CardTitle className="text-2xl font-semibold tabular-nums">{total}</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-1.5 px-4">
+        {top.map(c => (
+          <div key={c.creatorID} className="flex items-center justify-between gap-2 text-sm">
+            <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+              <Avatar className="size-4 shrink-0">
+                <AvatarImage src={c.photoURL ?? undefined} />
+                <AvatarFallback className="text-[8px]">{c.stageName.charAt(0)}</AvatarFallback>
+              </Avatar>
+              <span className="truncate">{c.stageName}</span>
+            </span>
+            <Badge variant="secondary" className="tabular-nums">{c.count}</Badge>
+          </div>
+        ))}
+        {rest.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            +{rest.reduce((sum, c) => sum + c.count, 0)} more on {rest.length} other creator{rest.length === 1 ? "" : "s"}
+          </p>
+        )}
+        {top.length === 0 && <p className="text-sm text-muted-foreground">None</p>}
+      </CardContent>
+    </Card>
   );
 }
 
