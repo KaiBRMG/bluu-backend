@@ -167,5 +167,32 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 16. SMM Twitter/X accounts
+    // All reads/writes via Admin SDK (API routes). No client-side listeners.
+    match /twitterx-accounts/{accountId} {
+      allow read, write: if false;
+    }
+
+    // 17. SMM content schedule (posts live in a subcollection; rules do not
+    // cascade, so the child match is required for defence-in-depth).
+    // All reads/writes via Admin SDK (API routes).
+    match /twitterx-content-schedule/{accountId} {
+      allow read, write: if false;
+
+      match /posts/{postId} {
+        allow read, write: if false;
+      }
+    }
+
+    // 18. SMM bonus rounds (submissions subcollection — same cascade note).
+    // All reads/writes via Admin SDK (API routes).
+    match /twitterx-bonus/{roundId} {
+      allow read, write: if false;
+
+      match /submissions/{submissionId} {
+        allow read, write: if false;
+      }
+    }
+
   }
 }

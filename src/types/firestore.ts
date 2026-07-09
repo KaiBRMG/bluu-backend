@@ -370,6 +370,95 @@ export interface ContentPlanningDocument {
   isArchived: boolean;
 }
 
+// ─── SMM Portal (Twitter/X) ──────────────────────────────────────────
+
+export const SMM_ACCOUNT_TYPES = [
+  'Twink', 'Twunk', 'Hunk/Jock', 'Couple', 'Daddy',
+  'Artist', 'Animator', 'SFS', 'Upload', 'Bonus',
+] as const;
+export type SmmAccountType = typeof SMM_ACCOUNT_TYPES[number];
+
+export const SMM_NETWORKS = ['Inhouse', 'X Managed', 'Twink', 'Other'] as const;
+export type SmmNetwork = typeof SMM_NETWORKS[number];
+
+export type SmmTier = 1 | 2;
+export type SmmAccountStatus = 'active' | 'inactive';
+
+/** Submission status values — single source of truth for these emoji-bearing
+ * strings, which are compared for equality to drive bonus logic and badges. */
+export const SMM_SUBMISSION_STATUSES = ['✅ Qualified', '❌ Late submission'] as const;
+export type SmmSubmissionStatus = typeof SMM_SUBMISSION_STATUSES[number];
+export const SMM_STATUS_QUALIFIED: SmmSubmissionStatus = SMM_SUBMISSION_STATUSES[0];
+export const SMM_STATUS_LATE: SmmSubmissionStatus = SMM_SUBMISSION_STATUSES[1];
+
+export type SmmAdminApproval = 'pending' | 'approved' | 'rejected';
+
+/** Serialised twitterx-accounts doc (Timestamps converted to ISO strings) */
+export interface SmmAccount {
+  id: string;
+  accountName: string;
+  accountLink: string;
+  type: string[];                    // multi-select of SMM_ACCOUNT_TYPES
+  network: SmmNetwork;
+  tier: SmmTier;
+  assigned: string | null;           // uid, single value
+  assignedName?: string;             // resolved server-side (admin scope only)
+  assignedPhotoURL?: string | null;
+  driveLink: string;
+  comments: string;
+  information: string;
+  status: SmmAccountStatus;
+  lastUpdatedTime: string | null;
+  lastUpdatedBy: string;
+  lastUpdatedByName?: string;        // resolved server-side (admin scope only)
+}
+
+/** Serialised twitterx-content-schedule/{accountId}/posts doc */
+export interface SmmPost {
+  id: string;
+  accountId: string;                 // derived from the parent doc ref
+  accountName: string;               // denormalized from twitterx-accounts
+  caption: string;
+  postDate: string | null;
+  postLink: string;
+  postedBy: string;                  // uid
+  postedByName?: string;             // resolved server-side (admin content schedule)
+  postedByPhotoURL?: string | null;
+  createdTime: string | null;
+  bonusSubmission: boolean;          // true once the post has been submitted for a bonus
+}
+
+/** Serialised twitterx-bonus round doc (userTotals delivered separately per scope) */
+export interface SmmBonusRound {
+  id: string;
+  roundDateStart: string | null;
+  roundDateEnd: string | null;
+}
+
+/** Serialised twitterx-bonus/{roundId}/submissions doc */
+export interface SmmSubmission {
+  id: string;
+  roundId: string;
+  postLink: string;
+  accountName: string;
+  originalLink: string;              // '' when not a viral copy
+  originalAcc: string;               // accountId, '' when not a viral copy
+  submittedBy: string;               // uid
+  submittedByName?: string;          // resolved server-side (admin scope only)
+  submittedByPhotoURL?: string | null;
+  screenshotLink: string;
+  postDate: string | null;
+  submissionDate: string | null;
+  numLikes: number;
+  status: SmmSubmissionStatus;
+  network: SmmNetwork;
+  tier: SmmTier;
+  bonusAmount: number;               // dollars, may be fractional
+  sysComments: string;               // '\n'-joined system comment lines
+  adminApproval: SmmAdminApproval;
+  isResidual: boolean;               // auto-created for the original account's owner
+}
+
 // ─── Resolved access (returned to client after permission resolution) ─
 
 export interface ResolvedAccess {

@@ -16,7 +16,7 @@ import type { NotionDocument } from "@/lib/services/notionService";
 import { Coffee, Info, Link as LinkIcon } from 'lucide-react';
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { STATE_CONFIG } from "@/lib/stateColors";
@@ -187,8 +187,11 @@ function ClockWidget() {
   }, []);
 
   return (
-    <Card style={{ background: '#171717' }} className="border-0 shadow-none py-0 gap-0">
-      <CardContent className="p-6">
+    <Card className="gap-3 py-4">
+      <CardHeader className="px-4">
+        <CardDescription>Local Time</CardDescription>
+      </CardHeader>
+      <CardContent className="px-4">
         <div className="flex flex-col gap-2">
           {/* Primary timezone — always shown; '--:--' if not yet set */}
           <div className="flex items-baseline gap-2">
@@ -242,16 +245,16 @@ function TimeTrackingWidget() {
   const timerSeconds = isOnBreak && breakRemainingSeconds !== null ? breakRemainingSeconds : elapsedSeconds;
 
   return (
-    <Card className="border-0 shadow-none transition-colors py-0 gap-0" style={{ background: config.bgAlpha }}>
-      <CardContent className="p-6">
-        {/* State indicator */}
-        <div className="flex items-center gap-2 mb-3">
-          <config.Icon style={{ color: config.color, width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
-          <span className="text-xs font-medium uppercase tracking-wide" style={{ color: config.color }}>
+    <Card className="gap-3 py-4 transition-colors" style={{ background: config.bgAlpha }}>
+      <CardHeader className="px-4">
+        <CardDescription className="flex items-center gap-2" style={{ color: config.color }}>
+          <config.Icon style={{ width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
+          <span className="text-xs font-medium uppercase tracking-wide">
             {config.label}
           </span>
-        </div>
-
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="px-4">
         {/* Timer + Actions */}
         <div className="flex items-center justify-between gap-4">
           <p
@@ -337,11 +340,11 @@ function NotificationsWidget() {
   }
 
   return (
-    <Card style={{ background: '#171717' }} className="border-0 shadow-none py-0 gap-0">
-      <CardContent className="p-6">
-        <h3 className="text-sm font-medium uppercase tracking-wide mb-4 text-muted-foreground">
-          Notifications
-        </h3>
+    <Card className="gap-3 py-4">
+      <CardHeader className="px-4">
+        <CardDescription>Notifications</CardDescription>
+      </CardHeader>
+      <CardContent className="px-4">
         {unread.length === 0 ? (
           <p className="text-sm text-muted-foreground">No unread notifications.</p>
         ) : (
@@ -488,12 +491,10 @@ function PinnedResourcesWidget() {
   }, [documents, pinned]);
 
   return (
-    <Card style={{ background: '#171717' }} className="border-0 shadow-none py-0 gap-0">
-      <CardContent className="p-6">
-        <div className="mb-4 flex items-center gap-2">
-          <h3 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-            Pinned Resources
-          </h3>
+    <Card className="gap-3 py-4">
+      <CardHeader className="px-4">
+        <CardDescription className="flex items-center gap-2">
+          Pinned Resources
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -515,8 +516,9 @@ function PinnedResourcesWidget() {
               .
             </TooltipContent>
           </Tooltip>
-        </div>
-
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="px-4">
         {loading && pinnedDocs.length === 0 ? (
           <div className="flex flex-col gap-2">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -568,31 +570,32 @@ export default function Home() {
 
   const groupCard = (
     <Card
-      style={{
-        background: userGroup === 'unassigned' ? 'rgba(223,98,110,0.1)' : '#171717',
-        borderColor: userGroup === 'unassigned' ? 'rgba(223,98,110,0.3)' : 'transparent',
-      }}
-      className="py-0 gap-0"
+      className="gap-3 py-4"
+      style={userGroup === 'unassigned' ? {
+        background: 'rgba(223,98,110,0.1)',
+        borderColor: 'rgba(223,98,110,0.3)',
+      } : undefined}
     >
-      <CardContent className="p-6">
-        <h3 className="text-sm font-medium uppercase tracking-wide mb-2 text-muted-foreground">Group</h3>
-        <p className="text-2xl font-semibold">{displayGroup}</p>
-        {userGroup === 'unassigned' && (
-          <p className="text-xs mt-2" style={{ color: '#DF626E' }}>
+      <CardHeader className="px-4">
+        <CardDescription>Group</CardDescription>
+        <CardTitle className="text-2xl font-semibold">{displayGroup}</CardTitle>
+      </CardHeader>
+      {userGroup === 'unassigned' && (
+        <CardContent className="px-4">
+          <p className="text-xs" style={{ color: '#DF626E' }}>
             User functionality limited: You are currently not assigned to any groups. Please wait until a system administrator assigns you.
           </p>
-        )}
-      </CardContent>
+        </CardContent>
+      )}
     </Card>
   );
 
   const welcomeCard = (
-    <Card style={{ background: '#171717' }} className="border-0 shadow-none py-0 gap-0">
-      <CardContent className="p-6">
-        <h3 className="text-sm font-medium uppercase tracking-wide mb-2 text-muted-foreground">
-          Welcome to Bluu Backend!
-        </h3>
-
+    <Card className="gap-3 py-4">
+      <CardHeader className="px-4">
+        <CardDescription>Welcome to Bluu Backend!</CardDescription>
+      </CardHeader>
+      <CardContent className="px-4">
         <p className="text-sm text-muted-foreground">
           {"We're still a work-in-progress. See a bug? Have a suggestion? "}
           <a

@@ -40,6 +40,7 @@ import { useUserData } from "@/hooks/useUserData";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
 import { TransferDialog, ConfirmDialog, ARCHIVE_CR_TEXT, UNARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
+import { OutstandingPaymentsDonut } from "@/components/campaign/OutstandingPaymentsDonut";
 
 // ─── Date picker ─────────────────────────────────────────────────────────────
 
@@ -797,15 +798,6 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function SummaryTile({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-xl p-4 border" style={{ background: "var(--sidebar-background)", borderColor: "var(--border-subtle)" }}>
-      <p className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{title}</p>
-      {children}
-    </div>
-  );
-}
-
 // ─── Creator Requests Table ───────────────────────────────────────────────────
 
 interface CreatorTableProps {
@@ -1184,18 +1176,17 @@ function MyCustomsKanban({ currentUserUid, creators, userNames, isActive }: MyCu
   const safePage = Math.min(page, totalPages - 1);
   const pagedCreators = activeCreators.slice(safePage * CREATORS_PER_PAGE, (safePage + 1) * CREATORS_PER_PAGE);
 
-  const outstandingAmount = [...visibleActive, ...visibleCompletedUnpaid, ...visibleRejected]
-    .reduce((sum, e) => sum + (e.totalAmount - e.amountPaid), 0);
+  const outstandingEntries = [...visibleActive, ...visibleCompletedUnpaid, ...visibleRejected];
 
   const isRejectedView = viewEntry && viewEntry.status === "Rejected";
 
   return (
     <div>
       {/* Summary tiles */}
-      <div className="flex items-center gap-4 mb-6">
-        <SummaryTile title="Outstanding Payments">
-          <p className="text-2xl font-bold text-red-400 mt-2">{formatAmount(outstandingAmount)}</p>
-        </SummaryTile>
+      <div className="flex items-start gap-4 mb-6">
+        <div className="w-64 shrink-0">
+          <OutstandingPaymentsDonut entries={outstandingEntries} creators={creators} />
+        </div>
         <div className="ml-auto">
           <Button size="sm" onClick={() => setShowNew(true)}>
             <Plus className="w-4 h-4 mr-1" /> New

@@ -5,10 +5,7 @@ import { EllipsisIcon } from 'lucide-react';
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '@/components/ui/table';
-import {
-  Pagination, PaginationContent, PaginationItem,
-  PaginationPrevious, PaginationNext, PaginationLink, PaginationEllipsis,
-} from '@/components/ui/pagination';
+import { EllipsisPagination } from '@/components/EllipsisPagination';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -87,21 +84,9 @@ function ApprovalBadge({ value }: { value: ApprovalStatus }) {
   return <Badge variant={variantMap[value]}>{value}</Badge>;
 }
 
-// ─── UserChip — avatar + display name ────────────────────────────────
+// ─── UserChip — promoted to a shared component ────────────────────────
 
-function UserChip({ name, photoURL }: { name: string; photoURL: string | null }) {
-  if (name === 'No One') return <span className="text-muted-foreground text-sm">No One</span>;
-  if (!name) return <span className="text-sm"><DeletedUser /></span>;
-  return (
-    <Button variant="outline" className="rounded-full p-0! pe-3! h-8 gap-0 text-sm font-normal">
-      <Avatar className="size-7" style={{ background: getAvatarColor(name) }}>
-        {photoURL && <AvatarImage src={photoURL} alt={name} />}
-        <AvatarFallback className="text-xs" style={{ background: getAvatarColor(name), color: '#fff' }}>{getInitials(name)}</AvatarFallback>
-      </Avatar>
-      <span className="pl-1.5">{name}</span>
-    </Button>
-  );
-}
+import { UserChip } from '@/components/UserChip';
 
 // ─── CommentCell — truncated trigger + hover card with full comment ───
 
@@ -240,71 +225,6 @@ function ActionPopover({
   );
 }
 
-// ─── Pagination ───────────────────────────────────────────────────────
-
-function DisputePagination({
-  page,
-  totalPages,
-  onPageChange,
-}: {
-  page: number;
-  totalPages: number;
-  onPageChange: (p: number) => void;
-}) {
-  if (totalPages <= 1) return null;
-
-  const pages: (number | 'ellipsis')[] = [];
-  if (totalPages <= 7) {
-    for (let i = 1; i <= totalPages; i++) pages.push(i);
-  } else {
-    pages.push(1);
-    if (page > 3) pages.push('ellipsis');
-    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) {
-      pages.push(i);
-    }
-    if (page < totalPages - 2) pages.push('ellipsis');
-    pages.push(totalPages);
-  }
-
-  return (
-    <Pagination className="mt-4">
-      <PaginationContent>
-        <PaginationItem>
-          <PaginationPrevious
-            onClick={() => page > 1 && onPageChange(page - 1)}
-            aria-disabled={page === 1}
-            className={page === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-          />
-        </PaginationItem>
-        {pages.map((p, i) =>
-          p === 'ellipsis' ? (
-            <PaginationItem key={`ell-${i}`}>
-              <PaginationEllipsis />
-            </PaginationItem>
-          ) : (
-            <PaginationItem key={p}>
-              <PaginationLink
-                isActive={p === page}
-                onClick={() => onPageChange(p)}
-                className="cursor-pointer"
-              >
-                {p}
-              </PaginationLink>
-            </PaginationItem>
-          )
-        )}
-        <PaginationItem>
-          <PaginationNext
-            onClick={() => page < totalPages && onPageChange(page + 1)}
-            aria-disabled={page === totalPages}
-            className={page === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-          />
-        </PaginationItem>
-      </PaginationContent>
-    </Pagination>
-  );
-}
-
 // ─── Main component ───────────────────────────────────────────────────
 
 export function DisputeTable({
@@ -399,7 +319,7 @@ export function DisputeTable({
           {renderRows()}
         </TableBody>
       </Table>
-      <DisputePagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
+      <EllipsisPagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
     </div>
   );
 }

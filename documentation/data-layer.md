@@ -29,6 +29,7 @@
 | `campaignTrackingService.ts` | `campaign-tracking` reads/writes | see [campaign-tracking.md](campaign-tracking.md) |
 | `notionService.ts` | Notion DB integration | see [notion-resources.md](notion-resources.md) |
 | `teamspaceService.ts` | Teamspace data | |
+| `smmService.ts` | SMM access gates, current round, link-usage lookup, serializers | see [smm-portal.md](smm-portal.md) |
 
 ---
 
@@ -43,6 +44,9 @@
 | `useBasicUsers` | `/api/users/display-names` | sessionStorage, 5 min | Full employee list **incl. archived** — for pickers and UID→name maps |
 | `useUserName` | built on `useBasicUsers` | — | Canonical client-side `uid → displayName`. Do **not** roll your own `/api/users/display-names` fetch. See [user-management.md](user-management.md#user-name-resolution) |
 | `usePermissions` | permission map | localStorage (no TTL) via `permissionsCache.ts` | |
+| `useSmmAccounts` / `useSmmBonus` / `useSmmUsers` | SMM API routes | sessionStorage, 5 min | see [smm-portal.md](smm-portal.md#client-hooks--caching) |
+| `useSmmPosts` | SMM posts API | in-memory per-week only (high churn) | cleared on any post mutation |
+| `useAuthFetch` | — | — | Shared bearer-token fetch helper (extracted from `useDisputesData`) |
 
 **Caching pattern (sessionStorage hooks):** versioned key + 5-min TTL, mirrored across `useCreators` / `useResources` / `useBasicUsers`. Reuse this pattern for new reference-data hooks rather than fetching in components.
 
@@ -66,6 +70,11 @@
 | `leave_requests/{id}` | Leave requests | |
 | `notifications/{docId}`, `notifications-batches/{batchId}` | Notification system | see [notifications.md](notifications.md) |
 | `bugs/{id}` | Bug reports | |
+| `twitterx-accounts/{id}` | SMM Twitter/X accounts | see [smm-portal.md](smm-portal.md) |
+| `twitterx-content-schedule/{accountId}/posts/{postId}` | SMM scheduled posts (**subcollection**) | see [smm-portal.md](smm-portal.md) |
+| `twitterx-bonus/{roundId}/submissions/{id}` | SMM bonus rounds + submissions (**subcollection**) | see [smm-portal.md](smm-portal.md) |
+
+**Subcollections + collection-group indexes:** the `twitterx-*` collections are the first in the repo to use subcollections and `COLLECTION_GROUP` indexes / `fieldOverrides` in `firestore.indexes.json`. See [smm-portal.md](smm-portal.md#indexes-firestoreindexesjson).
 
 **Deprecation:** `TimeEntryDocument` is `@deprecated`. New sessions use `ActiveSessionDocument` + `TimeEntryLedgerDocument`.
 

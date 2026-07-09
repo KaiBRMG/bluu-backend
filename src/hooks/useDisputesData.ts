@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useAuth } from '@/components/AuthProvider';
+import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { getCache, setCache } from '@/lib/queryCache';
 import type { DisputeDocument, CreatorDocument, ApprovalStatus } from '@/types/firestore';
 
@@ -41,31 +42,12 @@ const CA_USERS_KEY = 'bluu_disputes_ca_users_v1';
 
 export function useDisputesData() {
   const { user } = useAuth();
+  const authFetch = useAuthFetch();
 
   const [creators, setCreators] = useState<CreatorDocument[]>([]);
   const [caUsers, setCaUsers] = useState<CaUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // ── Authenticated fetch helper ──────────────────────────────────────
-
-  const authFetch = useCallback(async (url: string, options: RequestInit = {}) => {
-    if (!user) throw new Error('Not authenticated');
-    const idToken = await user.getIdToken();
-    const res = await fetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${idToken}`,
-        ...(options.headers ?? {}),
-      },
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || `Request failed: ${res.status}`);
-    }
-    return res.json();
-  }, [user]);
 
   // ── Load creators (cached) ──────────────────────────────────────────
 

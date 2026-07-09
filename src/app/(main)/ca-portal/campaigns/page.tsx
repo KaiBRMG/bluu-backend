@@ -35,6 +35,7 @@ import { useUserData } from "@/hooks/useUserData";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
 import { TransferDialog, ConfirmDialog, ARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
+import { OutstandingPaymentsDonut } from "@/components/campaign/OutstandingPaymentsDonut";
 
 // ─── Shared constants ─────────────────────────────────────────────────────────
 
@@ -483,18 +484,13 @@ function OverviewPanel({ creators, userNames, isActive, uid }: OverviewPanelProp
   // creator list) so they drop out of both the list and the outstanding total.
   const activeCreatorIds = new Set(creators.map(c => c.creatorID));
   const pendingPayments = entries.filter(e => activeCreatorIds.has(e.creatorID) && e.amountPaid < e.totalAmount);
-  const outstandingTotal = pendingPayments.reduce((sum, e) => sum + (e.totalAmount - e.amountPaid), 0);
 
   return (
     <div>
-      {/* Top row: outstanding tile + New button */}
+      {/* Top row: outstanding donut + New button */}
       <div className="flex items-start gap-4 mb-6">
-        <div className="rounded-xl p-4 border" style={{ background: "var(--sidebar-background)", borderColor: "var(--border-subtle)" }}>
-          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Outstanding Payments</p>
-          <p className="text-2xl font-bold text-red-400 mt-2">{formatAmount(outstandingTotal)}</p>
-          <p className="text-xs text-zinc-500 mt-1">
-            {pendingPayments.length} entr{pendingPayments.length === 1 ? "y" : "ies"} unpaid
-          </p>
+        <div className="w-64 shrink-0">
+          <OutstandingPaymentsDonut entries={pendingPayments} creators={creators} />
         </div>
         <div className="ml-auto">
           <Button size="sm" onClick={() => setShowWizard(true)}>

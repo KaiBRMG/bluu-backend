@@ -475,3 +475,86 @@ describe('bugs collection', () => {
     await assertFails(getDoc(doc(db, 'bugs', 'bug-1')));
   });
 });
+
+// ---------------------------------------------------------------------------
+// 13. SMM Twitter/X collections (defence-in-depth — all access denied,
+//     including subcollections, which rules do not cascade to)
+// ---------------------------------------------------------------------------
+
+describe('twitterx-accounts collection', () => {
+  const UID = 'user-a';
+  const ADMIN_UID = 'admin-user';
+
+  beforeEach(async () => {
+    await seedDoc('twitterx-accounts', 'acc-1', { accountName: 'Test Account', status: 'active', assigned: UID });
+  });
+
+  it('denies authenticated user reads (even the assigned user)', async () => {
+    const db = authedUser(UID).firestore();
+    await assertFails(getDoc(doc(db, 'twitterx-accounts', 'acc-1')));
+  });
+
+  it('denies admin client reads', async () => {
+    const db = adminUser(ADMIN_UID).firestore();
+    await assertFails(getDoc(doc(db, 'twitterx-accounts', 'acc-1')));
+  });
+
+  it('denies all client writes', async () => {
+    const db = authedUser(UID).firestore();
+    await assertFails(setDoc(doc(db, 'twitterx-accounts', 'acc-1'), { accountName: 'Hacked' }));
+  });
+});
+
+describe('twitterx-content-schedule collection (posts subcollection)', () => {
+  const UID = 'user-a';
+
+  beforeEach(async () => {
+    await seedDoc('twitterx-content-schedule/acc-1/posts', 'post-1', { postedBy: UID, caption: 'hi' });
+  });
+
+  it('denies reads of a post the user created', async () => {
+    const db = authedUser(UID).firestore();
+    await assertFails(getDoc(doc(db, 'twitterx-content-schedule/acc-1/posts', 'post-1')));
+  });
+
+  it('denies subcollection writes', async () => {
+    const db = authedUser(UID).firestore();
+    await assertFails(addDoc(collection(db, 'twitterx-content-schedule/acc-1/posts'), { caption: 'new' }));
+  });
+
+  it('denies parent doc reads and writes', async () => {
+    const db = authedUser(UID).firestore();
+    await assertFails(getDoc(doc(db, 'twitterx-content-schedule', 'acc-1')));
+    await assertFails(setDoc(doc(db, 'twitterx-content-schedule', 'acc-1'), { foo: 1 }));
+  });
+});
+
+describe('twitterx-bonus collection (submissions subcollection)', () => {
+  const UID = 'user-a';
+  const ADMIN_UID = 'admin-user';
+
+  beforeEach(async () => {
+    await seedDoc('twitterx-bonus', 'round-1', { userTotals: { [UID]: 10 } });
+    await seedDoc('twitterx-bonus/round-1/submissions', 'sub-1', { submittedBy: UID, bonusAmount: 5 });
+  });
+
+  it('denies round doc reads (userTotals is server-mediated)', async () => {
+    const db = authedUser(UID).firestore();
+    await assertFails(getDoc(doc(db, 'twitterx-bonus', 'round-1')));
+  });
+
+  it('denies reads of the user own submission', async () => {
+    const db = authedUser(UID).firestore();
+    await assertFails(getDoc(doc(db, 'twitterx-bonus/round-1/submissions', 'sub-1')));
+  });
+
+  it('denies admin client writes to submissions', async () => {
+    const db = adminUser(ADMIN_UID).firestore();
+    await assertFails(setDoc(doc(db, 'twitterx-bonus/round-1/submissions', 'sub-1'), { bonusAmount: 999 }));
+  });
+
+  it('denies round creation from the client', async () => {
+    const db = adminUser(ADMIN_UID).firestore();
+    await assertFails(addDoc(collection(db, 'twitterx-bonus'), { userTotals: {} }));
+  });
+});
