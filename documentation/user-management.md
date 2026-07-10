@@ -50,6 +50,7 @@
 - `users/{uid}`, group membership (`groups/*.members`), page-permission entries (`page-permissions/*.users.{uid}`), `active_sessions/{uid}`.
 - Every doc **owned** by the user (`userId`/`uid` field) in: `time_entries`, legacy `time-entries`, `screenshots`, `shifts`, `leave_requests`, `notifications`, `bugs`.
 - Storage: `screenshots/{uid}/` prefix (full-size + thumbnails) and `profile-photos/{uid}/`.
+- The **Firebase Auth account** (`adminAuth.deleteUser(uid)`, tolerant of `auth/user-not-found`). **Why it matters:** deleting only the Firestore doc leaves an orphaned login — the user could sign in again, get the *same* uid back, and silently recreate their doc ("resurrection"). Deleting the Auth account closes that. The mirror failure (Auth account deleted but doc left behind) is what produces **duplicate** `users` docs for one email — see [auth.md](auth.md#login-identity--duplicate-account-prevention).
 
 ### Intentionally KEPT
 Shared business records that reference the user only as a **participant/audit field** — these belong to creators/other employees:

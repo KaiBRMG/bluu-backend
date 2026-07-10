@@ -116,6 +116,28 @@ export async function ensureUserExists(userData: CreateUserData): Promise<string
 }
 
 /**
+ * Finds the uid of an existing `users` doc by work email.
+ *
+ * Identity is keyed on the Firebase Auth uid, but the login flow only dedupes
+ * at the Auth layer (getUserByEmail). If an email's Auth account is ever deleted
+ * while its `users` doc lingers, a fresh login would otherwise mint a NEW uid and
+ * create a SECOND doc for the same email (the `users` collection has no uniqueness
+ * constraint on workEmail). Callers use this to recreate the Auth account under the
+ * SAME uid instead, so all existing data (groups, permissions, historical records)
+ * reattaches and no duplicate is created.
+ *
+ * Returns the existing uid, or null if no doc has this workEmail.
+ */
+export async function findUserUidByEmail(workEmail: string): Promise<string | null> {
+  const snap = await adminDb
+    .collection('users')
+    .where('workEmail', '==', workEmail)
+    .limit(1)
+    .get();
+  return snap.empty ? null : snap.docs[0].id;
+}
+
+/**
  * Adds user UID to a group's members array
  */
 async function addUserToGroup(uid: string, groupId: string): Promise<void> {

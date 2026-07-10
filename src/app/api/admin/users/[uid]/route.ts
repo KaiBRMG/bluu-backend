@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
-import { adminDb, adminStorage } from '@/lib/firebase-admin';
+import { adminDb, adminStorage, adminAuth } from '@/lib/firebase-admin';
 import { getUserById, invalidateUserCache } from '@/lib/services/userService';
 import { invalidateAdminUsersCache } from '@/app/api/admin/users/route';
 import { invalidateDisplayNamesCache } from '@/app/api/users/display-names/route';
@@ -183,6 +183,17 @@ export const DELETE = withAuth(async (
         console.error(`[DeleteUser] Failed to delete profile photo for ${targetUid}:`, err);
       }),
     ]);
+
+    // ─── 4. Firebase Auth account ───────────────────────────────────────
+    // Removing the Firestore doc without removing the Auth account leaves an
+    // orphaned login: the user could sign in again, get the SAME uid back, and
+    // silently recreate their doc ("resurrection"). Delete the Auth account too.
+    // Tolerate user-not-found so the cascade stays idempotent.
+    await adminAuth.deleteUser(targetUid).catch((err: { code?: string }) => {
+      if (err?.code !== 'auth/user-not-found') {
+        console.error(`[DeleteUser] Failed to delete Auth account for ${targetUid}:`, err);
+      }
+    });
 
     invalidateUserCache(targetUid);
     invalidateAdminUsersCache();

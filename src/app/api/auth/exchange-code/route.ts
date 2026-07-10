@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { adminAuth } from '@/lib/firebase-admin';
-import { ensureUserExists, getUserById } from '@/lib/services/userService';
+import { ensureUserExists, getUserById, findUserUidByEmail } from '@/lib/services/userService';
 
 const oauth2Client = new google.auth.OAuth2(
   process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
@@ -53,8 +53,15 @@ export async function POST(request: NextRequest) {
       firebaseUser = await adminAuth.getUserByEmail(userInfo.email);
     } catch (error: any) {
       if (error.code === 'auth/user-not-found') {
-        // Create new user — do NOT pass photoURL so initials avatar is used
+        // No Auth account for this email. Before minting a brand-new uid, check
+        // for an existing (possibly orphaned) users doc with this email: if one
+        // exists, recreate the Auth account under that SAME uid so all existing
+        // data (profile, groups, permissions, historical records) reattaches and
+        // we don't create a duplicate users doc. See findUserUidByEmail.
+        const existingUid = await findUserUidByEmail(userInfo.email);
+        // Do NOT pass photoURL so initials avatar is used for genuinely new users.
         firebaseUser = await adminAuth.createUser({
+          ...(existingUid ? { uid: existingUid } : {}),
           email: userInfo.email,
           displayName: userInfo.name || undefined,
           emailVerified: userInfo.verified_email || false,

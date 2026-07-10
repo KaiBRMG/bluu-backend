@@ -75,6 +75,14 @@ bluu://callback?code=...   ── hands code back to Electron ──►  Electro
 - `/api/auth/google-url` — generates OAuth URL (used by Electron directly; `/auth/google` builds its own URL server-side).
 - `/api/auth/exchange-code` — exchanges code for Firebase custom token, sets custom claims, upserts the user document.
 
+### Login identity & duplicate-account prevention
+Identity is keyed on the **Firebase Auth uid**, and `/api/auth/exchange-code` dedupes an email to a uid via `adminAuth.getUserByEmail`. The `users` collection has **no uniqueness constraint on `workEmail`**, so if an email's Auth account is ever deleted while its `users` doc lingers (e.g. an Auth-console deletion that skipped the app's delete cascade), a fresh login would otherwise mint a **new uid** and create a **second doc** for the same email.
+
+**Guard:** in the `auth/user-not-found` branch, before `createUser`, the route calls `findUserUidByEmail(email)` (`userService.ts`); if an existing doc is found, it recreates the Auth account under **that same uid** (`createUser({ uid })`) so all existing data (groups, permissions, historical records) reattaches and no duplicate doc is created.
+- The `where('workEmail', '==', ...)` lookup uses Firestore's **automatic single-field index** — no composite index required.
+- This guard prevents *new* duplicates; docs duplicated before it shipped still need a one-off cleanup/merge.
+- The mirror concern (a doc that outlives its Auth account) is closed from the other side by the delete cascade also deleting the Auth account — see [user-management.md](user-management.md#2-deleting-users-hard--destructive-cascade).
+
 ### Admin claim
 - Admin status is a **JWT custom claim** (`token.admin`), **not** a Firestore read.
 - Set at login; **refreshed when group membership changes**.
