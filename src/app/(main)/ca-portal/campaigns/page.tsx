@@ -36,6 +36,8 @@ import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
 import { TransferDialog, ConfirmDialog, ARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
 import { OutstandingPaymentsDonut } from "@/components/campaign/OutstandingPaymentsDonut";
+// TEMP ANALYTICS — remove after data collection (see src/lib/temp-analytics/).
+import { useTempAnalyticsScreenshot } from "@/lib/temp-analytics/useTempAnalyticsScreenshot";
 
 // ─── Shared constants ─────────────────────────────────────────────────────────
 
@@ -836,6 +838,8 @@ export default function CACampaignsPage() {
   const { names: userNames } = useUserName();
   const [activeTab, setActiveTab] = useState("overview");
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(() => new Set(["overview"]));
+  // TEMP ANALYTICS — captures screen on page open (auto, once per user).
+  useTempAnalyticsScreenshot("campaigns");
 
   const handleTabChange = (value: string) => {
     setActiveTab(value);

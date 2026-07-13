@@ -28,6 +28,13 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 - **Auth:** Google OAuth only; admin status is a JWT custom claim (`token.admin`), not a Firestore read.
 - Full repo layout, commands, and env vars: [architecture-overview.md](documentation/architecture-overview.md).
 
+## Temporary Instrumentation (remove after data collection)
+
+- **CA-portal screenshot analytics** — a once-off, throwaway capture on select CA-portal pages. Grabs the user's screen (via the Electron native `captureScreenshot()`) with a 1s delay per trigger, and uploads to Storage under `temp-analytics/{uid}/` (filename prefixed with the page key). Gated **per page, per user** by a `localStorage` marker so each page fires **once per user, ever**. No Firestore docs/rules/indexes involved.
+  - Instrumented pages (all under `src/app/(main)/ca-portal/`): `disputes` (page open + Unresolved/Resolved tab switches on both tables), `custom-requests` (page open only), `campaigns` (page open only).
+  - Hook: `src/lib/temp-analytics/useTempAnalyticsScreenshot.ts` (`useTempAnalyticsScreenshot(pageKey)`) · Route: `src/app/api/temp-analytics/screenshot/route.ts` · Call sites: the three pages above (search `TEMP ANALYTICS`).
+  - **To remove:** delete `src/lib/temp-analytics/` + `src/app/api/temp-analytics/`, then strip the `TEMP ANALYTICS`-tagged lines in each instrumented page. Storage folder `temp-analytics/` can be cleared once the data is pulled.
+
 ## Documentation Index (spokes)
 
 | Spoke | Read it when you are touching… |
@@ -39,13 +46,13 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 | [time-tracking.md](documentation/time-tracking.md) | Event-log sessions, `sessionCloseMs`, crash robustness, activity percent |
 | [notifications.md](documentation/notifications.md) | `notificationContent.ts`, `addNotificationToBatch`, event → factory table |
 | [campaign-tracking.md](documentation/campaign-tracking.md) | Custom requests vs campaigns, the two archive mechanisms, transfer |
-| [notion-resources.md](documentation/notion-resources.md) | `apps-resources` page, Notion service, group filtering |
+| [resources.md](documentation/resources.md) | `apps-resources` page, `app-resources` collection, resource management, group/user filtering |
 | [boot-loading-screen.md](documentation/boot-loading-screen.md) | `BootLoaderProvider`, `useBootPhase`, home-widget gating |
 | [user-management.md](documentation/user-management.md) | Archiving vs deleting users, name resolution, profile pictures |
 
 ## Cross-Cutting Rules (do not violate)
 
-1. **Firestore rules/indexes** — notify the user on any change.
+1. **Firestore rules/indexes** — notify the user on any change. Display the command needed to deploy.
 2. **User doc writes** — call `invalidateUserCache(uid)` in the same handler (`getUserById` has a 60s cache). See [data-layer.md](documentation/data-layer.md#firestore-read-optimization-rules).
 3. **Authorization tier choice** — new admin-action routes affecting the auth graph or account state require the **admin claim**, not page permission. See [auth.md](documentation/auth.md#authorization-tiers-least--most-privileged).
 4. **Elapsed time from buffers** — always close with `sessionCloseMs` before `parseBuffer`; never `parseBuffer(events, Date.now())` over a buffer set. See [time-tracking.md](documentation/time-tracking.md#2-session-close-time--sessionclosems-single-source-of-truth).

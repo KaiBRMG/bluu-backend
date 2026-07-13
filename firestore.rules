@@ -194,5 +194,13 @@ service cloud.firestore {
       }
     }
 
+    // 19. App resources
+    // Group/user-filtered reads happen server-side in /api/resources; management
+    // writes go through /api/admin/resources. All access via Admin SDK, so no
+    // client-side rule is needed — deny everything for defence-in-depth.
+    match /app-resources/{resourceId} {
+      allow read, write: if false;
+    }
+
   }
 }

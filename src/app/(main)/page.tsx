@@ -12,7 +12,7 @@ import { useResources } from "@/hooks/useResources";
 import { usePinnedResources } from "@/hooks/usePinnedResources";
 import { useBootPhase } from "@/contexts/BootLoaderContext";
 import type { NotificationDocument, NotificationType } from "@/types/firestore";
-import type { NotionDocument } from "@/lib/services/notionService";
+import type { ResourceDocument } from "@/types/resource";
 import { Coffee, Info, Link as LinkIcon } from 'lucide-react';
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -399,7 +399,7 @@ function NotificationsWidget() {
   );
 }
 
-function PinnedDocIcon({ icon }: { icon: NotionDocument['icon'] }) {
+function PinnedDocIcon({ icon }: { icon: ResourceDocument['icon'] }) {
   if (!icon) {
     return (
       <span className="flex h-5 w-5 shrink-0 items-center justify-center text-xs text-muted-foreground">
@@ -420,7 +420,7 @@ function PinnedDocIcon({ icon }: { icon: NotionDocument['icon'] }) {
   );
 }
 
-function PinnedResourceCard({ doc }: { doc: NotionDocument }) {
+function PinnedResourceCard({ doc }: { doc: ResourceDocument }) {
   const targetUrl = doc.url ?? doc.notionPageUrl;
 
   const openDoc = () => {
@@ -486,7 +486,7 @@ function PinnedResourcesWidget() {
     const byId = new Map(documents.map((d) => [d.id, d]));
     return pinned
       .map((id) => byId.get(id))
-      .filter((d): d is NotionDocument => !!d)
+      .filter((d): d is ResourceDocument => !!d)
       .slice(0, 10);
   }, [documents, pinned]);
 

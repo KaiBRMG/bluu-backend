@@ -41,6 +41,8 @@ import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
 import { TransferDialog, ConfirmDialog, ARCHIVE_CR_TEXT, UNARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
 import { OutstandingPaymentsDonut } from "@/components/campaign/OutstandingPaymentsDonut";
+// TEMP ANALYTICS — remove after data collection (see src/lib/temp-analytics/).
+import { useTempAnalyticsScreenshot } from "@/lib/temp-analytics/useTempAnalyticsScreenshot";
 
 // ─── Date picker ─────────────────────────────────────────────────────────────
 
@@ -1359,6 +1361,8 @@ export default function CACustomRequestsPage() {
   const { names: userNames } = useUserName();
   const [activeTab, setActiveTab] = useState("my-customs");
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(() => new Set(["my-customs"]));
+  // TEMP ANALYTICS — captures screen on page open (auto, once per user).
+  useTempAnalyticsScreenshot("custom-requests");
 
   const handleTabChange = (value: string) => {
     setActiveTab(value);

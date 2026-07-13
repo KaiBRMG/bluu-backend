@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
-import type { NotionDocument } from '@/lib/services/notionService';
+import type { ResourceDocument } from '@/types/resource';
 
 const DOCS_CACHE_KEY = 'bluu_resources_v1';
 const TYPES_CACHE_KEY = 'bluu_resources_types_v1';
 const TTL = 5 * 60 * 1000;
 
 interface UseResourcesResult {
-  documents: NotionDocument[] | null;
+  documents: ResourceDocument[] | null;
   types: string[] | null;
   loading: boolean;
   error: string | null;
@@ -19,7 +19,7 @@ interface UseResourcesResult {
 
 export function useResources(): UseResourcesResult {
   const { user } = useAuth();
-  const [documents, setDocuments] = useState<NotionDocument[] | null>(null);
+  const [documents, setDocuments] = useState<ResourceDocument[] | null>(null);
   const [types, setTypes] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +34,7 @@ export function useResources(): UseResourcesResult {
   useEffect(() => {
     if (!user) return;
 
-    const cachedDocs = getCache<NotionDocument[]>(DOCS_CACHE_KEY, TTL);
+    const cachedDocs = getCache<ResourceDocument[]>(DOCS_CACHE_KEY, TTL);
     const cachedTypes = getCache<string[]>(TYPES_CACHE_KEY, TTL);
     if (cachedDocs && cachedTypes) {
       setDocuments(cachedDocs);
@@ -64,7 +64,7 @@ export function useResources(): UseResourcesResult {
 
         if (cancelled) return;
 
-        const docs: NotionDocument[] = docsJson.documents ?? [];
+        const docs: ResourceDocument[] = docsJson.documents ?? [];
         const t: string[] = typesJson.types ?? [];
 
         setDocuments(docs);

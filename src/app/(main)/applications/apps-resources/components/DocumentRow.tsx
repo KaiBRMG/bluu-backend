@@ -4,11 +4,11 @@ import { Link as LinkIcon, Star } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import type { NotionDocument } from '@/lib/services/notionService';
+import type { ResourceDocument } from '@/types/resource';
 import { colorForType } from './typeColors';
 
 interface DocumentRowProps {
-  doc: NotionDocument;
+  doc: ResourceDocument;
   isPinned?: boolean;
   onTogglePin?: (id: string) => void;
 }
@@ -24,7 +24,7 @@ function formatLastEdited(iso: string): string {
   return `Updated ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
 }
 
-function DocIcon({ icon }: { icon: NotionDocument['icon'] }) {
+function DocIcon({ icon }: { icon: ResourceDocument['icon'] }) {
   if (!icon) return null;
   if (icon.type === 'emoji') {
     return (

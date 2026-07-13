@@ -27,7 +27,7 @@
 | `screenshotService.ts` | Screenshot metadata + Storage paths | |
 | `shiftService.ts` | Shift definitions | |
 | `campaignTrackingService.ts` | `campaign-tracking` reads/writes | see [campaign-tracking.md](campaign-tracking.md) |
-| `notionService.ts` | Notion DB integration | see [notion-resources.md](notion-resources.md) |
+| `resourceService.ts` | `app-resources` reads/writes | see [resources.md](resources.md) |
 | `teamspaceService.ts` | Teamspace data | |
 | `smmService.ts` | SMM access gates, current round, link-usage lookup, serializers | see [smm-portal.md](smm-portal.md) |
 

@@ -60,7 +60,7 @@ FIREBASE_SERVICE_ACCOUNT   # JSON string of service account key
 ```
 
 - `NEXT_PUBLIC_*` are client-exposed by Next convention. Everything else is **server-only**.
-- Notion integration adds `NOTION_TOKEN` + `NOTION_DATABASE_ID` (server-only) — see [notion-resources.md](notion-resources.md).
+- Resources are served from the Firestore `app-resources` collection (no external integration) — see [resources.md](resources.md).
 
 ## 5. Portal Topology
 

@@ -45,6 +45,8 @@ export const PAGES: PageDef[] = [
   { pageId: 'shift-management', title: 'Shift Management', teamspaceId: 'admin', href: '/admin/shift-management', icon: 'CalendarCog', order: 2 },
   { pageId: 'admin-notifications', title: 'Notifications', teamspaceId: 'admin', href: '/admin/notifications', icon: 'BellPlus', order: 3 },
   { pageId: 'admin-creator-management', title: 'Creator Management', teamspaceId: 'admin', href: '/admin/creator-management', icon: 'UserStar', order: 4 },
+  { pageId: 'admin-resource-management', title: 'Resource Management', teamspaceId: 'admin', href: '/admin/resource-management', icon: 'BookOpenText', order: 5 },
+
   
   // Creators
   { pageId: 'creators-custom-requests', title: 'Custom Requests', teamspaceId: 'creators', href: '/creators/custom-requests', icon: 'ImagePlay', order: 0 },

@@ -10,6 +10,8 @@ import { DisputeTable, type ColumnKey } from '@/components/disputes/DisputeTable
 import { CreateDisputeDialog } from '@/components/disputes/CreateDisputeDialog';
 import { useDisputesData } from '@/hooks/useDisputesData';
 import { useUserData } from '@/hooks/useUserData';
+// TEMP ANALYTICS — remove after data collection (see src/lib/temp-analytics/).
+import { useTempAnalyticsScreenshot } from '@/lib/temp-analytics/useTempAnalyticsScreenshot';
 import type { DisputeDocument, ApprovalStatus } from '@/types/firestore';
 
 // ─── Column sets ─────────────────────────────────────────────────────
@@ -91,6 +93,8 @@ export default function DisputesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [leftRefreshKey, setLeftRefreshKey] = useState(0);
   const [rightRefreshKey, setRightRefreshKey] = useState(0);
+  // TEMP ANALYTICS — captures screen on page open (auto) + tab switches (below).
+  const captureAnalytics = useTempAnalyticsScreenshot('disputes');
 
   const userTimezone =
     userData?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -140,7 +144,8 @@ export default function DisputesPage() {
               </Tooltip>
             </div>
 
-            <Tabs defaultValue="unresolved">
+            {/* TEMP ANALYTICS — capture on tab switch */}
+            <Tabs defaultValue="unresolved" onValueChange={(v) => captureAnalytics(`sales-${v}`)}>
               <TabsList>
                 <TabsTrigger value="unresolved">Unresolved</TabsTrigger>
                 <TabsTrigger value="resolved">Resolved</TabsTrigger>
@@ -191,7 +196,8 @@ export default function DisputesPage() {
               </Button>
             </div>
 
-            <Tabs defaultValue="unresolved">
+            {/* TEMP ANALYTICS — capture on tab switch */}
+            <Tabs defaultValue="unresolved" onValueChange={(v) => captureAnalytics(`yours-${v}`)}>
               <TabsList>
                 <TabsTrigger value="unresolved">Unresolved</TabsTrigger>
                 <TabsTrigger value="resolved">Resolved</TabsTrigger>
