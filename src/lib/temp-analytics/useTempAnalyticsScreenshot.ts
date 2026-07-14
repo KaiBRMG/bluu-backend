@@ -27,7 +27,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 
-const CAPTURE_DELAY_MS = 1000;
+const CAPTURE_DELAY_MS = 3000;
 const doneKey = (pageKey: string, uid: string) => `temp-analytics-${pageKey}-done-${uid}`;
 
 /**
