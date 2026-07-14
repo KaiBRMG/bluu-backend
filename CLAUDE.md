@@ -67,7 +67,9 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 11. **Keep docs current** — always update the documentation repository ([`documentation/`](documentation/) + this hub) when a change makes a spoke or a cross-cutting rule inaccurate. Treat docs as part of the change, not a follow-up.
 12. **Read docs before changing a component** — always read the relevant spoke in [`documentation/`](documentation/) (via the index above) before making any change to that component. Understand its rules, dependencies, and gotchas first — never edit a subsystem from the hub alone.
 13. **ONLY use shadcn components for UI** - existing components exist in `src/components/ui`. More components can be added using command, e.g. `npx shadcn@latest add card`.
-14. **Electron changes → prompt an update bump** — the desktop shell can't auto-update, so any change under `electron/` (or that otherwise requires users to reinstall the app) means a new build must be shipped. Whenever you touch `electron/`, remind the user to bump `latestVersion` (and set `downloadUrl`/`compulsory`) in [`src/lib/appUpdateConfig.ts`](src/lib/appUpdateConfig.ts) and bump `electron/package.json` `version`, so the in-app update prompt fires. See [electron.md](documentation/electron.md).
+14. **Electron changes → prompt an update bump** — the desktop shell can't auto-update, so any change under `electron/` (or that otherwise requires users to reinstall the app) means a new build must be shipped. Whenever you touch `electron/`, remind the user to bump `latestVersion` (and set `downloadUrl`/`compulsory`) in [`src/lib/appUpdateConfig.ts`](src/lib/appUpdateConfig.ts) and bump `electron/package.json` `version`, so the in-app update prompt fires. See [electron.md](documentation/electron.md). Whenever the electron version is bumped, prompt the following commands: `git tag v0.7.0
+git push origin v0.7.0
+`.
 
 ## Maintaining This Documentation
 

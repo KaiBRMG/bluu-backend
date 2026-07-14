@@ -12,6 +12,7 @@
  *   BLOCKS the app at start-up until the user updates (they cannot navigate or
  *   use the app). It never interrupts an in-progress session — see
  *   `UpdateAvailableBanner`. `false` shows a dismissible prompt instead.
+ * |
  */
 export interface AppUpdateConfig {
   latestVersion: string;
@@ -21,6 +22,7 @@ export interface AppUpdateConfig {
 
 export const APP_UPDATE: AppUpdateConfig = {
   latestVersion: '0.7.0',
-  downloadUrl: 'https://github.com/KaiBRMG/bluu-backend/releases/latest',
+  downloadUrl: 'https://languid-syzygy-f45.notion.site/Download-Bluu-Backend-31d6a3e187d98080b341e4ed2c9d1917?source=copy_link',
   compulsory: true,
+
 };
