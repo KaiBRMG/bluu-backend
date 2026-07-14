@@ -17,6 +17,7 @@ export default function RevokedPage() {
         <h1 className="text-xl font-semibold text-white mb-3">Access Revoked</h1>
         <p className="text-zinc-400 mb-8">
           Your access to Bluu Backend has been revoked.
+          
         </p>
         <button
           onClick={() => router.replace('/')}
