@@ -1,15 +1,16 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Plus, Search } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Badge } from '@/components/ui/badge';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { Loader } from '@/components/ui/loader';
+import { cn } from '@/lib/utils';
 import { useAdminResources } from '@/hooks/useAdminResources';
 import { useBasicUsers } from '@/hooks/useBasicUsers';
 import { colorForType } from '@/app/(main)/applications/apps-resources/components/typeColors';
@@ -18,8 +19,43 @@ import { ResourceFormDialog } from './components/ResourceFormDialog';
 import type { MultiOption } from './components/OptionMultiSelect';
 import type { ResourceDocument } from '@/types/resource';
 
-// Sentinel for the "All" filter badge — an empty type selection means show all.
-const ALL_VALUE = '__ALL__';
+// User-group filter badges (second row).
+const GROUP_FILTERS = ['CA', 'SMM'];
+
+const PAGE_SIZE = 10;
+
+/** A clickable pill filter built from the shared Badge component. */
+function FilterBadge({
+  active,
+  onToggle,
+  className,
+  children,
+}: {
+  active: boolean;
+  onToggle: () => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Badge
+      role="button"
+      tabIndex={0}
+      aria-pressed={active}
+      onClick={onToggle}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); }
+      }}
+      variant="outline"
+      className={cn(
+        'cursor-pointer select-none gap-2 rounded-md px-3 py-1',
+        !active && 'hover:bg-accent hover:text-accent-foreground',
+        className,
+      )}
+    >
+      {children}
+    </Badge>
+  );
+}
 
 export default function ResourceManagementPage() {
   const {
@@ -28,9 +64,12 @@ export default function ResourceManagementPage() {
   const { users, groups } = useBasicUsers();
 
   const [query, setQuery] = useState('');
-  // Empty = "All" badge on (every type). Non-empty = explicit type selection.
+  // Empty = "All" badge on (every type/group). Non-empty = explicit selection.
   const [activeTypes, setActiveTypes] = useState<string[]>([]);
+  const [activeGroups, setActiveGroups] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<'all' | 'Active' | 'Unlisted'>('all');
+  // Lazy load: render this many rows, growing as the user scrolls to the bottom.
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<ResourceDocument | null>(null);
 
@@ -65,30 +104,27 @@ export default function ResourceManagementPage() {
 
   // One filter badge per distinct type, plus the "All" badge.
   const allTypes = useMemo(() => typeOptions.map(o => o.value), [typeOptions]);
-  const isAllOn = activeTypes.length === 0;
-  const toggleValue = isAllOn ? [ALL_VALUE] : activeTypes;
 
-  const handleToggleChange = (next: string[]) => {
-    const hadAll = isAllOn;
-    const hasAll = next.includes(ALL_VALUE);
-    // Clicking "All" while it was off clears every type filter.
-    if (hasAll && !hadAll) {
-      setActiveTypes([]);
-      return;
-    }
-    const onlyTypes = next.filter(v => v !== ALL_VALUE);
-    // Clicking the lone "All" chip is a no-op rather than showing an empty list.
-    if (onlyTypes.length === 0 && hadAll) return;
-    setActiveTypes(onlyTypes);
-  };
+  // Any filter change restarts the lazy-load window at the first page.
+  const resetPaging = () => setVisibleCount(PAGE_SIZE);
+
+  // Toggle a value in/out of a multi-select filter set.
+  const toggleFrom = (setter: React.Dispatch<React.SetStateAction<string[]>>) =>
+    (value: string) => {
+      setter(prev => (prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]));
+      resetPaging();
+    };
+  const toggleType = toggleFrom(setActiveTypes);
+  const toggleGroup = toggleFrom(setActiveGroups);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const activeSet = new Set(activeTypes);
-    const allOn = activeSet.size === 0;
+    const typeSet = new Set(activeTypes);
+    const groupSet = new Set(activeGroups);
     return documents.filter(d => {
       if (statusFilter !== 'all' && d.status !== statusFilter) return false;
-      if (!allOn && !d.types.some(t => activeSet.has(t))) return false;
+      if (typeSet.size > 0 && !d.types.some(t => typeSet.has(t))) return false;
+      if (groupSet.size > 0 && !d.groups.some(g => groupSet.has(g))) return false;
       if (!q) return true;
       // Search across name, groups, and types.
       const haystack = [
@@ -99,7 +135,22 @@ export default function ResourceManagementPage() {
       ].join(' ').toLowerCase();
       return haystack.includes(q);
     });
-  }, [documents, query, activeTypes, statusFilter, groupLabel]);
+  }, [documents, query, activeTypes, activeGroups, statusFilter, groupLabel]);
+
+  const visible = filtered.slice(0, visibleCount);
+  const hasMore = visibleCount < filtered.length;
+
+  // Grow the window when the sentinel at the bottom of the list scrolls into view.
+  // A callback ref (re)attaches the observer as the sentinel mounts/unmounts.
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const sentinelRef = useCallback((node: HTMLDivElement | null) => {
+    observerRef.current?.disconnect();
+    if (!node) return;
+    observerRef.current = new IntersectionObserver(entries => {
+      if (entries[0]?.isIntersecting) setVisibleCount(c => c + PAGE_SIZE);
+    }, { rootMargin: '200px' });
+    observerRef.current.observe(node);
+  }, []);
 
   if (loading) {
     return (
@@ -137,14 +188,17 @@ export default function ResourceManagementPage() {
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={query}
-                onChange={e => setQuery(e.target.value)}
+                onChange={e => { setQuery(e.target.value); resetPaging(); }}
                 placeholder="Search by name, group, or type"
                 className="h-10 pl-9 text-sm"
               />
             </div>
             <Select
               value={statusFilter}
-              onValueChange={v => setStatusFilter(v as 'all' | 'Active' | 'Unlisted')}
+              onValueChange={v => {
+                setStatusFilter(v as 'all' | 'Active' | 'Unlisted');
+                resetPaging();
+              }}
             >
               <SelectTrigger className="h-10 w-[9rem]">
                 <SelectValue />
@@ -162,47 +216,82 @@ export default function ResourceManagementPage() {
 
           {/* Type filter badges — one per type, plus "All". */}
           {allTypes.length > 0 && (
-            <ToggleGroup
-              type="multiple"
-              value={toggleValue}
-              onValueChange={handleToggleChange}
-              className="flex flex-wrap gap-2 w-full justify-start"
-            >
-              <ToggleGroupItem
-                value={ALL_VALUE}
-                aria-label="Show all resources"
-                variant="outline"
-                size="sm"
-                className="!rounded-md !border gap-2 data-[state=on]:bg-slate-100 data-[state=on]:text-slate-900 data-[state=on]:border-slate-300 dark:data-[state=on]:bg-slate-500/15 dark:data-[state=on]:text-slate-100 dark:data-[state=on]:border-slate-500/30"
+            <div className="flex flex-wrap gap-2">
+              <FilterBadge
+                active={activeTypes.length === 0}
+                onToggle={() => { setActiveTypes([]); resetPaging(); }}
+                className={activeTypes.length === 0
+                  ? 'bg-slate-100 text-slate-900 border-slate-300 dark:bg-slate-500/15 dark:text-slate-100 dark:border-slate-500/30'
+                  : undefined}
               >
                 <span className="h-2 w-2 rounded-full bg-slate-500" aria-hidden />
                 All
-              </ToggleGroupItem>
+              </FilterBadge>
               {allTypes.map(t => {
                 const c = colorForType(t);
+                const active = activeTypes.includes(t);
                 return (
-                  <ToggleGroupItem
+                  <FilterBadge
                     key={t}
-                    value={t}
-                    aria-label={`Toggle ${t}`}
-                    variant="outline"
-                    size="sm"
-                    className={`!rounded-md !border gap-2 ${c.toggle}`}
+                    active={active}
+                    onToggle={() => toggleType(t)}
+                    className={active ? c.badge : undefined}
                   >
                     <span className={`h-2 w-2 rounded-full ${c.dot}`} aria-hidden />
                     {t}
-                  </ToggleGroupItem>
+                  </FilterBadge>
                 );
               })}
-            </ToggleGroup>
+            </div>
           )}
 
+          {/* User-group filter badges (CA, SMM), plus "All". */}
+          <div className="flex flex-wrap gap-2">
+            <FilterBadge
+              active={activeGroups.length === 0}
+              onToggle={() => { setActiveGroups([]); resetPaging(); }}
+              className={activeGroups.length === 0
+                ? 'bg-slate-100 text-slate-900 border-slate-300 dark:bg-slate-500/15 dark:text-slate-100 dark:border-slate-500/30'
+                : undefined}
+            >
+              <span className="h-2 w-2 rounded-full bg-slate-500" aria-hidden />
+              All groups
+            </FilterBadge>
+            {GROUP_FILTERS.map(g => {
+              const active = activeGroups.includes(g);
+              return (
+                <FilterBadge
+                  key={g}
+                  active={active}
+                  onToggle={() => toggleGroup(g)}
+                  className={active
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : undefined}
+                >
+                  {groupLabel(g)}
+                </FilterBadge>
+              );
+            })}
+          </div>
+
           <ResourceTable
-            resources={filtered}
+            resources={visible}
             groupLabel={groupLabel}
             onEdit={setEditing}
             onDelete={deleteResource}
           />
+
+          {/* Lazy-load sentinel — scrolling it into view reveals the next page. */}
+          {hasMore && (
+            <div ref={sentinelRef} className="flex justify-center py-4">
+              <Loader />
+            </div>
+          )}
+          {filtered.length > 0 && (
+            <p className="text-center text-xs text-muted-foreground">
+              Showing {visible.length} of {filtered.length}
+            </p>
+          )}
         </div>
       </div>
 
