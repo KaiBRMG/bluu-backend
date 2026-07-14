@@ -220,6 +220,8 @@ export interface ActiveSessionDocument {
   currentState: ActiveSessionState;
   userClockOut: boolean; // true = app closed gracefully without explicit clock-out
   lastActivityPercent?: number | null; // most recent activity % from screenshot interval
+  appVersion?: string | null; // installed desktop app version reported at clock-in
+  platform?: string | null; // OS platform reported at clock-in (darwin/win32)
 }
 
 export interface SessionModification {

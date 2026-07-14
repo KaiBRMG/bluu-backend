@@ -7,6 +7,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 - Internal management platform for **Bluu Rock MGMT**.
 - **RULE:** Always notify the user if changes are made to **Firestore rules** or **Firestore indexes**.
 - **RULE:** Only use visual components/styling from `src/components/ui`; only use `@tabler/icons-react` and `lucide-react` for icons. (Full UI stack in [architecture-overview.md](documentation/architecture-overview.md#ui-stack-strict-constraints).)
+- If the user mentions "clocked in", "clocked out", "clock in", "clock out", they are referring to the time tracking subsystem.
 
 ## System at a Glance
 
@@ -49,6 +50,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 | [resources.md](documentation/resources.md) | `apps-resources` page, `app-resources` collection, resource management, group/user filtering |
 | [boot-loading-screen.md](documentation/boot-loading-screen.md) | `BootLoaderProvider`, `useBootPhase`, home-widget gating |
 | [user-management.md](documentation/user-management.md) | Archiving vs deleting users, name resolution, profile pictures |
+| [electron.md](documentation/electron.md) | `electron/` shell, `window.electronAPI` IPC surface, deep-link OAuth, crash/offline recovery, clock-out flush, power events, version nudge, build/release |
 
 ## Cross-Cutting Rules (do not violate)
 
@@ -65,6 +67,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 11. **Keep docs current** — always update the documentation repository ([`documentation/`](documentation/) + this hub) when a change makes a spoke or a cross-cutting rule inaccurate. Treat docs as part of the change, not a follow-up.
 12. **Read docs before changing a component** — always read the relevant spoke in [`documentation/`](documentation/) (via the index above) before making any change to that component. Understand its rules, dependencies, and gotchas first — never edit a subsystem from the hub alone.
 13. **ONLY use shadcn components for UI** - existing components exist in `src/components/ui`. More components can be added using command, e.g. `npx shadcn@latest add card`.
+14. **Electron changes → prompt an update bump** — the desktop shell can't auto-update, so any change under `electron/` (or that otherwise requires users to reinstall the app) means a new build must be shipped. Whenever you touch `electron/`, remind the user to bump `latestVersion` (and set `downloadUrl`/`compulsory`) in [`src/lib/appUpdateConfig.ts`](src/lib/appUpdateConfig.ts) and bump `electron/package.json` `version`, so the in-app update prompt fires. See [electron.md](documentation/electron.md).
 
 ## Maintaining This Documentation
 

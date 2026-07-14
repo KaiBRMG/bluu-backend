@@ -1,9 +1,9 @@
 // electron/main.js
-const { app, BrowserWindow, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification } = require('electron');
-const { autoUpdater } = require('electron-updater');
+const { app, BrowserWindow, session, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification } = require('electron');
 const path = require('path');
 
 const isDev = process.env.ELECTRON_DEV === 'true' || !app.isPackaged;
+const BASE_URL = isDev ? 'http://localhost:3000' : 'https://bluu-backend.vercel.app';
 
 // Custom protocol for OAuth callback
 const PROTOCOL = 'bluu';
@@ -104,8 +104,7 @@ function handleDeepLink(url) {
 
 // IPC handlers for OAuth
 ipcMain.handle('auth:start-google-oauth', async () => {
-  const baseUrl = isDev ? 'http://localhost:3000' : 'https://bluu-backend.vercel.app';
-  const authUrl = `${baseUrl}/auth/google`;
+  const authUrl = `${BASE_URL}/auth/google`;
 
   // Open the browser for OAuth
   shell.openExternal(authUrl);
@@ -238,6 +237,19 @@ ipcMain.handle('permissions:requestNotification', async () => {
 // IPC handler to return the current platform
 ipcMain.handle('app:getPlatform', () => process.platform);
 
+// IPC handler to return the installed app version (for fleet version tracking + update nudge)
+ipcMain.handle('app:getVersion', () => app.getVersion());
+
+// IPC handler to return the underlying runtime versions (diagnostics)
+ipcMain.handle('app:getVersions', () => ({
+  app: app.getVersion(),
+  electron: process.versions.electron,
+  chrome: process.versions.chrome,
+  node: process.versions.node,
+  platform: process.platform,
+  arch: process.arch,
+}));
+
 // IPC handler for window resizability
 ipcMain.on('window:set-resizable', (_event, resizable) => {
   console.log('[Performance] IPC setResizable called:', resizable);
@@ -254,6 +266,15 @@ ipcMain.on('window:set-size', (_event, width, height) => {
   }
 });
 
+// IPC handler to read the current outer window size (used to persist user resizes
+// without title-bar drift — getSize/setSize both operate on the outer window bounds).
+ipcMain.handle('window:get-size', () => {
+  if (mainWindow) {
+    return mainWindow.getSize();
+  }
+  return null;
+});
+
 // Renderer signals that React has mounted and is ready.
 // Re-registered on each page load so we always catch the first mount.
 function registerAppReadyHandler() {
@@ -262,6 +283,70 @@ function registerAppReadyHandler() {
   });
 }
 registerAppReadyHandler();
+
+// Only ever hand http(s)/mailto URLs to the OS. A compromised or redirected
+// page must never be able to invoke shell.openExternal with file://, custom
+// schemes, etc.
+function openExternalSafe(url) {
+  try {
+    const { protocol } = new URL(url);
+    if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') {
+      shell.openExternal(url);
+      return;
+    }
+  } catch {
+    // fall through to the block-and-log below
+  }
+  console.warn('[main] Blocked openExternal for unsafe/invalid URL:', url);
+}
+
+// ─── App load + offline fallback ─────────────────────────────────────
+// The renderer IS the product (hosted on Vercel). If it fails to load we
+// show a branded offline screen and retry with backoff instead of leaving
+// the raw Chrome error page (or a blank window) on screen.
+let offlineRetryTimer = null;
+let offlineRetryDelay = 2000;
+const OFFLINE_RETRY_MAX = 30000;
+
+function clearOfflineRetry() {
+  if (offlineRetryTimer) {
+    clearTimeout(offlineRetryTimer);
+    offlineRetryTimer = null;
+  }
+  offlineRetryDelay = 2000;
+}
+
+function loadAppUrl() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  clearOfflineRetry();
+  mainWindow.loadURL(BASE_URL);
+}
+
+function showOfflineScreen() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.loadFile(path.join(__dirname, 'offline.html')).catch(() => {});
+  // Auto-retry with capped exponential backoff; the offline page also has a
+  // manual "Try again" button (app:retry-load).
+  if (!offlineRetryTimer) {
+    offlineRetryTimer = setTimeout(() => {
+      offlineRetryTimer = null;
+      loadAppUrl();
+    }, offlineRetryDelay);
+    offlineRetryDelay = Math.min(offlineRetryDelay * 2, OFFLINE_RETRY_MAX);
+  }
+}
+
+ipcMain.on('app:retry-load', () => loadAppUrl());
+
+// Renderer-crash reload loop-guard: if the renderer keeps dying we stop
+// auto-reloading and park on the offline/error screen.
+let reloadCount = 0;
+let reloadWindowStart = Date.now();
+const RELOAD_WINDOW_MS = 60000;
+const RELOAD_MAX = 3;
+
+// Max time to hold the window close while the renderer clocks out and flushes.
+const QUIT_FLUSH_TIMEOUT_MS = 4000;
 
 function createWindow() {
   // Set app icon for macOS dock
@@ -274,6 +359,8 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1430,
     height: 870,
+    minWidth: 1024,    // Floor so a resized window can't break the UI (only applies once resizable)
+    minHeight: 720,
     resizable: false,  // Start with window locked (login page)
     show: true,
     backgroundColor: '#002333',     // Match your logo's dark background
@@ -283,55 +370,54 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,     // important for security
       nodeIntegration: false,     // important for security
-      sandbox: false,
+      sandbox: true,              // harden the renderer (preload only uses contextBridge + ipcRenderer)
+      backgroundThrottling: false, // keep renderer timers (heartbeat, idle checks, screenshot scheduler) running when minimized
       v8CacheOptions: 'code',  // Enable V8 code caching for faster startup
     },
   });
 
   // In dev, load local Next.js
   if (isDev) {
-    mainWindow.loadURL('http://localhost:3000');
+    mainWindow.loadURL(BASE_URL);
     // mainWindow.webContents.openDevTools();
   } else {
     // Show local loading screen instantly, then navigate to the hosted app once it's ready
     mainWindow.loadFile(path.join(__dirname, 'loading.html'));
     mainWindow.webContents.once('did-finish-load', () => {
-      mainWindow.loadURL('https://bluu-backend.vercel.app');
+      loadAppUrl();
     });
   }
 
   // Open external links (target=_blank) in default browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    // allow only external URLs to open in external browser
-    shell.openExternal(url);
+    openExternalSafe(url);
     return { action: 'deny' };
   });
 
   // Prevent navigation to other origins from the electron window
   mainWindow.webContents.on('will-navigate', (e, url) => {
-    const allowed = isDev ? 'http://localhost:3000' : 'https://bluu-backend.vercel.app';
-    if (!url.startsWith(allowed)) {
-      e.preventDefault();
-      shell.openExternal(url);
+    // Allow same-origin app navigation and our local loading/offline pages.
+    if (url.startsWith(BASE_URL) || url.startsWith('file://')) return;
+    e.preventDefault();
+    openExternalSafe(url);
+  });
+
+  // On a real load failure of the app URL, show the offline screen and retry
+  // with backoff. Ignore sub-frame failures and user-aborted loads (-3).
+  mainWindow.webContents.on('did-fail-load', (_e, errorCode, _desc, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return;
+    if (validatedURL.startsWith(BASE_URL)) {
+      console.log(`[main] did-fail-load (${errorCode}) for ${validatedURL} — showing offline screen`);
+      showOfflineScreen();
     }
   });
 
-  // Retry once on cold-start failures (e.g. Vercel 500 before Next.js boots).
-  // A raw error response from the infra layer won't have <!DOCTYPE html>, causing Quirks Mode.
-  mainWindow.webContents.on('did-fail-load', (_e, errorCode, _desc, validatedURL) => {
-    const base = isDev ? 'http://localhost:3000' : 'https://bluu-backend.vercel.app';
-    if (validatedURL.startsWith(base)) {
-      console.log(`[main] did-fail-load (${errorCode}) for ${validatedURL} — retrying in 2s`);
-      setTimeout(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.loadURL(validatedURL);
-        }
-      }, 2000);
-    }
-  });
-
-  // Handle stored deep link after window is ready
+  // Successful app load — reset the offline backoff.
   mainWindow.webContents.on('did-finish-load', () => {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.getURL().startsWith(BASE_URL)) {
+      clearOfflineRetry();
+    }
+
     if (deeplinkUrl) {
       console.log('Processing stored deep link:', deeplinkUrl);
       handleDeepLink(deeplinkUrl);
@@ -342,63 +428,106 @@ function createWindow() {
     registerAppReadyHandler();
   });
 
+  // ─── Renderer crash recovery ───────────────────────────────────────
+  // The renderer is the whole product; a crash otherwise leaves a blank
+  // window. Auto-reload with a loop-guard, and report to /api/bugs.
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    console.error('[main] render-process-gone:', details.reason, details.exitCode);
+    forwardErrorToRenderer(
+      'electron:main:render-process-gone',
+      `Renderer gone: ${details.reason} (exit ${details.exitCode})`,
+      undefined,
+    );
+    // A clean exit isn't a crash.
+    if (details.reason === 'clean-exit') return;
+
+    const now = Date.now();
+    if (now - reloadWindowStart > RELOAD_WINDOW_MS) {
+      reloadWindowStart = now;
+      reloadCount = 0;
+    }
+    reloadCount += 1;
+
+    if (reloadCount > RELOAD_MAX) {
+      console.error('[main] renderer crashed too many times — parking on offline screen');
+      showOfflineScreen();
+      return;
+    }
+    setTimeout(() => loadAppUrl(), 500);
+  });
+
+  mainWindow.webContents.on('child-process-gone', (_e, details) => {
+    console.error('[main] child-process-gone:', details.type, details.reason);
+  });
+
+  // ─── Unresponsive detection ────────────────────────────────────────
+  mainWindow.on('unresponsive', () => {
+    console.warn('[main] window became unresponsive');
+    forwardErrorToRenderer('electron:main:unresponsive', 'Renderer became unresponsive', undefined);
+  });
+  mainWindow.on('responsive', () => {
+    console.log('[main] window became responsive again');
+  });
+
+  // ─── Flush time-tracking before the window closes ──────────────────
+  // The window `close` event is the single choke-point that fires for BOTH the
+  // X button (window-all-closed → quit) and Cmd/Ctrl-Q. Hold the close until the
+  // renderer clocks out and acks ('app:closing-flushed'), or a hard timeout
+  // elapses — otherwise the async clock-out POST is killed mid-flight.
+  let closeFlushed = false;
+  mainWindow.on('close', (e) => {
+    if (closeFlushed) return; // second pass — allow the close to proceed
+    const wc = mainWindow.webContents;
+    if (!wc || wc.isDestroyed()) return;
+
+    e.preventDefault();
+    wc.send('app-closing');
+
+    const finish = () => {
+      closeFlushed = true;
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+    };
+    const timer = setTimeout(finish, QUIT_FLUSH_TIMEOUT_MS);
+    ipcMain.once('app:closing-flushed', () => {
+      clearTimeout(timer);
+      finish();
+    });
+  });
+
   return mainWindow;
 }
 
-function initAutoUpdater() {
-  if (isDev) return;
-  // TODO: re-enable once app is signed/notarized
-  return;
+// Auto-update via electron-updater is intentionally disabled: the app is not
+// code-signed/notarized, so updates can't be auto-installed. Users update
+// manually; the renderer nudges them via the version-gated banner (it compares
+// app:getVersion against a server-provided latest version). The electron-updater
+// dependency and the preload `updater` surface are retained for the day signing
+// is added.
 
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = false;
+// Forward native power/session transitions to the renderer so time-tracking can
+// pause/resume precisely (more accurate than the 15-min idle threshold) and so
+// lock/unlock patterns can be recorded.
+function forwardPowerEvent(name) {
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send('power:event', { event: name, at: Date.now() });
+  }
+}
 
-  autoUpdater.on('update-available', (info) => {
-    if (mainWindow) {
-      mainWindow.webContents.send('updater:status', { status: 'downloading', version: info.version });
-    }
-  });
-
-  autoUpdater.on('download-progress', (progress) => {
-    if (mainWindow) {
-      mainWindow.webContents.send('updater:progress', {
-        percent: progress.percent,
-        bytesPerSecond: progress.bytesPerSecond,
-        total: progress.total,
-        transferred: progress.transferred,
-      });
-    }
-  });
-
-  autoUpdater.on('update-downloaded', () => {
-    // Give the renderer up to 10 seconds to flush pending data before installing
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('updater:before-install');
-      const installTimer = setTimeout(() => {
-        autoUpdater.quitAndInstall(false, true);
-      }, 10000);
-      ipcMain.once('updater:ready-to-install', () => {
-        clearTimeout(installTimer);
-        autoUpdater.quitAndInstall(false, true);
-      });
-    } else {
-      autoUpdater.quitAndInstall(false, true);
-    }
-  });
-
-  autoUpdater.on('error', (err) => {
-    console.error('[updater] error:', err);
-    if (mainWindow) {
-      mainWindow.webContents.send('updater:status', { status: 'error', message: err.message });
-    }
-  });
-
-  autoUpdater.checkForUpdatesAndNotify();
+function registerPowerListeners() {
+  powerMonitor.on('suspend', () => forwardPowerEvent('suspend'));
+  powerMonitor.on('resume', () => forwardPowerEvent('resume'));
+  powerMonitor.on('lock-screen', () => forwardPowerEvent('lock'));
+  powerMonitor.on('unlock-screen', () => forwardPowerEvent('unlock'));
 }
 
 app.whenReady().then(() => {
+  // Deny renderer permission requests we never need (geolocation, camera,
+  // microphone, etc.). Screen capture goes through desktopCapturer, not
+  // getUserMedia, so it is unaffected.
+  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+
+  registerPowerListeners();
   createWindow();
-  initAutoUpdater();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -423,14 +552,9 @@ process.on('unhandledRejection', (reason) => {
   forwardErrorToRenderer('electron:main:unhandledRejection', message, stack);
 });
 
-// Notify renderer before quitting so it can clock out k
-app.on('before-quit', () => {
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-    mainWindow.webContents.send('app-closing');
-  }
-});
-
-// Quit on all windows closed (including macOS)
+// Quit on all windows closed (including macOS). The time-tracking flush happens
+// in the window `close` handler (createWindow), which is the single choke-point
+// for both the X button and Cmd/Ctrl-Q.
 app.on('window-all-closed', () => {
   app.quit();
 });

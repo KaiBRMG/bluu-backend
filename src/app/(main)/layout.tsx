@@ -5,6 +5,7 @@ import { BootLoaderProvider } from "@/contexts/BootLoaderContext";
 import AuthWrapper from "@/components/AuthWrapper";
 import ErrorLogger from "@/components/ErrorLogger";
 import UpdateBanner from "@/components/UpdateBanner";
+import UpdateAvailableBanner from "@/components/UpdateAvailableBanner";
 import LazyProviders from "@/components/LazyProviders";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
@@ -22,6 +23,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
               </AuthWrapper>
             </BootLoaderProvider>
             <UpdateBanner />
+            <UpdateAvailableBanner />
             <SpeedInsights />
             <Analytics />
           </LazyProviders>

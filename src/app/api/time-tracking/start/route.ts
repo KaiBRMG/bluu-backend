@@ -8,6 +8,17 @@ import type { ActiveSessionDocument } from '@/types/firestore';
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
+    // Optional desktop version/platform reported by the client (feature-detected).
+    let appVersion: string | null = null;
+    let platform: string | null = null;
+    try {
+      const body = await request.json();
+      if (typeof body?.appVersion === 'string') appVersion = body.appVersion.slice(0, 32);
+      if (typeof body?.platform === 'string') platform = body.platform.slice(0, 32);
+    } catch {
+      // No/invalid body — proceed without version info
+    }
+
     const sessionRef = adminDb.collection('active_sessions').doc(token.uid);
 
     // Use a Firestore transaction so concurrent requests cannot create two active sessions
@@ -32,6 +43,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         lastUpdated: FieldValue.serverTimestamp(),
         currentState: 'working',
         userClockOut: false,
+        appVersion,
+        platform,
       });
       return { sessionId, startTime };
     });

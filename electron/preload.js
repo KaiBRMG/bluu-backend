@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   window: {
     setResizable: (resizable) => ipcRenderer.send('window:set-resizable', resizable),
     setSize: (width, height) => ipcRenderer.send('window:set-size', width, height),
+    getSize: () => ipcRenderer.invoke('window:get-size'),
   },
 
   // Time tracking
@@ -69,10 +70,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
-  // Platform info
+  // Platform / version info + lifecycle
   app: {
     getPlatform: () => ipcRenderer.invoke('app:getPlatform'),
+    getVersion: () => ipcRenderer.invoke('app:getVersion'),
+    getVersions: () => ipcRenderer.invoke('app:getVersions'),
     signalReady: () => ipcRenderer.send('app:ready'),
+    // Renderer calls this once it has finished flushing time-tracking data on
+    // app close, so the main process can complete the quit.
+    closingFlushed: () => ipcRenderer.send('app:closing-flushed'),
+    // Retry loading the hosted app from the offline screen.
+    retryLoad: () => ipcRenderer.send('app:retry-load'),
+  },
+
+  // Native power / session events (suspend | resume | lock | unlock)
+  power: {
+    onEvent: (callback) => {
+      ipcRenderer.on('power:event', (_event, data) => callback(data));
+    },
+    removeEventListener: () => {
+      ipcRenderer.removeAllListeners('power:event');
+    },
   },
 
   // OS permission prompts

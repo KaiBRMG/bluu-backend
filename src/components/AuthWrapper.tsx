@@ -7,6 +7,7 @@ import Login from './Login';
 import { usePathname, useRouter } from 'next/navigation';
 import { auth } from '@/firebase-config';
 import { useBootPhase } from '@/contexts/BootLoaderContext';
+import { computeDynamicSize, readSavedSize, saveSize, clearSavedSize } from '@/lib/windowSize';
 
 export default function AuthWrapper({ children }: { children: React.ReactNode }) {
   const { user, loading, revokedRedirect } = useAuth();
@@ -44,20 +45,46 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
     }
   }, [revokedRedirect, router]);
 
-  // Control window resizability based on login state
+  // Control window sizing + resizability based on login state.
+  // On login: restore the remembered size, or size dynamically to 85%×80% of the display
+  // when there is none. On logout: forget the remembered size so the next login re-runs the
+  // dynamic sizing, and re-lock the window for the login page.
   useEffect(() => {
     if (prevIsLoggedInRef.current !== isLoggedIn) {
       prevIsLoggedInRef.current = isLoggedIn;
 
-      if (typeof window !== 'undefined' && window.electronAPI) {
+      if (typeof window !== 'undefined' && window.electronAPI?.window) {
         if (isLoggedIn) {
-          window.electronAPI.window.setSize(1430, 870);
+          const size = readSavedSize() ?? computeDynamicSize();
+          window.electronAPI.window.setSize(size.width, size.height);
           window.electronAPI.window.setResizable(true);
         } else {
+          clearSavedSize();
           window.electronAPI.window.setResizable(false);
         }
       }
     }
+  }, [isLoggedIn]);
+
+  // Persist the user's window size whenever they resize (Electron + logged in only).
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    if (typeof window === 'undefined' || !window.electronAPI?.window?.getSize) return;
+
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const handleResize = () => {
+      if (timeout) clearTimeout(timeout);
+      timeout = setTimeout(async () => {
+        const size = await window.electronAPI!.window.getSize?.();
+        if (size) saveSize(size[0], size[1]);
+      }, 300);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      if (timeout) clearTimeout(timeout);
+      window.removeEventListener('resize', handleResize);
+    };
   }, [isLoggedIn]);
 
   // Mid-session kill-switch: fires when an admin revokes access while the user is logged in.

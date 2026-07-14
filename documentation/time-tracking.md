@@ -82,8 +82,8 @@ Client appends events ──► local buffer (localBuffer.ts)
 
 **Limitation:** coarse. The tracker only flips to `idle` after 15 minutes without input (`IDLE_THRESHOLD_SECONDS`), so low-input periods under that threshold register as **100% active**.
 
-### Preferred method (powerMonitor input samples) — pending Electron rollout
-Once every desktop client exposes `window.electronAPI.timeTracking.getActivitySince`, revert the screenshot upload path in `TimeTrackingContext.tsx` to the sample-based calculation. It buckets the window into 1-minute slots and marks each slot active if any keyboard/mouse input occurred — measured at the OS level via `powerMonitor.getSystemIdleTime()`.
+### Preferred method (powerMonitor input samples) — now wired, feature-detected
+The screenshot upload path in `TimeTrackingContext.tsx` **prefers** the sample-based calculation (`calcActivityPercentFromSamples`) when `window.electronAPI.timeTracking.getActivitySince` is exposed, and **falls back** to the event-log method on older Electron builds. No full-rollout gate is needed — each client uses the best method it has. It buckets the window into 1-minute slots and marks each slot active if any keyboard/mouse input occurred — measured at the OS level via `powerMonitor.getSystemIdleTime()`.
 
 ```ts
 /** Compute activity % from powerMonitor idle-time samples between windowStart and windowEnd. */
@@ -118,8 +118,14 @@ if (electronAPI.timeTracking.getActivitySince) {
 }
 ```
 
-- IPC handler already wired in `electron/main.js` (`timeTracking:getActivitySince`), exposed via `electron/preload.js`; type in `src/types/electron.d.ts`.
-- **Why swapped out:** older installed Electron builds may not expose `getActivitySince`, so the event-log fallback runs reliably across all clients meanwhile. **Switch back once the Electron rollout is confirmed.**
+- IPC handler wired in `electron/main.js` (`timeTracking:getActivitySince`), exposed via `electron/preload.js`; type in `src/types/electron.d.ts`.
+- **Runtime selection:** the call site prefers samples when `getActivitySince` is present and falls back to the event-log method otherwise, so no rollout gate is needed.
+
+### Native session boundaries (screen lock / system suspend)
+The main process forwards `powerMonitor` `suspend`/`lock-screen`/`unlock-screen`/`resume` as a `power:event` IPC (`electron/preload.js` → `electronAPI.power.onEvent`). `TimeTrackingContext` transitions to **idle immediately** on `lock`/`suspend` while working (rather than waiting up to 15 min for the idle poll); the existing idle-resume poll returns the session to `working` on unlock/resume. Feature-detected — no-ops on Electron builds that don't forward power events. This supplements the reactive heartbeat sleep-gap patch.
+
+### Clock-out flush on app close
+The main process holds the window `close` (the single choke-point for both the X button and Cmd/Ctrl-Q) until the renderer's `clockOutAndFlush` finishes and calls `electronAPI.app.closingFlushed()`, or a 4s hard timeout elapses. This ensures the `/api/time-tracking/clock-out` POST completes instead of being killed mid-flight.
 
 ---
 
@@ -129,4 +135,4 @@ if (electronAPI.timeTracking.getActivitySince) {
 - [ ] Keep `useDayTotal` and `TodayTimeline` *Total worked* summing `workingSeconds + breakSeconds` only.
 - [ ] After clock-in/out, call `invalidateTimesheetCache(uid)`.
 - [ ] A "second active session" is a client buffer bug — check hydration/`isHydrating`, not the server.
-- [ ] Reverting to sample-based activity requires confirmed Electron rollout.
+- [ ] Sample-based activity is feature-detected (`getActivitySince`); the event-log method is the fallback.

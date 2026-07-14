@@ -5,7 +5,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { message, stack, context, url, userAgent, uid, displayName } = body;
+    const { message, stack, context, url, userAgent, uid, displayName, appVersion, platform } = body;
 
     if (!message || typeof message !== 'string') {
       return NextResponse.json({ error: 'message required' }, { status: 400 });
@@ -19,6 +19,8 @@ export async function POST(req: NextRequest) {
       userAgent: userAgent ?? null,
       uid: uid ?? null,
       displayName: displayName ?? null,
+      appVersion: typeof appVersion === 'string' ? appVersion.slice(0, 32) : null,
+      platform: typeof platform === 'string' ? platform.slice(0, 32) : null,
       createdAt: FieldValue.serverTimestamp(),
     });
 

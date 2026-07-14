@@ -14,6 +14,7 @@ import {
   pruneOldSessions,
 } from '@/lib/localBuffer';
 import { useUserData } from '@/hooks/useUserData';
+import { getAppInfo } from '@/lib/appVersion';
 import { toast } from 'sonner';
 
 const HEARTBEAT_INTERVAL_MS   = 15 * 60 * 1000; // 15 minutes — working state only
@@ -72,6 +73,29 @@ function calcActivityPercent(
   const denominator = working + idle;
   if (denominator === 0) return 100;
   return Math.round((working / denominator) * 100);
+}
+
+/**
+ * Preferred method — compute activity % from powerMonitor idle-time samples
+ * (native, per-minute granularity). Buckets the window into 1-minute slots and
+ * marks each slot active if any OS-level keyboard/mouse input occurred in it.
+ * Only usable on Electron builds that expose `getActivitySince`; callers must
+ * fall back to the event-log method otherwise.
+ */
+function calcActivityPercentFromSamples(
+  samples: Array<{ sampleMs: number; idleSeconds: number }>,
+  windowStart: number,
+  windowEnd: number,
+): number {
+  const totalSlots = Math.max(1, Math.ceil((windowEnd - windowStart) / 60_000));
+  const activeSlots = new Set<number>();
+  for (const { sampleMs, idleSeconds } of samples) {
+    const lastActiveMs = sampleMs - idleSeconds * 1000;
+    if (lastActiveMs >= windowStart && lastActiveMs < windowEnd) {
+      activeSlots.add(Math.floor((lastActiveMs - windowStart) / 60_000));
+    }
+  }
+  return Math.round((activeSlots.size / totalSlots) * 100);
 }
 
 export function useTimeTrackingContext(): TimeTrackingContextType {
@@ -290,7 +314,16 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    electronAPI.onAppClosing(clockOutAndFlush);
+    // On app close, the main process holds the quit until we ack (or a hard
+    // timeout elapses). Always signal completion so the quit isn't delayed the
+    // full timeout, even if the flush throws.
+    electronAPI.onAppClosing(async () => {
+      try {
+        await clockOutAndFlush();
+      } finally {
+        electronAPI.app?.closingFlushed?.();
+      }
+    });
 
     // Before auto-update installs, flush data then signal ready
     electronAPI.updater?.onBeforeInstall?.call(electronAPI.updater, async () => {
@@ -445,6 +478,49 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     };
   }, [displayState, enableIdleTimeout, apiCall]);
 
+  // ─── Native power/lock events (Electron) ─────────────────────────────
+  // Screen lock / system suspend are strong "user is away" signals. Transition
+  // to idle immediately rather than waiting up to 15 min for the idle poll. The
+  // idle-resume poll (getIdleTime < threshold) brings the session back to
+  // working on unlock/resume, so no explicit resume is needed here. Feature-
+  // detected: no-ops on older Electron builds that don't forward power events.
+  useEffect(() => {
+    const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
+    if (!electronAPI?.power?.onEvent) return;
+    if (!enableIdleTimeout) return;
+
+    electronAPI.power.onEvent(async ({ event }) => {
+      if (event !== 'lock' && event !== 'suspend') return;
+      if (isTransitioningRef.current) return;
+      if (displayStateRef.current !== 'working') return;
+
+      isTransitioningRef.current = true;
+      try {
+        const sid = sessionIdRef.current;
+        if (!sid) return;
+
+        const startTime = entryStartTimeRef.current;
+        const segmentSeconds = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
+        sessionBaseSecondsRef.current += segmentSeconds;
+
+        await Promise.all([
+          appendEvent(sid, { type: 'idle-start', timestamp: Date.now() }),
+          apiCall('transition', 'POST', { transition: 'idle' }),
+        ]);
+        setEntryStartTime(null);
+        setDisplayState('idle');
+      } catch (err) {
+        console.error('[TimeTracking] Power-event idle transition failed:', err);
+      } finally {
+        isTransitioningRef.current = false;
+      }
+    });
+
+    return () => {
+      electronAPI.power?.removeEventListener();
+    };
+  }, [enableIdleTimeout, apiCall]);
+
   // ─── Timer Tick (1s) ─────────────────────────────────────────────────
   useEffect(() => {
     if (tickRef.current) {
@@ -590,7 +666,18 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
 
               let activityPercent: number | null = null;
               const sid = sessionIdRef.current;
-              if (sid) {
+              // Preferred: native per-minute powerMonitor samples (finer than the
+              // 15-min idle threshold). Falls back to the event-log method on
+              // older Electron builds that don't expose getActivitySince.
+              if (electronAPI.timeTracking.getActivitySince) {
+                try {
+                  const samples = await electronAPI.timeTracking.getActivitySince(windowStart);
+                  activityPercent = calcActivityPercentFromSamples(samples, windowStart, windowEnd);
+                } catch {
+                  // Non-critical — fall through to the event-log method
+                }
+              }
+              if (activityPercent === null && sid) {
                 try {
                   const buf = await getBuffer(sid);
                   if (buf) {
@@ -684,7 +771,11 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     if (isLoading || isHydrating || displayState !== 'clocked-out') return;
     setIsLoading(true);
     try {
-      const data = await apiCall('start', 'POST');
+      // Report the installed desktop version/platform so the backend has a live
+      // view of who is on which build (feature-detected; nulls in a browser).
+      const { appVersion, platform } = await getAppInfo();
+      const startBody = { appVersion, platform };
+      const data = await apiCall('start', 'POST', startBody);
 
       if (data.alreadyActive) {
         // An active session already exists (a previous run on this machine, or
@@ -700,12 +791,12 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
           await apiCall('discard', 'POST');
         }
 
-        let fresh = await apiCall('start', 'POST');
+        let fresh = await apiCall('start', 'POST', startBody);
         if (fresh.alreadyActive) {
           // Reconciliation didn't clear the server session (e.g. upload was
           // discarded due to a mismatch) — force a discard so we can start.
           await apiCall('discard', 'POST');
-          fresh = await apiCall('start', 'POST');
+          fresh = await apiCall('start', 'POST', startBody);
         }
 
         await initBuffer(fresh.sessionId, user!.uid, fresh.startTime);
@@ -761,6 +852,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       sessionStartMsRef.current = null;
       prevScreenshotMsRef.current = null;
       if (user) invalidateTimesheetCache(user.uid);
+      // Let the update prompt re-surface on a manual clock-out (see UpdateAvailableBanner).
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('bluu:clocked-out'));
     } catch (err) {
       console.error('[TimeTracking] Stop failed:', err);
     } finally {

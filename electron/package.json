@@ -1,6 +1,6 @@
 {
   "name": "bluu-backend",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Bluu Rock MGMT SaaS",
   "author": "BluuRockMGMT",
   "private": true,
@@ -29,6 +29,8 @@
     "files": [
       "main.js",
       "preload.js",
+      "loading.html",
+      "offline.html",
       "public/logo/icon.icns",
       "public/logo/icon.ico",
       "public/mixkit-message-pop-alert-2354.mp3",

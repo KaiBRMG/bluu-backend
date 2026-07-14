@@ -9,6 +9,7 @@ interface ElectronAPI {
   window: {
     setResizable: (resizable: boolean) => void;
     setSize: (width: number, height: number) => void;
+    getSize?: () => Promise<[number, number] | null>;
   };
   timeTracking: {
     getIdleTime: () => Promise<number>;
@@ -27,7 +28,22 @@ interface ElectronAPI {
   removeAppClosingListeners: () => void;
   app: {
     getPlatform: () => Promise<string>;
+    getVersion?: () => Promise<string>;
+    getVersions?: () => Promise<{
+      app: string;
+      electron: string;
+      chrome: string;
+      node: string;
+      platform: string;
+      arch: string;
+    }>;
     signalReady: () => void;
+    closingFlushed?: () => void;
+    retryLoad?: () => void;
+  };
+  power?: {
+    onEvent: (callback: (data: { event: 'suspend' | 'resume' | 'lock' | 'unlock'; at: number }) => void) => void;
+    removeEventListener: () => void;
   };
   permissions: {
     requestScreenAccess: () => Promise<{ success: boolean }>;
