@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { MoreHorizontal, ExternalLink } from 'lucide-react';
+import { MoreHorizontal, ExternalLink, Link as LinkIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -31,6 +31,23 @@ function formatDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+const URL_MAX_CHARS = 40;
+
+/** Trim a URL for display so long links don't overflow the table cell. */
+function truncateUrl(url: string): string {
+  const stripped = url.replace(/^https?:\/\//, '');
+  return stripped.length > URL_MAX_CHARS ? `${stripped.slice(0, URL_MAX_CHARS - 1)}…` : stripped;
+}
+
+async function copyUrl(url: string) {
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('Link copied!');
+  } catch {
+    toast.error('Could not copy link');
+  }
 }
 
 export function ResourceTable({
@@ -98,17 +115,29 @@ export function ResourceTable({
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="max-w-[14rem]">
+                    <TableCell className="max-w-[16rem]">
                       {url ? (
-                        <a
-                          href={url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground truncate"
-                        >
-                          <span className="truncate">{url}</span>
-                          <ExternalLink className="h-3 w-3 shrink-0" />
-                        </a>
+                        <div className="flex items-center gap-1">
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={url}
+                            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground min-w-0"
+                          >
+                            <span className="truncate">{truncateUrl(url)}</span>
+                            <ExternalLink className="h-3 w-3 shrink-0" />
+                          </a>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                            onClick={() => copyUrl(url)}
+                            aria-label="Copy link"
+                          >
+                            <LinkIcon className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
