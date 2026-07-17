@@ -1,5 +1,6 @@
 // electron/main.js
 const { app, BrowserWindow, session, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
 const isDev = process.env.ELECTRON_DEV === 'true' || !app.isPackaged;
@@ -477,6 +478,9 @@ function createWindow() {
   let closeFlushed = false;
   mainWindow.on('close', (e) => {
     if (closeFlushed) return; // second pass — allow the close to proceed
+    // The auto-update path already flushed via 'updater:before-install'. Vetoing
+    // this close would flush twice and can abort the pending Squirrel install.
+    if (updateInstallStarted) return;
     const wc = mainWindow.webContents;
     if (!wc || wc.isDestroyed()) return;
 
@@ -497,20 +501,99 @@ function createWindow() {
   return mainWindow;
 }
 
-// Auto-update via electron-updater is intentionally disabled: the app is not
-// code-signed/notarized, so updates can't be auto-installed. Users update
-// manually; the renderer nudges them via the version-gated banner (it compares
-// app:getVersion against a server-provided latest version). The electron-updater
-// dependency and the preload `updater` surface are retained for the day signing
-// is added.
+// ─── Auto-update (macOS only) ───────────────────────────────────────────
+// macOS builds are Developer ID signed + notarized, so Squirrel.Mac can verify
+// and install updates in place. Windows builds are signed only with a
+// self-generated certificate, which the updater cannot validate, so Windows
+// users keep updating manually via the version-gated renderer banner (it
+// compares app:getVersion against APP_UPDATE.latestVersion).
+//
+// The check runs ONCE, at app start. There is deliberately no polling interval:
+// an update found mid-session could only ever interrupt work in progress. A user
+// who leaves the app open for a week simply picks the update up on next launch.
+const AUTO_UPDATE_SUPPORTED = process.platform === 'darwin';
+const INSTALL_FLUSH_TIMEOUT_MS = 10000;
+
+let updateInstallStarted = false;
+// Set when the start-up check finds an update. The renderer mounts after this
+// fires, so the event alone would be missed — it reads this via
+// 'updater:getPending' on mount and we also push the event for a mounted window.
+let pendingUpdate = null;
+
+function sendToRenderer(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+}
+
+// Quit into the installer exactly once, whether the renderer flushed in time or
+// the timeout fired. A double call would race two Squirrel installs.
+function installUpdate() {
+  if (updateInstallStarted) return;
+  updateInstallStarted = true;
+  autoUpdater.quitAndInstall();
+}
+
+function registerAutoUpdater() {
+  if (!AUTO_UPDATE_SUPPORTED || isDev) return;
+
+  // Nothing downloads until the user presses "Download update" in the renderer
+  // dialog: a background download would burn a metered connection unannounced.
+  autoUpdater.autoDownload = false;
+  // The renderer must clock the user out and flush buffered time-tracking
+  // events before the app restarts, so never install silently on quit.
+  autoUpdater.autoInstallOnAppQuit = false;
+
+  autoUpdater.on('update-available', (info) => {
+    pendingUpdate = { version: (info && info.version) || null };
+    sendToRenderer('updater:available', pendingUpdate);
+  });
+
+  autoUpdater.on('download-progress', (p) => {
+    sendToRenderer('updater:progress', {
+      percent: p.percent,
+      bytesPerSecond: p.bytesPerSecond,
+      total: p.total,
+      transferred: p.transferred,
+    });
+  });
+
+  autoUpdater.on('update-downloaded', () => {
+    // Give the renderer a bounded window to flush the open session, then
+    // install regardless so a wedged renderer can't strand the update.
+    const timer = setTimeout(installUpdate, INSTALL_FLUSH_TIMEOUT_MS);
+    ipcMain.once('updater:ready-to-install', () => {
+      clearTimeout(timer);
+      installUpdate();
+    });
+    sendToRenderer('updater:before-install');
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('autoUpdater error:', err);
+    sendToRenderer('updater:status', { status: 'error', message: err && err.message });
+  });
+
+  // The renderer mounts well after this resolves; it reads the outcome from
+  // 'updater:getPending' rather than relying on catching the event.
+  ipcMain.handle('updater:getPending', () => pendingUpdate);
+
+  ipcMain.on('updater:download', () => {
+    if (!pendingUpdate) return;
+    autoUpdater.downloadUpdate().catch((err) => {
+      console.error('Update download failed:', err);
+      sendToRenderer('updater:status', { status: 'error', message: err && err.message });
+    });
+  });
+
+  autoUpdater.checkForUpdates().catch((err) => console.error('Update check failed:', err));
+}
 
 // Forward native power/session transitions to the renderer so time-tracking can
 // pause/resume precisely (more accurate than the 15-min idle threshold) and so
 // lock/unlock patterns can be recorded.
 function forwardPowerEvent(name) {
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-    mainWindow.webContents.send('power:event', { event: name, at: Date.now() });
-  }
+  sendToRenderer('power:event', { event: name, at: Date.now() });
 }
 
 function registerPowerListeners() {
@@ -527,6 +610,7 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
 
   registerPowerListeners();
+  registerAutoUpdater();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

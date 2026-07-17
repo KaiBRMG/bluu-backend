@@ -9,9 +9,6 @@ on:
 jobs:
   build-mac:
     runs-on: macos-latest
-    strategy:
-      matrix:
-        arch: [arm64, x64]
 
     steps:
       - name: Checkout
@@ -28,9 +25,30 @@ jobs:
         working-directory: electron
         run: npm ci
 
-      - name: Build macOS DMG (${{ matrix.arch }})
+      # notarytool needs the App Store Connect key as a file on disk. RUNNER_TEMP
+      # is outside the workspace, so the key can never be swept into the build.
+      - name: Write App Store Connect API key
+        env:
+          APPLE_API_KEY_B64: ${{ secrets.APPLE_API_KEY_B64 }}
+        run: |
+          echo "$APPLE_API_KEY_B64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+
+      # Both architectures are built in one job on purpose: each electron-builder
+      # run emits a latest-mac.yml listing only the artifacts it produced. Split
+      # across matrix jobs, the second job's manifest overwrites the first's in
+      # the release and auto-update breaks for that architecture.
+      - name: Build, sign, notarize and publish macOS DMG + ZIP
         working-directory: electron
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ runner.temp }}/AuthKey.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run dist:mac-${{ matrix.arch }} -- --publish always
+        run: npm run dist:mac -- --publish always
+
+      - name: Remove App Store Connect API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"

@@ -202,5 +202,21 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 20. Analytics rollups
+    // analytics_daily holds one precomputed doc per user per local day, written
+    // by the rollupDailyAnalytics Cloud Function and read only by
+    // /api/admin/analytics/timetracking (which gates on the 'shift-management'
+    // page permission). analytics_dirty is the recompute queue.
+    // Both are Admin-SDK-only — no client ever touches them directly, so deny
+    // everything for defence-in-depth. These docs aggregate the whole company's
+    // hours, so a client-readable rule here would be a data leak.
+    match /analytics_daily/{docId} {
+      allow read, write: if false;
+    }
+
+    match /analytics_dirty/{docId} {
+      allow read, write: if false;
+    }
+
   }
 }

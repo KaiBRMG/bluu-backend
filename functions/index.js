@@ -2,6 +2,7 @@ const admin = require('firebase-admin');
 const { onObjectFinalized } = require('firebase-functions/v2/storage');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const sharp = require('sharp');
+const { rollupUserDay, todayStr, addCalendarDays } = require('./rollup');
 
 admin.initializeApp();
 
@@ -251,3 +252,104 @@ exports.cleanupStaleSessions = onSchedule({ schedule: '0 2 * * *', timeZone: 'UT
   await batch.commit();
   console.log(`[cleanupStaleSessions] Cleaned up ${snap.size} stale session(s).`);
 });
+
+
+/**
+ * Daily analytics rollup — runs once per day at 04:00 UTC.
+ *
+ * Writes one analytics_daily/{userId}_{YYYY-MM-DD} document per user per LOCAL
+ * day, powering the Analytics tab on /admin/shift-management. This exists
+ * because no Firestore index supports querying `time_entries` without `userId`
+ * — company-wide analytics read live would fan out across every user on every
+ * dashboard load. See documentation/time-tracking.md § Analytics.
+ *
+ * 04:00 UTC is deliberate: after cleanupStaleSessions (02:00) so orphaned
+ * sessions are already ledgered, and after syncPagePermissions (03:00) so
+ * permittedPageIds is settled before we enumerate time-tracking users.
+ *
+ * Each run recomputes a 3-DAY ROLLING WINDOW of each user's local dates
+ * [today-3 .. today-1], never the current local day (partial data). The window
+ * is what makes the fixed UTC schedule timezone-agnostic: a UTC-11 user's
+ * "yesterday" has not ended at 04:00 UTC, so it is recomputed correctly on a
+ * later run. Writes are full overwrites, so re-running converges.
+ *
+ * It also drains the analytics_dirty queue, which /api/time-tracking/upload-log
+ * populates when a crashed session's event log finally arrives — that backfills
+ * a day whose numbers were provisional, possibly long after the rolling window
+ * has moved past it.
+ */
+exports.rollupDailyAnalytics = onSchedule(
+  { schedule: '0 4 * * *', timeZone: 'UTC', timeoutSeconds: 540, memory: '512MiB' },
+  async () => {
+    const db = admin.firestore();
+
+    const usersSnap = await db
+      .collection('users')
+      .where('permittedPageIds', 'array-contains', 'time-tracking')
+      .get();
+
+    // uid → user doc. Archived users are KEPT: their history stays intact and
+    // correct, and the read path filters them out of current-roster views.
+    const userMap = new Map();
+    for (const doc of usersSnap.docs) userMap.set(doc.id, doc.data());
+
+    // ── 1. Collect the work set: rolling window + dirty queue ──────────
+    /** @type {Map<string, Set<string>>} uid → set of local date strings */
+    const work = new Map();
+    const addWork = (uid, date) => {
+      if (!work.has(uid)) work.set(uid, new Set());
+      work.get(uid).add(date);
+    };
+
+    for (const [uid, data] of userMap) {
+      const tz = data.timezone || 'UTC';
+      const today = todayStr(tz);
+      for (let i = 1; i <= 3; i++) addWork(uid, addCalendarDays(today, -i));
+    }
+
+    const dirtySnap = await db.collection('analytics_dirty').get();
+    for (const doc of dirtySnap.docs) {
+      const d = doc.data();
+      if (!d.userId || !d.date) continue;
+      // Only roll up users we can resolve — a dirty doc for a deleted user is
+      // drained below regardless, so the queue cannot grow unbounded.
+      if (userMap.has(d.userId)) addWork(d.userId, d.date);
+    }
+
+    // ── 2. Recompute ──────────────────────────────────────────────────
+    let written = 0, deleted = 0, skipped = 0, failed = 0;
+
+    for (const [uid, dates] of work) {
+      const userData = userMap.get(uid);
+      for (const date of dates) {
+        try {
+          const result = await rollupUserDay(db, uid, userData, date);
+          if (result === 'written') written++;
+          else if (result === 'deleted') deleted++;
+          else skipped++;
+        } catch (err) {
+          failed++;
+          console.error(`[rollupDailyAnalytics] ${uid} ${date} failed:`, err);
+        }
+      }
+    }
+
+    // ── 3. Drain the queue ────────────────────────────────────────────
+    // Only after the recompute above, so a crash leaves the entry queued for
+    // the next run rather than dropping the backfill on the floor.
+    if (!dirtySnap.empty) {
+      let batch = db.batch();
+      let ops = 0;
+      for (const doc of dirtySnap.docs) {
+        batch.delete(doc.ref);
+        if (++ops === 400) { await batch.commit(); batch = db.batch(); ops = 0; }
+      }
+      if (ops > 0) await batch.commit();
+    }
+
+    console.log(
+      `[rollupDailyAnalytics] users=${userMap.size} written=${written} ` +
+      `deleted=${deleted} skipped=${skipped} failed=${failed} dirtyDrained=${dirtySnap.size}`,
+    );
+  },
+);

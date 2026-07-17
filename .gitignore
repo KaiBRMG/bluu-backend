@@ -8,11 +8,14 @@ out/
 electron/dist/
 electron/node_modules/
 electron/.cache/
-# Signing material must never be committed (private keys / certs)
-electron/build-assets/*.key
-electron/build-assets/*.pfx
-electron/build-assets/*.crt
-electron/build-assets/*.cer
+# build-assets holds private keys, certs and their base64 exports (the raw
+# material behind the MAC_CSC_LINK / APPLE_API_KEY_B64 secrets). Deny by
+# default and allow back only the inert build inputs, so a new key or a
+# base64 dump of one can never be committed by an extension we forgot.
+electron/build-assets/**
+!electron/build-assets/**/
+!electron/build-assets/**/*.plist
+!electron/build-assets/**/*.png
 
 # Logs
 npm-debug.log*

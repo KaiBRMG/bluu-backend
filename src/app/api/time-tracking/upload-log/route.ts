@@ -7,6 +7,7 @@ import {
   updateSessionLog,
 } from '@/lib/services/activeSessionService';
 import { getUserById } from '@/lib/services/userService';
+import { markAnalyticsDirty } from '@/lib/services/analyticsService';
 import { parseBuffer } from '@/lib/parseBuffer';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { LocalSessionBuffer } from '@/types/firestore';
@@ -52,6 +53,12 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       // timesheet segment accurately reflects when the session actually ended,
       // rather than the CF-assigned lastUpdated which could be late in the day.
       await updateSessionLog(buffer.sessionId, buffer.events, parsedTotals, endTimeMs);
+      // This day's rollup was written with hasIncompleteLog:true (the CF had no
+      // event log to work from). Queue it for recompute — the rollup's 3-day
+      // rolling window may have long since passed this session's date.
+      await markAnalyticsDirty(
+        token.uid, buffer.startTime, userData?.timezone ?? 'UTC', 'log-merged',
+      );
       return NextResponse.json({ success: true, action: 'log-merged' });
     }
 
@@ -67,6 +74,11 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         buffer.events,
         userData?.timezone ?? 'UTC',
         userData?.enableIdleTimeout ?? true,
+      );
+      // A ledger doc now exists for a day that may already have been rolled up
+      // (the app can be reopened days later), so that day needs recomputing.
+      await markAnalyticsDirty(
+        token.uid, buffer.startTime, userData?.timezone ?? 'UTC', 'committed',
       );
       return NextResponse.json({ success: true, action: 'committed' });
     }

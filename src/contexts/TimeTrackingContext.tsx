@@ -22,6 +22,8 @@ const SLEEP_GAP_THRESHOLD_MS  = HEARTBEAT_INTERVAL_MS + 5 * 60 * 1000; // 20 min
 const IDLE_CHECK_INTERVAL_MS  = 30_000;          // poll for idle every 30s
 const IDLE_RESUME_CHECK_MS    = 5_000;           // poll for resume every 5s
 const IDLE_THRESHOLD_SECONDS  = 900;             // 15 minutes without input = idle
+const LOCK_CONFIRM_IDLE_SECONDS = 60;            // a `lock` is only "user walked away" if they were active just before it
+const SAMPLE_GAP_TOLERANCE_MS = 60_000;          // native sampler ticks every 5s — a hole this big means the process was stopped
 const BREAK_DURATION_SECONDS  = 2700;            // 45-minute break allowance per period
 const WORK_PERIOD_SECONDS     = 8 * 3600;        // new break period unlocked every 8 hours
 const SCREENSHOT_WINDOW_MS    = 15 * 60 * 1000;
@@ -76,26 +78,102 @@ function calcActivityPercent(
 }
 
 /**
+ * Did the machine stay awake for the whole span? The native sampler ticks every
+ * 5s in the main process, so a dense run of samples across the span proves the
+ * machine was running; a hole means it was suspended.
+ *
+ * Deliberately conservative — returns `false` whenever it cannot prove
+ * wakefulness (no sampler on older builds, samples aged out of the 45-min
+ * retention, IPC failure), which preserves the legacy sleep-gap behaviour.
+ */
+async function wasAwakeDuring(fromMs: number, toMs: number): Promise<boolean> {
+  const api = typeof window !== 'undefined' ? window.electronAPI?.timeTracking : undefined;
+  if (!api?.getActivitySince) return false;
+  try {
+    const sampleTimes = (await api.getActivitySince(fromMs))
+      .map(s => s.sampleMs)
+      .sort((a, b) => a - b);
+    if (sampleTimes.length === 0) return false;
+    // Samples must cover the span end to end, with no hole big enough to hide a suspend.
+    if (sampleTimes[0] - fromMs > SAMPLE_GAP_TOLERANCE_MS) return false;
+    if (toMs - sampleTimes[sampleTimes.length - 1] > SAMPLE_GAP_TOLERANCE_MS) return false;
+    for (let i = 1; i < sampleTimes.length; i++) {
+      if (sampleTimes[i] - sampleTimes[i - 1] > SAMPLE_GAP_TOLERANCE_MS) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The tracked state at a given moment, per the session event log. */
+function stateAtMs(events: SessionEvent[], ms: number): TimerDisplayState {
+  let state: TimerDisplayState = 'clocked-out';
+  for (const e of events) {
+    if (e.timestamp > ms) break;
+    switch (e.type) {
+      case 'clock-in':
+      case 'resume':
+      case 'idle-end':
+      case 'break-end':  state = 'working';     break;
+      case 'idle-start': state = 'idle';        break;
+      case 'break-start': state = 'on-break';   break;
+      case 'pause':      state = 'paused';      break;
+      case 'clock-out':  state = 'clocked-out'; break;
+      // 'activity' / 'screenshot' are markers — they don't change state
+    }
+  }
+  return state;
+}
+
+/**
  * Preferred method — compute activity % from powerMonitor idle-time samples
  * (native, per-minute granularity). Buckets the window into 1-minute slots and
  * marks each slot active if any OS-level keyboard/mouse input occurred in it.
- * Only usable on Electron builds that expose `getActivitySince`; callers must
- * fall back to the event-log method otherwise.
+ *
+ * Only minutes the user was actually expected to be working count toward the
+ * denominator — idle/break/pause minutes are excluded, mirroring the event-log
+ * method's `working / (working + idle)`. Without this a long break or idle
+ * stretch inside the window mathematically caps the result far below reality.
+ *
+ * Returns `null` when the sample buffer can't answer for this window (the main
+ * process restarted, or the window predates the 45-min sample retention).
+ * `null` — never 0 — is what lets callers fall back to the event-log method;
+ * returning 0 here would report a fully active user as completely inactive.
  */
 function calcActivityPercentFromSamples(
   samples: Array<{ sampleMs: number; idleSeconds: number }>,
   windowStart: number,
   windowEnd: number,
-): number {
-  const totalSlots = Math.max(1, Math.ceil((windowEnd - windowStart) / 60_000));
+  events: SessionEvent[] = [],
+): number | null {
+  if (samples.length === 0) return null;
+
+  // Samples are retained for a rolling window in the main process, so they may
+  // not reach back to windowStart. Score only the span they actually cover.
+  const earliestSampleMs = Math.min(...samples.map(s => s.sampleMs));
+  const effectiveStart = Math.max(windowStart, earliestSampleMs);
+  if (windowEnd - effectiveStart < 60_000) return null; // too short to score
+
+  const slotCount = Math.ceil((windowEnd - effectiveStart) / 60_000);
+  const workingSlots = new Set<number>();
+  for (let slot = 0; slot < slotCount; slot++) {
+    const slotMidMs = effectiveStart + slot * 60_000 + 30_000;
+    if (events.length === 0 || stateAtMs(events, slotMidMs) === 'working') {
+      workingSlots.add(slot);
+    }
+  }
+  if (workingSlots.size === 0) return null; // nothing to score — let the fallback decide
+
   const activeSlots = new Set<number>();
   for (const { sampleMs, idleSeconds } of samples) {
     const lastActiveMs = sampleMs - idleSeconds * 1000;
-    if (lastActiveMs >= windowStart && lastActiveMs < windowEnd) {
-      activeSlots.add(Math.floor((lastActiveMs - windowStart) / 60_000));
+    if (lastActiveMs >= effectiveStart && lastActiveMs < windowEnd) {
+      const slot = Math.floor((lastActiveMs - effectiveStart) / 60_000);
+      if (workingSlots.has(slot)) activeSlots.add(slot);
     }
   }
-  return Math.round((activeSlots.size / totalSlots) * 100);
+  return Math.round((activeSlots.size / workingSlots.size) * 100);
 }
 
 export function useTimeTrackingContext(): TimeTrackingContextType {
@@ -158,6 +236,25 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     }
     return res.json();
   }, [user]);
+
+  /**
+   * Retroactively exclude a span the machine was asleep: inject pause/resume
+   * around it and rebase the running totals so the sleep isn't counted as work.
+   */
+  const patchSleepGap = useCallback(async (sid: string, pauseAtMs: number, resumeAtMs: number) => {
+    await appendEvent(sid, { type: 'pause', timestamp: pauseAtMs });
+    await appendEvent(sid, { type: 'resume', timestamp: resumeAtMs });
+    const patchedBuf = await getBuffer(sid);
+    if (!patchedBuf) return;
+    const totals = parseBuffer(patchedBuf.events);
+    sessionBaseSecondsRef.current = totals.workingSeconds;
+    breakUsedSecondsRef.current   = totals.breakSeconds;
+    // Update the ref immediately so the next tick uses the correct base;
+    // setEntryStartTime keeps React state consistent and restarts the tick.
+    entryStartTimeRef.current = resumeAtMs;
+    setEntryStartTime(resumeAtMs);
+    setElapsedSeconds(totals.workingSeconds);
+  }, []);
 
   // ─── Session retention: prune old flushed sessions once per app load ─
   const hasPrunedRef = useRef(false);
@@ -350,10 +447,16 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
 
         const now = Date.now();
 
-        // Sleep gap detection: if the process was suspended (OS sleep), the
-        // frozen interval fires on wake with a gap far larger than the heartbeat
-        // period. Retroactively inject pause/resume so the sleep time is excluded
-        // from working seconds rather than silently counted as worked time.
+        // Sleep gap detection — safety net for a suspend that never reached the
+        // renderer (the power-event handler stamps `idle-start` at the exact
+        // suspend instant when it does, and `inWorkingSegment` then skips this).
+        //
+        // The gap alone is only a guess: the heartbeat period is 15 min and the
+        // threshold 20, so a throttled timer or a stalled network call can trip
+        // it and erase genuinely worked time. Where the native sampler exists,
+        // confirm against it first — it ticks every 5s in the main process, so
+        // samples spanning the gap prove the machine was awake and the user's
+        // work is real. Absent samples mean it truly slept.
         try {
           const buf = await getBuffer(sid);
           if (buf && buf.events.length > 0) {
@@ -361,20 +464,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
             const gap = now - lastEvent.timestamp;
             const inWorkingSegment = !['pause', 'idle-start', 'break-start', 'clock-out'].includes(lastEvent.type);
 
-            if (gap > SLEEP_GAP_THRESHOLD_MS && inWorkingSegment) {
-              await appendEvent(sid, { type: 'pause', timestamp: lastEvent.timestamp + 1000 });
-              await appendEvent(sid, { type: 'resume', timestamp: now });
-              const patchedBuf = await getBuffer(sid);
-              if (patchedBuf) {
-                const totals = parseBuffer(patchedBuf.events);
-                sessionBaseSecondsRef.current = totals.workingSeconds;
-                breakUsedSecondsRef.current   = totals.breakSeconds;
-                // Update the ref immediately so the next tick uses the correct base;
-                // setEntryStartTime keeps React state consistent and restarts the tick.
-                entryStartTimeRef.current = now;
-                setEntryStartTime(now);
-                setElapsedSeconds(totals.workingSeconds);
-              }
+            if (gap > SLEEP_GAP_THRESHOLD_MS && inWorkingSegment && !(await wasAwakeDuring(lastEvent.timestamp, now))) {
+              await patchSleepGap(sid, lastEvent.timestamp + 1000, now);
             }
           }
         } catch {
@@ -394,7 +485,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         heartbeatRef.current = null;
       }
     };
-  }, [displayState, apiCall]);
+  }, [displayState, apiCall, patchSleepGap]);
 
   // ─── Idle Detection ──────────────────────────────────────────────────
   const enableIdleTimeout = userData?.enableIdleTimeout ?? true;
@@ -479,40 +570,82 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   }, [displayState, enableIdleTimeout, apiCall]);
 
   // ─── Native power/lock events (Electron) ─────────────────────────────
-  // Screen lock / system suspend are strong "user is away" signals. Transition
-  // to idle immediately rather than waiting up to 15 min for the idle poll. The
-  // idle-resume poll (getIdleTime < threshold) brings the session back to
-  // working on unlock/resume, so no explicit resume is needed here. Feature-
-  // detected: no-ops on older Electron builds that don't forward power events.
+  // Native suspend/resume/lock/unlock carry exact timestamps, so they beat both
+  // the 30s idle poll and the heartbeat's gap guess. Feature-detected: no-ops on
+  // older Electron builds that don't forward power events.
   useEffect(() => {
     const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
     if (!electronAPI?.power?.onEvent) return;
     if (!enableIdleTimeout) return;
 
-    electronAPI.power.onEvent(async ({ event }) => {
-      if (event !== 'lock' && event !== 'suspend') return;
-      if (isTransitioningRef.current) return;
-      if (displayStateRef.current !== 'working') return;
+    /** working → idle, crediting the segment worked up to `atMs`. */
+    const goIdle = async (atMs: number) => {
+      const sid = sessionIdRef.current;
+      if (!sid) return;
+      const startTime = entryStartTimeRef.current;
+      const segmentSeconds = startTime ? Math.max(0, Math.floor((atMs - startTime) / 1000)) : 0;
+      sessionBaseSecondsRef.current += segmentSeconds;
+      await Promise.all([
+        appendEvent(sid, { type: 'idle-start', timestamp: atMs }),
+        apiCall('transition', 'POST', { transition: 'idle' }),
+      ]);
+      setEntryStartTime(null);
+      setDisplayState('idle');
+    };
 
-      isTransitioningRef.current = true;
+    electronAPI.power.onEvent(async ({ event, at }) => {
+      const atMs = at ?? Date.now();
       try {
-        const sid = sessionIdRef.current;
-        if (!sid) return;
+        if (event === 'suspend') {
+          // The machine is stopping — no work can happen past this instant, so
+          // stamping idle-start at `atMs` brackets the sleep exactly. That is
+          // what makes the heartbeat's gap guess unnecessary on this path.
+          if (isTransitioningRef.current || displayStateRef.current !== 'working') return;
+          isTransitioningRef.current = true;
+          try { await goIdle(atMs); } finally { isTransitioningRef.current = false; }
+          return;
+        }
 
-        const startTime = entryStartTimeRef.current;
-        const segmentSeconds = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
-        sessionBaseSecondsRef.current += segmentSeconds;
+        if (event === 'lock') {
+          // A lock only means "walked away" if the user was active right up to
+          // it. macOS also fires lock-screen when the screensaver kicks in —
+          // which by definition only happens after an inactivity timeout, so it
+          // says nothing new about presence. Trusting it blindly marks a user
+          // reading on-screen idle at their screensaver timeout (often 5 min)
+          // instead of the real 15-min threshold. Let the idle poll judge those.
+          if (isTransitioningRef.current || displayStateRef.current !== 'working') return;
+          const idleTime = await electronAPI.timeTracking.getIdleTime();
+          if (idleTime >= LOCK_CONFIRM_IDLE_SECONDS) return;
+          if (isTransitioningRef.current || displayStateRef.current !== 'working') return;
+          isTransitioningRef.current = true;
+          try { await goIdle(atMs); } finally { isTransitioningRef.current = false; }
+          return;
+        }
 
-        await Promise.all([
-          appendEvent(sid, { type: 'idle-start', timestamp: Date.now() }),
-          apiCall('transition', 'POST', { transition: 'idle' }),
-        ]);
-        setEntryStartTime(null);
-        setDisplayState('idle');
+        // 'resume' | 'unlock' ────────────────────────────────────────────
+        // Come back instantly instead of waiting up to IDLE_RESUME_CHECK_MS.
+        // Must be a check, not an assumption: after a resume the OS idle counter
+        // can still read high, in which case the poll handles it.
+        if (isTransitioningRef.current || displayStateRef.current !== 'idle') return;
+        const idleTime = await electronAPI.timeTracking.getIdleTime();
+        if (idleTime >= IDLE_THRESHOLD_SECONDS) return;
+        if (isTransitioningRef.current || displayStateRef.current !== 'idle') return;
+
+        isTransitioningRef.current = true;
+        try {
+          const activeSid = sessionIdRef.current;
+          if (!activeSid) return;
+          await Promise.all([
+            appendEvent(activeSid, { type: 'idle-end', timestamp: Date.now() }),
+            apiCall('transition', 'POST', { transition: 'resume' }),
+          ]);
+          setEntryStartTime(Date.now());
+          setDisplayState('working');
+        } finally {
+          isTransitioningRef.current = false;
+        }
       } catch (err) {
-        console.error('[TimeTracking] Power-event idle transition failed:', err);
-      } finally {
-        isTransitioningRef.current = false;
+        console.error('[TimeTracking] Power-event handling failed:', err);
       }
     });
 
@@ -666,26 +799,33 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
 
               let activityPercent: number | null = null;
               const sid = sessionIdRef.current;
+
+              // The event log serves both methods: it supplies the sample
+              // method's denominator (which minutes were working) and drives the
+              // fallback outright.
+              let events: SessionEvent[] = [];
+              if (sid) {
+                try {
+                  events = (await getBuffer(sid))?.events ?? [];
+                } catch {
+                  // Non-critical — proceed without event data
+                }
+              }
+
               // Preferred: native per-minute powerMonitor samples (finer than the
               // 15-min idle threshold). Falls back to the event-log method on
-              // older Electron builds that don't expose getActivitySince.
+              // older Electron builds that don't expose getActivitySince, and
+              // whenever the sample buffer can't cover the window.
               if (electronAPI.timeTracking.getActivitySince) {
                 try {
                   const samples = await electronAPI.timeTracking.getActivitySince(windowStart);
-                  activityPercent = calcActivityPercentFromSamples(samples, windowStart, windowEnd);
+                  activityPercent = calcActivityPercentFromSamples(samples, windowStart, windowEnd, events);
                 } catch {
                   // Non-critical — fall through to the event-log method
                 }
               }
-              if (activityPercent === null && sid) {
-                try {
-                  const buf = await getBuffer(sid);
-                  if (buf) {
-                    activityPercent = calcActivityPercent(buf.events, windowStart, windowEnd);
-                  }
-                } catch {
-                  // Non-critical — proceed without activity data
-                }
+              if (activityPercent === null && events.length > 0) {
+                activityPercent = calcActivityPercent(events, windowStart, windowEnd);
               }
 
               await fetch('/api/time-tracking/screenshots/upload', {

@@ -49,7 +49,15 @@ interface ElectronAPI {
     requestScreenAccess: () => Promise<{ success: boolean }>;
     requestNotification: () => Promise<{ success: boolean }>;
   };
+  /**
+   * macOS auto-update. `getPending`/`onAvailable`/`download` land in v0.8.0 —
+   * feature-detect them: builds older than that have no updater at all and must
+   * fall back to the manual APP_UPDATE prompt.
+   */
   updater: {
+    getPending?: () => Promise<{ version: string | null } | null>;
+    onAvailable?: (callback: (data: { version: string | null }) => void) => void;
+    download?: () => void;
     onStatus: (callback: (data: { status: 'downloading' | 'error'; version?: string; message?: string }) => void) => void;
     onProgress: (callback: (data: { percent: number; bytesPerSecond: number; total: number; transferred: number }) => void) => void;
     onBeforeInstall: (callback: () => void) => void;

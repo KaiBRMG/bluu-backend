@@ -1,6 +1,6 @@
 {
   "name": "bluu-backend",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Bluu Rock MGMT SaaS",
   "author": "BluuRockMGMT",
   "private": true,
@@ -41,12 +41,16 @@
       "buildResources": "public/logo"
     },
     "mac": {
-      "identity": "-",
-      "hardenedRuntime": false,
+      "hardenedRuntime": true,
       "gatekeeperAssess": false,
+      "notarize": true,
+      "entitlements": "build-assets/macos/entitlements.mac.plist",
+      "entitlementsInherit": "build-assets/macos/entitlements.mac.inherit.plist",
       "target": [
         { "target": "dmg", "arch": ["arm64"] },
-        { "target": "dmg", "arch": ["x64"] }
+        { "target": "dmg", "arch": ["x64"] },
+        { "target": "zip", "arch": ["arm64"] },
+        { "target": "zip", "arch": ["x64"] }
       ],
       "icon": "public/logo/icon.icns",
       "category": "public.app-category.productivity"

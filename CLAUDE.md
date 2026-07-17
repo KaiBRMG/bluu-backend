@@ -23,6 +23,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
  Firestore + Storage (Firebase Admin SDK) ← services (src/lib/services) ← API routes (src/app/api)
  Client hooks (src/hooks) ← contexts (src/contexts) ← React 19 / Next 16 App Router UI
  functions/ → generateThumbnail (Storage trigger) + daily stale-session cleanup
+              + daily page-permissions sync + nightly analytics rollup
 ```
 
 - **Monorepo:** `src/` (Next.js 16 web app, primary), `electron/` (desktop wrapper), `src/app/creator-portal/` (creator interface), `functions/` (Cloud Functions).
@@ -44,7 +45,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 | [auth.md](documentation/auth.md) | Browser middleware, OAuth login, `withAuth`/`withCreatorAuth`, the 3 authorization tiers |
 | [permissions.md](documentation/permissions.md) | Page definitions, `page-permissions`, `permittedPageIds`, `checkPageAccess` |
 | [data-layer.md](documentation/data-layer.md) | Server services, client hooks, Firestore collections, read-optimization rules, session token |
-| [time-tracking.md](documentation/time-tracking.md) | Event-log sessions, `sessionCloseMs`, crash robustness, activity percent |
+| [time-tracking.md](documentation/time-tracking.md) | Event-log sessions, `sessionCloseMs`, crash robustness, activity percent, **analytics rollups** |
 | [notifications.md](documentation/notifications.md) | `notificationContent.ts`, `addNotificationToBatch`, event → factory table |
 | [campaign-tracking.md](documentation/campaign-tracking.md) | Custom requests vs campaigns, the two archive mechanisms, transfer |
 | [resources.md](documentation/resources.md) | `apps-resources` page, `app-resources` collection, resource management, group/user filtering |
@@ -67,8 +68,8 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 11. **Keep docs current** — always update the documentation repository ([`documentation/`](documentation/) + this hub) when a change makes a spoke or a cross-cutting rule inaccurate. Treat docs as part of the change, not a follow-up.
 12. **Read docs before changing a component** — always read the relevant spoke in [`documentation/`](documentation/) (via the index above) before making any change to that component. Understand its rules, dependencies, and gotchas first — never edit a subsystem from the hub alone.
 13. **ONLY use shadcn components for UI** - existing components exist in `src/components/ui`. More components can be added using command, e.g. `npx shadcn@latest add card`.
-14. **Electron changes → prompt an update bump** — the desktop shell can't auto-update, so any change under `electron/` (or that otherwise requires users to reinstall the app) means a new build must be shipped. Whenever you touch `electron/`, remind the user to bump `latestVersion` (and set `downloadUrl`/`compulsory`) in [`src/lib/appUpdateConfig.ts`](src/lib/appUpdateConfig.ts) and bump `electron/package.json` `version`, so the in-app update prompt fires. See [electron.md](documentation/electron.md). Whenever the electron version is bumped, prompt the following commands: `git tag v0.7.0
-git push origin v0.7.0
+14. **Electron changes → prompt an update bump** — any change under `electron/` (or that otherwise requires users to reinstall the app) means a new build must be shipped. **[`src/lib/appUpdateConfig.ts`](src/lib/appUpdateConfig.ts) is the single gate for every update prompt on both platforms**: it is per-platform (`mac` / `win`), and a `null` entry means that OS is never prompted. macOS (v0.8.0+) installs in-app; Windows has no valid signing cert and reinstalls by hand. Whenever you touch `electron/`, remind the user to bump `electron/package.json` `version` and to set the relevant platform entry — **only after the release artifacts are live**, since `compulsory: true` blocks clients at start-up the moment it deploys, and leave a platform `null` if the release doesn't affect it. See [electron.md](documentation/electron.md). Whenever the electron version is bumped, prompt the tag push, e.g.: `git tag v0.8.0
+git push origin v0.8.0
 `.
 
 ## Maintaining This Documentation

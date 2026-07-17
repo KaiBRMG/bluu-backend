@@ -33,6 +33,14 @@
       ]
     },
     {
+      "collectionGroup": "analytics_daily",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "active_sessions",
       "queryScope": "COLLECTION",
       "fields": [

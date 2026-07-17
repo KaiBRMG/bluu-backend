@@ -99,8 +99,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     requestNotification: () => ipcRenderer.invoke('permissions:requestNotification'),
   },
 
-  // Auto-updater
+  // Auto-updater (macOS only; the main process no-ops elsewhere)
   updater: {
+    // Result of the start-up check. Returns null when no update is available.
+    // The renderer mounts after the check resolves, so it polls this rather
+    // than relying on catching 'updater:available'.
+    getPending: () => ipcRenderer.invoke('updater:getPending'),
+    onAvailable: (callback) => {
+      ipcRenderer.on('updater:available', (_event, data) => callback(data));
+    },
+    // Starts the download — only ever called from an explicit user action.
+    download: () => {
+      ipcRenderer.send('updater:download');
+    },
     onStatus: (callback) => {
       ipcRenderer.on('updater:status', (_event, data) => callback(data));
     },
@@ -114,6 +125,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.send('updater:ready-to-install');
     },
     removeListeners: () => {
+      ipcRenderer.removeAllListeners('updater:available');
       ipcRenderer.removeAllListeners('updater:status');
       ipcRenderer.removeAllListeners('updater:progress');
       ipcRenderer.removeAllListeners('updater:before-install');

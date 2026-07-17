@@ -21,6 +21,10 @@ const AdminLeave = dynamic(
   () => import("@/components/admin/shift-management/AdminLeave"),
   { loading: () => <div style={{ minHeight: 400 }} /> }
 );
+const AdminAnalytics = dynamic(
+  () => import("@/components/admin/shift-management/analytics/AdminAnalytics"),
+  { loading: () => <div style={{ minHeight: 400 }} /> }
+);
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export default function ShiftManagementPage() {
@@ -51,6 +55,7 @@ export default function ShiftManagementPage() {
                 <TabsTrigger value="timesheets">Timesheets</TabsTrigger>
                 <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
                 <TabsTrigger value="leave">Leave</TabsTrigger>
+                <TabsTrigger value="analytics">Analytics</TabsTrigger>
               </TabsList>
             </div>
 
@@ -64,6 +69,9 @@ export default function ShiftManagementPage() {
                 <AdminScreenshots selectedUserId={selectedUserId} onUserChange={setSelectedUserId} />
               </TabsContent>
               <TabsContent value="leave"><AdminLeave /></TabsContent>
+              <TabsContent value="analytics">
+                <AdminAnalytics selectedUserId={selectedUserId} onUserChange={setSelectedUserId} />
+              </TabsContent>
             </div>
           </Tabs>
         </div>

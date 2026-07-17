@@ -303,6 +303,134 @@ export interface ScreenshotDocument {
   activityPercent?: number | null; // % of 1-min slots with input between this and previous screenshot
 }
 
+// ─── Analytics rollups ───────────────────────────────────────────────
+
+/** Segment state codes used in AnalyticsDailyDocument.segments (compact form). */
+export const SEG_WORKING = 0;
+export const SEG_IDLE    = 1;
+export const SEG_BREAK   = 2;
+export const SEG_PAUSE   = 3;
+
+export type SegmentCode = 0 | 1 | 2 | 3;
+
+/** [startMs, endMs, stateCode] — a decoded timeline entry. */
+export type CompactSegment = [number, number, SegmentCode];
+
+/** [startMs, endMs] — a decoded session boundary. */
+export type SessionBound = [number, number];
+
+/**
+ * Firestore cannot store nested arrays, so `segments` and `sessionBounds` are
+ * persisted FLAT and decoded on read.
+ *   segments      → [start, end, code, start, end, code, …]  (stride 3)
+ *   sessionBounds → [start, end, start, end, …]              (stride 2)
+ */
+export function decodeSegments(flat: number[] | undefined): CompactSegment[] {
+  const out: CompactSegment[] = [];
+  if (!flat) return out;
+  for (let i = 0; i + 2 < flat.length; i += 3) {
+    out.push([flat[i], flat[i + 1], flat[i + 2] as SegmentCode]);
+  }
+  return out;
+}
+
+export function decodeSessionBounds(flat: number[] | undefined): SessionBound[] {
+  const out: SessionBound[] = [];
+  if (!flat) return out;
+  for (let i = 0; i + 1 < flat.length; i += 2) {
+    out.push([flat[i], flat[i + 1]]);
+  }
+  return out;
+}
+
+/**
+ * analytics_daily/{userId}_{YYYY-MM-DD} — one precomputed doc per user per
+ * LOCAL day, written nightly by the `rollupDailyAnalytics` Cloud Function.
+ *
+ * Exists because no Firestore index supports querying `time_entries` without
+ * `userId`, so company-wide analytics would otherwise fan out across every user.
+ *
+ * Aggregation rules (important):
+ * - Every seconds/count field is SUMMABLE across users and days.
+ * - Means are NEVER stored — store sum+count (`activitySum`/`activityCount`)
+ *   and divide at read time, because means don't sum.
+ * - Distributions are stored as histograms, which DO sum.
+ * - `segments` lets schedule adherence be recomputed at read time against
+ *   expanded shifts, so editing a shift never requires a rollup recompute.
+ */
+export interface AnalyticsDailyDocument {
+  version: 1;
+  userId: string;
+  date: string;              // YYYY-MM-DD in the user's OWN timezone
+  timezone: string;
+  groupsSnapshot: string[];  // audit only — filtering uses CURRENT membership
+  computedAt: Timestamp;
+
+  // Core time (seconds)
+  workingSeconds: number;
+  idleSeconds: number;
+  breakSeconds: number;
+  /**
+   * Derived from the event log, NOT copied from the ledger. The ledger's own
+   * `pauseSeconds` under-reports: parseBuffer discards `pauseStart` on `resume`
+   * without accumulating it, so it only ever counts a pause that was never
+   * resumed. working/idle/break match the ledger exactly; only this differs.
+   */
+  pauseSeconds: number;
+  /** Synthetic sleep-gap pauses — a SUBSET of pauseSeconds, not additional. */
+  asleepSeconds: number;
+  /** Last clock-out − first clock-in across the day's sessions. */
+  clockedSpanSeconds: number;
+  /** Span of interrupted sessions with no eventLog — time we cannot classify. */
+  unknownSeconds: number;
+  sessionCount: number;
+  firstClockInMs: number | null;
+  lastClockOutMs: number | null;
+
+  // Activity
+  /** Number of CAPTURES, deduped by captureGroup — not screen images. */
+  screenshotCount: number;
+  activitySum: number;
+  activityCount: number;
+  /** 10 deciles (0-9, 10-19, … 90-100). Histograms sum, so this survives aggregation. */
+  activityHistogram: number[];
+
+  // Timeline — stored flat (Firestore has no nested arrays); use decodeSegments()
+  segments: number[];
+  /**
+   * Flat [startMs, endMs] pairs per session — what schedule-adherence needs
+   * (clock-in times), which the merged `segments` array alone cannot express.
+   * Use decodeSessionBounds().
+   */
+  sessionBounds: number[];
+  /** 24 entries — working seconds per LOCAL hour. */
+  hourBuckets: number[];
+
+  // Focus
+  focusBlockCount: number;
+  focusSecondsInBlocks: number;
+  longestFocusBlockSeconds: number;
+  interruptionCount: number;
+
+  // Wellbeing
+  breakAllowanceSeconds: number;
+  noBreakDay: boolean;
+
+  // Provenance
+  /** True if any session lacked an eventLog — the day's numbers may still move. */
+  hasIncompleteLog: boolean;
+  hasManualEntry: boolean;
+  sessionIds: string[];
+}
+
+/** analytics_dirty/{userId}_{YYYY-MM-DD} — recompute queue drained by the CF. */
+export interface AnalyticsDirtyDocument {
+  userId: string;
+  date: string;
+  markedAt: Timestamp;
+  reason: string;
+}
+
 // ─── Disputes ────────────────────────────────────────────────────────
 
 export type ApprovalStatus = 'Pending' | 'Approved' | 'Rejected';

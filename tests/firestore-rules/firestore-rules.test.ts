@@ -558,3 +558,80 @@ describe('twitterx-bonus collection (submissions subcollection)', () => {
     await assertFails(addDoc(collection(db, 'twitterx-bonus'), { userTotals: {} }));
   });
 });
+
+// ---------------------------------------------------------------------------
+// 20. analytics rollups (defence-in-depth — all access denied)
+// ---------------------------------------------------------------------------
+
+describe('analytics_daily collection', () => {
+  const UID = 'user-a';
+  const ADMIN_UID = 'admin-user';
+  const DOC_ID = 'user-a_2026-07-14';
+
+  beforeEach(async () => {
+    await seedDoc('analytics_daily', DOC_ID, {
+      version: 1,
+      userId: UID,
+      date: '2026-07-14',
+      workingSeconds: 28800,
+    });
+  });
+
+  // These docs aggregate the whole company's hours, so a client-readable rule
+  // here would leak every employee's working pattern to any signed-in user.
+  it('denies a user reading their OWN rollup', async () => {
+    const db = authedUser(UID).firestore();
+    await assertFails(getDoc(doc(db, 'analytics_daily', DOC_ID)));
+  });
+
+  it('denies admin reads (client-side)', async () => {
+    const db = adminUser(ADMIN_UID).firestore();
+    await assertFails(getDoc(doc(db, 'analytics_daily', DOC_ID)));
+  });
+
+  it('denies unauthenticated reads', async () => {
+    const db = unauthenticated().firestore();
+    await assertFails(getDoc(doc(db, 'analytics_daily', DOC_ID)));
+  });
+
+  it('denies listing the collection', async () => {
+    const db = adminUser(ADMIN_UID).firestore();
+    await assertFails(getDocs(query(collection(db, 'analytics_daily'))));
+  });
+
+  it('denies all client writes', async () => {
+    const db = adminUser(ADMIN_UID).firestore();
+    await assertFails(setDoc(doc(db, 'analytics_daily', DOC_ID), { workingSeconds: 0 }));
+  });
+});
+
+describe('analytics_dirty collection', () => {
+  const UID = 'user-a';
+  const ADMIN_UID = 'admin-user';
+  const DOC_ID = 'user-a_2026-07-14';
+
+  beforeEach(async () => {
+    await seedDoc('analytics_dirty', DOC_ID, {
+      userId: UID,
+      date: '2026-07-14',
+      reason: 'log-merged',
+    });
+  });
+
+  it('denies authenticated user reads', async () => {
+    const db = authedUser(UID).firestore();
+    await assertFails(getDoc(doc(db, 'analytics_dirty', DOC_ID)));
+  });
+
+  it('denies admin reads (client-side)', async () => {
+    const db = adminUser(ADMIN_UID).firestore();
+    await assertFails(getDoc(doc(db, 'analytics_dirty', DOC_ID)));
+  });
+
+  // A client able to enqueue work here could force unbounded Cloud Function
+  // reads on the next nightly run.
+  it('denies all client writes', async () => {
+    const db = authedUser(UID).firestore();
+    await assertFails(setDoc(doc(db, 'analytics_dirty', DOC_ID), { reason: 'spoofed' }));
+  });
+});
