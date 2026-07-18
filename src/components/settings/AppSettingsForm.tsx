@@ -151,7 +151,6 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
     setSoundEnabled(originalNotifPrefsRef.current.soundEnabled);
     setShiftReminders(originalNotifPrefsRef.current.shiftReminders);
     setScreenshotNotifications(originalNotifPrefsRef.current.screenshotNotifications);
-    setSaveMessage(null);
   };
 
   const handleSave = async () => {
