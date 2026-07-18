@@ -599,13 +599,13 @@ export default function Home() {
         <p className="text-sm text-muted-foreground">
           {"We're still a work-in-progress. See a bug? Have a suggestion? "}
           <a
-            href="https://t.me/KaiJN"
+            href="https://forms.gle/wdxoEFSH7GxXo8Wg8"
             target="_blank"
             rel="noopener noreferrer"
             className="underline"
             style={{ color: 'var(--foreground)' }}
           >
-            Reach out to Kai
+            Give feedback
           </a>
           {" to help us improve your experience."}
         </p>

@@ -1,7 +1,11 @@
 // electron/main.js
-const { app, BrowserWindow, session, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification } = require('electron');
+const { app, BrowserWindow, session, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification, systemPreferences } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
+const fs = require('fs');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const execFileAsync = promisify(execFile);
 
 const isDev = process.env.ELECTRON_DEV === 'true' || !app.isPackaged;
 const BASE_URL = isDev ? 'http://localhost:3000' : 'https://bluu-backend.vercel.app';
@@ -153,6 +157,53 @@ ipcMain.handle('timeTracking:setPowerSaveBlocker', (_event, enable) => {
   return { success: true };
 });
 
+// ─── TEMPORARY: stale ScreenCapture permission repair (remove after fleet migrates) ───
+//
+// Builds before the app was Developer ID signed left a TCC permission record
+// keyed to the old (unsigned/ad-hoc) code identity. Now that the app is signed +
+// notarized, macOS sees a *different* identity for com.bluu.app and re-prompts on
+// every capture even though the Screen Recording toggle shows "on" (it displays
+// the stale record). A one-time `tccutil reset` clears it so the next capture
+// re-prompts cleanly against the new identity, after which it sticks.
+//
+// The RENDERER decides when to call this (TimeTrackingContext): only for existing
+// users (`screenshotBugFixed` falsy) and only on a capture — not network —
+// failure, so new/healthy installs never invoke it. This handler is the native
+// side of that; its own gates are:
+//   1. darwin-only.
+//   2. A marker file in userData caps the reset at once per OS user, ever, even
+//      if the renderer calls repeatedly. Written BEFORE tccutil so a crash mid-
+//      reset can't loop. userData survives app updates/reinstalls, and TCC is
+//      keyed per OS-user + bundle id (not per Bluu uid) — the correct granularity
+//      (it also means a second Bluu account on the same Mac won't re-reset an
+//      already-fixed record).
+// See the "Temporary: screenshot TCC repair" note in CLAUDE.md for removal.
+ipcMain.handle('permissions:resetScreenCapture', async () => {
+  if (process.platform !== 'darwin') return { success: false };
+
+  const marker = path.join(app.getPath('userData'), '.screencapture-tcc-reset-done');
+  if (fs.existsSync(marker)) return { success: false, alreadyReset: true };
+
+  try {
+    fs.writeFileSync(marker, new Date().toISOString());
+  } catch (err) {
+    console.error('[Screenshot] Could not write TCC reset marker — skipping one-time reset:', err.message);
+    return { success: false, error: err.message };
+  }
+
+  const status = systemPreferences.getMediaAccessStatus('screen');
+  try {
+    await execFileAsync('tccutil', ['reset', 'ScreenCapture', 'com.bluu.app']);
+    console.log(`[Screenshot] OS status "${status}" — reset stale ScreenCapture TCC record (one-time). A fresh prompt is expected on the next capture.`);
+    return { success: true };
+  } catch (err) {
+    // Non-fatal (e.g. bundle id not registered in a dev run). Marker is already
+    // written, so we won't retry.
+    console.error('[Screenshot] tccutil reset failed (continuing):', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
 // IPC handler for screenshot capture (all screens)
 ipcMain.handle('timeTracking:captureScreenshot', async () => {
   try {
@@ -174,6 +225,7 @@ ipcMain.handle('timeTracking:captureScreenshot', async () => {
       return { success: false, error: 'All screen captures were empty (check screen recording permissions)' };
     }
 
+    consecutiveEmptyCaptures = 0;
     return { success: true, screens };
   } catch (err) {
     console.error('[Screenshot] Capture failed:', err);

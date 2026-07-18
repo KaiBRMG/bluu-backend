@@ -4,6 +4,7 @@ import { IconDotsVertical, IconLogout, IconSettings } from "@tabler/icons-react"
 import Link from "next/link";
 import { auth } from "@/firebase-config";
 import { clearPermissionsCache } from "@/lib/permissionsCache";
+import { useTimeTrackingContext } from "@/contexts/TimeTrackingContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -43,8 +44,17 @@ function UserAvatarItem({ name, photoURL }: { name: string; photoURL?: string | 
 
 export function NavUser({ user }: NavUserProps) {
   const { isMobile } = useSidebar();
+  const { clockOutAndFlush } = useTimeTrackingContext();
 
+  // Signing out is a soft clock-out: the user is leaving the app without pressing
+  // Clock Out, so flush the session first or it stays open server-side (and renders
+  // as live) until the daily stale-session Cloud Function closes it.
   const handleSignOut = async () => {
+    try {
+      await clockOutAndFlush();
+    } catch (error) {
+      console.error("Clock-out on sign out failed:", error);
+    }
     try {
       clearPermissionsCache();
       localStorage.removeItem('sessionToken');

@@ -72,7 +72,8 @@ Client appends events ──► local buffer (localBuffer.ts)
 
 | Mechanism | Behavior |
 |---|---|
-| **App close appends a real `clock-out` event** | In `TimeTrackingContext.clockOutAndFlush`, before marking `active_sessions.userClockOut = true`. Makes the buffer self-describing — can never render as live even if later orphaned. |
+| **Soft clock-out appends a real `clock-out` event** | `TimeTrackingContext.clockOutAndFlush` — appends to the buffer, then marks `active_sessions.userClockOut = true`, then drops the timer to `clocked-out`. Makes the buffer self-describing — can never render as live even if later orphaned. It is exposed on the context and is the **single path for every session that ends without a Clock Out press**: app close, pre-update install, a **displaced (multiple-session) logout** (`AuthWrapper` awaits it before `signOut` — see [auth.md](auth.md#single-active-session)), and a **manual sign-out** (`sidebar/NavUser.tsx`). It early-returns when already `clocked-out`, so it is free to call on any sign-out path. |
+| **The clock-out route is session-scoped** | `/api/time-tracking/clock-out` takes an optional `sessionId` and **no-ops on a mismatch**. `active_sessions` is keyed by uid, so a displaced device whose session the new device has already resumed must not clock out a session it no longer owns. |
 | **Hydration gated by `isHydrating`** | Exposed on the context. On startup, pending-buffer reconciliation is `await`ed and the Clock In button is disabled until it finishes. Prevents an impatient click from starting a second session that races the in-flight upload and orphans the old buffer. |
 | **`startTracking` reconciles, never blindly discards** | When `/start` returns `alreadyActive`, it commits a matching local buffer (`silentLogUpload` → `commitSession`, which writes `time_entries` **and** deletes the `active_sessions` doc). It only `/discard`s when there is genuinely **no** local buffer (session started on another device). |
 | **Display self-heal** | The 1s timer tick freezes when the main thread is blocked (e.g. heavy page load). A `visibilitychange`/`focus` listener recomputes elapsed from `entryStartTime + Date.now()` to snap the display back. |
@@ -230,6 +231,7 @@ It `require`s the same `functions/rollup.js` module as the CF, so backfilled and
 ## Gotchas Checklist
 
 - [ ] Never `parseBuffer(events, Date.now())` over a buffer set — always close with `sessionCloseMs` first.
+- [ ] Any new path that signs a user out mid-session must `await clockOutAndFlush()` first — a sign-out never reaches the Clock Out button. Current paths: `AuthWrapper` (displaced), `sidebar/NavUser.tsx` (manual).
 - [ ] Keep `useDayTotal` and `TodayTimeline` *Total worked* summing `workingSeconds + breakSeconds` only.
 - [ ] After clock-in/out, call `invalidateTimesheetCache(uid)`.
 - [ ] A "second active session" is a client buffer bug — check hydration/`isHydrating`, not the server.

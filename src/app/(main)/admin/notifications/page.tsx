@@ -12,14 +12,14 @@ import type { AdminNotificationBatch } from "@/types/firestore";
 
 export default function AdminNotificationsPage() {
   const { users, groups, loading: usersLoading } = useBasicUsers();
-  const { batches, loading: batchesLoading, refetch, createBatch } = useAdminNotifications();
+  const { batches, loading: batchesLoading, refetch, createBatch, deleteBatch } = useAdminNotifications();
   const [selectedBatch, setSelectedBatch] = useState<AdminNotificationBatch | null>(null);
 
   return (
     <AppLayout>
       <div className="max-w-5xl">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold tracking-tight">Send Notification to Users</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Send System Notifications to Users</h1>
 
           {usersLoading ? (
             <Loader />
@@ -43,6 +43,7 @@ export default function AdminNotificationsPage() {
           batch={selectedBatch}
           open={selectedBatch !== null}
           onClose={() => setSelectedBatch(null)}
+          onDelete={deleteBatch}
         />
       </div>
     </AppLayout>

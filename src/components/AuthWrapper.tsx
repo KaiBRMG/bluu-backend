@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useAuth } from './AuthProvider';
 import { useUserData } from '@/hooks/useUserData';
+import { useTimeTrackingContext } from '@/contexts/TimeTrackingContext';
 import Login from './Login';
 import { usePathname, useRouter } from 'next/navigation';
 import { auth } from '@/firebase-config';
@@ -12,8 +13,13 @@ import { computeDynamicSize, readSavedSize, saveSize, clearSavedSize } from '@/l
 export default function AuthWrapper({ children }: { children: React.ReactNode }) {
   const { user, loading, revokedRedirect } = useAuth();
   const { userData, loading: userDataLoading, displaced } = useUserData();
+  const { clockOutAndFlush } = useTimeTrackingContext();
   const pathname = usePathname();
   const router = useRouter();
+
+  // Guards the displaced handler against a re-run (StrictMode, or a re-render
+  // before signOut settles) firing a second clock-out.
+  const hasHandledDisplacedRef = useRef(false);
 
   // Hold the boot loader while Firebase auth resolves.
   useBootPhase('auth', loading);
@@ -99,15 +105,25 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
   }, [userData, userDataLoading, user, isAuthRoute, router]);
 
   // Single active session enforcement: sign out and redirect if another device logged in.
+  // The timer is clocked out first — a displaced user cannot reach the Clock Out button,
+  // so without this their session stays open (and renders as live) until the daily
+  // stale-session Cloud Function closes it hours later.
   useEffect(() => {
     if (!user || userDataLoading || isAuthRoute) return;
-    if (displaced) {
+    if (!displaced || hasHandledDisplacedRef.current) return;
+    hasHandledDisplacedRef.current = true;
+
+    (async () => {
+      try {
+        await clockOutAndFlush();
+      } catch (err) {
+        console.error('[AuthWrapper] Clock-out on displaced logout failed:', err);
+      }
       localStorage.removeItem('sessionToken');
-      auth.signOut().then(() => {
-        router.replace('/auth/displaced');
-      });
-    }
-  }, [displaced, userDataLoading, user, isAuthRoute, router]);
+      await auth.signOut();
+      router.replace('/auth/displaced');
+    })();
+  }, [displaced, userDataLoading, user, isAuthRoute, router, clockOutAndFlush]);
 
   // Onboarding guard: redirect to the appropriate onboarding step if not completed
   useEffect(() => {

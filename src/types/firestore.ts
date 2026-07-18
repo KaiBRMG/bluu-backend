@@ -96,6 +96,12 @@ export interface UserDocument {
   // Onboarding state
   hasAcceptedTerms: boolean;
   hasCompletedOnboarding: boolean;
+
+  // TEMPORARY (remove after fleet migrates): true for users created after the
+  // stale-ScreenCapture-TCC fix shipped. Absent/false on pre-existing users, who
+  // may hold a stale macOS Screen Recording grant that needs a one-time reset.
+  // See the "Temporary: screenshot TCC repair" note in CLAUDE.md.
+  screenshotBugFixed?: boolean;
 }
 
 // ─── Notifications ───────────────────────────────────────────────────

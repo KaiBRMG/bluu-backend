@@ -105,9 +105,31 @@ export function useAdminNotifications() {
     [user, fetchBatches]
   );
 
+  const deleteBatch = useCallback(
+    async (batchId: string): Promise<void> => {
+      if (!user) throw new Error('Not authenticated');
+      const idToken = await user.getIdToken();
+
+      const res = await fetch(`/api/admin/notifications/${batchId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to unsend notification');
+      }
+
+      invalidateCache(CACHE_KEY);
+      await fetchBatches(true);
+    },
+    [user, fetchBatches]
+  );
+
   return {
     ...state,
     refetch: () => fetchBatches(true),
     createBatch,
+    deleteBatch,
   };
 }

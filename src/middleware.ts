@@ -5,6 +5,7 @@ const BROWSER_ALLOWED_PREFIXES = [
   '/auth',
   '/creator-portal',
   '/desktop-only',
+  '/download',
   '/raffle',
 ];
 

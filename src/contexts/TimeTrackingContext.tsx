@@ -48,6 +48,7 @@ interface TimeTrackingContextType {
   resumeFromPause:       () => Promise<void>;
   startBreak:            () => Promise<void>;
   endBreak:              () => Promise<void>;
+  clockOutAndFlush:      () => Promise<void>;
   isLoading:             boolean;
   isHydrating:           boolean;
 }
@@ -217,6 +218,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   const tickRef              = useRef<ReturnType<typeof setInterval> | null>(null);
   const screenshotTimeoutRef          = useRef<ReturnType<typeof setTimeout> | null>(null);
   const consecutiveScreenshotFailsRef = useRef(0);
+  // TEMPORARY (see CLAUDE.md): guards the one-time stale-TCC reset to once per session.
+  const tccResetAttemptedRef          = useRef(false);
   const isTransitioningRef            = useRef(false);
   const hasHydratedRef       = useRef(false);
   const sessionStartMsRef    = useRef<number | null>(null);
@@ -356,6 +359,55 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     }
   }, [apiCall]);
 
+  /**
+   * Soft clock-out: append a real clock-out event to the local buffer, mark the
+   * server session userClockOut, and drop the timer to 'clocked-out'.
+   *
+   * Used by every path that ends a session without an explicit Clock Out press:
+   * app close, pre-update install, and a displaced (multiple-session) logout.
+   * The local buffer is left in IndexedDB and uploaded on the next startup.
+   */
+  const clockOutAndFlush = useCallback(async () => {
+    if (displayStateRef.current === 'clocked-out') return;
+
+    const sid = sessionIdRef.current;
+    try {
+      // Append a clock-out event to the local buffer so it is self-describing:
+      // its open segment closes at this timestamp instead of being left open.
+      // This guarantees the session never renders as "live" (extending to now)
+      // on the next startup, even if the server-side reconciliation below fails
+      // or the buffer is later orphaned by a race.
+      if (sid) {
+        await appendEvent(sid, { type: 'clock-out', timestamp: Date.now() }).catch(() => {});
+      }
+
+      const idToken = await user?.getIdToken();
+      if (idToken) {
+        // Mark active_sessions.userClockOut = true so startup knows not to resume.
+        // sessionId scopes the write: active_sessions is keyed by uid, so a
+        // displaced device must not clock out a session the new device now owns.
+        await fetch('/api/time-tracking/clock-out', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+          body: JSON.stringify({ sessionId: sid }),
+        });
+        // Local buffer is preserved in IndexedDB — uploaded on next startup
+      }
+    } catch (err) {
+      console.error('[TimeTracking] Clock-out flush failed:', err);
+    } finally {
+      // Drop the timer regardless: the session is over on this client either way,
+      // and the buffer already carries the clock-out event.
+      displayStateRef.current = 'clocked-out';
+      setDisplayState('clocked-out');
+      setSessionId(null);
+      setEntryStartTime(null);
+      setBreakStartTime(null);
+      setBreakRemainingSeconds(null);
+      if (user) invalidateTimesheetCache(user.uid);
+    }
+  }, [user]);
+
   // Reset on logout
   useEffect(() => {
     if (!user) {
@@ -382,35 +434,6 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
     if (!electronAPI?.onAppClosing) return;
 
-    const clockOutAndFlush = async () => {
-      const state = displayStateRef.current;
-      if (state === 'clocked-out') return;
-
-      try {
-        // Append a clock-out event to the local buffer so it is self-describing:
-        // its open segment closes at this timestamp instead of being left open.
-        // This guarantees the session never renders as "live" (extending to now)
-        // on the next startup, even if the server-side reconciliation below fails
-        // or the buffer is later orphaned by a race.
-        const sid = sessionIdRef.current;
-        if (sid) {
-          await appendEvent(sid, { type: 'clock-out', timestamp: Date.now() }).catch(() => {});
-        }
-
-        const idToken = await user?.getIdToken();
-        if (idToken) {
-          // Mark active_sessions.userClockOut = true so startup knows not to resume
-          await fetch('/api/time-tracking/clock-out', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
-          });
-          // Local buffer is preserved in IndexedDB — uploaded on next startup
-        }
-      } catch (err) {
-        console.error('[TimeTracking] Clock-out on app close failed:', err);
-      }
-    };
-
     // On app close, the main process holds the quit until we ack (or a hard
     // timeout elapses). Always signal completion so the quit isn't delayed the
     // full timeout, even if the flush throws.
@@ -431,7 +454,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     return () => {
       electronAPI.removeAppClosingListeners();
     };
-  }, [user]);
+  }, [clockOutAndFlush]);
 
   // ─── Heartbeat (working state only) ─────────────────────────────────
   useEffect(() => {
@@ -864,16 +887,41 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         if (failed) {
           const failCount = ++consecutiveScreenshotFailsRef.current;
           console.error(`[TimeTracking] Screenshot failed (attempt ${failCount}/3):`, failureMessage);
+
+          // TEMPORARY (see CLAUDE.md): repair a stale macOS Screen Recording
+          // grant left by pre-signing builds. Fire on the FIRST capture failure
+          // (not a network failure) so the reset lands before the user is nudged
+          // to "enable it in settings" — enabling a stale record does nothing;
+          // only the reset makes the next prompt actually stick. Gated to
+          // existing users (screenshotBugFixed falsy) so new/healthy installs
+          // never re-prompt, and to once per session; the native side caps it at
+          // once per machine, ever. Feature-detected — no-op on older builds.
+          if (
+            failureContext === 'screenshot:capture-failed' &&
+            !userData?.screenshotBugFixed &&
+            !tccResetAttemptedRef.current
+          ) {
+            tccResetAttemptedRef.current = true;
+            electronAPI.permissions?.resetScreenCapture?.().catch(() => {});
+          }
+
           if (failCount < 3) {
             // Transient failure — retry in 30s without notifying the user
             scheduleNextCapture(30_000);
             return;
           }
-          // 3 consecutive failures — notify and reset the counter
+          // 3 consecutive failures — notify and reset the counter. The message
+          // depends on the cause: a capture failure (empty screens) is a screen-
+          // recording permission problem the user must fix in OS settings, but
+          // an upload failure is a network issue — telling that user to change
+          // OS settings would send them chasing the wrong fix.
           consecutiveScreenshotFailsRef.current = 0;
+          const isCaptureFailure = failureContext === 'screenshot:capture-failed';
           electronAPI.notifications?.show({
             title: 'Bluu Backend',
-            body: 'Screenshot Failed. Please enable this in your OS settings ASAP.',
+            body: isCaptureFailure
+              ? 'Screenshot Failed. Please enable this in your OS settings ASAP.'
+              : 'Screenshot Failed. Network Issues.',
             playSound: false,
           }).catch(() => {});
           fetch('/api/bugs', {
@@ -1115,12 +1163,14 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     resumeFromPause,
     startBreak,
     endBreak,
+    clockOutAndFlush,
     isLoading,
     isHydrating,
   }), [
     displayState, sessionId, elapsedSeconds, breakRemainingSeconds,
     breakUsedSeconds, breakAllowanceSeconds, startTracking, stopTracking,
-    pauseTracking, resumeFromPause, startBreak, endBreak, isLoading, isHydrating,
+    pauseTracking, resumeFromPause, startBreak, endBreak, clockOutAndFlush,
+    isLoading, isHydrating,
   ]);
 
   return (

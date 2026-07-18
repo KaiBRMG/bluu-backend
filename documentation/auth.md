@@ -37,6 +37,8 @@
 - `/auth` — OAuth flow pages run in the system browser during login; must be reachable without Electron.
 - `/creator-portal` — external creator interface, browser-accessible by design.
 - `/desktop-only` — the "use the desktop app" landing page itself.
+- `/download` — public installer/download page; users need it before they have the desktop app.
+- `/raffle` — browser-accessible raffle page.
 
 **RULE:** A new route that legitimately needs browser access must have its prefix added to `BROWSER_ALLOWED_PREFIXES`. API routes are already excluded from the matcher.
 
@@ -94,6 +96,8 @@ Identity is keyed on the **Firebase Auth uid**, and `/api/auth/exchange-code` de
 
 ### Single active session
 `users/{uid}.sessionToken` is a UUID **rotated on every login**. The client stores it locally; an `onSnapshot` on the user doc detects a mismatch and **forces sign-out** — enforcing one active session per user. See also [data-layer.md](data-layer.md).
+
+**RULE — a displaced logout must clock the timer out first.** `AuthWrapper`'s displaced effect `await`s `clockOutAndFlush()` (from `TimeTrackingContext`) *before* `auth.signOut()`. A displaced user is signed out without ever reaching the Clock Out button, so skipping this leaves the session open server-side until the daily stale-session Cloud Function closes it — and leaves a buffer with no `clock-out` event, which renders as a phantom live session. See [time-tracking.md](time-tracking.md#3-crash--restart-robustness).
 
 ---
 

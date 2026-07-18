@@ -1,14 +1,27 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { Check, X } from 'lucide-react';
+import { Check, X, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import {
   Table,
   TableBody,
@@ -33,6 +46,7 @@ interface NotificationRecipientsDialogProps {
   batch: AdminNotificationBatch | null;
   open: boolean;
   onClose: () => void;
+  onDelete: (batchId: string) => Promise<void>;
 }
 
 const TYPE_BADGE: Record<string, { label: string; className: string }> = {
@@ -46,11 +60,14 @@ export default function NotificationRecipientsDialog({
   batch,
   open,
   onClose,
+  onDelete,
 }: NotificationRecipientsDialogProps) {
   const { user } = useAuth();
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   // Track which batchId we've already fetched to avoid redundant calls
   const fetchedBatchId = useRef<string | null>(null);
 
@@ -83,13 +100,33 @@ export default function NotificationRecipientsDialog({
     fetchRecipients();
   }, [open, batch, user]);
 
+  function resetAndClose() {
+    setRecipients([]);
+    setError(null);
+    setDeleteError(null);
+    fetchedBatchId.current = null;
+    onClose();
+  }
+
   // Reset when dialog closes
   function handleOpenChange(isOpen: boolean) {
     if (!isOpen) {
-      setRecipients([]);
-      setError(null);
-      fetchedBatchId.current = null;
-      onClose();
+      if (deleting) return; // don't close mid-delete
+      resetAndClose();
+    }
+  }
+
+  async function handleUnsend() {
+    if (!batch) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await onDelete(batch.id);
+      setDeleting(false);
+      resetAndClose();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to unsend');
+      setDeleting(false);
     }
   }
 
@@ -112,7 +149,7 @@ export default function NotificationRecipientsDialog({
         </DialogHeader>
 
         {batch && (
-          <p className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/30 line-clamp-3">
+          <p className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/30 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
             {batch.message}
           </p>
         )}
@@ -127,7 +164,7 @@ export default function NotificationRecipientsDialog({
           <>
             {recipients.length > 0 && (
               <p className="text-xs text-muted-foreground">
-                {readCount}/{recipients.length} read &middot; {dismissedCount} dismissed
+                {readCount}/{recipients.length} opened &middot; {dismissedCount} dismissed
               </p>
             )}
 
@@ -136,7 +173,7 @@ export default function NotificationRecipientsDialog({
                 <TableHeader>
                   <TableRow>
                     <TableHead>User</TableHead>
-                    <TableHead className="w-20 text-center">Read</TableHead>
+                    <TableHead className="w-20 text-center">Opened</TableHead>
                     <TableHead className="w-28 text-center">Dismissed</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -172,6 +209,42 @@ export default function NotificationRecipientsDialog({
               </Table>
             </div>
           </>
+        )}
+
+        {batch && (
+          <DialogFooter className="flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2">
+            {deleteError ? (
+              <p className="text-xs text-destructive">{deleteError}</p>
+            ) : (
+              <span />
+            )}
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" size="sm" disabled={deleting}>
+                  <Trash2 className="h-4 w-4" />
+                  {deleting ? 'Unsending…' : 'Unsend'}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Unsend this notification?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This removes &ldquo;{batch.title}&rdquo; from every recipient&rsquo;s
+                    notification tray. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleUnsend}
+                    className="bg-destructive text-white hover:bg-destructive/90"
+                  >
+                    Unsend
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </DialogFooter>
         )}
       </DialogContent>
     </Dialog>

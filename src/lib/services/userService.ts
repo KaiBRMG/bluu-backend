@@ -81,6 +81,10 @@ export async function ensureUserExists(userData: CreateUserData): Promise<string
       sessionToken,
       hasAcceptedTerms: false,
       hasCompletedOnboarding: false,
+      // TEMPORARY (see CLAUDE.md): new users are born with a correct signed-
+      // identity TCC record, so they must never trigger the one-time stale-
+      // permission reset. Existing users lack this field (falsy) and do.
+      screenshotBugFixed: true,
     });
 
     // Add user to Unassigned group's member list (non-blocking for better performance)

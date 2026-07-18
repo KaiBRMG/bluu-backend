@@ -108,7 +108,7 @@ function Login() {
   return (
     <div
       className="flex items-center justify-center min-h-screen bg-cover bg-center bg-no-repeat"
-      style={{ backgroundImage: "url('/backgrounds/3.png')" }}
+      style={{ backgroundImage: "url('/backgrounds/2_blur.png')" }}
     >
       <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-12 max-w-md w-full">
         <div className="text-center mb-8">

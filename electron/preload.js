@@ -97,6 +97,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   permissions: {
     requestScreenAccess: () => ipcRenderer.invoke('permissions:requestScreenAccess'),
     requestNotification: () => ipcRenderer.invoke('permissions:requestNotification'),
+    // TEMPORARY: one-time stale-TCC repair for existing users (see CLAUDE.md).
+    resetScreenCapture: () => ipcRenderer.invoke('permissions:resetScreenCapture'),
   },
 
   // Auto-updater (macOS only; the main process no-ops elsewhere)

@@ -50,11 +50,13 @@ export interface AppUpdateConfig {
 }
 
 export const APP_UPDATE: AppUpdateConfig = {
-  //   mac: { latestVersion: '0.8.0', compulsory: true },
+
+
+  // mac: { latestVersion: '0.8.1', compulsory: true },
   mac: null,
 
   win: null,
-  downloadUrl: 'https://languid-syzygy-f45.notion.site/Download-Bluu-Backend-31d6a3e187d98080b341e4ed2c9d1917?source=copy_link',
+  downloadUrl: 'https://bluu-backend.vercel.app/download',
 };
 
 /** Maps a native `process.platform` onto its config entry. Returns null for

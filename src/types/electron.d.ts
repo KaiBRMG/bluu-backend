@@ -48,6 +48,12 @@ interface ElectronAPI {
   permissions: {
     requestScreenAccess: () => Promise<{ success: boolean }>;
     requestNotification: () => Promise<{ success: boolean }>;
+    /**
+     * TEMPORARY (v0.8.1+): one-time `tccutil reset ScreenCapture` to repair a
+     * stale macOS Screen Recording grant left by pre-signing builds. Optional —
+     * feature-detect; absent on older installed builds. See CLAUDE.md removal note.
+     */
+    resetScreenCapture?: () => Promise<{ success: boolean; alreadyReset?: boolean; error?: string }>;
   };
   /**
    * macOS auto-update. `getPending`/`onAvailable`/`download` land in v0.8.0 —

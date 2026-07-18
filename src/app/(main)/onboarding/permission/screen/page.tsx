@@ -14,14 +14,32 @@ export default function ScreenPermissionPage() {
       if (typeof window !== 'undefined' && window.electronAPI?.app) {
         const p = await window.electronAPI.app.getPlatform();
         setPlatform(p);
+
+        // TEMPORARY (see CLAUDE.md): on macOS, clear any stale ScreenCapture TCC
+        // record (left by pre-signing builds) BEFORE the user grants in this
+        // step, so the permission they set registers against the signed identity
+        // and actually sticks. No-op on a clean machine; the native handler caps
+        // it to once per machine. Feature-detected — no-op on older builds.
+        if (p === 'darwin') {
+          window.electronAPI.permissions?.resetScreenCapture?.().catch(() => {});
+        }
       }
     };
     init();
   }, []);
 
   const handleRequestAccess = async () => {
-    if (typeof window !== 'undefined' && window.electronAPI?.permissions) {
-      await window.electronAPI.permissions.requestScreenAccess();
+    if (typeof window !== 'undefined' && window.electronAPI) {
+      // On macOS, trigger an actual capture first: this fires the native "would
+      // like to record" prompt AND registers the app in the Screen Recording
+      // list (an app only appears there once it has attempted a capture). That
+      // matters especially right after the onboarding TCC reset above, which
+      // clears the record. Older pre-signing builds just opened System Settings
+      // because an unsigned app couldn't hold a durable grant anyway.
+      if (platform === 'darwin') {
+        await window.electronAPI.timeTracking?.captureScreenshot?.();
+      }
+      await window.electronAPI.permissions?.requestScreenAccess?.();
     }
     setPrompted(true);
   };

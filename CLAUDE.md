@@ -37,6 +37,17 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
   - Hook: `src/lib/temp-analytics/useTempAnalyticsScreenshot.ts` (`useTempAnalyticsScreenshot(pageKey)`) · Route: `src/app/api/temp-analytics/screenshot/route.ts` · Call sites: the three pages above (search `TEMP ANALYTICS`).
   - **To remove:** delete `src/lib/temp-analytics/` + `src/app/api/temp-analytics/`, then strip the `TEMP ANALYTICS`-tagged lines in each instrumented page. Storage folder `temp-analytics/` can be cleared once the data is pulled.
 
+## Temporary: screenshot TCC repair (remove after fleet migrates off pre-signing builds)
+
+- **What/why:** builds before the app was Developer ID signed left a macOS **ScreenCapture (Screen Recording) TCC record keyed to the old code identity**. After signing+notarization, macOS sees a different identity for `com.bluu.app` and re-prompts on every screenshot even though the toggle shows "on" — flipping it off/on doesn't help; only a `tccutil reset` does. This is a **one-time migration for existing users only**; new users are born correct.
+- **Mechanism (renderer decides, native executes):**
+  - Flag `screenshotBugFixed` on the user doc — set `true` at creation in [`ensureUserExists`](src/lib/services/userService.ts); **absent (falsy) on pre-existing users**, who are the ones needing the fix. Read for free off the `useUserData()` snapshot.
+  - **Two trigger sites**, both calling `electronAPI.permissions.resetScreenCapture()` (feature-detected):
+    - **Onboarding (new users)** — [`onboarding/permission/screen/page.tsx`](src/app/(main)/onboarding/permission/screen/page.tsx) resets on mount **on macOS only**, so the grant the user sets in that step registers against the signed identity. No-op on a clean machine.
+    - **Existing users** — [`TimeTrackingContext.tsx`](src/contexts/TimeTrackingContext.tsx): on the **first `capture-failed`** (not network) screenshot failure, if `screenshotBugFixed` is falsy, resets once per session. Firing on failure #1 lands the reset **before** the "enable it in OS settings" nudge, so the next prompt actually sticks. (Already-onboarded users never see the onboarding step, so they need this path.)
+  - `permissions:resetScreenCapture` in [`electron/main.js`](electron/main.js): darwin-only `tccutil reset ScreenCapture com.bluu.app`, capped at **once per OS user, ever** by a `.screencapture-tcc-reset-done` marker in `userData` (correct granularity — TCC is per OS-user+bundle, not per Bluu uid). Exposed via [`preload.js`](electron/preload.js), typed optional in [`electron.d.ts`](src/types/electron.d.ts).
+- **To remove** (once effectively all users are on a signed build and have been fixed): delete the `permissions:resetScreenCapture` handler in `main.js`, its `preload.js`/`electron.d.ts` entries, the mount reset in `onboarding/permission/screen/page.tsx`, the `tccResetAttemptedRef` block in `TimeTrackingContext.tsx`, and the `screenshotBugFixed` field (type + `ensureUserExists`). All lines are tagged `TEMPORARY`. Details in [electron.md](documentation/electron.md#screen-capture-permission-repair-macos-tcc-temporary).
+
 ## Documentation Index (spokes)
 
 | Spoke | Read it when you are touching… |
@@ -68,9 +79,33 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 11. **Keep docs current** — always update the documentation repository ([`documentation/`](documentation/) + this hub) when a change makes a spoke or a cross-cutting rule inaccurate. Treat docs as part of the change, not a follow-up.
 12. **Read docs before changing a component** — always read the relevant spoke in [`documentation/`](documentation/) (via the index above) before making any change to that component. Understand its rules, dependencies, and gotchas first — never edit a subsystem from the hub alone.
 13. **ONLY use shadcn components for UI** - existing components exist in `src/components/ui`. More components can be added using command, e.g. `npx shadcn@latest add card`.
-14. **Electron changes → prompt an update bump** — any change under `electron/` (or that otherwise requires users to reinstall the app) means a new build must be shipped. **[`src/lib/appUpdateConfig.ts`](src/lib/appUpdateConfig.ts) is the single gate for every update prompt on both platforms**: it is per-platform (`mac` / `win`), and a `null` entry means that OS is never prompted. macOS (v0.8.0+) installs in-app; Windows has no valid signing cert and reinstalls by hand. Whenever you touch `electron/`, remind the user to bump `electron/package.json` `version` and to set the relevant platform entry — **only after the release artifacts are live**, since `compulsory: true` blocks clients at start-up the moment it deploys, and leave a platform `null` if the release doesn't affect it. See [electron.md](documentation/electron.md). Whenever the electron version is bumped, prompt the tag push, e.g.: `git tag v0.8.0
-git push origin v0.8.0
-`.
+14. **Electron changes → a new build, released in TWO pushes** — any change under `electron/` (or that otherwise requires users to reinstall the app) means a new build must be shipped. **[`src/lib/appUpdateConfig.ts`](src/lib/appUpdateConfig.ts) is the single gate for every update prompt on both platforms**: it is per-platform (`mac` / `win`), a `null` entry means that OS is never prompted, and `compulsory: true` blocks clients at start-up. macOS (v0.8.0+) installs in-app; Windows has no valid signing cert and reinstalls by hand. Always bump `electron/package.json` `version` — **electron-builder names the release from that file, not from the tag**.
+
+    **NEVER arm the config in the same push as the code.** Vercel deploys in seconds; the GitHub Actions build takes ~10–30 min (Apple notarization is the long pole). Arming first blocks every user against a release that does not exist yet — and on a compulsory update they cannot use the app while they wait. Prompt the user through this order, and never skip step 3:
+
+    ```bash
+    # 1. Push the code with the platform entry still `null`.
+    #    Vercel deploys instantly — harmless, because null prompts nobody.
+    git add -A && git commit -m "App Enhancements" && git push origin main
+
+    # 2. Tag THE COMMIT YOU JUST PUSHED. Actions runs the workflow from the
+    #    tagged commit, so a tag on an earlier commit silently rebuilds the old
+    #    version and publishes it to the old release. Tag after committing.
+    git tag v0.8.0 && git push origin v0.8.0
+
+    # 3. WAIT for the run to finish, then verify the release before arming:
+    #    latest-mac.yml + both .dmg + both .zip (arm64 AND x64).
+    #    A missing zip/manifest = auto-update silently dead.
+    gh release view v0.8.0
+
+    # 4. Update the `downloadUrl` page with the new installers (label
+    #    Apple Silicon vs Intel — the x64 .dmg has NO arch suffix).
+
+    # 5. ONLY NOW arm the config (set the `mac`/`win` entry) and push again.
+    git add -A && git commit -m "Announce v0.8.0" && git push origin main
+    ```
+
+    Leave a platform `null` if the release does not affect it (e.g. a mac-only fix must not make Windows reinstall). See [electron.md](documentation/electron.md).
 
 ## Maintaining This Documentation
 

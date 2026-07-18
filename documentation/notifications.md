@@ -12,7 +12,7 @@
 | `src/components/NotificationTray.tsx` | UI surface |
 | `src/hooks/useAdminNotifications.ts` | Admin broadcast/announcement management |
 | API: `src/app/api/notifications/*` | `create`, `dismiss`, `mark-read` |
-| API: `src/app/api/admin/notifications/*` | admin send + `[batchId]/recipients` |
+| API: `src/app/api/admin/notifications/*` | admin send + `[batchId]/recipients` (GET) + `[batchId]` (DELETE = "unsend": removes every per-user notification doc for the batch + the batch record) |
 
 ## Firestore
 

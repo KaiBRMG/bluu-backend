@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useLayoutEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -73,6 +73,11 @@ const ICON_MAP: Record<string, LucideIcon> = {
   ClockFading,
 };
 
+// AppLayout (and thus this Sidebar) is mounted per-page, so it remounts on every
+// navigation. Persist the scroll offset of the content area at module scope so it
+// survives those remounts and the sidebar doesn't jump back to the top.
+let savedScrollTop = 0;
+
 function NavIcon({ name, className }: { name?: string; className?: string }) {
   if (!name) return null;
   const Icon = ICON_MAP[name];
@@ -101,22 +106,33 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
 
   const STORAGE_KEY = "sidebar_teamspace_open";
 
+  // Keep the raw persisted map (keyed by teamspace id) rather than deriving it
+  // from sortedTeamspaces: teamspaces load asynchronously, so at first mount the
+  // list is often empty and deriving here would drop every stored preference.
+  // Absence means "expanded" (the default) — see `openMap[ts.id] ?? true` below.
   const [openMap, setOpenMap] = useState<Record<string, boolean>>(() => {
-    let stored: Record<string, boolean> = {};
     try {
-      stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
-    } catch {}
-    return Object.fromEntries(
-      sortedTeamspaces.map((ts) => [ts.id, stored[ts.id] ?? true])
-    );
+      return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
+    } catch {
+      return {};
+    }
   });
 
   const toggle = (id: string) =>
     setOpenMap((prev) => {
-      const next = { ...prev, [id]: !prev[id] };
+      // Toggle against the displayed default (expanded) so the first click on a
+      // never-toggled teamspace actually collapses it instead of no-op'ing.
+      const next = { ...prev, [id]: !(prev[id] ?? true) };
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
       return next;
     });
+
+  // Restore the persisted scroll offset before paint so the remount on navigation
+  // doesn't visibly jump to the top; keep it updated as the user scrolls.
+  const contentRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = savedScrollTop;
+  }, []);
 
   return (
     <SidebarPrimitive collapsible="icon">
@@ -158,7 +174,10 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent
+        ref={contentRef}
+        onScroll={(e) => { savedScrollTop = e.currentTarget.scrollTop; }}
+      >
         {/* Teamspace groups */}
         {sortedTeamspaces.map((ts) => {
           const pages = accessiblePages
