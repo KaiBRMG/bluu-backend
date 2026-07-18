@@ -240,7 +240,27 @@ export default function DownloadPage() {
             <span>
               © 2026 Bluu Rock · For internal use only, not for distribution.
             </span>
-            <span>Trouble installing? Contact IT support.</span>
+            <span>
+              Trouble installing? Please{" "}
+              <a
+                href="https://forms.gle/QPs5gjzvX5TPg2zLA"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-foreground"
+              >
+                log an issue
+              </a>{" "}
+              or{" "}
+              <a
+                href="https://t.me/KaiJN"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-foreground"
+              >
+                contact us
+              </a>
+              .
+            </span>
           </div>
         </footer>
       </div>

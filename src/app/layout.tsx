@@ -1,23 +1,18 @@
 import type { Metadata } from "next";
-import localFont from "next/font/local";
+import googleFonts from "google-fonts";
 import "./globals.css";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 
-const googleSans = localFont({
-  src: [
-    {
-      path: "../public/fonts/GoogleSans-VariableFont_GRAD,opsz,wght.ttf",
-      style: "normal",
-    },
-    {
-      path: "../public/fonts/GoogleSans-Italic-VariableFont_GRAD,opsz,wght.ttf",
-      style: "italic",
-    },
-  ],
-  variable: "--font-geist-sans",
-  preload: false,
-});
+// Google Sans is served from the Google Fonts CDN via the `google-fonts`
+// helper. This is the single, app-wide typeface — no other fonts are used.
+// The helper returns a full `<link>` string; we pull out the href and force
+// https (it is protocol-relative by default) so it resolves inside Electron.
+const googleSansHref = googleFonts({
+  "Google Sans": ["400", "500", "600", "700", "400italic"],
+})
+  .match(/href="([^"]+)"/)![1]
+  .replace(/^\/\//, "https://");
 
 export const metadata: Metadata = {
   title: "Bluu Backend",
@@ -31,8 +26,17 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+          rel="preconnect"
+          href="https://fonts.gstatic.com"
+          crossOrigin="anonymous"
+        />
+        <link rel="stylesheet" href={googleSansHref} />
+      </head>
       <body
-        className={`${googleSans.variable} font-sans antialiased bg-background text-foreground`}
+        className="font-sans antialiased bg-background text-foreground"
       >
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
           {children}

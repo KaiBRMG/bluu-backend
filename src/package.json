@@ -41,6 +41,7 @@
     "embla-carousel-react": "^8.6.0",
     "firebase": "^12.6.0",
     "firebase-admin": "^13.6.0",
+    "google-fonts": "^1.0.0",
     "googleapis": "^169.0.0",
     "lucide-react": "^0.575.0",
     "motion": "^12.38.0",
