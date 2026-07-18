@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback } from 'react';
+import { Users } from 'lucide-react';
 import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
 import RegistryFilters from './RegistryFilters';
 import UserCard from './UserCard';
@@ -81,22 +82,32 @@ export default function EmployeeRegistry({
       />
 
       {filteredUsers.length === 0 ? (
-        <div className="flex items-center justify-center h-40">
-          <p className="text-sm" style={{ color: 'var(--foreground-muted)' }}>
-            {showArchived ? 'No archived users.' : 'No users found matching the selected filters.'}
+        <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center border-border-subtle">
+          <div className="flex size-11 items-center justify-center rounded-full bg-white/5">
+            <Users className="size-5 text-foreground-muted" />
+          </div>
+          <p className="max-w-xs text-sm text-foreground-muted">
+            {showArchived
+              ? 'No archived users.'
+              : 'No users match the selected filters. Try adjusting or clearing them.'}
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filteredUsers.map((user) => (
-            <UserCard
-              key={user.uid}
-              user={user}
-              groups={groups}
-              onClick={() => setSelectedUserId(user.uid)}
-            />
-          ))}
-        </div>
+        <>
+          <p className="mb-3 text-xs text-foreground-muted tabular-nums">
+            {filteredUsers.length} {filteredUsers.length === 1 ? 'person' : 'people'}
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {filteredUsers.map((user) => (
+              <UserCard
+                key={user.uid}
+                user={user}
+                groups={groups}
+                onClick={() => setSelectedUserId(user.uid)}
+              />
+            ))}
+          </div>
+        </>
       )}
 
       <UserDetailDrawer

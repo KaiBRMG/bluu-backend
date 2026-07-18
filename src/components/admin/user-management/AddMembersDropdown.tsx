@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
+import { cn } from '@/lib/utils';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -63,17 +64,13 @@ export default function AddMembersDropdown({ group, allUsers, onAdd, onClose }: 
   return (
     <div
       ref={dropdownRef}
-      className="absolute top-full left-0 mt-1 w-80 rounded-lg shadow-xl z-50"
-      style={{
-        background: 'var(--sidebar-background)',
-        border: '1px solid var(--border-subtle)',
-      }}
+      className="absolute top-full right-0 z-50 mt-1 w-80 rounded-lg border shadow-xl bg-sidebar-bg border-border-subtle"
     >
       {/* Search */}
-      <div className="p-2" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+      <div className="border-b p-2 border-border-subtle">
         <Input
           type="text"
-          className="form-input w-full text-sm"
+          className="h-8 w-full text-sm"
           placeholder="Search by name or email..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
@@ -94,16 +91,10 @@ export default function AddMembersDropdown({ group, allUsers, onAdd, onClose }: 
               <div
                 key={user.uid}
                 onClick={() => toggleUser(user.uid)}
-                className="w-full flex items-center gap-3 px-3 py-2 text-left text-sm transition-colors cursor-pointer"
-                style={{
-                  background: isSelected ? 'var(--active-background)' : 'transparent',
-                }}
-                onMouseEnter={(e) => {
-                  if (!isSelected) e.currentTarget.style.background = 'var(--hover-background)';
-                }}
-                onMouseLeave={(e) => {
-                  if (!isSelected) e.currentTarget.style.background = 'transparent';
-                }}
+                className={cn(
+                  'flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left text-sm transition-colors',
+                  isSelected ? 'bg-active-bg' : 'hover:bg-hover-bg'
+                )}
               >
                 <Checkbox
                   checked={isSelected}

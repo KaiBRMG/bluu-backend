@@ -6,11 +6,12 @@ import { useAuth } from '@/components/AuthProvider';
 import { getTimezoneList, getOffsetForTimezone, TimezoneOption } from '@/lib/timezoneData';
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { CheckIcon, ChevronDownIcon, PlusIcon, XIcon } from "lucide-react";
+import { toast } from "sonner";
 
 const DEFAULT_ADDITIONAL_TZS = ['Africa/Johannesburg', 'Asia/Manila'];
 
@@ -51,7 +52,6 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
   const [primaryOpen, setPrimaryOpen] = useState(false);
   const [additionalOpen, setAdditionalOpen] = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const timezoneList = useMemo(() => getTimezoneList(), []);
 
@@ -101,14 +101,6 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
       screenshotNotifications !== originalNotifPrefsRef.current.screenshotNotifications;
     setHasChanges(tzChanged || addlChanged || notifChanged);
   }, [selectedTimezone, additionalTimezones, desktopEnabled, soundEnabled, shiftReminders, screenshotNotifications]);
-
-  // Clear save message after 3 seconds
-  useEffect(() => {
-    if (saveMessage) {
-      const timer = setTimeout(() => setSaveMessage(null), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [saveMessage]);
 
   const addressIsSet = !!(userData?.address?.city && userData?.address?.country);
   const isDisabled = !addressIsSet && !userData?.timezone;
@@ -166,7 +158,6 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
     if (!selectedTimezone) return;
 
     setIsSubmitting(true);
-    setSaveMessage(null);
 
     try {
       const idToken = await user?.getIdToken();
@@ -198,13 +189,10 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
       originalAdditionalTimezonesRef.current = additionalTimezones.filter(Boolean);
       originalNotifPrefsRef.current = { desktopEnabled, soundEnabled, shiftReminders, screenshotNotifications };
       setHasChanges(false);
-      setSaveMessage({ type: 'success', text: 'Changes saved successfully!' });
+      toast.success('Changes saved');
     } catch (error) {
       console.error('Save error:', error);
-      setSaveMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'Failed to save changes',
-      });
+      toast.error(error instanceof Error ? error.message : 'Failed to save changes');
     } finally {
       setIsSubmitting(false);
     }
@@ -212,9 +200,22 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-sm" style={{ color: 'var(--foreground-secondary)' }}>
-          Loading...
+      <div className="flex flex-col gap-6">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <div key={i} className="flex flex-col gap-2">
+            <Skeleton className="h-3.5 w-28" />
+            <Skeleton className="h-3 w-3/4" />
+            <Skeleton className="h-10 w-full rounded-md" />
+          </div>
+        ))}
+        <div className="flex flex-col gap-4 pt-2">
+          <Skeleton className="h-3.5 w-24" />
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex items-center justify-between">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-5 w-9 rounded-full" />
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -236,7 +237,7 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
           </div>
 
           {isDisabled && (
-            <p className="text-sm mb-3" style={{ color: '#ef4444' }}>
+            <p className="text-sm mb-3 text-destructive">
               Address must first be set in{' '}
               <Button
                 type="button"
@@ -424,16 +425,9 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
 
       {/* Footer with Save/Cancel */}
       <div
-        className="flex items-center justify-between pt-4 mt-4"
+        className="flex items-center justify-end pt-4 mt-4"
         style={{ borderTop: '1px solid var(--border-subtle)' }}
       >
-        <div>
-          {saveMessage && (
-            <Alert variant={saveMessage.type === 'error' ? 'destructive' : 'default'} className="py-2 px-3">
-              <AlertDescription>{saveMessage.text}</AlertDescription>
-            </Alert>
-          )}
-        </div>
         <div className="flex gap-3">
           {hasChanges && (
             <Button

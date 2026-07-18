@@ -35,7 +35,7 @@ export default function UserDetailDrawer({
 
   return (
     <Sheet open={!!userId} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <SheetContent side="right" className="w-[500px] sm:max-w-[500px] overflow-y-auto p-0">
+      <SheetContent side="right" className="dark w-[500px] sm:max-w-[500px] overflow-y-auto p-0">
         <SheetHeader className="sticky top-0 z-10 px-6 py-4" style={{ background: 'var(--background)', borderBottom: '1px solid var(--border-subtle)' }}>
           <SheetTitle>
             {user

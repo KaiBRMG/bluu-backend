@@ -55,15 +55,17 @@ function tzOffsetMinutes(tz: string): number {
   return Math.round((localMs - utcMs) / 60000);
 }
 
-// ─── Announcement helpers ────────────────────────────────────────────
-
-const TYPE_ANNOUNCEMENT_COLOR: Record<NotificationType, { color: string; bg: string }> = {
-  shift:      { color: '#3b82f6', bg: 'rgba(59,130,246,0.1)'  },
-  alert:      { color: '#ef4444', bg: 'rgba(239,68,68,0.1)'   },
-  success:    { color: '#22c55e', bg: 'rgba(34,197,94,0.1)'   },
-  action:     { color: '#eab308', bg: 'rgba(234,179,8,0.1)'   },
-  onboarding: { color: 'var(--foreground-muted)', bg: 'var(--sidebar-background)' },
-  system:     { color: 'var(--foreground-muted)', bg: 'var(--sidebar-background)' },
+// ─── Notification / announcement styling ─────────────────────────────
+// Type → the DESIGN semantic triad (status dot -400, wash /10, hairline /30),
+// mirroring STATUS_DOT / STATUS_COLORS in campaignTracking.ts. Never hardcode
+// a themeable hex; the dot carries the type so titles stay ink for legibility.
+const NOTIFICATION_TYPE_STYLE: Record<NotificationType, { dot: string; wash: string; border: string }> = {
+  shift:      { dot: 'bg-blue-400',   wash: 'bg-blue-500/10',   border: 'border-blue-500/30'   },
+  alert:      { dot: 'bg-red-400',    wash: 'bg-red-500/10',    border: 'border-red-500/30'    },
+  success:    { dot: 'bg-green-400',  wash: 'bg-green-500/10',  border: 'border-green-500/30'  },
+  action:     { dot: 'bg-yellow-400', wash: 'bg-yellow-500/10', border: 'border-yellow-500/30' },
+  onboarding: { dot: 'bg-zinc-400',   wash: 'bg-white/[0.025]', border: 'border-white/[0.08]'  },
+  system:     { dot: 'bg-zinc-400',   wash: 'bg-white/[0.025]', border: 'border-white/[0.08]'  },
 };
 
 function formatAnnouncementDate(ts: import('@/types/firestore').NotificationDocument['createdAt']): string {
@@ -125,30 +127,20 @@ function AnnouncementBanner({ announcements }: { announcements: NotificationDocu
 
   if (announcements.length === 0) return null;
 
-  // Colour the block by the most recent announcement's type
-  const mostRecent = announcements[0];
-  const { color, bg } = TYPE_ANNOUNCEMENT_COLOR[mostRecent.type] ?? TYPE_ANNOUNCEMENT_COLOR.system;
+  // Tint the block by the most recent announcement's type (wash + hairline).
+  const block = NOTIFICATION_TYPE_STYLE[announcements[0].type] ?? NOTIFICATION_TYPE_STYLE.system;
 
   return (
-    <div
-      className="rounded-lg p-6 mb-8"
-      style={{ background: bg }}
-    >
+    <div className={`rounded-xl border p-6 mb-8 ${block.wash} ${block.border}`}>
       <div className="flex flex-col gap-4">
         {announcements.map((ann) => {
-          const stripe = TYPE_ANNOUNCEMENT_COLOR[ann.type]?.color ?? 'var(--foreground-muted)';
+          const { dot } = NOTIFICATION_TYPE_STYLE[ann.type] ?? NOTIFICATION_TYPE_STYLE.system;
           return (
-            <div key={ann.id} className="flex items-stretch gap-4">
-              {/* Type stripe */}
-              <div
-                className="flex-shrink-0 w-1 rounded-full self-stretch"
-                style={{ background: stripe }}
-              />
+            <div key={ann.id} className="flex items-start gap-2.5">
+              {/* Type dot — the compact house indicator (no side-stripe) */}
+              <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden />
               <div className="flex-1 min-w-0">
-                <p
-                  className="text-sm font-semibold leading-snug"
-                  style={{ color }}
-                >
+                <p className="text-sm font-semibold leading-snug text-foreground">
                   {ann.title}
                   <span className="ml-2 text-xs font-normal text-muted-foreground">
                     — {formatAnnouncementDate(ann.createdAt)}
@@ -201,7 +193,7 @@ function ClockWidget() {
             {primaryTz ? (
               <span className="text-sm text-muted-foreground">{shortTzLabel(primaryTz)}</span>
             ) : (
-              <span className="text-xs" style={{ color: '#DF626E' }}>Time zone not configured</span>
+              <span className="text-xs text-red-400">Time zone not configured</span>
             )}
           </div>
 
@@ -299,16 +291,6 @@ function TimeTrackingWidget() {
   );
 }
 
-function getTypeStripe(type: NotificationType): string {
-  switch (type) {
-    case 'shift':   return '#3b82f6';
-    case 'alert':   return '#ef4444';
-    case 'success': return '#22c55e';
-    case 'action':  return '#eab308';
-    default:        return 'var(--border-subtle)';
-  }
-}
-
 function NotificationsWidget() {
   const { notifications, loading } = useNotifications();
   const { user } = useAuth();
@@ -350,7 +332,7 @@ function NotificationsWidget() {
         ) : (
           <div className="flex flex-col gap-0 overflow-y-auto" style={{ maxHeight: '240px' }}>
             {unread.map((n) => {
-              const stripe = getTypeStripe(n.type);
+              const { dot } = NOTIFICATION_TYPE_STYLE[n.type] ?? NOTIFICATION_TYPE_STYLE.system;
               const hasAction = !!n.actionUrl;
               return (
                 <button
@@ -358,11 +340,11 @@ function NotificationsWidget() {
                   type="button"
                   onClick={() => handleClick(n.id, n.actionUrl)}
                   disabled={!hasAction}
-                  className="w-full text-left flex items-stretch border-b border-border-subtle last:border-b-0 transition-colors"
+                  className="w-full text-left flex items-start gap-3 py-2 border-b border-border-subtle last:border-b-0 transition-colors"
                   style={{ cursor: hasAction ? 'pointer' : 'default', background: 'transparent' }}
                 >
-                  <div className="flex-shrink-0 w-1 self-stretch rounded-full mr-3" style={{ background: stripe }} />
-                  <div className="flex-1 py-2 min-w-0">
+                  <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden />
+                  <div className="flex-1 min-w-0">
                     <span className="text-sm font-semibold leading-snug" style={{ color: 'var(--foreground)' }}>
                       {n.title}
                     </span>
@@ -570,11 +552,7 @@ export default function Home() {
 
   const groupCard = (
     <Card
-      className="gap-3 py-4"
-      style={userGroup === 'unassigned' ? {
-        background: 'rgba(223,98,110,0.1)',
-        borderColor: 'rgba(223,98,110,0.3)',
-      } : undefined}
+      className={`gap-3 py-4${userGroup === 'unassigned' ? ' bg-red-500/10 border-red-500/30' : ''}`}
     >
       <CardHeader className="px-4">
         <CardDescription>Group</CardDescription>
@@ -582,7 +560,7 @@ export default function Home() {
       </CardHeader>
       {userGroup === 'unassigned' && (
         <CardContent className="px-4">
-          <p className="text-xs" style={{ color: '#DF626E' }}>
+          <p className="text-xs text-red-400">
             User functionality limited: You are currently not assigned to any groups. Please wait until a system administrator assigns you.
           </p>
         </CardContent>

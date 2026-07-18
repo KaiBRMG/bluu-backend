@@ -1,13 +1,18 @@
 "use client";
 
-import { ChevronDownIcon } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import type { AdminGroup } from '@/hooks/useAdminUsers';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+
+const ALL = '__all__';
 
 interface RegistryFiltersProps {
   groups: AdminGroup[];
@@ -21,6 +26,8 @@ interface RegistryFiltersProps {
   onSearchQueryChange: (value: string) => void;
 }
 
+const EMPLOYMENT_TYPES = ['Full-time', 'Part-time', 'Contractor', 'Intern'];
+
 export default function RegistryFilters({
   groups,
   groupFilter,
@@ -32,77 +39,82 @@ export default function RegistryFilters({
   onEmploymentTypeFilterChange,
   onSearchQueryChange,
 }: RegistryFiltersProps) {
-  const groupLabel = groupFilter ? (groups.find(g => g.id === groupFilter)?.name ?? 'All Groups') : 'All Groups';
-  const statusLabel = statusFilter === 'active' ? 'Active' : statusFilter === 'inactive' ? 'Inactive' : 'All Status';
-  const employmentLabel = employmentTypeFilter || 'All Employment Types';
+  const hasActiveFilters =
+    !!groupFilter || !!statusFilter || !!employmentTypeFilter || !!searchQuery;
+
+  const clearAll = () => {
+    onGroupFilterChange('');
+    onStatusFilterChange('');
+    onEmploymentTypeFilterChange('');
+    onSearchQueryChange('');
+  };
 
   return (
-    <div className="flex items-center gap-3 mb-5">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className="form-input text-sm flex items-center justify-between gap-2"
-            style={{ cursor: 'pointer', maxWidth: '200px', minWidth: '140px' }}
-          >
-            <span>{groupLabel}</span>
-            <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="dark min-w-[140px]">
-          <DropdownMenuItem onSelect={() => onGroupFilterChange('')}>All Groups</DropdownMenuItem>
+    <div className="mb-5 flex flex-wrap items-center gap-2">
+      <Select
+        value={groupFilter || ALL}
+        onValueChange={(v) => onGroupFilterChange(v === ALL ? '' : v)}
+      >
+        <SelectTrigger size="sm" className="min-w-[140px]">
+          <SelectValue placeholder="All Groups" />
+        </SelectTrigger>
+        <SelectContent className="dark">
+          <SelectItem value={ALL}>All Groups</SelectItem>
           {groups.map((g) => (
-            <DropdownMenuItem key={g.id} onSelect={() => onGroupFilterChange(g.id)}>{g.name}</DropdownMenuItem>
+            <SelectItem key={g.id} value={g.id}>
+              {g.name}
+            </SelectItem>
           ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </SelectContent>
+      </Select>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className="form-input text-sm flex items-center justify-between gap-2"
-            style={{ cursor: 'pointer', maxWidth: '200px', minWidth: '120px' }}
-          >
-            <span>{statusLabel}</span>
-            <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="dark min-w-[120px]">
-          <DropdownMenuItem onSelect={() => onStatusFilterChange('')}>All Status</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onStatusFilterChange('active')}>Active</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onStatusFilterChange('inactive')}>Inactive</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <Select
+        value={statusFilter || ALL}
+        onValueChange={(v) => onStatusFilterChange(v === ALL ? '' : v)}
+      >
+        <SelectTrigger size="sm" className="min-w-[120px]">
+          <SelectValue placeholder="All Status" />
+        </SelectTrigger>
+        <SelectContent className="dark">
+          <SelectItem value={ALL}>All Status</SelectItem>
+          <SelectItem value="active">Active</SelectItem>
+          <SelectItem value="inactive">Inactive</SelectItem>
+        </SelectContent>
+      </Select>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className="form-input text-sm flex items-center justify-between gap-2"
-            style={{ cursor: 'pointer', maxWidth: '200px', minWidth: '160px' }}
-          >
-            <span>{employmentLabel}</span>
-            <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="dark min-w-[160px]">
-          <DropdownMenuItem onSelect={() => onEmploymentTypeFilterChange('')}>All Employment Types</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onEmploymentTypeFilterChange('Full-time')}>Full-time</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onEmploymentTypeFilterChange('Part-time')}>Part-time</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onEmploymentTypeFilterChange('Contractor')}>Contractor</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onEmploymentTypeFilterChange('Intern')}>Intern</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <Select
+        value={employmentTypeFilter || ALL}
+        onValueChange={(v) => onEmploymentTypeFilterChange(v === ALL ? '' : v)}
+      >
+        <SelectTrigger size="sm" className="min-w-[160px]">
+          <SelectValue placeholder="All Employment Types" />
+        </SelectTrigger>
+        <SelectContent className="dark">
+          <SelectItem value={ALL}>All Employment Types</SelectItem>
+          {EMPLOYMENT_TYPES.map((t) => (
+            <SelectItem key={t} value={t}>
+              {t}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
-      <input
-        type="text"
-        placeholder="Search by name..."
-        value={searchQuery}
-        onChange={(e) => onSearchQueryChange(e.target.value)}
-        className="form-input text-sm ml-auto"
-        style={{ minWidth: '200px', maxWidth: '260px' }}
-      />
+      {hasActiveFilters && (
+        <Button variant="ghost" size="sm" onClick={clearAll} className="text-foreground-secondary">
+          <X /> Clear
+        </Button>
+      )}
+
+      <div className="relative ml-auto w-full sm:w-auto">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-foreground-muted" />
+        <Input
+          type="text"
+          placeholder="Search by name..."
+          value={searchQuery}
+          onChange={(e) => onSearchQueryChange(e.target.value)}
+          className="h-8 w-full pl-8 sm:w-[240px]"
+        />
+      </div>
     </div>
   );
 }

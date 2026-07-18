@@ -1,5 +1,6 @@
 "use client";
 
+import { cn } from '@/lib/utils';
 import type { AdminGroup } from '@/hooks/useAdminUsers';
 import { getGroupColor } from './groupColors';
 
@@ -11,13 +12,7 @@ interface GroupListProps {
 
 export default function GroupList({ groups, selectedGroupId, onSelectGroup }: GroupListProps) {
   return (
-    <div
-      className="w-64 flex-shrink-0 overflow-y-auto rounded-lg"
-      style={{
-        border: '1px solid var(--border-subtle)',
-        maxHeight: '560px',
-      }}
-    >
+    <div className="w-64 flex-shrink-0 overflow-y-auto rounded-lg border border-border-subtle max-h-[560px]">
       {groups.map((group) => {
         const isActive = selectedGroupId === group.id;
         const color = getGroupColor(group.name);
@@ -26,39 +21,23 @@ export default function GroupList({ groups, selectedGroupId, onSelectGroup }: Gr
           <button
             key={group.id}
             onClick={() => onSelectGroup(group.id)}
-            className="w-full flex items-center gap-3 px-3 py-3 text-left text-sm transition-colors"
-            style={{
-              background: isActive ? 'var(--active-background)' : 'transparent',
-              borderBottom: '1px solid var(--border-subtle)',
-              color: isActive ? 'var(--foreground)' : 'var(--foreground-secondary)',
-            }}
-            onMouseEnter={(e) => {
-              if (!isActive) e.currentTarget.style.background = 'var(--hover-background)';
-            }}
-            onMouseLeave={(e) => {
-              if (!isActive) e.currentTarget.style.background = 'transparent';
-            }}
+            className={cn(
+              'flex w-full items-center gap-3 border-b px-3 py-3 text-left text-sm transition-colors border-border-subtle',
+              isActive
+                ? 'bg-active-bg text-foreground'
+                : 'text-foreground-secondary hover:bg-hover-bg'
+            )}
           >
-            {/* Color accent */}
             <div
-              className="w-1 h-8 rounded-full flex-shrink-0"
+              className="h-8 w-1 flex-shrink-0 rounded-full"
               style={{ background: color }}
             />
 
-            <div className="flex-1 min-w-0">
-              <span className={`block truncate ${isActive ? 'font-medium' : ''}`}>
-                {group.name}
-              </span>
-            </div>
+            <span className={cn('min-w-0 flex-1 truncate', isActive && 'font-medium')}>
+              {group.name}
+            </span>
 
-            {/* Member count badge */}
-            <span
-              className="text-xs px-2 py-0.5 rounded-full flex-shrink-0"
-              style={{
-                background: 'rgba(255, 255, 255, 0.06)',
-                color: 'var(--foreground-muted)',
-              }}
-            >
+            <span className="flex-shrink-0 rounded-full bg-white/[0.06] px-2 py-0.5 text-xs text-foreground-muted tabular-nums">
               {group.members?.length || 0}
             </span>
           </button>

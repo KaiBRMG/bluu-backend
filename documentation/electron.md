@@ -64,6 +64,8 @@ The window opens at a fixed `1430×870`, `resizable:false` for the login page (`
 
 Save and restore both use the **outer** window size (`getSize`/`setSize`), so no title-bar drift accumulates across launches. Only size is persisted, not position.
 
+**Content zoom** is forced to **90%** (`webContents.setZoomFactor(0.9)`) in the app-URL branch of the `did-finish-load` handler in `main.js` — user screenshots showed screens overly zoomed in. It re-asserts on every full page load (boot, reload, crash-recovery) but not on Next.js client-side navigation (zoom is a webContents property and persists across SPA routing). A user's manual Cmd+/Cmd− is therefore reset to 90% on the next full reload, by design.
+
 ## Window load flow, offline fallback
 
 - **Dev** (`ELECTRON_DEV=true`): loads `http://localhost:3000` directly.

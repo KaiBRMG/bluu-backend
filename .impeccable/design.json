@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-18T00:00:00Z",
+  "title": "Design System: Bluu Backend",
+  "extensions": {
+    "colorMeta": {
+      "canvas": { "role": "neutral", "displayName": "Canvas (Near-Black)", "canonical": "#0A0A0A", "tonalRamp": ["#000000", "#0a0a0a", "#141414", "#1f1f1f", "#2a2a2a", "#404040", "#6b7280", "#9ca3af"] },
+      "surface": { "role": "neutral", "displayName": "Reading Surface", "canonical": "#171717", "tonalRamp": ["#0a0a0a", "#111111", "#171717", "#1f1f1f", "#262626", "#333333", "#4a4a4a", "#666666"] },
+      "action-blue": { "role": "primary", "displayName": "Action Blue", "canonical": "#3b82f6", "tonalRamp": ["#172554", "#1e3a8a", "#1d4ed8", "#2563eb", "#3b82f6", "#60a5fa", "#93c5fd", "#dbeafe"] },
+      "status-green": { "role": "tertiary", "displayName": "Success Green", "canonical": "#4ade80", "tonalRamp": ["#052e16", "#14532d", "#166534", "#15803d", "#22c55e", "#4ade80", "#86efac", "#dcfce7"] },
+      "status-orange": { "role": "tertiary", "displayName": "Pending Orange", "canonical": "#fb923c", "tonalRamp": ["#431407", "#7c2d12", "#9a3412", "#c2410c", "#f97316", "#fb923c", "#fdba74", "#ffedd5"] },
+      "status-red": { "role": "tertiary", "displayName": "Owed Red", "canonical": "#f87171", "tonalRamp": ["#450a0a", "#7f1d1d", "#991b1b", "#b91c1c", "#ef4444", "#f87171", "#fca5a5", "#fee2e2"] },
+      "status-zinc": { "role": "neutral", "displayName": "Archived Zinc", "canonical": "#a1a1aa", "tonalRamp": ["#18181b", "#27272a", "#3f3f46", "#52525b", "#71717a", "#a1a1aa", "#d4d4d8", "#f4f4f5"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Stat and hero numbers in summary tiles. Always tabular-nums." },
+      "title": { "displayName": "Title", "purpose": "Dialog titles, card titles, section headers." },
+      "body": { "displayName": "Body", "purpose": "Default text, set on body and inherited everywhere. 14px / 500." },
+      "label": { "displayName": "Label", "purpose": "Field labels above inputs, meta, captions." },
+      "eyebrow": { "displayName": "Eyebrow", "purpose": "Sidebar section headers only — uppercase, 0.06em tracking, low opacity." },
+      "code": { "displayName": "Code / ID", "purpose": "IDs and codes (CR0001). font-mono, tabular-nums." }
+    },
+    "shadows": [
+      { "name": "no-shadow", "value": "none", "purpose": "Default. Depth is built from white overlays and hairline borders, never box-shadow." },
+      { "name": "overlay-lift", "value": "background rgba(255,255,255,0.025) → 0.055 (hover) → 0.08 (active)", "purpose": "The only elevation mechanism — a lighter white overlay, not a shadow." },
+      { "name": "network-backdrop", "value": "backdrop-filter: blur(2px); background rgba(0,0,0,0.75)", "purpose": "Exception, not a pattern: the full-screen network-loss overlay only." }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "120ms ease-out", "purpose": "Global transition on background-color, border-color, color, opacity for all interactive elements." },
+      { "name": "sidebar-collapse", "value": "250ms ease-out", "purpose": "Sidebar width and nav-item padding/opacity transitions." },
+      { "name": "row-press", "value": "hover:brightness-110 active:scale-[0.98]", "purpose": "Tappable list/kanban rows on press." }
+    ],
+    "breakpoints": [
+      { "name": "lg", "value": "1024px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one Action Blue voice — primary actions only.",
+      "html": "<button class=\"ds-btn-primary\">Save changes</button>",
+      "css": ".ds-btn-primary { background: #3b82f6; color: #fff; padding: 8px 16px; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background-color 120ms ease-out, opacity 120ms ease-out; } .ds-btn-primary:hover { background: #2563eb; } .ds-btn-primary:focus-visible { outline: 2px solid #60a5fa; outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Icon/text actions in dense tables and cards.",
+      "html": "<button class=\"ds-btn-ghost\">Dismiss</button>",
+      "css": ".ds-btn-ghost { background: transparent; color: #9ca3af; padding: 8px 16px; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: color 120ms ease-out, background-color 120ms ease-out; } .ds-btn-ghost:hover { color: #d4d4d8; background: rgba(255,255,255,0.055); } .ds-btn-ghost:focus-visible { outline: 2px solid #52525b; outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "The shared inputClass — dark field, hairline border, border-shift focus.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Search requests\" />",
+      "css": ".ds-input { width: 100%; background: #27272a; border: 1px solid #3f3f46; border-radius: 10px; padding: 8px 12px; font-size: 14px; color: #fff; transition: border-color 120ms ease-out, background-color 120ms ease-out; } .ds-input::placeholder { color: #71717a; } .ds-input:focus { outline: none; border-color: #71717a; background: rgba(255,255,255,0.08); } .ds-input.error { border-color: #ef4444; }"
+    },
+    {
+      "name": "Status Pill",
+      "kind": "chip",
+      "refersTo": "status-pill",
+      "description": "Tinted state chip — foreground -400, fill /10. Import color from campaignTracking.ts.",
+      "html": "<span class=\"ds-status-pill\">In Progress</span>",
+      "css": ".ds-status-pill { display: inline-flex; align-items: center; border-radius: 9999px; padding: 2px 8px; font-size: 12px; font-weight: 500; color: #60a5fa; background: rgba(59,130,246,0.10); }"
+    },
+    {
+      "name": "Status Dot",
+      "kind": "custom",
+      "refersTo": "status-pill",
+      "description": "Compact status indicator for dense lists and kanban rows.",
+      "html": "<span class=\"ds-status-dot\"></span>",
+      "css": ".ds-status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: #60a5fa; }"
+    },
+    {
+      "name": "Summary Widget Card",
+      "kind": "card",
+      "refersTo": "widget-card",
+      "description": "Compact dashboard tile: label + big tabular metric. Tightened padding.",
+      "html": "<div class=\"ds-widget\"><span class=\"ds-widget-label\">Owed this cycle</span><span class=\"ds-widget-metric\">$12,480</span></div>",
+      "css": ".ds-widget { display: flex; flex-direction: column; gap: 8px; background: #171717; border: 1px solid #2a2a2a; border-radius: 14px; padding: 16px; } .ds-widget-label { font-size: 12px; font-weight: 500; color: #9ca3af; } .ds-widget-metric { font-size: 24px; font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Kanban Row",
+      "kind": "custom",
+      "refersTo": "widget-card",
+      "description": "The dense, monospaced, tappable leaf row — the signature line of the system.",
+      "html": "<button class=\"ds-kanban-row\"><span class=\"ds-status-dot\"></span><span class=\"ds-kanban-code\">CR0042</span><span class=\"ds-kanban-amount\">$240</span></button>",
+      "css": ".ds-kanban-row { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: rgba(255,255,255,0.04); border: none; border-left: 2px solid rgba(255,255,255,0.14); border-radius: 8px; padding: 6px 8px; cursor: pointer; transition: filter 120ms ease-out, transform 120ms ease-out; } .ds-kanban-row:hover { filter: brightness(1.1); } .ds-kanban-row:active { transform: scale(0.98); } .ds-kanban-code { font-family: 'Google Sans', monospace; font-size: 12px; font-variant-numeric: tabular-nums; color: #fff; } .ds-kanban-amount { margin-left: auto; font-size: 12px; color: #9ca3af; font-variant-numeric: tabular-nums; } @media (prefers-reduced-motion: reduce) { .ds-kanban-row { transition: none; } .ds-kanban-row:active { transform: none; } }"
+    },
+    {
+      "name": "Sidebar Nav Item",
+      "kind": "nav",
+      "refersTo": "button-ghost",
+      "description": "The 260px navigation rail item — hover/active use white overlays.",
+      "html": "<a class=\"ds-nav-item active\"><span class=\"ds-nav-icon\"></span><span>Custom Requests</span></a>",
+      "css": ".ds-nav-item { display: flex; align-items: center; gap: 8px; padding: 4px 8px; margin: 0 6px; border-radius: 4px; font-size: 14px; font-weight: 500; color: #fff; cursor: pointer; transition: background-color 120ms ease-out; } .ds-nav-item:hover { background: rgba(255,255,255,0.055); } .ds-nav-item.active { background: rgba(255,255,255,0.08); font-weight: 600; } .ds-nav-icon { width: 18px; height: 18px; flex-shrink: 0; opacity: 0.65; border-radius: 4px; background: currentColor; } .ds-nav-item.active .ds-nav-icon { opacity: 1; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Instrument",
+    "overview": "Bluu Rock MGMT is a dark, dense operations console for an internal team — one they live inside for eight hours a day. The design philosophy is total deference: chrome recedes to near-black, type is small, spacing is tight, and the data is the interface. It borrows its posture from Notion and Linear — an instrument panel, not a marketing site. Color is rationed like a signal, never spent as decoration: the interface is greyscale by default and reaches for hue only when hue means a status, a priority, or a category. Depth is built from layered translucent-white overlays on a dark ground, not from drop shadows. Motion is fast and almost subliminal: 120ms ease-out on color and opacity, a small scale/brightness nudge on press. This system explicitly rejects the SaaS marketing look — no gradient heroes, no glassmorphism, no oversized display type, no color used for mood.",
+    "keyCharacteristics": [
+      "Near-black canvas (#0A0A0A), low-chroma surfaces, 14px base type, tight spacing.",
+      "Greyscale by default; color is strictly semantic (status / priority / category).",
+      "Soft elevation from translucent white overlays + hairline borders — never shadows.",
+      "Every number is tabular-nums; every code/ID is font-mono.",
+      "Fast, subtle motion: 120ms ease-out; hover:brightness-110 active:scale-[0.98] on tappable rows."
+    ],
+    "rules": [
+      { "name": "The One Voice Rule", "body": "Action Blue is the only non-semantic color on any screen, and it marks the primary action or current selection — nothing else. Its scarcity is what makes it read.", "section": "colors" },
+      { "name": "The Semantic-Only Rule", "body": "Color is forbidden as decoration. If a green, orange, or red pixel does not encode a status, priority, or category, remove it. Pull every state color from campaignTracking.ts; never hardcode a themeable hex.", "section": "colors" },
+      { "name": "The Overlay-Not-Grey Rule", "body": "Interior surfaces are translucent white on the dark ground, not solid greys — this is what gives the soft, layered depth.", "section": "colors" },
+      { "name": "The Tabular Rule", "body": "Every count, amount, and metric uses tabular-nums; every code or ID (CR0001) uses font-mono text-xs. Numbers must align in columns — always.", "section": "typography" },
+      { "name": "The One-Family Rule", "body": "Google Sans carries the entire UI. Never introduce a display or accent typeface; hierarchy comes from weight, size, and color, never from a second family.", "section": "typography" },
+      { "name": "The No-Shadow Rule", "body": "Depth comes from a lighter overlay and a hairline border, never from a box-shadow. If a surface needs to lift, raise its white overlay opacity — do not add a shadow.", "section": "elevation" },
+      { "name": "The Hairline Rule", "body": "Every border is a single hairline: #2a2a2a on opaque surfaces, rgba(255,255,255,0.07) on overlays. No heavy dividers, no double borders.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep the canvas near-black (#0A0A0A) and let chrome recede — the data is the interface.",
+      "Do build depth from the white-overlay recipe (rgba(255,255,255,0.025) bg / 0.07 border) plus hairline borders.",
+      "Do pull every status/priority color from campaignTracking.ts and apply the -400 text / /10 fill / /30 border triad.",
+      "Do put tabular-nums on every count, amount, and metric, and font-mono text-xs on every code/ID (CR0001).",
+      "Do use only src/components/ui components, only @tabler/icons-react / lucide-react icons, and only Avatar for images.",
+      "Do shape Skeletons to the final layout, write empty states as one quiet text-muted-foreground line, and toast every mutation outcome.",
+      "Do keep motion to 120ms transitions and hover:brightness-110 active:scale-[0.98] on tappable rows.",
+      "Do make it read like custom-requests/page.tsx. If it doesn't, reconcile."
+    ],
+    "donts": [
+      "Don't add drop shadows for depth — raise the white overlay instead (The No-Shadow Rule).",
+      "Don't use color as decoration; if a colored pixel doesn't encode state, category, or the one Action Blue voice, remove it (The Semantic-Only Rule).",
+      "Don't hardcode a themeable hex — use the CSS variables / Tailwind tokens.",
+      "Don't introduce another component library, hand-roll a primitive that exists in src/components/ui, or use icons outside @tabler/icons-react / lucide-react.",
+      "Don't use a raw <img> — always Avatar.",
+      "Don't reach for a modal first, drop a spinner into the middle of a layout, or ship an illustration empty state.",
+      "Don't introduce a second font family, oversized display type, gradient text/heros, or glassmorphism — this is not a marketing site.",
+      "Don't use a colored side-stripe as a decorative accent; the only left-border in the system is the kanban row's functional border-l-2 overlay edge."
+    ]
+  }
+}

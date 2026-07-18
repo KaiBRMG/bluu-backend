@@ -5,7 +5,7 @@ import type { AdminFullUser } from '@/hooks/useAdminUsers';
 import { validateEmail, validatePhoneNumber, validateRequired } from '@/lib/validation';
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { ChevronDownIcon } from 'lucide-react';
@@ -342,18 +342,24 @@ export default function UserDetailContent({
 
         {/* Account status — instant kill-switch, outside the deferred save form */}
         <div
-          className="flex items-center justify-between mb-4 px-3 py-2 rounded-lg"
+          className="mb-4 flex items-center justify-between gap-4 rounded-lg px-3 py-2.5"
           style={{ background: isActive ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', border: `1px solid ${isActive ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}` }}
         >
-          <div>
-            <span className="text-sm font-medium" style={{ color: isActive ? '#22c55e' : '#ef4444' }}>
-              {isActive ? 'Account Active' : 'Account Disabled'}
-            </span>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--foreground-muted)' }}>
-              {isActive ? 'User can access the system' : 'User is blocked from logging in'}
-            </p>
+          <div className="flex items-center gap-2.5">
+            <span
+              className="inline-block size-2 flex-shrink-0 rounded-full"
+              style={{ background: isActive ? '#22c55e' : '#ef4444' }}
+            />
+            <div>
+              <span className="text-sm font-medium" style={{ color: isActive ? '#22c55e' : '#ef4444' }}>
+                {isActive ? 'Account Active' : 'Account Disabled'}
+              </span>
+              <p className="mt-0.5 text-xs text-foreground-muted">
+                {isActive ? 'User can access the system' : 'User is blocked from logging in'}
+              </p>
+            </div>
           </div>
-          <Checkbox
+          <Switch
             checked={isActive}
             onCheckedChange={(checked) => handleIsActiveToggle(checked === true)}
             disabled={isActiveUpdating}
@@ -425,7 +431,7 @@ export default function UserDetailContent({
                     <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
                   </button>
                 </PopoverTrigger>
-                <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+                <PopoverContent className="dark w-auto overflow-hidden p-0" align="start">
                   <Calendar
                     mode="single"
                     selected={formData.DOB ? new Date(formData.DOB + 'T00:00:00') : undefined}
@@ -546,54 +552,59 @@ export default function UserDetailContent({
           <AccordionTrigger>Time Tracking</AccordionTrigger>
           <AccordionContent>
           <div className="space-y-4">
-            <div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox
-                  checked={enableTimeTracking}
-                  onCheckedChange={(checked) => handleTimeTrackingToggle(checked === true)}
-                  disabled={isTimeTrackingUpdating}
-                />
+            <div className="flex items-start justify-between gap-4">
+              <div>
                 <span className="text-sm">Enable Time Tracking</span>
-              </label>
-              <p className="text-xs mt-1 ml-6" style={{ color: 'var(--foreground-muted)' }}>
-                Controls whether this user has access to the Time Tracking page.
-              </p>
+                <p className="mt-1 text-xs text-foreground-muted">
+                  Controls whether this user has access to the Time Tracking page.
+                </p>
+              </div>
+              <Switch
+                checked={enableTimeTracking}
+                onCheckedChange={(checked) => handleTimeTrackingToggle(checked === true)}
+                disabled={isTimeTrackingUpdating}
+              />
             </div>
 
-            <div style={{ opacity: enableTimeTracking ? 1 : 0.4, pointerEvents: enableTimeTracking ? 'auto' : 'none' }}>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox
-                  checked={formData.enableIdleTimeout}
-                  onCheckedChange={(checked) => handleChange('enableIdleTimeout', checked === true)}
-                  disabled={!enableTimeTracking}
-                />
-                <span className="text-sm">Enable Idle Timeout</span>
-              </label>
+            <div
+              className="flex items-center justify-between gap-4"
+              style={{ opacity: enableTimeTracking ? 1 : 0.4, pointerEvents: enableTimeTracking ? 'auto' : 'none' }}
+            >
+              <span className="text-sm">Enable Idle Timeout</span>
+              <Switch
+                checked={formData.enableIdleTimeout}
+                onCheckedChange={(checked) => handleChange('enableIdleTimeout', checked === true)}
+                disabled={!enableTimeTracking}
+              />
             </div>
 
-            <div style={{ opacity: enableTimeTracking ? 1 : 0.4, pointerEvents: enableTimeTracking ? 'auto' : 'none' }}>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox
-                  checked={formData.enableScreenshots}
-                  onCheckedChange={(checked) => handleChange('enableScreenshots', checked === true)}
-                  disabled={!enableTimeTracking}
-                />
+            <div
+              className="flex items-start justify-between gap-4"
+              style={{ opacity: enableTimeTracking ? 1 : 0.4, pointerEvents: enableTimeTracking ? 'auto' : 'none' }}
+            >
+              <div>
                 <span className="text-sm">Enable Screenshots</span>
-              </label>
-              <p className="text-xs mt-1 ml-6" style={{ color: 'var(--foreground-muted)' }}>
-                Activity % is not monitored when disabled.
-              </p>
+                <p className="mt-1 text-xs text-foreground-muted">
+                  Activity % is not monitored when disabled.
+                </p>
+              </div>
+              <Switch
+                checked={formData.enableScreenshots}
+                onCheckedChange={(checked) => handleChange('enableScreenshots', checked === true)}
+                disabled={!enableTimeTracking}
+              />
             </div>
 
-            <div style={{ opacity: enableTimeTracking ? 1 : 0.4, pointerEvents: enableTimeTracking ? 'auto' : 'none' }}>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox
-                  checked={formData.hasPaidLeave}
-                  onCheckedChange={(checked) => handleChange('hasPaidLeave', checked === true)}
-                  disabled={!enableTimeTracking}
-                />
-                <span className="text-sm">Has Paid Leave</span>
-              </label>
+            <div
+              className="flex items-center justify-between gap-4"
+              style={{ opacity: enableTimeTracking ? 1 : 0.4, pointerEvents: enableTimeTracking ? 'auto' : 'none' }}
+            >
+              <span className="text-sm">Has Paid Leave</span>
+              <Switch
+                checked={formData.hasPaidLeave}
+                onCheckedChange={(checked) => handleChange('hasPaidLeave', checked === true)}
+                disabled={!enableTimeTracking}
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3" style={{ opacity: enableTimeTracking ? 1 : 0.4, pointerEvents: enableTimeTracking ? 'auto' : 'none' }}>
@@ -867,7 +878,7 @@ export default function UserDetailContent({
     </div>
       {/* Archive confirmation */}
       <AlertDialog open={showArchiveConfirm} onOpenChange={(open) => { if (!open) setShowArchiveConfirm(false); }}>
-        <AlertDialogContent>
+        <AlertDialogContent className="dark">
           <AlertDialogHeader>
             <AlertDialogTitle>Archive this user?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -889,7 +900,7 @@ export default function UserDetailContent({
 
       {/* Enable confirmation */}
       <AlertDialog open={showEnableConfirm} onOpenChange={(open) => { if (!open) setShowEnableConfirm(false); }}>
-        <AlertDialogContent>
+        <AlertDialogContent className="dark">
           <AlertDialogHeader>
             <AlertDialogTitle>Re-enable this user?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -910,7 +921,7 @@ export default function UserDetailContent({
 
       {/* Delete confirmation */}
       <AlertDialog open={showDeleteConfirm} onOpenChange={(open) => { if (!open) setShowDeleteConfirm(false); }}>
-        <AlertDialogContent>
+        <AlertDialogContent className="dark">
           <AlertDialogHeader>
             <AlertDialogTitle>Permanently delete this user?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -931,7 +942,7 @@ export default function UserDetailContent({
       </AlertDialog>
 
       <AlertDialog open={pendingIsActive !== null} onOpenChange={(open) => { if (!open) setPendingIsActive(null); }}>
-        <AlertDialogContent>
+        <AlertDialogContent className="dark">
           <AlertDialogHeader>
             <AlertDialogTitle>
               {pendingIsActive ? 'Re-enable account access?' : 'Revoke account access?'}

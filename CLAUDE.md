@@ -7,6 +7,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 - Internal management platform for **Bluu Rock MGMT**.
 - **RULE:** Always notify the user if changes are made to **Firestore rules** or **Firestore indexes**.
 - **RULE:** Only use visual components/styling from `src/components/ui`; only use `@tabler/icons-react` and `lucide-react` for icons. (Full UI stack in [architecture-overview.md](documentation/architecture-overview.md#ui-stack-strict-constraints).)
+- **RULE:** Always read [`DESIGN.md`](DESIGN.md) before writing or changing **any** frontend UI — it is the design system of record (palette, typography, surfaces, component/interaction conventions, and the signature dashboard-widget pattern). Match it; keep it current when the visual language changes.
 - If the user mentions "clocked in", "clocked out", "clock in", "clock out", they are referring to the time tracking subsystem.
 
 ## System at a Glance
@@ -52,6 +53,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 
 | Spoke | Read it when you are touching… |
 |---|---|
+| [DESIGN.md](DESIGN.md) | **Any frontend UI** — design system: palette, typography, surfaces, components, motion, dashboard-widget pattern |
 | [architecture-overview.md](documentation/architecture-overview.md) | Repo layout, commands, env vars, portal topology, UI stack |
 | [auth.md](documentation/auth.md) | Browser middleware, OAuth login, `withAuth`/`withCreatorAuth`, the 3 authorization tiers |
 | [permissions.md](documentation/permissions.md) | Page definitions, `page-permissions`, `permittedPageIds`, `checkPageAccess` |
@@ -78,7 +80,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 10. **Security first** — security principles must always be followed and prioritised. No vulnerability may linger after implementing a change: validate/authorize every request at the correct tier, never trust client input, never leak server-only secrets to the client, and never widen access as a shortcut.
 11. **Keep docs current** — always update the documentation repository ([`documentation/`](documentation/) + this hub) when a change makes a spoke or a cross-cutting rule inaccurate. Treat docs as part of the change, not a follow-up.
 12. **Read docs before changing a component** — always read the relevant spoke in [`documentation/`](documentation/) (via the index above) before making any change to that component. Understand its rules, dependencies, and gotchas first — never edit a subsystem from the hub alone.
-13. **ONLY use shadcn components for UI** - existing components exist in `src/components/ui`. More components can be added using command, e.g. `npx shadcn@latest add card`.
+13. **ONLY use shadcn components for UI** - existing components exist in `src/components/ui`. More components can be added using command, e.g. `npx shadcn@latest add card`. **Read [`DESIGN.md`](DESIGN.md) before writing or changing any frontend UI** and follow its conventions; treat updating it as part of any change to the visual language.
 14. **Electron changes → a new build, released in TWO pushes** — any change under `electron/` (or that otherwise requires users to reinstall the app) means a new build must be shipped. **[`src/lib/appUpdateConfig.ts`](src/lib/appUpdateConfig.ts) is the single gate for every update prompt on both platforms**: it is per-platform (`mac` / `win`), a `null` entry means that OS is never prompted, and `compulsory: true` blocks clients at start-up. macOS (v0.8.0+) installs in-app; Windows has no valid signing cert and reinstalls by hand. Always bump `electron/package.json` `version` — **electron-builder names the release from that file, not from the tag**.
 
     **NEVER arm the config in the same push as the code.** Vercel deploys in seconds; the GitHub Actions build takes ~10–30 min (Apple notarization is the long pole). Arming first blocks every user against a release that does not exist yet — and on a compulsory update they cannot use the app while they wait. Prompt the user through this order, and never skip step 3:

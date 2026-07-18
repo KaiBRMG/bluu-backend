@@ -27,7 +27,7 @@ export default function UserGroups({
     : null;
 
   return (
-    <div className="flex gap-4" style={{ minHeight: '500px' }}>
+    <div className="flex min-h-[500px] gap-4">
       <GroupList
         groups={groups}
         selectedGroupId={selectedGroupId}
@@ -43,8 +43,8 @@ export default function UserGroups({
           onAddMembers={onAddGroupMembers}
         />
       ) : (
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-sm" style={{ color: 'var(--foreground-muted)' }}>
+        <div className="flex flex-1 items-center justify-center">
+          <p className="text-sm text-foreground-muted">
             Select a group to view its members.
           </p>
         </div>

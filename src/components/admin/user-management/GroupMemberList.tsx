@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from 'react';
+import { X } from 'lucide-react';
 import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from "@/components/ui/button";
@@ -54,24 +55,21 @@ export default function GroupMemberList({
   return (
     <div className="flex-1 min-w-0">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="mb-4 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-medium flex items-center gap-2" style={{ color: 'var(--foreground)' }}>
+          <h3 className="flex items-center gap-2 text-sm font-medium text-foreground">
             <span
-              className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+              className="inline-block size-2 flex-shrink-0 rounded-full"
               style={{ background: groupColor }}
             />
             {group.name}
           </h3>
-          <span className="text-xs" style={{ color: 'var(--foreground-muted)' }}>
+          <span className="text-xs text-foreground-muted">
             {members.length} member{members.length !== 1 ? 's' : ''}
           </span>
         </div>
         <div className="relative">
-          <Button
-            onClick={() => setShowAddDropdown(!showAddDropdown)}
-            size="sm"
-          >
+          <Button onClick={() => setShowAddDropdown(!showAddDropdown)} size="sm">
             Add Members
           </Button>
           {showAddDropdown && (
@@ -86,20 +84,16 @@ export default function GroupMemberList({
       </div>
 
       {/* Members list */}
-      <div
-        className="rounded-lg overflow-hidden"
-        style={{ border: '1px solid var(--border-subtle)' }}
-      >
+      <div className="overflow-hidden rounded-lg border border-border-subtle">
         {members.length === 0 ? (
-          <div className="px-4 py-8 text-center text-sm" style={{ color: 'var(--foreground-muted)' }}>
+          <div className="px-4 py-8 text-center text-sm text-foreground-muted">
             No members in this group.
           </div>
         ) : (
           members.map((member) => (
             <div
               key={member.uid}
-              className="flex items-center gap-3 px-3 py-2 text-sm"
-              style={{ borderBottom: '1px solid var(--border-subtle)' }}
+              className="flex items-center gap-3 border-b px-3 py-2 text-sm transition-colors border-border-subtle hover:bg-hover-bg last:border-b-0"
             >
               <Avatar className="size-7" style={{ background: getAvatarColor(member.displayName || 'User') }}>
                 {member.photoURL && <AvatarImage src={member.photoURL} alt={member.displayName} />}
@@ -108,11 +102,11 @@ export default function GroupMemberList({
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
-                <span className="block truncate" style={{ color: 'var(--foreground)' }}>
+                <span className="block truncate text-foreground">
                   {member.displayName}
                 </span>
                 {member.jobTitle && (
-                  <span className="block text-xs truncate" style={{ color: 'var(--foreground-muted)' }}>
+                  <span className="block truncate text-xs text-foreground-muted">
                     {member.jobTitle}
                   </span>
                 )}
@@ -123,16 +117,10 @@ export default function GroupMemberList({
                   disabled={removingUid === member.uid}
                   variant="ghost"
                   size="icon"
-                  className="flex-shrink-0 size-7"
-                  style={{
-                    color: removingUid === member.uid ? 'var(--foreground-muted)' : 'var(--foreground-secondary)',
-                  }}
+                  className="size-7 flex-shrink-0 text-foreground-secondary"
                   title="Remove from group"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
+                  <X />
                 </Button>
               )}
             </div>

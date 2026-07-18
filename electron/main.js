@@ -469,6 +469,8 @@ function createWindow() {
   mainWindow.webContents.on('did-finish-load', () => {
     if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.getURL().startsWith(BASE_URL)) {
       clearOfflineRetry();
+      // Default the app to 90% zoom — screenshots showed users' screens overly zoomed in.
+      mainWindow.webContents.setZoomFactor(0.9);
     }
 
     if (deeplinkUrl) {

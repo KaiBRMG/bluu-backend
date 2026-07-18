@@ -13,11 +13,12 @@ import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Input } from '@/components/ui/input';
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Skeleton } from '@/components/ui/skeleton';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { ChevronDownIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { toast } from 'sonner';
 
 const initialFormState: PersonalInfoFormData = {
   displayName: '',
@@ -57,7 +58,6 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
   const [hasChanges, setHasChanges] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
   const [dobOpen, setDobOpen] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
@@ -105,14 +105,6 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
     }
   }, [formData]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Clear save message after 3 seconds
-  useEffect(() => {
-    if (saveMessage) {
-      const timer = setTimeout(() => setSaveMessage(null), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [saveMessage]);
-
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     // Clear error when user starts typing
@@ -147,12 +139,12 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
     });
     if (!validation.isValid) {
       setErrors(validation.errors);
+      toast.error('Please fix the highlighted fields');
       return;
     }
 
     setErrors({});
     setIsSubmitting(true);
-    setSaveMessage(null);
 
     try {
       const idToken = await user?.getIdToken();
@@ -197,7 +189,7 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
       const prevData = originalDataRef.current;
       originalDataRef.current = { ...formData };
       setHasChanges(false);
-      setSaveMessage({ type: 'success', text: 'Changes saved successfully!' });
+      toast.success('Changes saved');
 
       // Auto-detect timezone from address when country/city changes
       if (formData.address.country) {
@@ -224,10 +216,7 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
       }
     } catch (error) {
       console.error('Save error:', error);
-      setSaveMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'Failed to save changes',
-      });
+      toast.error(error instanceof Error ? error.message : 'Failed to save changes');
     } finally {
       setIsSubmitting(false);
     }
@@ -239,18 +228,17 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
 
     // Validate file type
     if (!ALLOWED_TYPES.includes(file.type)) {
-      setSaveMessage({ type: 'error', text: 'Invalid file type. Allowed: JPEG, PNG, GIF, WebP' });
+      toast.error('Invalid file type. Allowed: JPEG, PNG, GIF, WebP');
       return;
     }
 
     // Validate file size
     if (file.size > MAX_FILE_SIZE) {
-      setSaveMessage({ type: 'error', text: 'File too large. Maximum size is 5MB' });
+      toast.error('File too large. Maximum size is 5MB');
       return;
     }
 
     setIsUploadingPhoto(true);
-    setSaveMessage(null);
 
     try {
       const idToken = await user?.getIdToken();
@@ -280,30 +268,24 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
             throw new Error(data.error || 'Failed to upload photo');
           }
 
-          setSaveMessage({ type: 'success', text: 'Photo uploaded successfully!' });
+          toast.success('Photo updated');
         } catch (error) {
           console.error('Upload error:', error);
-          setSaveMessage({
-            type: 'error',
-            text: error instanceof Error ? error.message : 'Failed to upload photo',
-          });
+          toast.error(error instanceof Error ? error.message : 'Failed to upload photo');
         } finally {
           setIsUploadingPhoto(false);
         }
       };
 
       reader.onerror = () => {
-        setSaveMessage({ type: 'error', text: 'Failed to read file' });
+        toast.error('Failed to read file');
         setIsUploadingPhoto(false);
       };
 
       reader.readAsDataURL(file);
     } catch (error) {
       console.error('Upload error:', error);
-      setSaveMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'Failed to upload photo',
-      });
+      toast.error(error instanceof Error ? error.message : 'Failed to upload photo');
       setIsUploadingPhoto(false);
     }
 
@@ -315,7 +297,6 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
 
   const handleRemovePhoto = async () => {
     setIsRemovingPhoto(true);
-    setSaveMessage(null);
 
     try {
       const idToken = await user?.getIdToken();
@@ -336,13 +317,10 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
         throw new Error(data.error || 'Failed to remove photo');
       }
 
-      setSaveMessage({ type: 'success', text: 'Photo removed successfully!' });
+      toast.success('Photo removed');
     } catch (error) {
       console.error('Remove photo error:', error);
-      setSaveMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'Failed to remove photo',
-      });
+      toast.error(error instanceof Error ? error.message : 'Failed to remove photo');
     } finally {
       setIsRemovingPhoto(false);
     }
@@ -350,10 +328,20 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-sm" style={{ color: 'var(--foreground-secondary)' }}>
-          Loading...
+      <div className="flex flex-col gap-6">
+        <div className="flex items-center gap-4">
+          <Skeleton className="size-24 rounded-full" />
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-4 w-20" />
+          </div>
         </div>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="flex flex-col gap-2">
+            <Skeleton className="h-3.5 w-32" />
+            <Skeleton className="h-10 w-full rounded-md" />
+          </div>
+        ))}
       </div>
     );
   }
@@ -361,14 +349,7 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
   return (
     <div className="flex flex-col h-full">
       {/* Header with action buttons */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          {saveMessage && (
-            <Alert variant={saveMessage.type === 'error' ? 'destructive' : 'default'} className="py-2 px-3">
-              <AlertDescription>{saveMessage.text}</AlertDescription>
-            </Alert>
-          )}
-        </div>
+      <div className="flex items-center justify-end mb-6">
         <div className="flex gap-3">
           {hasChanges && (
             <Button
@@ -393,7 +374,7 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
       <div className="flex-1 overflow-y-auto pr-2">
         {/* Profile Photo Section */}
         <div className="mb-8">
-          <label className="form-label block mb-3">Profile photo</label>
+          <label className="form-label block mb-3">Profile Photo</label>
           <div className="flex items-center gap-4">
             <Avatar className="size-24 text-2xl" style={{ background: getAvatarColor((userData?.displayName || formData.displayName) || 'User') }}>
               {userData?.photoURL && <AvatarImage src={userData.photoURL} alt={userData?.displayName || formData.displayName} />}
@@ -413,11 +394,11 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
               />
               <label
                 htmlFor="photo-upload"
-                className="text-sm transition-colors cursor-pointer"
-                style={{
-                  color: isUploadingPhoto || isRemovingPhoto ? 'var(--foreground-muted)' : '#3b82f6',
-                  pointerEvents: isUploadingPhoto || isRemovingPhoto ? 'none' : 'auto'
-                }}
+                className={`text-sm transition-colors cursor-pointer w-fit ${
+                  isUploadingPhoto || isRemovingPhoto
+                    ? 'text-muted-foreground pointer-events-none'
+                    : 'text-blue-500 hover:text-blue-600'
+                }`}
               >
                 {isUploadingPhoto ? 'Uploading...' : 'Upload photo'}
               </label>
@@ -427,8 +408,7 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
                   variant="link"
                   onClick={handleRemovePhoto}
                   disabled={isUploadingPhoto || isRemovingPhoto}
-                  className="h-auto p-0 text-sm"
-                  style={{ color: isRemovingPhoto ? 'var(--foreground-muted)' : '#ef4444' }}
+                  className="h-auto p-0 text-sm text-destructive hover:text-destructive/80 w-fit"
                 >
                   {isRemovingPhoto ? 'Removing...' : 'Remove photo'}
                 </Button>

@@ -14,40 +14,31 @@ interface UserCardProps {
 
 export default function UserCard({ user, groups, onClick }: UserCardProps) {
   const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.displayName;
+  const isActive = user.isActive !== false;
   const userGroups = (user.groups || [])
     .map((id) => groups.find((g) => g.id === id))
     .filter(Boolean) as AdminGroup[];
 
   return (
-    <div
+    <button
+      type="button"
       onClick={onClick}
-      className="relative rounded-lg p-4 cursor-pointer transition-colors"
-      style={{
-        background: 'var(--container-background)',
-        border: '1px solid var(--border-subtle)',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = 'var(--hover-background)';
-        e.currentTarget.style.borderColor = 'var(--foreground-muted)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'var(--container-background)';
-        e.currentTarget.style.borderColor = 'var(--border-subtle)';
-      }}
+      className="relative w-full rounded-lg p-4 text-left transition-colors bg-container-bg border border-border-subtle hover:bg-hover-bg hover:border-foreground-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
     >
       <span
-        className="absolute top-3 right-3 text-xs font-medium px-2 py-0.5 rounded flex items-center gap-1"
+        className="absolute top-3 right-3 flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium"
         style={{
-          color: user.isActive !== false ? '#22c55e' : '#ef4444',
-          background: user.isActive !== false ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
+          color: isActive ? '#22c55e' : '#ef4444',
+          background: isActive ? 'rgba(34,197,94,0.10)' : 'rgba(239,68,68,0.10)',
         }}
       >
         <span
-          className="inline-block rounded-full"
-          style={{ width: 6, height: 6, background: user.isActive !== false ? '#22c55e' : '#ef4444' }}
+          className="inline-block size-1.5 rounded-full"
+          style={{ background: isActive ? '#22c55e' : '#ef4444' }}
         />
-        {user.isActive !== false ? 'Active' : 'Disabled'}
+        {isActive ? 'Active' : 'Disabled'}
       </span>
+
       <div className="flex items-start gap-3">
         <Avatar style={{ background: getAvatarColor((user.displayName || fullName) || 'User') }}>
           {user.photoURL && <AvatarImage src={user.photoURL} alt={user.displayName || fullName} />}
@@ -55,33 +46,32 @@ export default function UserCard({ user, groups, onClick }: UserCardProps) {
             {getInitials(user.displayName || fullName)}
           </AvatarFallback>
         </Avatar>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium truncate" style={{ color: 'var(--foreground)' }}>
-              {fullName}
-            </span>
-          </div>
+
+        <div className="flex-1 min-w-0 pr-16">
+          <span className="block truncate text-sm font-medium text-foreground">
+            {fullName}
+          </span>
 
           {user.displayName && user.displayName !== fullName && (
-            <div className="text-xs truncate" style={{ color: 'var(--foreground-secondary)' }}>
+            <div className="truncate text-xs text-foreground-secondary">
               {user.displayName}
             </div>
           )}
 
           {user.jobTitle && (
-            <div className="text-xs mt-1 truncate" style={{ color: 'var(--foreground-secondary)' }}>
+            <div className="mt-1 truncate text-xs text-foreground-secondary">
               {user.jobTitle}
             </div>
           )}
 
           {userGroups.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1 mt-2">
+            <div className="mt-2 flex flex-wrap items-center gap-1">
               {userGroups.map((group) => {
                 const style = getGroupBadgeStyle(group.name);
                 return (
                   <span
                     key={group.id}
-                    className="text-xs font-medium px-2 py-0.5 rounded"
+                    className="rounded-full px-2 py-0.5 text-xs font-medium"
                     style={{ color: style.color, background: style.background }}
                   >
                     {group.name}
@@ -92,12 +82,12 @@ export default function UserCard({ user, groups, onClick }: UserCardProps) {
           )}
 
           {user.workEmail && (
-            <div className="text-xs mt-2 truncate" style={{ color: 'var(--foreground-muted)' }}>
+            <div className="mt-2 truncate text-xs text-foreground-muted">
               {user.workEmail}
             </div>
           )}
         </div>
       </div>
-    </div>
+    </button>
   );
 }
