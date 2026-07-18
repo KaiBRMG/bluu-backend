@@ -128,7 +128,6 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
     if (originalDataRef.current) {
       setFormData(originalDataRef.current);
       setErrors({});
-      setSaveMessage(null);
     }
   };
 
