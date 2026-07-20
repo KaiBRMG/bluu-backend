@@ -15,6 +15,7 @@ import {
 } from '@/lib/localBuffer';
 import { useUserData } from '@/hooks/useUserData';
 import { getAppInfo } from '@/lib/appVersion';
+import { markScreenshotBugFixed } from '@/lib/markScreenshotBugFixed';
 import { toast } from 'sonner';
 
 const HEARTBEAT_INTERVAL_MS   = 15 * 60 * 1000; // 15 minutes — working state only
@@ -894,8 +895,15 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
           // to "enable it in settings" — enabling a stale record does nothing;
           // only the reset makes the next prompt actually stick. Gated to
           // existing users (screenshotBugFixed falsy) so new/healthy installs
-          // never re-prompt, and to once per session; the native side caps it at
-          // once per machine, ever. Feature-detected — no-op on older builds.
+          // never re-prompt, and to once per session.
+          //
+          // Persisting screenshotBugFixed is what makes it once EVER: the ref is
+          // only per-session and the flag stays falsy on its own, so without the
+          // write every launch would wipe the grant the user just gave and macOS
+          // would re-prompt on every start. Set it as soon as the reset fires,
+          // not on success — a reset that didn't take won't take on a retry
+          // either; that user goes to Settings → App Settings, which bypasses
+          // this flag. Feature-detected — no-op on older builds.
           if (
             failureContext === 'screenshot:capture-failed' &&
             !userData?.screenshotBugFixed &&
@@ -903,6 +911,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
           ) {
             tccResetAttemptedRef.current = true;
             electronAPI.permissions?.resetScreenCapture?.().catch(() => {});
+            void markScreenshotBugFixed(await user?.getIdToken());
           }
 
           if (failCount < 3) {

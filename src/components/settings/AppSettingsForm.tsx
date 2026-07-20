@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { CheckIcon, ChevronDownIcon, PlusIcon, XIcon } from "lucide-react";
+import { markScreenshotBugFixed } from "@/lib/markScreenshotBugFixed";
 import { toast } from "sonner";
 
 const DEFAULT_ADDITIONAL_TZS = ['Africa/Johannesburg', 'Asia/Manila'];
@@ -180,6 +181,11 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
     try {
       const result = await reset();
       if (!result?.success) throw new Error(result?.error || 'Reset failed');
+      // Deliberate user action, so it runs regardless of screenshotBugFixed —
+      // this button is the escape hatch for users the automatic reset didn't
+      // repair. Latch the flag afterwards so the automatic path stands down and
+      // can't re-wipe the grant they are about to give.
+      void markScreenshotBugFixed(await user?.getIdToken());
       toast.success('Your OS permissions have been reset. On the next screenshot, you will be prompted to enable this permission again. Please enable it and then Quit & Reopen.');
     } catch (error) {
       console.error('Screen permission reset error:', error);

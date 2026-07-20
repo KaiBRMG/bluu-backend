@@ -26,7 +26,20 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       'additionalTimezones',
       'pinnedResources',
       'notificationPreferences',
+      // TEMPORARY (see CLAUDE.md): marks the stale-TCC screen-recording repair as
+      // applied for this user, so the automatic reset never runs a second time.
+      'screenshotBugFixed',
     ];
+
+    // screenshotBugFixed is a one-way latch: clients may only ever set it true.
+    // Allowing false would let a client re-arm the automatic reset and put itself
+    // back into the every-launch OS permission prompt loop.
+    if (updates.screenshotBugFixed !== undefined && updates.screenshotBugFixed !== true) {
+      return NextResponse.json(
+        { error: 'screenshotBugFixed may only be set to true' },
+        { status: 400 }
+      );
+    }
 
     // Validate pinnedResources: array of strings, capped at 10 (enforced server-side
     // so the limit can't be bypassed by a crafted request).
