@@ -2,6 +2,7 @@
 
 import { IconDotsVertical, IconLogout, IconSettings } from "@tabler/icons-react";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { auth } from "@/firebase-config";
 import { clearPermissionsCache } from "@/lib/permissionsCache";
 import { useTimeTrackingContext } from "@/contexts/TimeTrackingContext";
@@ -45,6 +46,14 @@ function UserAvatarItem({ name, photoURL }: { name: string; photoURL?: string | 
 export function NavUser({ user }: NavUserProps) {
   const { isMobile } = useSidebar();
   const { clockOutAndFlush } = useTimeTrackingContext();
+  // Desktop-only: the version comes from the Electron shell, so it stays empty in a browser.
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    window.electronAPI?.app?.getVersion?.()
+      .then((version) => setAppVersion(version))
+      .catch(() => setAppVersion(null));
+  }, []);
 
   // Signing out is a soft clock-out: the user is leaving the app without pressing
   // Clock Out, so flush the session first or it stays open server-side (and renders
@@ -93,6 +102,9 @@ export function NavUser({ user }: NavUserProps) {
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-medium">{user.name}</span>
                   <span className="truncate text-xs opacity-60">{user.groupName}</span>
+                  {appVersion && (
+                    <span className="truncate text-xs opacity-40">v{appVersion}</span>
+                  )}
                 </div>
               </div>
             </DropdownMenuLabel>

@@ -465,7 +465,7 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
             <div className="mb-2">
               <label className="form-label">Reset Screenshot Permissions</label>
               <p className="text-xs italic mt-1" style={{ color: 'var(--foreground-secondary)' }}>
-                If screenshots keep failing, or macOS keeps asking for screen recording access even though it is already switched on, clear the app&apos;s saved permission here. You will be asked to grant it once more, and it will stick from then on.
+                If screenshots keep failing, or macOS keeps asking for screen recording access even though it is already switched on, clear the app&apos;s saved permission here. You will be asked to grant it once more, and it will stick from then on. Requires app version 0.8.2 and later.
               </p>
             </div>
             <Button
