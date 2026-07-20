@@ -21,6 +21,8 @@ const MAC_INTEL_URL =
   "https://drive.google.com/drive/folders/1d9h2Yqx_TpWmnKblDS6Ah30ZQeWaW1FO?usp=drive_link";
 const MAC_SILICON_URL =
   "https://drive.google.com/drive/folders/1nlWKZvcBo6VOzUb5LSqoYe5WeGe9MVi1?usp=sharing";
+const CERT_URL =
+  "https://drive.google.com/drive/folders/1xfop4q-G6m3zigYLqGAVhvWCJRIigZXX?usp=drive_link";
 const WALKTHROUGH_URL = "https://youtu.be/7LrNBZZC6tQ?si=rqXoDe2MJcDBbjhQ";
 
 /** A one-time-install certificate step index. */
@@ -73,10 +75,9 @@ export default function DownloadPage() {
             </span>
             <AlertDescription className="text-sm leading-relaxed text-foreground/85">
               <p>
-                All links below open a company Google Drive folder. You must be
-                signed in to Google with your{" "}
+                You must be signed in to Google with your{" "}
                 <strong style={{ color: ACCENT }}>@bluurock.com</strong> email to
-                access them — if you see an access-denied page, switch Google
+                access the links below — if you see an access-denied page, switch Google
                 accounts and try again.
               </p>
             </AlertDescription>
@@ -234,8 +235,16 @@ export default function DownloadPage() {
                 <StepNumber n={1} />
                 <div className="flex flex-col gap-2.5">
                   <p className="m-0 font-semibold text-foreground/90">
-                    Install <Ui>InternalCert.cer</Ui> from the Google Drive
-                    folder.
+                    Download <Ui>InternalCert.cer</Ui>{" "}
+                    <a
+                      href={CERT_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline underline-offset-2 transition-colors hover:text-foreground"
+                    >
+                      here
+                    </a>
+                    . 
                   </p>
                   <ol className="m-0 flex list-decimal flex-col gap-1.5 pl-5 marker:text-muted-foreground/60">
                     <li>
@@ -265,8 +274,7 @@ export default function DownloadPage() {
               <div className="flex gap-3.5">
                 <StepNumber n={2} />
                 <p className="m-0 self-center font-semibold text-foreground/90">
-                  Download and install the .exe file from the Google Drive
-                  folder.
+                  Download and install the .exe file.
                 </p>
               </div>
 
