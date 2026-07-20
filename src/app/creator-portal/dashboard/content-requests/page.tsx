@@ -125,7 +125,7 @@ export default function AllContentRequestsPage() {
       </header>
 
       <main className="mx-auto max-w-5xl px-3 py-6 sm:px-6 sm:py-8">
-        <h1 className="mb-4 text-xl font-semibold sm:mb-6 sm:text-2xl">All Content Requests</h1>
+        <h1 className="mb-4 text-2xl font-semibold sm:mb-6">All Content Requests</h1>
 
         {loading ? (
           <div className="flex flex-col gap-2">

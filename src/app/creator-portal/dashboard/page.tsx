@@ -123,9 +123,9 @@ function CPCard({ entry, onComplete, completing }: {
           onClick={() => onComplete(entry.id)}
           disabled={completing}
           size="sm"
-          className={`w-full gap-1.5 ${COMPLETE_BTN}`}
+          className={`group w-full gap-1.5 ${COMPLETE_BTN}`}
         >
-          <CheckCircle2 className="h-3.5 w-3.5" />
+          <CheckCircle2 className="h-3.5 w-3.5 transition-transform motion-safe:group-hover:scale-110" />
           {completing ? "Saving…" : "Mark Completed"}
         </Button>
       </div>
@@ -209,7 +209,7 @@ function TypeTile({ type, entries, onOpen }: {
 
       {entries.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-8 text-center">
-          <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-full" style={{ background: `${meta.hex}15` }}>
+          <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-full motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-90 motion-safe:duration-500" style={{ background: `${meta.hex}15` }}>
             <CheckCircle2 className="h-4 w-4" style={{ color: meta.hex }} />
           </div>
           <p className="text-xs text-zinc-400">All caught up!</p>
@@ -472,11 +472,11 @@ export default function CreatorDashboardPage() {
         />
       </header>
 
-      <main className="mx-auto flex max-w-4xl flex-col gap-6 px-3 py-6 sm:gap-8 sm:px-6 sm:py-12 md:max-w-none">
+      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-3 py-6 sm:gap-8 sm:px-6 sm:py-12">
         {/* Welcome */}
         <div>
           <p className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">Creator Portal</p>
-          <h1 className="text-xl font-semibold text-zinc-100 sm:text-3xl">
+          <h1 className="text-2xl font-semibold text-zinc-100">
             Hey, {creatorUser.stageName || creatorUser.displayName} 👋
           </h1>
         </div>
@@ -515,7 +515,7 @@ export default function CreatorDashboardPage() {
               </div>
             ) : cpEntries.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-center">
-                <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/15">
+                <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/15 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-90 motion-safe:duration-500">
                   <CheckCircle2 className="h-4 w-4 text-emerald-400" />
                 </div>
                 <p className="text-xs text-zinc-400">All caught up — no pending content requests!</p>

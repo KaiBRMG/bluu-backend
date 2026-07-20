@@ -26,7 +26,7 @@ export default function WelcomePage() {
         {/* Hero */}
         <div className="flex flex-col gap-2">
           <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Creator Portal</p>
-          <h1 className="text-3xl font-bold text-zinc-100 tracking-tight">Welcome to Bluu Rock MGMT</h1>
+          <h1 className="text-2xl font-semibold text-zinc-100">Welcome to Bluu Rock MGMT</h1>
           <p className="text-sm text-zinc-400 italic mt-0.5">shape. develop. impact.</p>
         </div>
 

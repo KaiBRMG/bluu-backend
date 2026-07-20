@@ -49,7 +49,7 @@ function CreatorSidebar() {
                   <SidebarMenuButton
                     asChild
                     isActive={pathname === href}
-                    className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5 data-[active=true]:bg-white/10 data-[active=true]:text-zinc-100 rounded-lg h-10"
+                    className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5 data-[active=true]:bg-violet-500/15 data-[active=true]:text-violet-100 data-[active=true]:font-medium rounded-lg h-10"
                   >
                     <Link href={href} onClick={handleNavClick}>
                       <Icon className="w-4 h-4 shrink-0" />

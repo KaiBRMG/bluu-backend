@@ -60,9 +60,11 @@ export const SURFACE = {
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 // Solid fills — no gradients, no glow shadows (see DESIGN.md § Creator Portal).
-/** The one "mark complete" success action. */
+/** The one "mark complete" success action. A subtle tactile press marks the
+ *  portal's key moment (completing a task); gated `motion-safe` so reduced-motion
+ *  users get no scale. Smooth via the shadcn Button's own `transition-all`. */
 export const COMPLETE_BTN =
-  "bg-emerald-600 hover:bg-emerald-700 text-white";
+  "bg-emerald-600 hover:bg-emerald-700 text-white motion-safe:active:scale-[0.98]";
 /** Soft accent action (open drive, upload, external links styled as buttons). */
 export const ACCENT_BTN =
   "bg-violet-500/15 hover:bg-violet-500/25 text-violet-200 border border-violet-500/30";
