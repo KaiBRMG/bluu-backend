@@ -2,7 +2,6 @@
 const { app, BrowserWindow, session, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification, systemPreferences } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
-const fs = require('fs');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
@@ -166,39 +165,27 @@ ipcMain.handle('timeTracking:setPowerSaveBlocker', (_event, enable) => {
 // the stale record). A one-time `tccutil reset` clears it so the next capture
 // re-prompts cleanly against the new identity, after which it sticks.
 //
-// The RENDERER decides when to call this (TimeTrackingContext): only for existing
-// users (`screenshotBugFixed` falsy) and only on a capture — not network —
-// failure, so new/healthy installs never invoke it. This handler is the native
-// side of that; its own gates are:
-//   1. darwin-only.
-//   2. A marker file in userData caps the reset at once per OS user, ever, even
-//      if the renderer calls repeatedly. Written BEFORE tccutil so a crash mid-
-//      reset can't loop. userData survives app updates/reinstalls, and TCC is
-//      keyed per OS-user + bundle id (not per Bluu uid) — the correct granularity
-//      (it also means a second Bluu account on the same Mac won't re-reset an
-//      already-fixed record).
+// The RENDERER decides when to call this: automatically for existing users
+// (`screenshotBugFixed` falsy, once per session, on a capture — not network —
+// failure) in TimeTrackingContext, on mount in the onboarding screen step, and
+// on demand from Settings → App Settings → "Reset OS Permissions".
+//
+// The only native gate is darwin-only. There is deliberately NO once-per-machine
+// marker: the automatic reset did not stick for every user, so the manual
+// Settings button must be able to re-run it as many times as it takes. tccutil
+// reset is idempotent and cheap — the cost of running it again is one fresh OS
+// prompt on the next capture, which is exactly what the button promises.
 // See the "Temporary: screenshot TCC repair" note in CLAUDE.md for removal.
 ipcMain.handle('permissions:resetScreenCapture', async () => {
   if (process.platform !== 'darwin') return { success: false };
 
-  const marker = path.join(app.getPath('userData'), '.screencapture-tcc-reset-done');
-  if (fs.existsSync(marker)) return { success: false, alreadyReset: true };
-
-  try {
-    fs.writeFileSync(marker, new Date().toISOString());
-  } catch (err) {
-    console.error('[Screenshot] Could not write TCC reset marker — skipping one-time reset:', err.message);
-    return { success: false, error: err.message };
-  }
-
   const status = systemPreferences.getMediaAccessStatus('screen');
   try {
     await execFileAsync('tccutil', ['reset', 'ScreenCapture', 'com.bluu.app']);
-    console.log(`[Screenshot] OS status "${status}" — reset stale ScreenCapture TCC record (one-time). A fresh prompt is expected on the next capture.`);
+    console.log(`[Screenshot] OS status "${status}" — reset ScreenCapture TCC record. A fresh prompt is expected on the next capture.`);
     return { success: true };
   } catch (err) {
-    // Non-fatal (e.g. bundle id not registered in a dev run). Marker is already
-    // written, so we won't retry.
+    // Non-fatal (e.g. bundle id not registered in a dev run).
     console.error('[Screenshot] tccutil reset failed (continuing):', err.message);
     return { success: false, error: err.message };
   }

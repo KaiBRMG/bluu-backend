@@ -49,6 +49,8 @@ export interface AdminFullUser {
   timezoneOffset?: string;
   additionalTimezones?: string[];
   permittedPageIds?: string[];
+  appVersion?: string | null;
+  appPlatform?: string | null;
 }
 
 export interface AdminGroup {

@@ -53,7 +53,21 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
   const [additionalOpen, setAdditionalOpen] = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // TEMPORARY (see CLAUDE.md): manual macOS ScreenCapture TCC repair.
+  const [isMac, setIsMac] = useState(false);
+  const [isResettingPermissions, setIsResettingPermissions] = useState(false);
+
   const timezoneList = useMemo(() => getTimezoneList(), []);
+
+  // Only macOS installs carry the stale Screen Recording grant, so the reset
+  // field is darwin-only. Feature-detected — no-op in a browser.
+  useEffect(() => {
+    let cancelled = false;
+    window.electronAPI?.app?.getPlatform?.()
+      .then(p => { if (!cancelled) setIsMac(p === 'darwin'); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // Initialize from userData
   useEffect(() => {
@@ -151,6 +165,28 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
     setSoundEnabled(originalNotifPrefsRef.current.soundEnabled);
     setShiftReminders(originalNotifPrefsRef.current.shiftReminders);
     setScreenshotNotifications(originalNotifPrefsRef.current.screenshotNotifications);
+  };
+
+  // TEMPORARY (see CLAUDE.md): wipes the stale macOS Screen Recording (TCC)
+  // record so the next capture re-prompts against the app's signed identity.
+  const handleResetScreenPermissions = async () => {
+    const reset = window.electronAPI?.permissions?.resetScreenCapture;
+    if (!reset) {
+      toast.error('Your app version does not support this. Please update the app.');
+      return;
+    }
+
+    setIsResettingPermissions(true);
+    try {
+      const result = await reset();
+      if (!result?.success) throw new Error(result?.error || 'Reset failed');
+      toast.success('Your OS permissions have been reset. On the next screenshot, you will be prompted to enable this permission again. Please enable it and then Quit & Reopen.');
+    } catch (error) {
+      console.error('Screen permission reset error:', error);
+      toast.error('Could not reset OS permissions. Please try again.');
+    } finally {
+      setIsResettingPermissions(false);
+    }
   };
 
   const handleSave = async () => {
@@ -421,6 +457,29 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
           />
         </div>
       </div>
+
+      {/* TEMPORARY (see CLAUDE.md): macOS screen-recording permission repair */}
+      {isMac && (
+        <div className="mb-6">
+          <div className="flex items-start justify-between gap-4">
+            <div className="mb-2">
+              <label className="form-label">Reset Screenshot Permissions</label>
+              <p className="text-xs italic mt-1" style={{ color: 'var(--foreground-secondary)' }}>
+                If screenshots keep failing, or macOS keeps asking for screen recording access even though it is already switched on, clear the app&apos;s saved permission here. You will be asked to grant it once more, and it will stick from then on.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleResetScreenPermissions}
+              disabled={isResettingPermissions}
+              className="flex-shrink-0"
+            >
+              {isResettingPermissions ? 'Resetting...' : 'Reset OS Permissions'}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Footer with Save/Cancel */}
       <div

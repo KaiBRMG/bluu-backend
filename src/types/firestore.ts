@@ -89,6 +89,12 @@ export interface UserDocument {
   // Denormalized: page IDs this user can access (kept in sync by server on group/permission changes)
   permittedPageIds?: string[];
 
+  // Installed desktop app build, reported once per app start by the renderer
+  // (see AppVersionReporter) and only written when it actually changes.
+  appVersion?: string | null;
+  appPlatform?: string | null; // darwin / win32
+  appVersionUpdatedAt?: Timestamp;
+
   // Single active session enforcement: rotated on every login.
   // Client stores this locally; onSnapshot detects a mismatch and forces sign-out.
   sessionToken?: string;

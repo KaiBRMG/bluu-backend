@@ -79,8 +79,6 @@ export default function UserManagementPage() {
               users={users}
               groups={groups}
               onUpdateUser={updateUser}
-              onAddGroupMembers={addGroupMembers}
-              onRemoveGroupMember={removeGroupMember}
               onRefetch={refetch}
               onDeleteUser={deleteUser}
             />
@@ -98,8 +96,6 @@ export default function UserManagementPage() {
               users={users}
               groups={groups}
               onUpdateUser={updateUser}
-              onAddGroupMembers={addGroupMembers}
-              onRemoveGroupMember={removeGroupMember}
               onRefetch={refetch}
               onDeleteUser={deleteUser}
               showArchived

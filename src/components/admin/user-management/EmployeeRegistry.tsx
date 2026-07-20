@@ -11,8 +11,6 @@ interface EmployeeRegistryProps {
   users: AdminFullUser[];
   groups: AdminGroup[];
   onUpdateUser: (uid: string, updates: Record<string, unknown>) => Promise<void>;
-  onAddGroupMembers: (groupId: string, uids: string[]) => Promise<void>;
-  onRemoveGroupMember: (groupId: string, uid: string) => Promise<void>;
   onRefetch: () => Promise<void>;
   onDeleteUser: (uid: string) => Promise<void>;
   showArchived?: boolean;
@@ -22,8 +20,6 @@ export default function EmployeeRegistry({
   users,
   groups,
   onUpdateUser,
-  onAddGroupMembers,
-  onRemoveGroupMember,
   onRefetch,
   onDeleteUser,
   showArchived = false,
@@ -113,11 +109,8 @@ export default function EmployeeRegistry({
       <UserDetailDrawer
         userId={selectedUserId}
         users={users}
-        groups={groups}
         onClose={() => setSelectedUserId(null)}
         onUpdateUser={onUpdateUser}
-        onAddGroupMembers={onAddGroupMembers}
-        onRemoveGroupMember={onRemoveGroupMember}
         onRefetch={onRefetch}
         onDeleteUser={handleDeleteUser}
       />
