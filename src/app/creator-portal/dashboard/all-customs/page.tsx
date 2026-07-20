@@ -5,7 +5,7 @@ import { useCreatorAuth } from "@/components/CreatorAuthProvider";
 import { db } from "@/firebase-config";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from "@/components/ui/table";
@@ -17,93 +17,25 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { MoreHorizontal, ExternalLink } from "lucide-react";
-import { type CampaignEntry, STATUS_COLORS, TYPE_LABELS, formatAmount, formatDueDate, firestoreToEntry, CAMPAIGN_TYPES } from "@/lib/campaignTracking";
+import { MoreHorizontal } from "lucide-react";
+import {
+  type CampaignEntry, STATUS_COLORS, TYPE_LABELS, formatDueDate, firestoreToEntry, CAMPAIGN_TYPES,
+} from "@/lib/campaignTracking";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
+import { PAGE_GROUND_STYLE, HEADER_STYLE, SURFACE } from "../../theme";
+import { CustomRequestDialog } from "../../components/CustomRequestDialog";
+
 const PAGE_SIZE = 20;
-
-// ─── Detail View Card ─────────────────────────────────────────────────────────
-
-interface DetailCardProps {
-  entry: CampaignEntry;
-  onClose: () => void;
-  onMarkComplete?: () => void;
-  onMarkIncomplete?: () => void;
-}
-
-function DetailCard({ entry, onClose, onMarkComplete, onMarkIncomplete }: DetailCardProps) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 overflow-y-auto py-8">
-      <Card className="w-full max-w-md mx-4">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>{entry.CR}</CardTitle>
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[entry.status]}`}>
-              {entry.status}
-            </span>
-          </div>
-          <p className="text-sm text-zinc-400">{TYPE_LABELS[entry.type]}</p>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3 max-h-[55vh] overflow-y-auto">
-          <Row label="Fan Name" value={entry.fanName} />
-          {entry.profileLink && (
-            <div>
-              <p className="text-xs text-zinc-500 mb-0.5">Profile</p>
-              <a href={entry.profileLink} target="_blank" rel="noreferrer" className="text-sm text-violet-400 flex items-center gap-1 hover:text-violet-300 transition-colors">
-                View Profile <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-          )}
-          <Row label="Description" value={entry.description} />
-          {entry.dueDate && (
-            <Row label={entry.type === "Call" ? "Call Time" : "Due Date"} value={`${formatDueDate(entry.dueDate)}${entry.dueDateTimezone ? ` (${entry.dueDateTimezone})` : ""}`} />
-          )}
-          {(entry.type === "CR" || entry.type === "Call") && entry.length && <Row label="Length" value={entry.length} />}
-          {entry.type === "Call" && entry.socialPlatform && <Row label="Social Platform" value={entry.socialPlatform} />}
-          {entry.type === "Call" && entry.socialUsername && <Row label="Social Username" value={entry.socialUsername} />}
-          {entry.type === "Item" && entry.address && <Row label="Address" value={entry.address} />}
-          <Row label="Total Amount" value={formatAmount(entry.totalAmount)} />
-          <Row label="Amount Paid" value={formatAmount(entry.amountPaid)} />
-        </CardContent>
-        <CardFooter className="flex flex-wrap items-center justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>Close</Button>
-          {onMarkComplete && (
-            <Button
-              className="bg-green-600 hover:bg-green-700 text-white"
-              onClick={() => { onMarkComplete(); onClose(); }}
-            >
-              Mark as Complete
-            </Button>
-          )}
-          {onMarkIncomplete && (
-            <Button variant="outline" onClick={() => { onMarkIncomplete(); onClose(); }}>
-              Mark as Incomplete
-            </Button>
-          )}
-        </CardFooter>
-      </Card>
-    </div>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-xs text-zinc-500">{label}</p>
-      <p className="text-sm text-zinc-200">{value}</p>
-    </div>
-  );
-}
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function AllCustomsPage() {
   const { creatorUser } = useCreatorAuth();
   const [entries, setEntries] = useState<CampaignEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+
   useEffect(() => {
     if (!creatorUser) return;
     const q = query(
@@ -122,13 +54,14 @@ export default function AllCustomsPage() {
       setEntries(docs);
       setLoading(false);
     }, (error) => {
-      console.error('[all-customs] campaign-tracking listener error:', error);
+      console.error("[all-customs] campaign-tracking listener error:", error);
       setLoading(false);
     });
     return unsub;
   }, [creatorUser?.creatorID]);
 
   const handleStatusChange = async (entry: CampaignEntry, revert: boolean) => {
+    setBusy(entry.id);
     try {
       const res = await apiRequest(`/api/campaign-tracking/${entry.id}/creator-complete`, {
         method: "POST",
@@ -138,6 +71,8 @@ export default function AllCustomsPage() {
       toast.success(revert ? "Marked as Awaiting Approval" : "Marked as Completed");
     } catch {
       toast.error("Failed to update status");
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -147,42 +82,35 @@ export default function AllCustomsPage() {
   const goTo = (p: number) => setCurrentPage(Math.max(1, Math.min(p, totalPages)));
 
   return (
-    <div className="min-h-screen" style={{ background: "#09090b", color: "white" }}>
+    <div className="min-h-screen" style={PAGE_GROUND_STYLE}>
       {/* Top bar */}
       <header
-        className="sticky top-0 z-40 flex items-center gap-2 px-3 sm:px-6 h-14 relative"
-        style={{
-          background: "rgba(9,9,11,0.9)",
-          backdropFilter: "blur(12px)",
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
-        }}
+        className="sticky top-0 z-40 flex h-14 items-center gap-2 px-3 sm:px-6"
+        style={HEADER_STYLE}
       >
-        <SidebarTrigger className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5" />
+        <SidebarTrigger className="text-zinc-400 hover:bg-white/5 hover:text-zinc-100" />
         <img
           src="/logo/bluu_long.svg"
           alt="Bluu Rock"
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-6 pointer-events-none"
+          className="pointer-events-none absolute left-1/2 top-1/2 h-6 -translate-x-1/2 -translate-y-1/2"
         />
       </header>
 
-      <main className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-8">
-        <h1 className="text-xl sm:text-2xl font-semibold mb-4 sm:mb-6">All Custom Requests</h1>
+      <main className="mx-auto max-w-5xl px-3 py-6 sm:px-6 sm:py-8">
+        <h1 className="mb-4 text-xl font-semibold sm:mb-6 sm:text-2xl">All Custom Requests</h1>
 
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-6 h-6 rounded-full border-2 border-violet-500/30 border-t-violet-500 animate-spin" />
+          <div className="flex flex-col gap-2">
+            {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-14 rounded-xl" />)}
           </div>
         ) : entries.length === 0 ? (
-          <div
-            className="rounded-2xl p-12 text-center"
-            style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)" }}
-          >
-            <p className="text-zinc-500 text-sm">No custom requests found.</p>
+          <div className={`rounded-2xl p-12 text-center ${SURFACE.panel}`}>
+            <p className="text-sm text-zinc-400">No custom requests found.</p>
           </div>
         ) : (
           <>
             {/* Desktop table */}
-            <div className="hidden md:block rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
+            <div className={`hidden overflow-hidden rounded-2xl md:block ${SURFACE.panel}`}>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -212,7 +140,7 @@ export default function AllCustomsPage() {
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" className="h-8 w-8">
-                              <MoreHorizontal className="w-4 h-4" />
+                              <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
@@ -237,25 +165,21 @@ export default function AllCustomsPage() {
             </div>
 
             {/* Mobile card list */}
-            <div className="md:hidden flex flex-col gap-2">
+            <div className="flex flex-col gap-2 md:hidden">
               {pageEntries.map(entry => (
                 <button
                   key={entry.id}
                   onClick={() => setViewEntry(entry)}
-                  className="text-left rounded-xl px-4 py-3 flex flex-col gap-2 transition-colors active:bg-white/[0.04]"
-                  style={{
-                    background: "rgba(255,255,255,0.025)",
-                    border: "1px solid rgba(255,255,255,0.07)",
-                  }}
+                  className={`flex flex-col gap-2 rounded-xl px-4 py-3 text-left transition-colors active:bg-white/[0.04] ${SURFACE.panel}`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-xs font-semibold text-violet-300 tracking-wider">{entry.CR}</span>
+                    <span className="font-mono text-xs font-semibold tracking-wider text-violet-300">{entry.CR}</span>
                     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${STATUS_COLORS[entry.status]}`}>
                       {entry.status}
                     </span>
                   </div>
                   <div className="flex flex-col gap-0.5">
-                    <p className="text-sm text-zinc-100 font-medium truncate">{entry.fanName}</p>
+                    <p className="truncate text-sm font-medium text-zinc-100">{entry.fanName}</p>
                     <p className="text-[11px] text-zinc-500">{TYPE_LABELS[entry.type]}</p>
                   </div>
                   {entry.dueDate && (
@@ -321,11 +245,14 @@ export default function AllCustomsPage() {
       </main>
 
       {viewEntry && (
-        <DetailCard
+        <CustomRequestDialog
           entry={viewEntry}
-          onClose={() => setViewEntry(null)}
-          onMarkComplete={viewEntry.status === "In Progress" ? () => handleStatusChange(viewEntry, false) : undefined}
-          onMarkIncomplete={viewEntry.status === "Completed" && !viewEntry.isArchived ? () => handleStatusChange(viewEntry, true) : undefined}
+          open={!!viewEntry}
+          onOpenChange={(o) => { if (!o) setViewEntry(null); }}
+          driveLink={creatorUser?.driveLink}
+          onComplete={viewEntry.status === "In Progress" ? () => { handleStatusChange(viewEntry, false); setViewEntry(null); } : undefined}
+          onIncomplete={viewEntry.status === "Completed" && !viewEntry.isArchived ? () => { handleStatusChange(viewEntry, true); setViewEntry(null); } : undefined}
+          busy={busy === viewEntry.id}
         />
       )}
     </div>

@@ -17,6 +17,10 @@ colors:
   status-yellow: "#facc15"
   status-red: "#f87171"
   status-zinc: "#a1a1aa"
+  creator-accent: "#8b5cf6"
+  creator-accent-deep: "#7c3aed"
+  creator-amber: "#f59e0b"
+  creator-emerald: "#10b981"
 typography:
   display:
     fontFamily: "Google Sans, sans-serif"
@@ -193,7 +197,7 @@ Card radius is `rounded-xl`; controls and rows are `rounded-md` / `rounded-lg`; 
 
 ## 5. Components
 
-Only shadcn/ui primitives from `src/components/ui/`. Never introduce another component library or hand-roll a primitive that already exists there; add new ones with `npx shadcn@latest add <name>`. Icons are **only** `@tabler/icons-react` and `lucide-react`. Images are **only** `Avatar` / `AvatarImage` / `AvatarFallback` — never a raw `<img>`. Every mutation `toast`s its outcome via `sonner` (`toast.success` / `toast.error`).
+**Only** shadcn/ui primitives from `src/components/ui/`. Never introduce another component library or hand-roll a primitive that already exists there; add new ones with `npx shadcn@latest add <name>`. Icons are **only** `@tabler/icons-react` and `lucide-react`. Images are **only** `Avatar` / `AvatarImage` / `AvatarFallback` — never a raw `<img>`. Every mutation `toast`s its outcome via `sonner` (`toast.success` / `toast.error`).
 
 ### Buttons
 - **Shape:** `rounded-md` / `rounded-lg`.
@@ -260,3 +264,36 @@ The throughline: **the card's tint tells you the category at a glance, the kanba
 - **Don't** reach for a modal first, drop a spinner into the middle of a layout, or ship an "illustration" empty state.
 - **Don't** introduce a second font family, oversized display type, gradient text/heros, or glassmorphism — this is not a marketing site.
 - **Don't** use a colored side-stripe as a decorative accent; the only left-border in the system is the kanban row's functional `border-l-2` overlay edge.
+
+## 7. Creator Portal (external skin)
+
+Everything above describes the **internal console** — the Electron app internal staff live in. The **creator portal** (`src/app/creator-portal/`) is a separate surface for **external creators** in a normal browser, and it wears a deliberately warmer, friendlier skin. This is an **authored divergence**, not drift: it trades the console's monochrome restraint for a single violet brand voice, because the audience and context differ (a creator marking their own work done, not an operator scanning a data console).
+
+**The skin is defined once, in code, in [`src/app/creator-portal/theme.ts`](src/app/creator-portal/theme.ts).** Import those tokens; never hardcode a portal color, gradient, badge map, or surface recipe inline. If the visual language changes, change `theme.ts` and this section together.
+
+### What carries over from the console (unchanged)
+- Near-black ground, translucent-white overlay surfaces, hairline borders. **No drop shadows** (the portal previously used `box-shadow` card lifts and glow shadows — both removed).
+- **No gradient fills** on buttons or cards. Actions are solid: `COMPLETE_BTN` (emerald) and `ACCENT_BTN` (soft violet). The old green→emerald gradient CTA with a glow is gone.
+- `tabular-nums` on every amount; `font-mono text-xs` on every CR code.
+- Only `src/components/ui` primitives; only `Avatar` for images (the profile menu uses `Avatar`, never a raw `<img>` — the logo SVG is the sole non-Avatar image).
+- `Skeleton`s shaped to the layout for loading (never a spinner mid-content); every mutation `toast`s its outcome.
+
+### What differs (the authored part)
+- **Brand voice is violet, not Action Blue.** `creator-accent` (`#8b5cf6`, `ACCENT.hex`) marks CR codes, links, focus, and the avatar fallback — the portal's one non-semantic voice, used as sparingly as the console uses blue. Named category hues live in `HUES` (violet / blue / amber / emerald) for section icons and the customs/calls/items type accents (`TYPE_META`).
+- **One signature brand glow.** A single `radial-gradient(... rgba(139,92,246,0.08) ...)` sits behind every portal page ground (`PAGE_GROUND_STYLE`). This is the portal's *one* decorative-color exception — the analogue of the console's single backdrop-blur — and it is the only place color is spent on mood. Do not add a second.
+- **Dense badge caption size.** Content-type / status badges use `text-[10px]`, the established dense-caption step (see § Typography, Code) — legitimate here, not a new size.
+- **Friendlier empty states.** A small icon-in-circle + one line ("All caught up!") instead of the console's single quiet line — a deliberate warmth for this audience.
+
+### Components & interaction (portal-specific)
+- **One dialog vocabulary.** Every detail view and confirmation uses shadcn `Dialog` via [`components/CreatorDialog.tsx`](src/app/creator-portal/components/CreatorDialog.tsx) — which gives Esc-to-close, a focus trap, and `role="dialog"` for free. **Never hand-roll a `createPortal` overlay** (the portal used to have three; all replaced). The two typed detail views are `CustomRequestDialog` (customs/calls/items) and `ContentPlanDialog` (content planning); both are reused across the dashboard and the list pages so a record looks identical everywhere.
+- **Completion is labelled and recoverable.** The action button reads **"Mark Completed"** (a verb), never the bare status word "Completed". Two safety models, by stakes:
+  - **Customs (high-ticket):** completion is a **deliberate two-step** — open the detail dialog, then confirm — so a single stray tap can't vanish a card. A success `toast` offers **Undo**, which reverts the request to *Awaiting Approval* (`creator-complete` with `{ revert: true }`).
+  - **Content planning (routine):** quick one-tap complete with an **Undo** `toast` that reverts to *Outstanding* (the content-planning `creator-complete` endpoint mirrors the campaign one's `revert` flag), so the card returns cleanly.
+- **Lists, not carousels.** Outstanding items render as responsive grids / vertical lists (`repeat(auto-fit, …)` / stacked cards), so a creator sees everything at once — no horizontal paging.
+
+### Portal rules (in addition to everything in §1–6)
+1. **Import the skin from `theme.ts`.** No inline portal hexes, gradients, or surface recipes. New portal color → add it to `theme.ts` **and** the `creator-*` palette entries in this file's frontmatter.
+2. **Violet is the portal's one voice**, exactly as Action Blue is the console's. It marks brand/interactive accent only — never decoration beyond the one signature page glow.
+3. **Solid fills only** — no gradient or glow buttons/cards. `COMPLETE_BTN` / `ACCENT_BTN` are the two action treatments.
+4. **Detail & confirm = shadcn `Dialog`** through `CreatorDialog`. No bespoke overlays.
+5. **"Mark Completed", never "Completed"**, and every completion is undoable via the `revert` flag.

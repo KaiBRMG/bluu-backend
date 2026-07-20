@@ -1,29 +1,28 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useCreatorAuth } from "@/components/CreatorAuthProvider";
 import { useSearchParams } from "next/navigation";
 import { auth, db } from "@/firebase-config";
-import { collection, doc, getDoc, query, where, onSnapshot } from "firebase/firestore";
+import { collection, doc, getDoc, query, where, onSnapshot, orderBy } from "firebase/firestore";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Skeleton } from "@/components/ui/skeleton";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Info, ExternalLink, CheckCircle2, ChevronRight, LogOut } from "lucide-react";
 import {
-  Carousel, CarouselContent, CarouselItem,
-  CarouselPrevious, CarouselNext,
-} from "@/components/ui/carousel";
-import {
-  Info, ExternalLink, CheckCircle2, ChevronRight, LogOut, X,
-} from "lucide-react";
-import {
-  type CampaignEntry, type CRType, type CRPriority,
+  type CampaignEntry, type CRPriority,
   PRIORITY_COLORS, formatAmount, formatDueDate, firestoreToEntry, sortByPriority, CAMPAIGN_TYPES,
 } from "@/lib/campaignTracking";
-import { orderBy } from "firebase/firestore";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
+import {
+  TYPE_META, SURFACE, ACCENT_BTN, COMPLETE_BTN, PAGE_GROUND_STYLE, HEADER_STYLE, contentTypeBadge,
+  type CustomType,
+} from "../theme";
+import { CustomRequestDialog } from "../components/CustomRequestDialog";
+import { CreatorDialog } from "../components/CreatorDialog";
 
 // ─── Content Planning types ───────────────────────────────────────────────────
 
@@ -69,45 +68,41 @@ function formatCPDate(dateStr: string | null): string {
   } catch { return dateStr; }
 }
 
+function sortCP(list: CPEntry[]): CPEntry[] {
+  return [...list].sort((a, b) => {
+    if (!a.dueDate && !b.dueDate) return 0;
+    if (!a.dueDate) return 1;
+    if (!b.dueDate) return -1;
+    return a.dueDate.localeCompare(b.dueDate);
+  });
+}
+
 // ─── Content Planning Card ────────────────────────────────────────────────────
 
-interface CPCardProps {
+function CPCard({ entry, onComplete, completing }: {
   entry: CPEntry;
   onComplete: (id: string) => void;
   completing: boolean;
-}
-
-function CPCard({ entry, onComplete, completing }: CPCardProps) {
+}) {
   const overdue = isCPOverdue(entry.dueDate);
+  const rows = entry.description.filter(r => r.qty || r.content);
   return (
     <div
-      className="relative rounded-2xl border p-4 flex flex-col gap-3 h-full min-h-[240px]"
-      style={{
-        background: "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)",
-        borderColor: overdue ? "rgba(239,68,68,0.25)" : "rgba(255,255,255,0.08)",
-        boxShadow: "0 4px 24px rgba(0,0,0,0.3)",
-      }}
+      className={`flex h-full flex-col gap-3 rounded-xl p-4 ${SURFACE.card}`}
+      style={overdue ? { borderColor: "rgba(239,68,68,0.25)" } : undefined}
     >
-      {/* Header */}
-      <div className="flex items-start justify-between gap-2 flex-wrap">
-        <p className="text-sm font-semibold text-zinc-100 leading-tight flex-1">{entry.contentSummary}</p>
-        <span
-          className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md shrink-0 ${
-            entry.contentType === "NSFW"
-              ? "bg-orange-500/15 text-orange-400"
-              : "bg-blue-500/15 text-blue-400"
-          }`}
-        >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <p className="flex-1 text-sm font-semibold leading-tight text-zinc-100">{entry.contentSummary}</p>
+        <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${contentTypeBadge(entry.contentType)}`}>
           {entry.contentType}
         </span>
       </div>
 
-      {/* Description */}
-      {entry.description.length > 0 && entry.description.some(r => r.qty || r.content) && (
+      {rows.length > 0 && (
         <div className="flex flex-col gap-0.5">
-          {entry.description.filter(r => r.qty || r.content).map((r, i) => (
+          {rows.map((r, i) => (
             <p key={i} className="text-xs text-zinc-400">
-              <span className="text-zinc-300 font-medium">{r.qty}</span>
+              <span className="font-medium text-zinc-300">{r.qty}</span>
               {r.qty && r.content ? " × " : ""}
               {r.content}
             </p>
@@ -115,351 +110,97 @@ function CPCard({ entry, onComplete, completing }: CPCardProps) {
         </div>
       )}
 
-      {/* Comment */}
       {entry.comment && (
-        <p className="text-xs text-zinc-500 leading-relaxed line-clamp-2">{entry.comment}</p>
+        <p className="line-clamp-2 text-xs leading-relaxed text-zinc-500">{entry.comment}</p>
       )}
 
-      {/* Due date */}
-      <p className={`text-xs mt-auto ${overdue ? "text-red-400 font-medium" : "text-zinc-500"}`}>
+      <p className={`mt-auto text-xs ${overdue ? "font-medium text-red-300" : "text-zinc-500"}`}>
         {overdue ? "Overdue · " : "Due "}{formatCPDate(entry.dueDate)}
       </p>
 
-      {/* Footer */}
-      <div className="pt-1 border-t" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
+      <div className="border-t border-white/[0.06] pt-3">
         <Button
           onClick={() => onComplete(entry.id)}
           disabled={completing}
-          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 h-auto rounded-lg transition-all disabled:opacity-50 w-full justify-center"
-          style={{
-            background: "linear-gradient(135deg, #059669, #10b981)",
-            color: "white",
-            boxShadow: completing ? "none" : "0 0 12px rgba(16,185,129,0.35)",
-          }}
+          size="sm"
+          className={`w-full gap-1.5 ${COMPLETE_BTN}`}
         >
-          <CheckCircle2 className="w-3.5 h-3.5" />
-          {completing ? "Saving…" : "Completed"}
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          {completing ? "Saving…" : "Mark Completed"}
         </Button>
       </div>
     </div>
   );
 }
 
-// ─── CR Detail Overlay ────────────────────────────────────────────────────────
+// ─── Customs Card (opens detail dialog; completion is deliberate) ─────────────
 
-interface CRDetailOverlayProps {
+function CustomCard({ entry, accentHex, onOpen }: {
   entry: CampaignEntry;
   accentHex: string;
-  driveLink?: string | null;
-  onComplete: (id: string) => void;
-  completing: boolean;
-  onClose: () => void;
-}
-
-function CRDetailOverlay({ entry, accentHex, driveLink, onComplete, completing, onClose }: CRDetailOverlayProps) {
-  const dueDateLabel = entry.dueDate
+  onOpen: () => void;
+}) {
+  const dueLabel = entry.dueDate
     ? `${formatDueDate(entry.dueDate)}${entry.dueDateTimezone ? ` (${entry.dueDateTimezone})` : ""}`
     : null;
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}
-      onClick={onClose}
-    >
-      <Card
-        className="w-full max-w-md max-h-[80vh] overflow-y-auto"
-        style={{ background: "#111113", border: "1px solid rgba(255,255,255,0.1)", color: "white" }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-2 px-6 pt-6 pb-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span
-              className="font-mono text-xs font-semibold tracking-widest px-2 py-0.5 rounded-md"
-              style={{ background: `${accentHex}25`, color: accentHex }}
-            >
-              {entry.CR}
-            </span>
-            {entry.priority && (
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_COLORS[entry.priority as CRPriority]}`}>
-                {entry.priority} Priority
-              </span>
-            )}
-          </div>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors flex-shrink-0">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <CardContent className="flex flex-col gap-4 pt-4">
-          {/* Fan */}
-          <div>
-            <p className="text-[11px] uppercase tracking-wider text-zinc-500 mb-0.5">Fan</p>
-            <p className="text-sm font-medium text-zinc-100">{entry.fanName}</p>
-            {entry.profileLink && (
-              <a
-                href={entry.profileLink}
-                target="_blank"
-                rel="noreferrer"
-                className="text-[11px] transition-colors flex items-center gap-1 mt-0.5"
-                style={{ color: accentHex }}
-              >
-                View Profile <ExternalLink className="w-3 h-3" />
-              </a>
-            )}
-          </div>
-
-          {/* Description */}
-          {entry.description && (
-            <div>
-              <p className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Description</p>
-              <p className="text-sm text-zinc-300 leading-relaxed">{entry.description}</p>
-            </div>
-          )}
-
-          {/* Meta details */}
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
-            {dueDateLabel && (
-              <div>
-                <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Due Date</p>
-                <p className="text-rose-400/80">{dueDateLabel}</p>
-              </div>
-            )}
-            {entry.length && (
-              <div>
-                <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Length</p>
-                <p className="text-zinc-300">{entry.length}</p>
-              </div>
-            )}
-            {entry.socialPlatform && (
-              <div>
-                <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Platform</p>
-                <p className="text-zinc-300">{entry.socialPlatform}</p>
-              </div>
-            )}
-            {entry.socialUsername && (
-              <div>
-                <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Username</p>
-                <p className="text-zinc-300">@{entry.socialUsername}</p>
-              </div>
-            )}
-            {entry.address && (
-              <div className="col-span-2">
-                <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Address</p>
-                <p className="text-zinc-300">{entry.address}</p>
-              </div>
-            )}
-            {entry.totalAmount != null && (
-              <div>
-                <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Amount</p>
-                <p className="text-zinc-200 font-semibold">{formatAmount(entry.totalAmount)}</p>
-              </div>
-            )}
-          </div>
-
-          {/* Actions */}
-          <div className="flex gap-2 pt-2 border-t" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-            {driveLink && (
-              <a
-                href={driveLink}
-                target="_blank"
-                rel="noreferrer"
-                className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition-all hover:brightness-110"
-                style={{
-                  background: "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.2))",
-                  border: "1px solid rgba(99,102,241,0.3)",
-                  color: "#93c5fd",
-                }}
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                Upload
-              </a>
-            )}
-            <Button
-              onClick={() => { onComplete(entry.id); onClose(); }}
-              disabled={completing}
-              className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 h-auto rounded-lg transition-all disabled:opacity-50"
-              style={{
-                background: "linear-gradient(135deg, #059669, #10b981)",
-                color: "white",
-                boxShadow: completing ? "none" : "0 0 12px rgba(16,185,129,0.35)",
-              }}
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              {completing ? "Saving…" : "Completed"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </div>,
-    document.body
-  );
-}
-
-// ─── Entry Card ───────────────────────────────────────────────────────────────
-
-interface EntryCardProps {
-  entry: CampaignEntry;
-  onComplete: (id: string) => void;
-  completing: boolean;
-  driveLink?: string | null;
-  accentHex: string;
-}
-
-function EntryCard({ entry, onComplete, completing, driveLink, accentHex }: EntryCardProps) {
-  const [detailOpen, setDetailOpen] = useState(false);
-  const dueDateLabel = entry.dueDate
-    ? `${formatDueDate(entry.dueDate)}${entry.dueDateTimezone ? ` (${entry.dueDateTimezone})` : ""}`
-    : null;
-
   return (
-    <>
-      <div
-        className="relative rounded-2xl border p-4 flex flex-col gap-3 h-full min-h-[260px]"
-        style={{
-          background: "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)",
-          borderColor: "rgba(255,255,255,0.08)",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.3)",
-        }}
-      >
-        {/* Header row */}
-        <div className="flex items-start justify-between gap-2">
-          <span
-            className="font-mono text-xs font-semibold tracking-widest px-2 py-0.5 rounded-md"
-            style={{ background: `${accentHex}25`, color: accentHex }}
-          >
-            {entry.CR}
-          </span>
-          {entry.priority && (
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_COLORS[entry.priority as CRPriority]}`}>
-              {entry.priority} Priority
-            </span>
-          )}
-        </div>
-
-        {/* Fan name */}
-        <div>
-          <p className="text-[11px] uppercase tracking-wider text-zinc-500 mb-0.5">Fan</p>
-          <p className="text-sm font-medium text-zinc-100">{entry.fanName}</p>
-          {entry.profileLink && (
-            <a
-              href={entry.profileLink}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[11px] transition-colors flex items-center gap-1 mt-0.5"
-              style={{ color: accentHex }}
-            >
-              View Profile <ExternalLink className="w-3 h-3" />
-            </a>
-          )}
-        </div>
-
-        {/* View details link */}
-        <button
-          onClick={() => setDetailOpen(true)}
-          className="text-[11px] transition-colors flex items-center gap-1 self-start flex-1"
-          style={{ color: accentHex }}
+    <button
+      onClick={onOpen}
+      className={`flex flex-col gap-2 rounded-xl p-3 text-left transition-all ${SURFACE.card} ${SURFACE.cardHover} active:scale-[0.98]`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span
+          className="rounded-md px-2 py-0.5 font-mono text-xs font-semibold tracking-widest"
+          style={{ background: `${accentHex}25`, color: accentHex }}
         >
-          View details <ChevronRight className="w-3 h-3" />
-        </button>
-
-        {/* Meta */}
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-500">
-          {dueDateLabel && (
-            <span className="text-rose-400/80">Due {dueDateLabel}</span>
-          )}
-          {entry.length && <span>Length: {entry.length}</span>}
-          {entry.socialPlatform && <span>{entry.socialPlatform}</span>}
-          {entry.socialUsername && <span>@{entry.socialUsername}</span>}
-          {entry.address && <span className="truncate max-w-[140px]">{entry.address}</span>}
-        </div>
-
-        {/* Footer */}
-        <div className="flex flex-col gap-2 pt-1 border-t" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
-          <span className="text-sm font-semibold text-zinc-200">{formatAmount(entry.totalAmount)}</span>
-          <Button
-            onClick={() => onComplete(entry.id)}
-            disabled={completing}
-            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 h-auto rounded-lg transition-all disabled:opacity-50 self-start"
-            style={{
-              background: "linear-gradient(135deg, #059669, #10b981)",
-              color: "white",
-              boxShadow: completing ? "none" : "0 0 12px rgba(16,185,129,0.35)",
-            }}
-          >
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            {completing ? "Saving…" : "Completed"}
-          </Button>
-        </div>
+          {entry.CR}
+        </span>
+        {entry.priority && (
+          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_COLORS[entry.priority as CRPriority]}`}>
+            {entry.priority}
+          </span>
+        )}
       </div>
 
-      {detailOpen && (
-        <CRDetailOverlay
-          entry={entry}
-          accentHex={accentHex}
-          driveLink={driveLink}
-          onComplete={onComplete}
-          completing={completing}
-          onClose={() => setDetailOpen(false)}
-        />
-      )}
-    </>
+      <div>
+        <p className="text-[11px] uppercase tracking-wider text-zinc-500">Fan</p>
+        <p className="truncate text-sm font-medium text-zinc-100">{entry.fanName}</p>
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] text-rose-300">{dueLabel ? `Due ${dueLabel}` : ""}</span>
+        <span className="text-sm font-semibold tabular-nums text-zinc-200">{formatAmount(entry.totalAmount)}</span>
+      </div>
+
+      <span className="inline-flex items-center gap-1 text-[11px] text-violet-300">
+        View details <ChevronRight className="h-3 w-3" />
+      </span>
+    </button>
   );
 }
 
 // ─── Type Tile ────────────────────────────────────────────────────────────────
 
-const TYPE_META: Record<"CR" | "Call" | "Item", { label: string; infoText?: string; accentHex: string }> = {
-  CR: {
-    label: "Customs",
-    infoText: "Please upload content to your Google Drive folder using the CR code as the name. For multiple files, create a folder with the CR code as the name.",
-    accentHex: "#8b5cf6",
-  },
-  Call: {
-    label: "Calls",
-    accentHex: "#3b82f6",
-  },
-  Item: {
-    label: "Items",
-    accentHex: "#f59e0b",
-  },
-};
-
-interface TypeTileProps {
-  type: "CR" | "Call" | "Item";
+function TypeTile({ type, entries, onOpen }: {
+  type: CustomType;
   entries: CampaignEntry[];
-  onComplete: (id: string) => void;
-  completing: string | null;
-  driveLink?: string | null;
-}
-
-function TypeTile({ type, entries, onComplete, completing, driveLink }: TypeTileProps) {
+  onOpen: (entry: CampaignEntry) => void;
+}) {
   const meta = TYPE_META[type];
-
   return (
-    <div
-      className="rounded-2xl p-4 flex flex-col gap-4"
-      style={{
-        background: "rgba(255,255,255,0.025)",
-        border: "1px solid rgba(255,255,255,0.07)",
-      }}
-    >
-      {/* Tile header */}
+    <div className={`flex flex-col gap-4 rounded-2xl p-4 ${SURFACE.panel}`}>
       <div className="flex items-center gap-2">
-        <span
-          className="w-2 h-2 rounded-full"
-          style={{ background: meta.accentHex, boxShadow: `0 0 6px ${meta.accentHex}` }}
-        />
+        <span className="h-2 w-2 rounded-full" style={{ background: meta.hex }} />
         <h3 className="text-sm font-semibold text-zinc-200">{meta.label}</h3>
-        <span className="text-xs text-zinc-500">({entries.length})</span>
+        <span className="text-xs tabular-nums text-zinc-500">({entries.length})</span>
         {meta.infoText && (
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-5 w-5 text-zinc-600 hover:text-zinc-400">
-                <Info className="w-3.5 h-3.5" />
+              <Button variant="ghost" size="icon" className="h-5 w-5 text-zinc-500 hover:text-zinc-300">
+                <Info className="h-3.5 w-3.5" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="max-w-xs text-xs text-zinc-300 leading-relaxed">
+            <PopoverContent className="max-w-xs text-xs leading-relaxed text-zinc-300">
               {meta.infoText}
             </PopoverContent>
           </Popover>
@@ -468,36 +209,17 @@ function TypeTile({ type, entries, onComplete, completing, driveLink }: TypeTile
 
       {entries.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-8 text-center">
-          <div
-            className="w-8 h-8 rounded-full flex items-center justify-center mb-2"
-            style={{ background: `${meta.accentHex}15` }}
-          >
-            <CheckCircle2 className="w-4 h-4" style={{ color: meta.accentHex }} />
+          <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-full" style={{ background: `${meta.hex}15` }}>
+            <CheckCircle2 className="h-4 w-4" style={{ color: meta.hex }} />
           </div>
-          <p className="text-xs text-zinc-600">All caught up!</p>
+          <p className="text-xs text-zinc-400">All caught up!</p>
         </div>
       ) : (
-        <Carousel className="w-full" opts={{ align: "start" }}>
-          <CarouselContent className="-ml-3">
-            {entries.map(e => (
-              <CarouselItem key={e.id} className="pl-3 basis-[85%] sm:basis-[75%]">
-                <EntryCard
-                  entry={e}
-                  onComplete={onComplete}
-                  completing={completing === e.id}
-                  driveLink={driveLink}
-                  accentHex={meta.accentHex}
-                />
-              </CarouselItem>
-            ))}
-          </CarouselContent>
-          {entries.length > 1 && (
-            <>
-              <CarouselPrevious className="left-0 -translate-x-1/2" />
-              <CarouselNext className="right-0 translate-x-1/2" />
-            </>
-          )}
-        </Carousel>
+        <div className="flex flex-col gap-2">
+          {entries.map(e => (
+            <CustomCard key={e.id} entry={e} accentHex={meta.hex} onOpen={() => onOpen(e)} />
+          ))}
+        </div>
       )}
     </div>
   );
@@ -505,42 +227,36 @@ function TypeTile({ type, entries, onComplete, completing, driveLink }: TypeTile
 
 // ─── Profile Menu ─────────────────────────────────────────────────────────────
 
-interface ProfileMenuProps {
+function ProfileMenu({ stageName, email, photoURL }: {
   stageName: string;
   email: string;
   photoURL?: string | null;
-}
-
-function ProfileMenu({ stageName, email, photoURL }: ProfileMenuProps) {
+}) {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" className="flex items-center gap-2.5 rounded-xl px-3 py-1.5 h-auto hover:bg-white/5">
-          {photoURL ? (
-            <img src={photoURL} alt="" className="w-7 h-7 rounded-full object-cover ring-1 ring-white/10" />
-          ) : (
-            <div
-              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold"
-              style={{ background: "linear-gradient(135deg,#8b5cf6,#6366f1)", color: "white" }}
-            >
+        <Button variant="ghost" className="h-auto items-center gap-2.5 rounded-xl px-2 py-1.5 hover:bg-white/5">
+          <Avatar size="sm" className="ring-1 ring-white/10">
+            {photoURL && <AvatarImage src={photoURL} alt="" />}
+            <AvatarFallback className="bg-violet-500/25 text-violet-100">
               {stageName.charAt(0).toUpperCase()}
-            </div>
-          )}
-          <span className="text-sm font-medium text-zinc-200 hidden sm:block">{stageName}</span>
+            </AvatarFallback>
+          </Avatar>
+          <span className="hidden text-sm font-medium text-zinc-200 sm:block">{stageName}</span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-56 p-0 overflow-hidden rounded-xl" style={{ background: "#111113", border: "1px solid rgba(255,255,255,0.1)" }}>
-        <div className="px-4 py-3 border-b" style={{ borderColor: "rgba(255,255,255,0.07)" }}>
+      <PopoverContent align="end" className={`w-56 overflow-hidden rounded-xl p-0 ${SURFACE.overlay}`}>
+        <div className="border-b border-white/[0.07] px-4 py-3">
           <p className="text-sm font-semibold text-zinc-100">{stageName}</p>
-          <p className="text-xs text-zinc-500 truncate mt-0.5">{email}</p>
+          <p className="mt-0.5 truncate text-xs text-zinc-500">{email}</p>
         </div>
         <div className="p-1.5">
           <Button
             variant="ghost"
-            className="flex items-center gap-2.5 w-full px-3 py-2 h-auto text-sm text-zinc-300 hover:text-white hover:bg-white/5 rounded-lg justify-start"
+            className="h-auto w-full justify-start gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-white"
             onClick={() => auth.signOut()}
           >
-            <LogOut className="w-4 h-4 text-zinc-500" />
+            <LogOut className="h-4 w-4 text-zinc-500" />
             Sign Out
           </Button>
         </div>
@@ -549,19 +265,38 @@ function ProfileMenu({ stageName, email, photoURL }: ProfileMenuProps) {
   );
 }
 
+// ─── Section header with info popover ─────────────────────────────────────────
+
+function SectionHeader({ title, info }: { title: string; info: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <h2 className="text-lg font-semibold text-zinc-100">{title}</h2>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 text-zinc-500 hover:text-zinc-300">
+            <Info className="h-4 w-4" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="max-w-sm text-xs leading-relaxed text-zinc-300">{info}</PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function CreatorDashboardPage() {
   const { creatorUser } = useCreatorAuth();
   const searchParams = useSearchParams();
-  const crId = searchParams.get('crId');
+  const crId = searchParams.get("crId");
 
   const [entries, setEntries] = useState<CampaignEntry[]>([]);
   const [completing, setCompleting] = useState<string | null>(null);
   const [cpEntries, setCpEntries] = useState<CPEntry[]>([]);
   const [cpCompleting, setCpCompleting] = useState<string | null>(null);
   const [entriesLoaded, setEntriesLoaded] = useState(false);
-  const [linkedEntry, setLinkedEntry] = useState<CampaignEntry | null>(null);
+  const [cpLoaded, setCpLoaded] = useState(false);
+  const [detailEntry, setDetailEntry] = useState<CampaignEntry | null>(null);
   const [linkedError, setLinkedError] = useState<string | null>(null);
   const linkedResolvedRef = useRef(false);
 
@@ -579,7 +314,7 @@ export default function CreatorDashboardPage() {
       );
       setEntriesLoaded(true);
     }, (error) => {
-      console.error('[dashboard] campaign-tracking listener error:', error);
+      console.error("[dashboard] campaign-tracking listener error:", error);
     });
     return unsub;
   }, [creatorUser?.creatorID]);
@@ -591,21 +326,19 @@ export default function CreatorDashboardPage() {
     const found = entries.find(e => e.id === crId);
     if (found) {
       linkedResolvedRef.current = true;
-      setLinkedEntry(found);
+      setDetailEntry(found);
       return;
     }
 
-    // Not in current "In Progress" list — wait briefly for a server snapshot,
-    // then fetch the doc directly to determine why.
     const timer = setTimeout(async () => {
       if (linkedResolvedRef.current) return;
       linkedResolvedRef.current = true;
       try {
-        const snap = await getDoc(doc(db, 'campaign-tracking', crId));
+        const snap = await getDoc(doc(db, "campaign-tracking", crId));
         if (!snap.exists()) {
-          toast.error('Custom request not found.');
+          toast.error("Custom request not found.");
         } else if ((snap.data() as Record<string, unknown>).creatorID !== creatorUser.creatorID) {
-          setLinkedError('This request belongs to a different account.');
+          setLinkedError("This request belongs to a different account.");
         } else {
           toast.error("This request isn't currently active.");
         }
@@ -626,44 +359,54 @@ export default function CreatorDashboardPage() {
       orderBy("dueDate", "asc")
     );
     const unsub = onSnapshot(q, snap => {
-      const sorted = snap.docs
-        .map(d => firestoreToCP(d.id, d.data() as Record<string, unknown>))
-        .sort((a, b) => {
-          if (!a.dueDate && !b.dueDate) return 0;
-          if (!a.dueDate) return 1;
-          if (!b.dueDate) return -1;
-          return a.dueDate.localeCompare(b.dueDate);
-        });
-      setCpEntries(sorted);
+      setCpEntries(sortCP(snap.docs.map(d => firestoreToCP(d.id, d.data() as Record<string, unknown>))));
+      setCpLoaded(true);
     }, (error) => {
-      console.error('[dashboard] content-planning listener error:', error);
+      console.error("[dashboard] content-planning listener error:", error);
     });
     return unsub;
   }, [creatorUser?.creatorID]);
 
+  // ── Content-planning: optimistic complete with clean Undo (revert → Outstanding) ──
   const handleCpComplete = async (id: string) => {
-    setCpCompleting(id);
     const removed = cpEntries.find(e => e.id === id);
+    if (!removed) return;
+    setCpCompleting(id);
     setCpEntries(prev => prev.filter(e => e.id !== id));
     try {
       const res = await apiRequest(`/api/content-planning/${id}/creator-complete`, { method: "POST" });
       if (!res.ok) throw new Error();
+      toast.success("Marked completed", {
+        action: { label: "Undo", onClick: () => revertCp(removed) },
+      });
     } catch {
-      if (removed) setCpEntries(prev => [...prev, removed].sort((a, b) => {
-        if (!a.dueDate && !b.dueDate) return 0;
-        if (!a.dueDate) return 1;
-        if (!b.dueDate) return -1;
-        return a.dueDate.localeCompare(b.dueDate);
-      }));
+      setCpEntries(prev => sortCP([...prev, removed]));
       toast.error("Failed to mark as completed");
     } finally {
       setCpCompleting(null);
     }
   };
 
+  const revertCp = async (entry: CPEntry) => {
+    setCpEntries(prev => prev.some(e => e.id === entry.id) ? prev : sortCP([...prev, entry]));
+    try {
+      const res = await apiRequest(`/api/content-planning/${entry.id}/creator-complete`, {
+        method: "POST",
+        body: JSON.stringify({ revert: true }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Restored");
+    } catch {
+      setCpEntries(prev => prev.filter(e => e.id !== entry.id));
+      toast.error("Couldn't undo — please try again");
+    }
+  };
+
+  // ── Customs: deliberate complete (from detail dialog) + Undo (revert → Awaiting Approval) ──
   const handleComplete = async (id: string) => {
-    setCompleting(id);
     const removed = entries.find(e => e.id === id);
+    if (!removed) return;
+    setCompleting(id);
     setEntries(prev => prev.filter(e => e.id !== id));
     try {
       const res = await apiRequest(`/api/campaign-tracking/${id}/creator-complete`, {
@@ -671,15 +414,31 @@ export default function CreatorDashboardPage() {
         body: JSON.stringify({ revert: false }),
       });
       if (!res.ok) throw new Error();
+      toast.success("Marked completed", {
+        action: { label: "Undo", onClick: () => revertCustom(removed) },
+      });
     } catch {
-      if (removed) setEntries(prev => [...prev, removed]);
+      setEntries(prev => [...prev, removed]);
       toast.error("Failed to mark as completed");
     } finally {
       setCompleting(null);
     }
   };
 
-  const entriesByType = useMemo<Record<"CR" | "Call" | "Item", CampaignEntry[]>>(() => ({
+  const revertCustom = async (entry: CampaignEntry) => {
+    try {
+      const res = await apiRequest(`/api/campaign-tracking/${entry.id}/creator-complete`, {
+        method: "POST",
+        body: JSON.stringify({ revert: true }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Completion reversed — sent back for review");
+    } catch {
+      toast.error("Couldn't undo — see All Custom Requests");
+    }
+  };
+
+  const entriesByType = useMemo<Record<CustomType, CampaignEntry[]>>(() => ({
     CR: sortByPriority(entries.filter(e => e.type === "CR")),
     Call: sortByPriority(entries.filter(e => e.type === "Call")),
     Item: sortByPriority(entries.filter(e => e.type === "Item")),
@@ -687,35 +446,24 @@ export default function CreatorDashboardPage() {
 
   if (!creatorUser) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#09090b" }}>
-        <div className="w-6 h-6 rounded-full border-2 border-violet-500/30 border-t-violet-500 animate-spin" />
+      <div className="flex min-h-screen items-center justify-center" style={{ background: "#09090b" }}>
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-violet-500/30 border-t-violet-500" />
       </div>
     );
   }
 
   return (
-    <div
-      className="min-h-screen"
-      style={{
-        backgroundColor: "#09090b",
-        backgroundImage: "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(139,92,246,0.08), transparent)",
-        color: "white",
-      }}
-    >
+    <div className="min-h-screen" style={PAGE_GROUND_STYLE}>
       {/* Top bar */}
       <header
-        className="sticky top-0 z-40 flex items-center justify-between gap-2 px-3 sm:px-6 h-14 relative"
-        style={{
-          background: "rgba(9,9,11,0.85)",
-          backdropFilter: "blur(12px)",
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
-        }}
+        className="sticky top-0 z-40 flex h-14 items-center justify-between gap-2 px-3 sm:px-6"
+        style={HEADER_STYLE}
       >
-        <SidebarTrigger className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5" />
+        <SidebarTrigger className="text-zinc-400 hover:bg-white/5 hover:text-zinc-100" />
         <img
           src="/logo/bluu_long.svg"
           alt="Bluu Rock"
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-6 pointer-events-none"
+          className="pointer-events-none absolute left-1/2 top-1/2 h-6 -translate-x-1/2 -translate-y-1/2"
         />
         <ProfileMenu
           stageName={creatorUser.stageName || creatorUser.displayName}
@@ -724,117 +472,76 @@ export default function CreatorDashboardPage() {
         />
       </header>
 
-      {/* Content */}
-      <main className="max-w-4xl md:max-w-none mx-auto px-3 sm:px-6 py-6 sm:py-12 flex flex-col gap-6 sm:gap-8">
-
+      <main className="mx-auto flex max-w-4xl flex-col gap-6 px-3 py-6 sm:gap-8 sm:px-6 sm:py-12 md:max-w-none">
         {/* Welcome */}
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-zinc-600 mb-1">Creator Portal</p>
-          <h1 className="text-xl sm:text-3xl font-semibold text-zinc-100">
+          <p className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">Creator Portal</p>
+          <h1 className="text-xl font-semibold text-zinc-100 sm:text-3xl">
             Hey, {creatorUser.stageName || creatorUser.displayName} 👋
           </h1>
         </div>
 
         {/* Section 1: Custom Requests */}
         <section className="flex flex-col gap-4">
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold text-zinc-100">Custom Requests</h2>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-6 w-6 text-zinc-600 hover:text-zinc-400 flex-shrink-0">
-                  <Info className="w-4 h-4" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="max-w-sm text-xs text-zinc-300 leading-relaxed">
-                These are high-ticket custom requests your fans make. Since they are custom-made, they are sold at a significantly higher price than regular content. It is important that we get this content to them ASAP in order to maintain a good relationship. A fan who is willing to pay for one Custom Request is likely to come back for more!
-              </PopoverContent>
-            </Popover>
-          </div>
+          <SectionHeader
+            title="Custom Requests"
+            info="These are high-ticket custom requests your fans make. Since they are custom-made, they are sold at a significantly higher price than regular content. It is important that we get this content to them ASAP in order to maintain a good relationship. A fan who is willing to pay for one Custom Request is likely to come back for more!"
+          />
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {(["CR", "Call", "Item"] as ("CR" | "Call" | "Item")[]).map(type => (
-              <TypeTile
-                key={type}
-                type={type}
-                entries={entriesByType[type]}
-                onComplete={handleComplete}
-                completing={completing}
-                driveLink={creatorUser.driveLink}
-              />
-            ))}
-          </div>
+          {!entriesLoaded ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              {[0, 1, 2].map(i => <Skeleton key={i} className="h-48 rounded-2xl" />)}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              {(["CR", "Call", "Item"] as CustomType[]).map(type => (
+                <TypeTile key={type} type={type} entries={entriesByType[type]} onOpen={setDetailEntry} />
+              ))}
+            </div>
+          )}
         </section>
 
         {/* Section 2: Content Planning */}
         <section className="flex flex-col gap-4">
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold text-zinc-100">Content Planning</h2>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-6 w-6 text-zinc-600 hover:text-zinc-400 flex-shrink-0">
-                  <Info className="w-4 h-4" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="max-w-sm text-xs text-zinc-300 leading-relaxed">
-                This is the content we need to maintain your page. Please try sticking to your due dates as we follow a strict content upload schedule!
-              </PopoverContent>
-            </Popover>
-          </div>
+          <SectionHeader
+            title="Content Planning"
+            info="This is the content we need to maintain your page. Please try sticking to your due dates as we follow a strict content upload schedule!"
+          />
 
-          <div
-            className="rounded-2xl p-4 w-full"
-            style={{
-              background: "rgba(255,255,255,0.025)",
-              border: "1px solid rgba(255,255,255,0.07)",
-            }}
-          >
-            {cpEntries.length === 0 ? (
+          <div className={`w-full rounded-2xl p-4 ${SURFACE.panel}`}>
+            {!cpLoaded ? (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {[0, 1].map(i => <Skeleton key={i} className="h-40 rounded-xl" />)}
+              </div>
+            ) : cpEntries.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-center">
-                <div
-                  className="w-8 h-8 rounded-full flex items-center justify-center mb-2"
-                  style={{ background: "rgba(16,185,129,0.1)" }}
-                >
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/15">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
                 </div>
-                <p className="text-xs text-zinc-600">All caught up — no pending content requests!</p>
+                <p className="text-xs text-zinc-400">All caught up — no pending content requests!</p>
               </div>
             ) : (
-              <Carousel className="w-full" opts={{ align: "start" }}>
-                <CarouselContent className="-ml-3">
-                  {cpEntries.map(e => (
-                    <CarouselItem key={e.id} className="pl-3 basis-[90%] sm:basis-[48%]">
-                      <CPCard
-                        entry={e}
-                        onComplete={handleCpComplete}
-                        completing={cpCompleting === e.id}
-                      />
-                    </CarouselItem>
-                  ))}
-                </CarouselContent>
-                {cpEntries.length > 1 && (
-                  <>
-                    <CarouselPrevious className="left-0 -translate-x-1/2" />
-                    <CarouselNext className="right-0 translate-x-1/2" />
-                  </>
-                )}
-              </Carousel>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {cpEntries.map(e => (
+                  <CPCard
+                    key={e.id}
+                    entry={e}
+                    onComplete={handleCpComplete}
+                    completing={cpCompleting === e.id}
+                  />
+                ))}
+              </div>
             )}
           </div>
         </section>
 
         {/* Section 3: Google Drive */}
-        <section
-          className="rounded-2xl px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
-          style={{
-            background: "rgba(255,255,255,0.025)",
-            border: "1px solid rgba(255,255,255,0.07)",
-          }}
-        >
-          <div className="flex flex-col gap-0.5 min-w-0">
+        <section className={`flex flex-col gap-3 rounded-2xl px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5 ${SURFACE.panel}`}>
+          <div className="flex min-w-0 flex-col gap-0.5">
             <h3 className="text-sm font-semibold text-zinc-200">Google Drive Upload Link</h3>
             <p className="text-xs text-zinc-500">
               Your content folder. Please upload content in{" "}
-              <span className="text-zinc-400 font-mono"># Unsorted</span>.
+              <span className="font-mono text-zinc-400"># Unsorted</span>.
             </p>
           </div>
           {creatorUser.driveLink ? (
@@ -842,60 +549,37 @@ export default function CreatorDashboardPage() {
               href={creatorUser.driveLink}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center justify-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap transition-all hover:brightness-110 self-stretch sm:self-auto"
-              style={{
-                background: "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.2))",
-                border: "1px solid rgba(99,102,241,0.3)",
-                color: "#93c5fd",
-              }}
+              className={`flex items-center justify-center gap-1.5 self-stretch whitespace-nowrap rounded-xl px-4 py-2 text-xs font-semibold transition-colors sm:self-auto ${ACCENT_BTN}`}
             >
-              Open Drive <ExternalLink className="w-3.5 h-3.5" />
+              Open Drive <ExternalLink className="h-3.5 w-3.5" />
             </a>
           ) : (
-            <span className="text-xs text-zinc-600">No link configured.</span>
+            <span className="text-xs text-zinc-500">No link configured.</span>
           )}
         </section>
-
       </main>
 
-      {/* Deep-linked CR detail */}
-      {linkedEntry && (
-        <CRDetailOverlay
-          entry={linkedEntry}
-          accentHex={TYPE_META[linkedEntry.type as "CR" | "Call" | "Item"]?.accentHex ?? "#8b5cf6"}
+      {/* Custom request detail (shared dialog; also handles deep-linked CR) */}
+      {detailEntry && (
+        <CustomRequestDialog
+          entry={detailEntry}
+          open={!!detailEntry}
+          onOpenChange={(o) => { if (!o) setDetailEntry(null); }}
           driveLink={creatorUser.driveLink}
-          onComplete={(id) => { handleComplete(id); setLinkedEntry(null); }}
-          completing={completing === linkedEntry.id}
-          onClose={() => setLinkedEntry(null)}
+          onComplete={() => { handleComplete(detailEntry.id); setDetailEntry(null); }}
+          busy={completing === detailEntry.id}
         />
       )}
 
       {/* Wrong-account error */}
-      {linkedError && createPortal(
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}
-          onClick={() => setLinkedError(null)}
-        >
-          <Card
-            className="w-full max-w-sm"
-            style={{ background: "#111113", border: "1px solid rgba(239,68,68,0.25)", color: "white" }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex flex-col items-center gap-3 p-6 text-center">
-              <div
-                className="w-10 h-10 rounded-full flex items-center justify-center"
-                style={{ background: "rgba(239,68,68,0.1)" }}
-              >
-                <X className="w-5 h-5 text-red-400" />
-              </div>
-              <p className="text-sm font-medium text-zinc-100">{linkedError}</p>
-              <Button variant="outline" size="sm" onClick={() => setLinkedError(null)}>Dismiss</Button>
-            </div>
-          </Card>
-        </div>,
-        document.body
-      )}
+      <CreatorDialog
+        open={!!linkedError}
+        onOpenChange={(o) => { if (!o) setLinkedError(null); }}
+        title="Can't open this request"
+        className="sm:max-w-sm"
+      >
+        <p className="text-sm text-zinc-300">{linkedError}</p>
+      </CreatorDialog>
     </div>
   );
 }

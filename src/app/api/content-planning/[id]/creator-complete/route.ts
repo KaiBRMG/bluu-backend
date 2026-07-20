@@ -8,6 +8,8 @@ import { getOFAMUids } from '@/lib/services/campaignTrackingService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 // Creator complete: status=Completed, isArchived stays false — fires notification to OFAM.
+// `revert: true` undoes it (status back to Outstanding, completedAt cleared, no notification),
+// mirroring the campaign-tracking creator-complete endpoint so the client can offer Undo.
 export const POST = withCreatorAuth(async (
   _request: NextRequest,
   token: DecodedIdToken,
@@ -25,6 +27,19 @@ export const POST = withCreatorAuth(async (
     const data = snap.data()!;
     if (data.creatorID !== token.uid) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
+    const body = await _request.json().catch(() => ({})) as { revert?: boolean };
+
+    // Revert: put the entry back to Outstanding without re-notifying.
+    if (body.revert) {
+      await docRef.update({
+        status: 'Outstanding',
+        completedAt: FieldValue.delete(),
+        lastEditedAt: FieldValue.serverTimestamp(),
+        lastEditedBy: token.uid,
+      });
+      return NextResponse.json({ success: true, status: 'Outstanding' });
     }
 
     // Look up creator's stage name for the notification message
@@ -46,7 +61,7 @@ export const POST = withCreatorAuth(async (
     }
 
     await batch.commit();
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, status: 'Completed' });
   } catch (error) {
     console.error('[POST /api/content-planning/:id/creator-complete]', error);
     return NextResponse.json({ error: 'Failed to complete entry' }, { status: 500 });

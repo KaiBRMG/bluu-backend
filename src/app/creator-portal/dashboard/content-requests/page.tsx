@@ -5,7 +5,7 @@ import { useCreatorAuth } from "@/components/CreatorAuthProvider";
 import { db } from "@/firebase-config";
 import { collection, query, where, onSnapshot, orderBy } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
-import { Card, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from "@/components/ui/table";
@@ -17,36 +17,19 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { MoreHorizontal, CheckCircle2, X } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
-import { createPortal } from "react-dom";
+import { PAGE_GROUND_STYLE, HEADER_STYLE, SURFACE, contentTypeBadge, contentStatusBadge, type ContentType } from "../../theme";
+import { ContentPlanDialog, type ContentPlanEntry } from "../../components/ContentPlanDialog";
 
 const PAGE_SIZE = 20;
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 interface DescriptionRow { qty: string; content: string; }
 
-type ContentType = "SFW" | "NSFW" | "OF TL" | "PPV" | "Dripfeed";
-
-const contentTypeBadgeClass: Record<ContentType, string> = {
-  NSFW: "bg-orange-500/15 text-orange-400",
-  SFW: "bg-blue-500/15 text-blue-400",
-  "OF TL": "bg-purple-500/15 text-purple-400",
-  PPV: "bg-pink-500/15 text-pink-400",
-  Dripfeed: "bg-teal-500/15 text-teal-400",
-};
-
-interface CPEntry {
-  id: string;
+interface CPEntry extends ContentPlanEntry {
   contentType: ContentType;
-  contentSummary: string;
-  description: DescriptionRow[];
-  comment: string;
-  dueDate: string | null;
   createdAt: string | null;
-  status: "Outstanding" | "Completed";
   isArchived: boolean;
 }
 
@@ -74,7 +57,7 @@ function isOverdue(dueDate: string | null): boolean {
   return new Date(dueDate + "T23:59:59Z") < new Date();
 }
 
-function formatDate(dateStr: string | null): string {
+function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "—";
   try {
     const d = dateStr.includes("T") ? new Date(dateStr) : new Date(dateStr + "T12:00:00Z");
@@ -82,114 +65,12 @@ function formatDate(dateStr: string | null): string {
   } catch { return dateStr; }
 }
 
-// ─── Detail Modal ─────────────────────────────────────────────────────────────
-
-interface DetailModalProps {
-  entry: CPEntry;
-  onClose: () => void;
-  onMarkComplete?: () => void;
-}
-
-function DetailModal({ entry, onClose, onMarkComplete }: DetailModalProps) {
-  const overdue = isOverdue(entry.dueDate) && entry.status === "Outstanding";
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}
-      onClick={onClose}
-    >
-      <Card
-        className="w-full max-w-md max-h-[85vh] overflow-y-auto"
-        style={{ background: "#111113", border: "1px solid rgba(255,255,255,0.1)", color: "white" }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-2 px-6 pt-6 pb-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <CardTitle className="text-base text-zinc-100">{entry.contentSummary}</CardTitle>
-            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${contentTypeBadgeClass[entry.contentType] ?? "bg-zinc-500/15 text-zinc-400"}`}>
-              {entry.contentType}
-            </span>
-          </div>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors shrink-0">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <CardContent className="flex flex-col gap-4 pt-4">
-          {/* Status */}
-          <span className={`self-start inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-            entry.status === "Completed" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
-          }`}>
-            {entry.status}
-          </span>
-
-          {/* Description */}
-          {entry.description.some(r => r.qty || r.content) && (
-            <div>
-              <p className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Description</p>
-              <div className="flex flex-col gap-0.5">
-                {entry.description.filter(r => r.qty || r.content).map((r, i) => (
-                  <p key={i} className="text-sm text-zinc-300">
-                    <span className="font-medium">{r.qty}</span>
-                    {r.qty && r.content ? " × " : ""}
-                    {r.content}
-                  </p>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Comment */}
-          {entry.comment && (
-            <div>
-              <p className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Comment</p>
-              <p className="text-sm text-zinc-300 leading-relaxed">{entry.comment}</p>
-            </div>
-          )}
-
-          {/* Dates */}
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
-            <div>
-              <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Due Date</p>
-              <p className={overdue ? "text-red-400 font-medium" : "text-zinc-300"}>
-                {overdue ? "Overdue · " : ""}{formatDate(entry.dueDate)}
-              </p>
-            </div>
-            <div>
-              <p className="uppercase tracking-wider text-zinc-500 mb-0.5">Created</p>
-              <p className="text-zinc-300">{formatDate(entry.createdAt)}</p>
-            </div>
-          </div>
-        </CardContent>
-
-        {onMarkComplete && (
-          <CardFooter className="flex gap-2 pt-0">
-            <Button
-              onClick={() => { onMarkComplete(); onClose(); }}
-              className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold h-9 rounded-lg"
-              style={{
-                background: "linear-gradient(135deg, #059669, #10b981)",
-                color: "white",
-                boxShadow: "0 0 12px rgba(16,185,129,0.35)",
-              }}
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" /> Completed
-            </Button>
-          </CardFooter>
-        )}
-      </Card>
-    </div>,
-    document.body
-  );
-}
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
-
 export default function AllContentRequestsPage() {
   const { creatorUser } = useCreatorAuth();
   const [entries, setEntries] = useState<CPEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewEntry, setViewEntry] = useState<CPEntry | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
@@ -211,12 +92,15 @@ export default function AllContentRequestsPage() {
   }, [creatorUser]);
 
   const handleMarkComplete = async (entry: CPEntry) => {
+    setBusy(entry.id);
     try {
       const res = await apiRequest(`/api/content-planning/${entry.id}/creator-complete`, { method: "POST" });
       if (!res.ok) throw new Error();
       toast.success("Marked as completed");
     } catch {
       toast.error("Failed to update status");
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -226,42 +110,35 @@ export default function AllContentRequestsPage() {
   const goTo = (p: number) => setCurrentPage(Math.max(1, Math.min(p, totalPages)));
 
   return (
-    <div className="min-h-screen" style={{ background: "#09090b", color: "white" }}>
+    <div className="min-h-screen" style={PAGE_GROUND_STYLE}>
       {/* Top bar */}
       <header
-        className="sticky top-0 z-40 flex items-center gap-2 px-3 sm:px-6 h-14 relative"
-        style={{
-          background: "rgba(9,9,11,0.9)",
-          backdropFilter: "blur(12px)",
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
-        }}
+        className="sticky top-0 z-40 flex h-14 items-center gap-2 px-3 sm:px-6"
+        style={HEADER_STYLE}
       >
-        <SidebarTrigger className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5" />
+        <SidebarTrigger className="text-zinc-400 hover:bg-white/5 hover:text-zinc-100" />
         <img
           src="/logo/bluu_long.svg"
           alt="Bluu Rock"
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-6 pointer-events-none"
+          className="pointer-events-none absolute left-1/2 top-1/2 h-6 -translate-x-1/2 -translate-y-1/2"
         />
       </header>
 
-      <main className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-8">
-        <h1 className="text-xl sm:text-2xl font-semibold mb-4 sm:mb-6">All Content Requests</h1>
+      <main className="mx-auto max-w-5xl px-3 py-6 sm:px-6 sm:py-8">
+        <h1 className="mb-4 text-xl font-semibold sm:mb-6 sm:text-2xl">All Content Requests</h1>
 
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-6 h-6 rounded-full border-2 border-violet-500/30 border-t-violet-500 animate-spin" />
+          <div className="flex flex-col gap-2">
+            {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-14 rounded-xl" />)}
           </div>
         ) : entries.length === 0 ? (
-          <div
-            className="rounded-2xl p-12 text-center"
-            style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)" }}
-          >
-            <p className="text-zinc-500 text-sm">No content requests found.</p>
+          <div className={`rounded-2xl p-12 text-center ${SURFACE.panel}`}>
+            <p className="text-sm text-zinc-400">No content requests found.</p>
           </div>
         ) : (
           <>
             {/* Desktop table */}
-            <div className="hidden md:block rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
+            <div className={`hidden overflow-hidden rounded-2xl md:block ${SURFACE.panel}`}>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -277,20 +154,18 @@ export default function AllContentRequestsPage() {
                     const overdue = isOverdue(entry.dueDate) && entry.status === "Outstanding";
                     return (
                       <TableRow key={entry.id}>
-                        <TableCell className="text-sm font-medium max-w-[200px] truncate">{entry.contentSummary}</TableCell>
+                        <TableCell className="max-w-[200px] truncate text-sm font-medium">{entry.contentSummary}</TableCell>
                         <TableCell>
-                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${contentTypeBadgeClass[entry.contentType] ?? "bg-zinc-500/15 text-zinc-400"}`}>
+                          <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium ${contentTypeBadge(entry.contentType)}`}>
                             {entry.contentType}
                           </span>
                         </TableCell>
-                        <TableCell className={`text-sm ${overdue ? "text-red-400 font-medium" : "text-zinc-400"}`}>
+                        <TableCell className={`text-sm ${overdue ? "font-medium text-red-300" : "text-zinc-400"}`}>
                           {formatDate(entry.dueDate)}
                           {overdue && <span className="ml-1 text-xs">· Overdue</span>}
                         </TableCell>
                         <TableCell>
-                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                            entry.status === "Completed" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
-                          }`}>
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${contentStatusBadge(entry.status)}`}>
                             {entry.status}
                           </span>
                         </TableCell>
@@ -298,7 +173,7 @@ export default function AllContentRequestsPage() {
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="icon" className="h-8 w-8">
-                                <MoreHorizontal className="w-4 h-4" />
+                                <MoreHorizontal className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
@@ -319,34 +194,29 @@ export default function AllContentRequestsPage() {
             </div>
 
             {/* Mobile card list */}
-            <div className="md:hidden flex flex-col gap-2">
+            <div className="flex flex-col gap-2 md:hidden">
               {pageEntries.map(entry => {
                 const overdue = isOverdue(entry.dueDate) && entry.status === "Outstanding";
                 return (
                   <button
                     key={entry.id}
                     onClick={() => setViewEntry(entry)}
-                    className="text-left rounded-xl px-4 py-3 flex flex-col gap-2 transition-colors active:bg-white/[0.04]"
-                    style={{
-                      background: "rgba(255,255,255,0.025)",
-                      border: `1px solid ${overdue ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.07)"}`,
-                    }}
+                    className={`flex flex-col gap-2 rounded-xl px-4 py-3 text-left transition-colors active:bg-white/[0.04] ${SURFACE.panel}`}
+                    style={overdue ? { borderColor: "rgba(239,68,68,0.2)" } : undefined}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm text-zinc-100 font-medium leading-tight flex-1 min-w-0">
+                      <p className="min-w-0 flex-1 truncate text-sm font-medium leading-tight text-zinc-100">
                         {entry.contentSummary}
                       </p>
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md shrink-0 ${contentTypeBadgeClass[entry.contentType] ?? "bg-zinc-500/15 text-zinc-400"}`}>
+                      <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${contentTypeBadge(entry.contentType)}`}>
                         {entry.contentType}
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
-                      <span className={`text-[11px] ${overdue ? "text-red-400 font-medium" : "text-zinc-500"}`}>
+                      <span className={`text-[11px] ${overdue ? "font-medium text-red-300" : "text-zinc-500"}`}>
                         {overdue ? "Overdue · " : "Due "}{formatDate(entry.dueDate)}
                       </span>
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                        entry.status === "Completed" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
-                      }`}>
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${contentStatusBadge(entry.status)}`}>
                         {entry.status}
                       </span>
                     </div>
@@ -404,10 +274,14 @@ export default function AllContentRequestsPage() {
       </main>
 
       {viewEntry && (
-        <DetailModal
+        <ContentPlanDialog
           entry={viewEntry}
-          onClose={() => setViewEntry(null)}
-          onMarkComplete={viewEntry.status === "Outstanding" ? () => handleMarkComplete(viewEntry) : undefined}
+          open={!!viewEntry}
+          onOpenChange={(o) => { if (!o) setViewEntry(null); }}
+          formatDate={formatDate}
+          overdue={isOverdue(viewEntry.dueDate) && viewEntry.status === "Outstanding"}
+          onComplete={viewEntry.status === "Outstanding" ? () => { handleMarkComplete(viewEntry); setViewEntry(null); } : undefined}
+          busy={busy === viewEntry.id}
         />
       )}
     </div>
