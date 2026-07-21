@@ -9,6 +9,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { useUserData } from '@/hooks/useUserData';
 import { useTimeTrackingContext } from '@/contexts/TimeTrackingContext';
 import { clearPermissionsCache } from '@/lib/permissionsCache';
+import { clearLoginSession } from '@/lib/loginSession';
 import { auth } from '@/firebase-config';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { cn } from '@/lib/utils';
@@ -25,6 +26,9 @@ const SURFACE = {
 } as const;
 
 const HAIRLINE = 'rgba(255,255,255,0.07)';
+
+/** How long sign-out will wait on the clock-out flush before giving up on it. */
+const SIGN_OUT_FLUSH_TIMEOUT_MS = 2500;
 
 /**
  * The user's full name — `firstName lastName` from the user doc. `displayName`
@@ -115,19 +119,42 @@ function SignOutButton() {
   const handleSignOut = async () => {
     if (signingOut) return;
     setSigningOut(true);
+
+    // Time-boxed. The flush awaits a Firebase token refresh and a network call,
+    // either of which can hang offline — and sign-out is the escape hatch from a
+    // wedged flow, so bookkeeping must never be able to hold it up.
     try {
-      await clockOutAndFlush();
+      await Promise.race([
+        clockOutAndFlush(),
+        new Promise<void>((resolve) => setTimeout(resolve, SIGN_OUT_FLUSH_TIMEOUT_MS)),
+      ]);
     } catch (error) {
-      console.error('[Onboarding] Clock-out on sign out failed:', error);
+      console.error('[Onboarding] Clock-out on sign out failed (continuing):', error);
     }
+
+    // Clear local session state BEFORE signing out, and never let a failure here
+    // stop the rest. With the login marker gone, even a failed `signOut()` leaves
+    // the next boot in a state the incomplete-onboarding discard resolves into
+    // the login screen.
     try {
       clearPermissionsCache();
       localStorage.removeItem('sessionToken');
+      clearLoginSession();
+    } catch (error) {
+      console.error('[Onboarding] Clearing local session state failed:', error);
+    }
+
+    try {
       await auth.signOut();
     } catch (error) {
-      console.error('[Onboarding] Sign out error:', error);
-      setSigningOut(false);
+      console.error('[Onboarding] Sign out failed; reloading anyway:', error);
     }
+
+    // A full document load, not a router push: it rebuilds the whole tree, so a
+    // stuck effect, a wedged provider, or a permanently-null `userData` in the
+    // onboarding flow cannot keep the user pinned to this screen. Signed out,
+    // AuthWrapper renders Login.
+    window.location.assign('/');
   };
 
   return (

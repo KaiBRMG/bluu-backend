@@ -46,7 +46,18 @@ screenshotBugFixed: true   // new users are born on the signed build — see CLA
 groups: ['unassigned']
 ```
 
-An **existing** user (any subsequent login) only gets `lastLoginAt` bumped — these flags are untouched, so once true they stay true forever. There is no re-onboarding.
+An **existing** user gets `lastLoginAt` and a rotated `sessionToken` — **and, if their last onboarding run never completed, that run is discarded**: `hasAcceptedTerms` goes back to `false` and `photoURL` back to `null`. See *Onboarding is all-or-nothing* below. Once `hasCompletedOnboarding` is `true` it stays true forever; there is no re-onboarding for a completed user.
+
+### Onboarding is all-or-nothing
+
+**A run that never reached "Submit details" is thrown away.** The user is met with the login screen on next launch and walks the whole flow again from the terms step, exactly as a first-time signup would. Two halves, both required:
+
+- **Server (authoritative)** — `ensureUserExists` resets `hasAcceptedTerms` and `photoURL` on any login where `hasCompletedOnboarding !== true`. This is the only trustworthy place, and it runs on every login. `photoURL` is named explicitly because the avatar upload is the *one* field written before completion; everything else on the details step is written in the same request that completes onboarding, so an incomplete run leaves nothing else behind.
+- **Client** — `AuthWrapper` ends a *restored* session whose onboarding never completed, so the user actually lands on Login rather than resuming mid-flow.
+
+The client half is gated on `hasLoginSession()` ([`src/lib/loginSession.ts`](../src/lib/loginSession.ts)), a `sessionStorage` marker set by `Login` immediately **before** sign-in. `sessionStorage` is the right store precisely because it survives in-app navigation and reloads but dies with the renderer — which is exactly the distinction needed: *"did this run begin with a login, or with auth restored from disk?"* Without the marker the effect would sign out the user who just logged in and is standing on step 1.
+
+**RULE — `Login` must write `sessionToken` and the login marker BEFORE `signInWithCustomToken`.** Signing in triggers `onAuthStateChanged` and the `users/{uid}` snapshot that follows reads both immediately. Writing the token afterwards meant the first snapshot of any *second* login compared the freshly rotated token against the previous one, flagged the session as **displaced**, and left `userData` null permanently — the doc never changes again, so no later snapshot corrects it. The symptom was an onboarding step stuck on skeleton avatars with a sign-out button that appeared inert. Now that an incomplete run forces a fresh login on every relaunch, that second login is the common path.
 
 Two notifications fire here (`welcomeToTeam` to the user, `adminNewUserAlert` to every admin — see [notifications.md](notifications.md)). **There is deliberately no "go fill in your personal information" nudge**: that data is collected by step 5 of this flow. The old `onboardingActionRequired()` factory was deleted when the profile step shipped; do not reintroduce it.
 
@@ -55,13 +66,15 @@ Two notifications fire here (`welcomeToTeam` to the user, `adminNewUserAlert` to
 `AuthWrapper` is the sole place that decides *whether* to send a logged-in user into onboarding:
 
 ```ts
-const isAuthRoute =
-  pathname?.startsWith('/auth/') ||
-  pathname?.startsWith('/onboarding/') ||
-  pathname?.startsWith('/creator-portal');
+// Renders with no internal session at all — OAuth pages, creator portal.
+const isUnauthenticatedRoute =
+  pathname?.startsWith('/auth/') || pathname?.startsWith('/creator-portal');
+
+// An authenticated surface, but the onboarding guard must skip it.
+const isOnboardingRoute = pathname?.startsWith('/onboarding/');
 
 useEffect(() => {
-  if (!user || userDataLoading || isAuthRoute) return;
+  if (!user || userDataLoading || isUnauthenticatedRoute || isOnboardingRoute) return;
   if (!userData) return;
 
   if (userData.hasAcceptedTerms !== true) {
@@ -72,10 +85,12 @@ useEffect(() => {
     router.replace('/onboarding/permissions');
     return;
   }
-}, [userData, userDataLoading, user, isAuthRoute, router]);
+}, [userData, userDataLoading, user, isUnauthenticatedRoute, isOnboardingRoute, router]);
 ```
 
-**Key nuance:** the guard bails out `if (isAuthRoute)`. It only *pulls* an incomplete user **into** onboarding when they try to reach anywhere else in the app; once inside `/onboarding/*` it steps back and lets each page's own `router.push` drive navigation. Two consequences:
+**RULE — keep these two predicates separate.** They were once a single `isAuthRoute` that lumped onboarding in with the OAuth pages, which had two bugs: session enforcement (revocation, displacement, the incomplete-onboarding discard) silently never ran during onboarding, and the render path returned children *before* the `!user` check — so signing out from an onboarding step cleared the session but kept rendering the step, making the button look inert. Onboarding is an authenticated surface; only `/auth/*` and `/creator-portal` are not.
+
+**Key nuance:** the guard bails on `isOnboardingRoute`. It only *pulls* an incomplete user **into** onboarding when they try to reach anywhere else in the app; once inside `/onboarding/*` it steps back and lets each page's own `router.push` drive navigation. Two consequences:
 
 - **Reloading anywhere inside the flow keeps you there** — the guard never fires on an onboarding route, so a refresh on step 5 stays on step 5.
 - **Re-entering from outside** (quit and relaunch, or navigating to `/`) resumes at `/onboarding/welcome` if terms were never accepted, otherwise at `/onboarding/permissions` — the start of the permissions leg, not the exact step you left. There is no per-step resume; the form step re-hydrates from the user doc so nothing typed is lost.
@@ -105,7 +120,13 @@ Also exports two hooks that must not be confused:
 
 `UserAvatar` holds a `Skeleton` until the user doc arrives, so no step flashes a `?` avatar or reflows when the name lands.
 
-A **Sign out** control sits at the top-right of the header on **every** step (absolutely positioned so the wordmark stays optically centred). Onboarding is the only authenticated surface with no sidebar, so without it a user who signed in with the wrong account has no way out. It mirrors `NavUser`'s handler exactly — clock-out flush, `clearPermissionsCache()`, drop `sessionToken`, `auth.signOut()` — so the two paths cannot drift.
+A **Sign out** control sits at the top-right of the header on **every** step (absolutely positioned so the wordmark stays optically centred). Onboarding is the only authenticated surface with no sidebar, so without it a user who signed in with the wrong account has no way out.
+
+**It is built as an escape hatch, and must stay one.** If any part of the flow wedges — a permanently-null `userData`, a hung provider, a stuck effect — this button still has to reach the login screen. Three deliberate properties, none of which should be simplified away:
+
+1. **The clock-out flush is time-boxed** (`SIGN_OUT_FLUSH_TIMEOUT_MS`, 2.5s) via `Promise.race`. It awaits a Firebase token refresh and a network call, both of which can hang offline. Bookkeeping must never block the exit.
+2. **Local session state is cleared before `signOut()`, and no failure short-circuits the rest.** With the login marker gone, even a *failed* `signOut()` leaves the next boot in a state the incomplete-onboarding discard resolves into the login screen.
+3. **It finishes with `window.location.assign('/')`, not a router push.** A full document load rebuilds the tree from scratch, so nothing stuck in the React state can pin the user to the step.
 
 ### Page locking and scroll (do not regress this)
 
@@ -184,7 +205,7 @@ if (body.hasAcceptedTerms === true) updates.hasAcceptedTerms = true;
 if (body.hasCompletedOnboarding === true) updates.hasCompletedOnboarding = true;
 ```
 
-Only `true` is ever accepted — the route has no code path to set either back to `false`. Onboarding is a one-way ratchet per user; there is no "reset a user's onboarding" affordance. It follows [data-layer.md](data-layer.md#firestore-read-optimization-rules)'s cache rule: `invalidateUserCache(token.uid)` runs in the same handler.
+Only `true` is ever accepted — **the client can never clear either flag.** The one reset that exists is server-side, in `ensureUserExists` at login (see *Onboarding is all-or-nothing*), where it cannot be triggered by a crafted request. Keep it that way. The route follows [data-layer.md](data-layer.md#firestore-read-optimization-rules)'s cache rule: `invalidateUserCache(token.uid)` runs in the same handler.
 
 The profile step writes through the existing allowlisted `/api/user/update` route — **no new fields, no new endpoint**, so onboarding and Settings cannot drift apart in what they are permitted to store.
 

@@ -107,10 +107,25 @@ export async function ensureUserExists(userData: CreateUserData): Promise<string
   } else {
     console.log(`[UserService] Updating last login: ${userData.workEmail}`);
 
+    // An onboarding run that never reached "Submit details" is discarded, so the
+    // user starts the flow from the terms step exactly as a first-time signup
+    // would. Enforced here rather than client-side because this is the only
+    // place that can be trusted, and it runs on every login.
+    //
+    // `photoURL` is included because it is the one field onboarding writes
+    // before completion (the upload is immediate); everything else on the
+    // details step is written in the same request that completes onboarding, so
+    // an incomplete run leaves nothing else behind.
+    const abandonedOnboarding = userDoc.data()?.hasCompletedOnboarding !== true;
+    if (abandonedOnboarding) {
+      console.log(`[UserService] Discarding incomplete onboarding: ${userData.workEmail}`);
+    }
+
     // Rotate session token and update last login — kicks out any existing session
     await userRef.update({
       lastLoginAt: FieldValue.serverTimestamp(),
       sessionToken,
+      ...(abandonedOnboarding ? { hasAcceptedTerms: false, photoURL: null } : {}),
     });
   }
 

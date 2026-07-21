@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { signInWithPopup, signInWithCustomToken } from 'firebase/auth';
 import { auth, googleProvider } from '../firebase-config';
+import { markLoginSession } from '@/lib/loginSession';
 
 function Login() {
   const [isElectron] = useState(() => typeof window !== 'undefined' && window.electronAPI?.isElectron);
@@ -29,13 +30,26 @@ function Login() {
           throw new Error(data.error || 'Failed to authenticate');
         }
 
-        // Sign in with custom token — AuthProvider will check isActive before setting user
-        await signInWithCustomToken(auth, data.customToken);
-
-        // Store session token so we can detect displacement by another login
+        // Both markers must be written BEFORE signing in. `signInWithCustomToken`
+        // triggers onAuthStateChanged, and the users/{uid} snapshot that follows
+        // reads both immediately.
+        //
+        // sessionToken: that snapshot compares the doc's freshly rotated token
+        // against localStorage. Writing it afterwards meant the first snapshot of
+        // any *second* login compared the new token to the previous one, flagged
+        // the session as displaced, and left `userData` null permanently — the
+        // doc never changes again, so no later snapshot ever corrects it. Now
+        // that an incomplete onboarding forces a fresh login on every relaunch,
+        // that second login is the common path, not an edge case.
         if (data.sessionToken) {
           localStorage.setItem('sessionToken', data.sessionToken);
         }
+        // Marks this run as explicitly logged into, so the incomplete-onboarding
+        // discard in AuthWrapper doesn't immediately sign the user back out.
+        markLoginSession();
+
+        // AuthProvider will check isActive before setting user
+        await signInWithCustomToken(auth, data.customToken);
 
         setLoading(false);
       } catch (error: any) {
@@ -73,6 +87,9 @@ function Login() {
   const handleBrowserLogin = async () => {
     try {
       setLoading(true);
+      // Set before the popup resolves auth state, for the same reason as the
+      // Electron path above.
+      markLoginSession();
       const result = await signInWithPopup(auth, googleProvider);
       const email = result.user.email;
 
