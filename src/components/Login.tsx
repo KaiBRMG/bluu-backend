@@ -148,7 +148,7 @@ function Login() {
         <p className="mt-4 text-center text-xs text-zinc-500">
           By signing in you agree with{' '}
           <a
-            href="https://app.notion.com/p/Bluu-Backend-Terms-of-Use-31d6a3e187d980a0bd2efa816993e2e7"
+            href="/terms"
             target="_blank"
             rel="noopener noreferrer"
             className="underline hover:text-zinc-300"

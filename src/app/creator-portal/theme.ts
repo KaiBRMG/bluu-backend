@@ -1,5 +1,5 @@
 /**
- * Creator Portal design tokens — the authored "warm violet" skin.
+ * Creator Portal design tokens — the authored "Bluu azure" skin.
  *
  * The creator portal is a deliberately friendlier, brand-forward surface for
  * EXTERNAL creators, distinct from the internal "Quiet Instrument" console in
@@ -12,16 +12,18 @@
 import type { CRStatus } from "@/lib/campaignTracking";
 
 // ── Brand accent ──────────────────────────────────────────────────────────────
-// Violet is the portal's one brand voice (the console's is Action Blue).
+// The Bluu brand azure is the portal's one brand voice (the console's is Action
+// Blue). Sampled from the company logo (`public/logo/bluu-logo.png`); a bright
+// cyan-azure that stays distinct from the console's royal Action Blue (#3b82f6).
 export const ACCENT = {
-  hex: "#8b5cf6", // violet-500
-  deep: "#7c3aed", // violet-600
+  hex: "#00b8f5", // Bluu azure (logo) — ~Tailwind sky
+  deep: "#0090c8", // logo shadow azure
 } as const;
 
 /** The portal's named category hues (section icons, type accents). Documented in
  *  DESIGN.md § Creator Portal — import these; never inline a hue. */
 export const HUES = {
-  violet: "#8b5cf6",
+  sky: "#00b8f5", // brand azure
   blue: "#3b82f6",
   amber: "#f59e0b",
   emerald: "#10b981",
@@ -32,7 +34,7 @@ export const HUES = {
 export const PAGE_GROUND_STYLE = {
   backgroundColor: "#09090b",
   backgroundImage:
-    "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(139,92,246,0.08), transparent)",
+    "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(0,184,245,0.08), transparent)",
   color: "white",
 } as const;
 
@@ -67,7 +69,7 @@ export const COMPLETE_BTN =
   "bg-emerald-600 hover:bg-emerald-700 text-white motion-safe:active:scale-[0.98]";
 /** Soft accent action (open drive, upload, external links styled as buttons). */
 export const ACCENT_BTN =
-  "bg-violet-500/15 hover:bg-violet-500/25 text-violet-200 border border-violet-500/30";
+  "bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 border border-sky-500/30";
 
 // ── Content-type badge (content-planning) ─────────────────────────────────────
 export type ContentType = "SFW" | "NSFW" | "OF TL" | "PPV" | "Dripfeed";

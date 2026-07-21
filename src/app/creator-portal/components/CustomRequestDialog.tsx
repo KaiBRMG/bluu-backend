@@ -118,7 +118,7 @@ export function CustomRequestDialog({
               href={entry.profileLink}
               target="_blank"
               rel="noreferrer"
-              className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-violet-300 transition-colors hover:text-violet-200"
+              className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-sky-300 transition-colors hover:text-sky-200"
             >
               View Profile <ExternalLink className="h-3 w-3" />
             </a>

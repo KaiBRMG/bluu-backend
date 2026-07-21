@@ -61,7 +61,7 @@ export default function CreatorLoginPage() {
       {/* Dark overlay for readability */}
       <div className="absolute inset-0 bg-black/50" />
 
-      <div className="relative bg-zinc-900/80 backdrop-blur-md border border-white/10 rounded-2xl p-12 max-w-md w-full">
+      <div className="relative bg-zinc-900/80 backdrop-blur-md border border-white/10 rounded-2xl p-8 sm:p-12 max-w-md w-full">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
             <img
@@ -85,7 +85,7 @@ export default function CreatorLoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-violet-500/60"
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-sky-500/60"
               placeholder="you@example.com"
             />
           </div>
@@ -101,7 +101,7 @@ export default function CreatorLoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete="current-password"
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-violet-500/60"
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-sky-500/60"
               placeholder="••••••••"
             />
           </div>
@@ -113,7 +113,7 @@ export default function CreatorLoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-violet-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-sky-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-sky-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? (
               <span className="flex items-center justify-center gap-2">

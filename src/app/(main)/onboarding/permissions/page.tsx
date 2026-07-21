@@ -2,44 +2,64 @@
 
 import { useRouter } from 'next/navigation';
 import { Focus, Megaphone } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import OnboardingCard from '../_components/OnboardingCard';
+
+const PERMISSIONS = [
+  {
+    icon: Focus,
+    title: 'Screen capturing',
+    body: 'Screenshots are taken of your screen while you are clocked in and tracking time.',
+  },
+  {
+    icon: Megaphone,
+    title: 'Notifications',
+    body: 'Receive real-time desktop notifications.',
+  },
+];
 
 export default function PermissionsPage() {
   const router = useRouter();
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-12 max-w-lg w-full">
-      <h1 className="text-xl font-semibold text-white mb-2 text-center">
-        Bluu Backend requires the following permissions to work:
-      </h1>
+    <OnboardingCard step={1}>
+      <h1 className="text-lg font-semibold text-white">Two permissions to set up</h1>
+      <p className="mt-1.5 max-w-[65ch] text-sm leading-relaxed text-zinc-400">
+        Bluu Backend needs these from your operating system to work. We&apos;ll walk you
+        through them one at a time.
+      </p>
 
-      <div className="mt-8 space-y-4">
-        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-5 flex items-start gap-4">
-          <Focus className="text-white mt-0.5 shrink-0" size={22} />
-          <div>
-            <h3 className="text-white font-semibold text-sm mb-1">Screen Capturing</h3>
-            <p className="text-zinc-400 text-sm leading-relaxed">
-              Screenshots are taken of your screen while you are clocked in and tracking time
-            </p>
-          </div>
-        </div>
+      <ul className="mt-6 space-y-3">
+        {PERMISSIONS.map(({ icon: Icon, title, body }) => (
+          <li
+            key={title}
+            className="flex items-start gap-3.5 rounded-lg border p-4"
+            style={{
+              background: 'rgba(255,255,255,0.04)',
+              borderColor: 'rgba(255,255,255,0.07)',
+            }}
+          >
+            <Icon className="mt-0.5 shrink-0 text-zinc-400" size={18} aria-hidden="true" />
+            <div>
+              <h2 className="text-sm font-semibold text-white">{title}</h2>
+              <p className="mt-1 text-sm leading-relaxed text-zinc-400">{body}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
 
-        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-5 flex items-start gap-4">
-          <Megaphone className="text-white mt-0.5 shrink-0" size={22} />
-          <div>
-            <h3 className="text-white font-semibold text-sm mb-1">Notifications</h3>
-            <p className="text-zinc-400 text-sm leading-relaxed">
-              Receive real-time desktop notifications
-            </p>
-          </div>
-        </div>
+      <div className="mt-7 flex gap-3">
+        <Button
+          variant="ghost"
+          onClick={() => router.push('/onboarding/welcome')}
+          className="text-zinc-400"
+        >
+          Back
+        </Button>
+        <Button onClick={() => router.push('/onboarding/permission/screen')} className="flex-1">
+          Next
+        </Button>
       </div>
-
-      <button
-        onClick={() => router.push('/onboarding/permission/screen')}
-        className="mt-8 w-full bg-white text-black font-semibold py-3 px-6 rounded-lg hover:bg-zinc-200 transition-colors"
-      >
-        Proceed
-      </button>
-    </div>
+    </OnboardingCard>
   );
 }

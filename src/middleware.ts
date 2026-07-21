@@ -7,6 +7,10 @@ const BROWSER_ALLOWED_PREFIXES = [
   '/desktop-only',
   '/download',
   '/raffle',
+  // Onboarding links the terms of use out to the system browser (Electron routes
+  // target=_blank through shell.openExternal), so it must resolve without the
+  // Electron user agent. Public, read-only, no user data.
+  '/terms',
 ];
 
 export function middleware(request: NextRequest) {

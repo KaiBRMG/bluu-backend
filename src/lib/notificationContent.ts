@@ -9,13 +9,8 @@ export interface NotificationContent {
 
 export const notifications = {
   // ─── User onboarding ──────────────────────────────────────────────────────────
-  onboardingActionRequired: (): NotificationContent => ({
-    title: 'Action Required',
-    message: 'To complete your onboarding, click here to update your personal information.',
-    type: 'action',
-    actionUrl: '/applications/settings',
-  }),
-
+  // Personal information is collected during the onboarding flow itself (the
+  // `profile` step), so there is no post-login nudge to go fill in Settings.
   welcomeToTeam: (firstName: string): NotificationContent => ({
     title: 'Welcome to Bluu Rock!',
     message: `Hi ${firstName}, welcome to the team! You will be assigned to a group soon.`,

@@ -116,7 +116,7 @@ export default function AllContentRequestsPage() {
         className="sticky top-0 z-40 flex h-14 items-center gap-2 px-3 sm:px-6"
         style={HEADER_STYLE}
       >
-        <SidebarTrigger className="text-zinc-400 hover:bg-white/5 hover:text-zinc-100" />
+        <SidebarTrigger className="text-zinc-400 hover:bg-white/5 hover:text-zinc-100 relative after:absolute after:-inset-3 after:content-['']" />
         <img
           src="/logo/bluu_long.svg"
           alt="Bluu Rock"

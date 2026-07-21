@@ -550,21 +550,17 @@ export default function Home() {
   const showTimeTracking = userData?.permittedPageIds?.includes('time-tracking') ?? false;
   const showResources = userData?.permittedPageIds?.includes('apps-resources') ?? false;
 
+  // Being unassigned is a pending state awaiting an admin, not an error the user
+  // caused — orange, per the semantic palette. The explanation now lives at the
+  // end of onboarding (/onboarding/done), so the card carries the state only.
   const groupCard = (
     <Card
-      className={`gap-3 py-4${userGroup === 'unassigned' ? ' bg-red-500/10 border-red-500/30' : ''}`}
+      className={`gap-3 py-4${userGroup === 'unassigned' ? ' bg-orange-500/10 border-orange-500/30' : ''}`}
     >
       <CardHeader className="px-4">
         <CardDescription>Group</CardDescription>
         <CardTitle className="text-2xl font-semibold">{displayGroup}</CardTitle>
       </CardHeader>
-      {userGroup === 'unassigned' && (
-        <CardContent className="px-4">
-          <p className="text-xs text-red-400">
-            User functionality limited: You are currently not assigned to any groups. Please wait until a system administrator assigns you.
-          </p>
-        </CardContent>
-      )}
     </Card>
   );
 

@@ -57,6 +57,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 | [DESIGN.md](DESIGN.md) | **Any frontend UI** — design system: palette, typography, surfaces, components, motion, dashboard-widget pattern |
 | [architecture-overview.md](documentation/architecture-overview.md) | Repo layout, commands, env vars, portal topology, UI stack |
 | [auth.md](documentation/auth.md) | Browser middleware, OAuth login, `withAuth`/`withCreatorAuth`, the 3 authorization tiers |
+| [onboarding.md](documentation/onboarding.md) | First-run flow: download → login → terms → OS permissions → personal details, the `AuthWrapper` guard, `hasAcceptedTerms`/`hasCompletedOnboarding`, `/terms` |
 | [permissions.md](documentation/permissions.md) | Page definitions, `page-permissions`, `permittedPageIds`, `checkPageAccess` |
 | [data-layer.md](documentation/data-layer.md) | Server services, client hooks, Firestore collections, read-optimization rules, session token |
 | [time-tracking.md](documentation/time-tracking.md) | Event-log sessions, `sessionCloseMs`, crash robustness, activity percent, **analytics rollups** |

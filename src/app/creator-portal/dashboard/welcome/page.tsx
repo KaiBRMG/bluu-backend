@@ -13,7 +13,7 @@ export default function WelcomePage() {
         className="sticky top-0 z-40 flex h-14 items-center gap-2 px-3 sm:px-6"
         style={HEADER_STYLE}
       >
-        <SidebarTrigger className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5" />
+        <SidebarTrigger className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5 relative after:absolute after:-inset-3 after:content-['']" />
         <img
           src="/logo/bluu_long.svg"
           alt="Bluu Rock"
@@ -31,7 +31,7 @@ export default function WelcomePage() {
         </div>
 
         {/* How We Work */}
-        <Section icon={Users} iconColor={HUES.violet} title="How We Work">
+        <Section icon={Users} iconColor={HUES.sky} title="How We Work">
           <p className="text-sm text-zinc-400 leading-relaxed">
             Bluu Rock manages the day-to-day operations of your account, including chatting, sales strategy,
             content scheduling, and performance optimisation.
@@ -54,7 +54,7 @@ export default function WelcomePage() {
           <div className="flex flex-col gap-3 mt-2">
             <DashboardItem
               icon={ImagePlay}
-              iconColor={HUES.violet}
+              iconColor={HUES.sky}
               title="Custom Requests"
               body="These are unique, custom goods your fans request at a much higher rate than general PPV content — pictures, videos, calls, and items. Once you complete a video, call, or item, mark it as Completed."
             />
@@ -73,8 +73,8 @@ export default function WelcomePage() {
           </div>
 
           {/* Content Examples aside */}
-          <div className="mt-2 flex flex-col gap-2 rounded-xl border border-violet-500/[0.18] bg-violet-500/[0.06] px-4 py-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-violet-300">Content Examples</p>
+          <div className="mt-2 flex flex-col gap-2 rounded-xl border border-sky-500/[0.18] bg-sky-500/[0.06] px-4 py-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-sky-300">Content Examples</p>
             <p className="text-sm text-zinc-400 leading-relaxed">
               Use the examples in this folder as a reference or inspiration when filming your content.
             </p>

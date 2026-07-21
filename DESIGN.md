@@ -17,8 +17,9 @@ colors:
   status-yellow: "#facc15"
   status-red: "#f87171"
   status-zinc: "#a1a1aa"
-  creator-accent: "#8b5cf6"
-  creator-accent-deep: "#7c3aed"
+  creator-accent: "#00b8f5"
+  creator-accent-deep: "#0090c8"
+  creator-blue: "#3b82f6"
   creator-amber: "#f59e0b"
   creator-emerald: "#10b981"
 typography:
@@ -228,6 +229,15 @@ Card radius is `rounded-xl`; controls and rows are `rounded-md` / `rounded-lg`; 
 - **Loading:** shadcn `Skeleton` shaped to the final layout (`<Skeleton className="h-64 rounded-xl" />`), never a bare spinner mid-layout. Async home widgets gate boot via `useBootPhase('home-<name>', isLoading)`.
 - **Empty:** a single quiet line — `text-sm text-muted-foreground` ("Nothing outstanding.", "None") — never an illustration.
 
+### Stepped Flows (onboarding)
+
+Multi-step first-run flows use one shared chrome — `src/app/(main)/onboarding/_components/OnboardingCard.tsx` — so every step is the same object with different contents. Never hand-roll a step card.
+
+- **Ground & surface:** the standard near-black canvas with the card on the overlay recipe (`rgba(255,255,255,0.025)` bg, `rgba(255,255,255,0.07)` border, `rounded-xl`). No shadows, no bespoke background color.
+- **Progress rail:** one `size-1.5` dot per step, left of the header. Behind → `bg-white/45`; current → Action Blue with `ring-4 ring-[#3b82f6]/15` (the One Voice Rule — current selection); ahead → `bg-white/12`. Color transitions only (120ms); never animate dot size or position. Each dot carries an `sr-only` "Step N of M" label and `aria-current="step"`.
+- **Identity strip:** the signed-in user's name + `Avatar` (`size="sm"`, `aria-hidden`) on the right of the header, hairline-separated from the body. A step that presents identity in its own heading passes `identity="none"` rather than rendering a second avatar.
+- **Actions:** `Back` is `variant="ghost"` (`text-zinc-400`), forward is the primary `Button` and takes `flex-1`. Long steps pass a `footer` so the actions pin below the scroll area instead of riding to the bottom of a long form.
+
 ### Signature Component: Tinted Summary Cards + Kanban
 The `OverviewTab` in `custom-requests/page.tsx` is the reference look for any dashboard. Three parts:
 
@@ -267,20 +277,20 @@ The throughline: **the card's tint tells you the category at a glance, the kanba
 
 ## 7. Creator Portal (external skin)
 
-Everything above describes the **internal console** — the Electron app internal staff live in. The **creator portal** (`src/app/creator-portal/`) is a separate surface for **external creators** in a normal browser, and it wears a deliberately warmer, friendlier skin. This is an **authored divergence**, not drift: it trades the console's monochrome restraint for a single violet brand voice, because the audience and context differ (a creator marking their own work done, not an operator scanning a data console).
+Everything above describes the **internal console** — the Electron app internal staff live in. The **creator portal** (`src/app/creator-portal/`) is a separate surface for **external creators** in a normal browser, and it wears a deliberately warmer, friendlier skin. This is an **authored divergence**, not drift: it trades the console's monochrome restraint for a single Bluu-azure brand voice (sampled from the company logo), because the audience and context differ (a creator marking their own work done, not an operator scanning a data console).
 
 **The skin is defined once, in code, in [`src/app/creator-portal/theme.ts`](src/app/creator-portal/theme.ts).** Import those tokens; never hardcode a portal color, gradient, badge map, or surface recipe inline. If the visual language changes, change `theme.ts` and this section together.
 
 ### What carries over from the console (unchanged)
 - Near-black ground, translucent-white overlay surfaces, hairline borders. **No drop shadows** (the portal previously used `box-shadow` card lifts and glow shadows — both removed).
-- **No gradient fills** on buttons or cards. Actions are solid: `COMPLETE_BTN` (emerald) and `ACCENT_BTN` (soft violet). The old green→emerald gradient CTA with a glow is gone.
+- **No gradient fills** on buttons or cards. Actions are solid: `COMPLETE_BTN` (emerald) and `ACCENT_BTN` (soft azure). The old green→emerald gradient CTA with a glow is gone.
 - `tabular-nums` on every amount; `font-mono text-xs` on every CR code.
 - Only `src/components/ui` primitives; only `Avatar` for images (the profile menu uses `Avatar`, never a raw `<img>` — the logo SVG is the sole non-Avatar image).
 - `Skeleton`s shaped to the layout for loading (never a spinner mid-content); every mutation `toast`s its outcome.
 
 ### What differs (the authored part)
-- **Brand voice is violet, not Action Blue.** `creator-accent` (`#8b5cf6`, `ACCENT.hex`) marks CR codes, links, focus, and the avatar fallback — the portal's one non-semantic voice, used as sparingly as the console uses blue. Named category hues live in `HUES` (violet / blue / amber / emerald) for section icons and the customs/calls/items type accents (`TYPE_META`).
-- **One signature brand glow.** A single `radial-gradient(... rgba(139,92,246,0.08) ...)` sits behind every portal page ground (`PAGE_GROUND_STYLE`). This is the portal's *one* decorative-color exception — the analogue of the console's single backdrop-blur — and it is the only place color is spent on mood. Do not add a second.
+- **Brand voice is Bluu azure, not Action Blue.** `creator-accent` (`#00b8f5`, `ACCENT.hex`) — the bright cyan-azure sampled from the company logo, kept distinct from the console's royal Action Blue (`#3b82f6`) — marks CR codes, links, focus, and the avatar fallback — the portal's one non-semantic voice, used as sparingly as the console uses blue. In Tailwind it maps to the `sky-*` scale. Named category hues live in `HUES` (sky / blue / amber / emerald) for section icons and the customs/calls/items type accents (`TYPE_META`).
+- **One signature brand glow.** A single `radial-gradient(... rgba(0,184,245,0.08) ...)` sits behind every portal page ground (`PAGE_GROUND_STYLE`). This is the portal's *one* decorative-color exception — the analogue of the console's single backdrop-blur — and it is the only place color is spent on mood. Do not add a second.
 - **Dense badge caption size.** Content-type / status badges use `text-[10px]`, the established dense-caption step (see § Typography, Code) — legitimate here, not a new size.
 - **Friendlier empty states.** A small icon-in-circle + one line ("All caught up!") instead of the console's single quiet line — a deliberate warmth for this audience.
 
@@ -293,7 +303,7 @@ Everything above describes the **internal console** — the Electron app interna
 
 ### Portal rules (in addition to everything in §1–6)
 1. **Import the skin from `theme.ts`.** No inline portal hexes, gradients, or surface recipes. New portal color → add it to `theme.ts` **and** the `creator-*` palette entries in this file's frontmatter.
-2. **Violet is the portal's one voice**, exactly as Action Blue is the console's. It marks brand/interactive accent only — never decoration beyond the one signature page glow.
+2. **Bluu azure is the portal's one voice**, exactly as Action Blue is the console's. It marks brand/interactive accent only — never decoration beyond the one signature page glow.
 3. **Solid fills only** — no gradient or glow buttons/cards. `COMPLETE_BTN` / `ACCENT_BTN` are the two action treatments.
 4. **Detail & confirm = shadcn `Dialog`** through `CreatorDialog`. No bespoke overlays.
 5. **"Mark Completed", never "Completed"**, and every completion is undoable via the `revert` flag.

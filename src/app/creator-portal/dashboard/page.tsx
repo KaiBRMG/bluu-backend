@@ -172,7 +172,7 @@ function CustomCard({ entry, accentHex, onOpen }: {
         <span className="text-sm font-semibold tabular-nums text-zinc-200">{formatAmount(entry.totalAmount)}</span>
       </div>
 
-      <span className="inline-flex items-center gap-1 text-[11px] text-violet-300">
+      <span className="inline-flex items-center gap-1 text-[11px] text-sky-300">
         View details <ChevronRight className="h-3 w-3" />
       </span>
     </button>
@@ -196,7 +196,7 @@ function TypeTile({ type, entries, onOpen }: {
         {meta.infoText && (
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-5 w-5 text-zinc-500 hover:text-zinc-300">
+              <Button variant="ghost" size="icon" className="relative h-5 w-5 text-zinc-500 hover:text-zinc-300 after:absolute after:-inset-3 after:content-['']">
                 <Info className="h-3.5 w-3.5" />
               </Button>
             </PopoverTrigger>
@@ -238,7 +238,7 @@ function ProfileMenu({ stageName, email, photoURL }: {
         <Button variant="ghost" className="h-auto items-center gap-2.5 rounded-xl px-2 py-1.5 hover:bg-white/5">
           <Avatar size="sm" className="ring-1 ring-white/10">
             {photoURL && <AvatarImage src={photoURL} alt="" />}
-            <AvatarFallback className="bg-violet-500/25 text-violet-100">
+            <AvatarFallback className="bg-sky-500/25 text-sky-100">
               {stageName.charAt(0).toUpperCase()}
             </AvatarFallback>
           </Avatar>
@@ -273,7 +273,7 @@ function SectionHeader({ title, info }: { title: string; info: string }) {
       <h2 className="text-lg font-semibold text-zinc-100">{title}</h2>
       <Popover>
         <PopoverTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 text-zinc-500 hover:text-zinc-300">
+          <Button variant="ghost" size="icon" className="relative h-6 w-6 shrink-0 text-zinc-500 hover:text-zinc-300 after:absolute after:-inset-3 after:content-['']">
             <Info className="h-4 w-4" />
           </Button>
         </PopoverTrigger>
@@ -447,7 +447,7 @@ export default function CreatorDashboardPage() {
   if (!creatorUser) {
     return (
       <div className="flex min-h-screen items-center justify-center" style={{ background: "#09090b" }}>
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-violet-500/30 border-t-violet-500" />
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-sky-500/30 border-t-sky-500" />
       </div>
     );
   }
@@ -459,7 +459,7 @@ export default function CreatorDashboardPage() {
         className="sticky top-0 z-40 flex h-14 items-center justify-between gap-2 px-3 sm:px-6"
         style={HEADER_STYLE}
       >
-        <SidebarTrigger className="text-zinc-400 hover:bg-white/5 hover:text-zinc-100" />
+        <SidebarTrigger className="text-zinc-400 hover:bg-white/5 hover:text-zinc-100 relative after:absolute after:-inset-3 after:content-['']" />
         <img
           src="/logo/bluu_long.svg"
           alt="Bluu Rock"

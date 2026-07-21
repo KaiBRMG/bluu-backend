@@ -49,7 +49,7 @@ function CreatorSidebar() {
                   <SidebarMenuButton
                     asChild
                     isActive={pathname === href}
-                    className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5 data-[active=true]:bg-violet-500/15 data-[active=true]:text-violet-100 data-[active=true]:font-medium rounded-lg h-10"
+                    className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5 data-[active=true]:bg-sky-500/15 data-[active=true]:text-sky-100 data-[active=true]:font-medium rounded-lg h-11"
                   >
                     <Link href={href} onClick={handleNavClick}>
                       <Icon className="w-4 h-4 shrink-0" />
@@ -75,7 +75,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         ["--sidebar-border" as string]: "rgba(255,255,255,0.06)",
         ["--sidebar-accent" as string]: "rgba(255,255,255,0.05)",
         ["--sidebar-accent-foreground" as string]: "#fafafa",
-        ["--sidebar-ring" as string]: "rgba(139,92,246,0.5)",
+        ["--sidebar-ring" as string]: "rgba(0,184,245,0.5)",
       } as React.CSSProperties}
     >
       <CreatorSidebar />

@@ -44,7 +44,6 @@ await batch.commit();
 
 | Event | Factory |
 |---|---|
-| New user — complete onboarding | `notifications.onboardingActionRequired()` |
 | New user — welcome message | `notifications.welcomeToTeam(firstName)` |
 | New user — admin alert | `notifications.adminNewUserAlert()` — **fans out to every uid in `groups/admin.members`** (do not hardcode an admin uid) |
 | CR submitted | `notifications.crCreated(creatorName, stageName)` |

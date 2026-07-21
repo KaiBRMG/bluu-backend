@@ -88,7 +88,7 @@ export default function AllCustomsPage() {
         className="sticky top-0 z-40 flex h-14 items-center gap-2 px-3 sm:px-6"
         style={HEADER_STYLE}
       >
-        <SidebarTrigger className="text-zinc-400 hover:bg-white/5 hover:text-zinc-100" />
+        <SidebarTrigger className="text-zinc-400 hover:bg-white/5 hover:text-zinc-100 relative after:absolute after:-inset-3 after:content-['']" />
         <img
           src="/logo/bluu_long.svg"
           alt="Bluu Rock"
@@ -125,7 +125,7 @@ export default function AllCustomsPage() {
                 <TableBody>
                   {pageEntries.map(entry => (
                     <TableRow key={entry.id}>
-                      <TableCell className="font-mono text-sm text-violet-300">{entry.CR}</TableCell>
+                      <TableCell className="font-mono text-sm text-sky-300">{entry.CR}</TableCell>
                       <TableCell className="text-sm text-zinc-400">{TYPE_LABELS[entry.type]}</TableCell>
                       <TableCell className="text-sm">{entry.fanName}</TableCell>
                       <TableCell className="text-sm text-zinc-400">
@@ -173,7 +173,7 @@ export default function AllCustomsPage() {
                   className={`flex flex-col gap-2 rounded-xl px-4 py-3 text-left transition-colors active:bg-white/[0.04] ${SURFACE.panel}`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-xs font-semibold tracking-wider text-violet-300">{entry.CR}</span>
+                    <span className="font-mono text-xs font-semibold tracking-wider text-sky-300">{entry.CR}</span>
                     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${STATUS_COLORS[entry.status]}`}>
                       {entry.status}
                     </span>

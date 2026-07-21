@@ -96,7 +96,6 @@ export async function ensureUserExists(userData: CreateUserData): Promise<string
     adminDb.collection('groups').doc('admin').get().then(async (adminGroupSnap) => {
       const adminUids: string[] = adminGroupSnap.data()?.members ?? [];
       const notifBatch = adminDb.batch();
-      addNotificationToBatch(notifBatch, userData.uid, notifications.onboardingActionRequired());
       addNotificationToBatch(notifBatch, userData.uid, notifications.welcomeToTeam(firstName || userData.displayName));
       for (const adminUid of adminUids) {
         addNotificationToBatch(notifBatch, adminUid, notifications.adminNewUserAlert());

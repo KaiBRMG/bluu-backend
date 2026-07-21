@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Focus } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import OnboardingCard from '../../_components/OnboardingCard';
 
 export default function ScreenPermissionPage() {
   const router = useRouter();
@@ -47,34 +49,48 @@ export default function ScreenPermissionPage() {
   const isMac = platform === 'darwin';
 
   const instructions = isMac
-    ? "Click the button below, or open System Settings → Privacy & Security → Screen Recording → Enable for Bluu Backend. Then click \"I've enabled it\" below. Note, you may need to restart the app after giving the permission."
-    : "Allow screen recording when the system prompt appears. Then click \"I've enabled it\" below.";
+    ? 'Click the button below, or open System Settings → Privacy & Security → Screen Recording → enable it for Bluu Backend. You may need to restart the app after granting it.'
+    : 'Allow screen recording when the system prompt appears.';
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-12 max-w-lg w-full">
-      <div className="flex items-center gap-3 mb-6">
-        <Focus className="text-white shrink-0" size={24} />
-        <h1 className="text-xl font-semibold text-white">Screen Capturing</h1>
+    <OnboardingCard step={2}>
+      <div className="flex items-center gap-2.5">
+        <Focus className="shrink-0 text-zinc-400" size={18} aria-hidden="true" />
+        <h1 className="text-lg font-semibold text-white">Screen capturing</h1>
       </div>
 
-      <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 mb-6">
-        <p className="text-zinc-300 text-sm leading-relaxed">{instructions}</p>
-      </div>
+      <p className="mt-3 max-w-[65ch] text-sm leading-relaxed text-zinc-400">{instructions}</p>
 
-      <button
+      <Button
+        variant="secondary"
         onClick={handleRequestAccess}
-        className="w-full bg-zinc-700 text-white font-semibold py-3 px-6 rounded-lg hover:bg-zinc-600 transition-colors mb-3"
+        className="mt-6 w-full"
       >
-        Prompt Screen Capture
-      </button>
+        Prompt screen capture
+      </Button>
 
-      <button
-        onClick={() => router.push('/onboarding/permission/notifications')}
-        disabled={!prompted}
-        className="w-full bg-white text-black font-semibold py-3 px-6 rounded-lg hover:bg-zinc-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-        I&apos;ve enabled it
-      </button>
-    </div>
+      <p className="mt-2.5 text-xs text-zinc-500" aria-live="polite">
+        {prompted
+          ? 'Once you have enabled it, continue.'
+          : 'Prompt for access to continue.'}
+      </p>
+
+      <div className="mt-6 flex gap-3">
+        <Button
+          variant="ghost"
+          onClick={() => router.push('/onboarding/permissions')}
+          className="text-zinc-400"
+        >
+          Back
+        </Button>
+        <Button
+          onClick={() => router.push('/onboarding/permission/notifications')}
+          disabled={!prompted}
+          className="flex-1"
+        >
+          Next
+        </Button>
+      </div>
+    </OnboardingCard>
   );
 }

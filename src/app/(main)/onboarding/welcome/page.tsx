@@ -3,22 +3,27 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
+import { useUserData } from '@/hooks/useUserData';
 import { Checkbox } from '@/components/ui/checkbox';
-
-const TERMS_URL = 'https://languid-syzygy-f45.notion.site/Bluu-Backend-31d6a3e187d980a0bd2efa816993e2e7?source=copy_link';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
+import OnboardingCard, { UserAvatar } from '../_components/OnboardingCard';
 
 export default function WelcomePage() {
   const { user } = useAuth();
+  const { userData } = useUserData();
   const router = useRouter();
   const [accepted, setAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const name = userData?.displayName || userData?.firstName || '';
 
   const handleNext = async () => {
     if (!accepted || !user || loading) return;
     setLoading(true);
     try {
       const idToken = await user.getIdToken();
-      await fetch('/api/user/onboarding', {
+      const res = await fetch('/api/user/onboarding', {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -26,51 +31,59 @@ export default function WelcomePage() {
         },
         body: JSON.stringify({ hasAcceptedTerms: true }),
       });
+      if (!res.ok) throw new Error('Failed to record your acceptance');
       router.push('/onboarding/permissions');
     } catch (err) {
       console.error('[WelcomePage] Failed to accept terms:', err);
+      toast.error("Couldn't save your acceptance. Check your connection and try again.");
       setLoading(false);
     }
   };
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-12 max-w-lg w-full text-center">
-      <div className="flex justify-center mb-6">
-        <img src="/logo/HQ2.png" alt="BluuRock" className="h-20 w-auto" />
-      </div>
+    <OnboardingCard step={0} identity="none">
+      <h1 className="text-lg font-semibold text-white">
+        {/* The inline avatar is this step's identity treatment — which is why the
+            header strip is suppressed above (no duplicate avatar). */}
+        <span className="inline-flex flex-wrap items-center gap-x-2.5 gap-y-1 align-middle">
+          Welcome to Bluu Backend
+          <UserAvatar size="default" />
+        </span>
+      </h1>
 
-      <h1 className="text-2xl font-semibold text-white mb-4">Welcome to Bluu Backend</h1>
+      {name && <p className="mt-1.5 text-sm text-zinc-400">Signed in as {name}</p>}
 
-      <p className="text-zinc-400 text-sm leading-relaxed mb-10">
-        Bluu Backend is an internal management platform developed and maintained by Bluu Rock MGMT. To get started, please review and accept the terms of use below.
+      <p className="mt-5 max-w-[65ch] text-sm leading-relaxed text-zinc-400">
+        Bluu Backend is the internal management platform for Bluu Rock MGMT. Before you
+        start, please review and accept the terms of use.
       </p>
 
-      <div className="flex items-center justify-center gap-3 mb-8">
+      <div className="mt-7 flex items-start gap-3">
         <Checkbox
           id="terms"
           checked={accepted}
           onCheckedChange={(checked) => setAccepted(checked === true)}
+          className="mt-0.5"
         />
-        <label htmlFor="terms" className="text-zinc-400 text-sm cursor-pointer select-none">
+        <label htmlFor="terms" className="cursor-pointer text-sm text-zinc-400 select-none">
           I accept the{' '}
           <a
-            href={TERMS_URL}
+            /* Opens in the system browser: Electron's setWindowOpenHandler routes
+               target=_blank through shell.openExternal. /terms is allowlisted in
+               middleware.ts so it resolves outside the desktop app. */
+            href="/terms"
             target="_blank"
             rel="noopener noreferrer"
-            className="underline text-white hover:text-zinc-300 transition-colors"
+            className="text-white underline underline-offset-2 transition-colors hover:text-zinc-300"
           >
             terms of use
           </a>
         </label>
       </div>
 
-      <button
-        onClick={handleNext}
-        disabled={!accepted || loading}
-        className="w-full bg-white text-black font-semibold py-3 px-6 rounded-lg hover:bg-zinc-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-        {loading ? 'Please wait...' : 'Next'}
-      </button>
-    </div>
+      <Button onClick={handleNext} disabled={!accepted || loading} className="mt-7 w-full">
+        {loading ? 'Please wait…' : 'Next'}
+      </Button>
+    </OnboardingCard>
   );
 }
