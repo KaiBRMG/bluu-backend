@@ -31,19 +31,27 @@ export default function ScreenPermissionPage() {
   }, []);
 
   const handleRequestAccess = async () => {
-    if (typeof window !== 'undefined' && window.electronAPI) {
-      // On macOS, trigger an actual capture first: this fires the native "would
-      // like to record" prompt AND registers the app in the Screen Recording
-      // list (an app only appears there once it has attempted a capture). That
-      // matters especially right after the onboarding TCC reset above, which
-      // clears the record. Older pre-signing builds just opened System Settings
-      // because an unsigned app couldn't hold a durable grant anyway.
-      if (platform === 'darwin') {
-        await window.electronAPI.timeTracking?.captureScreenshot?.();
+    try {
+      if (typeof window !== 'undefined' && window.electronAPI) {
+        // On macOS, trigger an actual capture first: this fires the native "would
+        // like to record" prompt AND registers the app in the Screen Recording
+        // list (an app only appears there once it has attempted a capture). That
+        // matters especially right after the onboarding TCC reset above, which
+        // clears the record. Older pre-signing builds just opened System Settings
+        // because an unsigned app couldn't hold a durable grant anyway.
+        if (platform === 'darwin') {
+          await window.electronAPI.timeTracking?.captureScreenshot?.();
+        }
+        await window.electronAPI.permissions?.requestScreenAccess?.();
       }
-      await window.electronAPI.permissions?.requestScreenAccess?.();
+    } catch (err) {
+      // Expected on macOS: the capture above is *meant* to fail before the grant
+      // exists — that failure is what raises the prompt. Never block on it, or
+      // the user is stranded on a disabled button with nothing explaining why.
+      console.warn('[ScreenPermissionPage] Permission prompt failed (continuing):', err);
+    } finally {
+      setPrompted(true);
     }
-    setPrompted(true);
   };
 
   const isMac = platform === 'darwin';

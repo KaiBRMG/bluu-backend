@@ -3,20 +3,19 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
-import { useUserData } from '@/hooks/useUserData';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import OnboardingCard, { UserAvatar } from '../_components/OnboardingCard';
+import OnboardingCard, { UserAvatar, useFullName } from '../_components/OnboardingCard';
 
 export default function WelcomePage() {
   const { user } = useAuth();
-  const { userData } = useUserData();
   const router = useRouter();
   const [accepted, setAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const name = userData?.displayName || userData?.firstName || '';
+  const name = useFullName();
 
   const handleNext = async () => {
     if (!accepted || !user || loading) return;
@@ -41,24 +40,29 @@ export default function WelcomePage() {
   };
 
   return (
+    // The header strip is suppressed: this step presents identity itself, below
+    // the heading, so there is never a second avatar on screen.
     <OnboardingCard step={0} identity="none">
-      <h1 className="text-lg font-semibold text-white">
-        {/* The inline avatar is this step's identity treatment — which is why the
-            header strip is suppressed above (no duplicate avatar). */}
-        <span className="inline-flex flex-wrap items-center gap-x-2.5 gap-y-1 align-middle">
-          Welcome to Bluu Backend
-          <UserAvatar size="default" />
-        </span>
+      <h1 className="text-center text-lg font-semibold text-balance text-white">
+        Welcome to Bluu Backend
       </h1>
 
-      {name && <p className="mt-1.5 text-sm text-zinc-400">Signed in as {name}</p>}
+      <div className="mt-4 flex flex-col items-center gap-2">
+        <UserAvatar size="lg" />
+        {/* Reserve the line while the user doc loads so the copy below doesn't jump. */}
+        {name ? (
+          <p className="text-sm font-medium text-white">{name}</p>
+        ) : (
+          <Skeleton className="h-4 w-32" />
+        )}
+      </div>
 
-      <p className="mt-5 max-w-[65ch] text-sm leading-relaxed text-zinc-400">
+      <p className="mx-auto mt-6 max-w-[60ch] text-center text-sm leading-relaxed text-pretty text-zinc-400">
         Bluu Backend is the internal management platform for Bluu Rock MGMT. Before you
         start, please review and accept the terms of use.
       </p>
 
-      <div className="mt-7 flex items-start gap-3">
+      <div className="mt-7 flex items-start justify-center gap-3">
         <Checkbox
           id="terms"
           checked={accepted}
@@ -82,7 +86,7 @@ export default function WelcomePage() {
       </div>
 
       <Button onClick={handleNext} disabled={!accepted || loading} className="mt-7 w-full">
-        {loading ? 'Please wait…' : 'Next'}
+        {loading ? 'Saving…' : 'Next'}
       </Button>
     </OnboardingCard>
   );

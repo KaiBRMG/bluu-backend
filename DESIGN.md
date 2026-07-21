@@ -234,9 +234,18 @@ Card radius is `rounded-xl`; controls and rows are `rounded-md` / `rounded-lg`; 
 Multi-step first-run flows use one shared chrome — `src/app/(main)/onboarding/_components/OnboardingCard.tsx` — so every step is the same object with different contents. Never hand-roll a step card.
 
 - **Ground & surface:** the standard near-black canvas with the card on the overlay recipe (`rgba(255,255,255,0.025)` bg, `rgba(255,255,255,0.07)` border, `rounded-xl`). No shadows, no bespoke background color.
-- **Progress rail:** one `size-1.5` dot per step, left of the header. Behind → `bg-white/45`; current → Action Blue with `ring-4 ring-[#3b82f6]/15` (the One Voice Rule — current selection); ahead → `bg-white/12`. Color transitions only (120ms); never animate dot size or position. Each dot carries an `sr-only` "Step N of M" label and `aria-current="step"`.
+- **Progress rail:** one `size-1.5` dot per step, left of the header. Behind → `bg-white/45`; current → Action Blue with `ring-4 ring-[#3b82f6]/15` (the One Voice Rule — current selection); ahead → `bg-white/12`. Color transitions only (120ms); never animate dot size or position. The rail is `aria-hidden` with a **single** `sr-only` line ("Step 3 of 6: Screen capture") beside it — labelling every dot made a screen reader recite the whole flow on each page.
 - **Identity strip:** the signed-in user's name + `Avatar` (`size="sm"`, `aria-hidden`) on the right of the header, hairline-separated from the body. A step that presents identity in its own heading passes `identity="none"` rather than rendering a second avatar.
 - **Actions:** `Back` is `variant="ghost"` (`text-zinc-400`), forward is the primary `Button` and takes `flex-1`. Long steps pass a `footer` so the actions pin below the scroll area instead of riding to the bottom of a long form.
+
+**The completion moment** (`/onboarding/done`) is the **one place in the app that celebrates**, and the only sanctioned exception to the 120ms motion budget. A new hire crosses it once, ever. Its vocabulary lives in `globals.css` as `.onboard-seal` / `.onboard-tick` / `.onboard-rise` / `.onboard-pending`:
+
+- A green success seal scales in (380ms), then the lucide `Check` **draws along its own path** via `stroke-dashoffset` — the icon set stays pure; no bespoke SVG is introduced.
+- Content rises 6px into place on a 60–80ms stagger. The whole sequence completes inside **~660ms** and nothing bounces, slides far, or loops.
+- Every base style is the **final** state, so the screen is correct if the animation never runs, and `prefers-reduced-motion` zeroes all of it (including closing the tick's `stroke-dashoffset`).
+- `.onboard-pending` is the sole looping animation: a 2.4s opacity pulse on the single status dot that is genuinely in progress. It encodes state — it is not decoration.
+
+**Do not extend this vocabulary to other screens.** Its scarcity is the entire point; a second celebration makes the first one furniture.
 
 ### Signature Component: Tinted Summary Cards + Kanban
 The `OverviewTab` in `custom-requests/page.tsx` is the reference look for any dashboard. Three parts:

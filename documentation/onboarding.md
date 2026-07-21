@@ -96,7 +96,11 @@ Because `isAuthRoute` also covers `/auth/` and `/creator-portal`, the mid-sessio
 | 5 | `/onboarding/done` | — | `/` |
 
 ### Shared chrome (`OnboardingCard`)
-Every step renders inside it, so the flow reads as one object: a **progress dot rail** (filled behind you, Action Blue ringed on you, hairline ahead — one dot per entry in `ONBOARDING_STEPS`, each with an `sr-only` "Step N of M" label and `aria-current="step"`) and an **identity strip** (the user's name + `Avatar`) in the header, over the DESIGN.md overlay surface recipe. Props: `step`, `width` (`default` | `wide` — the form step is wide), `identity` (`strip` | `none`), and `footer` for a pinned action bar.
+Every step renders inside it, so the flow reads as one object: the Bluu wordmark centred at the top, a **progress dot rail** (filled behind you, Action Blue ringed on you, hairline ahead — one dot per entry in `ONBOARDING_STEPS`), and an **identity strip** (the user's full name + `Avatar`) on the right, over the DESIGN.md overlay surface recipe. Props: `step`, `width` (`default` | `wide` — the form step is wide), `identity` (`strip` | `none`), and `footer` for a pinned action bar.
+
+Also exports **`useFullName()`** — `firstName lastName`, falling back to `displayName`. Use it rather than reading `displayName` directly: `ensureUserExists` sets `displayName` to the **first name only**, so it renders as a partial name. Both `useFullName` and `UserAvatar` hold a `Skeleton` until the user doc arrives, so no step flashes a `?` avatar or reflows when the name lands.
+
+**The layout centres with `alignItems: 'safe center'`** (inline, so unsupporting browsers keep plain `items-center`). This is load-bearing, not cosmetic: with ordinary centring a card taller than the window overflows past the *top* edge and cannot be scrolled to. The details step is tall enough to hit this on a short window.
 
 ### Step 0 — `welcome` (terms of use)
 Sets `identity="none"` and renders identity itself, as the heading **"Welcome to Bluu Backend"** with the user's avatar inline, name underneath — so there is exactly one avatar on the step, not two.
@@ -133,6 +137,10 @@ On success: `POST /api/user/update` (profile + timezone) → `PATCH /api/user/on
 
 ### Step 5 — `done`
 Terminal confirmation: "Your information has been received!", followed by the explanation that the user is unassigned until an admin reviews them. **This is the only place that message lives** — the home-page group widget deliberately does not repeat it (it just shows the group name on an orange pending tint). `Go to my workspace` → `/`.
+
+Below the message sits a three-row **status list** — *Details submitted / Admin review / Workspace access* — that shows the wait as progress rather than describing it as a dead end. The "Admin review" row notes that managers have been notified, which is true: `adminNewUserAlert` fanned out to every admin at signup. Tones follow the semantic palette (green complete, orange awaiting, zinc idle) and the orange dot carries the app's only looping animation.
+
+This is also the app's **one celebratory moment** — a success seal and a drawn tick, ~660ms total, reduced-motion safe. The motion vocabulary is documented in [DESIGN.md](../DESIGN.md) under *Stepped Flows*; it is deliberately scoped to this screen and must not be reused elsewhere.
 
 Reloading here drops the user into the app, which is correct: the flag is already set and the screen is informational, not a gate.
 

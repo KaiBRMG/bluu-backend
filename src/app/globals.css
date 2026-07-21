@@ -485,6 +485,73 @@ input[type="date"].form-input {
   }
 }
 
+/* ─── Onboarding completion (final step) ──────────────────────────────────
+   The single celebratory beat in the app: a once-ever moment when a new hire
+   finishes setup. Held to the house motion budget — short, ease-out, nothing
+   that bounces or asks to be watched. Every base style below is the FINAL
+   state, so if the animation never runs the screen still renders correctly. */
+
+.onboard-rise {
+  animation: onboard-rise 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes onboard-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.onboard-seal {
+  animation: onboard-seal 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes onboard-seal {
+  from {
+    opacity: 0;
+    transform: scale(0.88);
+  }
+}
+
+/* Draws the tick along its own path. Targets the lucide <Check> glyph rather
+   than introducing a second icon — the icon set stays pure. */
+.onboard-tick path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: onboard-tick 340ms cubic-bezier(0.65, 0, 0.35, 1) 200ms forwards;
+}
+
+@keyframes onboard-tick {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The one live indicator: marks the review that is actually in progress.
+   Slow and low-contrast on purpose — it should read as a pulse, not a blink. */
+.onboard-pending {
+  animation: onboard-pending 2.4s ease-in-out infinite;
+}
+
+@keyframes onboard-pending {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboard-rise,
+  .onboard-seal,
+  .onboard-pending,
+  .onboard-tick path {
+    animation: none;
+  }
+  /* The tick is drawn via dashoffset, so it needs closing out explicitly. */
+  .onboard-tick path {
+    stroke-dashoffset: 0;
+  }
+}
+
 .dark {
   --background: oklch(0.141 0.005 285.823);
   --foreground: oklch(0.985 0 0);

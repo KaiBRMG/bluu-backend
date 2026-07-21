@@ -22,10 +22,17 @@ export default function NotificationsPermissionPage() {
   }, []);
 
   const handleRequestAccess = async () => {
-    if (typeof window !== 'undefined' && window.electronAPI?.permissions) {
-      await window.electronAPI.permissions.requestNotification();
+    try {
+      if (typeof window !== 'undefined' && window.electronAPI?.permissions) {
+        await window.electronAPI.permissions.requestNotification();
+      }
+    } catch (err) {
+      // A refused or unsupported notification must not strand the user on a
+      // disabled button — the grant isn't verified here in any case.
+      console.warn('[NotificationsPermissionPage] Prompt failed (continuing):', err);
+    } finally {
+      setPrompted(true);
     }
-    setPrompted(true);
   };
 
   const isMac = platform === 'darwin';

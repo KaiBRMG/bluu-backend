@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronDownIcon, ShieldCheck } from 'lucide-react';
+import { ChevronDownIcon, Plus, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '@/components/AuthProvider';
@@ -19,13 +19,14 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Progress } from '@/components/ui/progress';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Textarea } from '@/components/ui/textarea';
 
-import OnboardingCard from '../_components/OnboardingCard';
+import OnboardingCard, { useFullName } from '../_components/OnboardingCard';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const ALLOWED_TYPES = ['image/jpeg', 'image/png'];
 
 const initialFormState: PersonalInfoFormData = {
   displayName: '',
@@ -44,7 +45,13 @@ const initialFormState: PersonalInfoFormData = {
   userComments: '',
 };
 
-/** A titled group of fields, separated by a hairline rather than nested cards. */
+/**
+ * A titled group of fields, separated by a hairline rather than nested cards.
+ *
+ * A real fieldset/legend, not a section/h2: the form carries two "Phone number"
+ * and two "Email" labels, and only a legend makes a screen reader disambiguate
+ * them ("Emergency contact, Phone number") instead of reading the same name twice.
+ */
 function Section({
   title,
   description,
@@ -55,14 +62,19 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section
+    // The hairline lives on the wrapper, not the fieldset: a legend is rendered
+    // into its fieldset's top border, so a bordered fieldset would draw the rule
+    // straight through the title.
+    <div
       className="border-t pt-6 first:border-t-0 first:pt-0"
       style={{ borderColor: 'rgba(255,255,255,0.07)' }}
     >
-      <h2 className="text-sm font-semibold text-white">{title}</h2>
-      {description && <p className="mt-1 text-xs text-zinc-400">{description}</p>}
-      <div className="mt-4 space-y-4">{children}</div>
-    </section>
+      <fieldset className="min-w-0">
+        <legend className="p-0 text-sm font-semibold text-white">{title}</legend>
+        {description && <p className="mt-1 text-xs text-zinc-400">{description}</p>}
+        <div className="mt-4 space-y-4">{children}</div>
+      </fieldset>
+    </div>
   );
 }
 
@@ -109,6 +121,7 @@ export default function ProfilePage() {
   const router = useRouter();
   const { user } = useAuth();
   const { userData } = useUserData();
+  const fullName = useFullName();
 
   const [formData, setFormData] = useState<PersonalInfoFormData>(initialFormState);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -118,6 +131,37 @@ export default function ProfilePage() {
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLFormElement>(null);
+
+  // Submitting is gated on having actually scrolled the form — we're asking for
+  // records the user is accountable for, so they should have seen every field.
+  const [scrollProgress, setScrollProgress] = useState(0);
+  const [hasReadThrough, setHasReadThrough] = useState(false);
+
+  const updateScrollProgress = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const scrollable = el.scrollHeight - el.clientHeight;
+    // Nothing to scroll (short viewport-independent content, or a tall window):
+    // there's no reading left to gate on, so unlock immediately.
+    if (scrollable <= 4) {
+      setScrollProgress(1);
+      setHasReadThrough(true);
+      return;
+    }
+    setScrollProgress(Math.min(1, el.scrollTop / scrollable));
+    if (el.scrollTop >= scrollable - 8) setHasReadThrough(true);
+  }, []);
+
+  // Re-measure when the form grows (validation errors appear, fonts settle) so
+  // the bar can't report 100% against a stale height.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    updateScrollProgress();
+    const observer = new ResizeObserver(updateScrollProgress);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [updateScrollProgress]);
 
   // Seed from whatever the user doc already holds — Google gives us a display
   // name at signup, and a user who reloads mid-flow gets their answers back.
@@ -173,7 +217,7 @@ export default function ProfilePage() {
     if (!file) return;
 
     if (!ALLOWED_TYPES.includes(file.type)) {
-      toast.error('Invalid file type. Allowed: JPEG, PNG, GIF, WebP');
+      toast.error('Invalid file type. Allowed: JPEG, PNG');
       return;
     }
     if (file.size > MAX_FILE_SIZE) {
@@ -214,6 +258,12 @@ export default function ProfilePage() {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (isSubmitting || !user) return;
+    // Pressing Enter in a text field submits natively, which would sidestep the
+    // disabled button — so the scroll gate is enforced here too.
+    if (!hasReadThrough) {
+      toast.error('Please scroll through the whole form before submitting');
+      return;
+    }
 
     const validation = validateOnboardingProfile(formData, {
       resolveTimezone: resolveTimezoneFromAddress,
@@ -222,11 +272,16 @@ export default function ProfilePage() {
     if (!validation.isValid) {
       setErrors(validation.errors);
       toast.error('Please complete the highlighted fields');
-      // Bring the first problem into view rather than leaving them to hunt.
+      // Move the user to the first problem rather than leaving them to hunt for
+      // it. Focus (not just scroll) so the keyboard lands there too, and so a
+      // screen reader announces the field and its error.
       requestAnimationFrame(() => {
-        scrollRef.current
-          ?.querySelector('[data-error="true"]')
-          ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        const firstError = scrollRef.current?.querySelector('[data-error="true"]');
+        if (!firstError) return;
+        firstError.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        firstError
+          .querySelector<HTMLElement>('input, textarea, select, button')
+          ?.focus({ preventScroll: true });
       });
       return;
     }
@@ -285,7 +340,7 @@ export default function ProfilePage() {
   };
 
   const selectedCountry = countryCodes.find((c) => c.dialCode === formData.countryCode);
-  const avatarName = formData.displayName || userData?.displayName || 'User';
+  const avatarName = fullName || 'User';
 
   return (
     <OnboardingCard
@@ -302,7 +357,12 @@ export default function ProfilePage() {
           >
             Back
           </Button>
-          <Button type="submit" form="onboarding-profile" disabled={isSubmitting} className="flex-1">
+          <Button
+            type="submit"
+            form="onboarding-profile"
+            disabled={isSubmitting || !hasReadThrough}
+            className="flex-1"
+          >
             {isSubmitting ? 'Submitting…' : 'Submit details'}
           </Button>
         </div>
@@ -316,52 +376,85 @@ export default function ProfilePage() {
       >
         <ShieldCheck className="mt-0.5 shrink-0 text-zinc-400" size={18} aria-hidden="true" />
         <p className="max-w-[65ch] text-sm leading-relaxed text-zinc-400">
-          Bluu Rock MGMT is a registered company, so we&apos;re required to keep accurate
-          personnel records for payroll, tax, and compliance purposes. Fields marked
-          <span aria-hidden="true"> *</span> are needed for those records — everything else is
-          optional. You can update any of this later in Settings.
+          As a registered company, Bluu Rock MGMT is required to maintain accurate personnel
+          records. All information is kept strictly confidential and is not shared externally.
+        </p>
+      </div>
+
+      {/* Reading progress for the scroll area below — the gate on Submit. */}
+      <div className="mt-4">
+        <Progress
+          value={scrollProgress * 100}
+          aria-label="Form reading progress"
+          className="h-1"
+        />
+        <p className="mt-2 text-xs text-zinc-500" aria-live="polite">
+          {hasReadThrough
+            ? 'You can now submit your details.'
+            : 'Scroll to the end of the form to continue.'}
         </p>
       </div>
 
       <form
         id="onboarding-profile"
         onSubmit={handleSubmit}
+        onScroll={updateScrollProgress}
         noValidate
         ref={scrollRef}
-        className="mt-6 max-h-[52vh] space-y-6 overflow-y-auto pr-1"
+        // Sized against the space actually left over (~32rem of card chrome +
+        // page padding) rather than a flat vh, so the card stays inside a short
+        // window instead of overflowing it. Floored so it never collapses.
+        // Underscores are Tailwind's escape for spaces: calc() is a parse error
+        // without whitespace around the operator, which would drop the whole
+        // max-height and take the scroll container (and its gate) with it.
+        className="mt-5 max-h-[max(12rem,calc(100vh_-_32rem))] space-y-6 overflow-y-auto pr-1"
       >
         <Section title="About you">
           <div className="flex items-center gap-4">
-            <Avatar className="size-16 text-lg">
-              {userData?.photoURL && <AvatarImage src={userData.photoURL} alt="" />}
-              <AvatarFallback
-                style={{ background: getAvatarColor(avatarName), color: '#fff' }}
-                className="text-lg"
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png"
+              onChange={handlePhotoUpload}
+              className="sr-only"
+              id="onboarding-photo"
+              disabled={isUploadingPhoto}
+              // The visible label contains only an aria-hidden avatar, so it
+              // supplies no accessible name — the input must carry it itself.
+              aria-label="Upload a profile picture"
+            />
+            {/* The avatar itself is the upload control — the badge is the affordance. */}
+            <Label
+              htmlFor="onboarding-photo"
+              // focus-within surfaces keyboard focus on the sr-only file input,
+              // which would otherwise be invisible.
+              className={`group relative shrink-0 rounded-full transition-opacity focus-within:ring-2 focus-within:ring-[#3b82f6] focus-within:ring-offset-2 focus-within:ring-offset-[#0A0A0A] ${
+                isUploadingPhoto ? 'pointer-events-none opacity-60' : 'cursor-pointer'
+              }`}
+            >
+              <Avatar className="size-16">
+                {userData?.photoURL && <AvatarImage src={userData.photoURL} alt="" />}
+                <AvatarFallback
+                  style={{ background: getAvatarColor(avatarName), color: '#fff' }}
+                  className="text-lg"
+                >
+                  {getInitials(avatarName)}
+                </AvatarFallback>
+              </Avatar>
+              <span
+                aria-hidden="true"
+                className="absolute right-0 bottom-0 flex size-5 items-center justify-center rounded-full bg-[#3b82f6] ring-2 ring-[#0A0A0A] transition-colors group-hover:bg-[#2563eb]"
               >
-                {getInitials(avatarName)}
-              </AvatarFallback>
-            </Avatar>
-            <div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/gif,image/webp"
-                onChange={handlePhotoUpload}
-                className="hidden"
-                id="onboarding-photo"
-                disabled={isUploadingPhoto}
-              />
-              <Label
-                htmlFor="onboarding-photo"
-                className={`w-fit cursor-pointer text-sm transition-colors ${
-                  isUploadingPhoto
-                    ? 'pointer-events-none text-zinc-500'
-                    : 'text-[#3b82f6] hover:text-[#2563eb]'
-                }`}
-              >
-                {isUploadingPhoto ? 'Uploading…' : 'Upload a profile photo'}
-              </Label>
-              <p className="mt-0.5 text-xs text-zinc-500">Optional. JPEG, PNG, GIF or WebP, up to 5MB.</p>
+                <Plus className="size-3 text-white" strokeWidth={2.5} />
+              </span>
+            </Label>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-white">{fullName}</p>
+              <p className="mt-1 text-xs text-zinc-500">
+                {isUploadingPhoto
+                  ? 'Uploading…'
+                  : 'Upload a profile picture (optional). JPEG or PNG, up to 5MB.'}
+              </p>
             </div>
           </div>
 
@@ -441,6 +534,23 @@ export default function ProfilePage() {
         </Section>
 
         <Section title="How we reach you">
+          <Field id="workEmail" label="Company email">
+            <Input
+              id="workEmail"
+              type="email"
+              value={userData?.workEmail ?? ''}
+              // readOnly, not disabled: a disabled input is skipped by the
+              // keyboard and can't be selected, and this is a value people
+              // reasonably want to read back or copy.
+              readOnly
+              aria-describedby="workEmail-hint"
+              className="text-zinc-400 focus-visible:ring-0"
+            />
+            <p id="workEmail-hint" className="mt-1 text-xs text-zinc-500">
+              The account you signed in with. This can&apos;t be changed here.
+            </p>
+          </Field>
+
           <Field id="personalEmail" label="Personal email" required error={errors.personalEmail}>
             <Input
               id="personalEmail"
@@ -608,9 +718,27 @@ export default function ProfilePage() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field
+              id="emergencyContactEmail"
+              label="Email"
+              required
+              error={errors.emergencyContactEmail}
+            >
+              <Input
+                id="emergencyContactEmail"
+                type="email"
+                value={formData.emergencyContactEmail}
+                onChange={(e) => setField('emergencyContactEmail', e.target.value)}
+                placeholder="Their email"
+                aria-required="true"
+                aria-invalid={!!errors.emergencyContactEmail}
+                aria-describedby={
+                  errors.emergencyContactEmail ? 'emergencyContactEmail-error' : undefined
+                }
+              />
+            </Field>
+            <Field
               id="emergencyContactNumber"
               label="Phone number"
-              required
               error={errors.emergencyContactNumber}
             >
               <Input
@@ -619,37 +747,23 @@ export default function ProfilePage() {
                 value={formData.emergencyContactNumber}
                 onChange={(e) => setField('emergencyContactNumber', e.target.value)}
                 placeholder="Their phone number"
-                aria-required="true"
                 aria-invalid={!!errors.emergencyContactNumber}
                 aria-describedby={
                   errors.emergencyContactNumber ? 'emergencyContactNumber-error' : undefined
                 }
               />
             </Field>
-            <Field id="emergencyContactEmail" label="Email" error={errors.emergencyContactEmail}>
-              <Input
-                id="emergencyContactEmail"
-                type="email"
-                value={formData.emergencyContactEmail}
-                onChange={(e) => setField('emergencyContactEmail', e.target.value)}
-                placeholder="Their email"
-                aria-invalid={!!errors.emergencyContactEmail}
-                aria-describedby={
-                  errors.emergencyContactEmail ? 'emergencyContactEmail-error' : undefined
-                }
-              />
-            </Field>
           </div>
         </Section>
 
-        <Section title="Payment and notes" description="Optional — you can add these later in Settings.">
+        <Section title="Payment and notes">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field id="paymentMethod" label="Payment method" error={errors.paymentMethod}>
               <Input
                 id="paymentMethod"
                 value={formData.paymentMethod}
                 onChange={(e) => setField('paymentMethod', e.target.value)}
-                placeholder="e.g. Bank transfer, PayPal"
+                placeholder="e.g. Wise, Binance"
                 maxLength={100}
               />
             </Field>
@@ -658,7 +772,7 @@ export default function ProfilePage() {
                 id="paymentInfo"
                 value={formData.paymentInfo}
                 onChange={(e) => setField('paymentInfo', e.target.value)}
-                placeholder="Account details or address"
+                placeholder="e.g. account number, BinanceID"
                 maxLength={500}
               />
             </Field>
@@ -669,7 +783,7 @@ export default function ProfilePage() {
               id="userComments"
               value={formData.userComments}
               onChange={(e) => setField('userComments', e.target.value)}
-              placeholder="Allergies, accessibility needs, notes for your manager…"
+              placeholder="e.g. medical conditions, accessibility needs, etc."
               maxLength={2000}
               className="min-h-20"
             />

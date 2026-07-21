@@ -132,7 +132,7 @@ export function validatePersonalInfoForm(
  *
  * Deliberately excluded (collected, format-validated, but never blocking):
  * gender, telegram handle, payment method/info, comments, and the emergency
- * contact's email.
+ * contact's phone number — email is the required channel for that contact.
  */
 const ONBOARDING_REQUIRED_FIELDS: ReadonlyArray<{
   key: keyof Omit<PersonalInfoFormData, 'address'>;
@@ -143,7 +143,7 @@ const ONBOARDING_REQUIRED_FIELDS: ReadonlyArray<{
   { key: 'phoneNumber', label: 'Phone number' },
   { key: 'DOB', label: 'Date of birth' },
   { key: 'emergencyContactName', label: 'Emergency contact name' },
-  { key: 'emergencyContactNumber', label: 'Emergency contact number' },
+  { key: 'emergencyContactEmail', label: 'Emergency contact email' },
 ];
 
 const ONBOARDING_REQUIRED_ADDRESS: ReadonlyArray<{
