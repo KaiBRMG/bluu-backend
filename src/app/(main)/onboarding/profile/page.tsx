@@ -141,14 +141,22 @@ export default function ProfilePage() {
   const updateScrollProgress = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
+
+    // A zero height means the element hasn't been laid out yet. Measuring now
+    // would read scrollHeight === clientHeight and latch the gate open before
+    // the user has seen anything — wait for a real measurement instead.
+    if (el.clientHeight === 0) return;
+
     const scrollable = el.scrollHeight - el.clientHeight;
-    // Nothing to scroll (short viewport-independent content, or a tall window):
-    // there's no reading left to gate on, so unlock immediately.
+
+    // Genuinely nothing to scroll (a very tall window): there's no reading left
+    // to gate on, so unlock rather than trapping the user behind a full bar.
     if (scrollable <= 4) {
       setScrollProgress(1);
       setHasReadThrough(true);
       return;
     }
+
     setScrollProgress(Math.min(1, el.scrollTop / scrollable));
     if (el.scrollTop >= scrollable - 8) setHasReadThrough(true);
   }, []);
@@ -368,10 +376,12 @@ export default function ProfilePage() {
         </div>
       }
     >
-      <h1 className="text-lg font-semibold text-white">Your details</h1>
+      {/* shrink-0 throughout the frozen block: these are flex children now, and
+          without it they'd compress instead of the form taking the squeeze. */}
+      <h1 className="shrink-0 text-lg font-semibold text-white">Your details</h1>
 
       <div
-        className="mt-4 flex items-start gap-3 rounded-lg border p-4"
+        className="mt-4 flex shrink-0 items-start gap-3 rounded-lg border p-4"
         style={{ background: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.07)' }}
       >
         <ShieldCheck className="mt-0.5 shrink-0 text-zinc-400" size={18} aria-hidden="true" />
@@ -382,13 +392,16 @@ export default function ProfilePage() {
       </div>
 
       {/* Reading progress for the scroll area below — the gate on Submit. */}
-      <div className="mt-4">
+      <div className="mt-4 shrink-0">
         <Progress
           value={scrollProgress * 100}
           aria-label="Form reading progress"
           className="h-1"
         />
-        <p className="mt-2 text-xs text-zinc-500" aria-live="polite">
+        {/* The bar carries this visually. Kept for screen readers only: a
+            disabled Submit with no stated reason is otherwise a dead end for
+            anyone who can't see the bar fill. */}
+        <p className="sr-only" aria-live="polite">
           {hasReadThrough
             ? 'You can now submit your details.'
             : 'Scroll to the end of the form to continue.'}
@@ -404,10 +417,10 @@ export default function ProfilePage() {
         // Sized against the space actually left over (~32rem of card chrome +
         // page padding) rather than a flat vh, so the card stays inside a short
         // window instead of overflowing it. Floored so it never collapses.
-        // Underscores are Tailwind's escape for spaces: calc() is a parse error
-        // without whitespace around the operator, which would drop the whole
-        // max-height and take the scroll container (and its gate) with it.
-        className="mt-5 max-h-[max(12rem,calc(100vh_-_32rem))] space-y-6 overflow-y-auto pr-1"
+        // Takes exactly the space the card has left over — no vh arithmetic, so
+        // it can't guess the chrome height wrong and spill the page. `min-h-0`
+        // is what allows a flex child to shrink below its content and scroll.
+        className="mt-5 min-h-0 flex-1 space-y-6 overflow-y-auto pr-1"
       >
         <Section title="About you">
           <div className="flex items-center gap-4">
@@ -453,7 +466,7 @@ export default function ProfilePage() {
             </Label>
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-white">{fullName}</p>
-              <p className="mt-1 text-xs text-zinc-500">
+              <p className="mt-1 text-xs text-zinc-400">
                 {isUploadingPhoto
                   ? 'Uploading…'
                   : 'Upload a profile picture (optional). JPEG or PNG, up to 5MB.'}
@@ -549,7 +562,7 @@ export default function ProfilePage() {
               aria-describedby="workEmail-hint"
               className="text-zinc-400 focus-visible:ring-0"
             />
-            <p id="workEmail-hint" className="mt-1 text-xs text-zinc-500">
+            <p id="workEmail-hint" className="mt-1 text-xs text-zinc-400">
               The account you signed in with. This can&apos;t be changed here.
             </p>
           </Field>

@@ -90,7 +90,7 @@ export default function OnboardingDonePage() {
               <span className={`shrink-0 text-xs font-medium ${text}`}>{status}</span>
             </div>
             {/* pl-8 aligns the hint with the label: px-4 (16) + dot (6) + gap (10). */}
-            {hint && <p className="pr-4 pb-3 pl-8 text-xs text-zinc-500">{hint}</p>}
+            {hint && <p className="pr-4 pb-3 pl-8 text-xs text-zinc-400">{hint}</p>}
           </li>
         ))}
       </ol>

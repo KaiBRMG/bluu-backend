@@ -1,17 +1,17 @@
 export default function OnboardingLayout({ children }: { children: React.ReactNode }) {
   return (
-    // Near-black canvas, matching the console the user is about to enter
-    // (DESIGN.md §2). Depth comes from the card's white overlay, not the ground.
+    // The same blurred ground the login screen uses, so signing in and setting up
+    // read as one continuous surface. `bg-background` stays underneath as the
+    // fallback if the image fails to load — the card must never sit on white.
     //
-    // `alignItems: 'safe center'` (inline, so browsers without it keep the
-    // `items-center` class) is load-bearing: with plain centring, a card taller
-    // than the window overflows past the TOP edge and the first fields become
-    // unreachable — you cannot scroll above a centred flex item. Safe centring
-    // falls back to start-alignment exactly when that would happen. The details
-    // step is tall enough to hit this on a short window.
+    // `h-screen` + `overflow-hidden` locks the page: onboarding never scrolls as a
+    // page on any step. The details step is the only one with more content than
+    // fits, and it absorbs that internally — `OnboardingCard` is capped at
+    // `max-h-full` and scrolls its own body, so nothing can spill past the
+    // viewport and leave dead space below the card.
     <main
-      className="flex min-h-screen items-center justify-center bg-background px-4 py-10"
-      style={{ alignItems: 'safe center' }}
+      className="flex h-screen items-center justify-center overflow-hidden bg-background bg-cover bg-center bg-no-repeat p-4 sm:p-6"
+      style={{ backgroundImage: "url('/backgrounds/2_blur.png')" }}
     >
       {children}
     </main>

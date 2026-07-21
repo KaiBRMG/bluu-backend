@@ -54,7 +54,7 @@ export default function NotificationsPermissionPage() {
         Prompt notification
       </Button>
 
-      <p className="mt-2.5 text-xs text-zinc-500" aria-live="polite">
+      <p className="mt-2.5 text-xs text-zinc-400" aria-live="polite">
         {prompted
           ? 'Once you have enabled it, continue.'
           : 'Prompt for access to continue.'}

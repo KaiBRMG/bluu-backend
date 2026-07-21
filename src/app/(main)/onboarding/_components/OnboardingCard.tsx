@@ -1,16 +1,26 @@
 "use client";
 
+import { useState } from 'react';
+import { LogOut } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/components/AuthProvider';
 import { useUserData } from '@/hooks/useUserData';
+import { useTimeTrackingContext } from '@/contexts/TimeTrackingContext';
+import { clearPermissionsCache } from '@/lib/permissionsCache';
+import { auth } from '@/firebase-config';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { cn } from '@/lib/utils';
 import { ONBOARDING_STEPS, type OnboardingStepIndex } from '../steps';
 
-/** The card interior surface — the overlay recipe from DESIGN.md §4, never a shadow. */
+/**
+ * The card surface. Opaque — DESIGN.md's translucent overlay recipe assumes the
+ * near-black canvas behind it; over the login photo it would let the image show
+ * through and drop body text below the 4.5:1 contrast floor.
+ */
 const SURFACE = {
-  background: 'rgba(255,255,255,0.025)',
+  background: '#171717',
   borderColor: 'rgba(255,255,255,0.07)',
 } as const;
 
@@ -91,6 +101,50 @@ export function UserAvatar({
   );
 }
 
+/**
+ * Onboarding is the one authenticated surface with no sidebar, so without this
+ * a user who signed in with the wrong account would be stuck with no way out.
+ * Mirrors `NavUser`'s sign-out exactly — including the clock-out flush, so the
+ * two paths can't drift (see time-tracking.md: leaving without pressing Clock
+ * Out otherwise leaves the session open server-side).
+ */
+function SignOutButton() {
+  const { clockOutAndFlush } = useTimeTrackingContext();
+  const [signingOut, setSigningOut] = useState(false);
+
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await clockOutAndFlush();
+    } catch (error) {
+      console.error('[Onboarding] Clock-out on sign out failed:', error);
+    }
+    try {
+      clearPermissionsCache();
+      localStorage.removeItem('sessionToken');
+      await auth.signOut();
+    } catch (error) {
+      console.error('[Onboarding] Sign out error:', error);
+      setSigningOut(false);
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="xs"
+      onClick={handleSignOut}
+      disabled={signingOut}
+      className="text-zinc-500 hover:text-zinc-300"
+    >
+      <LogOut aria-hidden="true" />
+      {signingOut ? 'Signing out…' : 'Sign out'}
+    </Button>
+  );
+}
+
 /** One dot per onboarding page: filled behind you, Action Blue on you, hairline ahead. */
 function ProgressDots({ step }: { step: OnboardingStepIndex }) {
   return (
@@ -145,18 +199,28 @@ export default function OnboardingCard({
   const name = useFullName();
 
   return (
+    // A flex column capped at the viewport: header and footer hold their size,
+    // the body takes what's left. Short steps size to their content; the details
+    // step hits the cap and scrolls inside instead of growing the page.
     <div
       style={SURFACE}
       className={cn(
-        'w-full rounded-xl border',
+        'flex max-h-full w-full flex-col overflow-hidden rounded-xl border',
         width === 'wide' ? 'max-w-2xl' : 'max-w-lg'
       )}
     >
       {/* Header: brand mark centred, then progress left / identity right */}
-      <div className="border-b px-6 py-5 sm:px-8" style={{ borderColor: HAIRLINE }}>
-        {/* The wordmark is the one sanctioned non-Avatar image in the system. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo/bluu_long.svg" alt="Bluu" className="mx-auto h-5 w-auto" />
+      <div className="shrink-0 border-b px-6 py-5 sm:px-8" style={{ borderColor: HAIRLINE }}>
+        {/* Sign-out is absolutely placed so the wordmark stays optically centred
+            in the card rather than being pushed off-centre by it. */}
+        <div className="relative">
+          {/* The wordmark is the one sanctioned non-Avatar image in the system. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo/bluu_long.svg" alt="Bluu" className="mx-auto h-5 w-auto" />
+          <div className="absolute inset-y-0 right-0 flex items-center">
+            <SignOutButton />
+          </div>
+        </div>
 
         <div className="mt-5 flex items-center justify-between gap-4">
           <ProgressDots step={step} />
@@ -174,11 +238,13 @@ export default function OnboardingCard({
         </div>
       </div>
 
-      <div className="px-6 py-7 sm:px-8">{children}</div>
+      {/* `min-h-0` lets this shrink below its content so a child marked
+          `flex-1 overflow-y-auto` (the details form) becomes the scroller. */}
+      <div className="flex min-h-0 flex-1 flex-col px-6 py-7 sm:px-8">{children}</div>
 
       {footer && (
         <div
-          className="border-t px-6 py-4 sm:px-8"
+          className="shrink-0 border-t px-6 py-4 sm:px-8"
           style={{ borderColor: HAIRLINE }}
         >
           {footer}

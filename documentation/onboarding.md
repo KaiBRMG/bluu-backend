@@ -105,7 +105,31 @@ Also exports two hooks that must not be confused:
 
 `UserAvatar` holds a `Skeleton` until the user doc arrives, so no step flashes a `?` avatar or reflows when the name lands.
 
-**The layout centres with `alignItems: 'safe center'`** (inline, so unsupporting browsers keep plain `items-center`). This is load-bearing, not cosmetic: with ordinary centring a card taller than the window overflows past the *top* edge and cannot be scrolled to. The details step is tall enough to hit this on a short window.
+A **Sign out** control sits at the top-right of the header on **every** step (absolutely positioned so the wordmark stays optically centred). Onboarding is the only authenticated surface with no sidebar, so without it a user who signed in with the wrong account has no way out. It mirrors `NavUser`'s handler exactly — clock-out flush, `clearPermissionsCache()`, drop `sessionToken`, `auth.signOut()` — so the two paths cannot drift.
+
+### Page locking and scroll (do not regress this)
+
+**The onboarding page never scrolls.** The layout is `h-screen overflow-hidden`; the card is `max-h-full` and is itself a **flex column** — header and footer `shrink-0`, body `min-h-0 flex-1`. Short steps size to their content; the details step hits the cap and scrolls *inside* its own form, which is `min-h-0 flex-1 overflow-y-auto`.
+
+Two earlier attempts failed and should not be retried:
+- **A `vh` calc** (`max-h-[calc(100vh-32rem)]`) has to guess the card's chrome height. Guess low and the card outgrows the viewport, leaving a long empty scroll region under it. Flex sizing needs no guess.
+- **`alignItems: 'safe center'`** was a workaround for a card taller than the viewport. With `max-h-full` that can no longer happen, so it's gone — plain centring is correct now.
+
+The frozen block on the details step (heading, compliance note, progress bar) is marked `shrink-0`; without it those compress instead of the form absorbing the squeeze.
+
+### The submit gate
+
+**Submit details** stays disabled until the user has scrolled the form to the end (`hasReadThrough`, a one-way latch so scrolling back up to fix a field doesn't re-lock it). `handleSubmit` re-checks it too, because Enter in a text field submits natively and would otherwise walk past the disabled button.
+
+The progress bar is the only visible indication — the helper text under it is `sr-only`, so a screen-reader user still learns why Submit is disabled.
+
+`updateScrollProgress` **ignores a measurement taken while `clientHeight === 0`.** An unlaid-out element reports `scrollHeight === clientHeight`, which reads as "nothing to scroll" and latches the gate open before the user has seen a thing. This is exactly how the broken `vh` calc above defeated the gate: with no valid max-height the form never became a scroll container, so the gate unlocked on mount every time.
+
+### Background
+
+Every step sits on `/backgrounds/2_blur.png` — the same ground as `Login`, so signing in and setting up read as one surface. `bg-background` stays underneath as the fallback if the image fails.
+
+Because of that photo the card surface is **opaque `#171717`**, not DESIGN.md's translucent overlay recipe: at 2.5% white the image showed through and pushed body text under the 4.5:1 contrast floor. Interior overlays (the permission rows, the compliance note) still use the overlay recipe — they sit on the opaque card, so they behave normally.
 
 ### Step 0 — `welcome` (terms of use)
 Sets `identity="none"` and renders identity itself, as the heading **"Welcome to Bluu Backend"** with the user's avatar inline, name underneath — so there is exactly one avatar on the step, not two.
