@@ -6,10 +6,13 @@ import { Button } from '@/components/ui/button';
 import OnboardingCard from '../_components/OnboardingCard';
 
 /**
- * What actually happens next, in order. The wait is the weakest moment in the
- * flow — the user finishes a long form and then can't use the app — so the
- * state is shown rather than described, which turns a dead end into progress.
- * Tones follow the semantic palette: green complete, orange awaiting, zinc idle.
+ * Where the user actually stands. Showing the state beats describing it: the
+ * copy says an admin still has to review them, and this makes that concrete and
+ * clearly in motion rather than an open-ended wait.
+ *
+ * Workspace access is deliberately absent — the user can reach their workspace
+ * straight away, so listing it as "pending" would be untrue and would imply a
+ * block that doesn't exist. Tones are semantic: green complete, orange awaiting.
  */
 const NEXT_STEPS = [
   {
@@ -27,15 +30,7 @@ const NEXT_STEPS = [
     text: 'text-orange-400',
     live: true,
     // True at this point: adminNewUserAlert fans out to every admin at signup.
-    hint: 'Your managers have been notified.',
-  },
-  {
-    label: 'Workspace access',
-    status: 'Pending',
-    dot: 'bg-zinc-600',
-    text: 'text-zinc-500',
-    live: false,
-    hint: null,
+    hint: 'Admin has been notified.',
   },
 ] as const;
 

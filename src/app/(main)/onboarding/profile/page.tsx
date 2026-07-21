@@ -23,7 +23,7 @@ import { Progress } from '@/components/ui/progress';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Textarea } from '@/components/ui/textarea';
 
-import OnboardingCard, { useFullName } from '../_components/OnboardingCard';
+import OnboardingCard, { useAvatarSeed, useFullName } from '../_components/OnboardingCard';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/png'];
@@ -122,6 +122,7 @@ export default function ProfilePage() {
   const { user } = useAuth();
   const { userData } = useUserData();
   const fullName = useFullName();
+  const avatarSeed = useAvatarSeed();
 
   const [formData, setFormData] = useState<PersonalInfoFormData>(initialFormState);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -340,7 +341,6 @@ export default function ProfilePage() {
   };
 
   const selectedCountry = countryCodes.find((c) => c.dialCode === formData.countryCode);
-  const avatarName = fullName || 'User';
 
   return (
     <OnboardingCard
@@ -432,13 +432,16 @@ export default function ProfilePage() {
                 isUploadingPhoto ? 'pointer-events-none opacity-60' : 'cursor-pointer'
               }`}
             >
-              <Avatar className="size-16">
+              {/* Seeded from `useAvatarSeed`, not the full name — the seed is
+                  hashed into the colour, so any other string renders a different
+                  person's avatar than the rest of the app shows. */}
+              <Avatar className="size-16" style={{ background: getAvatarColor(avatarSeed) }}>
                 {userData?.photoURL && <AvatarImage src={userData.photoURL} alt="" />}
                 <AvatarFallback
-                  style={{ background: getAvatarColor(avatarName), color: '#fff' }}
+                  style={{ background: getAvatarColor(avatarSeed), color: '#fff' }}
                   className="text-lg"
                 >
-                  {getInitials(avatarName)}
+                  {getInitials(avatarSeed)}
                 </AvatarFallback>
               </Avatar>
               <span

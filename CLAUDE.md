@@ -76,7 +76,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 4. **Elapsed time from buffers** — always close with `sessionCloseMs` before `parseBuffer`; never `parseBuffer(events, Date.now())` over a buffer set. See [time-tracking.md](documentation/time-tracking.md#2-session-close-time--sessionclosems-single-source-of-truth).
 5. **Notification copy** — only edit `src/lib/notificationContent.ts`; write via `addNotificationToBatch`.
 6. **Archive ≠ delete** — filter `isArchived` from user pickers; add new per-user collections to the delete cascade. See [user-management.md](documentation/user-management.md).
-7. **Avatars** — only `src/components/ui/avatar.tsx`, never `<img>`.
+7. **Avatars** — only `src/components/ui/avatar.tsx`, never `<img>`. Always seed the fallback from **`displayName`** (`getAvatarColor`/`getInitials`); the colour is a hash of that string, so any other seed renders the same person differently across screens. See [DESIGN.md](DESIGN.md#5-components) (The Avatar Seed Rule).
 8. **Home-page widgets** — async widgets must gate boot via `useBootPhase('home-<name>', isLoading)`.
 9. **Minimise Firestore I/O** — always minimise Firestore reads and writes where possible: prefer cached reads (`getUserById`, the sessionStorage hooks), batch with `adminDb.getAll(...)` / batched writes, and lean on JWT claims (`token.admin`) over reads. Never add an N+1 read or a redundant write.
 10. **Security first** — security principles must always be followed and prioritised. No vulnerability may linger after implementing a change: validate/authorize every request at the correct tier, never trust client input, never leak server-only secrets to the client, and never widen access as a shortcut.

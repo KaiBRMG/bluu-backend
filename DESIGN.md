@@ -200,6 +200,8 @@ Card radius is `rounded-xl`; controls and rows are `rounded-md` / `rounded-lg`; 
 
 **Only** shadcn/ui primitives from `src/components/ui/`. Never introduce another component library or hand-roll a primitive that already exists there; add new ones with `npx shadcn@latest add <name>`. Icons are **only** `@tabler/icons-react` and `lucide-react`. Images are **only** `Avatar` / `AvatarImage` / `AvatarFallback` — never a raw `<img>`. Every mutation `toast`s its outcome via `sonner` (`toast.success` / `toast.error`).
 
+**The Avatar Seed Rule.** Every fallback avatar is derived from **`displayName`** (`getAvatarColor(displayName || 'User')` + `getInitials(displayName)`), exactly as `AppLayout` and `NavUser` do it. `getAvatarColor` **hashes** the string it is given, so seeding from any other value — a full name, an email, a nickname in form state — changes both the initials *and* the colour, and the same person appears as two different avatars across screens. Display a fuller name as *text* if the surface calls for it, but always seed the avatar from `displayName`.
+
 ### Buttons
 - **Shape:** `rounded-md` / `rounded-lg`.
 - **Primary:** shadcn `default` variant; the global `.btn-primary` is Action Blue (`#3b82f6`), padding `8px 16px`, hover `#2563eb`.

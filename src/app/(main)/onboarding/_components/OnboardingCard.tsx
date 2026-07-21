@@ -2,6 +2,7 @@
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useAuth } from '@/components/AuthProvider';
 import { useUserData } from '@/hooks/useUserData';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { cn } from '@/lib/utils';
@@ -19,12 +20,27 @@ const HAIRLINE = 'rgba(255,255,255,0.07)';
  * The user's full name — `firstName lastName` from the user doc. `displayName`
  * is only ever the first name (see `ensureUserExists`), so it is the fallback,
  * not the source.
+ *
+ * For **display text only**. Never seed an avatar from this — see `useAvatarSeed`.
  */
 export function useFullName(): string {
   const { userData } = useUserData();
   if (!userData) return '';
   const full = `${userData.firstName ?? ''} ${userData.lastName ?? ''}`.trim();
   return full || userData.displayName || '';
+}
+
+/**
+ * The string every avatar in the app is derived from. Must stay byte-identical
+ * to `AppLayout`'s `userData.name`, because `getAvatarColor` **hashes** it:
+ * seeding from the full name instead of `displayName` changes the initials
+ * ("SP" vs "S") *and* the colour, so the same person would visibly change
+ * appearance crossing from onboarding into the app.
+ */
+export function useAvatarSeed(): string {
+  const { userData } = useUserData();
+  const { user } = useAuth();
+  return userData?.displayName || user?.displayName || 'User';
 }
 
 /**
@@ -39,7 +55,7 @@ export function UserAvatar({
   className?: string;
 }) {
   const { userData } = useUserData();
-  const name = useFullName();
+  const seed = useAvatarSeed();
 
   // Until the user doc arrives, `getInitials` would render a placeholder "?" on
   // a hashed colour — a visible flash of the wrong identity. Hold a skeleton.
@@ -56,13 +72,20 @@ export function UserAvatar({
   }
 
   return (
-    <Avatar size={size} className={className} aria-hidden="true">
+    // Colour is set on the root too, matching NavUser — it shows through while
+    // a photo is still decoding.
+    <Avatar
+      size={size}
+      className={className}
+      style={{ background: getAvatarColor(seed) }}
+      aria-hidden="true"
+    >
       {userData.photoURL && <AvatarImage src={userData.photoURL} alt="" />}
       <AvatarFallback
-        style={{ background: getAvatarColor(name || 'User'), color: '#fff' }}
+        style={{ background: getAvatarColor(seed), color: '#fff' }}
         className={size === 'lg' ? 'text-sm' : 'text-[10px]'}
       >
-        {getInitials(name)}
+        {getInitials(seed)}
       </AvatarFallback>
     </Avatar>
   );

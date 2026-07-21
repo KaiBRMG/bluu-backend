@@ -98,7 +98,12 @@ Because `isAuthRoute` also covers `/auth/` and `/creator-portal`, the mid-sessio
 ### Shared chrome (`OnboardingCard`)
 Every step renders inside it, so the flow reads as one object: the Bluu wordmark centred at the top, a **progress dot rail** (filled behind you, Action Blue ringed on you, hairline ahead — one dot per entry in `ONBOARDING_STEPS`), and an **identity strip** (the user's full name + `Avatar`) on the right, over the DESIGN.md overlay surface recipe. Props: `step`, `width` (`default` | `wide` — the form step is wide), `identity` (`strip` | `none`), and `footer` for a pinned action bar.
 
-Also exports **`useFullName()`** — `firstName lastName`, falling back to `displayName`. Use it rather than reading `displayName` directly: `ensureUserExists` sets `displayName` to the **first name only**, so it renders as a partial name. Both `useFullName` and `UserAvatar` hold a `Skeleton` until the user doc arrives, so no step flashes a `?` avatar or reflows when the name lands.
+Also exports two hooks that must not be confused:
+
+- **`useFullName()`** — `firstName lastName`, falling back to `displayName`. For **display text only**. Use it rather than reading `displayName` directly: `ensureUserExists` sets `displayName` to the **first name only**, so it renders as a partial name.
+- **`useAvatarSeed()`** — `displayName || auth displayName || 'User'`, byte-identical to `AppLayout`'s `userData.name`. **Every avatar seeds from this.** `getAvatarColor` hashes its argument, so seeding from the full name instead produced different initials *and* a different colour, and the user visibly changed avatar crossing from onboarding into the app. See DESIGN.md's *Avatar Seed Rule*.
+
+`UserAvatar` holds a `Skeleton` until the user doc arrives, so no step flashes a `?` avatar or reflows when the name lands.
 
 **The layout centres with `alignItems: 'safe center'`** (inline, so unsupporting browsers keep plain `items-center`). This is load-bearing, not cosmetic: with ordinary centring a card taller than the window overflows past the *top* edge and cannot be scrolled to. The details step is tall enough to hit this on a short window.
 
@@ -138,7 +143,9 @@ On success: `POST /api/user/update` (profile + timezone) → `PATCH /api/user/on
 ### Step 5 — `done`
 Terminal confirmation: "Your information has been received!", followed by the explanation that the user is unassigned until an admin reviews them. **This is the only place that message lives** — the home-page group widget deliberately does not repeat it (it just shows the group name on an orange pending tint). `Go to my workspace` → `/`.
 
-Below the message sits a three-row **status list** — *Details submitted / Admin review / Workspace access* — that shows the wait as progress rather than describing it as a dead end. The "Admin review" row notes that managers have been notified, which is true: `adminNewUserAlert` fanned out to every admin at signup. Tones follow the semantic palette (green complete, orange awaiting, zinc idle) and the orange dot carries the app's only looping animation.
+Below the message sits a two-row **status list** — *Details submitted* (green, done) and *Admin review* (orange, in progress) — that makes the review concrete and visibly in motion. The "Admin review" row notes that managers have been notified, which is true: `adminNewUserAlert` fanned out to every admin at signup. The orange dot carries the app's only looping animation.
+
+**Do not add a "Workspace access — pending" row.** The user can reach their workspace immediately; group assignment only affects what's *in* it. Listing access as pending would state something false and imply a block that does not exist.
 
 This is also the app's **one celebratory moment** — a success seal and a drawn tick, ~660ms total, reduced-motion safe. The motion vocabulary is documented in [DESIGN.md](../DESIGN.md) under *Stepped Flows*; it is deliberately scoped to this screen and must not be reused elsewhere.
 
