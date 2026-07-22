@@ -38,6 +38,13 @@
   --active-background: rgba(255, 255, 255, 0.08);
   --border-subtle: #2a2a2a;
 
+  /* Semantic z-index scale — layer names, not magic numbers. The app's shadcn
+     overlays (dialog / popover / sheet) sit at Tailwind z-50; these app-level
+     surfaces stack above them in priority order. */
+  --z-overlay: 50;  /* dropdowns, popovers, dialogs (matches Tailwind z-50) */
+  --z-banner: 60;   /* persistent app banners (update download / available) */
+  --z-toast: 70;    /* transient toasts, above the banner */
+
   /* Icon opacity */
   --icon-inactive: 0.65;
   --section-header-opacity: 0.5;
@@ -540,12 +547,23 @@ input[type="date"].form-input {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .onboard-rise,
-  .onboard-seal,
-  .onboard-pending,
-  .onboard-tick path {
-    animation: none;
+  /* Collapse all non-essential motion to an instant transition. Every animated
+     surface in this app (onboarding seal/rise/tick, sidebar width, notification
+     tray, hover/press nudges) has its FINAL state as its base style, so snapping
+     to the end — rather than mid-animation — always leaves the UI correct.
+     Activity spinners are exempt: a frozen spinner reads as a hung app, so they
+     keep looping to signal "busy". */
+  *:not(.loader):not(.network-modal-spinner),
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
   }
+
   /* The tick is drawn via dashoffset, so it needs closing out explicitly. */
   .onboard-tick path {
     stroke-dashoffset: 0;

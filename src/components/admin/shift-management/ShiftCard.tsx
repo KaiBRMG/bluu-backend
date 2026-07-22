@@ -79,15 +79,13 @@ export default function ShiftCard({ shift, user, viewerTimezone, onClick, onLeav
   const cardStyle: React.CSSProperties = isFuture
     ? {
         background:   `rgba(${rgb}, 0.12)`,
-        borderLeft:   `3px solid ${color}`,
+        border:       `1px solid rgba(${rgb}, 0.30)`,
         borderRadius: '10px',
-        boxShadow:    '0 1px 4px rgba(0,0,0,0.12)',
       }
     : {
         background:   `rgba(${rgb}, 0.20)`,
         border:       `1px solid rgba(${rgb}, 0.45)`,
         borderRadius: '10px',
-        boxShadow:    '0 1px 3px rgba(0,0,0,0.10)',
       };
 
   async function handleLeaveAction(action: 'approve' | 'deny') {

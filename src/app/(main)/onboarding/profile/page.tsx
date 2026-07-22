@@ -441,7 +441,7 @@ export default function ProfilePage() {
               htmlFor="onboarding-photo"
               // focus-within surfaces keyboard focus on the sr-only file input,
               // which would otherwise be invisible.
-              className={`group relative shrink-0 rounded-full transition-opacity focus-within:ring-2 focus-within:ring-[#3b82f6] focus-within:ring-offset-2 focus-within:ring-offset-[#0A0A0A] ${
+              className={`group relative shrink-0 rounded-full transition-opacity focus-within:ring-2 focus-within:ring-[#3b82f6] focus-within:ring-offset-2 focus-within:ring-offset-background ${
                 isUploadingPhoto ? 'pointer-events-none opacity-60' : 'cursor-pointer'
               }`}
             >
@@ -459,7 +459,7 @@ export default function ProfilePage() {
               </Avatar>
               <span
                 aria-hidden="true"
-                className="absolute right-0 bottom-0 flex size-5 items-center justify-center rounded-full bg-[#3b82f6] ring-2 ring-[#0A0A0A] transition-colors group-hover:bg-[#2563eb]"
+                className="absolute right-0 bottom-0 flex size-5 items-center justify-center rounded-full bg-[#3b82f6] ring-2 ring-background transition-colors group-hover:bg-[#2563eb]"
               >
                 <Plus className="size-3 text-white" strokeWidth={2.5} />
               </span>

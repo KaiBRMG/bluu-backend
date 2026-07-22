@@ -64,7 +64,7 @@ export default function AddMembersDropdown({ group, allUsers, onAdd, onClose }: 
   return (
     <div
       ref={dropdownRef}
-      className="absolute top-full right-0 z-50 mt-1 w-80 rounded-lg border shadow-xl bg-sidebar-bg border-border-subtle"
+      className="absolute top-full right-0 z-50 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg border bg-sidebar-bg border-border-subtle"
     >
       {/* Search */}
       <div className="border-b p-2 border-border-subtle">

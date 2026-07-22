@@ -20,6 +20,8 @@ import {
 } from "@/components/ui/card";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { MoreHorizontal, UserCircle, Copy, Check, Info } from "lucide-react";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { getAvatarColor, getInitials } from "@/lib/utils/avatar";
 import { TimezoneCombobox } from "@/components/ui/timezone-combobox";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -172,15 +174,15 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
           <CardContent className="flex flex-col gap-4">
             {/* Profile picture */}
             <div className="flex flex-col items-center gap-2">
-              <div
-                className="w-20 h-20 rounded-full overflow-hidden bg-zinc-800 flex items-center justify-center cursor-pointer border border-zinc-700"
+              <Avatar
+                className="size-20 cursor-pointer border border-zinc-700"
                 onClick={() => fileInputRef.current?.click()}
               >
-                {photoPreview
-                  ? <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
-                  : <UserCircle className="w-10 h-10 text-zinc-500" />
-                }
-              </div>
+                {photoPreview && <AvatarImage src={photoPreview} alt="Profile preview" className="object-cover" />}
+                <AvatarFallback className="bg-zinc-800">
+                  <UserCircle className="w-10 h-10 text-zinc-500" />
+                </AvatarFallback>
+              </Avatar>
               <Button
                 type="button"
                 variant="ghost"
@@ -353,14 +355,15 @@ function CreatorTable({ list, onEdit, onToggleActive, onArchive, onRestore, onDe
           {list.map(creator => (
             <TableRow key={creator.uid}>
               <TableCell>
-                {creator.photoURL
-                  ? <img src={creator.photoURL} alt="" className="w-8 h-8 rounded-full object-cover" />
-                  : (
-                    <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center text-xs font-medium text-zinc-300">
-                      {creator.stageName.charAt(0).toUpperCase()}
-                    </div>
-                  )
-                }
+                <Avatar>
+                  {creator.photoURL && <AvatarImage src={creator.photoURL} alt={creator.stageName} />}
+                  <AvatarFallback
+                    style={{ backgroundColor: getAvatarColor(creator.stageName) }}
+                    className="text-xs font-medium text-white"
+                  >
+                    {getInitials(creator.stageName)}
+                  </AvatarFallback>
+                </Avatar>
               </TableCell>
               <TableCell className="font-medium">{creator.stageName}</TableCell>
               <TableCell className="text-muted-foreground">{creator.userEmail}</TableCell>

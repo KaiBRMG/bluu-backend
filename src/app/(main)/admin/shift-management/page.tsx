@@ -4,28 +4,43 @@ import { useState } from "react";
 import dynamic from "next/dynamic";
 import AppLayout from "@/components/AppLayout";
 import AdminShifts from "@/components/admin/shift-management/AdminShifts";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+
+// Shaped loader for lazily-loaded tab panels — a header row + a table body,
+// sized to fill the content wrapper so switching tabs doesn't flash or shift.
+function PanelSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-8 w-48 rounded-md" />
+        <Skeleton className="h-8 w-32 rounded-md" />
+      </div>
+      <Skeleton className="h-[520px] w-full rounded-xl" />
+    </div>
+  );
+}
 
 const AdminActiveUsers = dynamic(
   () => import("@/components/admin/shift-management/AdminActiveUsers"),
-  { loading: () => <div style={{ minHeight: 400 }} /> }
+  { loading: () => <PanelSkeleton /> }
 );
 const AdminTimesheets = dynamic(
   () => import("@/components/admin/shift-management/AdminTimesheets"),
-  { loading: () => <div style={{ minHeight: 400 }} /> }
+  { loading: () => <PanelSkeleton /> }
 );
 const AdminScreenshots = dynamic(
   () => import("@/components/admin/shift-management/AdminScreenshots"),
-  { loading: () => <div style={{ minHeight: 400 }} /> }
+  { loading: () => <PanelSkeleton /> }
 );
 const AdminLeave = dynamic(
   () => import("@/components/admin/shift-management/AdminLeave"),
-  { loading: () => <div style={{ minHeight: 400 }} /> }
+  { loading: () => <PanelSkeleton /> }
 );
 const AdminAnalytics = dynamic(
   () => import("@/components/admin/shift-management/analytics/AdminAnalytics"),
-  { loading: () => <div style={{ minHeight: 400 }} /> }
+  { loading: () => <PanelSkeleton /> }
 );
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export default function ShiftManagementPage() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
@@ -40,15 +55,11 @@ export default function ShiftManagementPage() {
           View and manage employee time tracking.
         </p>
 
-        <div
-          className="mt-8 rounded-lg"
-          style={{
-            background: 'var(--sidebar-background)',
-            border: '1px solid var(--border-subtle)',
-          }}
-        >
+        <div className="mt-8 rounded-lg bg-content-bg border border-border-subtle">
           <Tabs defaultValue="shifts">
-            <div className="px-6 pt-4">
+            {/* pb-1.5: overflow-x:auto forces overflow-y to auto, so reserve room
+                for the trigger focus ring instead of letting it clip. */}
+            <div className="px-6 pt-4 pb-1.5 overflow-x-auto">
               <TabsList>
                 <TabsTrigger value="shifts">Shifts</TabsTrigger>
                 <TabsTrigger value="active-users">Active Users</TabsTrigger>
@@ -59,7 +70,7 @@ export default function ShiftManagementPage() {
               </TabsList>
             </div>
 
-            <div className="p-6" style={{ minHeight: '600px' }}>
+            <div className="p-6 min-h-[600px]">
               <TabsContent value="shifts"><AdminShifts /></TabsContent>
               <TabsContent value="active-users"><AdminActiveUsers /></TabsContent>
               <TabsContent value="timesheets">

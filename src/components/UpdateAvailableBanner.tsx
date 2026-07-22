@@ -252,7 +252,7 @@ export default function UpdateAvailableBanner() {
   if (dismissed) return null;
 
   return (
-    <Card className="fixed bottom-5 right-5 z-[9999] w-[22rem] max-w-[calc(100vw-2.5rem)] shadow-lg">
+    <Card className="fixed bottom-5 right-5 z-[var(--z-banner)] w-[22rem] max-w-[calc(100vw-2.5rem)]">
       <CardHeader>
         <CardTitle className="text-sm">Update available</CardTitle>
         <CardDescription>{versionLine}</CardDescription>

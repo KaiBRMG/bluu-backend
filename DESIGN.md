@@ -197,10 +197,18 @@ The surface recipe, reused for kanban columns, list rows, and panels:
 
 Card radius is `rounded-xl`; controls and rows are `rounded-md` / `rounded-lg`; chips and dots are `rounded-full`. `--radius` is `0.625rem` (10px).
 
+### Z-Index Scale
+Stacking is a **named semantic scale**, declared in `globals.css` and consumed via `var(--z-*)` (Tailwind `z-[var(--z-banner)]`) — never an arbitrary number. Three app-level layers sit *above* shadcn's own overlays (dialog / popover / sheet at Tailwind `z-50`):
+- **`--z-overlay` (50):** dropdowns, popovers, dialogs — matches Tailwind `z-50`.
+- **`--z-banner` (60):** persistent app banners (update-download / update-available) — above the overlays.
+- **`--z-toast` (70):** transient toasts — the top layer, above the banner.
+
 ### Named Rules
 **The No-Shadow Rule.** Depth comes from a lighter overlay and a hairline border, never from a `box-shadow`. If a surface needs to lift, raise its white overlay opacity — do not add a shadow.
 
 **The Hairline Rule.** Every border is a single hairline: `#2a2a2a` on opaque surfaces, `rgba(255,255,255,0.07)` on overlays. No heavy dividers, no double borders.
+
+**The Named-Layer Rule.** Stacking order is expressed with the `--z-*` scale (`--z-overlay` < `--z-banner` < `--z-toast`), never a literal like `z-[9999]`. A raw magic z-index is drift — replace it with the layer whose name matches its role.
 
 ## 5. Components
 
@@ -281,6 +289,7 @@ The throughline: **the card's tint tells you the category at a glance, the kanba
 - **Do** use only `src/components/ui` components, only `@tabler/icons-react` / `lucide-react` icons, and only `Avatar` for images.
 - **Do** shape `Skeleton`s to the final layout, write empty states as one quiet `text-muted-foreground` line, and `toast` every mutation outcome.
 - **Do** keep motion to 120ms transitions and `hover:brightness-110 active:scale-[0.98]` on tappable rows.
+- **Do** stack app surfaces with the `--z-*` scale (`--z-overlay` < `--z-banner` < `--z-toast`) via `var(--z-*)`.
 - **Do** make it read like `custom-requests/page.tsx`. If it doesn't, reconcile.
 
 ### Don't:
@@ -292,6 +301,7 @@ The throughline: **the card's tint tells you the category at a glance, the kanba
 - **Don't** reach for a modal first, drop a spinner into the middle of a layout, or ship an "illustration" empty state.
 - **Don't** introduce a second font family, oversized display type (the sole exception is the time-tracking `Instrument` step — see § Typography), gradient text/heros, or glassmorphism — this is not a marketing site.
 - **Don't** use a colored side-stripe as a decorative accent; the only left-border in the system is the kanban row's functional `border-l-2` overlay edge.
+- **Don't** reach for a magic `z-[9999]`; use the semantic `--z-*` layer whose name matches the role (The Named-Layer Rule).
 
 ## 7. Creator Portal (external skin)
 

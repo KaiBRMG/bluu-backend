@@ -42,7 +42,6 @@ function shortTzLabel(tz: string): string {
   const city = tz.split('/').pop()?.replace(/_/g, ' ') ?? tz;
   const formatter = new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'shortOffset' });
   const gmtPart = formatter.formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value ?? '';
-  // Normalise "GMT+2" → "GMT+2", already correct.
   return `${city} ${gmtPart}`;
 }
 
@@ -131,7 +130,11 @@ function AnnouncementBanner({ announcements }: { announcements: NotificationDocu
   const block = NOTIFICATION_TYPE_STYLE[announcements[0].type] ?? NOTIFICATION_TYPE_STYLE.system;
 
   return (
-    <div className={`rounded-xl border p-6 mb-8 ${block.wash} ${block.border}`}>
+    <div
+      role="region"
+      aria-label="Announcements"
+      className={`rounded-xl border p-6 mb-8 ${block.wash} ${block.border}`}
+    >
       <div className="flex flex-col gap-4">
         {announcements.map((ann) => {
           const { dot } = NOTIFICATION_TYPE_STYLE[ann.type] ?? NOTIFICATION_TYPE_STYLE.system;
@@ -140,13 +143,15 @@ function AnnouncementBanner({ announcements }: { announcements: NotificationDocu
               {/* Type dot — the compact house indicator (no side-stripe) */}
               <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden />
               <div className="flex-1 min-w-0">
+                {/* Muted-on-Tint Rule: the block wash is a colored tint, so meta
+                    drops to foreground-secondary (~6:1), never muted (~3.5:1). */}
                 <p className="text-sm font-semibold leading-snug text-foreground">
                   {ann.title}
-                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  <span className="ml-2 text-xs font-normal text-foreground-secondary">
                     — {formatAnnouncementDate(ann.createdAt)}
                   </span>
                 </p>
-                <p className="text-sm mt-1 text-muted-foreground">
+                <p className="text-sm mt-1 text-foreground-secondary">
                   {ann.message}
                 </p>
               </div>
@@ -193,7 +198,7 @@ function ClockWidget() {
             {primaryTz ? (
               <span className="text-sm text-muted-foreground">{shortTzLabel(primaryTz)}</span>
             ) : (
-              <span className="text-xs text-red-400">Time zone not configured</span>
+              <span className="text-xs text-orange-400">Time zone not configured</span>
             )}
           </div>
 
@@ -340,20 +345,18 @@ function NotificationsWidget() {
                   type="button"
                   onClick={() => handleClick(n.id, n.actionUrl)}
                   disabled={!hasAction}
-                  className="w-full text-left flex items-start gap-3 py-2 border-b border-border-subtle last:border-b-0 transition-colors"
-                  style={{ cursor: hasAction ? 'pointer' : 'default', background: 'transparent' }}
+                  className={`w-full text-left flex items-start gap-3 py-2 border-b border-border-subtle last:border-b-0 transition-colors ${
+                    hasAction ? 'cursor-pointer hover:bg-white/[0.04]' : 'cursor-default'
+                  }`}
                 >
                   <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden />
                   <div className="flex-1 min-w-0">
-                    <span className="text-sm font-semibold leading-snug" style={{ color: 'var(--foreground)' }}>
+                    <span className="text-sm font-semibold leading-snug text-foreground">
                       {n.title}
                     </span>
                     <HoverCard openDelay={300}>
                       <HoverCardTrigger asChild>
-                        <p
-                          className="text-xs mt-0.5 line-clamp-2 cursor-default"
-                          style={{ color: 'var(--foreground-secondary)' }}
-                        >
+                        <p className="text-xs mt-0.5 line-clamp-2 cursor-default text-foreground-secondary">
                           {n.message}
                         </p>
                       </HoverCardTrigger>
@@ -432,8 +435,7 @@ function PinnedResourceCard({ doc }: { doc: ResourceDocument }) {
           openDoc();
         }
       }}
-      className="group flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-      style={{ border: '1px solid var(--border-subtle)' }}
+      className="group flex cursor-pointer items-center gap-2.5 rounded-md border border-border-subtle px-3 py-2 transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
     >
       <PinnedDocIcon icon={doc.icon} />
       <span className="flex-1 truncate text-sm font-medium text-foreground">
@@ -512,8 +514,7 @@ function PinnedResourcesWidget() {
             No pinned resources yet. Pin your most used resources from the{' '}
             <Link
               href="/applications/apps-resources"
-              className="underline underline-offset-2"
-              style={{ color: 'var(--foreground)' }}
+              className="text-foreground underline underline-offset-2"
             >
               Resources page
             </Link>
@@ -553,12 +554,17 @@ export default function Home() {
   // Being unassigned is a pending state awaiting an admin, not an error the user
   // caused — orange, per the semantic palette. The explanation now lives at the
   // end of onboarding (/onboarding/done), so the card carries the state only.
+  const isUnassigned = userGroup === 'unassigned';
   const groupCard = (
     <Card
-      className={`gap-3 py-4${userGroup === 'unassigned' ? ' bg-orange-500/10 border-orange-500/30' : ''}`}
+      className={`gap-3 py-4${isUnassigned ? ' bg-orange-500/10 border-orange-500/30' : ''}`}
     >
       <CardHeader className="px-4">
-        <CardDescription>Group</CardDescription>
+        {/* Muted-on-Tint Rule: on the orange pending-tint, the label lifts to
+            foreground-secondary; on the plain surface, muted is correct. */}
+        <CardDescription className={isUnassigned ? 'text-foreground-secondary' : undefined}>
+          Group
+        </CardDescription>
         <CardTitle className="text-2xl font-semibold">{displayGroup}</CardTitle>
       </CardHeader>
     </Card>
@@ -576,8 +582,7 @@ export default function Home() {
             href="https://forms.gle/wdxoEFSH7GxXo8Wg8"
             target="_blank"
             rel="noopener noreferrer"
-            className="underline"
-            style={{ color: 'var(--foreground)' }}
+            className="text-foreground underline"
           >
             Give feedback
           </a>

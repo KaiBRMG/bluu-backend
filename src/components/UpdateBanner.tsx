@@ -48,13 +48,12 @@ export default function UpdateBanner() {
         position: 'fixed',
         bottom: '1.25rem',
         right: '1.25rem',
-        zIndex: 9999,
+        zIndex: 'var(--z-banner)',
         width: '22rem',
         backgroundColor: 'var(--card, #0f2233)',
         border: '1px solid var(--border, #1e3a4a)',
         borderRadius: '0.75rem',
         padding: '1rem 1.25rem',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>

@@ -109,8 +109,8 @@ function UserShiftCard({
   const badge = shift.attendanceStatus ? BADGE_CONFIG[shift.attendanceStatus] : null;
 
   const cardStyle: React.CSSProperties = isFuture
-    ? { background: `rgba(${rgb}, 0.12)`, borderLeft: `3px solid ${color}`, borderRadius: '10px', boxShadow: '0 1px 4px rgba(0,0,0,0.10)' }
-    : { background: `rgba(${rgb}, 0.20)`, border: `1px solid rgba(${rgb}, 0.45)`, borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' };
+    ? { background: `rgba(${rgb}, 0.12)`, border: `1px solid rgba(${rgb}, 0.30)`, borderRadius: '10px' }
+    : { background: `rgba(${rgb}, 0.20)`, border: `1px solid rgba(${rgb}, 0.45)`, borderRadius: '10px' };
 
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
   const [pendingLeaveType, setPendingLeaveType] = useState<'paid' | 'unpaid' | null>(null);
@@ -149,7 +149,7 @@ function UserShiftCard({
 
           {/* Time worked */}
           {isPast && shift.timeWorkedSeconds !== null && (
-            <div className="text-xs text-foreground-muted mt-1">
+            <div className="text-xs text-foreground-secondary mt-1">
               Time worked: {formatWorked(shift.timeWorkedSeconds)}
             </div>
           )}

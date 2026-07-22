@@ -43,8 +43,8 @@ export function AccountsKanban({
           role="button"
           tabIndex={0}
           onClick={() => onCardClick(account)}
-          onKeyDown={(e) => { if (e.key === 'Enter') onCardClick(account); }}
-          className="group cursor-pointer rounded-xl border bg-card p-3 shadow-xs transition-colors hover:border-primary/50 hover:bg-accent/40"
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onCardClick(account); } }}
+          className="group cursor-pointer rounded-xl border bg-card p-3 transition-colors hover:border-primary/50 hover:bg-accent/40"
         >
           <div className="flex items-start justify-between gap-2">
             <button

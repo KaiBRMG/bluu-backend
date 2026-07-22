@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-18T00:00:00Z",
+  "generatedAt": "2026-07-22T00:00:00Z",
   "title": "Design System: Bluu Backend",
   "extensions": {
     "colorMeta": {
@@ -32,6 +32,11 @@
     ],
     "breakpoints": [
       { "name": "lg", "value": "1024px" }
+    ],
+    "zIndex": [
+      { "name": "z-overlay", "value": "50", "purpose": "Dropdowns, popovers, dialogs — matches Tailwind z-50." },
+      { "name": "z-banner", "value": "60", "purpose": "Persistent app banners (update-download / update-available), above the overlays." },
+      { "name": "z-toast", "value": "70", "purpose": "Transient toasts — the top layer, above the banner." }
     ]
   },
   "components": [
@@ -117,7 +122,8 @@
       { "name": "The Tabular Rule", "body": "Every count, amount, and metric uses tabular-nums; every code or ID (CR0001) uses font-mono text-xs. Numbers must align in columns — always.", "section": "typography" },
       { "name": "The One-Family Rule", "body": "Google Sans carries the entire UI. Never introduce a display or accent typeface; hierarchy comes from weight, size, and color, never from a second family.", "section": "typography" },
       { "name": "The No-Shadow Rule", "body": "Depth comes from a lighter overlay and a hairline border, never from a box-shadow. If a surface needs to lift, raise its white overlay opacity — do not add a shadow.", "section": "elevation" },
-      { "name": "The Hairline Rule", "body": "Every border is a single hairline: #2a2a2a on opaque surfaces, rgba(255,255,255,0.07) on overlays. No heavy dividers, no double borders.", "section": "elevation" }
+      { "name": "The Hairline Rule", "body": "Every border is a single hairline: #2a2a2a on opaque surfaces, rgba(255,255,255,0.07) on overlays. No heavy dividers, no double borders.", "section": "elevation" },
+      { "name": "The Named-Layer Rule", "body": "Stacking order is expressed with the --z-* scale (--z-overlay < --z-banner < --z-toast), never a literal like z-[9999]. A raw magic z-index is drift — replace it with the layer whose name matches its role.", "section": "elevation" }
     ],
     "dos": [
       "Do keep the canvas near-black (#0A0A0A) and let chrome recede — the data is the interface.",
@@ -127,6 +133,7 @@
       "Do use only src/components/ui components, only @tabler/icons-react / lucide-react icons, and only Avatar for images.",
       "Do shape Skeletons to the final layout, write empty states as one quiet text-muted-foreground line, and toast every mutation outcome.",
       "Do keep motion to 120ms transitions and hover:brightness-110 active:scale-[0.98] on tappable rows.",
+      "Do stack app surfaces with the --z-* scale (--z-overlay < --z-banner < --z-toast) via var(--z-*).",
       "Do make it read like custom-requests/page.tsx. If it doesn't, reconcile."
     ],
     "donts": [
@@ -137,7 +144,8 @@
       "Don't use a raw <img> — always Avatar.",
       "Don't reach for a modal first, drop a spinner into the middle of a layout, or ship an illustration empty state.",
       "Don't introduce a second font family, oversized display type, gradient text/heros, or glassmorphism — this is not a marketing site.",
-      "Don't use a colored side-stripe as a decorative accent; the only left-border in the system is the kanban row's functional border-l-2 overlay edge."
+      "Don't use a colored side-stripe as a decorative accent; the only left-border in the system is the kanban row's functional border-l-2 overlay edge.",
+      "Don't reach for a magic z-[9999]; use the semantic --z-* layer whose name matches the role (The Named-Layer Rule)."
     ]
   }
 }

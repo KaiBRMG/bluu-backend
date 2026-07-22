@@ -32,7 +32,6 @@ export default function TimerPill() {
         borderRadius: '9999px',
         background: '#0a0a0a',
         border: `1px solid ${color}4D`,
-        boxShadow: `0 0 8px ${color}1A`,
         flexShrink: 0,
       }}
     >

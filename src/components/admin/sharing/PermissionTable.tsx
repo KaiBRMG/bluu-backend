@@ -204,7 +204,7 @@ export default function PermissionTable({
 
                     {isDropdownOpen && (
                       <div
-                        className="absolute top-full left-0 mt-1 w-64 max-h-60 overflow-y-auto rounded-lg shadow-xl z-50"
+                        className="absolute top-full left-0 mt-1 w-64 max-w-[calc(100vw-2rem)] max-h-60 overflow-y-auto rounded-lg z-50"
                         style={{
                           background: "var(--sidebar-background)",
                           border: "1px solid var(--border-subtle)",
