@@ -130,11 +130,18 @@ A **Sign out** control sits at the top-right of the header on **every** step (ab
 
 ### Page locking and scroll (do not regress this)
 
-**The onboarding page never scrolls.** The layout is `h-screen overflow-hidden`; the card is `max-h-full` and is itself a **flex column** — header and footer `shrink-0`, body `min-h-0 flex-1`. Short steps size to their content; the details step hits the cap and scrolls *inside* its own form, which is `min-h-0 flex-1 overflow-y-auto`.
+**The onboarding page never scrolls.** Three things enforce it together, and all three are needed:
 
-Two earlier attempts failed and should not be retried:
-- **A `vh` calc** (`max-h-[calc(100vh-32rem)]`) has to guess the card's chrome height. Guess low and the card outgrows the viewport, leaving a long empty scroll region under it. Flex sizing needs no guess.
+1. **The shell is `fixed inset-0`** — out of normal flow, so it contributes no document height and cannot itself cause a scroll.
+2. **[`LockPageScroll`](../src/app/(main)/onboarding/_components/LockPageScroll.tsx) pins `html`/`body` to `overflow: hidden`** while onboarding is mounted, restoring the previous values on unmount.
+3. **The card is `max-h-full` and a flex column** — header and footer `shrink-0`, body `min-h-0 flex-1`. Short steps size to their content; the details step hits the cap and scrolls *inside* its own form, which is `min-h-0 flex-1 overflow-y-auto`.
+
+Point 2 exists because the onboarding shell is **not the only thing in the tree**. `(main)/layout.tsx` mounts providers, update banners and analytics as siblings; any of them rendering in normal flow grows the document past the viewport. Locking the document is the only fix that doesn't depend on auditing every current and future sibling.
+
+Three earlier attempts failed and should not be retried:
+- **A `vh` calc** (`max-h-[calc(100vh-32rem)]`) has to guess the card's chrome height. Guess low and the card outgrows the viewport, leaving a long empty scroll region under it. Flex sizing needs no guess. (This one also shipped with `calc(100vh-32rem)` — invalid CSS, since `calc()` needs whitespace around the operator — which dropped the max-height entirely and defeated the submit gate along with it.)
 - **`alignItems: 'safe center'`** was a workaround for a card taller than the viewport. With `max-h-full` that can no longer happen, so it's gone — plain centring is correct now.
+- **`h-screen overflow-hidden` on the shell** bounds the shell but *not the document*: sibling content outside it still scrolled the page, which is why the dead space kept coming back.
 
 The frozen block on the details step (heading, compliance note, progress bar) is marked `shrink-0`; without it those compress instead of the form absorbing the squeeze.
 

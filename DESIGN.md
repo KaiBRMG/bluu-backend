@@ -135,7 +135,7 @@ A greyscale-on-black palette where the only saturated pixels carry state.
 - **Surface** (`#171717`): Content containers, panels, modals (`--content-background`). The reading plane.
 - **Ink** (`#ffffff`): Primary text and active icons (`text-foreground`).
 - **Ink Secondary** (`#9ca3af`, `text-zinc-400`): Secondary text, labels, meta.
-- **Ink Muted** (`#6b7280`, `text-zinc-500`): De-emphasised meta, placeholders, disabled.
+- **Ink Muted** (`#6b7280`, `text-zinc-500`): De-emphasised meta, placeholders, disabled. **Only safe on the near-black canvas** — see The Muted-on-Tint Rule below.
 - **Hairline** (`#2a2a2a`, `border-zinc-700/800`): Every divider and border. Depth is a hairline, not a shadow.
 
 ### Semantic (status / priority / category)
@@ -148,6 +148,9 @@ Centralised in `src/lib/campaignTracking.ts` as `STATUS_COLORS`, `STATUS_DOT`, `
 - **Red** (`#f87171`): Error / rejected / owed.
 - **Zinc** (`#a1a1aa`): Neutral / archived / low priority.
 
+### Time-tracking state palette (authored divergence)
+The timer subsystem carries its **own** five-hue palette in [`src/lib/stateColors.ts`](src/lib/stateColors.ts) (`STATE_CONFIG`) — one entry per `TimerDisplayState`, each a `{ color, bgAlpha, label, Icon }` triad (foreground hue + a matching `/10` panel wash). It shares **no values** with the semantic hues above and is a **deliberate authored divergence**, not drift: the states (Working / Idle / On Break / Paused / Clocked Out) are a closed, timer-specific vocabulary, and Paused's violet (`#8B5CF6`) has no equivalent in the status set. `STATE_CONFIG` is the single source for these colours — **import it; never re-type a state hex inline** (the time-tracking page references `STATE_CONFIG[...].color`, never a literal). Because it is a parallel system, a change to the status palette does **not** propagate here; if the two are ever meant to converge, reconcile them explicitly rather than assuming a global theme edit reaches the timer.
+
 ### Charts
 Chart hues are **validated for dark-surface contrast and CVD-safety**, not taken raw from the stock `--chart-*` tokens (the stock dark values fail contrast on card surfaces — see the `DONUT_COLORS` / `AGING_COLORS` comments in the reference page, and the `dataviz` skill for the method). Render through `src/components/ui/chart.tsx` (`ChartContainer`, `ChartTooltip`, `ChartTooltipContent`) with `recharts`. Slice strokes use `stroke="var(--card)"` so segments read as separated. Sequential data → single-hue ramp; categorical → distinct validated hues, folded into "Other" past ~5 series.
 
@@ -158,6 +161,8 @@ Chart hues are **validated for dark-surface contrast and CVD-safety**, not taken
 
 **The Overlay-Not-Grey Rule.** Interior surfaces are translucent white on the dark ground, not solid greys — this is what gives the soft, layered depth (see Elevation).
 
+**The Muted-on-Tint Rule.** **Ink Muted** (`#6b7280`, `--foreground-muted`) is tuned for the near-black canvas, where it passes AA; on a **tinted** surface — any state-tint or `bgAlpha` wash (e.g. the time-tracking state panel) — its contrast collapses to ~3.5:1 and fails. On tinted grounds, de-emphasise with **Ink Secondary** (`#9ca3af`, `--foreground-secondary`, ~6:1) instead, and never stack `opacity` on top of an already-muted token — double de-emphasis is what pushes text under the floor. Muted is a canvas colour, not a universal one.
+
 ## 3. Typography
 
 **Display / Body / Label Font:** Google Sans (both `--font-sans` and `--font-mono` map to it), fallback system stack.
@@ -165,6 +170,7 @@ Chart hues are **validated for dark-surface contrast and CVD-safety**, not taken
 **Character:** One family carries everything — headings, data, labels, code. There is no display/body pairing; a product this dense would only be made noisier by type contrast. Weight and `tabular-nums` do the work that a second family would.
 
 ### Hierarchy
+- **Instrument** (700, `text-5xl` → `sm:text-6xl` / 48–60px, `tabular-nums`): The **single** sanctioned oversized number — the live clock on the time-tracking page ([`applications/time-tracking/page.tsx`](src/app/(main)/applications/time-tracking/page.tsx)), read from across a desk. This is the one exception to the "no oversized display type" Don't; it earns it because the timer *is* the page's reason to exist, not decoration. `tabular-nums` does the alignment (in this project `font-mono` also maps to Google Sans, so the mono class is cosmetic here — the numeric feature is what matters). Do **not** cite this step to justify another big number: outside the timer, `Display` is the ceiling.
 - **Display** (600, `text-2xl` / 24px, `tabular-nums`): Stat and hero numbers in summary tiles. Always tabular.
 - **Title** (600, `text-lg` / 18px): Dialog titles, card titles, section headers.
 - **Body** (500, `text-sm` / 14px, line-height 1.5): The default — set on `body`, inherited nearly everywhere. Prose caps at 65–75ch; data and tables may run denser.
@@ -236,7 +242,7 @@ Card radius is `rounded-xl`; controls and rows are `rounded-md` / `rounded-lg`; 
 Multi-step first-run flows use one shared chrome — `src/app/(main)/onboarding/_components/OnboardingCard.tsx` — so every step is the same object with different contents. Never hand-roll a step card.
 
 - **Ground & surface:** the login photo ground (`/backgrounds/2_blur.png`) over `bg-background`, with the card **opaque** at Surface `#171717` + hairline border, `rounded-xl`. No shadows. The translucent overlay recipe is *not* used for the card here — it assumes the near-black canvas behind it, and over a photo it drops body text under 4.5:1. Interior surfaces inside the card still use the overlay recipe normally.
-- **Page lock:** the flow never scrolls as a page. The shell is `h-screen overflow-hidden`; the card is `max-h-full` and a flex column (header/footer `shrink-0`, body `min-h-0 flex-1`), so a long step scrolls inside its own body instead of growing the page. Never size a step's scroll area with a `vh` calc — guessing the chrome height is what leaves dead space under the card.
+- **Page lock:** the flow never scrolls as a page. The shell is `fixed inset-0` (out of flow, so it adds no document height), a mounted effect pins `html`/`body` to `overflow: hidden`, and the card is `max-h-full` and a flex column (header/footer `shrink-0`, body `min-h-0 flex-1`) so a long step scrolls inside its own body. Bounding only the shell is not enough — sibling content elsewhere in the layout still grows the document. Never size a step's scroll area with a `vh` calc; guessing the chrome height is what leaves dead space under the card.
 - **Progress rail:** one `size-1.5` dot per step, left of the header. Behind → `bg-white/45`; current → Action Blue with `ring-4 ring-[#3b82f6]/15` (the One Voice Rule — current selection); ahead → `bg-white/12`. Color transitions only (120ms); never animate dot size or position. The rail is `aria-hidden` with a **single** `sr-only` line ("Step 3 of 6: Screen capture") beside it — labelling every dot made a screen reader recite the whole flow on each page.
 - **Identity strip:** the signed-in user's name + `Avatar` (`size="sm"`, `aria-hidden`) on the right of the header, hairline-separated from the body. A step that presents identity in its own heading passes `identity="none"` rather than rendering a second avatar.
 - **Actions:** `Back` is `variant="ghost"` (`text-zinc-400`), forward is the primary `Button` and takes `flex-1`. Long steps pass a `footer` so the actions pin below the scroll area instead of riding to the bottom of a long form.
@@ -284,7 +290,7 @@ The throughline: **the card's tint tells you the category at a glance, the kanba
 - **Don't** introduce another component library, hand-roll a primitive that exists in `src/components/ui`, or use icons outside `@tabler/icons-react` / `lucide-react`.
 - **Don't** use a raw `<img>` — always `Avatar`.
 - **Don't** reach for a modal first, drop a spinner into the middle of a layout, or ship an "illustration" empty state.
-- **Don't** introduce a second font family, oversized display type, gradient text/heros, or glassmorphism — this is not a marketing site.
+- **Don't** introduce a second font family, oversized display type (the sole exception is the time-tracking `Instrument` step — see § Typography), gradient text/heros, or glassmorphism — this is not a marketing site.
 - **Don't** use a colored side-stripe as a decorative accent; the only left-border in the system is the kanban row's functional `border-l-2` overlay edge.
 
 ## 7. Creator Portal (external skin)
