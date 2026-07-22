@@ -26,6 +26,7 @@ import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, MoreHorizontal, Check, CalendarIcon, X } from "lucide-react";
 import { collection, query, where, onSnapshot, orderBy } from "firebase/firestore";
 import { db } from "@/firebase-config";
@@ -66,7 +67,7 @@ function firestoreToCP(id: string, data: Record<string, unknown>): CPEntry {
   };
   return {
     id,
-    contentType: (data.contentType as "SFW" | "NSFW") ?? "SFW",
+    contentType: (data.contentType as CPEntry["contentType"]) ?? "SFW",
     contentSummary: (data.contentSummary as string) ?? "",
     description: (data.description as DescriptionRow[]) ?? [],
     comment: (data.comment as string) ?? "",
@@ -100,8 +101,8 @@ function StatusBadge({ status }: { status: "Outstanding" | "Completed" }) {
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
       status === "Completed"
-        ? "bg-emerald-500/15 text-emerald-400"
-        : "bg-red-500/15 text-red-400"
+        ? "bg-green-500/10 text-green-400"
+        : "bg-orange-500/10 text-orange-400"
     }`}>
       {status}
     </span>
@@ -110,11 +111,11 @@ function StatusBadge({ status }: { status: "Outstanding" | "Completed" }) {
 
 function ContentTypeBadge({ type }: { type: "SFW" | "NSFW" | "OF TL" | "PPV" | "Dripfeed" }) {
   const styles: Record<string, string> = {
-    NSFW: "bg-orange-500/15 text-orange-400",
-    SFW: "bg-blue-500/15 text-blue-400",
-    "OF TL": "bg-purple-500/15 text-purple-400",
-    PPV: "bg-pink-500/15 text-pink-400",
-    Dripfeed: "bg-teal-500/15 text-teal-400",
+    NSFW: "bg-orange-500/10 text-orange-400",
+    SFW: "bg-blue-500/10 text-blue-400",
+    "OF TL": "bg-purple-500/10 text-purple-400",
+    PPV: "bg-pink-500/10 text-pink-400",
+    Dripfeed: "bg-teal-500/10 text-teal-400",
   };
   return (
     <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium ${styles[type] ?? "bg-zinc-500/15 text-zinc-400"}`}>
@@ -353,7 +354,7 @@ function DetailDialog({ entry, creatorName, creators, onClose, onSaved, onDelete
             <div className="flex items-center gap-2 mb-1">
               <p className="text-xs text-zinc-400">Due Date</p>
               {isOverdue(entry.dueDate) && entry.status === "Outstanding" && (
-                <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-red-500/15 text-red-400">
+                <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-red-500/10 text-red-400">
                   <span className="size-1.5 rounded-full bg-red-400" />
                   Overdue
                 </span>
@@ -605,6 +606,7 @@ function CreatorContentTable({ creatorID, creatorName, creators, isActive }: {
   const { userData } = useUserData();
   const userTz = userData?.timezone || undefined;
   const [entries, setEntries] = useState<CPEntry[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [viewEntry, setViewEntry] = useState<CPEntry | null>(null);
@@ -620,6 +622,7 @@ function CreatorContentTable({ creatorID, creatorName, creators, isActive }: {
       ? ["Outstanding", "Completed"]
       : ["Outstanding"];
 
+    setLoading(true);
     const q = query(
       collection(db, "content-planning"),
       where("creatorID", "==", creatorID),
@@ -628,6 +631,7 @@ function CreatorContentTable({ creatorID, creatorName, creators, isActive }: {
     );
     unsubRef.current = onSnapshot(q, snap => {
       setEntries(snap.docs.map(d => firestoreToCP(d.id, d.data() as Record<string, unknown>)));
+      setLoading(false);
     });
   }, [creatorID, showCompleted]);
 
@@ -689,9 +693,17 @@ function CreatorContentTable({ creatorID, creatorName, creators, isActive }: {
         </div>
       </div>
 
-      {entries.length === 0 ? (
+      {loading ? (
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 6 }, (_, i) => (
+            <Skeleton key={i} className="h-11 rounded-lg" />
+          ))}
+        </div>
+      ) : entries.length === 0 ? (
         <div className="rounded-lg p-8 text-center" style={{ background: "var(--sidebar-background)", border: "1px solid var(--border-subtle)" }}>
-          <p className="text-sm text-muted-foreground">No content requests found.</p>
+          <p className="text-sm text-muted-foreground">
+            {showCompleted ? "No content requests yet." : "Nothing outstanding."}
+          </p>
         </div>
       ) : (
         <div className="rounded-lg border overflow-hidden" style={{ borderColor: "var(--border-subtle)" }}>
@@ -936,7 +948,13 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
     setDismissAllLoading(false);
   };
 
-  if (loading) return <div className="text-sm text-zinc-500 p-8">Loading...</div>;
+  if (loading) return (
+    <div className="flex flex-col gap-6 min-w-0">
+      <div className="flex justify-end"><Skeleton className="h-8 w-20" /></div>
+      <Skeleton className="h-44 rounded-xl" />
+      <Skeleton className="h-64 rounded-xl" />
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-6 min-w-0">
@@ -958,7 +976,7 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
           )}
         </div>
         {visibleCompleted.length === 0 ? (
-          <p className="text-sm text-zinc-500">No completed content to review.</p>
+          <p className="text-sm text-muted-foreground">No completed content to review.</p>
         ) : (
           <div style={{ columnWidth: "13rem", columnCount: 4, columnGap: "0.75rem" }}>
             {completedKanbanCreators.map(creator => (
@@ -1010,7 +1028,7 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
       <div className="rounded-xl p-4 border border-zinc-700/50 bg-zinc-900/30">
         <h3 className="text-sm font-semibold text-zinc-300 mb-4">Pending Content</h3>
         {kanbanCreators.length === 0 ? (
-          <p className="text-sm text-zinc-500">No outstanding content requests.</p>
+          <p className="text-sm text-muted-foreground">No outstanding content requests.</p>
         ) : (
           <div style={{ columnWidth: "13rem", columnCount: 4, columnGap: "0.75rem" }}>
             {kanbanCreators.map(creator => (
@@ -1041,14 +1059,14 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
                       className="flex items-center gap-2 text-left rounded-md border-l-2 py-1.5 pl-2 pr-1.5 transition-all hover:brightness-110 active:scale-[0.98]"
                       style={{
                         background: "rgba(255,255,255,0.04)",
-                        borderLeftColor: overdue ? "rgb(239,68,68)" : "rgba(255,255,255,0.14)",
+                        borderLeftColor: overdue ? "#f87171" : "rgba(255,255,255,0.14)",
                       }}
                     >
                       <span className="flex-1 min-w-0 truncate text-xs font-medium text-zinc-200">{entry.contentSummary}</span>
                       {(overdue || entry.dueDate) && (
                         <span
                           className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                            overdue ? "bg-red-500/15 text-red-400" : "bg-white/5 text-zinc-400"
+                            overdue ? "bg-red-500/10 text-red-400" : "bg-white/5 text-zinc-400"
                           }`}
                         >
                           {overdue ? "Overdue" : formatDate(entry.dueDate, userTz)}
