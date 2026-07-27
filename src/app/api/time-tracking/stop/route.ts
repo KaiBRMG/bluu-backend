@@ -40,7 +40,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       endTimeMs,
       parsedTotals,
       buffer.events,
-      userData?.timezone ?? 'UTC',
+      userData?.timezone || 'UTC',
       userData?.enableIdleTimeout ?? true,
     );
 

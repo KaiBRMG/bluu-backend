@@ -187,7 +187,9 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 
     const shiftOccurrences: ShiftOccurrence[] = [];
     for (const s of expanded) {
-      const tz = activeUsers.get(s.userId)?.timezone ?? 'UTC';
+      // `||`, not `??` — an un-onboarded user's timezone is '', which is not
+      // nullish and would reach Intl as an invalid zone.
+      const tz = activeUsers.get(s.userId)?.timezone || 'UTC';
       const localDate = toLocalDateStr(s.occurrenceStart, tz);
       // Keep only occurrences whose local date falls inside the requested range.
       if (localDate < start || localDate > end) continue;

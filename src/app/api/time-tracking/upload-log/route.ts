@@ -57,7 +57,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       // event log to work from). Queue it for recompute — the rollup's 3-day
       // rolling window may have long since passed this session's date.
       await markAnalyticsDirty(
-        token.uid, buffer.startTime, userData?.timezone ?? 'UTC', 'log-merged',
+        token.uid, buffer.startTime, userData?.timezone || 'UTC', 'log-merged',
       );
       return NextResponse.json({ success: true, action: 'log-merged' });
     }
@@ -72,13 +72,13 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         endTimeMs,
         parsedTotals,
         buffer.events,
-        userData?.timezone ?? 'UTC',
+        userData?.timezone || 'UTC',
         userData?.enableIdleTimeout ?? true,
       );
       // A ledger doc now exists for a day that may already have been rolled up
       // (the app can be reopened days later), so that day needs recomputing.
       await markAnalyticsDirty(
-        token.uid, buffer.startTime, userData?.timezone ?? 'UTC', 'committed',
+        token.uid, buffer.startTime, userData?.timezone || 'UTC', 'committed',
       );
       return NextResponse.json({ success: true, action: 'committed' });
     }

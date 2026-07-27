@@ -53,10 +53,35 @@ const MAX_SEGMENTS = 500;
 
 // ─── Timezone helpers (mirror src/lib/utils/timezone.ts) ─────────────
 
+/**
+ * Coerce a possibly-unset or invalid IANA timezone to a usable one.
+ *
+ * `ensureUserExists` seeds `timezone: ''` and only onboarding fills it in, so an
+ * empty string is a normal state, not corruption — and Intl throws a RangeError
+ * on it. Every helper below funnels through here so no caller can reintroduce
+ * that throw.
+ */
+const tzValidity = new Map();
+
+function safeTimezone(timezone) {
+  if (!timezone) return 'UTC';
+  let valid = tzValidity.get(timezone);
+  if (valid === undefined) {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: timezone });
+      valid = true;
+    } catch {
+      valid = false;
+    }
+    tzValidity.set(timezone, valid);
+  }
+  return valid ? timezone : 'UTC';
+}
+
 /** Offset (ms) between local wall-clock and UTC at a given instant. */
 function tzOffsetMs(utcMs, timezone) {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
+    timeZone: safeTimezone(timezone),
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
     hour12: false,
@@ -85,7 +110,7 @@ function getDayBoundsUTC(dateStr, timezone) {
 
 function toLocalDateStr(utcMs, timezone) {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone: safeTimezone(timezone), year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date(utcMs));
 }
 
@@ -467,7 +492,7 @@ module.exports = {
   admin,
   SEG_WORKING, SEG_IDLE, SEG_BREAK, SEG_PAUSE,
   FOCUS_BLOCK_MIN_SECONDS,
-  tzOffsetMs, getDayBoundsUTC, toLocalDateStr, todayStr, addCalendarDays,
+  safeTimezone, tzOffsetMs, getDayBoundsUTC, toLocalDateStr, todayStr, addCalendarDays,
   computeBreakAllowance, findSyntheticPauses, buildSegments, addToHourBuckets,
   computeUserDay, rollupUserDay, rollupDocId,
 };

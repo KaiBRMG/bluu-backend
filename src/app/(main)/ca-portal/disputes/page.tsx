@@ -1,18 +1,32 @@
 "use client";
 
 import { useState, useCallback, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { InfoIcon } from 'lucide-react';
 import AppLayout from "@/components/AppLayout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
-import { DisputeTable, type ColumnKey } from '@/components/disputes/DisputeTable';
-import { CreateDisputeDialog } from '@/components/disputes/CreateDisputeDialog';
+import type { ColumnKey } from '@/components/disputes/DisputeTable';
 import { useDisputesData } from '@/hooks/useDisputesData';
 import { useUserData } from '@/hooks/useUserData';
-// TEMP ANALYTICS — remove after data collection (see src/lib/temp-analytics/).
-import { useTempAnalyticsScreenshot } from '@/lib/temp-analytics/useTempAnalyticsScreenshot';
 import type { DisputeDocument, ApprovalStatus } from '@/types/firestore';
+
+// ─── Lazily-loaded chunks ────────────────────────────────────────────
+// The table and the create dialog are the page's heavy leaves (avatars,
+// pagination, calendar/select). Neither is needed to paint the page, so both
+// are split out of the initial bundle. The table's loader mirrors its own
+// internal `loading` state, so the fallback and the real component are
+// visually identical — no flash on first mount or on tab switch.
+
+const DisputeTable = dynamic(
+  () => import('@/components/disputes/DisputeTable').then(m => m.DisputeTable),
+  { loading: () => <div className="py-12 text-center text-sm text-muted-foreground">Loading...</div> },
+);
+
+const CreateDisputeDialog = dynamic(
+  () => import('@/components/disputes/CreateDisputeDialog').then(m => m.CreateDisputeDialog),
+);
 
 // ─── Column sets ─────────────────────────────────────────────────────
 
@@ -91,10 +105,11 @@ export default function DisputesPage() {
   const { userData } = useUserData();
   const { creators, caUsers, createDispute, setCaApproval } = useDisputesData();
   const [createOpen, setCreateOpen] = useState(false);
+  // Latches on the first open so the dialog's chunk is only fetched when the
+  // user actually asks for it, then stays mounted so the close animation runs.
+  const [createMounted, setCreateMounted] = useState(false);
   const [leftRefreshKey, setLeftRefreshKey] = useState(0);
   const [rightRefreshKey, setRightRefreshKey] = useState(0);
-  // TEMP ANALYTICS — captures screen on page open (auto) + tab switches (below).
-  const captureAnalytics = useTempAnalyticsScreenshot('disputes');
 
   const userTimezone =
     userData?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -144,8 +159,7 @@ export default function DisputesPage() {
               </Tooltip>
             </div>
 
-            {/* TEMP ANALYTICS — capture on tab switch */}
-            <Tabs defaultValue="unresolved" onValueChange={(v) => captureAnalytics(`sales-${v}`)}>
+            <Tabs defaultValue="unresolved">
               <TabsList>
                 <TabsTrigger value="unresolved">Unresolved</TabsTrigger>
                 <TabsTrigger value="resolved">Resolved</TabsTrigger>
@@ -190,14 +204,16 @@ export default function DisputesPage() {
               <Button
                 size="sm"
                 className="ml-auto"
-                onClick={() => setCreateOpen(true)}
+                onClick={() => {
+                  setCreateMounted(true);
+                  setCreateOpen(true);
+                }}
               >
                 Create Dispute
               </Button>
             </div>
 
-            {/* TEMP ANALYTICS — capture on tab switch */}
-            <Tabs defaultValue="unresolved" onValueChange={(v) => captureAnalytics(`yours-${v}`)}>
+            <Tabs defaultValue="unresolved">
               <TabsList>
                 <TabsTrigger value="unresolved">Unresolved</TabsTrigger>
                 <TabsTrigger value="resolved">Resolved</TabsTrigger>
@@ -224,17 +240,19 @@ export default function DisputesPage() {
           </div>
         </div>
 
-        {/* Create Dispute Dialog */}
-        <CreateDisputeDialog
-          open={createOpen}
-          onOpenChange={setCreateOpen}
-          creators={creators}
-          caUsers={caUsers}
-          onSubmit={async (payload) => {
-            await createDispute(payload);
-            setRightRefreshKey(k => k + 1);
-          }}
-        />
+        {/* Create Dispute Dialog — mounted on first open only */}
+        {createMounted && (
+          <CreateDisputeDialog
+            open={createOpen}
+            onOpenChange={setCreateOpen}
+            creators={creators}
+            caUsers={caUsers}
+            onSubmit={async (payload) => {
+              await createDispute(payload);
+              setRightRefreshKey(k => k + 1);
+            }}
+          />
+        )}
       </div>
     </AppLayout>
   );

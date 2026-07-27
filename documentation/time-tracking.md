@@ -196,6 +196,7 @@ It `require`s the same `functions/rollup.js` module as the CF, so backfilled and
 ### Timezone semantics
 
 - **A day is defined in the user's own timezone** (`users/{uid}.timezone` → ledger `timezone` → `UTC`).
+- **`users/{uid}.timezone` is `''` until onboarding fills it in.** `ensureUserExists` seeds an empty string, and only the onboarding profile step (or Settings → App Settings) resolves a real IANA zone. An empty or otherwise invalid zone makes `Intl` throw `RangeError`, so **default it with `|| 'UTC'`, never `?? 'UTC'`** — `''` is not nullish and sails straight through `??`. Both `timezone.ts` and `functions/rollup.js` now funnel every zone through `safeTimezone()` as a backstop, but call sites should still use `||` so the intent is visible. *(This was a live bug: one un-onboarded user with a shift 500'd company-wide, their group, and their own scope in the Analytics tab.)*
 - **A session is attributed wholly to the local date of its `startTime`** — no midnight splitting. Matches `AdminTimesheets` and keeps overnight shifts + event logs intact.
 - **The company's "2026-07-14" is the union of every member's local 2026-07-14**, not a single UTC interval. This is what makes daily docs summable across mixed timezones, and it is stated in the UI.
 - DST: a local day is 23h or 25h. On a 25h day `hourBuckets` folds the repeated hour into one bucket — one hour per year per user.
@@ -233,6 +234,7 @@ It `require`s the same `functions/rollup.js` module as the CF, so backfilled and
 6. **Screenshots are one doc per SCREEN.** Every screen in a `captureGroup` carries the same `activityPercent`, so counting rows double-weights multi-monitor users in both the mean and the histogram. The rollup dedupes by `captureGroup`; `screenshotCount` counts **captures**, not images.
 7. **Manual entries** (`isManual: true`) legitimately have no event log. The rollup trusts their stored aggregates and synthesises one working span so adherence/coverage still credit them, but excludes them from focus metrics — there is no event data to judge focus from.
 8. **Archived users' rollups are retained** so history stays correct; the read path filters them from current-roster views (`isArchived !== true`).
+9. **A single user can 500 an aggregate scope.** The analytics route folds the whole roster in one request, so any per-user throw takes down company-wide *and* every group containing that user, while sibling scopes stay green — a "some groups, some users" failure pattern is the signature of one poison-pill user, not a broken query. Empty `timezone` was the first instance (see Timezone semantics). Guard per-user data at the point of use.
 
 ### Findings — investigated, not yet actioned
 
@@ -263,4 +265,5 @@ It `require`s the same `functions/rollup.js` module as the CF, so backfilled and
 - [ ] **Analytics:** never store a mean in a rollup — store sum + count, divide at read time.
 - [ ] **Analytics:** dedupe screenshots by `captureGroup` before averaging — one doc per screen, not per capture.
 - [ ] **Analytics:** any new ledger-writing path must call `markAnalyticsDirty` or that day's rollup goes stale.
-- [ ] **Analytics:** `functions/rollup.js` mirrors `sessionToSegments`, `computeBreakAllowance` and `timezone.ts` — change both sides together.
+- [ ] **Analytics:** `functions/rollup.js` mirrors `sessionToSegments`, `computeBreakAllowance` and `timezone.ts` — change both sides together (including `safeTimezone`).
+- [ ] Never default a user timezone with `?? 'UTC'` — it is seeded as `''`, which is not nullish. Use `|| 'UTC'`.

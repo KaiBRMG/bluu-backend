@@ -320,7 +320,7 @@ function UserShiftCard({
 
 export default function UserUpcomingShifts() {
   const { userData } = useUserData();
-  const tz = userData?.timezone ?? 'UTC';
+  const tz = userData?.timezone || 'UTC';
   const uid = userData?.uid ?? '';
 
   const today = new Date().toISOString().slice(0, 10);

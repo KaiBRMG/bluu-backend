@@ -21,6 +21,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { STATE_CONFIG } from "@/lib/stateColors";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
+// TEMP ANALYTICS — remove after data collection (see src/lib/temp-analytics/).
+import {
+  useTempAnalyticsScreenshot,
+  TEMP_ANALYTICS_HOME_UIDS,
+} from "@/lib/temp-analytics/useTempAnalyticsScreenshot";
 
 function formatTime(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
@@ -537,6 +542,10 @@ export default function Home() {
   const { userData } = useUserData();
   const { notifications } = useNotifications();
   const firstName = user?.displayName?.split(' ')[0] || 'User';
+
+  // TEMP ANALYTICS — one-off home-screen capture, allowlisted to specific users
+  // (not the whole roster, unlike the CA-portal pages). Fires once per user, ever.
+  useTempAnalyticsScreenshot('home', { onlyUids: TEMP_ANALYTICS_HOME_UIDS });
 
   const now = Date.now();
   const announcements = notifications.filter(

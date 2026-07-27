@@ -33,9 +33,10 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 
 ## Temporary Instrumentation (remove after data collection)
 
-- **CA-portal screenshot analytics** — a once-off, throwaway capture on select CA-portal pages. Grabs the user's screen (via the Electron native `captureScreenshot()`) with a 1s delay per trigger, and uploads to Storage under `temp-analytics/{uid}/` (filename prefixed with the page key). Gated **per page, per user** by a `localStorage` marker so each page fires **once per user, ever**. No Firestore docs/rules/indexes involved.
-  - Instrumented pages (all under `src/app/(main)/ca-portal/`): `disputes` (page open + Unresolved/Resolved tab switches on both tables), `custom-requests` (page open only), `campaigns` (page open only).
-  - Hook: `src/lib/temp-analytics/useTempAnalyticsScreenshot.ts` (`useTempAnalyticsScreenshot(pageKey)`) · Route: `src/app/api/temp-analytics/screenshot/route.ts` · Call sites: the three pages above (search `TEMP ANALYTICS`).
+- **Screenshot analytics** — a once-off, throwaway capture. Grabs the user's screen (via the Electron native `captureScreenshot()`) with a 3s delay per trigger, and uploads to Storage under `temp-analytics/{uid}/` (filename prefixed with the page key). Gated **per page, per user** by a `localStorage` marker so each page fires **once per user, ever**. No Firestore docs/rules/indexes involved.
+  - **Only one page is instrumented: `home`** (`src/app/(main)/page.tsx`, page open only), and it is **allowlisted** — `useTempAnalyticsScreenshot(pageKey, { onlyUids })` restricts collection to specific uids via `TEMP_ANALYTICS_HOME_UIDS` (currently one user). Non-listed users are skipped before storage or the capturer is touched. Omitting `onlyUids` would collect from everyone who opens the page.
+  - **Decommissioned:** the three CA-portal pages (`disputes`, `custom-requests`, `campaigns`) were previously instrumented and no longer capture anything — call sites removed. Screenshots already collected from them remain in Storage.
+  - Hook: `src/lib/temp-analytics/useTempAnalyticsScreenshot.ts` (`useTempAnalyticsScreenshot(pageKey, options?)`) · Route: `src/app/api/temp-analytics/screenshot/route.ts` · Call site: the home page (search `TEMP ANALYTICS`).
   - **To remove:** delete `src/lib/temp-analytics/` + `src/app/api/temp-analytics/`, then strip the `TEMP ANALYTICS`-tagged lines in each instrumented page. Storage folder `temp-analytics/` can be cleared once the data is pulled.
 
 ## Temporary: screenshot TCC repair (remove after fleet migrates off pre-signing builds)

@@ -8,6 +8,36 @@
  * boundaries and DST transitions) using Intl, then derive day boundaries.
  */
 
+// ─── Timezone validation ────────────────────────────────────────────
+
+/**
+ * Coerce a possibly-unset or invalid IANA timezone to a usable one.
+ *
+ * `ensureUserExists` seeds `timezone: ''` and only the onboarding profile step
+ * fills it in, so an empty string is a NORMAL state for anyone who has not
+ * completed onboarding — not corruption. `Intl` throws a RangeError on it, and
+ * `?? 'UTC'` does not catch it because `''` is not nullish. That combination is
+ * how a single un-onboarded user could 500 an entire company-wide response, so
+ * every helper below funnels its timezone through here instead of trusting the
+ * caller to have defaulted it.
+ */
+const tzValidity = new Map<string, boolean>();
+
+export function safeTimezone(timezone: string | null | undefined): string {
+  if (!timezone) return 'UTC';
+  let valid = tzValidity.get(timezone);
+  if (valid === undefined) {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: timezone });
+      valid = true;
+    } catch {
+      valid = false;
+    }
+    tzValidity.set(timezone, valid);
+  }
+  return valid ? timezone : 'UTC';
+}
+
 // ─── Day bounds ─────────────────────────────────────────────────────
 
 /**
@@ -22,7 +52,7 @@ export function getDayBoundsUTC(
   const [year, month, day] = dateStr.split('-').map(Number);
   const noonUTC = Date.UTC(year, month - 1, day, 12, 0, 0);
   const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
+    timeZone: safeTimezone(timezone),
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
@@ -52,7 +82,7 @@ export function getDayBoundsUTCDates(
 /** Returns "YYYY-MM-DD" for a UTC timestamp in the given timezone. */
 export function toLocalDateStr(utcMs: number, tz: string): string {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
+    timeZone: safeTimezone(tz),
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -62,7 +92,7 @@ export function toLocalDateStr(utcMs: number, tz: string): string {
 /** Today's date as "YYYY-MM-DD" in the given IANA timezone (defaults to UTC). */
 export function todayStr(timezone = 'UTC'): string {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
+    timeZone: safeTimezone(timezone),
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

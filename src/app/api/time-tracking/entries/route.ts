@@ -66,7 +66,7 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 
     return NextResponse.json({
       entries: allRows,
-      timezone:        targetUser?.timezone        ?? 'UTC',
+      timezone:        targetUser?.timezone        || 'UTC',
       timezoneOffset:  targetUser?.timezoneOffset  ?? '+00:00',
       enableIdleTimeout: targetUser?.enableIdleTimeout ?? true,
     });

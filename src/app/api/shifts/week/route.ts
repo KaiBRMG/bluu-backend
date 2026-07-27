@@ -173,7 +173,7 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         uid,
         displayName:    u?.displayName    ?? uid,
         photoURL:       u?.photoURL       ?? null,
-        timezone:       u?.timezone       ?? 'UTC',
+        timezone:       u?.timezone       || 'UTC',
         enableIdleTimeout: u?.enableIdleTimeout ?? true,
         groups:         u?.groups         ?? [],
       };
