@@ -11,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { notificationTypeBadge } from '@/lib/notificationTypeBadge';
 import type { AdminNotificationBatch } from '@/types/firestore';
 
 interface NotificationHistoryListProps {
@@ -18,15 +19,6 @@ interface NotificationHistoryListProps {
   loading: boolean;
   onSelectBatch: (batch: AdminNotificationBatch) => void;
 }
-
-const TYPE_BADGE: Record<string, { label: string; className: string }> = {
-  shift:   { label: 'Shift',   className: 'bg-blue-500/15 text-blue-600 border-blue-500/30' },
-  alert:   { label: 'Alert',   className: 'bg-red-500/15 text-red-600 border-red-500/30' },
-  success: { label: 'Success', className: 'bg-green-500/15 text-green-600 border-green-500/30' },
-  action:  { label: 'Action',  className: 'bg-amber-500/15 text-amber-600 border-amber-500/30' },
-  system:  { label: 'System',  className: 'bg-muted text-muted-foreground' },
-  onboarding: { label: 'Onboarding', className: 'bg-muted text-muted-foreground' },
-};
 
 export default function NotificationHistoryList({
   batches,
@@ -74,7 +66,7 @@ export default function NotificationHistoryList({
         </TableHeader>
         <TableBody>
           {batches.map(batch => {
-            const typeMeta = TYPE_BADGE[batch.type] ?? TYPE_BADGE['system'];
+            const typeMeta = notificationTypeBadge(batch.type);
             const sentAt = batch.sentAt ? new Date(batch.sentAt as string) : null;
 
             return (

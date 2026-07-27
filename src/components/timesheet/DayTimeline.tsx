@@ -1,28 +1,16 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useRef, useState, useMemo, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
+import { STATE_CONFIG } from '@/lib/stateColors';
 import type { TimesheetEntry } from '@/hooks/useTimesheetData';
 
 type SegmentState = TimesheetEntry['state'];
-
-const STATE_COLORS: Record<SegmentState, string> = {
-  working: '#86C27E',
-  idle: '#E37836',
-  'on-break': '#4B8FCC',
-  paused: '#8B5CF6',
-};
-
-const STATE_LABELS: Record<SegmentState, string> = {
-  working: 'Working',
-  idle: 'Idle',
-  'on-break': 'On Break',
-  paused: 'Paused',
-};
 
 interface Segment {
   leftPct: number;
   widthPct: number;
   state: SegmentState;
+  sessionId: string;
   startTime: Date;
   endTime: Date;
   // For tooltip: may span multiple merged entries
@@ -34,6 +22,12 @@ interface DayTimelineProps {
   date: string; // YYYY-MM-DD
   entries: TimesheetEntry[];
   timezone: string;
+  /**
+   * Opt-in: makes each segment a control that opens the session walkthrough.
+   * Omitted, the bar stays a read-only visualisation (the employee's own
+   * timesheet renders it that way).
+   */
+  onSessionClick?: (sessionId: string) => void;
 }
 
 import { getDayBoundsUTC } from '@/lib/utils/timezone';
@@ -47,11 +41,17 @@ function formatTimeInTZ(date: Date, timezone: string): string {
   });
 }
 
-export default function DayTimeline({ date, entries, timezone }: DayTimelineProps) {
+export default function DayTimeline({ date, entries, timezone, onSessionClick }: DayTimelineProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [anchor, setAnchor] = useState({ x: 0, y: 0 });
+  // Roving tabindex: the whole day bar is one tab stop, arrows walk its
+  // segments. One stop per segment would put hundreds of them in a month view.
+  const [focusIndex, setFocusIndex] = useState(0);
+  const barRef = useRef<HTMLDivElement>(null);
 
-  const { segments, dayStart, dayDuration } = useMemo(() => {
+  const interactive = Boolean(onSessionClick);
+
+  const { segments } = useMemo(() => {
     const { start, end } = getDayBoundsUTC(date, timezone);
     const duration = end - start + 1;
     const segs: Segment[] = [];
@@ -73,6 +73,7 @@ export default function DayTimeline({ date, entries, timezone }: DayTimelineProp
         leftPct,
         widthPct,
         state: entry.state,
+        sessionId: entry.sessionId,
         startTime: new Date(clampedStart),
         endTime: new Date(clampedEnd),
         tooltipStartTime: new Date(clampedStart),
@@ -93,58 +94,113 @@ export default function DayTimeline({ date, entries, timezone }: DayTimelineProp
       }
     }
 
-    return { segments: segs, dayStart: start, dayDuration: duration };
+    return { segments: segs };
   }, [date, entries, timezone]);
+
+  // Show the tooltip against the element itself when focus arrives by keyboard;
+  // the pointer position is meaningless then.
+  const anchorToElement = (el: HTMLElement) => {
+    const rect = el.getBoundingClientRect();
+    setAnchor({ x: rect.left + rect.width / 2, y: rect.top });
+  };
+
+  const moveFocus = (from: number, delta: number) => {
+    const next = Math.min(segments.length - 1, Math.max(0, from + delta));
+    if (next === from) return;
+    setFocusIndex(next);
+    const el = barRef.current?.querySelectorAll<HTMLElement>('[data-segment]')[next];
+    el?.focus();
+  };
+
+  const activeSegment = hoveredIndex !== null ? segments[hoveredIndex] : null;
 
   return (
     <div
-      className="relative w-full h-7 rounded-full overflow-hidden"
+      ref={barRef}
+      className="relative h-7 w-full overflow-hidden rounded-full"
       style={{ background: 'var(--border-subtle)' }}
+      {...(interactive
+        ? { role: 'group', 'aria-label': `Sessions on ${date} — activate a segment to view its timeline` }
+        : {})}
     >
-      {segments.map((seg, i) => (
-        <div
-          key={i}
-          className="absolute top-0 bottom-0 transition-opacity"
-          style={{
+      {segments.map((seg, i) => {
+        const shared = {
+          'data-segment': true,
+          className: 'absolute top-0 bottom-0 transition-opacity',
+          style: {
             left: `${seg.leftPct}%`,
             width: `${seg.widthPct}%`,
-            background: STATE_COLORS[seg.state],
+            background: STATE_CONFIG[seg.state].color,
             opacity: hoveredIndex === i ? 0.85 : 1,
             minWidth: '2px',
-          }}
-          onMouseEnter={(e) => {
+          } as CSSProperties,
+          onMouseEnter: (e: ReactMouseEvent) => {
             setHoveredIndex(i);
-            setMousePos({ x: e.clientX, y: e.clientY });
-          }}
-          onMouseMove={(e) => {
-            setMousePos({ x: e.clientX, y: e.clientY });
-          }}
-          onMouseLeave={() => setHoveredIndex(null)}
-        />
-      ))}
+            setAnchor({ x: e.clientX, y: e.clientY });
+          },
+          onMouseMove: (e: ReactMouseEvent) => {
+            setAnchor({ x: e.clientX, y: e.clientY });
+          },
+          onMouseLeave: () => setHoveredIndex(null),
+        };
+
+        if (!interactive) return <div key={i} {...shared} />;
+
+        return (
+          <button
+            key={i}
+            type="button"
+            {...shared}
+            // Focus lives inside an overflow-hidden pill, so a ring would be
+            // clipped — an inset outline stays visible.
+            className={`${shared.className} cursor-pointer focus-visible:outline-2 focus-visible:outline-white focus-visible:-outline-offset-2`}
+            tabIndex={i === Math.min(focusIndex, segments.length - 1) ? 0 : -1}
+            aria-label={`${STATE_CONFIG[seg.state].label}, ${formatTimeInTZ(seg.tooltipStartTime, timezone)} to ${formatTimeInTZ(seg.tooltipEndTime, timezone)}. View session timeline.`}
+            onFocus={(e) => {
+              setFocusIndex(i);
+              setHoveredIndex(i);
+              anchorToElement(e.currentTarget);
+            }}
+            onBlur={() => setHoveredIndex(null)}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowRight') { e.preventDefault(); moveFocus(i, 1); }
+              else if (e.key === 'ArrowLeft') { e.preventDefault(); moveFocus(i, -1); }
+              else if (e.key === 'Home') { e.preventDefault(); moveFocus(i, -segments.length); }
+              else if (e.key === 'End') { e.preventDefault(); moveFocus(i, segments.length); }
+            }}
+            onClick={() => onSessionClick?.(seg.sessionId)}
+          />
+        );
+      })}
 
       {/* Tooltip */}
-      {hoveredIndex !== null && segments[hoveredIndex] && (
+      {activeSegment && (
         <div
-          className="fixed z-50 px-3 py-2 rounded-lg text-xs shadow-lg pointer-events-none"
+          className="pointer-events-none fixed z-[var(--z-overlay)] rounded-lg px-3 py-2 text-xs"
           style={{
-            left: mousePos.x + 12,
-            top: mousePos.y - 40,
+            left: anchor.x + 12,
+            top: anchor.y - 40,
             background: 'var(--background)',
             border: '1px solid var(--border-subtle)',
             color: 'var(--foreground)',
           }}
+          role="tooltip"
         >
-          <div className="flex items-center gap-2 mb-1">
+          <div className="mb-1 flex items-center gap-2">
             <div
-              className="w-2 h-2 rounded-full"
-              style={{ background: STATE_COLORS[segments[hoveredIndex].state] }}
+              className="h-2 w-2 rounded-full"
+              style={{ background: STATE_CONFIG[activeSegment.state].color }}
             />
-            <span className="font-medium">{STATE_LABELS[segments[hoveredIndex].state]}</span>
+            <span className="font-medium">{STATE_CONFIG[activeSegment.state].label}</span>
           </div>
-          <div style={{ color: 'var(--foreground-secondary)' }}>
-            {formatTimeInTZ(segments[hoveredIndex].tooltipStartTime, timezone)} — {formatTimeInTZ(segments[hoveredIndex].tooltipEndTime, timezone)}
+          <div className="tabular-nums" style={{ color: 'var(--foreground-secondary)' }}>
+            {formatTimeInTZ(activeSegment.tooltipStartTime, timezone)} — {formatTimeInTZ(activeSegment.tooltipEndTime, timezone)}
           </div>
+          {interactive && (
+            <div className="mt-1.5 border-t pt-1.5" style={{ borderColor: 'var(--border-subtle)', color: 'var(--foreground-muted)' }}>
+              Click to view timeline
+            </div>
+          )}
         </div>
       )}
     </div>

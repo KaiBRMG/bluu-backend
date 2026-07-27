@@ -546,6 +546,24 @@ input[type="date"].form-input {
   }
 }
 
+/* ─── Session walkthrough ribbon ──────────────────────────────────────
+   The state ribbon in the timesheet walkthrough dialog draws left-to-right
+   as it appears. It conveys the one thing the bar is about — that this is a
+   span of time running forwards — rather than decorating the open. Held to
+   the house budget: one 260ms ease-out, transform only, no bounce. The base
+   style is the FINAL state, so the ribbon is correct if it never runs. */
+.session-ribbon-draw {
+  animation: session-ribbon-draw 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: left center;
+}
+
+@keyframes session-ribbon-draw {
+  from {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* Collapse all non-essential motion to an instant transition. Every animated
      surface in this app (onboarding seal/rise/tick, sidebar width, notification

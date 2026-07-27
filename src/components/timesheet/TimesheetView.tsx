@@ -1,9 +1,11 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import DayTimeline from './DayTimeline';
+import SessionWalkthroughDialog from './SessionWalkthroughDialog';
 import { Loader } from '@/components/ui/loader';
-import type { TimesheetEntry } from '@/hooks/useTimesheetData';
+import { STATE_CONFIG } from '@/lib/stateColors';
+import type { TimesheetEntry, TimesheetSession } from '@/hooks/useTimesheetData';
 
 interface TimesheetViewProps {
   entries: TimesheetEntry[];
@@ -11,6 +13,11 @@ interface TimesheetViewProps {
   startDate: string; // YYYY-MM-DD
   endDate: string;   // YYYY-MM-DD
   loading: boolean;
+  /**
+   * Supplying the sessions makes the bars clickable and opens the walkthrough.
+   * Without it the timesheet stays a read-only visualisation.
+   */
+  sessions?: TimesheetSession[];
 }
 
 import { getDayBoundsUTC } from '@/lib/utils/timezone';
@@ -76,8 +83,22 @@ export default function TimesheetView({
   startDate,
   endDate,
   loading,
+  sessions,
 }: TimesheetViewProps) {
   const dates = useMemo(() => generateDates(startDate, endDate), [startDate, endDate]);
+  const [openSessionId, setOpenSessionId] = useState<string | null>(null);
+
+  const sessionsById = useMemo(() => {
+    const map = new Map<string, TimesheetSession>();
+    for (const s of sessions ?? []) map.set(s.sessionId, s);
+    return map;
+  }, [sessions]);
+
+  // A segment whose session didn't come back (an older cached payload, say) must
+  // not present itself as clickable.
+  const onSessionClick = sessions
+    ? (sessionId: string) => { if (sessionsById.has(sessionId)) setOpenSessionId(sessionId); }
+    : undefined;
 
   // Group entries by date (an entry can appear in multiple days if it spans midnight)
   const entriesByDate = useMemo(() => {
@@ -139,7 +160,12 @@ export default function TimesheetView({
                 {formatDateLabel(date)}
               </div>
               <div className="flex-1">
-                <DayTimeline date={date} entries={dayEntries} timezone={timezone} />
+                <DayTimeline
+                  date={date}
+                  entries={dayEntries}
+                  timezone={timezone}
+                  onSessionClick={onSessionClick}
+                />
               </div>
               <div
                 className="w-20 flex-shrink-0 text-xs text-right font-medium"
@@ -154,18 +180,24 @@ export default function TimesheetView({
 
       {/* Legend */}
       <div className="flex items-center gap-4 mt-4 pt-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
-        {[
-          { color: '#86C27E', label: 'Working' },
-          { color: '#E37836', label: 'Idle' },
-          { color: '#4B8FCC', label: 'On Break' },
-          { color: '#8B5CF6', label: 'Paused' },
-        ].map((item) => (
-          <div key={item.label} className="flex items-center gap-1.5">
-            <div className="w-2.5 h-2.5 rounded-full" style={{ background: item.color }} />
-            <span className="text-xs" style={{ color: 'var(--foreground-muted)' }}>{item.label}</span>
+        {(['working', 'idle', 'on-break', 'paused'] as const).map((state) => (
+          <div key={state} className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full" style={{ background: STATE_CONFIG[state].color }} />
+            <span className="text-xs" style={{ color: 'var(--foreground-muted)' }}>
+              {STATE_CONFIG[state].label}
+            </span>
           </div>
         ))}
       </div>
+
+      {onSessionClick && (
+        <SessionWalkthroughDialog
+          session={openSessionId ? sessionsById.get(openSessionId) ?? null : null}
+          timezone={timezone}
+          open={openSessionId !== null}
+          onOpenChange={(next) => { if (!next) setOpenSessionId(null); }}
+        />
+      )}
     </div>
   );
 }

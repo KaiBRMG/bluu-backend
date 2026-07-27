@@ -227,6 +227,7 @@ Stacking is a **named semantic scale**, declared in `globals.css` and consumed v
 - **Badges:** `variant="secondary"` for counts, `variant="destructive"` for alerts ("3 over 30d").
 - **Status pill:** `rounded-full px-2 py-0.5 text-xs font-medium` span, colored from `STATUS_COLORS` (the `-400` text / `/10` fill triad).
 - **Status dot:** `inline-block w-2 h-2 rounded-full` + `STATUS_DOT[status]` — the compact indicator in dense lists.
+- **Template-token chip:** a `<code>` on the overlay recipe — `rounded bg-white/[0.08] px-1 py-0.5 font-mono text-xs text-zinc-300` — marking a value interpolated at runtime inside otherwise literal copy (the automated-notification templates on `/admin/notifications`). Greyscale by design: a placeholder is not a state, so it takes no hue.
 
 ### Inputs / Fields
 - **Style:** the shared `inputClass` — `w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500`. `Select` / `SelectTrigger` match with `bg-zinc-800 border-zinc-700`.

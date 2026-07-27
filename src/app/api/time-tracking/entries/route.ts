@@ -4,7 +4,7 @@ import { getUserById } from '@/lib/services/userService';
 import { getLedgerEntriesByDateRange } from '@/lib/services/activeSessionService';
 import { sessionToSegments } from '@/lib/utils/sessionSegments';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-import type { SegmentRow } from '@/lib/utils/sessionSegments';
+import type { SegmentRow, TimesheetSessionPayload } from '@/lib/utils/sessionSegments';
 
 import { getDayBoundsUTCDates } from '@/lib/utils/timezone';
 
@@ -64,8 +64,30 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       new Date(a.createdTime).getTime() - new Date(b.createdTime).getTime(),
     );
 
+    // Raw session records for the walkthrough dialog. These are the SAME ledger
+    // docs already fetched above — Firestore bills per document, not per field,
+    // so carrying the event log through costs zero extra reads. Fetching it
+    // on click instead would add a read per dialog open for no benefit.
+    const sessions: TimesheetSessionPayload[] = newEntries.map(({ id, data }) => ({
+      sessionId: id,
+      startTime: data.startTime.toDate().toISOString(),
+      endTime: data.endTime.toDate().toISOString(),
+      status: data.status,
+      didNotClockOut: data.didNotClockOut === true,
+      isManual: data.isManual === true,
+      workingSeconds: data.workingSeconds ?? 0,
+      idleSeconds: data.idleSeconds ?? 0,
+      breakSeconds: data.breakSeconds ?? 0,
+      pauseSeconds: data.pauseSeconds ?? 0,
+      events: (data.eventLog ?? []).map(e => (
+        e.meta ? { type: e.type, timestamp: e.timestamp, meta: e.meta }
+               : { type: e.type, timestamp: e.timestamp }
+      )),
+    }));
+
     return NextResponse.json({
       entries: allRows,
+      sessions,
       timezone:        targetUser?.timezone        || 'UTC',
       timezoneOffset:  targetUser?.timezoneOffset  ?? '+00:00',
       enableIdleTimeout: targetUser?.enableIdleTimeout ?? true,

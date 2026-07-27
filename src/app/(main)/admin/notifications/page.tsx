@@ -3,11 +3,14 @@
 import { useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import { Loader } from "@/components/ui/loader";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBasicUsers } from "@/hooks/useBasicUsers";
 import { useAdminNotifications } from "@/hooks/useAdminNotifications";
 import CreateNotificationDialog from "@/components/admin/notifications/CreateNotificationDialog";
 import NotificationHistoryList from "@/components/admin/notifications/NotificationHistoryList";
 import NotificationRecipientsDialog from "@/components/admin/notifications/NotificationRecipientsDialog";
+import AutomatedNotificationsList from "@/components/admin/notifications/AutomatedNotificationsList";
+import { AUTOMATED_NOTIFICATIONS } from "@/lib/automatedNotifications";
 import type { AdminNotificationBatch } from "@/types/firestore";
 
 export default function AdminNotificationsPage() {
@@ -19,7 +22,7 @@ export default function AdminNotificationsPage() {
     <AppLayout>
       <div className="max-w-5xl">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold tracking-tight">Send System Notifications to Users</h1>
+          <h1 className="text-2xl font-bold tracking-tight">System Notifications</h1>
 
           {usersLoading ? (
             <Loader />
@@ -33,11 +36,29 @@ export default function AdminNotificationsPage() {
           )}
         </div>
 
-        <NotificationHistoryList
-          batches={batches}
-          loading={batchesLoading}
-          onSelectBatch={setSelectedBatch}
-        />
+        <Tabs defaultValue="sent">
+          <TabsList>
+            <TabsTrigger value="sent">Sent</TabsTrigger>
+            <TabsTrigger value="automated">
+              Automated
+              <span className="text-xs text-zinc-400 tabular-nums">
+                {AUTOMATED_NOTIFICATIONS.length}
+              </span>
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="sent">
+            <NotificationHistoryList
+              batches={batches}
+              loading={batchesLoading}
+              onSelectBatch={setSelectedBatch}
+            />
+          </TabsContent>
+
+          <TabsContent value="automated">
+            <AutomatedNotificationsList />
+          </TabsContent>
+        </Tabs>
 
         <NotificationRecipientsDialog
           batch={selectedBatch}

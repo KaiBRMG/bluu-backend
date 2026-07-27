@@ -72,7 +72,7 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
     return null;
   }, [startDate, endDate]);
 
-  const { entries, timezone, loading: entriesLoading, error } = useTimesheetData(
+  const { entries, sessions, loading: entriesLoading, error } = useTimesheetData(
     selectedUserId,
     dateError ? null : startDate,
     dateError ? null : endDate,
@@ -195,6 +195,7 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
       ) : !dateError ? (
         <TimesheetView
           entries={entries}
+          sessions={sessions}
           timezone={viewerTimezone}
           startDate={startDate}
           endDate={endDate}

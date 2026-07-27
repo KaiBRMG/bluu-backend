@@ -33,6 +33,7 @@ import {
 import { Loader } from '@/components/ui/loader';
 import { useAuth } from '@/components/AuthProvider';
 import { DeletedUser } from '@/components/DeletedUser';
+import { notificationTypeBadge } from '@/lib/notificationTypeBadge';
 import type { AdminNotificationBatch } from '@/types/firestore';
 
 interface Recipient {
@@ -48,13 +49,6 @@ interface NotificationRecipientsDialogProps {
   onClose: () => void;
   onDelete: (batchId: string) => Promise<void>;
 }
-
-const TYPE_BADGE: Record<string, { label: string; className: string }> = {
-  shift:   { label: 'Shift',   className: 'bg-blue-500/15 text-blue-600 border-blue-500/30' },
-  alert:   { label: 'Alert',   className: 'bg-red-500/15 text-red-600 border-red-500/30' },
-  success: { label: 'Success', className: 'bg-green-500/15 text-green-600 border-green-500/30' },
-  action:  { label: 'Action',  className: 'bg-amber-500/15 text-amber-600 border-amber-500/30' },
-};
 
 export default function NotificationRecipientsDialog({
   batch,
@@ -132,7 +126,7 @@ export default function NotificationRecipientsDialog({
 
   const readCount = recipients.filter(r => r.read).length;
   const dismissedCount = recipients.filter(r => r.dismissedByUser).length;
-  const typeMeta = batch ? (TYPE_BADGE[batch.type] ?? null) : null;
+  const typeMeta = batch ? notificationTypeBadge(batch.type) : null;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>

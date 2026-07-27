@@ -17,6 +17,8 @@
 | `src/hooks/useTimeTracking.ts` | Hook surface over the context |
 | `src/hooks/useDayTotal.ts` | The "TODAY" total |
 | `src/components/timesheet/TodayTimeline.tsx` | Timeline bars + per-row totals |
+| `src/components/timesheet/DayTimeline.tsx` | One day's segment bar + tooltip; opens the walkthrough |
+| `src/components/timesheet/SessionWalkthroughDialog.tsx` | Per-session event-log walkthrough (§6) |
 | `src/hooks/useTimesheetData.ts` | Timesheet cache (5 min TTL) |
 | API: `src/app/api/time-tracking/*/route.ts` | `start`, `stop`, `clock-out`, `discard`, `heartbeat`, `transition`, `status`, `upload-log`, `entries`, `screenshots/*` |
 | `electron/main.js`, `electron/preload.js` | `timeTracking:getActivitySince` IPC (powerMonitor) |
@@ -246,6 +248,28 @@ It `require`s the same `functions/rollup.js` module as the CF, so backfilled and
 
 ---
 
+## 6. Session Walkthrough (admin timesheets)
+
+> `/admin/shift-management` → **Timesheets** → click any segment on a day bar. Renders the session's verbatim `eventLog` on a timeline spanning its start to its end.
+
+```
+GET /api/time-tracking/entries
+  ├── entries[]   — segment rows (the day bars)            ← sessionToSegments
+  └── sessions[]  — whole ledger docs + raw eventLog       ← the walkthrough
+```
+
+- **The event log rides along on the existing read.** The entries route already fetches the very `time_entries` docs the dialog needs, and Firestore bills per *document*, not per field — so `sessions[]` costs **zero** extra reads. **Never add a per-session fetch on dialog open**; it would spend a read to re-fetch data the page already had (cross-cutting rule 9).
+- `SegmentRow.sessionId` is what maps a clicked bar segment back to its session. Every segment carries it, including the logless fallback row.
+- **`eventsToSegments(events, startMs, endMs)` in `sessionSegments.ts` is the shared decomposition core**, used by `sessionToSegments` (server, day bars) and the dialog (client, ribbon). Change it once; the two views cannot drift.
+  - It returns **`[]` for an empty log** — "no events" is *unknown*, not "worked the whole span" (trap 1). `sessionToSegments` keeps its own legacy full-working fallback so the day bars still draw something; the dialog renders the same absence honestly, as a grey hatch labelled "no event log".
+- **Totals in the dialog are derived from the event log, not the ledger.** The stored `pauseSeconds` under-reports (trap 5), so a ledger-sourced strip would contradict the ribbon directly above it.
+- **Times are rendered in the *viewer's* timezone** (`useUserData().timezone`, the admin reading the page), not the tracked user's, and the zone is named in the header so the two can never be confused. Every zone goes through `safeTimezone()`.
+- Event copy and colours live in `EVENT_META` in the dialog; colours are read from `STATE_CONFIG` — never re-type a state hex (DESIGN.md). Events split into **milestones** (state boundaries, always shown) and **routine markers** (`activity`, `screenshot` — shown by default, hideable).
+- The bar is **opt-in interactive**: `TimesheetView` only makes segments clickable when a `sessions` prop is supplied. The employee's own timesheet (`UserTimesheet`) omits it and stays read-only.
+- The timesheet sessionStorage cache key is **`bluu_timesheet_v2`** — bumped when `sessions` joined the payload. **Any future change to the entries payload shape needs another bump**, or warm caches render a stale/empty walkthrough.
+
+---
+
 ## Gotchas Checklist
 
 - [ ] Never `parseBuffer(events, Date.now())` over a buffer set — always close with `sessionCloseMs` first.
@@ -267,3 +291,6 @@ It `require`s the same `functions/rollup.js` module as the CF, so backfilled and
 - [ ] **Analytics:** any new ledger-writing path must call `markAnalyticsDirty` or that day's rollup goes stale.
 - [ ] **Analytics:** `functions/rollup.js` mirrors `sessionToSegments`, `computeBreakAllowance` and `timezone.ts` — change both sides together (including `safeTimezone`).
 - [ ] Never default a user timezone with `?? 'UTC'` — it is seeded as `''`, which is not nullish. Use `|| 'UTC'`.
+- [ ] **Walkthrough:** never fetch a session's event log on dialog open — it already arrived with `/entries` for free.
+- [ ] **Walkthrough:** bump the `bluu_timesheet_v*` cache key whenever the entries payload shape changes.
+- [ ] **Walkthrough:** `eventsToSegments` returning `[]` means *unknown*, not zero worked time — present the absence, never a full working span.

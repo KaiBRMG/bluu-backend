@@ -3,20 +3,29 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { getCache, setCache, invalidateCacheByPrefix } from '@/lib/queryCache';
+import type { TimesheetSessionPayload } from '@/lib/utils/sessionSegments';
+
 export interface TimesheetEntry {
   id: string;
+  /** The ledger session this segment was decomposed from. */
+  sessionId: string;
   state: 'working' | 'idle' | 'on-break' | 'paused';
   createdTime: string;
   lastTime: string;
 }
 
+/** A whole session, event log included — the source for the walkthrough dialog. */
+export type TimesheetSession = TimesheetSessionPayload;
+
 interface CachedTimesheetData {
   entries: TimesheetEntry[];
+  sessions: TimesheetSession[];
   timezone: string;
 }
 
 interface UseTimesheetDataReturn {
   entries: TimesheetEntry[];
+  sessions: TimesheetSession[];
   timezone: string;
   loading: boolean;
   error: string | null;
@@ -28,12 +37,14 @@ interface UseTimesheetDataReturn {
 // when the user immediately navigates back to the page.
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
+// v2 added `sessions` (raw event logs) to the payload. The version bump is what
+// stops a warm v1 entry — segments only — from rendering an empty walkthrough.
 function cacheKey(uid: string, userId: string | null, startDate: string, endDate: string, timezone: string): string {
-  return `bluu_timesheet_v1:${uid}:${userId ?? 'self'}:${startDate}:${endDate}:${timezone}`;
+  return `bluu_timesheet_v2:${uid}:${userId ?? 'self'}:${startDate}:${endDate}:${timezone}`;
 }
 
 export function invalidateTimesheetCache(uid: string): void {
-  invalidateCacheByPrefix(`bluu_timesheet_v1:${uid}:`);
+  invalidateCacheByPrefix(`bluu_timesheet_v2:${uid}:`);
 }
 
 export function useTimesheetData(
@@ -44,6 +55,7 @@ export function useTimesheetData(
 ): UseTimesheetDataReturn {
   const { user } = useAuth();
   const [entries, setEntries] = useState<TimesheetEntry[]>([]);
+  const [sessions, setSessions] = useState<TimesheetSession[]>([]);
   const [timezone, setTimezone] = useState('UTC');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +70,7 @@ export function useTimesheetData(
       const cached = getCache<CachedTimesheetData>(key, CACHE_TTL_MS);
       if (cached) {
         setEntries(cached.entries);
+        setSessions(cached.sessions ?? []);
         setTimezone(cached.timezone);
         return;
       }
@@ -79,9 +92,11 @@ export function useTimesheetData(
       }
       const data = await res.json();
       setEntries(data.entries);
+      setSessions(data.sessions ?? []);
       setTimezone(data.timezone || 'UTC');
       setCache<CachedTimesheetData>(key, {
         entries: data.entries,
+        sessions: data.sessions ?? [],
         timezone: data.timezone || 'UTC',
       });
     } catch (err) {
@@ -97,5 +112,5 @@ export function useTimesheetData(
   // refetch() always bypasses the cache so the user can force-refresh
   const refetch = useCallback(() => fetchData(true), [fetchData]);
 
-  return { entries, timezone, loading, error, refetch };
+  return { entries, sessions, timezone, loading, error, refetch };
 }
