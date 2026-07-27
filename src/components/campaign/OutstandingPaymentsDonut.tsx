@@ -2,6 +2,8 @@
 
 import { Card, CardHeader, CardContent, CardDescription, CardTitle } from "@/components/ui/card";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Info } from "lucide-react";
 import { Label as RechartsLabel, Pie, PieChart } from "recharts";
 import { type CampaignEntry, type Creator, formatAmount } from "@/lib/campaignTracking";
 
@@ -109,7 +111,19 @@ export function OutstandingPaymentsDonut({ entries, creators }: OutstandingPayme
   return (
     <Card className="gap-3 py-4">
       <CardHeader className="px-4">
-        <CardDescription>Outstanding Payments</CardDescription>
+        <div className="flex items-center gap-1.5">
+          <CardDescription>Outstanding Payments</CardDescription>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="text-muted-foreground hover:text-foreground transition-colors">
+                <Info className="w-3.5 h-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">
+              Outstanding payments on customs should always be minimised. Complete a payment by following up with the fan -- or, by Archiving the custom if the fan/model can no longer proceed with the custom.
+            </TooltipContent>
+          </Tooltip>
+        </div>
         {donutData.length === 0 && (
           <CardTitle className="text-2xl font-semibold tabular-nums">{formatAmount(0)}</CardTitle>
         )}

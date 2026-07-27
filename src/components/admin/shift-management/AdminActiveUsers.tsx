@@ -161,20 +161,52 @@ export default function AdminActiveUsers() {
                   </span>
                 </div>
 
-                {/* Last activity */}
+                {/* Last check-in with the server — clock-in, a state transition, or the
+                    15-min heartbeat. NOT a last-user-input time, so it is deliberately
+                    not labelled "activity". */}
                 <div
                   className="text-xs flex-shrink-0"
                   style={{ color: 'var(--foreground-muted)', minWidth: '130px', textAlign: 'right' }}
+                  title="Last time this user's app checked in with the server (heartbeat runs every 15 minutes while working)."
                 >
-                  Last activity at {formatTime(session.lastUpdated, viewerTimezone)}
+                  Last Synced at {formatTime(session.lastUpdated, viewerTimezone)}
                 </div>
 
-                {/* Activity % */}
-                <div className="flex items-center gap-1.5 flex-shrink-0" style={{ minWidth: '110px' }}>
-                  <Progress value={session.lastActivityPercent ?? 100} className="flex-1 h-1.5" />
-                  <span className="text-xs" style={{ color: 'var(--foreground-muted)' }}>
-                    {session.lastActivityPercent ?? 100}%
-                  </span>
+                {/* Activity % — produced only by the screenshot pipeline, so it is
+                    absent for screenshots-off users and until the first capture lands.
+                    Never fall back to a number here: an invented 100% reads as a
+                    measurement. */}
+                <div
+                  className="flex items-center justify-end gap-1.5 flex-shrink-0"
+                  style={{ minWidth: '110px' }}
+                >
+                  {!session.enableScreenshots ? (
+                    <span
+                      className="text-xs whitespace-nowrap"
+                      style={{ color: 'var(--foreground-muted)' }}
+                      title="Screenshots are disabled for this user, so no activity is measured."
+                    >
+                      Screenshots off
+                    </span>
+                  ) : session.lastActivityPercent == null ? (
+                    <span
+                      className="text-xs whitespace-nowrap"
+                      style={{ color: 'var(--foreground-muted)' }}
+                      title="Awaiting the first screenshot of this session."
+                    >
+                      No data yet
+                    </span>
+                  ) : (
+                    <>
+                      <Progress value={session.lastActivityPercent} className="flex-1 h-1.5" />
+                      <span
+                        className="text-xs tabular-nums"
+                        style={{ color: 'var(--foreground-muted)' }}
+                      >
+                        {session.lastActivityPercent}%
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
             );

@@ -4,6 +4,7 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 import { randomUUID } from 'crypto';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { getUserById } from '@/lib/services/userService';
 import type { ActiveSessionDocument } from '@/types/firestore';
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
@@ -18,6 +19,11 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     } catch {
       // No/invalid body — proceed without version info
     }
+
+    // Stamped on the session so the admin Active Users view can tell "screenshots
+    // are off, so no activity % will ever exist" apart from "awaiting first capture".
+    // Read before the transaction — getUserById is 60s-cached, so this is usually free.
+    const enableScreenshots = (await getUserById(token.uid))?.enableScreenshots ?? true;
 
     const sessionRef = adminDb.collection('active_sessions').doc(token.uid);
 
@@ -43,6 +49,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         lastUpdated: FieldValue.serverTimestamp(),
         currentState: 'working',
         userClockOut: false,
+        enableScreenshots,
         appVersion,
         platform,
       });

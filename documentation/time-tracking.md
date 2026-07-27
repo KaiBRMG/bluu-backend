@@ -120,6 +120,22 @@ if (activityPercent === null && events.length > 0) {
 - IPC handler wired in `electron/main.js` (`timeTracking:getActivitySince`), exposed via `electron/preload.js`; type in `src/types/electron.d.ts`.
 - **Runtime selection:** the call site prefers samples when `getActivitySince` is present and falls back to the event-log method when it is absent *or* returns `null`.
 
+### Absence of a value is not 0 — and not 100
+
+`activityPercent` is produced **only** by the screenshot upload path (`/api/time-tracking/screenshots/upload` → `updateActivityPercent` → `active_sessions.lastActivityPercent`), and that route hard-returns 403 when `enableScreenshots` is false. So for a screenshots-disabled user the field **never exists**, and for anyone else it is absent until the session's first capture lands (scheduled at a random offset within `SCREENSHOT_WINDOW_MS`, so up to 15 min).
+
+**RULE — never substitute a number for a missing `lastActivityPercent`.** `AdminActiveUsers` previously rendered `lastActivityPercent ?? 100`, which showed every screenshots-off user as a permanently full 100% bar — an invented figure indistinguishable from a real measurement. Render the absence instead.
+
+To let the UI separate the two absences, **`active_sessions.enableScreenshots` is stamped at clock-in** by `/api/time-tracking/start` (from the 60s-cached `getUserById`, so it is normally a free read). `useActiveUsers` maps it with `data.enableScreenshots !== false`, so sessions predating the field read as `true` (unknown → assume on → "No data yet"). The three render states are:
+
+| Condition | Rendered |
+|---|---|
+| `enableScreenshots === false` | "Screenshots off" |
+| enabled, `lastActivityPercent == null` | "No data yet" |
+| enabled, value present | `Progress` bar + `N%` |
+
+It is a **snapshot at clock-in**, not live — an admin toggling `enableScreenshots` mid-session does not update it. That matches the client, which also reads `enableScreenshots` once at hydration (`TimeTrackingContext` ← `/api/time-tracking/status`), so the stamp and the capture behaviour stay consistent for the life of a session.
+
 ### Native session boundaries (screen lock / system suspend)
 The main process forwards `powerMonitor` `suspend`/`lock-screen`/`unlock-screen`/`resume` as a `power:event` IPC (`electron/preload.js` → `electronAPI.power.onEvent`), each carrying the native timestamp `at`. `TimeTrackingContext` stamps events at `at` rather than `Date.now()`, so boundaries are exact. Feature-detected — no-ops on Electron builds that don't forward power events.
 
@@ -238,6 +254,8 @@ It `require`s the same `functions/rollup.js` module as the CF, so backfilled and
 - [ ] Sample-based activity is feature-detected (`getActivitySince`); the event-log method is the fallback.
 - [ ] `calcActivityPercentFromSamples` must return `null` (never `0`) when it can't cover the window — `0` both libels an active user and kills the fallback.
 - [ ] Never count idle/break/pause minutes in the activity denominator.
+- [ ] Never default a missing `lastActivityPercent` to a number — screenshots-off users have no activity value at all. Use `active_sessions.enableScreenshots` to tell "off" from "not captured yet".
+- [ ] `active_sessions.lastUpdated` is a **client→server check-in time** (clock-in, state transition, 15-min heartbeat), *not* a last-user-input time — Active Users surfaces it as "Last Synced at" for exactly that reason. Never relabel it as activity/presence.
 - [ ] Never trust a bare `lock` as "away" — confirm with `getIdleTime()` first (screensavers fire it).
 - [ ] Never patch a heartbeat gap without confirming sleep via `wasAwakeDuring()` — the gap alone erases real work.
 - [ ] **Analytics:** never feed an empty-`eventLog` session to `sessionToSegments`/`computeWorkedInWindow` — they read it as 100% working. Skip it and record `unknownSeconds`.

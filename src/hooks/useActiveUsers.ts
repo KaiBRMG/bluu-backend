@@ -12,6 +12,12 @@ export interface ActiveUserSummary {
   startTime: Date;
   lastUpdated: Date;
   lastActivityPercent: number | null;
+  /**
+   * Screenshot setting stamped at clock-in. Activity % is produced only by the
+   * screenshot pipeline, so `false` means no activity value will ever arrive.
+   * Sessions started before this field existed report `true` (unknown → assume on).
+   */
+  enableScreenshots: boolean;
 }
 
 /**
@@ -54,6 +60,7 @@ export function useActiveUsers(): { activeSessions: ActiveUserSummary[]; isLoadi
               startTime:           data.startTime?.toDate?.() ?? new Date(0),
               lastUpdated:         data.lastUpdated?.toDate?.() ?? new Date(0),
               lastActivityPercent: data.lastActivityPercent ?? null,
+              enableScreenshots:   data.enableScreenshots !== false,
             };
           });
           setActiveSessions(sessions);

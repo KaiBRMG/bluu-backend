@@ -232,6 +232,7 @@ export interface ActiveSessionDocument {
   currentState: ActiveSessionState;
   userClockOut: boolean; // true = app closed gracefully without explicit clock-out
   lastActivityPercent?: number | null; // most recent activity % from screenshot interval
+  enableScreenshots?: boolean; // user's screenshot setting as of clock-in — activity % only exists when true
   appVersion?: string | null; // installed desktop app version reported at clock-in
   platform?: string | null; // OS platform reported at clock-in (darwin/win32)
 }
