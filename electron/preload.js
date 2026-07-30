@@ -25,6 +25,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setResizable: (resizable) => ipcRenderer.send('window:set-resizable', resizable),
     setSize: (width, height) => ipcRenderer.send('window:set-size', width, height),
     getSize: () => ipcRenderer.invoke('window:get-size'),
+    // Outer size + maximize state, so the renderer never persists maximized bounds.
+    getState: () => ipcRenderer.invoke('window:get-state'),
+    // Display work area in DIPs — authoritative, unlike zoom-skewed window.screen.*
+    getWorkArea: () => ipcRenderer.invoke('window:get-work-area'),
+    maximize: () => ipcRenderer.send('window:maximize'),
+    // Fires ONLY for user-initiated resize/maximize — never for our own auto-size.
+    onUserResized: (callback) => {
+      ipcRenderer.on('window:user-resized', (_event, state) => callback(state));
+    },
+    removeUserResizedListener: () => {
+      ipcRenderer.removeAllListeners('window:user-resized');
+    },
   },
 
   // Time tracking

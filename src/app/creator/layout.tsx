@@ -11,18 +11,18 @@ function CreatorAuthWrapper({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const isLoginRoute = pathname === '/creator-portal/login';
+  const isLoginRoute = pathname === '/creator/login';
 
   useEffect(() => {
     if (loading) return;
     if (!creatorUser && !isLoginRoute) {
       const current = pathname + (searchParams.toString() ? `?${searchParams.toString()}` : '');
-      router.replace(`/creator-portal/login?redirect=${encodeURIComponent(current)}`);
+      router.replace(`/creator/login?redirect=${encodeURIComponent(current)}`);
     }
     if (creatorUser && isLoginRoute) {
       const redirect = searchParams.get('redirect');
       // Only follow relative redirects to prevent open-redirect attacks
-      const destination = redirect?.startsWith('/') ? redirect : '/creator-portal/dashboard';
+      const destination = redirect?.startsWith('/') ? redirect : '/creator/dashboard';
       router.replace(destination);
     }
   }, [creatorUser, loading, isLoginRoute, router, pathname, searchParams]);

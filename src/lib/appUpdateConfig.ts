@@ -32,6 +32,8 @@
  *   On Windows prefer `false` for routine releases: updating means quitting and
  *   reinstalling by hand.
  */
+import { PUBLIC_APP_ORIGIN } from './publicOrigin';
+
 export interface PlatformUpdate {
   /** Clients running older than this are prompted. Compared with semver. */
   latestVersion: string;
@@ -56,7 +58,7 @@ export const APP_UPDATE: AppUpdateConfig = {
   mac: null,
 
   win: null,
-  downloadUrl: 'https://bluu-backend.vercel.app/download',
+  downloadUrl: `${PUBLIC_APP_ORIGIN}/download`,
 };
 
 /** Maps a native `process.platform` onto its config entry. Returns null for

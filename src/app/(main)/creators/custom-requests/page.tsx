@@ -39,6 +39,7 @@ import {
 import { useUserData } from "@/hooks/useUserData";
 import { useBasicUsers } from "@/hooks/useBasicUsers";
 import { apiRequest } from "@/lib/clientApi";
+import { PUBLIC_APP_ORIGIN } from "@/lib/publicOrigin";
 import { toast } from "sonner";
 import { ConfirmDialog, ARCHIVE_CR_TEXT, UNARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
 
@@ -345,7 +346,9 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
                 title="Copy creator link"
                 onClick={() => {
                   const typeLabel = entry.type === "Item" ? "Item Request" : TYPE_LABELS[entry.type] ?? entry.type;
-                  const url = `${window.location.origin}/creator-portal/dashboard?crId=${entry.id}`;
+                  // Public domain, not window.location.origin — staff copy this
+                  // from Electron, whose origin is the vercel.app host.
+                  const url = `${PUBLIC_APP_ORIGIN}/creator/dashboard?crId=${entry.id}`;
                   const message = `💸 You have a new ${typeLabel} from ${entry.fanName} for ${formatAmount(entry.totalAmount)}! \nCheck your Portal for the details: ${url}\n`;
                   navigator.clipboard.writeText(message);
                   toast.success("Link copied");

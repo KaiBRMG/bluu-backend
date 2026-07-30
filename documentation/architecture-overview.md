@@ -14,7 +14,7 @@
 |---|---|---|
 | `src/` | Next.js 16 web app | App Router, TypeScript, React 19. **Primary codebase.** Run all Next.js commands from here. Services all employees. |
 | `electron/` | Electron wrapper | Embeds the Next.js app as a desktop app. Employees access the system **only** through this. |
-| `src/app/creator-portal/` | Creator interface | Client-facing. Separate from the main system, separate auth flow. |
+| `src/app/creator/` | Creator interface | Client-facing. Separate from the main system, separate auth flow. |
 | `functions/` | Firebase Cloud Functions | Node.js, plain JS. Two functions: `generateThumbnail` (Storage trigger) + daily scheduled stale-session cleanup. |
 | `tests/firestore-rules/` | Rules tests | Requires Firebase Emulator on port 8080. |
 
@@ -72,7 +72,7 @@ FIREBASE_SERVICE_ACCOUNT   # JSON string of service account key
                  └─────────────────────────────────────────┘
                  ┌─────────────────────────────────────────┐
    Browser  ───► │  Creator portal (external creators)     │
-   (system)      │  /creator-portal/                       │
+   (system)      │  /creator/                              │
                  │  CreatorAuthProvider  +  withCreatorAuth │
                  └─────────────────────────────────────────┘
 ```
@@ -80,7 +80,7 @@ FIREBASE_SERVICE_ACCOUNT   # JSON string of service account key
 | Portal | Route prefix | Auth context | API middleware |
 |---|---|---|---|
 | Internal (employees) | `/ca-portal/`, `/admin/`, `/applications/` | `AuthProvider` | `withAuth` |
-| Creator | `/creator-portal/` | `CreatorAuthProvider` | `withCreatorAuth` |
+| Creator | `/creator/` | `CreatorAuthProvider` | `withCreatorAuth` |
 
 Browser access to internal routes is blocked by `src/middleware.ts` — see [auth.md](auth.md#browser-access-middleware).
 

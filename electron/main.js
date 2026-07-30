@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, session, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification, systemPreferences } = require('electron');
+const { app, BrowserWindow, session, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification, systemPreferences, screen: electronScreen } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { execFile } = require('child_process');
@@ -290,6 +290,41 @@ ipcMain.handle('app:getVersions', () => ({
   arch: process.arch,
 }));
 
+// ─── Window geometry ─────────────────────────────────────────────────
+// The main process is the authority on display geometry. The renderer must never
+// derive a window size from `window.screen.*`: those are CSS pixels, so the forced
+// 90% zoom (see the did-finish-load handler) skews them, and they describe whatever
+// display Chromium considers current rather than the one the window is on.
+const WINDOW_MIN_W = 1024;
+const WINDOW_MIN_H = 720;
+const LOGIN_W = 1430;
+const LOGIN_H = 870;
+
+// Work area (screen minus taskbar/dock) of the display the window is on, in DIPs —
+// the same unit setSize/getSize use. Falls back to the primary display before the
+// window exists. Only safe to call after app.whenReady().
+function currentWorkArea() {
+  try {
+    const display = mainWindow && !mainWindow.isDestroyed()
+      ? electronScreen.getDisplayMatching(mainWindow.getBounds())
+      : electronScreen.getPrimaryDisplay();
+    return display.workAreaSize;
+  } catch {
+    return { width: LOGIN_W, height: LOGIN_H };
+  }
+}
+
+// Never hand setSize a value larger than the display. The floor is itself capped by
+// the work area, so a small or heavily-scaled display can't be given a window it
+// cannot fit (a 1920x1080 @150% Windows laptop has only 1280x672 DIPs to work with).
+function clampToWorkArea(width, height) {
+  const wa = currentWorkArea();
+  return {
+    width: Math.min(Math.max(width, Math.min(WINDOW_MIN_W, wa.width)), wa.width),
+    height: Math.min(Math.max(height, Math.min(WINDOW_MIN_H, wa.height)), wa.height),
+  };
+}
+
 // IPC handler for window resizability
 ipcMain.on('window:set-resizable', (_event, resizable) => {
   console.log('[Performance] IPC setResizable called:', resizable);
@@ -298,12 +333,44 @@ ipcMain.on('window:set-resizable', (_event, resizable) => {
   }
 });
 
-// IPC handler for window size
+// Last size the window had while **not** maximized. Reported instead of the live size
+// whenever the window is maximized: on Windows a maximized window's outer bounds include
+// the invisible resize border, so persisting them and replaying them via setSize on an
+// un-maximized window yields a window wider than the display.
+let lastNormalSize = null;
+
+// Suppresses the `resized` event that some platforms emit for our own setSize calls.
+// Only a genuine user drag may be persisted — see the `resized` handler.
+let suppressResizedUntil = 0;
+
+// Apply a size we chose (not the user). Clamped, re-centred, and flagged so the
+// resulting `resized` event is not mistaken for a manual resize.
+function applyWindowSize(width, height) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const size = clampToWorkArea(Math.round(width), Math.round(height));
+  suppressResizedUntil = Date.now() + 750;
+  // animate:false — an animated setSize on macOS emits `resized` when it finishes.
+  mainWindow.setSize(size.width, size.height, false);
+  mainWindow.center();
+  lastNormalSize = size;
+}
+
+// Current persistable window state: the last *normal* size plus the maximize flag.
+function currentWindowState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  const [width, height] = mainWindow.getSize();
+  const isMaximized = mainWindow.isMaximized();
+  if (!isMaximized) lastNormalSize = { width, height };
+  const size = lastNormalSize || { width, height };
+  return { width: size.width, height: size.height, isMaximized };
+}
+
+// IPC handler for window size. Clamped — a size persisted on a larger monitor (or by an
+// older build that saved maximized bounds) must not reopen off-screen here.
 ipcMain.on('window:set-size', (_event, width, height) => {
-  if (mainWindow) {
-    mainWindow.setSize(width, height, true);
-    mainWindow.center();
-  }
+  if (typeof width !== 'number' || typeof height !== 'number') return;
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+  applyWindowSize(width, height);
 });
 
 // IPC handler to read the current outer window size (used to persist user resizes
@@ -314,6 +381,36 @@ ipcMain.handle('window:get-size', () => {
   }
   return null;
 });
+
+// Outer (normal) size plus maximize state.
+ipcMain.handle('window:get-state', () => currentWindowState());
+
+// Authoritative work area in DIPs, for the renderer's dynamic first-run sizing.
+ipcMain.handle('window:get-work-area', () => currentWorkArea());
+
+ipcMain.on('window:maximize', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.maximize();
+});
+
+// The renderer only re-sizes on login, so without this a window sized on one display
+// stays that size after the display changes underneath it — unplugging an external
+// monitor, an RDP session at a smaller resolution, or a DPI-scaling change all leave
+// the window larger than the screen for the rest of the session.
+// Registered once at ready (createWindow can run again on macOS `activate`).
+function registerDisplayListeners() {
+  const reclamp = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMaximized() || mainWindow.isFullScreen()) return;
+    const [width, height] = mainWindow.getSize();
+    const size = clampToWorkArea(width, height);
+    if (size.width === width && size.height === height) return;
+    console.log(`[main] display changed — clamping window ${width}x${height} → ${size.width}x${size.height}`);
+    applyWindowSize(size.width, size.height);
+  };
+  electronScreen.on('display-metrics-changed', reclamp);
+  electronScreen.on('display-removed', reclamp);
+  electronScreen.on('display-added', reclamp);
+}
 
 // Renderer signals that React has mounted and is ready.
 // Re-registered on each page load so we always catch the first mount.
@@ -396,11 +493,18 @@ function createWindow() {
     app.dock.setIcon(image);
   }
 
+  // The login window is fixed and non-resizable, so it must fit the display up front —
+  // a 1430x870 window on a 1280x672 work area (1920x1080 @150% scaling, common on
+  // Windows) opens larger than the screen with no way for the user to shrink it.
+  const workArea = electronScreen.getPrimaryDisplay().workAreaSize;
+
   mainWindow = new BrowserWindow({
-    width: 1430,
-    height: 870,
-    minWidth: 1024,    // Floor so a resized window can't break the UI (only applies once resizable)
-    minHeight: 720,
+    width: Math.min(LOGIN_W, workArea.width),
+    height: Math.min(LOGIN_H, workArea.height),
+    // Floor so a resized window can't break the UI (only applies once resizable),
+    // itself capped by the work area so it can't force an oversized window.
+    minWidth: Math.min(WINDOW_MIN_W, workArea.width),
+    minHeight: Math.min(WINDOW_MIN_H, workArea.height),
     resizable: false,  // Start with window locked (login page)
     show: true,
     backgroundColor: '#002333',     // Match your logo's dark background
@@ -415,6 +519,25 @@ function createWindow() {
       v8CacheOptions: 'code',  // Enable V8 code caching for faster startup
     },
   });
+
+  lastNormalSize = null;
+  suppressResizedUntil = 0;
+
+  // ─── User-initiated resize → renderer ──────────────────────────────
+  // Only a MANUAL resize may be persisted. The DOM `resize` event can't express that:
+  // it also fires for our own auto-size, which would write the auto-sized value to
+  // storage and stop auto-sizing from ever running again. `resized` fires when the user
+  // finishes dragging (the suppression window covers platforms that also emit it for
+  // setSize), and maximize/unmaximize carry the state without the maximized bounds.
+  const notifyUserResize = () => {
+    if (Date.now() < suppressResizedUntil) return;
+    const state = currentWindowState();
+    if (!state) return;
+    mainWindow.webContents.send('window:user-resized', state);
+  };
+  mainWindow.on('resized', notifyUserResize);
+  mainWindow.on('maximize', notifyUserResize);
+  mainWindow.on('unmaximize', notifyUserResize);
 
   // In dev, load local Next.js
   if (isDev) {
@@ -652,6 +775,7 @@ app.whenReady().then(() => {
 
   registerPowerListeners();
   registerAutoUpdater();
+  registerDisplayListeners();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

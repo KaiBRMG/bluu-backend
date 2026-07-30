@@ -10,6 +10,15 @@ interface ElectronAPI {
     setResizable: (resizable: boolean) => void;
     setSize: (width: number, height: number) => void;
     getSize?: () => Promise<[number, number] | null>;
+    // Optional: absent on builds before the window-geometry fix. Feature-detect.
+    getState?: () => Promise<{ width: number; height: number; isMaximized: boolean } | null>;
+    getWorkArea?: () => Promise<{ width: number; height: number } | null>;
+    maximize?: () => void;
+    // Fires only for user-initiated resize/maximize, never for a programmatic auto-size.
+    onUserResized?: (
+      callback: (state: { width: number; height: number; isMaximized: boolean }) => void,
+    ) => void;
+    removeUserResizedListener?: () => void;
   };
   timeTracking: {
     getIdleTime: () => Promise<number>;

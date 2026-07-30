@@ -35,7 +35,7 @@
 
 **`BROWSER_ALLOWED_PREFIXES` (currently):**
 - `/auth` — OAuth flow pages run in the system browser during login; must be reachable without Electron.
-- `/creator-portal` — external creator interface, browser-accessible by design.
+- `/creator` — external creator interface, browser-accessible by design.
 - `/desktop-only` — the "use the desktop app" landing page itself.
 - `/download` — public installer/download page; users need it before they have the desktop app.
 - `/raffle` — browser-accessible raffle page.
@@ -92,7 +92,7 @@ Identity is keyed on the **Firebase Auth uid**, and `/api/auth/exchange-code` de
 
 ### Auth contexts
 - **`AuthProvider`** — internal employees (`@bluurock.com` emails). Enforces the `isActive` check.
-- **`CreatorAuthProvider`** — external creator accounts, used only in the creator portal.
+- **`CreatorAuthProvider`** — external creator accounts, used only in the creator portal. The portal has no landing page: `src/app/creator/page.tsx` server-redirects `/creator` → `/creator/dashboard`, and `CreatorAuthWrapper` in the portal layout bounces signed-out visitors to `/creator/login?redirect=…` (relative redirects only, to block open redirects).
 
 ### Single active session
 `users/{uid}.sessionToken` is a UUID **rotated on every login**. The client stores it locally; an `onSnapshot` on the user doc detects a mismatch and **forces sign-out** — enforcing one active session per user. See also [data-layer.md](data-layer.md).

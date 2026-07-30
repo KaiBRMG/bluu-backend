@@ -4,7 +4,22 @@ Spoke for the `electron/` desktop wrapper. Read this before changing anything in
 
 ## What it is
 
-A **thin Electron shell that loads the hosted Next.js web app** (`https://bluu-backend.vercel.app`). It bundles almost no app code — the web app itself is served from Vercel. The shell exists to give employees a desktop app with native capabilities the browser can't offer (OS idle detection, screen capture, native notifications, deep-link OAuth) and to gate the app to desktop-only (`src/middleware.ts` admits requests whose UA contains `Electron/`).
+A **thin Electron shell that loads the hosted Next.js web app** (`https://bluu-backend.vercel.app` — see [Two domains, one deployment](#two-domains-one-deployment)). It bundles almost no app code — the web app itself is served from Vercel. The shell exists to give employees a desktop app with native capabilities the browser can't offer (OS idle detection, screen capture, native notifications, deep-link OAuth) and to gate the app to desktop-only (`src/middleware.ts` admits requests whose UA contains `Electron/`).
+
+### Two domains, one deployment
+
+The same Vercel project serves **two hosts**, and the difference matters:
+
+| Host | Who uses it |
+|---|---|
+| `bluu-backend.vercel.app` | **The Electron shell only** — hardcoded as `BASE_URL` in `electron/main.js`. |
+| `app.bluurock.com` | **Browser-facing pages** — `/creator`, `/download`, `/terms`, `/raffle`. Exported as `PUBLIC_APP_ORIGIN` in [`src/lib/publicOrigin.ts`](../src/lib/publicOrigin.ts). |
+
+`src/middleware.ts` is host-agnostic, so both domains expose exactly the same surface (browser traffic outside the allowlist rewrites to `/desktop-only`).
+
+- **Never point the vercel.app host at a redirect to the custom domain.** `BASE_URL` is compared with `startsWith` in `will-navigate`, `did-fail-load` and `did-finish-load`; landing on a foreign origin makes the shell kick its own navigations out to the system browser and silently skips the offline-retry reset and the 0.9 zoom default.
+- **Never build a user-facing link from `window.location.origin`.** Staff run the app inside Electron, so that resolves to the vercel.app host. Use `PUBLIC_APP_ORIGIN` — as the "copy creator link" button in `src/app/(main)/creators/custom-requests/page.tsx` and `APP_UPDATE.downloadUrl` do.
+- OAuth is unaffected: `redirect_uri` comes from the fixed `NEXT_PUBLIC_REDIRECT_URI` env var (vercel.app), not from the requesting host. Auth state is per-origin (Firebase uses IndexedDB, the app sets no cookies), so the two hosts have independent sessions by design.
 
 ### The core constraint: two update channels
 - **Renderer (the web app) updates instantly** via Vercel. Anything in `src/` reaches users on next load.
@@ -35,8 +50,12 @@ All renderer↔main communication goes through `preload.js` → `window.electron
 |---|---|---|---|
 | `auth.startGoogleOAuth()` | invoke | `auth:start-google-oauth` | opens `/auth/google` in the external browser |
 | `auth.onOAuthCallback/onOAuthError` | main→renderer | — | fired from the `bluu://` deep-link handler |
-| `window.setResizable/setSize` | send | `window:set-*` | resize the desktop window (login vs app); `setSize` re-centers |
+| `window.setResizable/setSize` | send | `window:set-*` | resize the desktop window (login vs app); `setSize` **clamps to the work area** then re-centers |
 | `window.getSize()` | invoke | `window:get-size` | current **outer** window size `[w,h]`; used to persist user resizes without title-bar drift |
+| `window.getState()` | invoke | `window:get-state` | `{ width, height, isMaximized }` — outer size **plus** maximize state (optional; absent pre-fix) |
+| `window.getWorkArea()` | invoke | `window:get-work-area` | work area of the display the window is on, in **DIPs** (optional; absent pre-fix) |
+| `window.maximize()` | send | `window:maximize` | restore a persisted maximized state (optional; absent pre-fix) |
+| `window.onUserResized(cb)` | main→renderer | `window:user-resized` | **user-initiated** resize/maximize only — never the programmatic auto-size (optional; absent pre-fix) |
 | `timeTracking.getIdleTime()` | invoke | `timeTracking:getIdleTime` | `powerMonitor.getSystemIdleTime()` |
 | `timeTracking.getActivitySince(sinceMs)` | invoke | `timeTracking:getActivitySince` | 5s idle-time samples (45-min rolling buffer) for accurate activity % |
 | `timeTracking.captureScreenshot()` | invoke | `timeTracking:captureScreenshot` | `desktopCapturer`, all screens → base64 PNGs |
@@ -56,13 +75,29 @@ All renderer↔main communication goes through `preload.js` → `window.electron
 
 ## Window sizing & persistence
 
-The window opens at a fixed `1430×870`, `resizable:false` for the login page (`minWidth/minHeight` `1024×720` guard once resizing is enabled). Sizing **policy lives in the renderer** — [`src/lib/windowSize.ts`](../src/lib/windowSize.ts) + the login/logout effect in [`src/components/AuthWrapper.tsx`](../src/components/AuthWrapper.tsx):
+The window opens at `1430×870`, `resizable:false` for the login page (`minWidth/minHeight` `1024×720` guard once resizing is enabled). **Both the initial size and the min sizes are capped by the primary display's work area** — a 1920×1080 @150% Windows laptop has only `1280×672` DIPs, and an un-resizable window larger than that is unusable.
 
-- **On login**, it restores the remembered size, or — when there is none — sizes the window to **85% width × 80% height** of the display work area (`window.screen.availWidth/availHeight`, clamped to the min).
-- **On resize** (logged in), the debounced handler reads the true outer size via `window.getSize()` and saves it to a single `localStorage` key `bluu_window_size`.
+Sizing **policy lives in the renderer** — [`src/lib/windowSize.ts`](../src/lib/windowSize.ts) + the login/logout effect in [`src/components/AuthWrapper.tsx`](../src/components/AuthWrapper.tsx) — but **display geometry is owned by the main process**.
+
+**The spec, in one line: auto-size by default; once the user resizes by hand that size sticks and auto-sizing never runs again — until they log in again.**
+
+- **On login**, it restores the remembered size (fitted to the current work area), or — when there is none — sizes the window to **85% width × 80% height** of the work area returned by `window.getWorkArea()`. If the saved state was `maximized`, it calls `setResizable(true)` then `maximize()` instead of restoring bounds.
+- **On a manual resize** (logged in), `window:user-resized` arrives from main and is saved to the single `localStorage` key `bluu_window_size` as `{ width, height, maximized }`.
 - **On logout**, the key is cleared, so the next login re-runs the dynamic 85/80 sizing. The key is intentionally **not** per-uid: forgetting on logout is the spec, and a shared key cleared at logout is the exact implementation (this also covers the `revoked`/`displaced` forced sign-outs, which flip login state through the same effect).
 
+**The presence of the key is the entire "has the user chosen a size?" signal**, so it must only ever be written by a *genuine user resize*. Do **not** persist from the DOM `resize` event: it also fires for the auto-size itself, which writes the auto-sized value to storage and permanently disables auto-sizing (a relaunch then replays a stale hard number instead of fitting the current display). Main gates this with the window's `resized` / `maximize` / `unmaximize` events plus a short suppression window around its own `setSize` calls (`applyWindowSize`), and `setSize` passes `animate:false` because an animated setSize on macOS emits `resized` when it finishes.
+
 Save and restore both use the **outer** window size (`getSize`/`setSize`), so no title-bar drift accumulates across launches. Only size is persisted, not position.
+
+### Three rules that keep the window on-screen
+
+Each of these was, on its own, enough to make the window open larger than the user's screen (observed on Windows):
+
+1. **Never persist maximized bounds.** On Windows a maximized window's outer bounds include the invisible resize border — so saving them and replaying them via `setSize` on an un-maximized window yields a window wider than the display. Main tracks `lastNormalSize` and reports *that* (plus an `isMaximized` flag) in both `window:get-state` and `window:user-resized`, so un-maximizing on a later launch still lands somewhere sane.
+2. **Never derive geometry from `window.screen.*`.** Those are CSS pixels — the forced 90% zoom skews them — and they describe whichever display Chromium considers current, not the one the window is on. Use `window.getWorkArea()` (DIPs, `screen.getDisplayMatching(...)`). The `window.screen` path survives only as a fallback for older installed builds.
+3. **The main process clamps every `setSize`.** `window:set-size` fits the requested size into `screen.getDisplayMatching(win.getBounds()).workAreaSize` before applying it — the renderer's numbers are never trusted verbatim, because a size persisted on a larger monitor, on an older build, or before a DPI change will otherwise reopen off-screen. `screen`'s `display-metrics-changed` / `display-added` / `display-removed` re-clamp mid-session (unplugging an external monitor, RDP at a lower resolution, a scaling change), skipping maximized/full-screen windows.
+
+All four new IPCs are **optional** in `electron.d.ts` and feature-detected. On an older installed build the renderer falls back to `window.screen` for the auto-size and — lacking `onUserResized` — never persists a size at all, so it auto-sizes on every launch. That is the correct default rather than a regression: the authoritative clamp and manual-size persistence both arrive with the native update.
 
 **Content zoom** is forced to **90%** (`webContents.setZoomFactor(0.9)`) in the app-URL branch of the `did-finish-load` handler in `main.js` — user screenshots showed screens overly zoomed in. It re-asserts on every full page load (boot, reload, crash-recovery) but not on Next.js client-side navigation (zoom is a webContents property and persists across SPA routing). A user's manual Cmd+/Cmd− is therefore reset to 90% on the next full reload, by design.
 
@@ -193,6 +228,7 @@ The reset repairs the **next** scheduled capture, not the one that just failed. 
 - [ ] New native IPC → type it **optional** in `src/types/electron.d.ts` and **feature-detect** in the renderer (older installed builds lack it).
 - [ ] Anything that must survive app close → route it through the `close`-event flush (`closingFlushed()`), not `before-quit`.
 - [ ] Window size persists via the single `localStorage` key `bluu_window_size`, cleared on logout — keep it **non**-per-uid (reset-on-logout is the spec). Save/restore via **outer** size (`getSize`/`setSize`) to avoid title-bar drift.
+- [ ] Window geometry: never persist maximized bounds, never size from `window.screen.*`, always clamp in main. See [Three rules that keep the window on-screen](#three-rules-that-keep-the-window-on-screen). Verify on a **scaled Windows display** (1920×1080 @150%) — maximize, quit, relaunch, log in.
 - [ ] `shell.openExternal` only via `openExternalSafe`.
 - [ ] The Electron GUI **cannot be launched from a headless env** (`require('electron')` returns the binary path → `app` undefined). Verify runtime with `npm run pack` on a real machine; `node --check` is the only automated check available.
 - [ ] **Release in two pushes** — code first (platform entry `null`), then tag + build, then arm the config. Vercel is instant, the build is ~10–30 min; arming in the same push blocks users against a release that doesn't exist yet. Full command sequence: **rule 14 in [CLAUDE.md](../CLAUDE.md)**.

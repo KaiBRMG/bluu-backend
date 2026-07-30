@@ -67,8 +67,12 @@ Two notifications fire here (`welcomeToTeam` to the user, `adminNewUserAlert` to
 
 ```ts
 // Renders with no internal session at all — OAuth pages, creator portal.
+// The `/creator` test is segment-bounded on purpose: a bare
+// startsWith('/creator') would also swallow the internal `/creators/*` pages.
 const isUnauthenticatedRoute =
-  pathname?.startsWith('/auth/') || pathname?.startsWith('/creator-portal');
+  pathname?.startsWith('/auth/') ||
+  pathname === '/creator' ||
+  pathname?.startsWith('/creator/');
 
 // An authenticated surface, but the onboarding guard must skip it.
 const isOnboardingRoute = pathname?.startsWith('/onboarding/');
@@ -88,14 +92,14 @@ useEffect(() => {
 }, [userData, userDataLoading, user, isUnauthenticatedRoute, isOnboardingRoute, router]);
 ```
 
-**RULE — keep these two predicates separate.** They were once a single `isAuthRoute` that lumped onboarding in with the OAuth pages, which had two bugs: session enforcement (revocation, displacement, the incomplete-onboarding discard) silently never ran during onboarding, and the render path returned children *before* the `!user` check — so signing out from an onboarding step cleared the session but kept rendering the step, making the button look inert. Onboarding is an authenticated surface; only `/auth/*` and `/creator-portal` are not.
+**RULE — keep these two predicates separate.** They were once a single `isAuthRoute` that lumped onboarding in with the OAuth pages, which had two bugs: session enforcement (revocation, displacement, the incomplete-onboarding discard) silently never ran during onboarding, and the render path returned children *before* the `!user` check — so signing out from an onboarding step cleared the session but kept rendering the step, making the button look inert. Onboarding is an authenticated surface; only `/auth/*` and `/creator` are not.
 
 **Key nuance:** the guard bails on `isOnboardingRoute`. It only *pulls* an incomplete user **into** onboarding when they try to reach anywhere else in the app; once inside `/onboarding/*` it steps back and lets each page's own `router.push` drive navigation. Two consequences:
 
 - **Reloading anywhere inside the flow keeps you there** — the guard never fires on an onboarding route, so a refresh on step 5 stays on step 5.
 - **Re-entering from outside** (quit and relaunch, or navigating to `/`) resumes at `/onboarding/welcome` if terms were never accepted, otherwise at `/onboarding/permissions` — the start of the permissions leg, not the exact step you left. There is no per-step resume; the form step re-hydrates from the user doc so nothing typed is lost.
 
-Because `isAuthRoute` also covers `/auth/` and `/creator-portal`, the mid-session kill-switch (`isActive === false`) and the displaced-session check are both skipped while inside `/onboarding/*`.
+Because `isAuthRoute` also covers `/auth/` and `/creator`, the mid-session kill-switch (`isActive === false`) and the displaced-session check are both skipped while inside `/onboarding/*`.
 
 ## 4. The six steps
 

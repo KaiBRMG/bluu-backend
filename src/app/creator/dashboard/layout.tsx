@@ -18,10 +18,10 @@ import {
 } from "@/components/ui/sidebar";
 
 const navItems = [
-  { title: "Dashboard", href: "/creator-portal/dashboard", icon: House },
-  { title: "Welcome to Bluu Rock", href: "/creator-portal/dashboard/welcome", icon: HeartHandshake },
-  { title: "Custom Requests", href: "/creator-portal/dashboard/all-customs", icon: ImagePlay },
-  { title: "Content Planning", href: "/creator-portal/dashboard/content-requests", icon: CalendarCheck },
+  { title: "Dashboard", href: "/creator/dashboard", icon: House },
+  { title: "Welcome to Bluu Rock", href: "/creator/dashboard/welcome", icon: HeartHandshake },
+  { title: "Custom Requests", href: "/creator/dashboard/all-customs", icon: ImagePlay },
+  { title: "Content Planning", href: "/creator/dashboard/content-requests", icon: CalendarCheck },
 ];
 
 function CreatorSidebar() {

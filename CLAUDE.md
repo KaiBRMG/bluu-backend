@@ -17,7 +17,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
  Electron desktop ─►│  Internal portals  /ca-portal /admin /apps    │─► AuthProvider + withAuth
  (employees only)   └───────────────────────────────────────────────┘
                     ┌───────────────────────────────────────────────┐
- System browser  ─►│  Creator portal    /creator-portal            │─► CreatorAuthProvider + withCreatorAuth
+ System browser  ─►│  Creator portal    /creator                   │─► CreatorAuthProvider + withCreatorAuth
  (creators)         └───────────────────────────────────────────────┘
 
  src/middleware.ts  → rewrites all non-Electron, non-allowlisted page traffic to /desktop-only
@@ -27,7 +27,8 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
               + daily page-permissions sync + nightly analytics rollup
 ```
 
-- **Monorepo:** `src/` (Next.js 16 web app, primary), `electron/` (desktop wrapper), `src/app/creator-portal/` (creator interface), `functions/` (Cloud Functions).
+- **Monorepo:** `src/` (Next.js 16 web app, primary), `electron/` (desktop wrapper), `src/app/creator/` (creator interface), `functions/` (Cloud Functions).
+- **Two domains, one Vercel deployment:** the Electron shell is pinned to `bluu-backend.vercel.app` (`BASE_URL`); browser-facing pages use `app.bluurock.com` (`PUBLIC_APP_ORIGIN` in [`src/lib/publicOrigin.ts`](src/lib/publicOrigin.ts)). Build every user-facing link from that constant — **never `window.location.origin`**, which is the vercel.app host inside Electron. See [electron.md](documentation/electron.md#two-domains-one-deployment).
 - **Auth:** Google OAuth only; admin status is a JWT custom claim (`token.admin`), not a Firestore read.
 - Full repo layout, commands, and env vars: [architecture-overview.md](documentation/architecture-overview.md).
 

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '@/firebase-config';
+import { PRIMARY_BTN } from '../theme';
 
 export default function CreatorLoginPage() {
   const [email, setEmail] = useState('');
@@ -70,7 +71,7 @@ export default function CreatorLoginPage() {
               className="h-12 w-auto"
             />
           </div>
-          <p className="text-zinc-400">Sign in to your creator portal</p>
+          <p className="text-zinc-400">Sign in to your workspace</p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-4">
@@ -113,11 +114,11 @@ export default function CreatorLoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-sky-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-sky-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className={`w-full font-semibold py-3 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${PRIMARY_BTN}`}
           >
             {loading ? (
               <span className="flex items-center justify-center gap-2">
-                <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                <span className="w-4 h-4 border-2 border-black/25 border-t-black/70 rounded-full animate-spin" />
                 Signing in...
               </span>
             ) : (

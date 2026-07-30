@@ -70,6 +70,14 @@ export const COMPLETE_BTN =
 /** Soft accent action (open drive, upload, external links styled as buttons). */
 export const ACCENT_BTN =
   "bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 border border-sky-500/30";
+/** The primary action — Bluu azure at full strength, for the ONE action that is the
+ *  reason a screen exists (sign in, enter the portal). Ink is a near-black tinted
+ *  toward the brand hue, not white: on `ACCENT.hex` white lands at 2.3:1 and fails,
+ *  this ink reads 7.2:1 (8.6:1 on hover). Hexes are inlined because Tailwind only scans static class
+ *  strings — they are `ACCENT.hex` and a lighter step of it, and this file is still
+ *  the only place they may appear. */
+export const PRIMARY_BTN =
+  "bg-[#00b8f5] text-[#04222e] hover:bg-[#3fc9fb] focus-visible:ring-[3px] focus-visible:ring-[#00b8f5]/40 motion-safe:active:scale-[0.98]";
 
 // ── Content-type badge (content-planning) ─────────────────────────────────────
 export type ContentType = "SFW" | "NSFW" | "OF TL" | "PPV" | "Dripfeed";

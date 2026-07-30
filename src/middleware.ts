@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 
 const BROWSER_ALLOWED_PREFIXES = [
   '/auth',
-  '/creator-portal',
+  '/creator',
   '/desktop-only',
   '/download',
   '/raffle',

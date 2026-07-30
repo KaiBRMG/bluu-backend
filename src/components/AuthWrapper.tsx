@@ -8,7 +8,14 @@ import Login from './Login';
 import { usePathname, useRouter } from 'next/navigation';
 import { auth } from '@/firebase-config';
 import { useBootPhase } from '@/contexts/BootLoaderContext';
-import { computeDynamicSize, readSavedSize, saveSize, clearSavedSize } from '@/lib/windowSize';
+import {
+  computeDynamicSize,
+  readSavedSize,
+  saveSize,
+  clearSavedSize,
+  readWorkArea,
+  fitToWorkArea,
+} from '@/lib/windowSize';
 import { clearLoginSession, hasLoginSession } from '@/lib/loginSession';
 
 export default function AuthWrapper({ children }: { children: React.ReactNode }) {
@@ -34,9 +41,14 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
   const hasSignaledReady = useRef(false);
 
   // Routes that render with no internal-employee session at all: the OAuth pages
-  // and the creator portal (which runs its own auth context).
+  // and the creator portal (which runs its own auth context). The `/creator`
+  // check must be segment-bounded — a bare startsWith('/creator') would also
+  // swallow the internal staff pages at `/creators/*` and silently skip session
+  // enforcement there.
   const isUnauthenticatedRoute =
-    pathname?.startsWith('/auth/') || pathname?.startsWith('/creator-portal');
+    pathname?.startsWith('/auth/') ||
+    pathname === '/creator' ||
+    pathname?.startsWith('/creator/');
 
   // Onboarding IS an authenticated surface, so session enforcement (revocation,
   // displacement, the incomplete-onboarding discard) must run there. Only the
@@ -62,45 +74,63 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
   }, [revokedRedirect, router]);
 
   // Control window sizing + resizability based on login state.
-  // On login: restore the remembered size, or size dynamically to 85%×80% of the display
-  // when there is none. On logout: forget the remembered size so the next login re-runs the
-  // dynamic sizing, and re-lock the window for the login page.
+  // On login: restore the remembered size (fitted to the display the window is actually
+  // on), or size dynamically to 85%×80% of that work area when there is none. On logout:
+  // forget the remembered size so the next login re-runs the dynamic sizing, and re-lock
+  // the window for the login page.
   useEffect(() => {
-    if (prevIsLoggedInRef.current !== isLoggedIn) {
-      prevIsLoggedInRef.current = isLoggedIn;
+    if (prevIsLoggedInRef.current === isLoggedIn) return;
+    prevIsLoggedInRef.current = isLoggedIn;
 
-      if (typeof window !== 'undefined' && window.electronAPI?.window) {
-        if (isLoggedIn) {
-          const size = readSavedSize() ?? computeDynamicSize();
-          window.electronAPI.window.setSize(size.width, size.height);
-          window.electronAPI.window.setResizable(true);
-        } else {
-          clearSavedSize();
-          window.electronAPI.window.setResizable(false);
-        }
-      }
+    if (typeof window === 'undefined' || !window.electronAPI?.window) return;
+    const windowApi = window.electronAPI.window;
+
+    if (!isLoggedIn) {
+      clearSavedSize();
+      windowApi.setResizable(false);
+      return;
     }
+
+    let cancelled = false;
+    (async () => {
+      const workArea = await readWorkArea();
+      if (cancelled) return;
+
+      // A saved size exists only if the user manually resized. Its presence is what
+      // suppresses auto-sizing; logout clears it, so the next login auto-sizes again.
+      const saved = readSavedSize();
+      const size = saved ? fitToWorkArea(saved, workArea) : computeDynamicSize(workArea);
+
+      // Resizable first — maximize() is a no-op on a locked window.
+      windowApi.setResizable(true);
+      windowApi.setSize(size.width, size.height);
+      if (saved?.maximized) windowApi.maximize?.();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [isLoggedIn]);
 
-  // Persist the user's window size whenever they resize (Electron + logged in only).
+  // Persist the window size ONLY when the user resizes it by hand (Electron + logged in).
+  // This must not listen to the DOM `resize` event: that also fires for the auto-size we
+  // issue on login, which would persist the auto-sized value and stop auto-sizing from
+  // ever running again. `onUserResized` is emitted by the main process for a finished
+  // user drag / maximize / unmaximize only, and reports the last **non-maximized** size
+  // alongside the maximize flag (maximized bounds exceed the display on Windows).
+  //
+  // Absent on installed builds predating this IPC — those simply never persist a size and
+  // auto-size on every launch, which is the correct default rather than a regression.
   useEffect(() => {
     if (!isLoggedIn) return;
-    if (typeof window === 'undefined' || !window.electronAPI?.window?.getSize) return;
+    if (typeof window === 'undefined') return;
+    const windowApi = window.electronAPI?.window;
+    if (!windowApi?.onUserResized) return;
 
-    let timeout: ReturnType<typeof setTimeout> | null = null;
-    const handleResize = () => {
-      if (timeout) clearTimeout(timeout);
-      timeout = setTimeout(async () => {
-        const size = await window.electronAPI!.window.getSize?.();
-        if (size) saveSize(size[0], size[1]);
-      }, 300);
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => {
-      if (timeout) clearTimeout(timeout);
-      window.removeEventListener('resize', handleResize);
-    };
+    windowApi.onUserResized((state) => {
+      saveSize(state.width, state.height, state.isMaximized);
+    });
+    return () => windowApi.removeUserResizedListener?.();
   }, [isLoggedIn]);
 
   // Mid-session kill-switch: fires when an admin revokes access while the user is logged in.
