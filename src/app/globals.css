@@ -564,6 +564,23 @@ input[type="date"].form-input {
   }
 }
 
+/* ─── Model application thank-you (public form) ───────────────────────
+   The applicant's once-ever completion beat on /model-submissions. It reuses
+   the onboarding seal/rise/tick vocabulary above so the two completion moments
+   speak one language; the only addition is this stage light blooming out from
+   behind the seal, which is the public surface's signature. Base style is the
+   FINAL state, so the screen is correct if the animation never runs. */
+.stage-bloom {
+  animation: stage-bloom 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes stage-bloom {
+  from {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* Collapse all non-essential motion to an instant transition. Every animated
      surface in this app (onboarding seal/rise/tick, sidebar width, notification

@@ -6,6 +6,9 @@ const BROWSER_ALLOWED_PREFIXES = [
   '/creator',
   '/desktop-only',
   '/download',
+  // The public model application form. Handed out as a link to prospective
+  // models, who have no desktop app — it must resolve in a normal browser.
+  '/model-submissions',
   '/raffle',
   // Onboarding links the terms of use out to the system browser (Electron routes
   // target=_blank through shell.openExternal), so it must resolve without the

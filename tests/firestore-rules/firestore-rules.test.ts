@@ -635,3 +635,107 @@ describe('analytics_dirty collection', () => {
     await assertFails(setDoc(doc(db, 'analytics_dirty', DOC_ID), { reason: 'spoofed' }));
   });
 });
+
+// ---------------------------------------------------------------------------
+// 21. model-submissions (public application form)
+// ---------------------------------------------------------------------------
+// The most sensitive documents in the project: personal details and pointers to
+// private photos, submitted by people who are not users of this app. Everything
+// goes through the Admin SDK, so no client — signed in, admin, or anonymous —
+// may read or write any of these paths.
+
+describe('model-submissions collection', () => {
+  const UID = 'user-a';
+  const ADMIN_UID = 'admin-user';
+  const DOC_ID = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+
+  beforeEach(async () => {
+    await seedDoc('model-submissions', DOC_ID, {
+      name: 'Applicant',
+      email: 'applicant@example.com',
+      status: 'new',
+    });
+  });
+
+  it('denies unauthenticated reads', async () => {
+    const db = unauthenticated().firestore();
+    await assertFails(getDoc(doc(db, 'model-submissions', DOC_ID)));
+  });
+
+  // A signed-in employee WITHOUT the page permission must not be able to read
+  // applicants' details by going around the API.
+  it('denies authenticated user reads', async () => {
+    const db = authedUser(UID).firestore();
+    await assertFails(getDoc(doc(db, 'model-submissions', DOC_ID)));
+  });
+
+  it('denies admin reads (client-side)', async () => {
+    const db = adminUser(ADMIN_UID).firestore();
+    await assertFails(getDoc(doc(db, 'model-submissions', DOC_ID)));
+  });
+
+  it('denies collection listing', async () => {
+    const db = adminUser(ADMIN_UID).firestore();
+    await assertFails(getDocs(query(collection(db, 'model-submissions'))));
+  });
+
+  // Writing straight to the collection would bypass the session token, the
+  // rate limits, and the server-side image validation entirely.
+  it('denies unauthenticated writes', async () => {
+    const db = unauthenticated().firestore();
+    await assertFails(setDoc(doc(db, 'model-submissions', 'forged'), { name: 'Bot' }));
+  });
+
+  it('denies authenticated writes, including status changes', async () => {
+    const db = authedUser(UID).firestore();
+    await assertFails(setDoc(doc(db, 'model-submissions', DOC_ID), { status: 'approved' }));
+  });
+});
+
+describe('model-submission-sessions collection', () => {
+  const DOC_ID = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+
+  beforeEach(async () => {
+    await seedDoc('model-submission-sessions', DOC_ID, {
+      ipHash: 'hash',
+      fileCount: 0,
+      consumed: false,
+    });
+  });
+
+  // Reading a session would leak the pending-photo manifest; writing one could
+  // reset `consumed` or `fileCount` and defeat the per-session caps.
+  it('denies unauthenticated access', async () => {
+    const db = unauthenticated().firestore();
+    await assertFails(getDoc(doc(db, 'model-submission-sessions', DOC_ID)));
+    await assertFails(setDoc(doc(db, 'model-submission-sessions', DOC_ID), { consumed: false }));
+  });
+
+  it('denies admin access (client-side)', async () => {
+    const db = adminUser('admin-user').firestore();
+    await assertFails(getDoc(doc(db, 'model-submission-sessions', DOC_ID)));
+  });
+});
+
+describe('model-submission-rate collection', () => {
+  const DOC_ID = 'ip-hash-value';
+
+  beforeEach(async () => {
+    await seedDoc('model-submission-rate', DOC_ID, {
+      windowStart: Date.now(),
+      submissions: 3,
+    });
+  });
+
+  // A client that could write here would clear its own abuse counters.
+  it('denies unauthenticated access', async () => {
+    const db = unauthenticated().firestore();
+    await assertFails(getDoc(doc(db, 'model-submission-rate', DOC_ID)));
+    await assertFails(setDoc(doc(db, 'model-submission-rate', DOC_ID), { submissions: 0 }));
+  });
+
+  it('denies authenticated access', async () => {
+    const db = authedUser('user-a').firestore();
+    await assertFails(setDoc(doc(db, 'model-submission-rate', DOC_ID), { submissions: 0 }));
+  });
+});

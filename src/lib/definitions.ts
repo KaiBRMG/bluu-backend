@@ -54,9 +54,10 @@ export const PAGES: PageDef[] = [
 
   // Apps
   { pageId: 'time-tracking', title: 'Time Tracking', teamspaceId: 'apps', href: '/applications/time-tracking', icon: 'ClockFading', order: 0 },
-  { pageId: 'apps-password-manager', title: 'Password Manager', teamspaceId: 'apps', href: '/applications/password-manager', icon: 'KeyRound', order: 5 },
+  { pageId: 'apps-password-manager', title: 'Password Manager', teamspaceId: 'apps', href: '/applications/password-manager', icon: 'KeyRound', order: 2 },
   { pageId: 'apps-resources', title: 'Resources', teamspaceId: 'apps', href: '/applications/apps-resources', icon: 'BookOpen', order: 1 },
   // { pageId: 'apps-onlyfans', title: 'OnlyFans', teamspaceId: 'apps', href: '/applications/apps-onlyfans', icon: '', order: 2 },
+  { pageId: 'apps-model-submissions', title: 'Model Submissions', teamspaceId: 'apps', href: '/applications/apps-model-submissions', icon: 'FileUser', order: 3 },
 
 ];
 

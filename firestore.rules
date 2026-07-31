@@ -218,5 +218,31 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 21. Model submissions (public application form)
+    // These documents hold applicants' personal details and links to private
+    // photos — the most sensitive data in the project, submitted by people who
+    // are not users of this app at all. Every path is Admin-SDK-only:
+    //   - writes come from /api/model-submissions/submit (unauthenticated, but
+    //     session-token gated and rate limited),
+    //   - reads come from /api/model-submissions/admin*, which check the
+    //     'apps-model-submissions' page permission first.
+    // There is deliberately NO client-readable rule here. A signed-in employee
+    // without the page permission must not be able to read these directly, and
+    // an applicant must never be able to read anyone's application including
+    // their own.
+    match /model-submissions/{submissionId} {
+      allow read, write: if false;
+    }
+
+    // Short-lived form sessions (signing state, per-session file counters, and
+    // the pending-photo manifest) plus the per-IP abuse counters. Server-only.
+    match /model-submission-sessions/{sessionId} {
+      allow read, write: if false;
+    }
+
+    match /model-submission-rate/{ipHash} {
+      allow read, write: if false;
+    }
+
   }
 }

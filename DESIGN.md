@@ -336,3 +336,27 @@ Everything above describes the **internal console** — the Electron app interna
 3. **Solid fills only** — no gradient or glow buttons/cards. `PRIMARY_BTN` / `COMPLETE_BTN` / `ACCENT_BTN` are the three action treatments, and they are a hierarchy, not a palette: **`PRIMARY_BTN` appears at most once per screen** — the azure is only loud because it is rare. Anything else that merely *can* be clicked takes `ACCENT_BTN`. Its ink is a brand-tinted near-black by necessity, not taste: white on `ACCENT.hex` measures 2.3:1 and fails AA outright, the near-black reads 7.2:1. Never re-ink it white.
 4. **Detail & confirm = shadcn `Dialog`** through `CreatorDialog`. No bespoke overlays.
 5. **"Mark Completed", never "Completed"**, and every completion is undoable via the `revert` flag.
+
+## 8. Public model application form (external skin)
+
+The **third** surface: `/model-submissions`, a fully public, unauthenticated form read once, on a phone, by a prospective model deciding whether to trust us. It is louder in scale than the console because it is a brand surface, and quieter in colour than a marketing page because the subject is confidential. Like §7 this is an **authored divergence**, not drift.
+
+**The skin is defined once, in [`src/app/model-submissions/_lib/theme.ts`](src/app/model-submissions/_lib/theme.ts).** Import those tokens; never inline a hex on this surface. Full subsystem detail — including the abuse model — lives in [model-submissions.md](documentation/model-submissions.md).
+
+### What carries over
+- Near-black ground, translucent-white overlay surfaces (`PANEL`), hairline borders, **no drop shadows**, no gradient fills.
+- Only `src/components/ui` primitives; only `@tabler/icons-react` / `lucide-react` icons.
+- Bluu azure (`AZURE`, `#00b8f5`) as the **one voice** — the progress rail, focus, the selected choice, and the single primary action. Same hue as the creator portal, same scarcity discipline.
+
+### What differs (the authored part)
+- **"The stage."** One azure stage-light wash falls from above the page (`STAGE_GROUND`). This is the surface's *one* decorative-colour exception — the analogue of the console's backdrop blur and the portal's page glow. **Do not add a second.**
+- **Display scale.** Step headings run `text-3xl` → `sm:text-4xl`, above the console's `Display` ceiling. Justified: one heading per viewport on a brand surface, not a data screen. It does not license a bigger number anywhere else.
+- **16px field text** (`FIELD`), not the console's 14px. Anything smaller makes iOS Safari zoom the viewport on focus and the applicant loses their place in the form.
+- **`AZURE_INK` on azure.** White on `#00b8f5` measures 2.3:1 and fails AA outright; the brand-tinted near-black reads 7.2:1. Never re-ink it white. (Same rule as the portal's `ACCENT_BTN`.)
+- **The thank-you screen celebrates.** It reuses the onboarding completion vocabulary (`.onboard-seal` / `.onboard-tick` / `.onboard-rise`) plus a `.stage-bloom` and a single confetti burst. §5 says not to extend that vocabulary to other screens; the exception is deliberate and narrow — this is the *same beat* (a once-ever completion) on a *different surface*, and sharing the primitives keeps one motion language rather than inventing a second. It is not licence for a third celebration.
+
+### Surface rules (in addition to §1–6)
+1. **Import the skin from `_lib/theme.ts`.** New colour → add it there **and** to this section.
+2. **One glow, one voice.** Azure marks brand/interactive accent only; the stage wash is the sole decorative use.
+3. **Mobile is the design target**, not a breakpoint: 16px inputs, ≥44px touch targets, a sticky action bar with `env(safe-area-inset-bottom)`, one question group per scroll.
+4. **Every field goes through `Field`**, which owns the label / hint / error association. Pass `group` when the control is a radio set or composite — a `<label for>` pointing at a group is invalid.

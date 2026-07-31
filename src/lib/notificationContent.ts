@@ -116,4 +116,12 @@ export const notifications = {
     type: 'success',
     actionUrl: '/creators/content-planning',
   }),
+
+  // ─── Model submissions ────────────────────────────────────────────────────────
+  modelSubmissionReceived: (applicantName: string, location: string): NotificationContent => ({
+    title: '🌟 New Model Application',
+    message: `${applicantName} from ${location} has applied. Review their photos and details to approve or reject.`,
+    type: 'action',
+    actionUrl: '/applications/apps-model-submissions',
+  }),
 };
