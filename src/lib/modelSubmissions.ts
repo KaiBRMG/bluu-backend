@@ -176,42 +176,37 @@ const F = {
   earningsPhotoId: z.string().nullable(),
 } as const;
 
-/** "Where we will contact you" — an application we cannot reply to is useless. */
-const contactRefinement = (
-  data: { instagram: string; telegram: string },
-  ctx: z.RefinementCtx,
-) => {
-  if (!data.instagram && !data.telegram) {
+/**
+ * Instagram and Telegram are genuinely optional, exactly as the form says.
+ *
+ * There was briefly a rule here requiring at least one of them — it contradicted
+ * the "Optional" label on both fields, and it was redundant besides: email is
+ * required, so we can always reach an applicant. Don't reintroduce it without
+ * also changing what the fields say.
+ */
+export const submissionSchema = z.object(F).superRefine((data, ctx) => {
+  // Section 3 becomes required content once they've told us the account exists.
+  if (data.hasOnlyFans && !data.socialLinks) {
     ctx.addIssue({
       code: 'custom',
-      path: ['telegram'],
-      message: 'Add a Telegram or Instagram so we can reach you',
+      path: ['socialLinks'],
+      message: 'Please list your social media pages',
     });
   }
-};
-
-export const submissionSchema = z
-  .object(F)
-  .superRefine((data, ctx) => {
-    contactRefinement(data, ctx);
-    // Section 3 becomes required content once they've told us the account exists.
-    if (data.hasOnlyFans && !data.socialLinks) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['socialLinks'],
-        message: 'Please list your social media pages',
-      });
-    }
-  });
+});
 
 /**
  * Per-step slices, so "Continue" only complains about what's on screen. The
  * whole-form schema still runs on submit (client) and again on the server.
  */
 export const stepSchemas = {
-  info: z
-    .object({ name: F.name, email: F.email, instagram: F.instagram, telegram: F.telegram })
-    .superRefine(contactRefinement),
+  // Only name and email gate this step — the two handles are optional.
+  info: z.object({
+    name: F.name,
+    email: F.email,
+    instagram: F.instagram,
+    telegram: F.telegram,
+  }),
   about: z.object({
     hasOnlyFans: F.hasOnlyFans,
     age: F.age,

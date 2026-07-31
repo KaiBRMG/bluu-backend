@@ -8,4 +8,4 @@
  * never use it to build a link that leaves the app. Build creator-facing URLs
  * from this constant instead.
  */
-export const PUBLIC_APP_ORIGIN = 'https://app.bluurock.com';
+export const PUBLIC_APP_ORIGIN = 'https://bluu-backend.vercel.app';
