@@ -771,7 +771,19 @@ app.whenReady().then(() => {
   // Deny renderer permission requests we never need (geolocation, camera,
   // microphone, etc.). Screen capture goes through desktopCapturer, not
   // getUserMedia, so it is unaffected.
-  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  //
+  // `clipboard-sanitized-write` is the ONE exception: navigator.clipboard
+  // .writeText() routes through this handler, so a blanket deny silently breaks
+  // every "copy link" button in the app. Sanitized write is write-only and
+  // cannot read what the user already has on their clipboard — unlike
+  // `clipboard-read`, which stays denied.
+  const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write']);
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) =>
+    callback(ALLOWED_PERMISSIONS.has(permission)));
+  // Chromium also asks synchronously (permissions.query / the write path in some
+  // versions), which bypasses the request handler entirely.
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) =>
+    ALLOWED_PERMISSIONS.has(permission));
 
   registerPowerListeners();
   registerAutoUpdater();

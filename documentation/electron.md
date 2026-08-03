@@ -168,7 +168,9 @@ Detecting the capability rather than branching on `win32` is deliberate: a pre-0
 
 - `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true` (preload only uses `contextBridge` + `ipcRenderer`), `backgroundThrottling: false` (keeps renderer timers running when minimized — critical for time-tracking).
 - `openExternalSafe()` restricts `shell.openExternal` to http/https/mailto.
-- `setPermissionRequestHandler` denies all renderer permission requests (geolocation/camera/mic/etc.); screen capture uses `desktopCapturer`, not `getUserMedia`, so it's unaffected.
+- `setPermissionRequestHandler` + `setPermissionCheckHandler` deny every renderer permission request except **`clipboard-sanitized-write`** (`ALLOWED_PERMISSIONS` in `main.js`); screen capture uses `desktopCapturer`, not `getUserMedia`, so it's unaffected.
+  - **Do not re-broaden this to a blanket deny.** `navigator.clipboard.writeText()` routes through these handlers, so denying it breaks every "copy link"/"copy" button in the app at once, app-wide — the failure surfaces only as a `Could not copy link` toast (or, where the caller has no `catch`, as nothing at all), which makes it easy to misread as a page bug. Regression history: the blanket deny shipped in v0.7.0 and broke copy everywhere until v0.8.3.
+  - `clipboard-read` stays denied — nothing here needs to read the user's clipboard, and sanitized write cannot.
 - **Signing material** — `electron/build-assets/**` is **deny-by-default gitignored**; only `*.plist` and `*.png` are allowed back. The folder holds the Developer ID `.p12`, its base64 export, and the App Store Connect `.p8` — none may ever be committed. A private key was historically committed — purge from git history + rotate the cert is a pending manual follow-up.
 
 ## Screen-capture permission repair (macOS TCC, temporary)
