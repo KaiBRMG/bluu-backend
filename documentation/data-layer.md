@@ -46,6 +46,8 @@
 | `usePermissions` | permission map | localStorage (no TTL) via `permissionsCache.ts` | |
 | `useSmmAccounts` / `useSmmBonus` / `useSmmUsers` | SMM API routes | sessionStorage, 5 min | see [smm-portal.md](smm-portal.md#client-hooks--caching) |
 | `useSmmPosts` | SMM posts API | in-memory per-week only (high churn) | cleared on any post mutation |
+| `useOnlyFansChats` | `onlyfans-chats` via `onSnapshot` | account id in sessionStorage (30 min) | Realtime chat list; the API route only warms the mirror. see [onlyfans-crm.md](onlyfans-crm.md) |
+| `useOnlyFansMessages` | provider API + live subcollection | sessionStorage, 60s (newest page) | Merges paged history with the live tail, de-duped by message id |
 | `useAuthFetch` | — | — | Shared bearer-token fetch helper (extracted from `useDisputesData`) |
 
 **Caching pattern (sessionStorage hooks):** versioned key + 5-min TTL, mirrored across `useCreators` / `useResources` / `useBasicUsers`. Reuse this pattern for new reference-data hooks rather than fetching in components.
@@ -73,6 +75,8 @@
 | `twitterx-accounts/{id}` | SMM Twitter/X accounts | see [smm-portal.md](smm-portal.md) |
 | `twitterx-content-schedule/{accountId}/posts/{postId}` | SMM scheduled posts (**subcollection**) | see [smm-portal.md](smm-portal.md) |
 | `twitterx-bonus/{roundId}/submissions/{id}` | SMM bonus rounds + submissions (**subcollection**) | see [smm-portal.md](smm-portal.md) |
+| `onlyfans-chats/{accountId}__{chatId}` (+ `/messages/{id}` **subcollection**) | Mirror of the OnlyFans chat list + live messages | see [onlyfans-crm.md](onlyfans-crm.md) |
+| `onlyfans-meta/{accountId}` | OnlyFans sync freshness marker (server-only) | see [onlyfans-crm.md](onlyfans-crm.md) |
 
 **Subcollections + collection-group indexes:** the `twitterx-*` collections are the first in the repo to use subcollections and `COLLECTION_GROUP` indexes / `fieldOverrides` in `firestore.indexes.json`. See [smm-portal.md](smm-portal.md#indexes-firestoreindexesjson).
 

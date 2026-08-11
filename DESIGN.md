@@ -241,6 +241,19 @@ Stacking is a **named semantic scale**, declared in `globals.css` and consumed v
 
 ### Navigation
 - **Style:** the 260px `.sidebar` on `#000000`, collapsing to 68px (`width 250ms ease-out`). Nav items are 14px/500, `rounded` 4px; hover raises to the hover overlay, `.active` uses the active overlay + `font-weight 600`. Section headers are the uppercase 11px eyebrow. Every internal page renders inside `AppLayout` (sidebar + top bar + boot gating) — never build a bespoke shell.
+- **Sidebar icons are lucide**, mapped by name in `ICON_MAP`. The one escape hatch is `SVG_ICONS` — brand marks with no lucide equivalent (currently only OF Manager's `/Icons/onlyfans.svg`), rendered through `next/image` at `size-4`, exactly as the sidebar logo already is. Add to it only for a real third-party brand; anything expressible in lucide belongs in `ICON_MAP`.
+
+#### The satellite-window shell (OF Manager)
+
+`AppLayout` is the shell for every **in-app page**. The one sanctioned exception is a surface that owns its own Electron window — currently `/of-manager` — where a sidebar and top bar would be navigation to nowhere. Its chrome is the two-pane messaging shell instead:
+
+- **Full-bleed, never scrolling as a page.** `h-screen w-screen overflow-hidden` on the ground; each pane owns its own `overflow-y-auto`.
+- **Left rail on Sidebar `#000000`** (`w-[340px]`, hairline right border) so the window still reads as part of the console; the content pane sits on Canvas `#0A0A0A`.
+- **Section title is the eyebrow** (11px/600, uppercase, `0.06em`) — the same device the sidebar uses for section headers, and the only place the window names itself.
+- **Filter chips** are `rounded-full px-2.5 py-1 text-xs`: the selected chip is Action Blue (the One Voice Rule — current selection), the rest ride the hover/active overlay recipe.
+- **Message bubbles** are the overlay recipe (`bg-white/[0.04]` + `border-white/[0.07]`, `rounded-xl`) for the fan; our own messages take an Action Blue tint (`/15` fill, `/30` border) because "who said this" is the one distinction the surface exists to encode. Timestamps are `text-[11px]` `tabular-nums` zinc-500.
+
+This is a shell, not a new visual language: colours, overlays, hairlines, radii, motion and the empty-state line are all unchanged. A second satellite window should reuse this shell rather than invent a third.
 
 ### Loading & Empty States
 - **Loading:** shadcn `Skeleton` shaped to the final layout (`<Skeleton className="h-64 rounded-xl" />`), never a bare spinner mid-layout. Async home widgets gate boot via `useBootPhase('home-<name>', isLoading)`.

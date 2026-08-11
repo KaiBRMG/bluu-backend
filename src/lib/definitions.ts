@@ -56,7 +56,10 @@ export const PAGES: PageDef[] = [
   { pageId: 'time-tracking', title: 'Time Tracking', teamspaceId: 'apps', href: '/applications/time-tracking', icon: 'ClockFading', order: 0 },
   { pageId: 'apps-password-manager', title: 'Password Manager', teamspaceId: 'apps', href: '/applications/password-manager', icon: 'KeyRound', order: 2 },
   { pageId: 'apps-resources', title: 'Resources', teamspaceId: 'apps', href: '/applications/apps-resources', icon: 'BookOpen', order: 1 },
-  // { pageId: 'apps-onlyfans', title: 'OnlyFans', teamspaceId: 'apps', href: '/applications/apps-onlyfans', icon: '', order: 2 },
+  // OF Manager opens in its own Electron window rather than navigating in-app,
+  // so it deliberately has no href — the sidebar special-cases this pageId.
+  // Its icon is the brand SVG at /Icons/onlyfans.svg (no lucide equivalent).
+  { pageId: 'apps-ofmanager', title: 'OF Manager', teamspaceId: 'apps', href: null, icon: 'OnlyFans', order: 4 },
   { pageId: 'apps-model-submissions', title: 'Model Submissions', teamspaceId: 'apps', href: '/applications/apps-model-submissions', icon: 'FileUser', order: 3 },
 
 ];

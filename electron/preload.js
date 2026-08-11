@@ -39,6 +39,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // OF Manager — spawns the dedicated OnlyFans window. The ID token is passed
+  // so the main process can verify the page permission server-side before the
+  // window is created (see 'onlyfans:open-window' in main.js).
+  onlyfans: {
+    openWindow: (idToken) => ipcRenderer.invoke('onlyfans:open-window', { idToken }),
+  },
+
   // Time tracking
   timeTracking: {
     getIdleTime: () => ipcRenderer.invoke('timeTracking:getIdleTime'),

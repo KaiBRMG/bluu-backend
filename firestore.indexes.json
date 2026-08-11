@@ -205,6 +205,14 @@
         { "fieldPath": "postedBy", "order": "ASCENDING" },
         { "fieldPath": "postDate", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "onlyfans-chats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "accountId", "order": "ASCENDING" },
+        { "fieldPath": "lastMessageAtMs", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

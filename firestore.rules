@@ -244,5 +244,32 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 22. OnlyFans CRM (OF Manager)
+    // `onlyfans-chats` is a MIRROR of the third-party provider's chat list, kept
+    // fresh by the provider webhook and the sync route. The OF Manager window
+    // reads it with onSnapshot — that is what makes the inbox realtime without
+    // polling a billed API — so it needs a client-readable rule.
+    //
+    // Reads are gated on the 'apps-ofmanager' page permission rather than on
+    // isSignedIn(): these documents contain fans' names, avatars and message
+    // text, and a staff member without the page must not be able to read them
+    // straight out of Firestore. Writes are Admin-SDK-only (sync route + webhook).
+    match /onlyfans-chats/{chatId} {
+      allow read: if hasPagePermission('apps-ofmanager');
+      allow write: if false;
+
+      // Live messages only — history is never mirrored (see onlyfansService.ts).
+      match /messages/{messageId} {
+        allow read: if hasPagePermission('apps-ofmanager');
+        allow write: if false;
+      }
+    }
+
+    // Sync bookkeeping (the chat-list freshness marker). Server-only: no client
+    // reads it, and it must not be writable or the provider rate limit is moot.
+    match /onlyfans-meta/{accountId} {
+      allow read, write: if false;
+    }
+
   }
 }

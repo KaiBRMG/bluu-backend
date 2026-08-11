@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useRef, useLayoutEffect } from "react";
+import { useState, useRef, useLayoutEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { House, ChevronLeft, ChevronDown, type LucideIcon } from "lucide-react";
 import {
   MessageSquareQuote,
@@ -50,6 +50,8 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { NavUser } from "@/components/sidebar/NavUser";
+import { auth } from "@/firebase-config";
+import { toast } from "sonner";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   House,
@@ -80,11 +82,76 @@ const ICON_MAP: Record<string, LucideIcon> = {
 // survives those remounts and the sidebar doesn't jump back to the top.
 let savedScrollTop = 0;
 
+// Brand icons that have no lucide equivalent are served from /Icons as SVGs.
+// Same escape hatch the sidebar logo already uses — everything else stays in
+// ICON_MAP so the icon set remains lucide-only.
+const SVG_ICONS: Record<string, string> = {
+  OnlyFans: "/Icons/onlyfans.svg",
+};
+
 function NavIcon({ name, className }: { name?: string; className?: string }) {
   if (!name) return null;
+  const svg = SVG_ICONS[name];
+  if (svg) {
+    return (
+      <Image
+        src={svg}
+        alt=""
+        width={16}
+        height={16}
+        aria-hidden
+        className={className}
+        style={{ width: "1rem", height: "1rem" }}
+      />
+    );
+  }
   const Icon = ICON_MAP[name];
   if (!Icon) return null;
   return <Icon className={className} />;
+}
+
+/**
+ * OF Manager does not navigate — it spawns its own Electron window (main.js
+ * re-checks the page permission server-side before creating it). On a build
+ * that predates that IPC, fall back to opening the route in this window so the
+ * feature still works while the fleet updates.
+ */
+const OF_MANAGER_PAGE_ID = "apps-ofmanager";
+
+function OfManagerButton({ title, icon }: { title: string; icon?: string | null }) {
+  const router = useRouter();
+
+  const open = useCallback(async () => {
+    const openWindow = window.electronAPI?.onlyfans?.openWindow;
+    if (!openWindow) {
+      router.push("/of-manager");
+      return;
+    }
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        toast.error("Session expired — sign in again.");
+        return;
+      }
+      const result = await openWindow(idToken);
+      if (!result?.success) {
+        toast.error(
+          result?.error === "forbidden"
+            ? "You do not have access to OF Manager."
+            : "Could not open OF Manager.",
+        );
+      }
+    } catch {
+      toast.error("Could not open OF Manager.");
+    }
+  }, [router]);
+
+  return (
+    <SidebarMenuButton onClick={open} tooltip={title}>
+      <NavIcon name={icon ?? undefined} />
+      <span>{title}</span>
+    </SidebarMenuButton>
+  );
 }
 
 interface SidebarProps {
@@ -204,16 +271,20 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
                     <SidebarMenu>
                       {pages.map((page) => (
                         <SidebarMenuItem key={page.pageId}>
-                          <SidebarMenuButton
-                            asChild
-                            isActive={!!page.href && pathname === page.href}
-                            tooltip={page.title}
-                          >
-                            <Link href={page.href ?? "#"}>
-                              <NavIcon name={page.icon ?? undefined} />
-                              <span>{page.title}</span>
-                            </Link>
-                          </SidebarMenuButton>
+                          {page.pageId === OF_MANAGER_PAGE_ID ? (
+                            <OfManagerButton title={page.title} icon={page.icon} />
+                          ) : (
+                            <SidebarMenuButton
+                              asChild
+                              isActive={!!page.href && pathname === page.href}
+                              tooltip={page.title}
+                            >
+                              <Link href={page.href ?? "#"}>
+                                <NavIcon name={page.icon ?? undefined} />
+                                <span>{page.title}</span>
+                              </Link>
+                            </SidebarMenuButton>
+                          )}
                         </SidebarMenuItem>
                       ))}
                     </SidebarMenu>

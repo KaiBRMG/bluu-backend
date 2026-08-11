@@ -23,6 +23,10 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
  System browser  ─►│  Model application /model-submissions         │─► UNAUTHENTICATED (session token
  (public)           └───────────────────────────────────────────────┘   + rate limit + sharp validation)
 
+                    ┌───────────────────────────────────────────────┐
+ Second Electron ─►│  OF Manager        /of-manager                │─► own window, own layout
+ window (spawned)   └───────────────────────────────────────────────┘   (NO TimeTrackingProvider)
+
  src/middleware.ts  → rewrites all non-Electron, non-allowlisted page traffic to /desktop-only
  Firestore + Storage (Firebase Admin SDK) ← services (src/lib/services) ← API routes (src/app/api)
  Client hooks (src/hooks) ← contexts (src/contexts) ← React 19 / Next 16 App Router UI
@@ -69,6 +73,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 | [notifications.md](documentation/notifications.md) | `notificationContent.ts`, `addNotificationToBatch`, event → factory table |
 | [campaign-tracking.md](documentation/campaign-tracking.md) | Custom requests vs campaigns, the two archive mechanisms, transfer |
 | [resources.md](documentation/resources.md) | `apps-resources` page, `app-resources` collection, resource management, group/user filtering |
+| [onlyfans-crm.md](documentation/onlyfans-crm.md) | **OF Manager** — the OnlyFans messaging window, the `IOnlyFansClient` adapter seam, the Firestore chat mirror + provider webhook |
 | [model-submissions.md](documentation/model-submissions.md) | The **public** application form `/model-submissions` (the project's only unauthenticated write path), its abuse model, and the `apps-model-submissions` review queue |
 | [boot-loading-screen.md](documentation/boot-loading-screen.md) | `BootLoaderProvider`, `useBootPhase`, home-widget gating |
 | [user-management.md](documentation/user-management.md) | Archiving vs deleting users, name resolution, profile pictures |

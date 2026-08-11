@@ -20,6 +20,13 @@ interface ElectronAPI {
     ) => void;
     removeUserResizedListener?: () => void;
   };
+  // Optional: absent on builds predating the OF Manager window. The renderer
+  // feature-detects and falls back to in-window navigation.
+  onlyfans?: {
+    openWindow: (
+      idToken: string,
+    ) => Promise<{ success: boolean; focused?: boolean; error?: string }>;
+  };
   timeTracking: {
     getIdleTime: () => Promise<number>;
     captureScreenshot: () => Promise<{ success: boolean; screens?: string[]; error?: string }>;

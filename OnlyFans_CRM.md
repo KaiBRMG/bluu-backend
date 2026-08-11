@@ -12,118 +12,27 @@ All OnlyFans operations must go through a single adapter interface (e.g. `IOnlyF
 
 ---
 
-## Phase 1 — Sidebar Icon & Navigation Entry Point
+## Tasks
 
-**Goal:** Wire up the OnlyFans sidebar item with the correct custom icon.
+### 1. Config
+- Wire up the OnlyFans sidebar item (OF Manager) with the correct custom icon: in `src/lib/definitions.ts`, locate the OnlyFans page definition where the `icon` field is currently empty. Set the icon to reference the existing SVG at `src/public/Icons/onlyfans.svg`. 
+- Spawn a dedicated, isolated Electron window when the user clicks the OnlyFans sidebar item: The window must verify the requesting user has OnlyFans access before proceeding. Prevent duplicate windows — if one is already open, focus it instead of spawning another. Load the OF Manager Next.js route into this window. The OnlyFans window should be dependent on the main window -- if the user closes the main window, the OnlyFans window should also close. The OnlyFans window should be independently resizable. 
+- Gate the OnlyFans feature behind the existing access control system: Wrap the sidebar OnlyFans item so it only renders if the current user has the OnlyFans page in their shared pages. Ensure the Electron IPC handler that spawns the OnlyFans window also checks this permission server-side or in the main process — do not rely solely on UI-level hiding.
 
-### Tasks
+### 2. Window Components
 
-- In `src/lib/definitions.ts`, locate the OnlyFans page definition where the `icon` field is currently empty.
-- Set the icon to reference the existing SVG at `src/public/Icons/onlyfans.svg`.
-- Confirm the sidebar renders the icon correctly in the existing navigation component.
+- We are using a third-party API provider to access OnlyFans. Find the full API schema here: `OnlyFans_CRM.md`.
+- Future work for OF Manager system will include uploading to vault, granulated permissions for specific OnlyFans pages and functions, audit logs for all actions, wiring up to the existing time tracking system for better access control, wiring up to the existing creator collection, earnings reports, notifications, etc. But for now, you only need to implement one thing: messaging on only 1 account. Code while keeping the expansion intents in mind. A test account is already linked on openai -- use this only, we will not be connecting our existing creators yet. Model the page using this as a guide of what is needed: `Screenshot 2026-08-05 at 16.14.25.png`. Ignore extra components on this screenshot that do not relate to messaging specifically. 
+- By the end of this task there should be a chats page showing all fans/subscribers. Opening a chat should show all history of that chat if the user scrolls up (lazy load). The user should be able to send messages. Other features like vault, etc. are not needed and will be added to the next iteration.
 
-### Acceptance Criteria
 
-- The OnlyFans entry appears in the sidebar with the correct branding icon.
-- No other sidebar items are affected.
+## Instructions
 
----
+- Minimise firestore reads and writes where possible.
+- IMPORTANT: minimimse onlyfans api (openapi) reads and writes where possible, and opt for webhooks where relevant.
+- the OpenAPI key is in the .env.local file (`ONLYFANSAPI_API_KEY`).
+- Consider the use of cache.
+- Only use shadcn components.
+- Implement lazy load where possible.
 
-## Phase 2 — Access Control Integration
 
-**Goal:** Gate the OnlyFans feature behind the existing access control system.
-
-### Context
-
-The app uses a page-level sharing model: if a page is shared with a user, they have full read/write access to its content. If not shared, nothing from that page — no UI components, no data, no API calls — should be accessible.
-
-### Tasks
-
-- Register the OnlyFans page in whatever access control registry/config the existing system uses (role definitions, permission maps, Firestore rules, etc.).
-- Wrap the sidebar OnlyFans item so it only renders if the current user has the OnlyFans page in their shared pages.
-- Ensure the Electron IPC handler that spawns the OnlyFans window (Phase 3) also checks this permission server-side or in the main process — do not rely solely on UI-level hiding.
-- All data fetched via `IOnlyFansClient` must be scoped to authenticated, authorised sessions only. No data should be fetchable by users without this permission, even via direct IPC calls.
-
-### Acceptance Criteria
-
-- Users without access: sidebar item hidden, window cannot be spawned, IPC calls return unauthorised.
-- Users with access: full functionality available.
-
----
-
-## Phase 3 — OnlyFans Electron Window
-
-**Goal:** Spawn a dedicated, isolated Electron window when the user clicks the OnlyFans sidebar item.
-
-### Tasks
-
-#### 3.1 — IPC Channel: Spawn Window
-
-- In the Electron main process, register an IPC handler (e.g. `ipcMain.handle('open-onlyfans-window', ...)`) that:
-  - Verifies the requesting user has OnlyFans access before proceeding.
-  - Creates a new `BrowserWindow` with appropriate config (see below).
-  - Prevents duplicate windows — if one is already open, focus it instead of spawning another.
-
-#### 3.2 — Window Configuration
-
-```typescript
-new BrowserWindow({
-  width: 1440,
-  height: 900,
-  minWidth: 1280,
-  minHeight: 768,
-  title: 'OnlyFans',
-  // Match existing app's webPreferences setup
-  webPreferences: {
-    contextIsolation: true,
-    nodeIntegration: false,
-    preload: path.join(__dirname, 'preload.js'), // reuse or create dedicated preload
-  },
-})
-```
-
-- Load the OnlyFans-specific Next.js route (e.g. `/onlyfans`) into this window.
-- The window should be independently resizable and not tied to the main window's lifecycle (closing main window should not close this one, and vice versa — confirm this matches desired UX).
-
-#### 3.3 — Renderer: Trigger from Sidebar
-
-- In the sidebar component, the OnlyFans item's `onClick` should invoke the IPC channel:
-  ```typescript
-  window.electron.ipcRenderer.invoke('open-onlyfans-window')
-  ```
-- Handle the case where the IPC call is rejected (no access) gracefully — show no error to the user beyond the item not being clickable.
-
-#### 3.4 — OnlyFans Window Root Page
-
-- Create `src/app/onlyfans/page.tsx` (or equivalent route) as the root of the OnlyFans window.
-- This page is the shell that will house all OnlyFans CRM components going forward.
-- For now, render a placeholder layout confirming the window loads correctly.
-
-### Window Components
-
-> ⚠️ **PLACEHOLDER — Components not yet specified.**
-> The window components were not provided at time of writing. Update this section with the list of components required in the OnlyFans window before implementing Phase 3.4 onwards.
-
----
-
-## Phase 4 — Adapter Interface & Provider Integration
-
-> To be detailed in the next roadmap increment, after Phase 3 is complete.
-
-High-level intent:
-- Define `IOnlyFansClient` interface covering all required operations.
-- Implement a concrete `ProviderOnlyFansClient` against the chosen third-party provider.
-- Wire the client into the OnlyFans window via a React context or service layer.
-- All future feature work consumes `IOnlyFansClient` only — never the concrete implementation directly.
-
----
-
-## File Reference Summary
-
-| Path | Purpose |
-|---|---|
-| `src/lib/definitions.ts` | Add OnlyFans icon reference |
-| `src/public/Icons/onlyfans.svg` | Custom icon asset (already exists) |
-| `electron/main.ts` (or equivalent) | IPC handler for window spawning |
-| `src/app/onlyfans/page.tsx` | Root route for the OnlyFans window |
-| `src/lib/onlyfans/IOnlyFansClient.ts` | Adapter interface (Phase 4) |

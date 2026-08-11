@@ -56,6 +56,7 @@ All renderer↔main communication goes through `preload.js` → `window.electron
 | `window.getWorkArea()` | invoke | `window:get-work-area` | work area of the display the window is on, in **DIPs** (optional; absent pre-fix) |
 | `window.maximize()` | send | `window:maximize` | restore a persisted maximized state (optional; absent pre-fix) |
 | `window.onUserResized(cb)` | main→renderer | `window:user-resized` | **user-initiated** resize/maximize only — never the programmatic auto-size (optional; absent pre-fix) |
+| `onlyfans.openWindow(idToken)` | invoke | `onlyfans:open-window` | Spawns the OF Manager satellite window. **Verifies the page permission server-side first** (POSTs the token to `/api/onlyfans/access`); single-instance; **not** an Electron child window — see [onlyfans-crm.md](onlyfans-crm.md#the-window). Optional — feature-detect. See [onlyfans-crm.md](onlyfans-crm.md) |
 | `timeTracking.getIdleTime()` | invoke | `timeTracking:getIdleTime` | `powerMonitor.getSystemIdleTime()` |
 | `timeTracking.getActivitySince(sinceMs)` | invoke | `timeTracking:getActivitySince` | 5s idle-time samples (45-min rolling buffer) for accurate activity % |
 | `timeTracking.captureScreenshot()` | invoke | `timeTracking:captureScreenshot` | `desktopCapturer`, all screens → base64 PNGs |

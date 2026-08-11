@@ -116,6 +116,100 @@ ipcMain.handle('auth:start-google-oauth', async () => {
   return { success: true };
 });
 
+// ─── OF Manager window ───────────────────────────────────────────────
+// OnlyFans messaging lives in its own window, spawned from the sidebar. Three
+// properties are load-bearing:
+//   • **Co-equal with the main window, not a child.** It is deliberately NOT
+//     created with `parent: mainWindow`: on macOS a parented window is pinned
+//     above its parent forever, so the main window sits permanently behind it
+//     and cannot be worked in. Operators need both windows side by side and
+//     either one on top, so the close-dependency below is enforced by hand
+//     (`closeOfWindow()` on the main window's `closed`) instead.
+//   • `resizable: true` with its own minimum — operators size the inbox
+//     independently of the main window, which is locked to its own geometry.
+//   • single instance — a second click focuses the existing window.
+//
+// Permission is verified SERVER-SIDE before the window is created: the renderer
+// hands over its Firebase ID token and main calls /api/onlyfans/access with it.
+// Hiding the sidebar item is a UI convenience; this is the check that counts.
+let ofWindow = null;
+
+const OF_WINDOW_W = 1200;
+const OF_WINDOW_H = 820;
+
+// The OF window is a satellite of the signed-in session, so it must not outlive
+// the main window — and `window-all-closed` would never fire (the app would
+// never quit) if it were left open after the main window went away.
+function closeOfWindow() {
+  if (ofWindow && !ofWindow.isDestroyed()) ofWindow.destroy();
+  ofWindow = null;
+}
+
+ipcMain.handle('onlyfans:open-window', async (_event, { idToken } = {}) => {
+  if (ofWindow && !ofWindow.isDestroyed()) {
+    if (ofWindow.isMinimized()) ofWindow.restore();
+    ofWindow.focus();
+    return { success: true, focused: true };
+  }
+
+  if (!idToken || typeof idToken !== 'string') {
+    return { success: false, error: 'unauthenticated' };
+  }
+
+  try {
+    const response = await fetch(`${BASE_URL}/api/onlyfans/access`, {
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
+    if (!response.ok) {
+      console.warn('[main] OF Manager access denied:', response.status);
+      return { success: false, error: response.status === 403 ? 'forbidden' : 'unauthenticated' };
+    }
+  } catch (err) {
+    console.error('[main] OF Manager access check failed:', err);
+    return { success: false, error: 'offline' };
+  }
+
+  const workArea = currentWorkArea();
+  ofWindow = new BrowserWindow({
+    width: Math.min(OF_WINDOW_W, workArea.width),
+    height: Math.min(OF_WINDOW_H, workArea.height),
+    minWidth: Math.min(900, workArea.width),
+    minHeight: Math.min(600, workArea.height),
+    resizable: true,
+    show: true,
+    backgroundColor: '#0A0A0A',
+    title: 'OF Manager',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+    },
+  });
+
+  // Same navigation posture as the main window: app origin stays in-window,
+  // anything else goes to the system browser.
+  ofWindow.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalSafe(url);
+    return { action: 'deny' };
+  });
+  ofWindow.webContents.on('will-navigate', (e, url) => {
+    if (url.startsWith(BASE_URL) || url.startsWith('file://')) return;
+    e.preventDefault();
+    openExternalSafe(url);
+  });
+  ofWindow.webContents.on('did-finish-load', () => {
+    if (ofWindow && !ofWindow.isDestroyed()) ofWindow.webContents.setZoomFactor(0.9);
+  });
+  ofWindow.on('closed', () => {
+    ofWindow = null;
+  });
+
+  ofWindow.loadURL(`${BASE_URL}/of-manager`);
+  return { success: true };
+});
+
 // IPC handler for idle time detection
 ipcMain.handle('timeTracking:getIdleTime', () => {
   return powerMonitor.getSystemIdleTime();
@@ -661,6 +755,12 @@ function createWindow() {
       finish();
     });
   });
+
+  // The OF Manager window is a satellite of this one. It is not an Electron
+  // child window (that would pin it above the main window on macOS and make the
+  // main window unusable), so the dependency is enforced here instead. Hooked to
+  // `closed`, not `close`, so it survives the flush veto above.
+  mainWindow.on('closed', closeOfWindow);
 
   return mainWindow;
 }

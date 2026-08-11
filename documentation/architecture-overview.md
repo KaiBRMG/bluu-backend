@@ -57,9 +57,13 @@ NEXT_PUBLIC_FIREBASE_APP_ID
 NEXT_PUBLIC_GOOGLE_CLIENT_ID
 GOOGLE_CLIENT_SECRET
 FIREBASE_SERVICE_ACCOUNT   # JSON string of service account key
+ONLYFANSAPI_API_KEY        # OnlyFans provider bearer token — see onlyfans-crm.md
+ONLYFANSAPI_WEBHOOK_SECRET # path secret + HMAC key for /api/onlyfans/webhook/[secret]
+ONLYFANS_ACCOUNT_ID        # optional; pins the operated account (required once a 2nd is linked)
 ```
 
 - `NEXT_PUBLIC_*` are client-exposed by Next convention. Everything else is **server-only**.
+- The `ONLYFANS*` keys are read **only** under `src/lib/onlyfans/` (server). Importing that folder from a client component would leak the key into the bundle — see [onlyfans-crm.md](onlyfans-crm.md).
 - Resources are served from the Firestore `app-resources` collection (no external integration) — see [resources.md](resources.md).
 
 ## 5. Portal Topology
