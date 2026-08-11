@@ -93,7 +93,7 @@ export function ViralCopyDialog({
             <DialogHeader>
               <DialogTitle>Did you copy another viral post?</DialogTitle>
               <DialogDescription>
-                If this post copies someone else’s viral post, add the original below — a copied
+                If you used a post from a Viral Account, add the original link below — a copied
                 post earns half the bonus. Otherwise choose “No”.
               </DialogDescription>
             </DialogHeader>
@@ -104,9 +104,7 @@ export function ViralCopyDialog({
                 onChange={(e) => setOriginalLink(e.target.value)}
                 placeholder="https://x.com/..."
               />
-              <p className="text-xs text-muted-foreground">
-                We’ll work out which account it’s from — you don’t need to enter it.
-              </p>
+          
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => onAnswered(null)}>No</Button>
