@@ -13,6 +13,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { MultiSelect } from '@/components/smm/shared/MultiSelect';
+import { extractAccountHandle } from '@/lib/smm/linkUtils';
 import { TierField, ViralAccountField, tierError } from '@/components/smm/shared/TierField';
 import { SMM_ACCOUNT_TYPES, SMM_NETWORKS } from '@/types/firestore';
 import type { SmmTier } from '@/types/firestore';
@@ -42,9 +43,13 @@ export function AddAccountDialog({
   const [driveLink, setDriveLink] = useState('');
   const [comments, setComments] = useState('');
   const [saving, setSaving] = useState(false);
+  // Once the admin edits the name themselves the link stops driving it — the
+  // handle is a convenience, never an override of a deliberate name.
+  const [nameTouched, setNameTouched] = useState(false);
 
   useEffect(() => {
     if (!open) return;
+    setNameTouched(false);
     setAccountName('');
     setAccountLink('');
     setType([]);
@@ -55,6 +60,20 @@ export function AddAccountDialog({
     setDriveLink('');
     setComments('');
   }, [open]);
+
+  // The name IS the handle in the link, so pasting the link fills it in. Kept
+  // in sync while the field is untouched (clearing the name re-arms it), since
+  // the handle is what `findAccountByHandle` matches on — a name that doesn't
+  // match the link is what makes an account unfindable from a post link.
+  const handleLinkChange = (value: string) => {
+    setAccountLink(value);
+    if (!nameTouched) setAccountName(extractAccountHandle(value));
+  };
+
+  const handleNameChange = (value: string) => {
+    setAccountName(value);
+    setNameTouched(value.trim() !== '');
+  };
 
   const handleCreate = async () => {
     setSaving(true);
@@ -89,16 +108,21 @@ export function AddAccountDialog({
         </DialogHeader>
 
         <div className="space-y-3">
+          {/* Link first: it fills the name in, so asking for it first is the
+              order the admin actually works in. */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Account name *</Label>
-              <Input value={accountName} onChange={(e) => setAccountName(e.target.value)} />
+              <Label>Account link *</Label>
+              <Input value={accountLink} onChange={(e) => handleLinkChange(e.target.value)} placeholder="https://x.com/..." />
             </div>
             <div className="space-y-1.5">
-              <Label>Account link *</Label>
-              <Input value={accountLink} onChange={(e) => setAccountLink(e.target.value)} placeholder="https://x.com/..." />
+              <Label>Account name *</Label>
+              <Input value={accountName} onChange={(e) => handleNameChange(e.target.value)} />
             </div>
           </div>
+          <p className="-mt-1.5 text-xs text-muted-foreground">
+            The name is taken from the link — change it if it’s wrong.
+          </p>
           <div className="space-y-1.5">
             <Label>Type</Label>
             <MultiSelect
