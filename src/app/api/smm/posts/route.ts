@@ -8,7 +8,9 @@ import {
   SMM_SCHEDULE,
   assertAccountWritable,
   checkSmmAccess,
+  checkViralEligibility,
   isSmmAdmin,
+  resolveSourceAccount,
   resolveUserInfo,
   serializePost,
 } from '@/lib/services/smmService';
@@ -152,6 +154,9 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       caption?: string;
       postDate?: string;
       postLink?: string;
+      originalLink?: string;
+      originalAccId?: string;
+      sourceAccId?: string;
     };
 
     if (!body.accountId || !body.postDate) {
@@ -168,6 +173,38 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     if (accountDenied) return accountDenied;
     const account = accountSnap.data()!;
 
+    // Viral-copy declaration, captured at upload time (not at bonus time). The
+    // client already ran the same check for the "⚠️ Already Used Recently" card,
+    // but its answer is never trusted — a copy is only recorded if the source
+    // still qualifies here.
+    const originalLink = body.originalLink?.trim() ?? '';
+    const originalNormalized = normalizePostLink(originalLink);
+    if (originalLink) {
+      if (!originalNormalized) {
+        return NextResponse.json({ error: 'Invalid original post link' }, { status: 400 });
+      }
+      const eligibility = await checkViralEligibility(originalNormalized);
+      if (!eligibility.eligible) {
+        return NextResponse.json(
+          { error: 'That original post has been used too recently to copy' },
+          { status: 400 },
+        );
+      }
+      if (!body.originalAccId) {
+        return NextResponse.json({ error: 'The original account is required' }, { status: 400 });
+      }
+      const origSnap = await adminDb.collection(SMM_ACCOUNTS).doc(body.originalAccId).get();
+      if (!origSnap.exists) {
+        return NextResponse.json({ error: 'Original account not found' }, { status: 404 });
+      }
+    }
+
+    // The creator page this content was uploaded FROM. It decides the network
+    // bonus (and the suggester's share), so it is resolved and denormalized
+    // here rather than trusted as a name from the client.
+    const source = await resolveSourceAccount(body.sourceAccId);
+    if (source instanceof NextResponse) return source;
+
     const postLink = body.postLink?.trim() ?? '';
     const ref = adminDb
       .collection(SMM_SCHEDULE).doc(body.accountId).collection(SMM_POSTS_SUB).doc();
@@ -180,6 +217,12 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       postedBy: token.uid,
       createdTime: FieldValue.serverTimestamp(),
       bonusSubmission: false,
+      isViralCopy: !!originalLink,
+      originalLink,
+      originalLinkNormalized: originalNormalized,
+      originalAcc: originalLink ? body.originalAccId! : '',
+      sourceAcc: source.id,
+      sourceAccName: source.name,
     });
 
     return NextResponse.json({ success: true, id: ref.id });

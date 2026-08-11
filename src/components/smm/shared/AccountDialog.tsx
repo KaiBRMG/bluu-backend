@@ -10,6 +10,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -19,6 +20,7 @@ import { useUserName } from '@/hooks/useUserName';
 import { AccountContentTable } from '@/components/smm/shared/AccountContentTable';
 import { LinkWithCopy } from '@/components/smm/shared/LinkWithCopy';
 import { MultiSelect } from '@/components/smm/shared/MultiSelect';
+import { TierField, ViralAccountField, tierError } from '@/components/smm/shared/TierField';
 import { AccountStatusBadge, NetworkBadge, TierBadge, TypeBadges } from '@/components/smm/shared/badges';
 import { arrayEquals, buildDiff } from '@/lib/smm/diff';
 import { SMM_ACCOUNT_TYPES, SMM_NETWORKS } from '@/types/firestore';
@@ -71,6 +73,7 @@ export function AccountDialog({
       type: account.type,
       network: account.network,
       tier: account.tier,
+      isViralBonus: account.isViralBonus,
       assigned: account.assigned,
       driveLink: account.driveLink,
       comments: account.comments,
@@ -86,7 +89,7 @@ export function AccountDialog({
     return buildDiff(
       form,
       account as unknown as SmmAccountPayload,
-      ['accountName', 'accountLink', 'type', 'network', 'tier', 'assigned', 'driveLink', 'comments', 'information', 'status'],
+      ['accountName', 'accountLink', 'type', 'network', 'tier', 'isViralBonus', 'assigned', 'driveLink', 'comments', 'information', 'status'],
       { type: arrayEquals },
     );
   }, [account, form]);
@@ -174,19 +177,21 @@ export function AccountDialog({
               <NetworkBadge network={account.network} />
             )}
           </Field>
-          <Field label="Tier">
-            {editing ? (
-              <Select value={String(form.tier)} onValueChange={(tier) => patch({ tier: Number(tier) })}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">Tier 1</SelectItem>
-                  <SelectItem value="2">Tier 2</SelectItem>
-                </SelectContent>
-              </Select>
-            ) : (
-              <TierBadge tier={account.tier as SmmTier} />
-            )}
-          </Field>
+          {editing ? (
+            <Field label="Tier">
+              <TierField
+                type={form.type}
+                tier={(form.tier ?? null) as SmmTier | null}
+                onChange={(tier) => patch({ tier })}
+                hideLabel
+              />
+            </Field>
+          ) : (
+            /* Tier is only meaningful on a bonus account — hidden everywhere else. */
+            account.tier && (
+              <Field label="Tier"><TierBadge tier={account.tier} /></Field>
+            )
+          )}
           <Field label="Assigned">
             {editing ? (
               <Select
@@ -219,6 +224,11 @@ export function AccountDialog({
           {!editing && (
             <Field label="Status"><AccountStatusBadge status={account.status} /></Field>
           )}
+          {editing ? (
+            <ViralAccountField value={!!form.isViralBonus} onChange={(isViralBonus) => patch({ isViralBonus })} />
+          ) : account.isViralBonus ? (
+            <Field label="Viral account"><Badge variant="secondary">Viral posts may be copied</Badge></Field>
+          ) : null}
           <Field label="Comments">
             {editing ? (
               <Textarea
@@ -267,7 +277,7 @@ export function AccountDialog({
         {editing && (
           <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={!dirty || saving}>
+            <Button onClick={handleSave} disabled={!dirty || !!tierError(form.type, (form.tier ?? null) as SmmTier | null) || saving}>
               {saving ? 'Saving...' : 'Save changes'}
             </Button>
           </DialogFooter>

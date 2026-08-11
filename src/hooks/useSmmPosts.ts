@@ -7,8 +7,13 @@ import type { SmmPost } from '@/types/firestore';
 export interface SmmPostPayload {
   accountId: string;
   caption?: string;
-  postDate?: string; // ISO
+  postDate?: string; // ISO — carries the time of day, not just the date
   postLink?: string;
+  /** Viral-copy declaration — create only; re-verified server-side. */
+  originalLink?: string;
+  originalAccId?: string;
+  /** The creator page the content was uploaded from — drives the network bonus. */
+  sourceAccId?: string;
 }
 
 export interface SmmPostsPage {

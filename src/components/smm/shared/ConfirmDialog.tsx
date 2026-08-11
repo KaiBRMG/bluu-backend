@@ -17,6 +17,7 @@ export function ConfirmDialog({
   description,
   confirmLabel = 'Confirm',
   destructive = false,
+  hideCancel = false,
   onConfirm,
 }: {
   open: boolean;
@@ -25,6 +26,7 @@ export function ConfirmDialog({
   description?: string;
   confirmLabel?: string;
   destructive?: boolean;
+  hideCancel?: boolean; // informational dialogs acknowledge, they don't choose
   onConfirm: () => void;
 }) {
   return (
@@ -35,7 +37,7 @@ export function ConfirmDialog({
           {description && <AlertDialogDescription>{description}</AlertDialogDescription>}
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          {!hideCancel && <AlertDialogCancel>Cancel</AlertDialogCancel>}
           <AlertDialogAction
             className={cn(destructive && 'bg-destructive text-white hover:bg-destructive/90')}
             onClick={onConfirm}

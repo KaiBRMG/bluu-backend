@@ -13,7 +13,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { MultiSelect } from '@/components/smm/shared/MultiSelect';
+import { TierField, ViralAccountField, tierError } from '@/components/smm/shared/TierField';
 import { SMM_ACCOUNT_TYPES, SMM_NETWORKS } from '@/types/firestore';
+import type { SmmTier } from '@/types/firestore';
 import type { SmmAccountPayload } from '@/hooks/useSmmAccounts';
 import type { SmmUser } from '@/hooks/useSmmUsers';
 
@@ -34,7 +36,8 @@ export function AddAccountDialog({
   const [accountLink, setAccountLink] = useState('');
   const [type, setType] = useState<string[]>([]);
   const [network, setNetwork] = useState<string>('Other');
-  const [tier, setTier] = useState('1');
+  const [tier, setTier] = useState<SmmTier | null>(null);
+  const [isViralBonus, setIsViralBonus] = useState(false);
   const [assigned, setAssigned] = useState(UNASSIGNED);
   const [driveLink, setDriveLink] = useState('');
   const [comments, setComments] = useState('');
@@ -46,7 +49,8 @@ export function AddAccountDialog({
     setAccountLink('');
     setType([]);
     setNetwork('Other');
-    setTier('1');
+    setTier(null);
+    setIsViralBonus(false);
     setAssigned(UNASSIGNED);
     setDriveLink('');
     setComments('');
@@ -60,7 +64,8 @@ export function AddAccountDialog({
         accountLink,
         type,
         network,
-        tier: Number(tier),
+        tier,
+        isViralBonus,
         assigned: assigned === UNASSIGNED ? null : assigned,
         driveLink,
         comments,
@@ -114,16 +119,7 @@ export function AddAccountDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label>Tier</Label>
-              <Select value={tier} onValueChange={setTier}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">Tier 1</SelectItem>
-                  <SelectItem value="2">Tier 2</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <TierField type={type} tier={tier} onChange={setTier} />
           </div>
           <div className="space-y-1.5">
             <Label>Assigned</Label>
@@ -139,6 +135,7 @@ export function AddAccountDialog({
             <Label>Drive link</Label>
             <Input value={driveLink} onChange={(e) => setDriveLink(e.target.value)} />
           </div>
+          <ViralAccountField value={isViralBonus} onChange={setIsViralBonus} />
           <div className="space-y-1.5">
             <Label>Comments</Label>
             <Textarea value={comments} onChange={(e) => setComments(e.target.value)} rows={2} />
@@ -147,7 +144,10 @@ export function AddAccountDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleCreate} disabled={!accountName.trim() || !accountLink.trim() || saving}>
+          <Button
+            onClick={handleCreate}
+            disabled={!accountName.trim() || !accountLink.trim() || !!tierError(type, tier) || saving}
+          >
             {saving ? 'Creating...' : 'Create account'}
           </Button>
         </DialogFooter>

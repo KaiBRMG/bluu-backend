@@ -18,7 +18,8 @@ import {
 import { UserChip } from '@/components/UserChip';
 import { useUserName } from '@/hooks/useUserName';
 import { useBasicUsers } from '@/hooks/useBasicUsers';
-import { DatePicker } from '@/components/smm/shared/DatePicker';
+import { DateTimePicker } from '@/components/smm/shared/DateTimePicker';
+import { SourceAccountField } from '@/components/smm/shared/SourceAccountField';
 import { LinkWithCopy } from '@/components/smm/shared/LinkWithCopy';
 import type { SmmAccount, SmmPost } from '@/types/firestore';
 import type { SmmPostPayload } from '@/hooks/useSmmPosts';
@@ -65,6 +66,7 @@ export function PostDialog({
   const [accountId, setAccountId] = useState('');
   const [postDate, setPostDate] = useState<Date | undefined>(undefined);
   const [postLink, setPostLink] = useState('');
+  const [sourceAccId, setSourceAccId] = useState('');
 
   // Reset the form whenever a different post is shown or the dialog reopens.
   useEffect(() => {
@@ -74,6 +76,7 @@ export function PostDialog({
     setAccountId(post.accountId);
     setPostDate(post.postDate ? new Date(post.postDate) : undefined);
     setPostLink(post.postLink);
+    setSourceAccId(post.sourceAcc);
   }, [post, open, startInEdit]);
 
   const postedByName = post ? names[post.postedBy] ?? '' : '';
@@ -87,12 +90,13 @@ export function PostDialog({
     if (caption !== post.caption) u.caption = caption;
     if (accountId !== post.accountId) u.accountId = accountId;
     if (postLink !== post.postLink) u.postLink = postLink;
+    if (sourceAccId !== post.sourceAcc) u.sourceAccId = sourceAccId;
     const origIso = post.postDate ? new Date(post.postDate).toISOString() : null;
     if ((postDate?.toISOString() ?? null) !== origIso && postDate) {
       u.postDate = postDate.toISOString();
     }
     return u;
-  }, [post, caption, accountId, postLink, postDate]);
+  }, [post, caption, accountId, postLink, postDate, sourceAccId]);
   const dirty = Object.keys(updates).length > 0;
 
   if (!post) return null;
@@ -154,9 +158,10 @@ export function PostDialog({
                 <Textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={3} />
               </div>
               <div className="space-y-1.5">
-                <Label>Post date</Label>
-                <DatePicker value={postDate} onChange={setPostDate} className="w-full" />
+                <Label>Post date &amp; time</Label>
+                <DateTimePicker value={postDate} onChange={setPostDate} className="w-full" />
               </div>
+              <SourceAccountField value={sourceAccId} onChange={setSourceAccId} />
               <div className="space-y-1.5">
                 <Label>Post link</Label>
                 <Input value={postLink} onChange={(e) => setPostLink(e.target.value)} placeholder="https://x.com/..." />
@@ -165,14 +170,25 @@ export function PostDialog({
           ) : (
             <div className="space-y-2.5">
               <Field label="Post date">
-                {post.postDate ? format(new Date(post.postDate), 'PPP') : '—'}
+                {post.postDate ? format(new Date(post.postDate), 'PPp') : '—'}
               </Field>
               <Field label="Post link">
                 {post.postLink ? <LinkWithCopy url={post.postLink} /> : '—'}
               </Field>
+              <Field label="Uploaded from">
+                {post.sourceAccName || <span className="text-muted-foreground">Not recorded — no network bonus</span>}
+              </Field>
               <Field label="Posted by">
                 <UserChip name={postedByName} photoURL={postedByPhoto} />
               </Field>
+              {post.isViralCopy && (
+                <Field label="Copied from">
+                  <span className="space-y-0.5 block">
+                    <LinkWithCopy url={post.originalLink} />
+                    <span className="block text-xs text-muted-foreground">Bonus is halved for copied posts.</span>
+                  </span>
+                </Field>
+              )}
             </div>
           )}
 

@@ -11,6 +11,24 @@
  * Handles: whitespace, query strings/fragments, a trailing `/photo/N` or
  * `/video/N` segment, trailing slashes, and scheme/host casing.
  */
+/**
+ * The account handle inside a Twitter/X profile link — the first path segment
+ * of an x.com/twitter.com URL. Used by the viral-page suggestion flow, which
+ * stores the handle as `accountName` so it can be matched against
+ * `twitterx-accounts`. Returns '' when the link isn't a recognisable profile.
+ *
+ * https://x.com/example, https://twitter.com/example/media → 'example'
+ */
+export function extractAccountHandle(url: string): string {
+  const link = url.trim();
+  if (!link) return '';
+  const match = link.match(/^(?:https?:\/\/)?(?:www\.)?(?:x|twitter)\.com\/([^/?#]+)/i);
+  const handle = match?.[1] ?? '';
+  // Reserved path prefixes that are never a profile.
+  if (!handle || /^(i|home|search|explore|notifications|messages|settings)$/i.test(handle)) return '';
+  return handle.replace(/^@/, '');
+}
+
 export function normalizePostLink(url: string): string {
   let link = url.trim();
   if (!link) return '';

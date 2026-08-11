@@ -11,10 +11,12 @@ import { PostDialog } from '@/components/smm/shared/PostDialog';
 import { CreatePostDialog } from '@/components/smm/shared/CreatePostDialog';
 import { AccountDialog } from '@/components/smm/shared/AccountDialog';
 import { BonusWizard } from '@/components/smm/shared/BonusWizard';
+import { ConfirmDialog } from '@/components/smm/shared/ConfirmDialog';
+import { ViralCopyDialog, type ViralCopyDeclaration } from '@/components/smm/shared/ViralCopyDialog';
 import { useSmmAccounts } from '@/hooks/useSmmAccounts';
 import { useSmmPosts, type SmmPostPayload } from '@/hooks/useSmmPosts';
 import type { PostAction } from '@/components/smm/shared/PostsTable';
-import type { SmmAccount, SmmPost } from '@/types/firestore';
+import { isBonusAccountType, type SmmAccount, type SmmPost } from '@/types/firestore';
 
 export default function SmmDashboardPage() {
   const { accounts, loading: accountsLoading } = useSmmAccounts('mine');
@@ -31,6 +33,11 @@ export default function SmmDashboardPage() {
   const [postDialogEdit, setPostDialogEdit] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createDate, setCreateDate] = useState<Date | undefined>(undefined);
+  // Scheduling a post is a two-step flow: the viral-copy question, then the
+  // schedule form. `viralCopy` carries the (verified) answer between them.
+  const [viralOpen, setViralOpen] = useState(false);
+  const [viralCopy, setViralCopy] = useState<ViralCopyDeclaration | null>(null);
+  const [notBonusAccount, setNotBonusAccount] = useState<string | null>(null);
   const [selectedAccount, setSelectedAccount] = useState<SmmAccount | null>(null);
   const [accountDialogOpen, setAccountDialogOpen] = useState(false);
   const [showAllOpen, setShowAllOpen] = useState(false);
@@ -74,10 +81,17 @@ export default function SmmDashboardPage() {
     await afterMutation();
   }, [deletePost, afterMutation]);
 
+  // Only accounts whose type contains 'Bonus' may be submitted — say so up
+  // front instead of letting the submit fail server-side.
   const openBonus = useCallback((post: SmmPost) => {
+    const account = accounts.find((a) => a.id === post.accountId);
+    if (account && !isBonusAccountType(account.type)) {
+      setNotBonusAccount(account.accountName);
+      return;
+    }
     setBonusPost(post);
     setBonusOpen(true);
-  }, []);
+  }, [accounts]);
 
   // Row actions from Show All Posts.
   const handleTableAction = useCallback((action: PostAction, post: SmmPost) => {
@@ -105,7 +119,7 @@ export default function SmmDashboardPage() {
               anchorDate={anchorDate}
               onWeekChange={setAnchorDate}
               onPostClick={(post) => { setSelectedPost(post); setPostDialogEdit(false); setPostDialogOpen(true); }}
-              onDayClick={(date) => { setCreateDate(date); setCreateOpen(true); }}
+              onDayClick={(date) => { setCreateDate(date); setViralCopy(null); setViralOpen(true); }}
               onShowAll={() => setShowAllOpen(true)}
             />
           </section>
@@ -136,11 +150,22 @@ export default function SmmDashboardPage() {
         startInEdit={postDialogEdit}
       />
 
+      <ViralCopyDialog
+        open={viralOpen}
+        onOpenChange={setViralOpen}
+        onAnswered={(declaration) => {
+          setViralCopy(declaration);
+          setViralOpen(false);
+          setCreateOpen(true);
+        }}
+      />
+
       <CreatePostDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
         accounts={accounts}
         defaultDate={createDate}
+        viralCopy={viralCopy}
         onCreate={handleCreate}
       />
 
@@ -164,6 +189,16 @@ export default function SmmDashboardPage() {
         open={bonusOpen}
         onOpenChange={setBonusOpen}
         onSubmitted={afterMutation}
+      />
+
+      <ConfirmDialog
+        open={notBonusAccount !== null}
+        onOpenChange={(open) => !open && setNotBonusAccount(null)}
+        title="Not a bonus account"
+        description={`${notBonusAccount ?? 'This account'} is not a bonus account, so its posts can’t be submitted for a bonus. An admin must add “Bonus” to the account’s type first.`}
+        confirmLabel="OK"
+        hideCancel
+        onConfirm={() => setNotBonusAccount(null)}
       />
     </AppLayout>
   );

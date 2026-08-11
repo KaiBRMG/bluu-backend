@@ -7,6 +7,7 @@ import {
   SMM_POSTS_SUB,
   SMM_SCHEDULE,
   checkSmmAccess,
+  resolveTier,
   validateAccountFields,
 } from '@/lib/services/smmService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
@@ -34,7 +35,7 @@ export const PATCH = withAuth(async (
     }
 
     const allowed = [
-      'accountName', 'accountLink', 'type', 'network', 'tier',
+      'accountName', 'accountLink', 'type', 'network', 'tier', 'isViralBonus',
       'assigned', 'driveLink', 'comments', 'information', 'status',
     ];
     const updates: Record<string, unknown> = {
@@ -43,6 +44,18 @@ export const PATCH = withAuth(async (
     };
     for (const key of allowed) {
       if (key in body) updates[key] = body[key];
+    }
+
+    // The tier ⇄ 'Bonus' invariant is a property of the merged document: a
+    // PATCH may change `type` or `tier` alone, so reconcile the incoming
+    // values with what is stored before validating.
+    const current = snap.data() ?? {};
+    if ('type' in body || 'tier' in body) {
+      const mergedType = ('type' in body ? body.type : current.type) as string[] ?? [];
+      const mergedTier = ('tier' in body ? body.tier : current.tier) as number | null | undefined;
+      const tier = resolveTier(mergedType, mergedTier);
+      if (tier instanceof NextResponse) return tier;
+      updates.tier = tier.tier;
     }
 
     await ref.update(updates);

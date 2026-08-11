@@ -4,11 +4,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import { SubmissionsTable } from '@/components/smm/admin/SubmissionsTable';
 import { SubmissionDetailDialog } from '@/components/smm/admin/SubmissionDetailDialog';
 import { EarningsTable } from '@/components/smm/admin/EarningsTable';
 import { StartNewRoundDialog } from '@/components/smm/admin/StartNewRoundDialog';
 import { PreviousRoundsDialog } from '@/components/smm/shared/PreviousRoundsDialog';
+import { SuggestionsSection } from '@/components/smm/admin/SuggestionsSection';
 import { formatRoundDate } from '@/lib/smm/format';
 import { useSmmBonus, type CurrentRoundAll } from '@/hooks/useSmmBonus';
 import type { SmmSubmission } from '@/types/firestore';
@@ -21,6 +25,10 @@ export function BonusManagementTab() {
 
   const [data, setData] = useState<CurrentRoundAll | null>(null);
   const [loading, setLoading] = useState(true);
+  // null = follow the default (the round containing today). Set by the picker.
+  const [roundId, setRoundId] = useState<string | null>(null);
+  // The round the server picks by default — the one whose window contains today.
+  const [defaultRoundId, setDefaultRoundId] = useState<string | null>(null);
   const [startOpen, setStartOpen] = useState(false);
   const [prevOpen, setPrevOpen] = useState(false);
   const [selected, setSelected] = useState<SmmSubmission | null>(null);
@@ -29,22 +37,28 @@ export function BonusManagementTab() {
   const load = useCallback(async (force = false) => {
     setLoading(true);
     try {
-      setData(await fetchCurrentAll(force));
+      const fresh = await fetchCurrentAll(force, roundId ?? undefined);
+      setData(fresh);
+      // Remember which round the server treats as current, so the picker can
+      // label it — it is not simply the newest round.
+      if (!roundId) setDefaultRoundId(fresh.round?.id ?? null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load bonus data');
     } finally {
       setLoading(false);
     }
-  }, [fetchCurrentAll]);
+  }, [fetchCurrentAll, roundId]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const round = data?.round ?? null;
+  const rounds = data?.rounds ?? [];
 
   const handleStartRound = async (start: string, end: string) => {
     await startRound(start, end);
+    setRoundId(null); // a new round becomes the default view
     await load(true);
   };
 
@@ -54,7 +68,7 @@ export function BonusManagementTab() {
   ) => {
     if (!round) return;
     await updateSubmission(round.id, submissionId, updates);
-    const fresh = await fetchCurrentAll(true);
+    const fresh = await fetchCurrentAll(true, roundId ?? undefined);
     setData(fresh);
     // Keep the detail dialog in sync with the refreshed record.
     setSelected((prev) => (prev ? fresh.submissions.find((s) => s.id === prev.id) ?? null : null));
@@ -82,12 +96,26 @@ export function BonusManagementTab() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Bonus Management</h1>
-          {loading ? (
-            <Skeleton className="h-4 w-56 mt-1" />
-          ) : round ? (
-            <p className="text-sm text-muted-foreground">
-              Current Round: {formatRoundDate(round.roundDateStart)} – {formatRoundDate(round.roundDateEnd)}
-            </p>
+          {loading && !round ? (
+            <Skeleton className="h-8 w-64 mt-1" />
+          ) : rounds.length > 0 ? (
+            <Select value={round?.id ?? ''} onValueChange={setRoundId}>
+              <SelectTrigger
+                size="sm"
+                className="mt-1 border-transparent px-2 text-muted-foreground shadow-none hover:border-input"
+                aria-label="Select bonus round"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {rounds.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>
+                    {formatRoundDate(r.roundDateStart)} – {formatRoundDate(r.roundDateEnd)}
+                    {r.id === defaultRoundId ? ' (current)' : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           ) : (
             <p className="text-sm text-muted-foreground">No active round yet.</p>
           )}
@@ -123,6 +151,8 @@ export function BonusManagementTab() {
           )}
         </section>
       </div>
+
+      <SuggestionsSection />
 
       <StartNewRoundDialog open={startOpen} onOpenChange={setStartOpen} onStart={handleStartRound} />
       <PreviousRoundsDialog open={prevOpen} onOpenChange={setPrevOpen} scope="all" />

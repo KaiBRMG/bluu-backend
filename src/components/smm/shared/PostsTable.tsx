@@ -118,7 +118,7 @@ export function PostsTable({
       case 'postDate':
         return (
           <span className="whitespace-nowrap">
-            {post.postDate ? format(new Date(post.postDate), 'PP') : '—'}
+            {post.postDate ? format(new Date(post.postDate), 'PPp') : '—'}
           </span>
         );
       case 'postLink':

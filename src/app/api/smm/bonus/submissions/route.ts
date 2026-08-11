@@ -8,23 +8,23 @@ import {
   SMM_SCHEDULE,
   SMM_SUBMISSIONS_SUB,
   checkSmmAccess,
-  findLinkUsage,
   getCurrentRoundSnap,
   resolveUserInfo,
 } from '@/lib/services/smmService';
-import { calculateBonus } from '@/lib/smm/bonusCalc';
+import { SUGGESTION_SHARE, calculateBonus } from '@/lib/smm/bonusCalc';
 import { normalizePostLink } from '@/lib/smm/linkUtils';
-import { SMM_STATUS_QUALIFIED } from '@/types/firestore';
+import { SMM_STATUS_QUALIFIED, isBonusAccountType } from '@/types/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-
-const ELIGIBLE_AFTER_DAYS = 14;
-const DAY_MS = 24 * 60 * 60 * 1000;
+import type { SmmNetwork } from '@/types/firestore';
 
 /**
  * POST /api/smm/bonus/submissions — the bonus wizard submit.
  * All bonus math runs here; the client only collects inputs. userTotals is
  * NOT credited at submission time — it is credited when an admin approves the
  * submission (see the submission PATCH route).
+ *
+ * The viral-copy declaration is NOT taken from this request: it was captured
+ * and verified when the post was scheduled, and is read back off the post doc.
  */
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
@@ -34,8 +34,6 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     const body = await request.json() as {
       accountId?: string;
       postId?: string;
-      originalLink?: string;
-      originalAccId?: string;
       numLikes?: number;
       screenshotLink?: string;
     };
@@ -67,11 +65,26 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'You can only submit your own posts' }, { status: 403 });
     }
 
-    // 2. Account provides the frozen tier/network.
+    // 2. Account provides the frozen tier/network. Only bonus accounts (type
+    //    contains 'Bonus') may be submitted, and those always carry a tier —
+    //    the client shows the same message, but this is the enforcement.
     if (!accountSnap.exists) {
       return NextResponse.json({ error: 'Account not found' }, { status: 404 });
     }
     const account = accountSnap.data()!;
+    if (!isBonusAccountType(account.type as string[])) {
+      return NextResponse.json(
+        { error: 'This is not a bonus account — its type must include "Bonus"' },
+        { status: 400 },
+      );
+    }
+    const tier = account.tier;
+    if (tier !== 1 && tier !== 2) {
+      return NextResponse.json(
+        { error: 'This account has no tier — set one on the account before submitting' },
+        { status: 400 },
+      );
+    }
 
     // 3. Require "now" inside the current round window.
     if (!roundSnap) {
@@ -85,24 +98,30 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'No active bonus round' }, { status: 400 });
     }
 
-    // 4. Viral-copy path: re-verify eligibility server-side (never trust the
-    //    client) and resolve the original account for residual routing.
-    const originalLink = body.originalLink?.trim() ?? '';
-    const originalNormalized = normalizePostLink(originalLink);
-    let originalAccount: FirebaseFirestore.DocumentData | null = null;
-    if (originalLink) {
-      const usage = await findLinkUsage(originalNormalized);
-      if (usage && usage.refDate) {
-        const daysDiff = Math.floor((now - new Date(usage.refDate).getTime()) / DAY_MS);
-        if (daysDiff <= ELIGIBLE_AFTER_DAYS) {
-          return NextResponse.json({ error: 'This post has been used too recently to qualify' }, { status: 400 });
-        }
-      }
-      if (body.originalAccId) {
-        const origSnap = await adminDb.collection(SMM_ACCOUNTS).doc(body.originalAccId).get();
-        if (origSnap.exists) originalAccount = origSnap.data()!;
-      }
-    }
+    // 4. The two other accounts a bonus can involve, both recorded on the post
+    //    and both fetched in one getAll:
+    //      - originalAcc: the page whose viral post was copied (residual)
+    //      - sourceAcc:   the creator page the content was uploaded FROM. Its
+    //                     network drives the network bonus (NOT the posting
+    //                     page's — the manual pays for uploading *from* the
+    //                     inhouse / X managed / twink lists), and its
+    //                     `suggestedBy` earns the $2 page-suggestion share.
+    const isViralCopy = post.isViralCopy === true;
+    const originalLink = isViralCopy ? (post.originalLink as string) ?? '' : '';
+    const originalNormalized = isViralCopy ? (post.originalLinkNormalized as string) ?? '' : '';
+    const originalAccId = isViralCopy ? (post.originalAcc as string) ?? '' : '';
+    const sourceAccId = (post.sourceAcc as string) ?? '';
+
+    const extraIds = [originalAccId, sourceAccId].filter(Boolean);
+    const extraSnaps = extraIds.length > 0
+      ? await adminDb.getAll(...extraIds.map((id) => adminDb.collection(SMM_ACCOUNTS).doc(id)))
+      : [];
+    const byId = new Map(extraSnaps.filter((s) => s.exists).map((s) => [s.id, s.data()!]));
+    const originalAccount = originalAccId ? byId.get(originalAccId) ?? null : null;
+    const sourceAccount = sourceAccId ? byId.get(sourceAccId) ?? null : null;
+
+    // No recorded source ⇒ 'Other' ⇒ no network bonus.
+    const sourceNetwork = (sourceAccount?.network ?? 'Other') as SmmNetwork;
 
     // 5. Reject a duplicate submission of this post in the current round.
     const postNormalized = (post.postLinkNormalized as string) ?? normalizePostLink(post.postLink ?? '');
@@ -120,12 +139,12 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     // 6. Compute the bonus (server-authoritative).
     const postDateMs = post.postDate?.toDate?.().getTime() ?? now;
     const result = calculateBonus({
-      tier: (account.tier ?? 1) as 1 | 2,
-      network: account.network ?? 'Other',
+      tier,
+      network: sourceNetwork,
       numLikes,
       postDateMs,
       submissionDateMs: now,
-      hasOriginalLink: !!originalLink,
+      hasOriginalLink: isViralCopy,
     });
 
     // 7. Single batch: the submission (+ optional residual). No userTotals
@@ -140,15 +159,17 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       accountName: post.accountName ?? account.accountName ?? '',
       originalLink,
       originalLinkNormalized: originalNormalized,
-      originalAcc: body.originalAccId ?? '',
+      originalAcc: originalAccId,
       submittedBy: token.uid,
       screenshotLink: body.screenshotLink?.trim() ?? '',
       postDate: post.postDate ?? Timestamp.fromMillis(postDateMs),
       submissionDate,
       numLikes,
       status: result.status,
-      network: account.network ?? 'Other',
-      tier: account.tier ?? 1,
+      network: sourceNetwork,
+      sourceAcc: sourceAccId,
+      sourceAccName: (post.sourceAccName as string) ?? '',
+      tier,
       bonusAmount: result.bonusAmount,
       sysComments: result.sysComments,
       adminApproval: 'pending',
@@ -158,32 +179,72 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     // Flag the source post so its calendar card shows the 💰 bonus indicator.
     batch.update(postRef, { bonusSubmission: true });
 
-    // Residual for the original account's owner (viral copy only).
+    // 8. Shares paid to OTHER SMMs off this submission. Both are their own
+    //    pending submission docs, so an admin approves each on its own merits.
+    //    They are independent and can both fire on one post.
+    const suggestedBy = (sourceAccount?.suggestedBy as string) ?? '';
+    // Rule 3️⃣: a flat $2 to whoever suggested the creator page this content
+    // came from — "if a page you suggested was approved and ANOTHER SMM uses
+    // their content", so never to the submitter themselves.
+    const paysSuggestionShare = result.status === SMM_STATUS_QUALIFIED
+      && !!suggestedBy
+      && suggestedBy !== token.uid;
+
+    const paysResidual = result.residualBonusAmount !== null && !!originalAccount?.assigned;
+    // Both share comments name the submitter — resolve it once, and only when
+    // a share is actually being written.
+    const names = paysSuggestionShare || paysResidual ? await resolveUserInfo([token.uid]) : null;
+    const submitterName = names?.get(token.uid)?.displayName ?? 'another SMM';
+
+    /** Every share doc is this post's submission, re-pointed at another SMM. */
+    const shareDoc = (recipient: string, amount: number, comment: string) => ({
+      postLink: post.postLink ?? '',
+      postLinkNormalized: '', // not the recipient's own post — keep out of dup checks
+      accountName: post.accountName ?? account.accountName ?? '',
+      originalLink,
+      originalLinkNormalized: '',
+      originalAcc: originalAccId,
+      submittedBy: recipient,
+      screenshotLink: '',
+      postDate: post.postDate ?? Timestamp.fromMillis(postDateMs),
+      submissionDate,
+      numLikes,
+      status: SMM_STATUS_QUALIFIED,
+      network: sourceNetwork,
+      sourceAcc: sourceAccId,
+      sourceAccName: (post.sourceAccName as string) ?? '',
+      tier,
+      bonusAmount: amount,
+      sysComments: comment,
+      adminApproval: 'pending',
+      isResidual: true,
+    });
+
+    // Rule 3️⃣ — the page-suggestion share.
+    let suggestionShareCreated = false;
+    if (paysSuggestionShare) {
+      batch.set(
+        roundSnap.ref.collection(SMM_SUBMISSIONS_SUB).doc(),
+        shareDoc(
+          suggestedBy,
+          SUGGESTION_SHARE,
+          `3️⃣ Page Suggestion share: $${SUGGESTION_SHARE} — ${(post.sourceAccName as string) || 'a page you suggested'} used by ${submitterName}`,
+        ),
+      );
+      suggestionShareCreated = true;
+    }
+
+    // Rule 6️⃣ — residual for the copied account's owner (viral copy only).
     let residualCreated = false;
-    if (result.residualBonusAmount !== null && originalAccount?.assigned) {
-      const names = await resolveUserInfo([token.uid]);
-      const submitterName = names.get(token.uid)?.displayName ?? 'another SMM';
-      const residualRef = roundSnap.ref.collection(SMM_SUBMISSIONS_SUB).doc();
-      batch.set(residualRef, {
-        postLink: post.postLink ?? '',
-        postLinkNormalized: '', // residual isn't the owner's own post — keep out of dup checks
-        accountName: post.accountName ?? account.accountName ?? '',
-        originalLink,
-        originalLinkNormalized: '',
-        originalAcc: body.originalAccId ?? '',
-        submittedBy: originalAccount.assigned,
-        screenshotLink: '',
-        postDate: post.postDate ?? Timestamp.fromMillis(postDateMs),
-        submissionDate,
-        numLikes,
-        status: SMM_STATUS_QUALIFIED,
-        network: account.network ?? 'Other',
-        tier: account.tier ?? 1,
-        bonusAmount: result.residualBonusAmount,
-        sysComments: `6️⃣ Viral Post residual from ${submitterName}`,
-        adminApproval: 'pending',
-        isResidual: true,
-      });
+    if (paysResidual) {
+      batch.set(
+        roundSnap.ref.collection(SMM_SUBMISSIONS_SUB).doc(),
+        shareDoc(
+          originalAccount!.assigned as string,
+          result.residualBonusAmount!,
+          `6️⃣ Viral Post residual from ${submitterName}`,
+        ),
+      );
       residualCreated = true;
     }
 
@@ -195,6 +256,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       status: result.status,
       sysComments: result.sysComments,
       residualCreated,
+      suggestionShareCreated,
     });
   } catch (error) {
     console.error('[POST /api/smm/bonus/submissions]', error);

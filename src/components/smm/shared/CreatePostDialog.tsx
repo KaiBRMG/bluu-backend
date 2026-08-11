@@ -12,39 +12,56 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { DatePicker } from '@/components/smm/shared/DatePicker';
+import { DateTimePicker } from '@/components/smm/shared/DateTimePicker';
+import { SourceAccountField } from '@/components/smm/shared/SourceAccountField';
 import type { SmmAccount } from '@/types/firestore';
 import type { SmmPostPayload } from '@/hooks/useSmmPosts';
+import type { ViralCopyDeclaration } from '@/components/smm/shared/ViralCopyDialog';
+
+/** Midnight (a bare day click) becomes 09:00; an explicit time is kept. */
+function startOfWorkday(date: Date): Date {
+  if (date.getHours() !== 0 || date.getMinutes() !== 0) return date;
+  const next = new Date(date);
+  next.setHours(9, 0, 0, 0);
+  return next;
+}
 
 /**
- * Schedule-a-post dialog, opened by clicking an empty calendar day (which
- * prefills postDate). postedBy is set server-side from the session.
+ * Schedule-a-post dialog, step two of the calendar-day flow (the viral-copy
+ * question comes first — see {@link ViralCopyDialog}). Clicking a day prefills
+ * postDate; postedBy is set server-side from the session.
  */
 export function CreatePostDialog({
   open,
   onOpenChange,
   accounts,
   defaultDate,
+  viralCopy,
   onCreate,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   accounts: SmmAccount[]; // active accounts assigned to the caller
   defaultDate?: Date;
+  viralCopy?: ViralCopyDeclaration | null; // set when the post copies a viral post
   onCreate: (payload: SmmPostPayload) => Promise<void>;
 }) {
   const [accountId, setAccountId] = useState('');
   const [caption, setCaption] = useState('');
   const [postDate, setPostDate] = useState<Date | undefined>(undefined);
   const [postLink, setPostLink] = useState('');
+  const [sourceAccId, setSourceAccId] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setAccountId('');
     setCaption('');
-    setPostDate(defaultDate);
+    // A calendar-day click hands over midnight; open on a sensible hour so the
+    // SMM edits a time rather than accidentally scheduling everything at 00:00.
+    setPostDate(defaultDate ? startOfWorkday(defaultDate) : undefined);
     setPostLink('');
+    setSourceAccId('');
   }, [open, defaultDate]);
 
   // A post link is required and must be an x.com URL to enable Submit.
@@ -60,6 +77,9 @@ export function CreatePostDialog({
         caption,
         postDate: postDate.toISOString(),
         postLink: postLink.trim(),
+        sourceAccId: sourceAccId || undefined,
+        originalLink: viralCopy?.originalLink,
+        originalAccId: viralCopy?.originalAccId,
       });
       toast.success('Post scheduled');
       onOpenChange(false);
@@ -79,6 +99,17 @@ export function CreatePostDialog({
         </DialogHeader>
 
         <div className="space-y-3">
+          {viralCopy && (
+            <div className="rounded-lg border p-3 text-sm space-y-0.5">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Copied viral post
+              </p>
+              <p className="break-words">{viralCopy.originalLink}</p>
+              <p className="text-xs text-muted-foreground">
+                This post’s bonus will be halved if you apply for one.
+              </p>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label>Account</Label>
             <Select value={accountId} onValueChange={setAccountId}>
@@ -94,13 +125,14 @@ export function CreatePostDialog({
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label>Post date</Label>
-            <DatePicker value={postDate} onChange={setPostDate} className="w-full" />
+            <Label>Post date &amp; time</Label>
+            <DateTimePicker value={postDate} onChange={setPostDate} className="w-full" />
           </div>
           <div className="space-y-1.5">
             <Label>Caption</Label>
             <Textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={3} />
           </div>
+          <SourceAccountField value={sourceAccId} onChange={setSourceAccId} />
           <div className="space-y-1.5">
             <Label>Post link</Label>
             <Input value={postLink} onChange={(e) => setPostLink(e.target.value)} placeholder="https://x.com/..." />

@@ -527,6 +527,11 @@ export type SmmNetwork = typeof SMM_NETWORKS[number];
 export type SmmTier = 1 | 2;
 export type SmmAccountStatus = 'active' | 'inactive';
 
+/** Only accounts whose `type` contains this may hold a tier or submit for a bonus. */
+export const SMM_BONUS_TYPE = 'Bonus';
+export const isBonusAccountType = (type: string[] | undefined | null): boolean =>
+  (type ?? []).includes(SMM_BONUS_TYPE);
+
 /** Submission status values — single source of truth for these emoji-bearing
  * strings, which are compared for equality to drive bonus logic and badges. */
 export const SMM_SUBMISSION_STATUSES = ['✅ Qualified', '❌ Late submission'] as const;
@@ -543,7 +548,12 @@ export interface SmmAccount {
   accountLink: string;
   type: string[];                    // multi-select of SMM_ACCOUNT_TYPES
   network: SmmNetwork;
-  tier: SmmTier;
+  /** null unless `type` contains 'Bonus' — only bonus accounts are tiered. */
+  tier: SmmTier | null;
+  /** true when SMMs may copy viral posts from this account (Viral Accounts page). */
+  isViralBonus: boolean;
+  /** uid of the SMM whose page suggestion added this account — earns the $2 share. */
+  suggestedBy: string | null;
   assigned: string | null;           // uid, single value
   assignedName?: string;             // resolved server-side (admin scope only)
   assignedPhotoURL?: string | null;
@@ -569,6 +579,21 @@ export interface SmmPost {
   postedByPhotoURL?: string | null;
   createdTime: string | null;
   bonusSubmission: boolean;          // true once the post has been submitted for a bonus
+  /**
+   * Viral-copy declaration, captured (and server-verified) when the post is
+   * scheduled — NOT when a bonus is applied for. A post flagged here has its
+   * bonus halved at submission time.
+   */
+  isViralCopy: boolean;
+  originalLink: string;              // '' unless isViralCopy
+  originalAcc: string;               // twitterx-accounts id, '' unless isViralCopy
+  /**
+   * The creator page the content was uploaded FROM (a twitterx-accounts id).
+   * Drives the network bonus and the suggester's share — both are properties
+   * of the source creator, not of the page the SMM posted on.
+   */
+  sourceAcc: string;
+  sourceAccName: string;             // denormalized for tables/dialogs
 }
 
 /** Serialised twitterx-bonus round doc (userTotals delivered separately per scope) */
@@ -594,12 +619,27 @@ export interface SmmSubmission {
   submissionDate: string | null;
   numLikes: number;
   status: SmmSubmissionStatus;
-  network: SmmNetwork;
-  tier: SmmTier;
+  network: SmmNetwork;               // frozen from the SOURCE creator page
+  sourceAcc: string;                 // frozen source creator account id
+  sourceAccName: string;             // frozen source creator name
+  tier: SmmTier;                     // frozen from the posting page
   bonusAmount: number;               // dollars, may be fractional
   sysComments: string;               // '\n'-joined system comment lines
   adminApproval: SmmAdminApproval;
   isResidual: boolean;               // auto-created for the original account's owner
+}
+
+/** Serialised twitterx-page-suggestions doc — an SMM nominating a viral account */
+export interface SmmPageSuggestion {
+  id: string;
+  accountName: string;               // handle extracted from accountLink
+  accountLink: string;
+  submittedBy: string;               // uid
+  submittedByName?: string;          // resolved server-side
+  submittedByPhotoURL?: string | null;
+  submissionDate: string | null;
+  isApproved: boolean;
+  isRejected: boolean;
 }
 
 // ─── Resolved access (returned to client after permission resolution) ─

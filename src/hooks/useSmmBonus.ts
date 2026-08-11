@@ -22,6 +22,7 @@ export interface CurrentRoundAll {
   round: SmmBonusRound | null;
   submissions: SmmSubmission[];
   userTotals: UserTotalRow[];
+  rounds: SmmBonusRound[]; // every round, newest first — the admin round picker
 }
 
 export interface PreviousRound {
@@ -41,10 +42,10 @@ export interface EligibilityResult {
 export interface SubmitBonusPayload {
   accountId: string;
   postId: string;
-  originalLink?: string;
-  originalAccId?: string;
   numLikes: number;
   screenshotLink?: string;
+  // The viral-copy declaration is NOT sent — it lives on the post, captured
+  // and verified when the post was scheduled.
 }
 
 export interface SubmitBonusResult {
@@ -52,6 +53,7 @@ export interface SubmitBonusResult {
   status: string;
   sysComments: string;
   residualCreated: boolean;
+  suggestionShareCreated: boolean;
 }
 
 const CACHE_PREFIX = 'bluu_smm_bonus_';
@@ -75,7 +77,15 @@ export function useSmmBonus() {
     return data;
   }, [authFetch]);
 
-  const fetchCurrentAll = useCallback(async (force = false): Promise<CurrentRoundAll> => {
+  /**
+   * The admin round view. Only the default (current) round is cached — an
+   * explicitly picked round is a deliberate one-off lookup, and caching every
+   * round the admin browses would just stale the picker.
+   */
+  const fetchCurrentAll = useCallback(async (force = false, roundId?: string): Promise<CurrentRoundAll> => {
+    if (roundId) {
+      return authFetch(`/api/smm/bonus/current?scope=all&roundId=${encodeURIComponent(roundId)}`);
+    }
     if (!force) {
       const cached = getCache<CurrentRoundAll>(allKey, CACHE_TTL_MS);
       if (cached) return cached;

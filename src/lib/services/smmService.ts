@@ -1,14 +1,16 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { Timestamp } from 'firebase-admin/firestore';
 import { getUserById } from '@/lib/services/userService';
 import { serializeTimestamp } from '@/lib/middleware/apiHelpers';
 import type { DocumentSnapshot } from 'firebase-admin/firestore';
-import { SMM_ACCOUNT_TYPES, SMM_NETWORKS, SMM_STATUS_LATE } from '@/types/firestore';
+import { SMM_ACCOUNT_TYPES, SMM_NETWORKS, SMM_STATUS_LATE, isBonusAccountType } from '@/types/firestore';
 import type {
   SmmAccount,
   SmmAccountStatus,
   SmmBonusRound,
   SmmNetwork,
+  SmmPageSuggestion,
   SmmPost,
   SmmSubmission,
   SmmTier,
@@ -19,17 +21,22 @@ import type {
 export const SMM_ACCOUNTS = 'twitterx-accounts';
 export const SMM_SCHEDULE = 'twitterx-content-schedule';
 export const SMM_BONUS = 'twitterx-bonus';
+export const SMM_SUGGESTIONS = 'twitterx-page-suggestions';
 export const SMM_POSTS_SUB = 'posts';
 export const SMM_SUBMISSIONS_SUB = 'submissions';
 
 // ─── Access gates ────────────────────────────────────────────────────
 
-export type SmmAccessNeed = 'dashboard' | 'admin' | 'either';
+export type SmmAccessNeed = 'dashboard' | 'admin' | 'either' | 'viral';
 
 /**
  * Page-permission gate for SMM API routes. 'admin' = the smm-admin page,
  * which is shared via page permissions like any other page (NOT the admin
  * JWT claim — these routes only touch SMM data, not the auth graph).
+ * 'viral' = the creator pages SMMs upload from. Held by the smm-xaccounts
+ * (Viral Accounts) page, but also by the dashboard: scheduling a post asks
+ * which creator it came from, and that attribution drives the network bonus,
+ * so an SMM without the Viral Accounts page must still be able to name one.
  * getUserById is cached (60s), so repeated calls in one handler are cheap.
  */
 export async function checkSmmAccess(
@@ -40,6 +47,7 @@ export async function checkSmmAccess(
   const ok =
     need === 'dashboard' ? pages.includes('smm-dashboard') :
     need === 'admin' ? pages.includes('smm-admin') :
+    need === 'viral' ? pages.includes('smm-xaccounts') || pages.includes('smm-dashboard') || pages.includes('smm-admin') :
     pages.includes('smm-dashboard') || pages.includes('smm-admin');
   return ok ? null : NextResponse.json({ error: 'Access denied' }, { status: 403 });
 }
@@ -67,6 +75,24 @@ export async function assertAccountWritable(
     return NextResponse.json({ error: 'Account is not assigned to you' }, { status: 403 });
   }
   return null;
+}
+
+/**
+ * Resolve the "uploaded from" creator page for a post. The network bonus and
+ * the page-suggestion share are both properties of this account, so the id is
+ * verified and the name denormalized server-side. An empty/absent id is legal
+ * — the post simply earns no network bonus.
+ */
+export async function resolveSourceAccount(
+  sourceAccId: string | undefined | null,
+): Promise<{ id: string; name: string } | NextResponse> {
+  const id = (sourceAccId ?? '').trim();
+  if (!id) return { id: '', name: '' };
+  const snap = await adminDb.collection(SMM_ACCOUNTS).doc(id).get();
+  if (!snap.exists) {
+    return NextResponse.json({ error: 'Source creator account not found' }, { status: 404 });
+  }
+  return { id, name: (snap.data()?.accountName as string) ?? '' };
 }
 
 // ─── User resolution (disputes resolveNames pattern) ─────────────────
@@ -101,7 +127,10 @@ export function serializeAccount(snap: DocumentSnapshot): SmmAccount {
     accountLink: d.accountLink ?? '',
     type: d.type ?? [],
     network: (d.network ?? 'Other') as SmmNetwork,
-    tier: (d.tier ?? 1) as SmmTier,
+    // Only bonus accounts are tiered — everything else carries a null tier.
+    tier: (d.tier ?? null) as SmmTier | null,
+    isViralBonus: d.isViralBonus ?? false,
+    suggestedBy: d.suggestedBy ?? null,
     assigned: d.assigned ?? null,
     driveLink: d.driveLink ?? '',
     comments: d.comments ?? '',
@@ -125,6 +154,24 @@ export function serializePost(snap: DocumentSnapshot): SmmPost {
     postedBy: d.postedBy ?? '',
     createdTime: serializeTimestamp(d.createdTime),
     bonusSubmission: d.bonusSubmission ?? false,
+    isViralCopy: d.isViralCopy ?? false,
+    originalLink: d.originalLink ?? '',
+    originalAcc: d.originalAcc ?? '',
+    sourceAcc: d.sourceAcc ?? '',
+    sourceAccName: d.sourceAccName ?? '',
+  };
+}
+
+export function serializeSuggestion(snap: DocumentSnapshot): SmmPageSuggestion {
+  const d = snap.data() ?? {};
+  return {
+    id: snap.id,
+    accountName: d.accountName ?? '',
+    accountLink: d.accountLink ?? '',
+    submittedBy: d.submittedBy ?? '',
+    submissionDate: serializeTimestamp(d.submissionDate),
+    isApproved: d.isApproved ?? false,
+    isRejected: d.isRejected ?? false,
   };
 }
 
@@ -153,6 +200,8 @@ export function serializeSubmission(snap: DocumentSnapshot): SmmSubmission {
     numLikes: d.numLikes ?? 0,
     status: d.status ?? SMM_STATUS_LATE,
     network: (d.network ?? 'Other') as SmmNetwork,
+    sourceAcc: d.sourceAcc ?? '',
+    sourceAccName: d.sourceAccName ?? '',
     tier: (d.tier ?? 1) as SmmTier,
     bonusAmount: d.bonusAmount ?? 0,
     sysComments: d.sysComments ?? '',
@@ -163,13 +212,37 @@ export function serializeSubmission(snap: DocumentSnapshot): SmmSubmission {
 
 // ─── Validation ──────────────────────────────────────────────────────
 
+/**
+ * The tier ⇄ 'Bonus' type invariant, resolved against the MERGED document
+ * (a PATCH may change either field alone, so both handlers must reconcile the
+ * incoming values with what is already stored).
+ *
+ * - type contains 'Bonus' → a tier is required (1 or 2).
+ * - otherwise → the tier is forced to null, rather than rejected: dropping
+ *   'Bonus' from an existing account's type must not fail because of a tier
+ *   the admin never touched.
+ *
+ * Returns the tier to persist, or an error response.
+ */
+export function resolveTier(
+  type: string[],
+  tier: number | null | undefined,
+): { tier: SmmTier | null } | NextResponse {
+  if (!isBonusAccountType(type)) return { tier: null };
+  if (tier !== 1 && tier !== 2) {
+    return NextResponse.json({ error: 'Bonus accounts must have a tier' }, { status: 400 });
+  }
+  return { tier };
+}
+
 /** Enum validation shared by the account create + update handlers. */
 export function validateAccountFields(body: {
   type?: string[];
   network?: string;
-  tier?: number;
+  tier?: number | null;
   status?: string;
   assigned?: string | null;
+  isViralBonus?: boolean;
 }): NextResponse | null {
   if (body.type !== undefined) {
     if (!Array.isArray(body.type) || body.type.some((t) => !(SMM_ACCOUNT_TYPES as readonly string[]).includes(t))) {
@@ -179,8 +252,11 @@ export function validateAccountFields(body: {
   if (body.network !== undefined && !(SMM_NETWORKS as readonly string[]).includes(body.network)) {
     return NextResponse.json({ error: 'Invalid network' }, { status: 400 });
   }
-  if (body.tier !== undefined && body.tier !== 1 && body.tier !== 2) {
+  if (body.tier !== undefined && body.tier !== null && body.tier !== 1 && body.tier !== 2) {
     return NextResponse.json({ error: 'Invalid tier' }, { status: 400 });
+  }
+  if (body.isViralBonus !== undefined && typeof body.isViralBonus !== 'boolean') {
+    return NextResponse.json({ error: 'Invalid viral account flag' }, { status: 400 });
   }
   if (body.status !== undefined && body.status !== 'active' && body.status !== 'inactive') {
     return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
@@ -193,14 +269,34 @@ export function validateAccountFields(body: {
 
 // ─── Rounds ──────────────────────────────────────────────────────────
 
-/** Latest round by roundDateStart, or null before the first round exists. */
+/**
+ * The round to treat as "current": the round whose window contains now, else
+ * the latest round by `roundDateStart`. Two limit(1) reads at worst — the
+ * containing round is found by taking the most recently *started* round and
+ * checking its end, so no full collection scan is needed.
+ */
 export async function getCurrentRoundSnap(): Promise<DocumentSnapshot | null> {
-  const snap = await adminDb
+  const now = Timestamp.now();
+  const started = await adminDb
+    .collection(SMM_BONUS)
+    .where('roundDateStart', '<=', now)
+    .orderBy('roundDateStart', 'desc')
+    .limit(1)
+    .get();
+  const candidate = started.docs[0];
+  if (candidate) {
+    const end = candidate.data()?.roundDateEnd as Timestamp | undefined;
+    if (end && end.toMillis() >= now.toMillis()) return candidate;
+  }
+
+  // No round is live right now — fall back to the latest one (which may be
+  // finished, or scheduled to start in the future).
+  const latest = await adminDb
     .collection(SMM_BONUS)
     .orderBy('roundDateStart', 'desc')
     .limit(1)
     .get();
-  return snap.empty ? null : snap.docs[0];
+  return latest.empty ? null : latest.docs[0];
 }
 
 // ─── Bonus totals invariant ──────────────────────────────────────────
@@ -230,6 +326,48 @@ export interface LinkUsage {
   detailLink: string;     // postLink / originalLink
 }
 
+/** A copied viral post only qualifies if its source is older than this. */
+export const VIRAL_ELIGIBLE_AFTER_DAYS = 14;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export interface ViralEligibility {
+  found: boolean;
+  eligible: boolean;
+  source?: 'post' | 'submission';
+  daysDiff: number | null;
+  detail?: { link: string; userName: string; date: string | null };
+}
+
+/**
+ * The viral-copy rule, in one place: an original link may be copied only if it
+ * has never been used, or its most recent use (a scheduled post or an earlier
+ * bonus's source) is more than {@link VIRAL_ELIGIBLE_AFTER_DAYS} days old.
+ *
+ * Runs on the advisory eligibility route AND authoritatively when the post is
+ * scheduled — the client's result is never trusted.
+ */
+export async function checkViralEligibility(normalized: string): Promise<ViralEligibility> {
+  const usage = await findLinkUsage(normalized);
+  if (!usage) return { found: false, eligible: true, daysDiff: null };
+
+  const names = await resolveUserInfo([usage.userId]);
+  const daysDiff = usage.refDate
+    ? Math.floor((Date.now() - new Date(usage.refDate).getTime()) / DAY_MS)
+    : Infinity;
+
+  return {
+    found: true,
+    source: usage.source,
+    eligible: daysDiff > VIRAL_ELIGIBLE_AFTER_DAYS,
+    daysDiff: Number.isFinite(daysDiff) ? daysDiff : null,
+    detail: {
+      link: usage.detailLink,
+      userName: names.get(usage.userId)?.displayName ?? '',
+      date: usage.refDate,
+    },
+  };
+}
+
 /**
  * Find the most recent prior use of a normalized link — as a scheduled post
  * (postLinkNormalized) or as a viral-copy source of an earlier bonus
@@ -240,13 +378,16 @@ export interface LinkUsage {
 export async function findLinkUsage(normalized: string): Promise<LinkUsage | null> {
   if (!normalized) return null;
 
-  const [posts, subs] = await Promise.all([
+  const [posts, copies, subs] = await Promise.all([
     adminDb.collectionGroup(SMM_POSTS_SUB).where('postLinkNormalized', '==', normalized).get(),
+    // Copies are declared when a post is SCHEDULED, so a source already claimed
+    // by another SMM's upload must count as used even before its bonus is filed.
+    adminDb.collectionGroup(SMM_POSTS_SUB).where('originalLinkNormalized', '==', normalized).get(),
     adminDb.collectionGroup(SMM_SUBMISSIONS_SUB).where('originalLinkNormalized', '==', normalized).get(),
   ]);
 
   const candidates: LinkUsage[] = [];
-  for (const doc of posts.docs) {
+  for (const doc of [...posts.docs, ...copies.docs]) {
     const d = doc.data();
     candidates.push({
       source: 'post',

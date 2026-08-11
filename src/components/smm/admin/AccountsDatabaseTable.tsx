@@ -16,13 +16,19 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { MultiSelect } from '@/components/smm/shared/MultiSelect';
 import { NetworkBadge } from '@/components/smm/shared/badges';
 import { cn } from '@/lib/utils';
-import { SMM_ACCOUNT_TYPES, SMM_NETWORKS } from '@/types/firestore';
+import { SMM_ACCOUNT_TYPES, SMM_NETWORKS, isBonusAccountType } from '@/types/firestore';
 import type { SmmAccount, SmmNetwork } from '@/types/firestore';
 import type { NetworkGroupState, SmmAccountPayload } from '@/hooks/useSmmAccounts';
 import type { SmmUser } from '@/hooks/useSmmUsers';
 
 const UNASSIGNED = '__unassigned__';
 const COLS = 7;
+
+/** Badge filters sitting beside the search box. */
+export interface AccountFilters {
+  bonus: boolean; // type contains 'Bonus'
+  viral: boolean; // isViralBonus
+}
 
 /** Borderless input that saves on blur when the value changed. */
 function EditableTextCell({
@@ -99,18 +105,23 @@ function AccountRow({
         />
       </TableCell>
       <TableCell>
-        <Select
-          value={String(account.tier)}
-          onValueChange={(tier) => onUpdate(account.id, { tier: Number(tier) })}
-        >
-          <SelectTrigger size="sm" className="w-full border-transparent shadow-none hover:border-input">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="1">Tier 1</SelectItem>
-            <SelectItem value="2">Tier 2</SelectItem>
-          </SelectContent>
-        </Select>
+        {/* Only bonus accounts are tiered — everything else shows nothing at all. */}
+        {isBonusAccountType(account.type) ? (
+          <Select
+            value={account.tier ? String(account.tier) : ''}
+            onValueChange={(tier) => onUpdate(account.id, { tier: Number(tier) })}
+          >
+            <SelectTrigger size="sm" className="w-full border-transparent shadow-none hover:border-input">
+              <SelectValue placeholder="Set tier" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1">Tier 1</SelectItem>
+              <SelectItem value="2">Tier 2</SelectItem>
+            </SelectContent>
+          </Select>
+        ) : (
+          <span className="pl-3 text-sm text-muted-foreground">—</span>
+        )}
       </TableCell>
       <TableCell>
         <Select
@@ -185,6 +196,7 @@ function NetworkGroup({
   state,
   users,
   search,
+  filters,
   pendingEdits,
   onExpand,
   onUpdate,
@@ -196,6 +208,7 @@ function NetworkGroup({
   state: NetworkGroupState;
   users: SmmUser[];
   search: string;
+  filters: AccountFilters;
   pendingEdits: Record<string, Partial<SmmAccountPayload>>;
   onExpand: () => void;
   onUpdate: (id: string, updates: Partial<SmmAccountPayload>) => void;
@@ -204,7 +217,9 @@ function NetworkGroup({
   onDelete: (account: SmmAccount) => void;
 }) {
   const [manualOpen, setManualOpen] = useState(false);
-  const searchActive = search.trim().length > 0;
+  // A badge filter narrows the same way a search does: it needs every group's
+  // data, and only groups with matches open.
+  const searchActive = search.trim().length > 0 || filters.bonus || filters.viral;
   // A search needs the group's data to match against, but the group should stay
   // collapsed (showing a spinner) until that data loads. Manual expansion opens
   // immediately regardless of matches.
@@ -221,18 +236,22 @@ function NetworkGroup({
       const edit = pendingEdits[a.id];
       return edit ? { ...a, ...edit } as SmmAccount : a;
     });
+    const narrowed = merged.filter((a) => (
+      (!filters.bonus || isBonusAccountType(a.type)) &&
+      (!filters.viral || a.isViralBonus)
+    ));
     const q = search.trim().toLowerCase();
-    if (!q) return merged;
-    return merged.filter((a) => [
+    if (!q) return narrowed;
+    return narrowed.filter((a) => [
       a.accountName,
       a.accountLink,
       a.type.join(' '),
-      String(a.tier),
+      a.tier ? `tier ${a.tier}` : '',
       a.network,
       a.assignedName ?? '',
       a.status,
     ].join(' ').toLowerCase().includes(q));
-  }, [state.accounts, search, pendingEdits]);
+  }, [state.accounts, search, filters, pendingEdits]);
 
   // Once a search's results are in, only expand groups that actually matched —
   // a group with zero matches stays collapsed (its "0 of N" count still shows).
@@ -314,6 +333,7 @@ export const AccountsDatabaseTable = memo(function AccountsDatabaseTable({
   loadNetwork,
   users,
   search,
+  filters,
   pendingEdits,
   onStage,
   onEdit,
@@ -323,6 +343,7 @@ export const AccountsDatabaseTable = memo(function AccountsDatabaseTable({
   loadNetwork: (network: string) => void;
   users: SmmUser[];
   search: string;
+  filters: AccountFilters;
   pendingEdits: Record<string, Partial<SmmAccountPayload>>;
   onStage: (id: string, updates: Partial<SmmAccountPayload>) => void;
   onEdit: (account: SmmAccount) => void;
@@ -357,6 +378,7 @@ export const AccountsDatabaseTable = memo(function AccountsDatabaseTable({
                 state={groupFor(network)}
                 users={users}
                 search={search}
+                filters={filters}
                 pendingEdits={pendingEdits}
                 onExpand={() => loadNetwork(network)}
                 onUpdate={update}

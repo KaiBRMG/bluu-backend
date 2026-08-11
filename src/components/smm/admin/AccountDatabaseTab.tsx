@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { PlusIcon, SearchIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { AccountsDatabaseTable } from '@/components/smm/admin/AccountsDatabaseTable';
+import { AccountsDatabaseTable, type AccountFilters } from '@/components/smm/admin/AccountsDatabaseTable';
 import { AddAccountDialog } from '@/components/smm/admin/AddAccountDialog';
 import { AccountDialog } from '@/components/smm/shared/AccountDialog';
 import { useSmmAccountDatabase, useSmmAccounts, type SmmAccountPayload } from '@/hooks/useSmmAccounts';
@@ -35,6 +36,7 @@ export function AccountDatabaseTab({
   // Filtering + lazy-loading run off the debounced value so keystrokes stay
   // smooth; the input itself stays fully responsive on `search`.
   const debouncedSearch = useDebouncedValue(search, 300);
+  const [filters, setFilters] = useState<AccountFilters>({ bonus: false, viral: false });
   const [addOpen, setAddOpen] = useState(false);
   const [editAccount, setEditAccount] = useState<SmmAccount | null>(null);
   const [editOpen, setEditOpen] = useState(false);
@@ -99,6 +101,29 @@ export function AccountDatabaseTab({
             className="pl-8"
           />
         </div>
+        {/* Quick filters — Action Blue marks the active selection. */}
+        <div className="flex items-center gap-2">
+          <Badge asChild variant={filters.bonus ? 'default' : 'outline'}>
+            <button
+              type="button"
+              aria-pressed={filters.bonus}
+              onClick={() => setFilters((f) => ({ ...f, bonus: !f.bonus }))}
+              className="cursor-pointer"
+            >
+              Bonus Accounts
+            </button>
+          </Badge>
+          <Badge asChild variant={filters.viral ? 'default' : 'outline'}>
+            <button
+              type="button"
+              aria-pressed={filters.viral}
+              onClick={() => setFilters((f) => ({ ...f, viral: !f.viral }))}
+              className="cursor-pointer"
+            >
+              Viral Bonus Accounts
+            </button>
+          </Badge>
+        </div>
         <div className="ml-auto flex items-center gap-2">
           {dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
           <Button variant="outline" onClick={() => handleSave().catch(() => {})} disabled={!dirty || saving}>
@@ -116,6 +141,7 @@ export function AccountDatabaseTab({
         loadNetwork={loadNetwork}
         users={users}
         search={debouncedSearch}
+        filters={filters}
         pendingEdits={pendingEdits}
         onStage={onStage}
         onEdit={handleEdit}

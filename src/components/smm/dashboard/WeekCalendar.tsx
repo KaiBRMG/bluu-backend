@@ -47,6 +47,11 @@ function PostCard({
           <span className="shrink-0 text-sm" role="img" title="Submitted for bonus" aria-label="Submitted for bonus">💰</span>
         )}
         <p className="min-w-0 flex-1 text-xs font-semibold truncate">{post.accountName}</p>
+        {post.postDate && (
+          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+            {format(new Date(post.postDate), 'HH:mm')}
+          </span>
+        )}
       </div>
       {renderBody(post)}
     </button>
@@ -86,6 +91,10 @@ export function WeekCalendar({
       const key = format(new Date(post.postDate), 'yyyy-MM-dd');
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(post);
+    }
+    // Posts carry a time of day — a day column reads as a running order.
+    for (const dayPosts of map.values()) {
+      dayPosts.sort((a, b) => (a.postDate ?? '').localeCompare(b.postDate ?? ''));
     }
     return map;
   }, [posts]);

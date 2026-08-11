@@ -5,6 +5,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import {
   SMM_ACCOUNTS,
   checkSmmAccess,
+  resolveTier,
   resolveUserInfo,
   serializeAccount,
   validateAccountFields,
@@ -13,9 +14,10 @@ import { SMM_NETWORKS } from '@/types/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
- * GET /api/smm/accounts?scope=mine|active|all[&network=<network>]
+ * GET /api/smm/accounts?scope=mine|active|viral|all[&network=<network>]
  *  - mine:   active accounts assigned to the caller (dashboard kanban + post dropdowns)
  *  - active: all active accounts, slim shape (bonus wizard original-account dropdown)
+ *  - viral:  active accounts with isViralBonus (the Viral Accounts page)
  *  - all:    every account incl. inactive, with resolved user names (admin database).
  *            The admin database lazy-loads one network group at a time, so scope=all
  *            accepts an optional `network` filter (single-equality, auto-indexed) to
@@ -24,6 +26,29 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
     const scope = request.nextUrl.searchParams.get('scope') ?? 'mine';
+
+    // The Viral Accounts page is its own permission (smm-xaccounts) — the
+    // accounts SMMs may copy viral posts from, grouped by network.
+    if (scope === 'viral') {
+      const denied = await checkSmmAccess(token.uid, 'viral');
+      if (denied) return denied;
+
+      const snap = await adminDb
+        .collection(SMM_ACCOUNTS)
+        .where('isViralBonus', '==', true)
+        .get();
+      const accounts = snap.docs.map(serializeAccount)
+        .filter((a) => a.status === 'active');
+      const names = await resolveUserInfo(accounts.map((a) => a.assigned ?? ''));
+      for (const a of accounts) {
+        if (a.assigned) {
+          a.assignedName = names.get(a.assigned)?.displayName ?? '';
+          a.assignedPhotoURL = names.get(a.assigned)?.photoURL ?? null;
+        }
+      }
+      accounts.sort((a, b) => a.accountName.localeCompare(b.accountName));
+      return NextResponse.json({ accounts });
+    }
 
     if (scope === 'all') {
       const denied = await checkSmmAccess(token.uid, 'admin');
@@ -88,7 +113,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       accountLink?: string;
       type?: string[];
       network?: string;
-      tier?: number;
+      tier?: number | null;
+      isViralBonus?: boolean;
       assigned?: string | null;
       driveLink?: string;
       comments?: string;
@@ -102,13 +128,18 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     const invalid = validateAccountFields(body);
     if (invalid) return invalid;
 
+    const type = body.type ?? [];
+    const tier = resolveTier(type, body.tier);
+    if (tier instanceof NextResponse) return tier;
+
     const ref = adminDb.collection(SMM_ACCOUNTS).doc();
     await ref.set({
       accountName: body.accountName.trim(),
       accountLink: body.accountLink.trim(),
-      type: body.type ?? [],
+      type,
       network: body.network ?? 'Other',
-      tier: body.tier ?? 1,
+      tier: tier.tier,
+      isViralBonus: body.isViralBonus ?? false,
       assigned: body.assigned ?? null,
       driveLink: body.driveLink ?? '',
       comments: body.comments ?? '',

@@ -34,8 +34,22 @@ export const TIER_RULES: Record<SmmTier, TierRule[]> = {
   ],
 };
 
+/**
+ * Flat share paid to the SMM who suggested the creator page a post was
+ * uploaded from, per post of theirs that hits a bonus target (rule 3️⃣ of the
+ * bonus manual). Paid to `sourceAccount.suggestedBy`, never to the submitter.
+ */
+export const SUGGESTION_SHARE = 2;
+
 export interface BonusInput {
-  tier: SmmTier;
+  tier: SmmTier;          // the tier of the page the SMM POSTED ON
+  /**
+   * The network of the creator page the content was uploaded FROM — not the
+   * posting page. The manual pays the network bonus for "uploading from the
+   * inhouse / X managed / twink lists", which is a property of the source
+   * creator; the tier is the property of your own page. 'Other' when no
+   * source creator was recorded (no network bonus).
+   */
   network: SmmNetwork;
   numLikes: number;
   postDateMs: number;
@@ -83,9 +97,13 @@ export function calculateBonus(input: BonusInput): BonusResult {
   } else if (input.network === 'X Managed') {
     bonusAmount += 1;
     comments.push('2️⃣ Network Bonus: $1');
-  } else if (input.network === 'Twink' && !input.hasOriginalLink) {
-    bonusAmount /= 2;
-    comments.push('2️⃣ Network Bonus: half 1️⃣ Target Bonus');
+  } else if (input.network === 'Twink') {
+    // "You will get half of the Tier 1 bonus" — an ADDITION, and always
+    // measured against Tier 1's amount for the threshold that was met, whatever
+    // tier the posting page is.
+    const share = (TIER_RULES[1].find((r) => r.minLikes === rule.minLikes)?.amount ?? 0) / 2;
+    bonusAmount += share;
+    comments.push(`2️⃣ Network Bonus: half Tier 1 Target Bonus ($${share})`);
   }
 
   return { bonusAmount, status: SMM_STATUS_QUALIFIED, sysComments: comments.join('\n'), residualBonusAmount };

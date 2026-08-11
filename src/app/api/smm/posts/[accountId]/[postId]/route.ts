@@ -9,6 +9,7 @@ import {
   assertAccountWritable,
   checkSmmAccess,
   isSmmAdmin,
+  resolveSourceAccount,
 } from '@/lib/services/smmService';
 import { normalizePostLink } from '@/lib/smm/linkUtils';
 import type { DecodedIdToken } from 'firebase-admin/auth';
@@ -68,6 +69,18 @@ export const PATCH = withAuth(async (
     }
     if (typeof updates.postLink === 'string') {
       updates.postLinkNormalized = normalizePostLink(updates.postLink);
+    }
+
+    // The "uploaded from" creator is editable — SMMs forget it, and unlike the
+    // viral-copy declaration it carries no time-sensitive eligibility check.
+    // (The viral fields stay off this allowlist for exactly that reason.)
+    // Submissions freeze the network at submission time, so this never rewrites
+    // an already-paid bonus.
+    if ('sourceAccId' in body) {
+      const source = await resolveSourceAccount(body.sourceAccId as string);
+      if (source instanceof NextResponse) return source;
+      updates.sourceAcc = source.id;
+      updates.sourceAccName = source.name;
     }
 
     const newAccountId = typeof body.accountId === 'string' ? body.accountId : accountId;

@@ -6,14 +6,15 @@ import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { getCache, invalidateCacheByPrefix, setCache } from '@/lib/queryCache';
 import type { SmmAccount } from '@/types/firestore';
 
-export type SmmAccountScope = 'mine' | 'active' | 'all';
+export type SmmAccountScope = 'mine' | 'active' | 'viral' | 'all';
 
 export interface SmmAccountPayload {
   accountName: string;
   accountLink: string;
   type: string[];
   network: string;
-  tier: number;
+  tier: number | null;      // null unless `type` contains 'Bonus'
+  isViralBonus?: boolean;
   assigned: string | null;
   driveLink?: string;
   comments?: string;

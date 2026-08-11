@@ -96,9 +96,13 @@ export function SubmissionDetailDialog({
           <Field label="Original link">{submission.originalLink ? <LinkWithCopy url={submission.originalLink} /> : '—'}</Field>
           <Field label="Submitted by">{submission.submittedByName || '—'}</Field>
           <Field label="Screenshot">{submission.screenshotLink ? <LinkWithCopy url={submission.screenshotLink} /> : '—'}</Field>
-          <Field label="Post date">{submission.postDate ? format(new Date(submission.postDate), 'PPP') : '—'}</Field>
+          <Field label="Post date">{submission.postDate ? format(new Date(submission.postDate), 'PPp') : '—'}</Field>
           <Field label="Submission date">{submission.submissionDate ? format(new Date(submission.submissionDate), 'PPp') : '—'}</Field>
-          <Field label="Network">{submission.network}</Field>
+          <Field label="Uploaded from">
+            {submission.sourceAccName || <span className="text-muted-foreground">Not recorded</span>}
+          </Field>
+          {/* The network is the SOURCE creator's — it is what pays the network bonus. */}
+          <Field label="Source network">{submission.network}</Field>
           <Field label="Tier">Tier {submission.tier}</Field>
         </div>
 
