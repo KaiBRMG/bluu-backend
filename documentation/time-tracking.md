@@ -15,6 +15,7 @@
 | `src/lib/parseBuffer.ts` | `parseBuffer(events, nowMs)` + **`sessionCloseMs(buf, isActive, now)`** |
 | `src/contexts/TimeTrackingContext.tsx` | Orchestration: clock in/out, hydration, screenshot upload, `calcActivityPercent` |
 | `src/hooks/useTimeTracking.ts` | Hook surface over the context |
+| `src/hooks/useTodaySessions.ts` | **Today's sessions from BOTH sources** — local buffers + committed ledger |
 | `src/hooks/useDayTotal.ts` | The "TODAY" total |
 | `src/components/timesheet/TodayTimeline.tsx` | Timeline bars + per-row totals |
 | `src/components/timesheet/DayTimeline.tsx` | One day's segment bar + tooltip; opens the walkthrough |
@@ -27,8 +28,8 @@
 
 ## Firestore
 
-- `active_sessions/{userId}` — keyed by **uid**, so a user can only ever have **one** server-side active session. **"Two active sessions" symptoms are ALWAYS a client-side rendering/buffer issue, never two server docs.** Deleted on clock-out.
-- `time_entries/{sessionId}` — permanent ledger written at clock-out.
+- `active_sessions/{userId}` — keyed by **uid**, so a user can only ever have **one** server-side active session. **"Two active sessions" symptoms are ALWAYS a client-side rendering/buffer issue, never two server docs.** Deleted on clock-out. Because it is keyed by uid, clocking in on a second device **displaces** the doc — see §3b for why that must never delete the old session outright.
+- `time_entries/{sessionId}` — permanent ledger written at clock-out. Keyed by uid too, so **sessions tracked on different devices all land in the same timesheet**; the doc id **is** the session id, which is what makes de-duplicating local buffers against the ledger exact (§2b).
 
 ---
 
@@ -61,12 +62,34 @@ Client appends events ──► local buffer (localBuffer.ts)
 
 **Why:** Without this, a clock-out-less buffer's open working segment is counted all the way to `now`, inflating totals and rendering as a phantom "live, working" session while the user is clocked out.
 
-**Consumers:** `TodayTimeline.tsx` (timeline bars + per-row totals) and `useDayTotal.ts` (the "TODAY" total).
+**Consumers:** both today-views, via `todaySessionCloseMs` in `useTodaySessions.ts` (see §2b) — `TodayTimeline.tsx` (timeline bars + per-row totals) and `useDayTotal.ts` (the "TODAY" total).
 
 **ANTI-PATTERN:** Do **not** call `parseBuffer(buf.events, Date.now())` directly over a set of buffers.
 
 ### Total-worked invariant
-`useDayTotal` and `TodayTimeline`'s *Total worked* **MUST stay in sync**: both sum `workingSeconds + breakSeconds` (**idle and pause excluded**). The "TODAY" figure on the timer page is **required to equal** the timesheet's *Total worked* exactly.
+`useDayTotal` and `TodayTimeline`'s *Total worked* **MUST stay in sync**: both sum `workingSeconds + breakSeconds` (**idle and pause excluded**). The "TODAY" figure on the timer page is **required to equal** the timesheet's *Total worked* exactly. They now share `todaySessionWorkedSeconds`, so the invariant holds by construction rather than by two matching copies of the arithmetic.
+
+---
+
+## 2b. Today's Views Are Multi-Device — `useTodaySessions`
+
+> `src/hooks/useTodaySessions.ts`. The **only** source `useDayTotal` and `TodayTimeline` may read.
+
+The local IndexedDB buffer holds sessions tracked on **this device only**. A user who clocks out on device A and later clocks in on device B has both sessions on the server — `time_entries` is keyed by uid — but only the second one locally. A local-only read therefore showed device B a day missing all of device A's hours ("TODAY" at `00:00:00`, *"No active session today"*), while the admin timesheet and analytics showed both. `UserTimesheet` deliberately excludes today, so nothing else covered the gap.
+
+`useTodaySessions(timezone)` merges the two sources and de-duplicates by `sessionId` (the ledger doc id **is** the session id, so the match is exact):
+
+| Case | Winner | Why |
+|---|---|---|
+| Live session | **local buffer** | Still growing; no ledger doc exists until clock-out |
+| Ledger doc **with** an event log | **ledger** | The committed record — and for a session tracked here it was written from this very buffer |
+| Ledger doc with an **empty** log | **local buffer** | A placeholder awaiting exactly this buffer's upload (§3b) — the ledger's zeroes are not yet the truth |
+| Buffer with no ledger doc | local buffer | Not yet uploaded (crash pending reconciliation) |
+
+- The ledger half comes from `useTimesheetData(null, today, today, tz)`, so it shares the 5-min sessionStorage cache, the `invalidateTimesheetCache` calls already made on clock-in/out, and an **in-flight dedupe** added to that hook — the timer page mounts the hook twice (`useDayTotal` + `TodayTimeline`) and must still cost **one** query (rule 9).
+- **RULE — derive every today total from `todaySessionWorkedSeconds`.** It closes open segments with `todaySessionCloseMs` (which delegates to `sessionCloseMs`, adding only the empty-log case where the ledger's `endTime` is the sole boundary) and falls back to stored aggregates when `events` is empty.
+- **An empty event log is *unknown*, never "worked the whole span"** (analytics trap 1). A manual entry contributes its stored hours and draws one synthesised working bar (trap 7); an interrupted session the CF closed with zeroes contributes 0 and draws an empty track. Never measure `endTime − startTime` to fill the hole.
+- `TodayTimeline` must not render *"No active session today"* while the ledger is still loading, or a session from another device flashes as absent before arriving.
 
 ---
 
@@ -77,10 +100,29 @@ Client appends events ──► local buffer (localBuffer.ts)
 | **Soft clock-out appends a real `clock-out` event** | `TimeTrackingContext.clockOutAndFlush` — appends to the buffer, then marks `active_sessions.userClockOut = true`, then drops the timer to `clocked-out`. Makes the buffer self-describing — can never render as live even if later orphaned. It is exposed on the context and is the **single path for every session that ends without a Clock Out press**: app close, pre-update install, a **displaced (multiple-session) logout** (`AuthWrapper` awaits it before `signOut` — see [auth.md](auth.md#single-active-session)), and a **manual sign-out** (`sidebar/NavUser.tsx`). It early-returns when already `clocked-out`, so it is free to call on any sign-out path. |
 | **The clock-out route is session-scoped** | `/api/time-tracking/clock-out` takes an optional `sessionId` and **no-ops on a mismatch**. `active_sessions` is keyed by uid, so a displaced device whose session the new device has already resumed must not clock out a session it no longer owns. |
 | **Hydration gated by `isHydrating`** | Exposed on the context. On startup, pending-buffer reconciliation is `await`ed and the Clock In button is disabled until it finishes. Prevents an impatient click from starting a second session that races the in-flight upload and orphans the old buffer. |
-| **`startTracking` reconciles, never blindly discards** | When `/start` returns `alreadyActive`, it commits a matching local buffer (`silentLogUpload` → `commitSession`, which writes `time_entries` **and** deletes the `active_sessions` doc). It only `/discard`s when there is genuinely **no** local buffer (session started on another device). |
+| **`startTracking` reconciles, never blindly discards** | When `/start` returns `alreadyActive`, it commits a matching local buffer (`silentLogUpload` → `commitSession`, which writes `time_entries` **and** deletes the `active_sessions` doc). It only `/discard`s when there is genuinely **no** local buffer (session started on another device) — and `/discard` no longer destroys anything (see §3b). |
 | **Display self-heal** | The 1s timer tick freezes when the main thread is blocked (e.g. heavy page load). A `visibilitychange`/`focus` listener recomputes elapsed from `entryStartTime + Date.now()` to snap the display back. |
 | **Sleep-gap patch is sample-confirmed** | The heartbeat infers OS sleep from a gap > `SLEEP_GAP_THRESHOLD_MS` (20 min) and injects `pause`/`resume` to exclude it. It is now a **safety net for a `suspend` that never reached the renderer** — when the event does arrive, `idle-start` already brackets the sleep and `inWorkingSegment` skips this path. Before patching, it confirms with `wasAwakeDuring()`. |
 | **Soft clock-out semantics** | App close is a deliberate soft clock-out — reopening **never** auto-resumes a gracefully-closed session; it commits it and shows a toast. Orphaned server-side sessions are cleaned by the daily Cloud Function; the client does **not** force-delete server sessions during hydration. |
+
+### 3b. Never Delete a Session Whose Event Log Lives on Another Device
+
+**The event log exists in exactly one place until it is uploaded: the IndexedDB of the device that recorded it.** Any server-side path that removes an `active_sessions` doc without leaving something in `time_entries` for that log to land on **destroys a real shift** — the owning device's next `/upload-log` finds neither an active session nor a ledger doc and answers `discarded`.
+
+The path that hit this: device A closes the app without pressing Clock Out (a **soft clock-out** — it sets `userClockOut: true` and leaves the buffer local), the user clocks in on device B, and device A's session is gone before its log was ever uploaded.
+
+**RULE — reserve, don't delete.** Both displacing paths now write `buildInterruptedLedgerDoc` (`activeSessionService.ts`) first — `status: 'interrupted'`, empty `eventLog`, **zeroed** aggregates, `didNotClockOut: true` — the same placeholder `cleanupStaleSessions` writes, so device A's later upload lands on the merge branch and fills in the real hours.
+
+| Path | Behavior |
+|---|---|
+| `/api/time-tracking/start` | On overwriting a `userClockOut: true` doc, reserves the displaced session in the ledger **inside the same transaction** (reads the ledger doc before any write, per Firestore's reads-before-writes rule). This is the path a second-device clock-in actually takes — no `/discard` is involved. |
+| `/api/time-tracking/discard` | `interruptActiveSession` instead of `deleteActiveSession` (which no longer exists). Reserves, then deletes the active doc, atomically. |
+
+- Neither path ever infers aggregates from the session's span — an empty log is *unknown* (analytics trap 1). They stay 0 until the real log merges in.
+- Both **skip the write when a ledger doc already exists**: the session may have been committed or already closed by the CF, and overwriting would wipe a real event log.
+- Both call `markAnalyticsDirty` — they are ledger-writing paths.
+- `buildInterruptedLedgerDoc` **mirrors `cleanupStaleSessions` in `functions/index.js`** — change both together.
+- **`/upload-log` is authorization-scoped.** The `sessionId` is client-supplied and `updateSessionLog` rewrites a doc's event log and totals wholesale, so `getLedgerSessionMeta` returns the owner and status: a doc owned by another uid is **403**, and a `status: 'completed'` doc returns `already-committed` without merging — its log was written at clock-out and a replayed upload must not rewrite settled hours.
 
 **RULE — a heartbeat gap alone must never erase worked time.** The heartbeat period (15 min) sits only 5 min under `SLEEP_GAP_THRESHOLD_MS` (20 min), so a throttled timer or a stalled network call can overshoot it while the machine was awake and the user was working. `wasAwakeDuring(from, to)` settles it with evidence: the native sampler ticks every 5s in the main process, so samples spanning the gap **prove** the machine was running and the patch is skipped; a hole (> `SAMPLE_GAP_TOLERANCE_MS`) means it genuinely slept. It is deliberately conservative — it returns `false` (patch, i.e. legacy behavior) whenever it cannot prove wakefulness: no sampler on older builds, samples aged out of the 45-min retention, or IPC failure.
 
@@ -273,6 +315,9 @@ GET /api/time-tracking/entries
 ## Gotchas Checklist
 
 - [ ] Never `parseBuffer(events, Date.now())` over a buffer set — always close with `sessionCloseMs` first.
+- [ ] Never read today's totals from local buffers alone — go through `useTodaySessions`, or a second device shows a day with hours missing.
+- [ ] Never remove an `active_sessions` doc without reserving the session in `time_entries` — its event log may still be sitting on another device (§3b).
+- [ ] Never trust a client-supplied `sessionId` into `updateSessionLog` — check owner **and** status first.
 - [ ] Any new path that signs a user out mid-session must `await clockOutAndFlush()` first — a sign-out never reaches the Clock Out button. Current paths: `AuthWrapper` (displaced), `sidebar/NavUser.tsx` (manual).
 - [ ] Keep `useDayTotal` and `TodayTimeline` *Total worked* summing `workingSeconds + breakSeconds` only.
 - [ ] After clock-in/out, call `invalidateTimesheetCache(uid)`.

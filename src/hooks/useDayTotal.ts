@@ -1,25 +1,26 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { getTodaySessions } from '@/lib/localBuffer';
-import { parseBuffer, sessionCloseMs } from '@/lib/parseBuffer';
-import { useTimeTracking } from '@/hooks/useTimeTracking';
+import { useTodaySessions, todaySessionWorkedSeconds } from '@/hooks/useTodaySessions';
 
 /**
  * Returns the total "time worked" seconds tracked today (in the user's timezone),
- * summed across all sessions whose clock-in falls within today's calendar day.
+ * summed across all sessions whose clock-in falls within today's calendar day —
+ * on ANY device, since `useTodaySessions` merges the server ledger with this
+ * device's local buffers.
  *
  * Counts: working + break seconds. This MUST match the "Total worked" figure in
  * TodayTimeline (working + break) so the timer page's "TODAY" total and the
- * timesheet below it always show the same value.
+ * timesheet below it always show the same value. Both sum
+ * `todaySessionWorkedSeconds`, which is what keeps them from drifting.
  * Excludes: idle and pause time.
  *
- * - Ticks every second.
+ * - Recomputes every 10s (and whenever the session set changes).
  * - Resets automatically at midnight in the user's timezone by re-running the
  *   effect (driven by a `day` state that increments at midnight).
  */
 export function useDayTotal(timezone: string): number {
-  const { sessionId, displayState } = useTimeTracking();
+  const { sessions } = useTodaySessions(timezone);
   const [totalSeconds, setTotalSeconds] = useState(0);
   // Incrementing this triggers the effect to re-run after midnight
   const [day, setDay] = useState(0);
@@ -31,17 +32,11 @@ export function useDayTotal(timezone: string): number {
 
     let cancelled = false;
 
-    async function compute() {
-      const sessions = await getTodaySessions(timezone);
+    function compute() {
       const now = Date.now();
-      let total = 0;
-      for (const buf of sessions) {
-        // Only the live session grows to `now`; everything else is closed at its
-        // clock-out / last event so an orphaned buffer can't inflate the total.
-        const isActive = buf.sessionId === sessionId && displayState !== 'clocked-out';
-        const t = parseBuffer(buf.events, sessionCloseMs(buf, isActive, now));
-        total += t.workingSeconds + t.breakSeconds;
-      }
+      // Only the live session grows to `now`; everything else is closed at its
+      // clock-out / last event so an orphaned buffer can't inflate the total.
+      const total = sessions.reduce((sum, s) => sum + todaySessionWorkedSeconds(s, now), 0);
       if (!cancelled) setTotalSeconds(total);
     }
 
@@ -62,7 +57,7 @@ export function useDayTotal(timezone: string): number {
       if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
       if (midnightRef.current) { clearTimeout(midnightRef.current); midnightRef.current = null; }
     };
-  }, [timezone, day, sessionId, displayState]); // re-runs on tz change, day rollover, or session state change
+  }, [timezone, day, sessions]); // re-runs on tz change, day rollover, or when the session set changes
 
   return totalSeconds;
 }

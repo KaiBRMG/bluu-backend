@@ -1,11 +1,15 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useTimeTracking } from '@/hooks/useTimeTracking';
 import { useUserData } from '@/hooks/useUserData';
-import { getTodaySessions } from '@/lib/localBuffer';
-import { parseBuffer, sessionCloseMs } from '@/lib/parseBuffer';
-import type { LocalSessionBuffer, SessionEvent } from '@/types/firestore';
+import {
+  useTodaySessions,
+  todaySessionCloseMs,
+  todaySessionWorkedSeconds,
+  type TodaySession,
+} from '@/hooks/useTodaySessions';
+import type { SessionEvent } from '@/types/firestore';
 
 // ─── Segment types ────────────────────────────────────────────────────
 
@@ -125,28 +129,39 @@ function buildSegments(events: SessionEvent[], nowMs: number): TimelineSegment[]
   return segments;
 }
 
+/**
+ * Segments for one of today's sessions, from whichever source it came.
+ *
+ * An empty event log means *unknown*, not "worked the whole span" (see
+ * time-tracking.md, analytics trap 1), so it draws nothing rather than a full
+ * working bar. The one exception is a manual entry, which legitimately has no
+ * event log and whose stored span IS the worked time (trap 7) — the same
+ * treatment `functions/rollup.js` gives it.
+ */
+function sessionSegments(session: TodaySession, now: number): TimelineSegment[] {
+  if (session.events.length === 0) {
+    if (session.isManual && session.endTime !== null) {
+      return [{ kind: 'working', startMs: session.startTime, endMs: session.endTime }];
+    }
+    return [];
+  }
+  return buildSegments(session.events, todaySessionCloseMs(session, now));
+}
+
 // ─── Component ────────────────────────────────────────────────────────
 
 const HOUR_MARKERS = [0, 6, 12, 18, 24];
 
 export default function TodayTimeline() {
-  const { sessionId, displayState } = useTimeTracking();
+  const { displayState } = useTimeTracking();
   const { userData } = useUserData();
   const timezone = userData?.timezone || 'UTC';
-  const [buffers, setBuffers] = useState<LocalSessionBuffer[]>([]);
+  // Local buffers + today's committed ledger, so a session tracked on another
+  // device earlier today still draws a bar here.
+  const { sessions, loading } = useTodaySessions(timezone);
   const [now, setNow] = useState(() => Date.now());
-  const [hoveredKey, setHoveredKey] = useState<string | null>(null); // `${bufIdx}-${segIdx}`
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null); // `${sessionIdx}-${segIdx}`
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-
-  const loadBuffers = useCallback(async () => {
-    const sessions = await getTodaySessions(timezone);
-    setBuffers(sessions);
-  }, [timezone]);
-
-  // Reload when the session changes or a state transition appends new buffer events
-  useEffect(() => {
-    loadBuffers();
-  }, [loadBuffers, sessionId, displayState]);
 
   // Keep `now` in sync for live open-segment rendering
   useEffect(() => {
@@ -161,27 +176,18 @@ export default function TodayTimeline() {
   );
   const dayDuration = dayEnd - dayStart + 1;
 
-  // A buffer is "active" (its open segments grow to `now`) only when it is the
-  // session the timer is currently running — i.e. we are not clocked out.
-  const isActiveBuffer = useCallback(
-    (buf: LocalSessionBuffer) => buf.sessionId === sessionId && displayState !== 'clocked-out',
-    [sessionId, displayState],
+  // Build segments per session; only the live session uses live nowMs.
+  const allSessionSegments = useMemo(
+    () => sessions.map(s => sessionSegments(s, now)),
+    [sessions, now],
   );
 
-  // Build segments per buffer; only the active session uses live nowMs.
-  const allSessionSegments = useMemo(() => {
-    return buffers.map(buf =>
-      buildSegments(buf.events, sessionCloseMs(buf, isActiveBuffer(buf), now)),
-    );
-  }, [buffers, isActiveBuffer, now]);
-
-  // Total worked seconds across all today's sessions
-  const totalWorkedSeconds = useMemo(() => {
-    return buffers.reduce((sum, buf) => {
-      const totals = parseBuffer(buf.events, sessionCloseMs(buf, isActiveBuffer(buf), now));
-      return sum + totals.workingSeconds + totals.breakSeconds;
-    }, 0);
-  }, [buffers, isActiveBuffer, now]);
+  // Total worked seconds across all today's sessions. Shares
+  // `todaySessionWorkedSeconds` with useDayTotal — that is the invariant.
+  const totalWorkedSeconds = useMemo(
+    () => sessions.reduce((sum, s) => sum + todaySessionWorkedSeconds(s, now), 0),
+    [sessions, now],
+  );
 
   const toPercent = (ms: number) =>
     Math.max(0, Math.min(100, ((ms - dayStart) / dayDuration) * 100));
@@ -207,7 +213,9 @@ export default function TodayTimeline() {
     });
   }, [allSessionSegments]);
 
-  if (displayState === 'clocked-out' && buffers.length === 0) {
+  // Never claim an empty day while today's ledger is still in flight — a
+  // session tracked on another device would flash "no session" before arriving.
+  if (displayState === 'clocked-out' && sessions.length === 0 && !loading) {
     return (
       <div
         className="rounded-lg p-6 text-center text-sm"
@@ -274,15 +282,14 @@ export default function TodayTimeline() {
       {/* Timeline bars — one per session */}
       <div className="flex flex-col gap-1.5">
         {allSessionSegments.map((segments, bi) => {
-          const buf = buffers[bi];
-          const totals = parseBuffer(buf.events, sessionCloseMs(buf, isActiveBuffer(buf), now));
-          const workedSeconds = totals.workingSeconds + totals.breakSeconds;
+          const session = sessions[bi];
+          const workedSeconds = todaySessionWorkedSeconds(session, now);
           const h = Math.floor(workedSeconds / 3600);
           const m = Math.floor((workedSeconds % 3600) / 60);
           const sessionTotal = workedSeconds === 0 ? '—' : h === 0 ? `${m}m` : `${h}h ${m}m`;
 
           return (
-            <div key={buf.sessionId} className="flex items-center gap-3">
+            <div key={session.sessionId} className="flex items-center gap-3">
               <div
                 className="flex-1 relative h-7 rounded-full overflow-hidden"
                 style={{ background: 'var(--border-subtle)' }}

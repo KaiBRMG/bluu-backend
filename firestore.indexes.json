@@ -237,6 +237,16 @@
       ]
     },
     {
+      "collectionGroup": "posts",
+      "fieldPath": "originalLinkNormalized",
+      "indexes": [
+        { "queryScope": "COLLECTION", "order": "ASCENDING" },
+        { "queryScope": "COLLECTION", "order": "DESCENDING" },
+        { "queryScope": "COLLECTION", "arrayConfig": "CONTAINS" },
+        { "queryScope": "COLLECTION_GROUP", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "submissions",
       "fieldPath": "originalLinkNormalized",
       "indexes": [

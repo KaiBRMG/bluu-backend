@@ -13,8 +13,17 @@ import type { SessionEvent, ParsedSessionTotals, LocalSessionBuffer } from '@/ty
  *
  * Pass the result as `parseBuffer`'s `nowMs` argument so every consumer (day
  * total, today's timeline, etc.) agrees on the same value.
+ *
+ * Takes the structural `{ events, startTime }` subset rather than a whole
+ * `LocalSessionBuffer` so a session read back from the server ledger (which
+ * carries no `userId`/`lastFlushed`) closes by the exact same rule — see
+ * `useTodaySessions`.
  */
-export function sessionCloseMs(buf: LocalSessionBuffer, isActive: boolean, now: number): number {
+export function sessionCloseMs(
+  buf: Pick<LocalSessionBuffer, 'events' | 'startTime'>,
+  isActive: boolean,
+  now: number,
+): number {
   if (isActive) return now;
   const clockOut = buf.events.find(e => e.type === 'clock-out');
   if (clockOut) return clockOut.timestamp;

@@ -47,6 +47,17 @@ export function invalidateTimesheetCache(uid: string): void {
   invalidateCacheByPrefix(`bluu_timesheet_v2:${uid}:`);
 }
 
+/**
+ * In-flight requests, keyed by cache key.
+ *
+ * The sessionStorage cache is only written once a response lands, so two
+ * components mounting together and asking for the SAME range both miss it and
+ * both query Firestore. The timer page does exactly that — `useDayTotal` and
+ * `TodayTimeline` each pull today's ledger via `useTodaySessions`. Sharing the
+ * promise makes it one query instead of two (cross-cutting rule 9).
+ */
+const inFlight = new Map<string, Promise<CachedTimesheetData>>();
+
 export function useTimesheetData(
   userId: string | null,
   startDate: string | null,
@@ -79,26 +90,43 @@ export function useTimesheetData(
     setLoading(true);
     setError(null);
     try {
-      const idToken = await user.getIdToken();
-      const params = new URLSearchParams({ startDate, endDate, timezone: viewerTimezone });
-      if (userId) params.set('userId', userId);
+      // Join an identical request already on the wire rather than firing a
+      // second one. A forced refresh always starts fresh — it exists precisely
+      // to bypass anything already fetched.
+      let request = forceRefresh ? undefined : inFlight.get(key);
+      if (!request) {
+        request = (async () => {
+          const idToken = await user.getIdToken();
+          const params = new URLSearchParams({ startDate, endDate, timezone: viewerTimezone });
+          if (userId) params.set('userId', userId);
 
-      const res = await fetch(`/api/time-tracking/entries?${params}`, {
-        headers: { Authorization: `Bearer ${idToken}` },
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Failed: ${res.status}`);
+          const res = await fetch(`/api/time-tracking/entries?${params}`, {
+            headers: { Authorization: `Bearer ${idToken}` },
+          });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.error || `Failed: ${res.status}`);
+          }
+          const data = await res.json();
+          const payload: CachedTimesheetData = {
+            entries: data.entries,
+            sessions: data.sessions ?? [],
+            timezone: data.timezone || 'UTC',
+          };
+          setCache<CachedTimesheetData>(key, payload);
+          return payload;
+        })();
+        const pending = request;
+        inFlight.set(key, pending);
+        pending
+          .catch(() => {}) // settled purely to clear the entry; the caller still sees the rejection
+          .finally(() => { if (inFlight.get(key) === pending) inFlight.delete(key); });
       }
-      const data = await res.json();
-      setEntries(data.entries);
-      setSessions(data.sessions ?? []);
-      setTimezone(data.timezone || 'UTC');
-      setCache<CachedTimesheetData>(key, {
-        entries: data.entries,
-        sessions: data.sessions ?? [],
-        timezone: data.timezone || 'UTC',
-      });
+
+      const payload = await request;
+      setEntries(payload.entries);
+      setSessions(payload.sessions);
+      setTimezone(payload.timezone);
     } catch (err) {
       console.error('[useTimesheetData] Fetch failed:', err);
       setError(err instanceof Error ? err.message : 'Unknown error');
