@@ -13,7 +13,6 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { DateTimePicker } from '@/components/smm/shared/DateTimePicker';
-import { SourceAccountField } from '@/components/smm/shared/SourceAccountField';
 import type { SmmAccount } from '@/types/firestore';
 import type { SmmPostPayload } from '@/hooks/useSmmPosts';
 import type { ViralCopyDeclaration } from '@/components/smm/shared/ViralCopyDialog';
@@ -50,7 +49,6 @@ export function CreatePostDialog({
   const [caption, setCaption] = useState('');
   const [postDate, setPostDate] = useState<Date | undefined>(undefined);
   const [postLink, setPostLink] = useState('');
-  const [sourceAccId, setSourceAccId] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -61,7 +59,6 @@ export function CreatePostDialog({
     // SMM edits a time rather than accidentally scheduling everything at 00:00.
     setPostDate(defaultDate ? startOfWorkday(defaultDate) : undefined);
     setPostLink('');
-    setSourceAccId('');
   }, [open, defaultDate]);
 
   // A post link is required and must be an x.com URL to enable Submit.
@@ -77,9 +74,7 @@ export function CreatePostDialog({
         caption,
         postDate: postDate.toISOString(),
         postLink: postLink.trim(),
-        sourceAccId: sourceAccId || undefined,
         originalLink: viralCopy?.originalLink,
-        originalAccId: viralCopy?.originalAccId,
       });
       toast.success('Post scheduled');
       onOpenChange(false);
@@ -105,8 +100,12 @@ export function CreatePostDialog({
                 Copied viral post
               </p>
               <p className="break-words">{viralCopy.originalLink}</p>
+              {/* The source is not an input — it is the account the original
+                  lives on, resolved from the link. It decides the network
+                  bonus, so it is shown here rather than asked for. */}
               <p className="text-xs text-muted-foreground">
-                This post’s bonus will be halved if you apply for one.
+                Uploaded from <span className="text-foreground">{viralCopy.originalAccName}</span> ·
+                {' '}this post’s bonus will be halved if you apply for one.
               </p>
             </div>
           )}
@@ -132,7 +131,6 @@ export function CreatePostDialog({
             <Label>Caption</Label>
             <Textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={3} />
           </div>
-          <SourceAccountField value={sourceAccId} onChange={setSourceAccId} />
           <div className="space-y-1.5">
             <Label>Post link</Label>
             <Input value={postLink} onChange={(e) => setPostLink(e.target.value)} placeholder="https://x.com/..." />

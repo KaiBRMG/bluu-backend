@@ -6,23 +6,9 @@ import {
   SMM_ACCOUNTS,
   SMM_SUGGESTIONS,
   checkSmmAccess,
+  findAccountByHandle,
 } from '@/lib/services/smmService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-
-/**
- * Locate the suggested account. Handles are stored with inconsistent casing
- * (the imported sheet is upper-case, a pasted link may not be), so the three
- * casings are matched in one `in` query rather than scanning the collection.
- */
-async function findAccountByHandle(handle: string) {
-  const variants = [...new Set([handle, handle.toUpperCase(), handle.toLowerCase()])];
-  const snap = await adminDb
-    .collection(SMM_ACCOUNTS)
-    .where('accountName', 'in', variants)
-    .limit(1)
-    .get();
-  return snap.docs[0] ?? null;
-}
 
 /**
  * PATCH /api/smm/suggestions/[id] — approve or deny a viral-page suggestion

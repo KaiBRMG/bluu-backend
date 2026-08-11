@@ -19,7 +19,6 @@ import { UserChip } from '@/components/UserChip';
 import { useUserName } from '@/hooks/useUserName';
 import { useBasicUsers } from '@/hooks/useBasicUsers';
 import { DateTimePicker } from '@/components/smm/shared/DateTimePicker';
-import { SourceAccountField } from '@/components/smm/shared/SourceAccountField';
 import { LinkWithCopy } from '@/components/smm/shared/LinkWithCopy';
 import type { SmmAccount, SmmPost } from '@/types/firestore';
 import type { SmmPostPayload } from '@/hooks/useSmmPosts';
@@ -66,7 +65,6 @@ export function PostDialog({
   const [accountId, setAccountId] = useState('');
   const [postDate, setPostDate] = useState<Date | undefined>(undefined);
   const [postLink, setPostLink] = useState('');
-  const [sourceAccId, setSourceAccId] = useState('');
 
   // Reset the form whenever a different post is shown or the dialog reopens.
   useEffect(() => {
@@ -76,7 +74,6 @@ export function PostDialog({
     setAccountId(post.accountId);
     setPostDate(post.postDate ? new Date(post.postDate) : undefined);
     setPostLink(post.postLink);
-    setSourceAccId(post.sourceAcc);
   }, [post, open, startInEdit]);
 
   const postedByName = post ? names[post.postedBy] ?? '' : '';
@@ -90,13 +87,12 @@ export function PostDialog({
     if (caption !== post.caption) u.caption = caption;
     if (accountId !== post.accountId) u.accountId = accountId;
     if (postLink !== post.postLink) u.postLink = postLink;
-    if (sourceAccId !== post.sourceAcc) u.sourceAccId = sourceAccId;
     const origIso = post.postDate ? new Date(post.postDate).toISOString() : null;
     if ((postDate?.toISOString() ?? null) !== origIso && postDate) {
       u.postDate = postDate.toISOString();
     }
     return u;
-  }, [post, caption, accountId, postLink, postDate, sourceAccId]);
+  }, [post, caption, accountId, postLink, postDate]);
   const dirty = Object.keys(updates).length > 0;
 
   if (!post) return null;
@@ -161,7 +157,8 @@ export function PostDialog({
                 <Label>Post date &amp; time</Label>
                 <DateTimePicker value={postDate} onChange={setPostDate} className="w-full" />
               </div>
-              <SourceAccountField value={sourceAccId} onChange={setSourceAccId} />
+              {/* "Uploaded from" is not editable: it is derived from the
+                  viral-copy declaration, which is itself fixed at upload. */}
               <div className="space-y-1.5">
                 <Label>Post link</Label>
                 <Input value={postLink} onChange={(e) => setPostLink(e.target.value)} placeholder="https://x.com/..." />
@@ -176,7 +173,7 @@ export function PostDialog({
                 {post.postLink ? <LinkWithCopy url={post.postLink} /> : '—'}
               </Field>
               <Field label="Uploaded from">
-                {post.sourceAccName || <span className="text-muted-foreground">Not recorded — no network bonus</span>}
+                {post.sourceAccName || <span className="text-muted-foreground">Not a copy — no network bonus</span>}
               </Field>
               <Field label="Posted by">
                 <UserChip name={postedByName} photoURL={postedByPhoto} />

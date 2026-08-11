@@ -10,7 +10,7 @@ import {
   checkSmmAccess,
   checkViralEligibility,
   isSmmAdmin,
-  resolveSourceAccount,
+  resolveOriginalAccount,
   resolveUserInfo,
   serializePost,
 } from '@/lib/services/smmService';
@@ -155,8 +155,6 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       postDate?: string;
       postLink?: string;
       originalLink?: string;
-      originalAccId?: string;
-      sourceAccId?: string;
     };
 
     if (!body.accountId || !body.postDate) {
@@ -179,6 +177,10 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     // still qualifies here.
     const originalLink = body.originalLink?.trim() ?? '';
     const originalNormalized = normalizePostLink(originalLink);
+    // The creator page the content was uploaded FROM is the account the copied
+    // original lives on — derived from the link here, never sent by the client,
+    // since it decides the network bonus and the suggester's $2 share.
+    let source = { id: '', name: '' };
     if (originalLink) {
       if (!originalNormalized) {
         return NextResponse.json({ error: 'Invalid original post link' }, { status: 400 });
@@ -190,20 +192,15 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
           { status: 400 },
         );
       }
-      if (!body.originalAccId) {
-        return NextResponse.json({ error: 'The original account is required' }, { status: 400 });
+      const original = await resolveOriginalAccount(originalLink);
+      if (!original) {
+        return NextResponse.json(
+          { error: 'That account is not in the account database, so this post can’t be recorded as a copy.' },
+          { status: 404 },
+        );
       }
-      const origSnap = await adminDb.collection(SMM_ACCOUNTS).doc(body.originalAccId).get();
-      if (!origSnap.exists) {
-        return NextResponse.json({ error: 'Original account not found' }, { status: 404 });
-      }
+      source = { id: original.id, name: original.name };
     }
-
-    // The creator page this content was uploaded FROM. It decides the network
-    // bonus (and the suggester's share), so it is resolved and denormalized
-    // here rather than trusted as a name from the client.
-    const source = await resolveSourceAccount(body.sourceAccId);
-    if (source instanceof NextResponse) return source;
 
     const postLink = body.postLink?.trim() ?? '';
     const ref = adminDb
@@ -220,7 +217,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       isViralCopy: !!originalLink,
       originalLink,
       originalLinkNormalized: originalNormalized,
-      originalAcc: originalLink ? body.originalAccId! : '',
+      originalAcc: source.id,
       sourceAcc: source.id,
       sourceAccName: source.name,
     });

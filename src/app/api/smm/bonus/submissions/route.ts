@@ -98,21 +98,23 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'No active bonus round' }, { status: 400 });
     }
 
-    // 4. The two other accounts a bonus can involve, both recorded on the post
-    //    and both fetched in one getAll:
+    // 4. The other account(s) a bonus can involve, recorded on the post:
     //      - originalAcc: the page whose viral post was copied (residual)
     //      - sourceAcc:   the creator page the content was uploaded FROM. Its
     //                     network drives the network bonus (NOT the posting
     //                     page's — the manual pays for uploading *from* the
     //                     inhouse / X managed / twink lists), and its
     //                     `suggestedBy` earns the $2 page-suggestion share.
+    //    Since a post's source is *derived* from its copy declaration these are
+    //    the same account on every post written today (older posts may still
+    //    carry a hand-picked source), so the ids are deduped before the getAll.
     const isViralCopy = post.isViralCopy === true;
     const originalLink = isViralCopy ? (post.originalLink as string) ?? '' : '';
     const originalNormalized = isViralCopy ? (post.originalLinkNormalized as string) ?? '' : '';
     const originalAccId = isViralCopy ? (post.originalAcc as string) ?? '' : '';
     const sourceAccId = (post.sourceAcc as string) ?? '';
 
-    const extraIds = [originalAccId, sourceAccId].filter(Boolean);
+    const extraIds = [...new Set([originalAccId, sourceAccId].filter(Boolean))];
     const extraSnaps = extraIds.length > 0
       ? await adminDb.getAll(...extraIds.map((id) => adminDb.collection(SMM_ACCOUNTS).doc(id)))
       : [];

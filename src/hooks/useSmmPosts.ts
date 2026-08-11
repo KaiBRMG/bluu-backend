@@ -9,11 +9,12 @@ export interface SmmPostPayload {
   caption?: string;
   postDate?: string; // ISO — carries the time of day, not just the date
   postLink?: string;
-  /** Viral-copy declaration — create only; re-verified server-side. */
+  /**
+   * Viral-copy declaration — create only; re-verified server-side, which also
+   * derives the original/source account (and so the network bonus) from this
+   * link. Neither account is ever sent by the client.
+   */
   originalLink?: string;
-  originalAccId?: string;
-  /** The creator page the content was uploaded from — drives the network bonus. */
-  sourceAccId?: string;
 }
 
 export interface SmmPostsPage {

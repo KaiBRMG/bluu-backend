@@ -3,6 +3,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { getUserById } from '@/lib/services/userService';
 import { serializeTimestamp } from '@/lib/middleware/apiHelpers';
+import { extractAccountHandle } from '@/lib/smm/linkUtils';
 import type { DocumentSnapshot } from 'firebase-admin/firestore';
 import { SMM_ACCOUNT_TYPES, SMM_NETWORKS, SMM_STATUS_LATE, isBonusAccountType } from '@/types/firestore';
 import type {
@@ -33,10 +34,10 @@ export type SmmAccessNeed = 'dashboard' | 'admin' | 'either' | 'viral';
  * Page-permission gate for SMM API routes. 'admin' = the smm-admin page,
  * which is shared via page permissions like any other page (NOT the admin
  * JWT claim — these routes only touch SMM data, not the auth graph).
- * 'viral' = the creator pages SMMs upload from. Held by the smm-xaccounts
- * (Viral Accounts) page, but also by the dashboard: scheduling a post asks
- * which creator it came from, and that attribution drives the network bonus,
- * so an SMM without the Viral Accounts page must still be able to name one.
+ * 'viral' = the creator pages SMMs upload from — the smm-xaccounts (Viral
+ * Accounts) listing. The dashboard used to need this too, when scheduling a
+ * post asked the SMM to name the creator; that source is now derived from the
+ * copied link server-side, so the dashboard grant was dropped.
  * getUserById is cached (60s), so repeated calls in one handler are cheap.
  */
 export async function checkSmmAccess(
@@ -47,7 +48,7 @@ export async function checkSmmAccess(
   const ok =
     need === 'dashboard' ? pages.includes('smm-dashboard') :
     need === 'admin' ? pages.includes('smm-admin') :
-    need === 'viral' ? pages.includes('smm-xaccounts') || pages.includes('smm-dashboard') || pages.includes('smm-admin') :
+    need === 'viral' ? pages.includes('smm-xaccounts') || pages.includes('smm-admin') :
     pages.includes('smm-dashboard') || pages.includes('smm-admin');
   return ok ? null : NextResponse.json({ error: 'Access denied' }, { status: 403 });
 }
@@ -78,21 +79,44 @@ export async function assertAccountWritable(
 }
 
 /**
- * Resolve the "uploaded from" creator page for a post. The network bonus and
- * the page-suggestion share are both properties of this account, so the id is
- * verified and the name denormalized server-side. An empty/absent id is legal
- * — the post simply earns no network bonus.
+ * Locate an account by its Twitter/X handle. Handles are stored with
+ * inconsistent casing (the imported sheet is upper-case, a pasted link is
+ * usually not), so the three casings are matched in one `in` query rather than
+ * scanning the collection.
  */
-export async function resolveSourceAccount(
-  sourceAccId: string | undefined | null,
-): Promise<{ id: string; name: string } | NextResponse> {
-  const id = (sourceAccId ?? '').trim();
-  if (!id) return { id: '', name: '' };
-  const snap = await adminDb.collection(SMM_ACCOUNTS).doc(id).get();
-  if (!snap.exists) {
-    return NextResponse.json({ error: 'Source creator account not found' }, { status: 404 });
-  }
-  return { id, name: (snap.data()?.accountName as string) ?? '' };
+export async function findAccountByHandle(handle: string): Promise<DocumentSnapshot | null> {
+  const clean = handle.trim().replace(/^@/, '');
+  if (!clean) return null;
+  const variants = [...new Set([clean, clean.toUpperCase(), clean.toLowerCase()])];
+  const snap = await adminDb
+    .collection(SMM_ACCOUNTS)
+    .where('accountName', 'in', variants)
+    .limit(1)
+    .get();
+  return snap.docs[0] ?? null;
+}
+
+/**
+ * Resolve the creator page a copied viral post lives on, derived from the
+ * original link alone — the SMM never picks it by hand, so it cannot be
+ * pointed at a better-paying network than the one they actually copied from.
+ *
+ * This single account plays both source roles: its `network` is the network
+ * bonus and its `suggestedBy` earns the $2 page-suggestion share. Returns null
+ * when the handle is not in `twitterx-accounts` — callers must refuse the copy
+ * rather than silently record a sourceless post.
+ */
+export async function resolveOriginalAccount(originalLink: string): Promise<
+  { id: string; name: string; network: SmmNetwork } | null
+> {
+  const doc = await findAccountByHandle(extractAccountHandle(originalLink));
+  if (!doc) return null;
+  const d = doc.data() ?? {};
+  return {
+    id: doc.id,
+    name: (d.accountName as string) ?? '',
+    network: (d.network ?? 'Other') as SmmNetwork,
+  };
 }
 
 // ─── User resolution (disputes resolveNames pattern) ─────────────────

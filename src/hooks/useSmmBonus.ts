@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from 'react';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { getCache, invalidateCacheByPrefix, setCache } from '@/lib/queryCache';
-import type { SmmBonusRound, SmmSubmission } from '@/types/firestore';
+import type { SmmBonusRound, SmmNetwork, SmmSubmission } from '@/types/firestore';
 
 export interface UserTotalRow {
   uid: string;
@@ -37,6 +37,14 @@ export interface EligibilityResult {
   source?: 'post' | 'submission';
   daysDiff?: number | null;
   detail?: { link: string; userName: string; date: string | null };
+  /** The handle parsed out of the link ('' when it isn't a profile/post URL). */
+  handle: string;
+  /**
+   * The account that handle resolves to in `twitterx-accounts` — the copy's
+   * origin AND the post's "uploaded from" source (its network pays the network
+   * bonus). null when the handle isn't in the database, which blocks the copy.
+   */
+  account: { id: string; name: string; network: SmmNetwork } | null;
 }
 
 export interface SubmitBonusPayload {

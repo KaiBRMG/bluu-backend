@@ -45,7 +45,7 @@ The UI mirrors this with the shared `TierField` (greyed out with *"Only bonus ac
 ### Denormalization (frozen at write time)
 - `posts.accountName` — denormalized from the account so calendars/tables render without an account read. On account rename, the PATCH route fans the new name out to the account's posts (chunked batches). Bonus submissions keep their frozen copies by design.
 - `posts.postLinkNormalized`, `posts.originalLinkNormalized`, `submissions.originalLinkNormalized` — `normalizePostLink()` output, stored so the viral-copy lookup can use equality queries (Firestore can't suffix-match). **Always** recomputed at every write boundary that sets the link.
-- `posts.sourceAcc`/`sourceAccName` — the creator page the content was uploaded from, chosen from the viral-account list when the post is scheduled and **editable afterwards** (SMMs forget it, and unlike the copy declaration it carries no time-sensitive check).
+- `posts.sourceAcc`/`sourceAccName` — the creator page the content was uploaded from. **Never entered by hand and never editable**: it is *derived* from the viral-copy declaration — the account the original post lives on, looked up from the pasted link by `resolveOriginalAccount()` — so it always equals `originalAcc`. A post that is not a copy has no source (⇒ network `'Other'` ⇒ no network bonus). Posts created before this change may still carry a hand-picked source that differs from `originalAcc`; the submission route handles both.
 - `submissions.network`/`sourceAcc`/`sourceAccName`/`tier`/`accountName` — frozen at submission time so later account/post edits never change historical bonuses.
 
 ### Indexes (`firestore.indexes.json`)
@@ -59,7 +59,7 @@ First `COLLECTION_GROUP` indexes in the repo: `posts (postedBy, postDate)` asc +
 
 | Route | Gate | Ownership |
 |---|---|---|
-| `accounts` GET `?scope=mine\|active\|viral\|all[&network=]` | mine/active: either; viral: xaccounts **or dashboard** (the schedule form needs the creator list to attribute uploads); all: admin | mine = `assigned==uid` + active; `all&network=` filters one group (single-equality, auto-indexed) for the admin database's lazy load |
+| `accounts` GET `?scope=mine\|active\|viral\|all[&network=]` | mine/active: either; viral: xaccounts (or admin); all: admin | mine = `assigned==uid` + active; `all&network=` filters one group (single-equality, auto-indexed) for the admin database's lazy load |
 | `accounts` POST, `accounts/[id]` PATCH/DELETE | admin | DELETE also `recursiveDelete`s the posts subtree |
 | `posts` GET `?view=week\|all`, `?accountId=` | dashboard (accountId: either) | own posts; inactive-account posts filtered out server-side |
 | `posts` GET `?view=week&scope=all` | admin | **every** user's posts in the range, with `postedByName`/`postedByPhotoURL` resolved — powers the admin **Content Schedule** calendar. Pure `postDate` range on the `posts` collection group — needs the `posts.postDate` **COLLECTION_GROUP** single-field override (collection-group single-field indexes are NOT auto-created) |
@@ -68,7 +68,7 @@ First `COLLECTION_GROUP` indexes in the repo: `posts (postedBy, postDate)` asc +
 | `bonus/rounds` GET/POST | GET per scope; POST admin | |
 | `bonus/rounds/[roundId]/totals` PATCH | admin | absolute payout override |
 | `bonus/rounds/[roundId]/submissions/[submissionId]` PATCH/DELETE | admin | applies the totals delta (below) |
-| `bonus/eligibility` GET `?link=` | dashboard | advisory — re-checked when the **post is created** |
+| `bonus/eligibility` GET `?link=` | dashboard | advisory — re-checked when the **post is created**. Also returns `handle` + the resolved `account` (`{id,name,network}` or `null`) so the dialog can show the source and block an unknown one |
 | `bonus/submissions` POST | dashboard | own post; account type must contain 'Bonus' and carry a tier; server computes everything |
 | `suggestions` GET | admin | pending viral-page nominations |
 | `suggestions` POST | viral | submitter + timestamp + handle all derived server-side |
@@ -84,7 +84,7 @@ First `COLLECTION_GROUP` indexes in the repo: `posts (postedBy, postDate)` asc +
 
 **The two inputs come from two different accounts** — the single most confusable thing in this subsystem:
 - `tier` ← the **page the SMM posted on** (`accountId`). Only bonus accounts are tiered.
-- `network` ← the **creator page the content was uploaded from** (`post.sourceAcc`). The manual pays the network bonus for uploading *from* the inhouse / X managed / twink lists, so it is a property of the source, not of your page. No recorded source ⇒ `'Other'` ⇒ no network bonus.
+- `network` ← the **creator page the content was uploaded from** (`post.sourceAcc`, i.e. the account the copied original lives on). The manual pays the network bonus for uploading *from* the inhouse / X managed / twink lists, so it is a property of the source, not of your page. No recorded source — which now means "not declared as a copy" — ⇒ `'Other'` ⇒ no network bonus.
 - `hasOriginalLink` ← the post's stored viral-copy declaration.
 
 Pipeline:
@@ -100,10 +100,11 @@ Both are written as their own `isResidual: true` submission docs so an admin app
 ### The viral-copy declaration happens at UPLOAD time
 "Did you copy another viral post?" is **step one of scheduling a post** (`ViralCopyDialog` → `CreatePostDialog`), not part of applying for a bonus. Rationale: the 2-week source rule is only actionable while the SMM can still choose a different source.
 
-- The dialog runs `bonus/eligibility` and shows **"✅ Eligible"** or **"⚠️ Already Used Recently"** (with the original's upload date + uploader). An ineligible source **blocks** the copy — the SMM picks another source or answers "No" and schedules an ordinary post.
-- `POST /api/smm/posts` **re-runs the same check** (`checkViralEligibility`) and only then stores `isViralCopy`/`originalLink`/`originalAcc`. The client's answer is never trusted.
+- **The account is never typed in.** `extractAccountHandle()` pulls the handle out of the pasted link and `findAccountByHandle()` resolves it against `twitterx-accounts` (three casings in one `in` query — the sheet import is upper-case). That account is *both* the copy's origin and the post's `sourceAcc`, so it is what pays the network bonus; letting the SMM pick it by hand would let them point a post at a better-paying network.
+- The dialog runs `bonus/eligibility` (which returns `handle` + the resolved `account`) and shows **"✅ Eligible"**, **"⚠️ Already Used Recently"**, or **"⚠️ Account Not Found"**. Any of the last two **blocks** the copy — the SMM picks another source or answers "No" and schedules an ordinary post. **A handle that isn't in the database is a hard stop**, not a sourceless post.
+- `POST /api/smm/posts` **re-runs both checks** (`checkViralEligibility` + `resolveOriginalAccount`) and only then stores `isViralCopy`/`originalLink`/`originalAcc`/`sourceAcc`. It takes only `originalLink` from the client — no account id is accepted from the browser at all.
 - `findLinkUsage` searches posts by `postLinkNormalized` **and** by `originalLinkNormalized`, plus submissions by `originalLinkNormalized` — a source claimed by another SMM's *upload* counts as used straight away, not only once their bonus is filed.
-- The post PATCH allowlist deliberately **excludes** the viral fields, so a copy cannot be declared (or un-declared) after the fact. An account move copies the whole doc, so the declaration follows the post.
+- The post PATCH allowlist deliberately **excludes** the viral fields **and `sourceAcc`**, so neither the copy nor the network it pays can be changed after the fact. An account move copies the whole doc, so the declaration follows the post.
 
 ### Submission flow (`bonus/submissions` POST)
 Load post (must be caller's) → load account: **type must contain 'Bonus'** and its tier must be 1 or 2 (else 400 — the dashboard shows the same "not a bonus account" dialog before opening the wizard) → require now within the current round window (else 400) → read the viral-copy declaration **off the post** (never off the request body) → reject a duplicate `postLinkNormalized` in the round → `calculateBonus` → single batch writing the submission plus an optional **residual** submission for the original account's `assigned` owner (`isResidual: true`, `✅ Qualified`). **No `userTotals` write here.**
@@ -142,6 +143,7 @@ A read-only listing of every **active** account with `isViralBonus`, grouped by 
 
 ## Gotchas
 - **Two accounts, two roles.** A bonus involves the page the SMM *posted on* (tier, ownership, must be a 'Bonus' type) and the creator page they *uploaded from* (`sourceAcc` — network bonus + the $2 suggestion share). Reading `network` off the posting account is the mistake to avoid: the Twitter Management import gives every posting page `network: 'Other'`, so that bug is silent — it just pays nobody.
+- **The source account is derived, not asked for.** It is the account the copied original lives on, resolved from the link in the viral-copy step. There is no "Uploaded from" input anywhere in the UI any more (`SourceAccountField` is gone) — the only way a post gets a source, and therefore a network bonus, is by declaring a copy. `scope=viral` on the accounts route was consequently narrowed to `smm-xaccounts`/`smm-admin`; the dashboard no longer reads that list.
 - **Post dates carry a time of day.** The qualifying windows are measured in hours (3d12h / 5d12h / 7d12h) from the post timestamp, so the schedule captures a time — `DateTimePicker` (calendar + native time input), not `DatePicker`. Everything that renders a post/submission date uses `'PPp'`, calendar cards show `HH:mm`, and a day column is ordered by time. `DatePicker` remains for round windows.
 - **Inactive accounts** must never surface on the dashboard — filtered server-side (posts routes drop them; dropdowns use `scope=mine`/`active`). Enforced in the query layer, not the UI.
 - **Subcollections** are NOT covered by the user-deletion cascade; `submittedBy`/`postedBy` are audit refs, kept like `disputes.createdBy`.
