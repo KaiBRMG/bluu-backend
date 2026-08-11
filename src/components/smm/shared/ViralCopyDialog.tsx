@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -76,6 +77,14 @@ export function ViralCopyDialog({
   const accountFound = !!eligibility?.account;
   const canContinue = !!eligibility?.eligible && accountFound;
 
+  // The single verdict, in the order the gates are applied: an unknown account
+  // blocks regardless of age, so it wins over the two-week rule.
+  const statusLabel = !accountFound
+    ? 'Account not found'
+    : eligibility?.eligible
+      ? (eligibility.found ? 'Eligible — old enough to copy' : 'Eligible — never used')
+      : 'Already used recently';
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
@@ -125,35 +134,49 @@ export function ViralCopyDialog({
               </DialogDescription>
             </DialogHeader>
 
-            {(accountFound || eligibility.found) && (
-              <div className="rounded-lg border p-3 space-y-1 text-sm">
-                {eligibility.account && (
-                  <p>
-                    <span className="text-muted-foreground">Account: </span>
-                    {eligibility.account.name}
-                    <span className="text-muted-foreground"> ({eligibility.account.network})</span>
-                  </p>
-                )}
-                {eligibility.found && (
-                  <>
-                    <p>
-                      <span className="text-muted-foreground">Uploaded: </span>
-                      {eligibility.detail?.date ? format(new Date(eligibility.detail.date), 'PPp') : '—'}
-                    </p>
-                    <p>
-                      <span className="text-muted-foreground">Uploaded by: </span>
-                      {eligibility.detail?.userName || '—'}
-                    </p>
-                    {eligibility.daysDiff != null && (
-                      <p className="tabular-nums">
-                        <span className="text-muted-foreground">Age: </span>
-                        {eligibility.daysDiff} day{eligibility.daysDiff === 1 ? '' : 's'} ago
-                      </p>
-                    )}
-                  </>
-                )}
+            {/* The full status of the original, ALWAYS rendered — pass or fail.
+                Every row is present in every outcome so the SMM can see why a
+                link was accepted or refused (missing values read as "—"). */}
+            <div className="rounded-lg border p-3 space-y-1.5 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Status</span>
+                <Badge variant={canContinue ? 'secondary' : 'destructive'}>{statusLabel}</Badge>
               </div>
-            )}
+              <p className="break-all">
+                <span className="text-muted-foreground">Original link: </span>
+                {originalLink.trim() || '—'}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Account: </span>
+                {eligibility.account
+                  ? <>{eligibility.account.name}<span className="text-muted-foreground"> ({eligibility.account.network})</span></>
+                  : <span className="text-destructive">
+                      {eligibility.handle ? `@${eligibility.handle} — not in the account database` : 'Not found in the database'}
+                    </span>}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Previously used: </span>
+                {eligibility.found
+                  ? `Yes — as ${eligibility.source === 'submission' ? 'a bonus submission source' : 'a scheduled post'}`
+                  : 'No — this original has not been used before'}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Posted by: </span>
+                {eligibility.found ? (eligibility.detail?.userName || 'Unknown') : '—'}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Post date: </span>
+                {eligibility.found && eligibility.detail?.date
+                  ? format(new Date(eligibility.detail.date), 'PPp')
+                  : '—'}
+              </p>
+              <p className="tabular-nums">
+                <span className="text-muted-foreground">Age: </span>
+                {eligibility.found && eligibility.daysDiff != null
+                  ? `${eligibility.daysDiff} day${eligibility.daysDiff === 1 ? '' : 's'} ago`
+                  : '—'}
+              </p>
+            </div>
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setStep('ask')}>Back</Button>

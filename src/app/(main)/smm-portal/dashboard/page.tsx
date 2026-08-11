@@ -112,7 +112,10 @@ export default function SmmDashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Left ~75%: upload schedule */}
           <section className="lg:col-span-3 space-y-3">
-            <h2 className="text-lg font-semibold">📅 Upload Schedule</h2>
+            <div className="space-y-0.5">
+              <h2 className="text-lg font-semibold">📅 Upload Schedule</h2>
+              <p className="text-sm text-muted-foreground">Click on a day to schedule a post</p>
+            </div>
             <WeekCalendar
               posts={weekPosts}
               loading={weekLoading}
