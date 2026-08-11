@@ -46,35 +46,109 @@ The same Vercel project serves **two hosts**, and the difference matters:
 
 All renderer↔main communication goes through `preload.js` → `window.electronAPI`. Types live in `src/types/electron.d.ts` (new/optional APIs are typed `?:` because older builds lack them). Renderer must always feature-detect.
 
+> **Everything under `window.*` is sender-scoped** — see [Multi-window](#multi-window-the-main-window-and-its-satellites). A handler resolves its window from `BrowserWindow.fromWebContents(event.sender)`, so a satellite that calls `setSize` resizes *itself*.
+
 | `electronAPI.*` | Direction | Main handler | Notes |
 |---|---|---|---|
 | `auth.startGoogleOAuth()` | invoke | `auth:start-google-oauth` | opens `/auth/google` in the external browser |
 | `auth.onOAuthCallback/onOAuthError` | main→renderer | — | fired from the `bluu://` deep-link handler |
-| `window.setResizable/setSize` | send | `window:set-*` | resize the desktop window (login vs app); `setSize` **clamps to the work area** then re-centers |
+| `window.setResizable/setSize` | send | `window:set-*` | resize the calling window (login vs app); `setSize` **clamps to the work area** then re-centers |
 | `window.getSize()` | invoke | `window:get-size` | current **outer** window size `[w,h]`; used to persist user resizes without title-bar drift |
 | `window.getState()` | invoke | `window:get-state` | `{ width, height, isMaximized }` — outer size **plus** maximize state (optional; absent pre-fix) |
-| `window.getWorkArea()` | invoke | `window:get-work-area` | work area of the display the window is on, in **DIPs** (optional; absent pre-fix) |
-| `window.maximize()` | send | `window:maximize` | restore a persisted maximized state (optional; absent pre-fix) |
+| `window.getWorkArea()` | invoke | `window:get-work-area` | work area of the display the calling window is on, in **DIPs** (optional; absent pre-fix) |
+| `window.maximize/minimize/focus()` | send | `window:*` | (optional) |
+| `window.close()` | send | `window:close` | **satellites only** — main ignores it for the main window, which must close through the clock-out flush (v0.10.0+) |
+| `window.setAlwaysOnTop(bool)` / `isFocused()` / `setZoom(f)` / `getZoom()` | both | `window:*` | per-window; `setZoom` is remembered on the record so a reload keeps it instead of snapping back to 0.9 (v0.10.0+) |
+| `window.setOverlayIcon(dataUrl, desc)` | send | `window:set-overlay-icon` | **Windows** taskbar badge. The *renderer* draws the image, so the badge restyles without a native build. No-op elsewhere (v0.10.0+) |
+| `window.flashFrame(bool)` | send | `window:flash-frame` | Windows/Linux taskbar attention (v0.10.0+) |
 | `window.onUserResized(cb)` | main→renderer | `window:user-resized` | **user-initiated** resize/maximize only — never the programmatic auto-size (optional; absent pre-fix) |
-| `onlyfans.openWindow(idToken)` | invoke | `onlyfans:open-window` | Spawns the OF Manager satellite window. **Verifies the page permission server-side first** (POSTs the token to `/api/onlyfans/access`); single-instance; **not** an Electron child window — see [onlyfans-crm.md](onlyfans-crm.md#the-window). Optional — feature-detect. See [onlyfans-crm.md](onlyfans-crm.md) |
+| `window.onFocusChange(cb)` | main→renderer | `window:focus-changed` | focus/blur of *this* window — decide whether a message deserves a notification (v0.10.0+) |
+| `window.openSatellite(idToken, opts)` | invoke | `window:open-satellite` | the generalised spawner (v0.10.0+). `closeSatellite(key)` / `listSatellites()` alongside it |
+| `onlyfans.openWindow(idToken, opts?)` | invoke | `onlyfans:open-window` | Same handler, legacy name. Spawns an OF satellite; **verifies the page permission server-side first**; one window per `key`; **not** an Electron child window. Optional — feature-detect. See [Multi-window](#multi-window-the-main-window-and-its-satellites) and [onlyfans-crm.md](onlyfans-crm.md#the-window) |
 | `timeTracking.getIdleTime()` | invoke | `timeTracking:getIdleTime` | `powerMonitor.getSystemIdleTime()` |
 | `timeTracking.getActivitySince(sinceMs)` | invoke | `timeTracking:getActivitySince` | 5s idle-time samples (45-min rolling buffer) for accurate activity % |
 | `timeTracking.captureScreenshot()` | invoke | `timeTracking:captureScreenshot` | `desktopCapturer`, all screens → base64 PNGs |
 | `timeTracking.setPowerSaveBlocker(bool)` | invoke | `timeTracking:setPowerSaveBlocker` | keep display awake while working |
-| `notifications.show(opts)` | invoke | `notifications:show` | native `Notification` + optional renderer sound/navigate |
+| `notifications.show(opts)` | invoke | `notifications:show` | native `Notification` + optional renderer sound/navigate. **Routed to a window** via `opts.target` — see [Notifications](#notifications-routed-to-a-window) |
+| `notifications.close(id)` | invoke | `notifications:close` | dismiss a banner shown with that `id` (v0.10.0+) |
+| `notifications.onActivated/onReply/onAction(cb)` | main→renderer | `notification:*` | click (with `id`), macOS inline reply text, action-button index (v0.10.0+) |
+| `clipboard.readImage()` | invoke | `clipboard:readImage` | `{dataUrl,width,height}` or null. The **only** clipboard read path — `clipboard-read` stays denied (v0.10.0+) |
+| `files.save(opts)` | invoke | `dialog:saveFile` | native save dialog + write. Renderer supplies bytes, never a path (v0.10.0+) |
+| `files.download(opts)` | invoke | `download:start` | streams an http(s) URL to disk with a save dialog — for large media. Progress via `onDownloadProgress`/`onDownloadDone` (v0.10.0+) |
+| `files.showInFolder/open(path)` | invoke | `shell:*` | **only** paths this session wrote (v0.10.0+) |
 | `permissions.requestScreenAccess/requestNotification` | invoke | `permissions:*` | OS permission prompts |
 | `app.getPlatform()` | invoke | `app:getPlatform` | `process.platform` |
 | `app.getVersion()` / `getVersions()` | invoke | `app:getVersion` / `app:getVersions` | fleet version reporting + update nudge |
+| `app.setBadgeCount(n)` | invoke | `app:setBadgeCount` | macOS/Linux dock number. Windows has none — use `window.setOverlayIcon` (v0.10.0+) |
+| `app.bounceDock(type)` / `cancelBounce(id)` | both | `app:bounceDock` / `app:cancelBounce` | macOS dock bounce (v0.10.0+) |
+| `app.getPendingDeepLink()` / `onDeepLink(cb)` | invoke / main→renderer | `app:getPendingDeepLink` / `deeplink:route` | **non-OAuth** `bluu://` URLs, parsed but uninterpreted — see [Deep-link OAuth](#deep-link-oauth-bluu) (v0.10.0+) |
 | `app.signalReady()` | send | `app:ready` | renderer signals React mounted |
 | `app.closingFlushed()` | send | `app:closing-flushed` | renderer acks it finished flushing on close (see Clock-out flush) |
-| `app.retryLoad()` | send | `app:retry-load` | offline screen "Try again" |
-| `power.onEvent(cb)` | main→renderer | — | native `suspend`/`resume`/`lock`/`unlock` (see Power events) |
-| `bugs.onReport(cb)` | main→renderer | — | main-process errors forwarded so renderer POSTs `/api/bugs` |
+| `app.retryLoad()` | send | `app:retry-load` | offline screen "Try again" — reloads the **calling window's own** route |
+| `power.onEvent(cb)` | main→renderer | — | native `suspend`/`resume`/`lock`/`unlock` (see Power events). Main window only |
+| `bugs.onReport(cb)` | main→renderer | — | main-process errors forwarded so renderer POSTs `/api/bugs`. Main window only |
 | `updater.getPending()` | invoke | `updater:getPending` | result of the start-up check (`{version}` or null); **v0.8.0+ — feature-detect** |
 | `updater.download()` | send | `updater:download` | begin download; only ever from an explicit user click. **v0.8.0+** |
 | `updater.onAvailable/onProgress/onStatus/onBeforeInstall`, `readyToInstall()` | both | `updater:*` | live on macOS; inert on Windows (auto-update is darwin-gated) |
 
+## Multi-window: the main window and its satellites
+
+The shell owns **one main window and zero or more satellites**. A satellite is a co-equal top-level window loading an app route (today: OF Manager); it is *not* an Electron child window — a parented window is pinned above its parent on macOS forever, which makes the main window unusable.
+
+**The rule that makes this work: no handler may close over `mainWindow`.** Every window-scoped IPC resolves its target with `BrowserWindow.fromWebContents(event.sender)`. Before v0.10.0 they were all hardwired to the main window, so a satellite calling `setSize` silently resized the *main* window. Per-window state (geometry floors, remembered zoom, offline backoff, crash counters) lives on a record in the `winRecords` map keyed by `win.id`, not in module-level variables.
+
+`attachWindowBehaviour(win, …)` applies one identical posture to every window: navigation (app origin in-window, everything else to the system browser), `did-fail-load` → offline screen with backoff, `render-process-gone` → auto-reload with a 3-per-60s loop guard, unresponsive reporting, manual-resize reporting, focus reporting, the 90% zoom default, and the context menu. Each window's offline screen retries **its own route**, not the app root.
+
+### Routes are a prefix allowlist, not an enum
+
+`openSatellite(idToken, { path, key, … })` accepts **any path under an allowlisted prefix**:
+
+```js
+const SATELLITE_PREFIXES = [
+  { prefix: '/of-manager', accessPath: '/api/onlyfans/access', title: 'OF Manager' },
+];
+```
+
+So `/of-manager`, `/of-manager/chat/abc`, `/of-manager/vault` all work — a popped-out chat window, a media viewer or a vault browser ships as a **renderer-only change**. Adding a whole new *prefix* is the only thing that needs a native build, because each prefix names the access route that guards it.
+
+The path is treated as untrusted input: same origin, under a prefix, no `..`, no `\`, no protocol-relative host. `key` identifies the window instance (defaults to the path) — a repeat call with the same key **focuses** the existing window rather than spawning a second. Capped at `SATELLITE_MAX` (8) windows.
+
+**Permission is verified server-side before the window is created:** main POSTs the renderer's Firebase ID token to the prefix's `accessPath` and only proceeds on a 200. Hiding the sidebar item is a convenience; this is the gate a determined renderer cannot skip.
+
+Satellites are destroyed on the main window's `closed` (hooked to `closed`, not `close`, so the clock-out flush veto still runs). Without that, `window-all-closed` never fires and the app never quits. Satellites themselves have **no** close flush — they hold no time-tracking state.
+
+## Notifications: routed to a window
+
+`notifications.show({ …, target })` picks the destination: omitted → **the calling window** (identical to the old main-window-only behaviour when called from the main window), `'main'` → the main window, any other string → that satellite key (falling back to main). Click focuses *that* window and sends `notification:navigate` to it — a new-DM alert raised by the OF window must not drag the operator out of the inbox.
+
+- `id` — stable identity. A repeat `show` with the same id **replaces** the banner instead of stacking five alerts for one chat, and it is echoed back on click/reply/action. It is also the handle for `notifications.close(id)`.
+- `hasReply` + `replyPlaceholder` — macOS inline reply. The text arrives on `onReply`; it deliberately does **not** focus the window, because replying inline exists precisely so the operator doesn't have to switch.
+- `actions` — up to 3 macOS buttons; the index arrives on `onAction`.
+
+## Unread badges
+
+Three mechanisms, because badge support is per-platform and none of it has a web equivalent. The renderer picks:
+
+- **macOS / Linux** — `app.setBadgeCount(n)`, a real dock number.
+- **Windows** — no numeric badge exists. `window.setOverlayIcon(dataUrl, desc)` takes an image the **renderer** draws (canvas → data URL), so the badge can be restyled without shipping a native build. `null` clears it.
+- **Attention** — `window.flashFrame(true)` (Windows/Linux) and `app.bounceDock()` (macOS).
+
+## Right-click menu and spellcheck
+
+Chromium's spellchecker is on by default, but **Electron renders no suggestion UI unless the main process builds the menu** — and without a `context-menu` handler there is no cut/copy/paste either. `attachContextMenu(win)` builds one from `params`: spelling suggestions + "Add to Dictionary" when `misspelledWord` is set, link open/copy, image copy/save, then the editing roles gated on `params.editFlags`, plus Inspect Element in dev. It is attached to every window.
+
+## Saving files
+
+Two paths, both consented through a native save dialog, and the renderer **never names a filesystem path**:
+
+- `files.save({ suggestedName, filters, dataBase64 })` — main shows the dialog and writes the bytes. Capped at ~200 MB decoded.
+- `files.download({ url, suggestedName })` — main calls `webContents.downloadURL` and a session-wide `will-download` handler sets the save-dialog default and forwards `download:progress` / `download:done`. Use this for large media so the bytes never sit in renderer memory. http(s) only.
+
+`files.showInFolder(path)` / `files.open(path)` are restricted to the `savedPaths` set — paths this session actually wrote. An arbitrary path from the renderer is refused.
+
 ## Window sizing & persistence
+
+> This section describes the **main** window. The same IPCs work for a satellite (they are sender-scoped), but the persistence policy below — the `bluu_window_size` key, login/logout triggers — is main-window policy in the renderer. A satellite that wants to remember its size needs its own key; do not reuse this one.
 
 The window opens at `1430×870`, `resizable:false` for the login page (`minWidth/minHeight` `1024×720` guard once resizing is enabled). **Both the initial size and the min sizes are capped by the primary display's work area** — a 1920×1080 @150% Windows laptop has only `1280×672` DIPs, and an un-resizable window larger than that is unusable.
 
@@ -96,7 +170,7 @@ Each of these was, on its own, enough to make the window open larger than the us
 
 1. **Never persist maximized bounds.** On Windows a maximized window's outer bounds include the invisible resize border — so saving them and replaying them via `setSize` on an un-maximized window yields a window wider than the display. Main tracks `lastNormalSize` and reports *that* (plus an `isMaximized` flag) in both `window:get-state` and `window:user-resized`, so un-maximizing on a later launch still lands somewhere sane.
 2. **Never derive geometry from `window.screen.*`.** Those are CSS pixels — the forced 90% zoom skews them — and they describe whichever display Chromium considers current, not the one the window is on. Use `window.getWorkArea()` (DIPs, `screen.getDisplayMatching(...)`). The `window.screen` path survives only as a fallback for older installed builds.
-3. **The main process clamps every `setSize`.** `window:set-size` fits the requested size into `screen.getDisplayMatching(win.getBounds()).workAreaSize` before applying it — the renderer's numbers are never trusted verbatim, because a size persisted on a larger monitor, on an older build, or before a DPI change will otherwise reopen off-screen. `screen`'s `display-metrics-changed` / `display-added` / `display-removed` re-clamp mid-session (unplugging an external monitor, RDP at a lower resolution, a scaling change), skipping maximized/full-screen windows.
+3. **The main process clamps every `setSize`.** `window:set-size` fits the requested size into `screen.getDisplayMatching(win.getBounds()).workAreaSize` before applying it — where `win` is the **calling** window, and the floor comes from that window's record (the main window's `1024×720`, or the satellite's own minimums) — the renderer's numbers are never trusted verbatim, because a size persisted on a larger monitor, on an older build, or before a DPI change will otherwise reopen off-screen. `screen`'s `display-metrics-changed` / `display-added` / `display-removed` re-clamp mid-session (unplugging an external monitor, RDP at a lower resolution, a scaling change), skipping maximized/full-screen windows.
 
 All four new IPCs are **optional** in `electron.d.ts` and feature-detected. On an older installed build the renderer falls back to `window.screen` for the auto-size and — lacking `onUserResized` — never persists a size at all, so it auto-sizes on every launch. That is the correct default rather than a regression: the authoritative clamp and manual-size persistence both arrive with the native update.
 
@@ -105,18 +179,20 @@ All four new IPCs are **optional** in `electron.d.ts` and feature-detected. On a
 ## Window load flow, offline fallback
 
 - **Dev** (`ELECTRON_DEV=true`): loads `http://localhost:3000` directly.
-- **Prod**: `loadFile(loading.html)` → on `did-finish-load` → `loadAppUrl()` (Vercel).
-- `did-fail-load` (main frame, non-abort) on the app URL → `showOfflineScreen()` (loads `offline.html`, schedules a capped exponential-backoff retry). Successful app load clears the backoff. The offline page's button and the `online` event call `app.retryLoad()`.
-- `will-navigate` / `setWindowOpenHandler`: same-origin app navigation stays in-window; everything else is opened in the external browser via `openExternalSafe()` (**http/https/mailto only** — never `file:` or custom schemes).
+- **Prod**: `loadFile(loading.html)` → on `did-finish-load` → `loadAppUrl()` (Vercel). Satellites skip the splash and load their route directly.
+- `did-fail-load` (main frame, non-abort) on the app URL → `showOfflineScreen(win)` (loads `offline.html`, schedules a capped exponential-backoff retry **to that window's own route**). Successful app load clears the backoff. The offline page's button and the `online` event call `app.retryLoad()`, which is sender-scoped.
+- `will-navigate` / `setWindowOpenHandler`: same-origin app navigation stays in-window; everything else is opened in the external browser via `openExternalSafe()` (**http/https/mailto only** — never `file:` or custom schemes). Renderer-initiated `file://` navigation is allowed **only** to `loading.html` / `offline.html` by exact URL — the previous blanket `file://` allowance was unnecessary and the OF window renders fan-supplied content. (`loadFile`/`loadURL` from main do not emit `will-navigate`, so this restricts pages, not us.)
 
 ## Deep-link OAuth (`bluu://`)
 
 OAuth runs in the system browser (native `signInWithCustomToken` flow, not `signInWithPopup`). The browser redirects to `bluu://callback?code=…`; the OS hands it to the app via `open-url` (macOS) or `second-instance` argv (Windows; single-instance lock enforced). `handleDeepLink` parses the code and sends `oauth-callback`/`oauth-error` to the renderer (`src/components/Login.tsx`). If the window isn't ready, the URL is stashed and replayed on `did-finish-load`.
 
+**Any other `bluu://` URL is a routing request the shell deliberately does not interpret.** It is parsed into `{ url, host, pathname, params }` and handed to the main window on `deeplink:route`; the renderer owns routing policy and can, for example, turn `bluu://of/chat/123` into `openSatellite(token, { path: '/of-manager/chat/123' })`. New deep-link routes therefore never need a native build. The payload is also cached and readable once via `app.getPendingDeepLink()` — same pattern as `updater:getPending`, because the URL can arrive before React mounts and the event alone would be missed.
+
 ## Robustness (crash recovery, unresponsive)
 
-The renderer *is* the product, so a renderer crash must not leave a blank window:
-- `render-process-gone` → report to `/api/bugs` (via `forwardErrorToRenderer` → `bug:report`), then auto-reload. A **loop-guard** (max 3 reloads / 60s) parks on the offline screen if it keeps crashing. `clean-exit` is ignored.
+The renderer *is* the product, so a renderer crash must not leave a blank window. All of this is applied by `attachWindowBehaviour` to **every** window, satellites included — before v0.10.0 the OF window had none of it and a Vercel hiccup left the operator with a blank window and no retry:
+- `render-process-gone` → report to `/api/bugs` (via `forwardErrorToRenderer` → `bug:report`, always delivered to the main window), then auto-reload. A **per-window loop-guard** (max 3 reloads / 60s) parks on the offline screen if it keeps crashing. `clean-exit` is ignored.
 - `unresponsive`/`responsive` and `child-process-gone` are logged/reported.
 - Main-process `uncaughtException`/`unhandledRejection` are forwarded to `/api/bugs` too.
 
@@ -171,7 +247,9 @@ Detecting the capability rather than branching on `win32` is deliberate: a pre-0
 - `openExternalSafe()` restricts `shell.openExternal` to http/https/mailto.
 - `setPermissionRequestHandler` + `setPermissionCheckHandler` deny every renderer permission request except **`clipboard-sanitized-write`** (`ALLOWED_PERMISSIONS` in `main.js`); screen capture uses `desktopCapturer`, not `getUserMedia`, so it's unaffected.
   - **Do not re-broaden this to a blanket deny.** `navigator.clipboard.writeText()` routes through these handlers, so denying it breaks every "copy link"/"copy" button in the app at once, app-wide — the failure surfaces only as a `Could not copy link` toast (or, where the caller has no `catch`, as nothing at all), which makes it easy to misread as a page bug. Regression history: the blanket deny shipped in v0.7.0 and broke copy everywhere until v0.8.3.
-  - `clipboard-read` stays denied — nothing here needs to read the user's clipboard, and sanitized write cannot.
+  - `clipboard-read` stays denied. Pasting a screenshot into a composer goes through the explicit **`clipboard.readImage()`** IPC instead: image only, never text, and only on a deliberate renderer call rather than a standing capability handed to every page.
+  - **Microphone/camera remain denied.** Voice messages would need `media` widened here — a native change, so decide before shipping, not after.
+- **Untrusted input from the renderer** — a satellite `path` is validated (same origin, allowlisted prefix, no traversal), `download.start` accepts http(s) only, `files.showInFolder/open` accept only paths this session wrote, and save targets always come from a native dialog rather than the renderer.
 - **Signing material** — `electron/build-assets/**` is **deny-by-default gitignored**; only `*.plist` and `*.png` are allowed back. The folder holds the Developer ID `.p12`, its base64 export, and the App Store Connect `.p8` — none may ever be committed. A private key was historically committed — purge from git history + rotate the cert is a pending manual follow-up.
 
 ## Screen-capture permission repair (macOS TCC, temporary)
@@ -229,6 +307,10 @@ The reset repairs the **next** scheduled capture, not the one that just failed. 
 
 - [ ] New local runtime file (html/asset) → add it to `build.files` or it won't be in the packaged asar.
 - [ ] New native IPC → type it **optional** in `src/types/electron.d.ts` and **feature-detect** in the renderer (older installed builds lack it).
+- [ ] **Never close over `mainWindow` in a window-scoped handler.** Resolve the window from `event.sender`, and put per-window state on the `winRecords` record — not in a module-level variable. See [Multi-window](#multi-window-the-main-window-and-its-satellites).
+- [ ] A new satellite **route** is renderer-only (any path under an allowlisted prefix). A new **prefix** needs a native build, because the prefix names the server-side access route that guards it.
+- [ ] New satellite window → it inherits crash/offline handling from `attachWindowBehaviour`. Don't hand-roll a second copy.
+- [ ] A notification raised from a satellite must carry `target` (or default to the sender) — routing it to `'main'` drags the operator out of the window they were working in.
 - [ ] Anything that must survive app close → route it through the `close`-event flush (`closingFlushed()`), not `before-quit`.
 - [ ] Window size persists via the single `localStorage` key `bluu_window_size`, cleared on logout — keep it **non**-per-uid (reset-on-logout is the spec). Save/restore via **outer** size (`getSize`/`setSize`) to avoid title-bar drift.
 - [ ] Window geometry: never persist maximized bounds, never size from `window.screen.*`, always clamp in main. See [Three rules that keep the window on-screen](#three-rules-that-keep-the-window-on-screen). Verify on a **scaled Windows display** (1920×1080 @150%) — maximize, quit, relaunch, log in.

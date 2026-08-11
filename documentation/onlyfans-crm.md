@@ -17,7 +17,7 @@
 | `src/app/api/onlyfans/webhook/[secret]/route.ts` | Provider push → Firestore mirror |
 | `src/app/of-manager/**` | The window: layout, guard, chat list, thread |
 | `src/hooks/useOnlyFansChats.ts` / `useOnlyFansMessages.ts` | Client data hooks |
-| `electron/main.js` (`onlyfans:open-window`) | Spawns the window after a **server-side** permission check |
+| `electron/main.js` (`openSatelliteWindow`) | Spawns the window after a **server-side** permission check. Reached via `onlyfans:open-window` (legacy name) or `window:open-satellite` |
 | `src/components/Sidebar.tsx` (`OfManagerButton`) | Sidebar entry — opens the window instead of navigating |
 
 ## Firestore
@@ -79,6 +79,10 @@ Two costs drive every decision here: **provider credits** (each call is billed) 
 
 `useOnlyFansMessages` merges **history** (provider pages) with the **live tail** (the `messages` subcollection), de-duplicating by message id — the same message legitimately appears in both once the next history page is fetched. Sent messages are written to the subcollection by the send route *and* by the `messages.sent` webhook; both write the same doc id, so it is idempotent.
 
+### Optimistic send has exactly one failure model
+
+A send inserts an optimistic row (`pending: true`) which the live listener replaces with the real message. **A send that fails removes its row and returns `false`; the composer restores the draft.** There is deliberately no `failed` message state: the earlier version kept a red bubble *and* refilled the composer, so the operator saw one unsent message twice, the ghost never cleared, and each retry appended another. The composer is the only place unsent text lives. `error` is cleared at the start of every attempt so a second identical failure still toasts.
+
 ### Webhooks are best-effort, never load-bearing
 
 The provider's OpenAPI document lists the event names but **not the payload bodies or delivery headers**, so both the signature check (`verifyWebhookSignature`) and the payload parse (`parseWebhookEvent`) sit **behind the adapter**, alongside every other provider-shaped concern — the route itself never touches a provider field. `parseWebhookEvent` probes each field across the plausible spellings; an unrecognised payload returns null and is 200'd rather than retried, because the app self-corrects on the next chat sync. Only a *failed Firestore write* returns 5xx (the one failure worth retrying).
@@ -124,14 +128,46 @@ Plus:
 Auth is shared with the main window for free — Firebase persists to IndexedDB, which is per-origin, and both windows load the same origin.
 
 Window properties that are part of the spec:
-- **Co-equal with the main window, never `parent: mainWindow`.** A parented window is pinned above its parent on macOS for as long as it lives, which leaves the main window permanently behind it and effectively unusable — operators need both windows and either one on top. The close-dependency is therefore enforced by hand: `mainWindow.on('closed', closeOfWindow)`. It is hooked to `closed` rather than `close` so the clock-out flush veto still runs, and it is not optional — without it `window-all-closed` never fires and the app never quits.
+- **Co-equal with the main window, never `parent: mainWindow`.** A parented window is pinned above its parent on macOS for as long as it lives, which leaves the main window permanently behind it and effectively unusable — operators need both windows and either one on top. The close-dependency is therefore enforced by hand: `mainWindow.on('closed', closeAllSatellites)`. It is hooked to `closed` rather than `close` so the clock-out flush veto still runs, and it is not optional — without it `window-all-closed` never fires and the app never quits.
 - `resizable: true` with its own minimums — sized independently of the main window.
-- Single instance — a second sidebar click focuses the existing window.
-- `will-navigate` / `setWindowOpenHandler` mirror the main window's posture (app origin in-window, everything else to the system browser).
+- One window per `key` — a second sidebar click focuses the existing window.
+- `will-navigate` / `setWindowOpenHandler` mirror the main window's posture (app origin in-window, everything else to the system browser), along with the offline screen, crash auto-reload and unresponsive reporting — all applied by the shared `attachWindowBehaviour`.
 
 `src/middleware.ts` is untouched: `/of-manager` is not on the browser allowlist, so browser traffic rewrites to `/desktop-only` exactly like the rest of the app.
 
 **Older installed builds** lack the `onlyfans:open-window` IPC. `OfManagerButton` feature-detects and falls back to navigating to `/of-manager` in the main window, so the feature works before the fleet updates (with the sidebar still rendered around it).
+
+### Sub-routes are renderer-only (v0.10.0+)
+
+The shell accepts **any path under `/of-manager`**, not a fixed route:
+
+```ts
+window.electronAPI?.onlyfans?.openWindow(idToken, {
+  path: '/of-manager/chat/abc',
+  key: 'of-chat:abc',
+  width: 520, minWidth: 380,
+});
+```
+
+So a popped-out chat, a vault browser or a media viewer is a **web deploy**, not a native release. The permission check still runs server-side per open, the path is validated as untrusted input, and 8 satellite windows is the cap. Only adding a *new prefix* (a non-`/of-manager` route) needs a native build. Full contract: [electron.md](electron.md#multi-window-the-main-window-and-its-satellites).
+
+### Native capability available to this window
+
+Everything the messaging surface is likely to want is already exposed, feature-detected off `window.electronAPI` (see the IPC table in [electron.md](electron.md#ipc-surface)):
+
+| Need | API |
+|---|---|
+| Unread count on the dock/taskbar | `app.setBadgeCount` (mac/Linux) · `window.setOverlayIcon` (Windows, renderer-drawn) · `window.flashFrame` / `app.bounceDock` |
+| New-DM alert that focuses **this** window | `notifications.show({ target, id, actionUrl })` |
+| Reply from the notification (macOS) | `notifications.show({ hasReply: true })` + `notifications.onReply` |
+| Suppress alerts for the visible thread | `window.onFocusChange` / `window.isFocused` |
+| Paste a screenshot into the composer | `clipboard.readImage()` |
+| Right-click cut/copy/paste + spellcheck | automatic — `attachContextMenu` |
+| Save a fan's media | `files.download({ url })` for large media, `files.save({ dataBase64 })` for small · `files.showInFolder` |
+| Remember this window's size | `window.getState` / `setSize` / `onUserResized` — **use your own storage key**, not `bluu_window_size` |
+| Open a chat from outside the app | `bluu://…` → `app.onDeepLink` / `getPendingDeepLink` |
+
+Attaching files needs nothing native — `<input type=file>` and drag-drop give a real `File`.
 
 ---
 
@@ -141,7 +177,9 @@ Implemented: chat list (search + All/Pinned/Unread filters, load older), thread 
 
 Deliberately **not** implemented: vault/media upload, PPV composition, per-function permissions, audit logs, time-tracking gating, linking to the `creators` collection, earnings, notifications. Media on existing messages renders as an attachment chip rather than an image — nothing here assumes text-only, but rendering signed CDN/DRM media is its own piece of work.
 
-The shape anticipates them: the adapter covers the whole provider surface, `chatDocId` is account-scoped, and `OF_PAGE_ID` is the single place the permission is named.
+The shape anticipates them: the adapter covers the whole provider surface, `chatDocId` is account-scoped, `OF_PAGE_ID` is the single place the permission is named, and the native shell (v0.10.0+) already exposes every capability the list above would need.
+
+> **One native unknown remains: DRM.** Stock Electron ships without Widevine. If any provider media is DRM-protected rather than a plain signed CDN URL, it cannot play at all, and the fix is a different Electron binary (the castlabs ECS fork) — a full re-sign and re-release, not an IPC. Verify how the provider serves media before promising in-window playback.
 
 ## Gotchas
 

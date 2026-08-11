@@ -34,9 +34,8 @@ export interface OFMessageRow {
   isTip: boolean;
   isOpened: boolean;
   mediaCount: number;
-  /** Set locally while a send is in flight. */
+  /** Set locally while a send is in flight. A send that fails is removed, not flagged. */
   pending?: boolean;
-  failed?: boolean;
 }
 
 const PAGE_SIZE = 30;
@@ -157,6 +156,9 @@ export function useOnlyFansMessages(accountId: string | null, chatId: string | n
   const send = useCallback(
     async (text: string) => {
       if (!chatId || !text.trim() || sending) return false;
+      // Cleared per attempt so a second identical failure still re-toasts — the
+      // toast fires on a *change* of `error`.
+      setError(null);
       const tempId = `pending-${Date.now()}`;
       setOptimistic((prev) => [
         ...prev,
@@ -184,9 +186,10 @@ export function useOnlyFansMessages(accountId: string | null, chatId: string | n
         if (message) setHistory((prev) => [message, ...prev]);
         return true;
       } catch (err) {
-        setOptimistic((prev) =>
-          prev.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m)),
-        );
+        // The composer is the single source of truth for unsent text: the caller
+        // restores the draft, so leaving a failed bubble behind would show the
+        // same message twice and never clear.
+        setOptimistic((prev) => prev.filter((m) => m.id !== tempId));
         setError(err instanceof Error ? err.message : 'Message failed to send');
         return false;
       } finally {

@@ -125,6 +125,7 @@ export default function SmmDashboardPage() {
               onDayClick={(date) => { setCreateDate(date); setViralCopy(null); setViralOpen(true); }}
               onShowAll={() => setShowAllOpen(true)}
             />
+            <BonusSection />
           </section>
 
           {/* Right ~25%: my accounts */}
@@ -137,8 +138,6 @@ export default function SmmDashboardPage() {
             />
           </section>
         </div>
-
-        <BonusSection />
       </div>
 
       {/* Dialogs */}

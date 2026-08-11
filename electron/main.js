@@ -1,13 +1,16 @@
 // electron/main.js
-const { app, BrowserWindow, session, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification, systemPreferences, screen: electronScreen } = require('electron');
+const { app, BrowserWindow, session, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification, systemPreferences, Menu, clipboard, dialog, screen: electronScreen } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
+const fsp = require('fs/promises');
+const { pathToFileURL } = require('url');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 
 const isDev = process.env.ELECTRON_DEV === 'true' || !app.isPackaged;
 const BASE_URL = isDev ? 'http://localhost:3000' : 'https://bluu-backend.vercel.app';
+const BASE_ORIGIN = new URL(BASE_URL).origin;
 
 // Custom protocol for OAuth callback
 const PROTOCOL = 'bluu';
@@ -23,6 +26,31 @@ if (process.defaultApp) {
 } else {
   const registered = app.setAsDefaultProtocolClient(PROTOCOL);
   console.log(`Protocol ${PROTOCOL}:// registration (prod):`, registered);
+}
+
+// ─── Window plumbing shared by the main window and every satellite ────
+// Everything below is deliberately window-agnostic. Handlers resolve the window
+// from `event.sender` rather than closing over `mainWindow`, so a satellite that
+// calls window.setSize() resizes *itself* — the single most important property
+// of this file now that more than one window exists. See documentation/electron.md.
+
+// win.id -> per-window record (geometry floors, offline backoff, crash counters)
+const winRecords = new Map();
+
+function sendTo(win, channel, payload) {
+  if (win && !win.isDestroyed() && win.webContents && !win.webContents.isDestroyed()) {
+    win.webContents.send(channel, payload);
+  }
+}
+
+function senderWindow(event) {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return win && !win.isDestroyed() ? win : null;
+}
+
+function recordFor(win) {
+  if (!win || win.isDestroyed()) return null;
+  return winRecords.get(win.id) || null;
 }
 
 // Handle deep links (macOS)
@@ -59,6 +87,11 @@ if (!gotTheLock) {
     }
   });
 }
+
+// A non-OAuth deep link the renderer has not collected yet. Same pattern as
+// `updater:getPending`: the event alone is unreliable because the renderer may
+// mount *after* the URL arrives, so the payload is also readable on demand.
+let pendingDeepLinkRoute = null;
 
 function handleDeepLink(url) {
   console.log('Deep link received:', url);
@@ -98,13 +131,27 @@ function handleDeepLink(url) {
       } else {
         console.error('mainWindow or webContents not available');
       }
-    } else {
-      console.log('Deep link host/pathname does not match callback. Host:', urlObj.host, 'Pathname:', urlObj.pathname);
+      return;
     }
+
+    // Any other bluu:// URL is a routing request. The shell deliberately does not
+    // interpret it — it hands the parsed parts to the renderer, which owns routing
+    // policy and can (for example) turn bluu://of/chat/123 into a satellite window.
+    // Adding a new deep-link route therefore never needs a native build.
+    const params = {};
+    urlObj.searchParams.forEach((value, key) => { params[key] = value; });
+    pendingDeepLinkRoute = { url, host: urlObj.host, pathname: urlObj.pathname, params, at: Date.now() };
+    sendTo(mainWindow, 'deeplink:route', pendingDeepLinkRoute);
   } catch (err) {
     console.error('Error parsing deep link:', err);
   }
 }
+
+ipcMain.handle('app:getPendingDeepLink', () => {
+  const route = pendingDeepLinkRoute;
+  pendingDeepLinkRoute = null;
+  return route;
+});
 
 // IPC handlers for OAuth
 ipcMain.handle('auth:start-google-oauth', async () => {
@@ -116,101 +163,7 @@ ipcMain.handle('auth:start-google-oauth', async () => {
   return { success: true };
 });
 
-// ─── OF Manager window ───────────────────────────────────────────────
-// OnlyFans messaging lives in its own window, spawned from the sidebar. Three
-// properties are load-bearing:
-//   • **Co-equal with the main window, not a child.** It is deliberately NOT
-//     created with `parent: mainWindow`: on macOS a parented window is pinned
-//     above its parent forever, so the main window sits permanently behind it
-//     and cannot be worked in. Operators need both windows side by side and
-//     either one on top, so the close-dependency below is enforced by hand
-//     (`closeOfWindow()` on the main window's `closed`) instead.
-//   • `resizable: true` with its own minimum — operators size the inbox
-//     independently of the main window, which is locked to its own geometry.
-//   • single instance — a second click focuses the existing window.
-//
-// Permission is verified SERVER-SIDE before the window is created: the renderer
-// hands over its Firebase ID token and main calls /api/onlyfans/access with it.
-// Hiding the sidebar item is a UI convenience; this is the check that counts.
-let ofWindow = null;
-
-const OF_WINDOW_W = 1200;
-const OF_WINDOW_H = 820;
-
-// The OF window is a satellite of the signed-in session, so it must not outlive
-// the main window — and `window-all-closed` would never fire (the app would
-// never quit) if it were left open after the main window went away.
-function closeOfWindow() {
-  if (ofWindow && !ofWindow.isDestroyed()) ofWindow.destroy();
-  ofWindow = null;
-}
-
-ipcMain.handle('onlyfans:open-window', async (_event, { idToken } = {}) => {
-  if (ofWindow && !ofWindow.isDestroyed()) {
-    if (ofWindow.isMinimized()) ofWindow.restore();
-    ofWindow.focus();
-    return { success: true, focused: true };
-  }
-
-  if (!idToken || typeof idToken !== 'string') {
-    return { success: false, error: 'unauthenticated' };
-  }
-
-  try {
-    const response = await fetch(`${BASE_URL}/api/onlyfans/access`, {
-      headers: { Authorization: `Bearer ${idToken}` },
-    });
-    if (!response.ok) {
-      console.warn('[main] OF Manager access denied:', response.status);
-      return { success: false, error: response.status === 403 ? 'forbidden' : 'unauthenticated' };
-    }
-  } catch (err) {
-    console.error('[main] OF Manager access check failed:', err);
-    return { success: false, error: 'offline' };
-  }
-
-  const workArea = currentWorkArea();
-  ofWindow = new BrowserWindow({
-    width: Math.min(OF_WINDOW_W, workArea.width),
-    height: Math.min(OF_WINDOW_H, workArea.height),
-    minWidth: Math.min(900, workArea.width),
-    minHeight: Math.min(600, workArea.height),
-    resizable: true,
-    show: true,
-    backgroundColor: '#0A0A0A',
-    title: 'OF Manager',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      backgroundThrottling: false,
-    },
-  });
-
-  // Same navigation posture as the main window: app origin stays in-window,
-  // anything else goes to the system browser.
-  ofWindow.webContents.setWindowOpenHandler(({ url }) => {
-    openExternalSafe(url);
-    return { action: 'deny' };
-  });
-  ofWindow.webContents.on('will-navigate', (e, url) => {
-    if (url.startsWith(BASE_URL) || url.startsWith('file://')) return;
-    e.preventDefault();
-    openExternalSafe(url);
-  });
-  ofWindow.webContents.on('did-finish-load', () => {
-    if (ofWindow && !ofWindow.isDestroyed()) ofWindow.webContents.setZoomFactor(0.9);
-  });
-  ofWindow.on('closed', () => {
-    ofWindow = null;
-  });
-
-  ofWindow.loadURL(`${BASE_URL}/of-manager`);
-  return { success: true };
-});
-
-// IPC handler for idle time detection
+// ─── Time tracking ───────────────────────────────────────────────────
 ipcMain.handle('timeTracking:getIdleTime', () => {
   return powerMonitor.getSystemIdleTime();
 });
@@ -306,7 +259,6 @@ ipcMain.handle('timeTracking:captureScreenshot', async () => {
       return { success: false, error: 'All screen captures were empty (check screen recording permissions)' };
     }
 
-    consecutiveEmptyCaptures = 0;
     return { success: true, screens };
   } catch (err) {
     console.error('[Screenshot] Capture failed:', err);
@@ -314,30 +266,287 @@ ipcMain.handle('timeTracking:captureScreenshot', async () => {
   }
 });
 
-// IPC handler for system notifications + sound
-ipcMain.handle('notifications:show', async (_event, { title, body, playSound, actionUrl }) => {
-  if (Notification.isSupported()) {
-    const notif = new Notification({ title, body, silent: true });
+// ─── Notifications ───────────────────────────────────────────────────
+// Notifications are routed to a *window*, not to `mainWindow`. A new-DM alert
+// raised by the OF Manager window must focus and navigate that window — routing
+// everything to the main window (the pre-multi-window behaviour) would drag the
+// operator out of the inbox they were working in.
+//
+// `target` selects the destination: omitted/'sender' → the window that called
+// (the default, and identical to the old behaviour for the main window), 'main'
+// → the main window, any other string → that satellite key, falling back to main.
+const activeNotifications = new Map(); // id -> Notification
 
-    if (actionUrl && mainWindow) {
-      notif.on('click', () => {
-        if (mainWindow) {
-          if (mainWindow.isMinimized()) mainWindow.restore();
-          mainWindow.focus();
-          mainWindow.webContents.send('notification:navigate', actionUrl);
-        }
-      });
+function resolveTargetWindow(event, target) {
+  if (target === 'main') return mainWindow;
+  if (typeof target === 'string' && target && target !== 'sender') {
+    const satellite = satelliteWindows.get(target);
+    if (satellite && !satellite.isDestroyed()) return satellite;
+    return mainWindow;
+  }
+  return senderWindow(event) || mainWindow;
+}
+
+ipcMain.handle('notifications:show', async (event, options = {}) => {
+  const { id, title, body, playSound, actionUrl, target, hasReply, replyPlaceholder, actions } = options;
+  const targetWin = resolveTargetWindow(event, target);
+
+  if (Notification.isSupported()) {
+    const notif = new Notification({
+      title,
+      body,
+      silent: true,
+      // macOS inline reply — lets an operator answer a DM without switching windows.
+      hasReply: !!hasReply,
+      replyPlaceholder: typeof replyPlaceholder === 'string' ? replyPlaceholder : undefined,
+      actions: Array.isArray(actions)
+        ? actions.slice(0, 3).map(a => ({ type: 'button', text: String((a && a.text) || '') }))
+        : undefined,
+    });
+
+    const focusTarget = () => {
+      if (!targetWin || targetWin.isDestroyed()) return;
+      if (targetWin.isMinimized()) targetWin.restore();
+      targetWin.show();
+      targetWin.focus();
+    };
+
+    notif.on('click', () => {
+      focusTarget();
+      if (actionUrl) sendTo(targetWin, 'notification:navigate', actionUrl);
+      if (id) sendTo(targetWin, 'notification:activated', { id });
+    });
+    // Deliberately does NOT focus: replying inline exists so the operator can stay
+    // in whatever they were doing.
+    notif.on('reply', (_e, reply) => sendTo(targetWin, 'notification:reply', { id: id || null, reply }));
+    notif.on('action', (_e, index) => sendTo(targetWin, 'notification:action', { id: id || null, index }));
+    notif.on('close', () => { if (id) activeNotifications.delete(id); });
+
+    if (id) {
+      // Same id → replace, so a chat that receives five messages doesn't stack
+      // five banners in Notification Center.
+      const previous = activeNotifications.get(id);
+      if (previous) previous.close();
+      activeNotifications.set(id, notif);
     }
 
     notif.show();
   }
 
-  if (playSound && mainWindow) {
-    mainWindow.webContents.send('notifications:play-sound');
-  }
+  if (playSound) sendTo(targetWin, 'notifications:play-sound');
 
   return { success: true };
 });
+
+ipcMain.handle('notifications:close', (_event, id) => {
+  const notif = id ? activeNotifications.get(id) : null;
+  if (!notif) return { success: false };
+  notif.close();
+  activeNotifications.delete(id);
+  return { success: true };
+});
+
+// ─── Dock / taskbar attention ────────────────────────────────────────
+// An unread inbox has to be visible when the app isn't focused. Badge support is
+// per-platform and there is no web equivalent, so all three mechanisms are exposed
+// and the renderer picks: macOS/Linux take the numeric badge, Windows takes a
+// taskbar overlay icon the *renderer* draws (so the badge can be restyled without
+// a native build), and flashFrame/dock bounce cover the "look at me" case.
+ipcMain.handle('app:setBadgeCount', (_event, count) => {
+  const value = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  try {
+    return { success: app.setBadgeCount(value) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.on('window:set-overlay-icon', (event, { dataUrl, description } = {}) => {
+  if (process.platform !== 'win32') return;
+  const win = senderWindow(event);
+  if (!win) return;
+  try {
+    if (!dataUrl) {
+      win.setOverlayIcon(null, '');
+      return;
+    }
+    const image = nativeImage.createFromDataURL(String(dataUrl));
+    if (image.isEmpty()) return;
+    win.setOverlayIcon(image, String(description || ''));
+  } catch (err) {
+    console.warn('[main] setOverlayIcon failed:', err.message);
+  }
+});
+
+ipcMain.on('window:flash-frame', (event, flag) => {
+  const win = senderWindow(event);
+  if (win) win.flashFrame(!!flag);
+});
+
+ipcMain.handle('app:bounceDock', (_event, type) => {
+  if (process.platform !== 'darwin' || !app.dock) return null;
+  return app.dock.bounce(type === 'critical' ? 'critical' : 'informational');
+});
+
+ipcMain.on('app:cancelBounce', (_event, id) => {
+  if (process.platform !== 'darwin' || !app.dock) return;
+  if (typeof id === 'number') app.dock.cancelBounce(id);
+});
+
+// ─── Clipboard ───────────────────────────────────────────────────────
+// `clipboard-read` stays denied at the Chromium permission layer, so
+// navigator.clipboard.read() cannot see the user's clipboard. This is the one
+// narrow exception: an explicit, renderer-initiated read of an *image*, for
+// pasting a screenshot into the message composer. Text is not exposed — the
+// normal paste path already delivers it without any permission.
+ipcMain.handle('clipboard:readImage', () => {
+  try {
+    const image = clipboard.readImage();
+    if (!image || image.isEmpty()) return null;
+    const { width, height } = image.getSize();
+    return { dataUrl: image.toDataURL(), width, height };
+  } catch (err) {
+    console.warn('[main] clipboard.readImage failed:', err.message);
+    return null;
+  }
+});
+
+// ─── Saving and revealing files ──────────────────────────────────────
+// Two paths, both user-consented via a native save dialog:
+//   • dialog:saveFile — renderer hands over bytes (generated exports, small media).
+//   • download:start  — main streams a remote URL (large media; no base64 in RAM).
+// The renderer never names a filesystem path, and showItemInFolder/openPath are
+// restricted to paths this session actually wrote.
+const savedPaths = new Set();
+const MAX_SAVE_BASE64_LEN = 280_000_000; // ~200 MB decoded
+
+function sanitizeFileName(name, fallback) {
+  // Illegal path characters and control bytes only. Spaces are legal in a
+  // filename and mangling them turns "Fan photo.jpg" into something the
+  // operator will not recognise in their Downloads folder.
+  const base = path.basename(String(name || '')).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim();
+  if (!base || base === '.' || base === '..') return fallback;
+  return base.slice(0, 180);
+}
+
+ipcMain.handle('dialog:saveFile', async (event, { suggestedName, filters, dataBase64 } = {}) => {
+  if (typeof dataBase64 !== 'string' || !dataBase64) return { success: false, error: 'no-data' };
+  if (dataBase64.length > MAX_SAVE_BASE64_LEN) return { success: false, error: 'too-large' };
+
+  const win = senderWindow(event) || mainWindow;
+  const name = sanitizeFileName(suggestedName, 'download');
+  const result = await dialog.showSaveDialog(win, {
+    defaultPath: path.join(app.getPath('downloads'), name),
+    filters: Array.isArray(filters) ? filters : undefined,
+  });
+  if (result.canceled || !result.filePath) return { success: false, canceled: true };
+
+  try {
+    await fsp.writeFile(result.filePath, Buffer.from(dataBase64, 'base64'));
+    savedPaths.add(result.filePath);
+    return { success: true, filePath: result.filePath };
+  } catch (err) {
+    console.error('[main] saveFile failed:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+// url -> { id, winId, name } for downloads we initiated, so `will-download` can
+// correlate the item back to the caller.
+const pendingDownloads = new Map();
+
+ipcMain.handle('download:start', async (event, { url, suggestedName, id } = {}) => {
+  const win = senderWindow(event);
+  if (!win) return { success: false, error: 'no-window' };
+
+  let parsed;
+  try {
+    parsed = new URL(String(url));
+  } catch {
+    return { success: false, error: 'bad-url' };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return { success: false, error: 'bad-scheme' };
+
+  const downloadId = typeof id === 'string' && id ? id : `dl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  pendingDownloads.set(parsed.href, {
+    id: downloadId,
+    winId: win.id,
+    name: sanitizeFileName(suggestedName || path.basename(parsed.pathname), 'download'),
+  });
+  win.webContents.downloadURL(parsed.href);
+  return { success: true, id: downloadId };
+});
+
+// Signed media URLs redirect, and after a redirect `item.getURL()` is the final
+// hop — so match against the whole chain or a redirected download loses its id
+// (and with it, progress reporting) even though the save itself still works.
+function takePendingDownload(item) {
+  const chain = typeof item.getURLChain === 'function' ? item.getURLChain() : [];
+  for (const url of [item.getURL(), ...chain]) {
+    const pending = pendingDownloads.get(url);
+    if (pending) {
+      pendingDownloads.delete(url);
+      return pending;
+    }
+  }
+  return null;
+}
+
+function registerDownloadHandler() {
+  session.defaultSession.on('will-download', (_event, item, webContents) => {
+    const pending = takePendingDownload(item);
+
+    const win = pending ? BrowserWindow.fromId(pending.winId) : BrowserWindow.fromWebContents(webContents);
+    const id = pending ? pending.id : null;
+    const name = (pending && pending.name) || item.getFilename();
+
+    item.setSaveDialogOptions({ defaultPath: path.join(app.getPath('downloads'), name) });
+
+    item.on('updated', (_e, state) => {
+      if (!id) return;
+      sendTo(win, 'download:progress', {
+        id,
+        state,
+        received: item.getReceivedBytes(),
+        total: item.getTotalBytes(),
+      });
+    });
+
+    item.once('done', (_e, state) => {
+      const filePath = item.getSavePath();
+      if (state === 'completed' && filePath) savedPaths.add(filePath);
+      if (id) sendTo(win, 'download:done', { id, state, filePath: state === 'completed' ? filePath : null });
+    });
+  });
+}
+
+ipcMain.handle('shell:showItemInFolder', (_event, filePath) => {
+  if (typeof filePath !== 'string' || !savedPaths.has(filePath)) return { success: false, error: 'unknown-path' };
+  shell.showItemInFolder(filePath);
+  return { success: true };
+});
+
+ipcMain.handle('shell:openPath', async (_event, filePath) => {
+  if (typeof filePath !== 'string' || !savedPaths.has(filePath)) return { success: false, error: 'unknown-path' };
+  const error = await shell.openPath(filePath);
+  return { success: !error, error: error || undefined };
+});
+
+// ─── Platform / version info ─────────────────────────────────────────
+ipcMain.handle('app:getPlatform', () => process.platform);
+
+// IPC handler to return the installed app version (for fleet version tracking + update nudge)
+ipcMain.handle('app:getVersion', () => app.getVersion());
+
+// IPC handler to return the underlying runtime versions (diagnostics)
+ipcMain.handle('app:getVersions', () => ({
+  app: app.getVersion(),
+  electron: process.versions.electron,
+  chrome: process.versions.chrome,
+  node: process.versions.node,
+  platform: process.platform,
+  arch: process.arch,
+}));
 
 // IPC handler to open System Settings for screen recording access (macOS).
 // On Windows, triggers a getSources call which prompts the user.
@@ -368,39 +577,31 @@ ipcMain.handle('permissions:requestNotification', async () => {
   return { success: false };
 });
 
-// IPC handler to return the current platform
-ipcMain.handle('app:getPlatform', () => process.platform);
-
-// IPC handler to return the installed app version (for fleet version tracking + update nudge)
-ipcMain.handle('app:getVersion', () => app.getVersion());
-
-// IPC handler to return the underlying runtime versions (diagnostics)
-ipcMain.handle('app:getVersions', () => ({
-  app: app.getVersion(),
-  electron: process.versions.electron,
-  chrome: process.versions.chrome,
-  node: process.versions.node,
-  platform: process.platform,
-  arch: process.arch,
-}));
-
 // ─── Window geometry ─────────────────────────────────────────────────
 // The main process is the authority on display geometry. The renderer must never
 // derive a window size from `window.screen.*`: those are CSS pixels, so the forced
 // 90% zoom (see the did-finish-load handler) skews them, and they describe whatever
 // display Chromium considers current rather than the one the window is on.
+//
+// Every handler here is SENDER-SCOPED. The minimum sizes are per-window too (the
+// main window's floor is 1024x720; a satellite sets its own), which is why the
+// floor lives on the window record rather than in a module constant.
 const WINDOW_MIN_W = 1024;
 const WINDOW_MIN_H = 720;
 const LOGIN_W = 1430;
 const LOGIN_H = 870;
 
-// Work area (screen minus taskbar/dock) of the display the window is on, in DIPs —
-// the same unit setSize/getSize use. Falls back to the primary display before the
-// window exists. Only safe to call after app.whenReady().
-function currentWorkArea() {
+const ZOOM_DEFAULT = 0.9;
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 2;
+
+// Work area (screen minus taskbar/dock) of the display the given window is on, in
+// DIPs — the same unit setSize/getSize use. Falls back to the primary display.
+// Only safe to call after app.whenReady().
+function workAreaFor(win) {
   try {
-    const display = mainWindow && !mainWindow.isDestroyed()
-      ? electronScreen.getDisplayMatching(mainWindow.getBounds())
+    const display = win && !win.isDestroyed()
+      ? electronScreen.getDisplayMatching(win.getBounds())
       : electronScreen.getPrimaryDisplay();
     return display.workAreaSize;
   } catch {
@@ -411,95 +612,140 @@ function currentWorkArea() {
 // Never hand setSize a value larger than the display. The floor is itself capped by
 // the work area, so a small or heavily-scaled display can't be given a window it
 // cannot fit (a 1920x1080 @150% Windows laptop has only 1280x672 DIPs to work with).
-function clampToWorkArea(width, height) {
-  const wa = currentWorkArea();
+function clampToWorkArea(win, width, height) {
+  const wa = workAreaFor(win);
+  const rec = recordFor(win);
+  const minW = rec ? rec.minWidth : WINDOW_MIN_W;
+  const minH = rec ? rec.minHeight : WINDOW_MIN_H;
   return {
-    width: Math.min(Math.max(width, Math.min(WINDOW_MIN_W, wa.width)), wa.width),
-    height: Math.min(Math.max(height, Math.min(WINDOW_MIN_H, wa.height)), wa.height),
+    width: Math.min(Math.max(width, Math.min(minW, wa.width)), wa.width),
+    height: Math.min(Math.max(height, Math.min(minH, wa.height)), wa.height),
   };
 }
 
-// IPC handler for window resizability
-ipcMain.on('window:set-resizable', (_event, resizable) => {
-  console.log('[Performance] IPC setResizable called:', resizable);
-  if (mainWindow) {
-    mainWindow.setResizable(resizable);
-  }
-});
-
-// Last size the window had while **not** maximized. Reported instead of the live size
-// whenever the window is maximized: on Windows a maximized window's outer bounds include
-// the invisible resize border, so persisting them and replaying them via setSize on an
-// un-maximized window yields a window wider than the display.
-let lastNormalSize = null;
-
-// Suppresses the `resized` event that some platforms emit for our own setSize calls.
-// Only a genuine user drag may be persisted — see the `resized` handler.
-let suppressResizedUntil = 0;
-
 // Apply a size we chose (not the user). Clamped, re-centred, and flagged so the
 // resulting `resized` event is not mistaken for a manual resize.
-function applyWindowSize(width, height) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const size = clampToWorkArea(Math.round(width), Math.round(height));
-  suppressResizedUntil = Date.now() + 750;
+function applyWindowSize(win, width, height) {
+  const rec = recordFor(win);
+  if (!rec) return;
+  const size = clampToWorkArea(win, Math.round(width), Math.round(height));
+  rec.suppressResizedUntil = Date.now() + 750;
   // animate:false — an animated setSize on macOS emits `resized` when it finishes.
-  mainWindow.setSize(size.width, size.height, false);
-  mainWindow.center();
-  lastNormalSize = size;
+  win.setSize(size.width, size.height, false);
+  win.center();
+  rec.lastNormalSize = size;
 }
 
 // Current persistable window state: the last *normal* size plus the maximize flag.
-function currentWindowState() {
-  if (!mainWindow || mainWindow.isDestroyed()) return null;
-  const [width, height] = mainWindow.getSize();
-  const isMaximized = mainWindow.isMaximized();
-  if (!isMaximized) lastNormalSize = { width, height };
-  const size = lastNormalSize || { width, height };
+function currentWindowState(win) {
+  const rec = recordFor(win);
+  if (!rec) return null;
+  const [width, height] = win.getSize();
+  const isMaximized = win.isMaximized();
+  if (!isMaximized) rec.lastNormalSize = { width, height };
+  const size = rec.lastNormalSize || { width, height };
   return { width: size.width, height: size.height, isMaximized };
 }
 
+// IPC handler for window resizability
+ipcMain.on('window:set-resizable', (event, resizable) => {
+  const win = senderWindow(event);
+  if (win) win.setResizable(!!resizable);
+});
+
 // IPC handler for window size. Clamped — a size persisted on a larger monitor (or by an
 // older build that saved maximized bounds) must not reopen off-screen here.
-ipcMain.on('window:set-size', (_event, width, height) => {
+ipcMain.on('window:set-size', (event, width, height) => {
   if (typeof width !== 'number' || typeof height !== 'number') return;
   if (!Number.isFinite(width) || !Number.isFinite(height)) return;
-  applyWindowSize(width, height);
+  const win = senderWindow(event);
+  if (win) applyWindowSize(win, width, height);
 });
 
 // IPC handler to read the current outer window size (used to persist user resizes
 // without title-bar drift — getSize/setSize both operate on the outer window bounds).
-ipcMain.handle('window:get-size', () => {
-  if (mainWindow) {
-    return mainWindow.getSize();
-  }
-  return null;
+ipcMain.handle('window:get-size', (event) => {
+  const win = senderWindow(event);
+  return win ? win.getSize() : null;
 });
 
 // Outer (normal) size plus maximize state.
-ipcMain.handle('window:get-state', () => currentWindowState());
+ipcMain.handle('window:get-state', (event) => currentWindowState(senderWindow(event)));
 
 // Authoritative work area in DIPs, for the renderer's dynamic first-run sizing.
-ipcMain.handle('window:get-work-area', () => currentWorkArea());
+ipcMain.handle('window:get-work-area', (event) => workAreaFor(senderWindow(event)));
 
-ipcMain.on('window:maximize', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.maximize();
+ipcMain.on('window:maximize', (event) => {
+  const win = senderWindow(event);
+  if (win) win.maximize();
+});
+
+ipcMain.on('window:minimize', (event) => {
+  const win = senderWindow(event);
+  if (win) win.minimize();
+});
+
+ipcMain.on('window:focus', (event) => {
+  const win = senderWindow(event);
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+});
+
+// A satellite closing itself (e.g. a "Close" button in its own chrome). The main
+// window is excluded: closing it must go through the clock-out flush path, and a
+// renderer bug must not be able to bypass that.
+ipcMain.on('window:close', (event) => {
+  const win = senderWindow(event);
+  const rec = recordFor(win);
+  if (!rec || rec.isMain) return;
+  win.close();
+});
+
+ipcMain.on('window:set-always-on-top', (event, flag) => {
+  const win = senderWindow(event);
+  if (win) win.setAlwaysOnTop(!!flag);
+});
+
+ipcMain.handle('window:is-focused', (event) => {
+  const win = senderWindow(event);
+  return !!(win && win.isFocused());
+});
+
+// Zoom is a per-window property. The 90% default is re-asserted on every full page
+// load; a renderer-set factor is remembered on the record so a reload keeps it.
+ipcMain.on('window:set-zoom', (event, factor) => {
+  const win = senderWindow(event);
+  const rec = recordFor(win);
+  if (!rec || typeof factor !== 'number' || !Number.isFinite(factor)) return;
+  const clamped = Math.min(Math.max(factor, ZOOM_MIN), ZOOM_MAX);
+  rec.zoomFactor = clamped;
+  win.webContents.setZoomFactor(clamped);
+});
+
+ipcMain.handle('window:get-zoom', (event) => {
+  const win = senderWindow(event);
+  return win ? win.webContents.getZoomFactor() : null;
 });
 
 // The renderer only re-sizes on login, so without this a window sized on one display
 // stays that size after the display changes underneath it — unplugging an external
 // monitor, an RDP session at a smaller resolution, or a DPI-scaling change all leave
-// the window larger than the screen for the rest of the session.
-// Registered once at ready (createWindow can run again on macOS `activate`).
+// the window larger than the screen for the rest of the session. Applies to every
+// window, satellites included.
 function registerDisplayListeners() {
   const reclamp = () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (mainWindow.isMaximized() || mainWindow.isFullScreen()) return;
-    const [width, height] = mainWindow.getSize();
-    const size = clampToWorkArea(width, height);
-    if (size.width === width && size.height === height) return;
-    console.log(`[main] display changed — clamping window ${width}x${height} → ${size.width}x${size.height}`);
-    applyWindowSize(size.width, size.height);
+    for (const rec of winRecords.values()) {
+      const win = rec.win;
+      if (!win || win.isDestroyed()) continue;
+      if (win.isMaximized() || win.isFullScreen()) continue;
+      const [width, height] = win.getSize();
+      const size = clampToWorkArea(win, width, height);
+      if (size.width === width && size.height === height) continue;
+      console.log(`[main] display changed — clamping window ${width}x${height} → ${size.width}x${size.height}`);
+      applyWindowSize(win, size.width, size.height);
+    }
   };
   electronScreen.on('display-metrics-changed', reclamp);
   electronScreen.on('display-removed', reclamp);
@@ -531,54 +777,445 @@ function openExternalSafe(url) {
   console.warn('[main] Blocked openExternal for unsafe/invalid URL:', url);
 }
 
-// ─── App load + offline fallback ─────────────────────────────────────
+// The only two local pages a renderer is allowed to navigate to. `will-navigate`
+// fires for renderer-initiated navigation only (loadFile/loadURL from main do not
+// emit it), so this is a whitelist of what a *page* may navigate to — previously a
+// blanket `file://` allowance, which the OF window does not need and which renders
+// fan-supplied content.
+const LOADING_PAGE = path.join(__dirname, 'loading.html');
+const OFFLINE_PAGE = path.join(__dirname, 'offline.html');
+const LOCAL_PAGE_URLS = new Set([pathToFileURL(LOADING_PAGE).href, pathToFileURL(OFFLINE_PAGE).href]);
+
+// ─── App load + offline fallback (per window) ────────────────────────
 // The renderer IS the product (hosted on Vercel). If it fails to load we
 // show a branded offline screen and retry with backoff instead of leaving
-// the raw Chrome error page (or a blank window) on screen.
-let offlineRetryTimer = null;
-let offlineRetryDelay = 2000;
+// the raw Chrome error page (or a blank window) on screen. Each window carries
+// its own backoff and its own app URL, so a satellite recovers to the route it
+// was opened on rather than to the app root.
+const OFFLINE_RETRY_BASE = 2000;
 const OFFLINE_RETRY_MAX = 30000;
 
-function clearOfflineRetry() {
-  if (offlineRetryTimer) {
-    clearTimeout(offlineRetryTimer);
-    offlineRetryTimer = null;
+function clearOfflineRetry(rec) {
+  if (!rec) return;
+  if (rec.offlineTimer) {
+    clearTimeout(rec.offlineTimer);
+    rec.offlineTimer = null;
   }
-  offlineRetryDelay = 2000;
+  rec.offlineDelay = OFFLINE_RETRY_BASE;
 }
 
-function loadAppUrl() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  clearOfflineRetry();
-  mainWindow.loadURL(BASE_URL);
+function loadAppUrl(win) {
+  const rec = recordFor(win);
+  if (!rec) return;
+  clearOfflineRetry(rec);
+  win.loadURL(rec.appUrl);
 }
 
-function showOfflineScreen() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.loadFile(path.join(__dirname, 'offline.html')).catch(() => {});
+function showOfflineScreen(win) {
+  const rec = recordFor(win);
+  if (!rec) return;
+  win.loadFile(OFFLINE_PAGE).catch(() => {});
   // Auto-retry with capped exponential backoff; the offline page also has a
   // manual "Try again" button (app:retry-load).
-  if (!offlineRetryTimer) {
-    offlineRetryTimer = setTimeout(() => {
-      offlineRetryTimer = null;
-      loadAppUrl();
-    }, offlineRetryDelay);
-    offlineRetryDelay = Math.min(offlineRetryDelay * 2, OFFLINE_RETRY_MAX);
+  if (!rec.offlineTimer) {
+    rec.offlineTimer = setTimeout(() => {
+      rec.offlineTimer = null;
+      loadAppUrl(win);
+    }, rec.offlineDelay);
+    rec.offlineDelay = Math.min(rec.offlineDelay * 2, OFFLINE_RETRY_MAX);
   }
 }
 
-ipcMain.on('app:retry-load', () => loadAppUrl());
+ipcMain.on('app:retry-load', (event) => loadAppUrl(senderWindow(event)));
 
 // Renderer-crash reload loop-guard: if the renderer keeps dying we stop
-// auto-reloading and park on the offline/error screen.
-let reloadCount = 0;
-let reloadWindowStart = Date.now();
+// auto-reloading and park on the offline/error screen. Counted per window.
 const RELOAD_WINDOW_MS = 60000;
 const RELOAD_MAX = 3;
 
 // Max time to hold the window close while the renderer clocks out and flushes.
 const QUIT_FLUSH_TIMEOUT_MS = 4000;
 
+// ─── Right-click menu + spellcheck ───────────────────────────────────
+// Chromium's spellchecker is on by default, but Electron renders NO suggestion UI
+// unless the main process builds the menu — and without a context menu there is no
+// cut/copy/paste either. In a window whose whole job is typing messages to fans,
+// both are table stakes. Built from `params` so it adapts to what was right-clicked.
+function attachContextMenu(win) {
+  win.webContents.on('context-menu', (_event, params) => {
+    const template = [];
+
+    if (params.misspelledWord) {
+      const suggestions = params.dictionarySuggestions.slice(0, 5);
+      if (suggestions.length === 0) {
+        template.push({ label: 'No spelling suggestions', enabled: false });
+      } else {
+        for (const suggestion of suggestions) {
+          template.push({ label: suggestion, click: () => win.webContents.replaceMisspelling(suggestion) });
+        }
+      }
+      template.push({ type: 'separator' });
+      template.push({
+        label: 'Add to Dictionary',
+        click: () => win.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord),
+      });
+      template.push({ type: 'separator' });
+    }
+
+    if (params.linkURL) {
+      template.push({ label: 'Open Link in Browser', click: () => openExternalSafe(params.linkURL) });
+      template.push({ label: 'Copy Link Address', click: () => clipboard.writeText(params.linkURL) });
+      template.push({ type: 'separator' });
+    }
+
+    if (params.mediaType === 'image' && params.srcURL) {
+      template.push({ label: 'Copy Image', click: () => win.webContents.copyImageAt(params.x, params.y) });
+      if (/^https?:/.test(params.srcURL)) {
+        template.push({
+          label: 'Save Image As…',
+          click: () => {
+            pendingDownloads.set(params.srcURL, {
+              id: null,
+              winId: win.id,
+              name: sanitizeFileName(path.basename(new URL(params.srcURL).pathname), 'image'),
+            });
+            win.webContents.downloadURL(params.srcURL);
+          },
+        });
+      }
+      template.push({ type: 'separator' });
+    }
+
+    const { editFlags } = params;
+    if (params.isEditable || params.selectionText) {
+      template.push({ role: 'cut', enabled: !!(editFlags && editFlags.canCut) });
+      template.push({ role: 'copy', enabled: !!(editFlags && editFlags.canCopy) });
+      template.push({ role: 'paste', enabled: !!(editFlags && editFlags.canPaste) });
+      if (params.isEditable && process.platform === 'darwin') {
+        template.push({ role: 'pasteAndMatchStyle', enabled: !!(editFlags && editFlags.canPaste) });
+      }
+      template.push({ type: 'separator' });
+      template.push({ role: 'selectAll' });
+    }
+
+    if (isDev) {
+      template.push({ type: 'separator' });
+      template.push({ label: 'Inspect Element', click: () => win.webContents.inspectElement(params.x, params.y) });
+    }
+
+    if (template.length === 0) return;
+    Menu.buildFromTemplate(template).popup({ window: win });
+  });
+}
+
+// ─── Shared window behaviour ─────────────────────────────────────────
+// Navigation posture, offline fallback, crash recovery, unresponsive reporting,
+// manual-resize reporting, focus reporting and the context menu, applied
+// identically to the main window and to every satellite. Before this existed the
+// satellite had only a zoom handler: a Vercel hiccup or a renderer crash left the
+// operator staring at a blank window with no retry.
+function attachWindowBehaviour(win, { isMain, appUrl, minWidth, minHeight, satelliteKey = null }) {
+  const rec = {
+    win,
+    isMain,
+    appUrl,
+    satelliteKey,
+    minWidth,
+    minHeight,
+    zoomFactor: ZOOM_DEFAULT,
+    lastNormalSize: null,
+    suppressResizedUntil: 0,
+    offlineTimer: null,
+    offlineDelay: OFFLINE_RETRY_BASE,
+    reloadCount: 0,
+    reloadWindowStart: Date.now(),
+  };
+  winRecords.set(win.id, rec);
+
+  // ─── User-initiated resize → renderer ──────────────────────────────
+  // Only a MANUAL resize may be persisted. The DOM `resize` event can't express that:
+  // it also fires for our own auto-size, which would write the auto-sized value to
+  // storage and stop auto-sizing from ever running again. `resized` fires when the user
+  // finishes dragging (the suppression window covers platforms that also emit it for
+  // setSize), and maximize/unmaximize carry the state without the maximized bounds.
+  const notifyUserResize = () => {
+    if (Date.now() < rec.suppressResizedUntil) return;
+    const state = currentWindowState(win);
+    if (state) sendTo(win, 'window:user-resized', state);
+  };
+  win.on('resized', notifyUserResize);
+  win.on('maximize', notifyUserResize);
+  win.on('unmaximize', notifyUserResize);
+
+  // Lets a window decide whether an incoming message deserves a notification, or
+  // whether the thread on screen should be marked read.
+  win.on('focus', () => sendTo(win, 'window:focus-changed', { focused: true }));
+  win.on('blur', () => sendTo(win, 'window:focus-changed', { focused: false }));
+
+  // Open external links (target=_blank) in default browser
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalSafe(url);
+    return { action: 'deny' };
+  });
+
+  // Prevent navigation to other origins from the electron window
+  win.webContents.on('will-navigate', (e, url) => {
+    if (url.startsWith(BASE_URL) || LOCAL_PAGE_URLS.has(url.split('?')[0])) return;
+    e.preventDefault();
+    openExternalSafe(url);
+  });
+
+  // On a real load failure of the app URL, show the offline screen and retry
+  // with backoff. Ignore sub-frame failures and user-aborted loads (-3).
+  win.webContents.on('did-fail-load', (_e, errorCode, _desc, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return;
+    if (validatedURL.startsWith(BASE_URL)) {
+      console.log(`[main] did-fail-load (${errorCode}) for ${validatedURL} — showing offline screen`);
+      showOfflineScreen(win);
+    }
+  });
+
+  // Successful app load — reset the offline backoff.
+  win.webContents.on('did-finish-load', () => {
+    if (!win.isDestroyed() && win.webContents.getURL().startsWith(BASE_URL)) {
+      clearOfflineRetry(rec);
+      // Default the app to 90% zoom — screenshots showed users' screens overly
+      // zoomed in. A renderer-chosen factor (window:set-zoom) wins.
+      win.webContents.setZoomFactor(rec.zoomFactor);
+    }
+
+    if (!isMain) return;
+
+    if (deeplinkUrl) {
+      console.log('Processing stored deep link:', deeplinkUrl);
+      handleDeepLink(deeplinkUrl);
+      deeplinkUrl = null;
+    }
+    // Re-register so each new page load gets a fresh app:ready listener
+    ipcMain.removeAllListeners('app:ready');
+    registerAppReadyHandler();
+  });
+
+  // ─── Renderer crash recovery ───────────────────────────────────────
+  // The renderer is the whole product; a crash otherwise leaves a blank
+  // window. Auto-reload with a loop-guard, and report to /api/bugs.
+  win.webContents.on('render-process-gone', (_e, details) => {
+    console.error('[main] render-process-gone:', details.reason, details.exitCode);
+    forwardErrorToRenderer(
+      'electron:main:render-process-gone',
+      `Renderer gone (${satelliteKey || 'main'}): ${details.reason} (exit ${details.exitCode})`,
+      undefined,
+    );
+    // A clean exit isn't a crash.
+    if (details.reason === 'clean-exit') return;
+
+    const now = Date.now();
+    if (now - rec.reloadWindowStart > RELOAD_WINDOW_MS) {
+      rec.reloadWindowStart = now;
+      rec.reloadCount = 0;
+    }
+    rec.reloadCount += 1;
+
+    if (rec.reloadCount > RELOAD_MAX) {
+      console.error('[main] renderer crashed too many times — parking on offline screen');
+      showOfflineScreen(win);
+      return;
+    }
+    setTimeout(() => loadAppUrl(win), 500);
+  });
+
+  win.webContents.on('child-process-gone', (_e, details) => {
+    console.error('[main] child-process-gone:', details.type, details.reason);
+  });
+
+  // ─── Unresponsive detection ────────────────────────────────────────
+  win.on('unresponsive', () => {
+    console.warn('[main] window became unresponsive');
+    forwardErrorToRenderer('electron:main:unresponsive', `Renderer became unresponsive (${satelliteKey || 'main'})`, undefined);
+  });
+  win.on('responsive', () => {
+    console.log('[main] window became responsive again');
+  });
+
+  attachContextMenu(win);
+
+  win.on('closed', () => {
+    clearOfflineRetry(rec);
+    winRecords.delete(win.id);
+    if (satelliteKey) satelliteWindows.delete(satelliteKey);
+  });
+
+  return rec;
+}
+
+// ─── Satellite windows (OF Manager and anything after it) ────────────
+// OnlyFans messaging lives in its own window, spawned from the sidebar. Three
+// properties are load-bearing:
+//   • **Co-equal with the main window, not a child.** It is deliberately NOT
+//     created with `parent: mainWindow`: on macOS a parented window is pinned
+//     above its parent forever, so the main window sits permanently behind it
+//     and cannot be worked in. Operators need both windows side by side and
+//     either one on top, so the close-dependency below is enforced by hand
+//     (`closeAllSatellites()` on the main window's `closed`) instead.
+//   • `resizable: true` with its own minimum — operators size the inbox
+//     independently of the main window, which is locked to its own geometry.
+//   • one window per `key` — a second request with the same key focuses it.
+//
+// Permission is verified SERVER-SIDE before the window is created: the renderer
+// hands over its Firebase ID token and main calls the prefix's access route with
+// it. Hiding the sidebar item is a UI convenience; this is the check that counts.
+//
+// The route is NOT an enum. Any path under an allowlisted prefix is accepted, so
+// new sub-routes (a popped-out chat, a vault browser, a media viewer) ship as
+// renderer-only changes — no native build. Adding a whole new *prefix* is the only
+// thing that needs one, because each prefix names the access route that guards it.
+const SATELLITE_PREFIXES = [
+  { prefix: '/of-manager', accessPath: '/api/onlyfans/access', title: 'OF Manager' },
+];
+const SATELLITE_MAX = 8;
+const SATELLITE_MIN_DIMENSION = 360;
+
+// key -> BrowserWindow
+const satelliteWindows = new Map();
+// Keys whose server-side access check is in flight (see openSatelliteWindow).
+const openingSatellites = new Set();
+
+function matchSatellitePrefix(pathname) {
+  return SATELLITE_PREFIXES.find(p => pathname === p.prefix || pathname.startsWith(`${p.prefix}/`)) || null;
+}
+
+// The renderer supplies the route, so it is validated as untrusted input: same
+// origin, under an allowlisted prefix, no traversal, no protocol-relative host.
+function normalizeSatelliteTarget(raw) {
+  const value = typeof raw === 'string' && raw ? raw : SATELLITE_PREFIXES[0].prefix;
+  if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\') || value.includes('..')) return null;
+  let parsed;
+  try {
+    parsed = new URL(value, BASE_URL);
+  } catch {
+    return null;
+  }
+  if (parsed.origin !== BASE_ORIGIN) return null;
+  const prefix = matchSatellitePrefix(parsed.pathname);
+  if (!prefix) return null;
+  return { prefix, pathname: parsed.pathname, relative: `${parsed.pathname}${parsed.search}` };
+}
+
+function closeAllSatellites() {
+  for (const win of satelliteWindows.values()) {
+    if (win && !win.isDestroyed()) win.destroy();
+  }
+  satelliteWindows.clear();
+}
+
+function clampDimension(value, fallback, max) {
+  const n = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback;
+  return Math.min(Math.max(n, SATELLITE_MIN_DIMENSION), max);
+}
+
+async function openSatelliteWindow(options = {}) {
+  const { idToken, path: rawPath, key: rawKey, title, alwaysOnTop } = options;
+
+  const target = normalizeSatelliteTarget(rawPath);
+  if (!target) return { success: false, error: 'invalid-path' };
+
+  const key = typeof rawKey === 'string' && /^[a-z0-9][a-z0-9._:-]{0,63}$/i.test(rawKey) ? rawKey : target.relative;
+
+  const existing = satelliteWindows.get(key);
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore();
+    existing.focus();
+    return { success: true, focused: true, key };
+  }
+
+  // The access check is awaited, so two fast clicks would both clear the check
+  // above and open two windows for one key — the first then becomes orphaned
+  // (unreachable, and only closed when the main window goes). The in-flight set
+  // is what makes "one window per key" actually hold.
+  if (openingSatellites.has(key)) return { success: false, error: 'already-opening' };
+
+  if (!idToken || typeof idToken !== 'string') {
+    return { success: false, error: 'unauthenticated' };
+  }
+  if (satelliteWindows.size + openingSatellites.size >= SATELLITE_MAX) {
+    return { success: false, error: 'too-many-windows' };
+  }
+
+  openingSatellites.add(key);
+  try {
+    const response = await fetch(`${BASE_URL}${target.prefix.accessPath}`, {
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
+    if (!response.ok) {
+      console.warn('[main] satellite access denied:', target.relative, response.status);
+      openingSatellites.delete(key);
+      return { success: false, error: response.status === 403 ? 'forbidden' : 'unauthenticated' };
+    }
+  } catch (err) {
+    console.error('[main] satellite access check failed:', err);
+    openingSatellites.delete(key);
+    return { success: false, error: 'offline' };
+  }
+  openingSatellites.delete(key);
+
+  const workArea = workAreaFor(mainWindow);
+  const minWidth = clampDimension(options.minWidth, 900, workArea.width);
+  const minHeight = clampDimension(options.minHeight, 600, workArea.height);
+  const width = Math.max(clampDimension(options.width, 1200, workArea.width), minWidth);
+  const height = Math.max(clampDimension(options.height, 820, workArea.height), minHeight);
+
+  const win = new BrowserWindow({
+    width,
+    height,
+    minWidth,
+    minHeight,
+    resizable: true,
+    show: true,
+    backgroundColor: '#0A0A0A',
+    title: typeof title === 'string' && title ? title.slice(0, 120) : target.prefix.title,
+    alwaysOnTop: !!alwaysOnTop,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      spellcheck: true,
+      backgroundThrottling: false,
+    },
+  });
+
+  satelliteWindows.set(key, win);
+  attachWindowBehaviour(win, {
+    isMain: false,
+    appUrl: `${BASE_URL}${target.relative}`,
+    minWidth,
+    minHeight,
+    satelliteKey: key,
+  });
+
+  win.loadURL(`${BASE_URL}${target.relative}`);
+  return { success: true, key };
+}
+
+// Legacy channel — pre-generalisation renderers call this with `{ idToken }` only
+// and get the OF Manager root, exactly as before.
+ipcMain.handle('onlyfans:open-window', (_event, args = {}) => openSatelliteWindow(args));
+ipcMain.handle('window:open-satellite', (_event, args = {}) => openSatelliteWindow(args));
+
+ipcMain.handle('window:close-satellite', (_event, key) => {
+  const win = typeof key === 'string' ? satelliteWindows.get(key) : null;
+  if (!win || win.isDestroyed()) return { success: false };
+  win.close();
+  return { success: true };
+});
+
+ipcMain.handle('window:list-satellites', () => (
+  [...satelliteWindows.entries()]
+    .filter(([, win]) => win && !win.isDestroyed())
+    .map(([key, win]) => ({ key, focused: win.isFocused(), title: win.getTitle() }))
+));
+
+// ─── Main window ─────────────────────────────────────────────────────
 function createWindow() {
   // Set app icon for macOS dock
   const iconPath = path.join(__dirname, './public/logo/icon.icns');
@@ -609,29 +1246,18 @@ function createWindow() {
       contextIsolation: true,     // important for security
       nodeIntegration: false,     // important for security
       sandbox: true,              // harden the renderer (preload only uses contextBridge + ipcRenderer)
+      spellcheck: true,           // suggestions surface through the context menu (attachContextMenu)
       backgroundThrottling: false, // keep renderer timers (heartbeat, idle checks, screenshot scheduler) running when minimized
       v8CacheOptions: 'code',  // Enable V8 code caching for faster startup
     },
   });
 
-  lastNormalSize = null;
-  suppressResizedUntil = 0;
-
-  // ─── User-initiated resize → renderer ──────────────────────────────
-  // Only a MANUAL resize may be persisted. The DOM `resize` event can't express that:
-  // it also fires for our own auto-size, which would write the auto-sized value to
-  // storage and stop auto-sizing from ever running again. `resized` fires when the user
-  // finishes dragging (the suppression window covers platforms that also emit it for
-  // setSize), and maximize/unmaximize carry the state without the maximized bounds.
-  const notifyUserResize = () => {
-    if (Date.now() < suppressResizedUntil) return;
-    const state = currentWindowState();
-    if (!state) return;
-    mainWindow.webContents.send('window:user-resized', state);
-  };
-  mainWindow.on('resized', notifyUserResize);
-  mainWindow.on('maximize', notifyUserResize);
-  mainWindow.on('unmaximize', notifyUserResize);
+  attachWindowBehaviour(mainWindow, {
+    isMain: true,
+    appUrl: BASE_URL,
+    minWidth: WINDOW_MIN_W,
+    minHeight: WINDOW_MIN_H,
+  });
 
   // In dev, load local Next.js
   if (isDev) {
@@ -639,94 +1265,11 @@ function createWindow() {
     // mainWindow.webContents.openDevTools();
   } else {
     // Show local loading screen instantly, then navigate to the hosted app once it's ready
-    mainWindow.loadFile(path.join(__dirname, 'loading.html'));
+    mainWindow.loadFile(LOADING_PAGE);
     mainWindow.webContents.once('did-finish-load', () => {
-      loadAppUrl();
+      loadAppUrl(mainWindow);
     });
   }
-
-  // Open external links (target=_blank) in default browser
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    openExternalSafe(url);
-    return { action: 'deny' };
-  });
-
-  // Prevent navigation to other origins from the electron window
-  mainWindow.webContents.on('will-navigate', (e, url) => {
-    // Allow same-origin app navigation and our local loading/offline pages.
-    if (url.startsWith(BASE_URL) || url.startsWith('file://')) return;
-    e.preventDefault();
-    openExternalSafe(url);
-  });
-
-  // On a real load failure of the app URL, show the offline screen and retry
-  // with backoff. Ignore sub-frame failures and user-aborted loads (-3).
-  mainWindow.webContents.on('did-fail-load', (_e, errorCode, _desc, validatedURL, isMainFrame) => {
-    if (!isMainFrame || errorCode === -3) return;
-    if (validatedURL.startsWith(BASE_URL)) {
-      console.log(`[main] did-fail-load (${errorCode}) for ${validatedURL} — showing offline screen`);
-      showOfflineScreen();
-    }
-  });
-
-  // Successful app load — reset the offline backoff.
-  mainWindow.webContents.on('did-finish-load', () => {
-    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.getURL().startsWith(BASE_URL)) {
-      clearOfflineRetry();
-      // Default the app to 90% zoom — screenshots showed users' screens overly zoomed in.
-      mainWindow.webContents.setZoomFactor(0.9);
-    }
-
-    if (deeplinkUrl) {
-      console.log('Processing stored deep link:', deeplinkUrl);
-      handleDeepLink(deeplinkUrl);
-      deeplinkUrl = null;
-    }
-    // Re-register so each new page load gets a fresh app:ready listener
-    ipcMain.removeAllListeners('app:ready');
-    registerAppReadyHandler();
-  });
-
-  // ─── Renderer crash recovery ───────────────────────────────────────
-  // The renderer is the whole product; a crash otherwise leaves a blank
-  // window. Auto-reload with a loop-guard, and report to /api/bugs.
-  mainWindow.webContents.on('render-process-gone', (_e, details) => {
-    console.error('[main] render-process-gone:', details.reason, details.exitCode);
-    forwardErrorToRenderer(
-      'electron:main:render-process-gone',
-      `Renderer gone: ${details.reason} (exit ${details.exitCode})`,
-      undefined,
-    );
-    // A clean exit isn't a crash.
-    if (details.reason === 'clean-exit') return;
-
-    const now = Date.now();
-    if (now - reloadWindowStart > RELOAD_WINDOW_MS) {
-      reloadWindowStart = now;
-      reloadCount = 0;
-    }
-    reloadCount += 1;
-
-    if (reloadCount > RELOAD_MAX) {
-      console.error('[main] renderer crashed too many times — parking on offline screen');
-      showOfflineScreen();
-      return;
-    }
-    setTimeout(() => loadAppUrl(), 500);
-  });
-
-  mainWindow.webContents.on('child-process-gone', (_e, details) => {
-    console.error('[main] child-process-gone:', details.type, details.reason);
-  });
-
-  // ─── Unresponsive detection ────────────────────────────────────────
-  mainWindow.on('unresponsive', () => {
-    console.warn('[main] window became unresponsive');
-    forwardErrorToRenderer('electron:main:unresponsive', 'Renderer became unresponsive', undefined);
-  });
-  mainWindow.on('responsive', () => {
-    console.log('[main] window became responsive again');
-  });
 
   // ─── Flush time-tracking before the window closes ──────────────────
   // The window `close` event is the single choke-point that fires for BOTH the
@@ -756,11 +1299,15 @@ function createWindow() {
     });
   });
 
-  // The OF Manager window is a satellite of this one. It is not an Electron
-  // child window (that would pin it above the main window on macOS and make the
-  // main window unusable), so the dependency is enforced here instead. Hooked to
-  // `closed`, not `close`, so it survives the flush veto above.
-  mainWindow.on('closed', closeOfWindow);
+  // Satellites are satellites of this window. They are not Electron child windows
+  // (that would pin them above the main window on macOS and make it unusable), so
+  // the dependency is enforced here instead. Hooked to `closed`, not `close`, so it
+  // survives the flush veto above — and without it `window-all-closed` would never
+  // fire and the app would never quit.
+  mainWindow.on('closed', () => {
+    closeAllSatellites();
+    mainWindow = null;
+  });
 
   return mainWindow;
 }
@@ -785,9 +1332,7 @@ let updateInstallStarted = false;
 let pendingUpdate = null;
 
 function sendToRenderer(channel, payload) {
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-    mainWindow.webContents.send(channel, payload);
-  }
+  sendTo(mainWindow, channel, payload);
 }
 
 // Quit into the installer exactly once, whether the renderer flushed in time or
@@ -855,7 +1400,8 @@ function registerAutoUpdater() {
 
 // Forward native power/session transitions to the renderer so time-tracking can
 // pause/resume precisely (more accurate than the 15-min idle threshold) and so
-// lock/unlock patterns can be recorded.
+// lock/unlock patterns can be recorded. Time tracking lives in the main window
+// only, so this stays main-window-scoped.
 function forwardPowerEvent(name) {
   sendToRenderer('power:event', { event: name, at: Date.now() });
 }
@@ -876,7 +1422,8 @@ app.whenReady().then(() => {
   // .writeText() routes through this handler, so a blanket deny silently breaks
   // every "copy link" button in the app. Sanitized write is write-only and
   // cannot read what the user already has on their clipboard — unlike
-  // `clipboard-read`, which stays denied.
+  // `clipboard-read`, which stays denied (pasting an image goes through the
+  // explicit `clipboard:readImage` IPC instead).
   const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write']);
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) =>
     callback(ALLOWED_PERMISSIONS.has(permission)));
@@ -885,6 +1432,15 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((_wc, permission) =>
     ALLOWED_PERMISSIONS.has(permission));
 
+  // Spellcheck language. macOS uses the OS spellchecker and rejects this call,
+  // so it is best-effort.
+  try {
+    session.defaultSession.setSpellCheckerLanguages(['en-US']);
+  } catch {
+    // macOS — the system spellchecker picks the language itself.
+  }
+
+  registerDownloadHandler();
   registerPowerListeners();
   registerAutoUpdater();
   registerDisplayListeners();
@@ -896,9 +1452,7 @@ app.whenReady().then(() => {
 
 // Forward main-process errors to the renderer so they reach the /api/bugs route
 function forwardErrorToRenderer(context, message, stack) {
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-    mainWindow.webContents.send('bug:report', { context, message, stack });
-  }
+  sendTo(mainWindow, 'bug:report', { context, message, stack });
 }
 
 process.on('uncaughtException', (err) => {

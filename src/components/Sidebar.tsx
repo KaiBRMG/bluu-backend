@@ -136,7 +136,9 @@ function OfManagerButton({ title, icon }: { title: string; icon?: string | null 
         return;
       }
       const result = await openWindow(idToken);
-      if (!result?.success) {
+      // 'already-opening' is a double-click while the access check is in flight —
+      // the window is on its way, so saying "could not open" would be wrong.
+      if (!result?.success && result?.error !== "already-opening") {
         toast.error(
           result?.error === "forbidden"
             ? "You do not have access to OF Manager."

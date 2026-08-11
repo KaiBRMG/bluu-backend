@@ -2,8 +2,8 @@
 name: Bluu Backend
 description: Dark, quiet, information-dense internal management console where the data is the interface.
 colors:
-  canvas: "#0A0A0A"
-  sidebar: "#000000"
+  canvas: "#09090b"
+  sidebar: "#18181b"
   surface: "#171717"
   ink: "#ffffff"
   ink-secondary: "#9ca3af"
@@ -127,15 +127,21 @@ The canonical reference implementation is `src/app/(main)/creators/custom-reques
 A greyscale-on-black palette where the only saturated pixels carry state.
 
 ### Primary
-- **Action Blue** (`#3b82f6`): The single interactive accent — primary buttons, focus, current selection. Hover deepens to **Action Blue Deep** (`#2563eb`). Used sparingly; it is the one voice that means "act here."
+- **Action Blue** (`#3b82f6`): The single interactive accent — tints, borders, selection washes, and marks that carry no text. Used sparingly; it is the one voice that means "act here."
+- **Action Blue Deep** (`#2563eb`): The **filled** step — any Action Blue surface that carries white text (primary buttons, a selected filter chip). Hover deepens again to `#1d4ed8`. This is an accessibility floor, not a preference: white on `#3b82f6` measures **3.68:1** and fails AA for anything under 18px, while white on `#2563eb` reads **5.17:1**. Tint at `#3b82f6`, fill at `#2563eb`.
+
+  Two things do **not** yet follow this and are outstanding, both one-line changes with app-wide visual effect (deliberately left for a separate decision): `.btn-primary` in `globals.css` still fills at `#3b82f6` with white ink, and shadcn's `Button` `default` variant resolves `--primary` to **near-white** (`oklch(0.92 …)`, the stock `.dark` value) rather than to Action Blue at all — so most primary buttons in the app are currently white, not blue. OF Manager's Send button is inked correctly at `#2563eb` in-component; treat it as the reference, not as drift.
 
 ### Neutral
-- **Canvas** (`#0A0A0A`): The app ground behind everything (`bg-background`).
-- **Sidebar** (`#000000`): The navigation rail — one shade darker than canvas, the darkest surface in the app.
+
+**`globals.css`'s `.dark` block is the source of truth for these values, and it is what `<html class="dark">` actually resolves.** The `:root` block above it is stock shadcn and is overridden on every screen; read the `.dark` block when checking a token.
+
+- **Canvas** (`#09090b`, `--background`): The app ground behind everything (`bg-background`).
+- **Sidebar** (`#18181b`, `--sidebar`): The navigation rail. It is **1.12:1** against the canvas, so the rail/content split is carried by its hairline border, not by the fill — do not rely on the two grounds reading as distinct planes.
 - **Surface** (`#171717`): Content containers, panels, modals (`--content-background`). The reading plane.
 - **Ink** (`#ffffff`): Primary text and active icons (`text-foreground`).
-- **Ink Secondary** (`#9ca3af`, `text-zinc-400`): Secondary text, labels, meta.
-- **Ink Muted** (`#6b7280`, `text-zinc-500`): De-emphasised meta, placeholders, disabled. **Only safe on the near-black canvas** — see The Muted-on-Tint Rule below.
+- **Ink Secondary** (`#a1a1aa`, `text-zinc-400`): Secondary text, labels, meta. **The only de-emphasis step for text** — 7.76:1 on canvas, 6.91:1 on the sidebar, 7.25:1 on an overlay surface.
+- **Ink Muted** (`#71717a`, `text-zinc-500`): **Not a text colour.** It measures **4.12:1 on the canvas**, 3.84:1 on an overlay surface and 3.67:1 on the sidebar — it fails AA on every ground in the app, including the near-black one. Use it only for non-text marks that need to clear 3:1 (hairline-adjacent icons, disabled affordances); de-emphasise text with Ink Secondary. *(Existing screens still use it as a text colour; the OF Manager window is converted, the rest is outstanding.)*
 - **Hairline** (`#2a2a2a`, `border-zinc-700/800`): Every divider and border. Depth is a hairline, not a shadow.
 
 ### Semantic (status / priority / category)
@@ -161,7 +167,9 @@ Chart hues are **validated for dark-surface contrast and CVD-safety**, not taken
 
 **The Overlay-Not-Grey Rule.** Interior surfaces are translucent white on the dark ground, not solid greys — this is what gives the soft, layered depth (see Elevation).
 
-**The Muted-on-Tint Rule.** **Ink Muted** (`#6b7280`, `--foreground-muted`) is tuned for the near-black canvas, where it passes AA; on a **tinted** surface — any state-tint or `bgAlpha` wash (e.g. the time-tracking state panel) — its contrast collapses to ~3.5:1 and fails. On tinted grounds, de-emphasise with **Ink Secondary** (`#9ca3af`, `--foreground-secondary`, ~6:1) instead, and never stack `opacity` on top of an already-muted token — double de-emphasis is what pushes text under the floor. Muted is a canvas colour, not a universal one.
+**The One De-emphasis Rule** (supersedes the former Muted-on-Tint Rule). There is **one** step below Ink for text: **Ink Secondary** (`text-zinc-400` / `--foreground-secondary`). Ink Muted was previously documented as safe on the near-black canvas; measured, it is 4.12:1 there and fails everywhere else too, so there is no ground on which it is a legal text colour. Use Ink Secondary on canvas, on sidebar, on overlay surfaces and on state tints alike, and never stack `opacity` on top of it — double de-emphasis is what pushes text under the floor.
+
+**The One-Grey Rule.** A surface picks **one** token for de-emphasised text and uses it throughout. Mixing `text-muted-foreground` (`#9f9fa9`) with `text-zinc-400` (`#a1a1aa`) and `text-zinc-500` (`#71717a`) inside one component — which is how the OF Manager window drifted — makes three greys for one role and hides the failing one among the passing ones.
 
 ## 3. Typography
 
@@ -212,7 +220,7 @@ Stacking is a **named semantic scale**, declared in `globals.css` and consumed v
 
 ## 5. Components
 
-**Only** shadcn/ui primitives from `src/components/ui/`. Never introduce another component library or hand-roll a primitive that already exists there; add new ones with `npx shadcn@latest add <name>`. Icons are **only** `@tabler/icons-react` and `lucide-react`. Images are **only** `Avatar` / `AvatarImage` / `AvatarFallback` — never a raw `<img>`. Every mutation `toast`s its outcome via `sonner` (`toast.success` / `toast.error`).
+**Only** shadcn/ui primitives from `src/components/ui/`. Never introduce another component library or hand-roll a primitive that already exists there; add new ones with `npx shadcn@latest add <name>`. Icons are **only** `@tabler/icons-react` and `lucide-react`. Images are **only** `Avatar` / `AvatarImage` / `AvatarFallback` — never a raw `<img>`. Every mutation `toast`s its outcome via `sonner` (`toast.success` / `toast.error`) — with one narrow exception: a **high-frequency mutation whose result is already visible in place** toasts failures only (see the satellite shell's message send). The rule exists because CRUD results happen off-screen; it is not a licence to fire a toast every few seconds.
 
 **The Avatar Seed Rule.** Every fallback avatar is derived from **`displayName`** (`getAvatarColor(displayName || 'User')` + `getInitials(displayName)`), exactly as `AppLayout` and `NavUser` do it. `getAvatarColor` **hashes** the string it is given, so seeding from any other value — a full name, an email, a nickname in form state — changes both the initials *and* the colour, and the same person appears as two different avatars across screens. Display a fuller name as *text* if the surface calls for it, but always seed the avatar from `displayName`.
 
@@ -248,10 +256,14 @@ Stacking is a **named semantic scale**, declared in `globals.css` and consumed v
 `AppLayout` is the shell for every **in-app page**. The one sanctioned exception is a surface that owns its own Electron window — currently `/of-manager` — where a sidebar and top bar would be navigation to nowhere. Its chrome is the two-pane messaging shell instead:
 
 - **Full-bleed, never scrolling as a page.** `h-screen w-screen overflow-hidden` on the ground; each pane owns its own `overflow-y-auto`.
-- **Left rail on Sidebar `#000000`** (`w-[340px]`, hairline right border) so the window still reads as part of the console; the content pane sits on Canvas `#0A0A0A`.
-- **Section title is the eyebrow** (11px/600, uppercase, `0.06em`) — the same device the sidebar uses for section headers, and the only place the window names itself.
-- **Filter chips** are `rounded-full px-2.5 py-1 text-xs`: the selected chip is Action Blue (the One Voice Rule — current selection), the rest ride the hover/active overlay recipe.
-- **Message bubbles** are the overlay recipe (`bg-white/[0.04]` + `border-white/[0.07]`, `rounded-xl`) for the fan; our own messages take an Action Blue tint (`/15` fill, `/30` border) because "who said this" is the one distinction the surface exists to encode. Timestamps are `text-[11px]` `tabular-nums` zinc-500.
+- **Left rail on Sidebar** (`w-[340px]`, hairline right border) so the window still reads as part of the console; the content pane sits on Canvas. The rail is a fixed width with no breakpoint, which holds because `openSatelliteWindow` gives every satellite a **900px `minWidth`** ([`electron/main.js`](electron/main.js)) — the two panes are never squeezed. A caller that passes a smaller `minWidth` (the clamp floor is 360) would break this layout; don't, or add a single-pane mode first.
+- **Section title is the eyebrow** (11px/600, uppercase, `0.06em`) — the same device the sidebar uses for section headers, and the only place the window names itself. It is an `<h2>`; the open thread's fan name is the window's `<h1>`.
+- **Filter chips** are `rounded-full px-2.5 py-1 text-xs`: the selected chip is a **filled Action Blue Deep** (`#2563eb`, white ink — see §2, filled blue never uses `#3b82f6`), the rest ride the hover/active overlay recipe. Each carries `aria-pressed`.
+- **Selected chat row = three cues, never one.** An overlay-only selected row (`bg-white/[0.08]` on the rail) measures **1.25:1** against an unselected one and ~1.1:1 against a hovered one — invisible. Selection is the Action Blue **tint** (`bg-[#3b82f6]/15`), the fan name stepping to `text-white font-semibold` (unselected rows sit at `font-medium text-zinc-300`), and `aria-current`. Hover stays on the overlay recipe, so hue separates selection from hover.
+- **Message bubbles** are the overlay recipe (`bg-white/[0.04]` + `border-white/[0.07]`, `rounded-xl`) for the fan; our own messages take an Action Blue tint (`/15` fill, `/30` border) because "who said this" is the one distinction the surface exists to encode. Width is `max-w-[min(75%,34rem)]` — the percentage alone runs past 120ch once the window is wide. Timestamps are `text-[11px]` `tabular-nums` **zinc-400** (the One De-emphasis Rule; zinc-500 fails on every ground here).
+- **The thread is a live region.** The scroll container is `role="log"` with `aria-live="polite"`, dropped to `off` while an older page loads so paging back through history doesn't read thirty messages aloud. Both text controls carry an `aria-label` — a placeholder is not a name.
+- **No success toast per message.** DESIGN's "every mutation toasts" rule is for CRUD, where the result is off-screen; here the bubble landing in the thread *is* the confirmation, and a toast every few seconds trains the operator to ignore the failure toasts that matter. Failures toast, successes don't.
+- **One place holds unsent text.** A failed send removes its optimistic bubble and hands the draft back to the composer. Never do both — a red bubble plus a refilled composer shows the same message twice and the bubble never clears.
 
 This is a shell, not a new visual language: colours, overlays, hairlines, radii, motion and the empty-state line are all unchanged. A second satellite window should reuse this shell rather than invent a third.
 
