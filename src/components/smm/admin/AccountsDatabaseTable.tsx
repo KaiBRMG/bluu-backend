@@ -24,10 +24,11 @@ import type { SmmUser } from '@/hooks/useSmmUsers';
 const UNASSIGNED = '__unassigned__';
 const COLS = 7;
 
-/** Badge filters sitting beside the search box. */
+/** Badge filters sitting beside the search box — mutually exclusive. */
 export interface AccountFilters {
   bonus: boolean; // type contains 'Bonus'
   viral: boolean; // isViralBonus
+  other: boolean; // type does NOT contain 'Bonus' and isViralBonus is false
 }
 
 /** Borderless input that saves on blur when the value changed. */
@@ -222,7 +223,7 @@ function NetworkGroup({
   const [manualOpen, setManualOpen] = useState(false);
   // A badge filter narrows the same way a search does: it needs every group's
   // data, and only groups with matches open.
-  const searchActive = search.trim().length > 0 || filters.bonus || filters.viral;
+  const searchActive = search.trim().length > 0 || filters.bonus || filters.viral || filters.other;
   // A search needs the group's data to match against, but the group should stay
   // collapsed (showing a spinner) until that data loads. Manual expansion opens
   // immediately regardless of matches.
@@ -241,7 +242,8 @@ function NetworkGroup({
     });
     const narrowed = merged.filter((a) => (
       (!filters.bonus || isBonusAccountType(a.type)) &&
-      (!filters.viral || a.isViralBonus)
+      (!filters.viral || a.isViralBonus) &&
+      (!filters.other || (!isBonusAccountType(a.type) && !a.isViralBonus))
     ));
     const q = search.trim().toLowerCase();
     if (!q) return narrowed;

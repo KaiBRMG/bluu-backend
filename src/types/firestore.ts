@@ -28,6 +28,15 @@ export const GROUP_DISPLAY_NAMES: Record<string, string> = {
 
 export interface UserDocument {
   uid: string;
+  /**
+   * The sign-in address, and the **authorisation key** for the whole app: an
+   * admin registers it in the Employee Registry, and login is refused unless
+   * the address Google returns matches it (via the `auth-emails` index).
+   *
+   * Named `workEmail` for history — since the personal-email migration it holds
+   * the user's *personal* Google account. The UI labels it "Login email"; the
+   * field name is kept because it spans types, caches and API payloads.
+   */
   workEmail: string;
   displayName: string;
   photoURL?: string;
@@ -35,7 +44,14 @@ export interface UserDocument {
   lastName: string;
   groups: string[];
   createdAt: Timestamp;
-  lastLoginAt: Timestamp;
+  /** Null until the registered user actually signs in — this is "Invited". */
+  lastLoginAt: Timestamp | null;
+  /** Google's stable account id (`sub`), recorded on login. Survives renames. */
+  googleSub?: string | null;
+  /** Set when the user moved off their @bluurock.com address. */
+  emailMigratedAt?: Timestamp;
+  /** The company address they migrated away from. Audit only. */
+  previousWorkEmail?: string | null;
   isActive: boolean;
   isArchived?: boolean;
   role?: 'admin' | 'member';

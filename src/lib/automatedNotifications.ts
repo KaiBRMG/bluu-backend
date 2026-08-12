@@ -41,18 +41,19 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
   {
     id: 'welcomeToTeam',
     category: 'Onboarding',
-    event: 'New user created',
-    trigger: 'A user signs in for the first time and their user document is created.',
+    event: 'First login',
+    trigger:
+      'A registered user signs in for the first time. Not sent when an admin registers them — that can be days before their start date.',
     recipients: 'The new user',
     sources: ['src/lib/services/userService.ts'],
-    content: notifications.welcomeToTeam('{firstName}'),
+    content: notifications.welcomeToTeam('{firstName}', '{groupName}'),
   },
   {
     id: 'adminNewUserAlert',
     category: 'Onboarding',
-    event: 'New user created',
+    event: 'First login without a group',
     trigger:
-      'Sent alongside the welcome message, so an admin assigns the new user to a group and unblocks their onboarding.',
+      'A user reaches their first login while still unassigned, i.e. registered without a group. Silent in the normal flow, where the group is set at registration.',
     recipients: 'Every member of the admin group',
     sources: ['src/lib/services/userService.ts'],
     content: notifications.adminNewUserAlert(),

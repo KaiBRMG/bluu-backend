@@ -3,39 +3,66 @@
 import { useRouter } from 'next/navigation';
 import { Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useUserData } from '@/hooks/useUserData';
+import { GROUP_DISPLAY_NAMES } from '@/types/firestore';
 import OnboardingCard from '../_components/OnboardingCard';
 
 /**
- * Where the user actually stands. Showing the state beats describing it: the
- * copy says an admin still has to review them, and this makes that concrete and
- * clearly in motion rather than an open-ended wait.
+ * Where the user actually stands. Showing the state beats describing it.
  *
- * Workspace access is deliberately absent — the user can reach their workspace
- * straight away, so listing it as "pending" would be untrue and would imply a
- * block that doesn't exist. Tones are semantic: green complete, orange awaiting.
+ * Two shapes, because two things can be true by the time someone finishes
+ * onboarding. Since users are registered by an admin *before* they can log in,
+ * a group is normally already assigned — there is nothing to wait for, and the
+ * old "an admin still has to review you" copy would be a lie that invents a
+ * block. The waiting variant survives only for the deliberate "decide later"
+ * registration, where it is still accurate.
+ *
+ * Workspace access is deliberately absent from both — the user can reach their
+ * workspace straight away, so listing it as "pending" would imply a block that
+ * doesn't exist. Tones are semantic: green complete, orange awaiting.
  */
-const NEXT_STEPS = [
-  {
-    label: 'Details submitted',
-    status: 'Done',
-    dot: 'bg-green-400',
-    text: 'text-green-400',
-    live: false,
-    hint: null,
-  },
-  {
-    label: 'Admin review',
-    status: 'In progress',
-    dot: 'bg-orange-400',
-    text: 'text-orange-400',
-    live: true,
-    // True at this point: adminNewUserAlert fans out to every admin at signup.
-    hint: 'Admin has been notified.',
-  },
-] as const;
+const DETAILS_STEP = {
+  label: 'Details submitted',
+  status: 'Done',
+  dot: 'bg-green-400',
+  text: 'text-green-400',
+  live: false,
+  hint: null,
+} as const;
+
+const GROUP_STEP = {
+  label: 'Team assigned',
+  status: 'Done',
+  dot: 'bg-green-400',
+  text: 'text-green-400',
+  live: false,
+  hint: null as string | null,
+} as const;
+
+const ADMIN_REVIEW_STEP = {
+  label: 'Admin review',
+  status: 'In progress',
+  dot: 'bg-orange-400',
+  text: 'text-orange-400',
+  live: true,
+  // True at this point: adminNewUserAlert fans out to every admin on the first
+  // login of a user who is still unassigned — exactly this case.
+  hint: 'Admin has been notified.',
+} as const;
 
 export default function OnboardingDonePage() {
   const router = useRouter();
+  const { userData } = useUserData();
+
+  const groups: string[] = userData?.groups ?? [];
+  const assignedGroup = groups.find((g) => g !== 'unassigned');
+  const groupName = assignedGroup
+    ? GROUP_DISPLAY_NAMES[assignedGroup] ?? assignedGroup
+    : null;
+
+  const steps = groupName
+    ? [{ ...DETAILS_STEP }, { ...GROUP_STEP, hint: `You're in ${groupName}.` }]
+    : [DETAILS_STEP, ADMIN_REVIEW_STEP];
 
   return (
     <OnboardingCard step={5}>
@@ -59,9 +86,9 @@ export default function OnboardingDonePage() {
           className="onboard-rise mx-auto mt-3 max-w-[58ch] text-sm leading-relaxed text-pretty text-zinc-400"
           style={{ animationDelay: '180ms' }}
         >
-          You are currently not assigned to any group until an admin reviews your information.
-          Once you are assigned to a group, you will have access to your workspace. Check back
-          soon!
+          {groupName
+            ? "You're all set up and your workspace is ready. Head in whenever you're ready to start."
+            : 'You are currently not assigned to any group until an admin reviews your information. Once you are assigned to a group, you will have access to your workspace. Check back soon!'}
         </p>
       </div>
 
@@ -73,7 +100,7 @@ export default function OnboardingDonePage() {
           animationDelay: '260ms',
         }}
       >
-        {NEXT_STEPS.map(({ label, status, dot, text, live, hint }, i) => (
+        {steps.map(({ label, status, dot, text, live, hint }, i) => (
           <li
             key={label}
             className={i > 0 ? 'border-t' : undefined}

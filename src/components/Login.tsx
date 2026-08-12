@@ -2,12 +2,23 @@
 
 import { useEffect, useState } from 'react';
 import { signInWithPopup, signInWithCustomToken } from 'firebase/auth';
+import { AlertCircle } from 'lucide-react';
 import { auth, googleProvider } from '../firebase-config';
 import { markLoginSession } from '@/lib/loginSession';
+
+/**
+ * The refusal a user sees when Google authenticated them fine but they are not
+ * in the `users` collection — the normal case for someone whose admin hasn't
+ * registered them yet. It is deliberately actionable ("contact your team
+ * leader") rather than diagnostic: the server does not tell us, and must not
+ * tell us, whether the address is unknown or the account was deactivated.
+ */
+const NOT_REGISTERED_CODE = 'USER_NOT_REGISTERED';
 
 function Login() {
   const [isElectron] = useState(() => typeof window !== 'undefined' && window.electronAPI?.isElectron);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<{ message: string; blocked: boolean } | null>(null);
 
   useEffect(() => {
     if (!isElectron || !window.electronAPI) return;
@@ -16,6 +27,7 @@ function Login() {
     window.electronAPI.auth.onOAuthCallback(async (code: string) => {
       try {
         setLoading(true);
+        setError(null);
 
         // Exchange code for Firebase custom token
         const response = await fetch('/api/auth/exchange-code', {
@@ -27,7 +39,12 @@ function Login() {
         const data = await response.json();
 
         if (!response.ok) {
-          throw new Error(data.error || 'Failed to authenticate');
+          setError({
+            message: data.error || 'Failed to authenticate',
+            blocked: data.code === NOT_REGISTERED_CODE,
+          });
+          setLoading(false);
+          return;
         }
 
         // Both markers must be written BEFORE signing in. `signInWithCustomToken`
@@ -52,16 +69,19 @@ function Login() {
         await signInWithCustomToken(auth, data.customToken);
 
         setLoading(false);
-      } catch (error: any) {
-        console.error('OAuth callback error:', error);
-        alert(error.message || 'Login failed. Please try again.');
+      } catch (err: unknown) {
+        console.error('OAuth callback error:', err);
+        setError({
+          message: err instanceof Error ? err.message : 'Login failed. Please try again.',
+          blocked: false,
+        });
         setLoading(false);
       }
     });
 
-    window.electronAPI.auth.onOAuthError((error: string) => {
-      console.error('OAuth error:', error);
-      alert('Login failed: ' + error);
+    window.electronAPI.auth.onOAuthError((oauthError: string) => {
+      console.error('OAuth error:', oauthError);
+      setError({ message: `Login failed: ${oauthError}`, blocked: false });
       setLoading(false);
     });
 
@@ -75,11 +95,12 @@ function Login() {
 
     try {
       setLoading(true);
+      setError(null);
       await window.electronAPI.auth.startGoogleOAuth();
       // OAuth flow continues in the callback listener
-    } catch (error) {
-      console.error('Login error:', error);
-      alert('Login failed. Please try again.');
+    } catch (err) {
+      console.error('Login error:', err);
+      setError({ message: 'Login failed. Please try again.', blocked: false });
       setLoading(false);
     }
   };
@@ -87,35 +108,41 @@ function Login() {
   const handleBrowserLogin = async () => {
     try {
       setLoading(true);
+      setError(null);
       // Set before the popup resolves auth state, for the same reason as the
       // Electron path above.
       markLoginSession();
       const result = await signInWithPopup(auth, googleProvider);
-      const email = result.user.email;
 
-      if (!email || !email.endsWith('@bluurock.com')) {
-        await auth.signOut();
-        alert('Access denied. Please use your @bluurock.com email address.');
-        setLoading(false);
-        return;
-      }
-
-      // Rotate the session token server-side to displace any existing session
+      // No domain check here any more — staff sign in with personal Google
+      // accounts, so the only meaningful test is whether an admin registered
+      // them. `session-token` performs it; a 403 means they are not in the
+      // system, and the half-established Firebase session must be torn down.
       const idToken = await result.user.getIdToken();
       const res = await fetch('/api/auth/session-token', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${idToken}` },
       });
-      if (res.ok) {
-        const data = await res.json();
-        localStorage.setItem('sessionToken', data.sessionToken);
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        await auth.signOut();
+        setError({
+          message: data.error || 'Login failed. Please try again.',
+          blocked: data.code === NOT_REGISTERED_CODE,
+        });
+        setLoading(false);
+        return;
       }
+
+      const data = await res.json();
+      localStorage.setItem('sessionToken', data.sessionToken);
 
       // AuthProvider will check isActive before setting user
       setLoading(false);
-    } catch (error) {
-      console.error('Login error:', error);
-      alert('Login failed. Please try again.');
+    } catch (err) {
+      console.error('Login error:', err);
+      setError({ message: 'Login failed. Please try again.', blocked: false });
       setLoading(false);
     }
   };
@@ -138,6 +165,29 @@ function Login() {
           </div>
           <p className="text-zinc-400">Sign in to access your workspace</p>
         </div>
+
+        {error && (
+          <div
+            role="alert"
+            className="mb-5 flex gap-3 rounded-lg border p-3 text-left"
+            style={{
+              borderColor: 'rgba(239,68,68,0.30)',
+              background: 'rgba(239,68,68,0.10)',
+            }}
+          >
+            <AlertCircle className="mt-0.5 size-4 shrink-0" style={{ color: '#ef4444' }} />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-white">
+                {error.blocked ? 'Login blocked' : 'Sign-in failed'}
+              </p>
+              <p className="mt-0.5 text-sm text-zinc-400">
+                {error.blocked
+                  ? 'Your account is not in the system. Please contact your team leader to be added.'
+                  : error.message}
+              </p>
+            </div>
+          </div>
+        )}
 
         <button
           onClick={handleLogin}

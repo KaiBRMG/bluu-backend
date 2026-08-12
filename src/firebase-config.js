@@ -31,6 +31,9 @@ export const db = initializeFirestore(app, {
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 
+// No `hd` domain restriction: staff sign in with personal Google accounts.
+// Access is decided by the allowlist (an admin must have registered the address
+// in the Employee Registry), enforced server-side — never by the domain.
 googleProvider.setCustomParameters({
-    hd: 'bluurock.com' // Replace with your domain
-  });
+  prompt: 'select_account',
+});

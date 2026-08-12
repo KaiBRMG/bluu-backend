@@ -139,7 +139,11 @@ const ONBOARDING_REQUIRED_FIELDS: ReadonlyArray<{
   label: string;
 }> = [
   { key: 'displayName', label: 'Nickname' },
-  { key: 'personalEmail', label: 'Personal email' },
+  // `personalEmail` is deliberately NOT here. Since staff sign in with personal
+  // Google accounts, the address on the user doc (`workEmail`) already IS their
+  // personal email for almost everyone — demanding it a second time was a
+  // required field with no information in it. Still collected and still
+  // format-validated, for the minority who keep a separate contact address.
   { key: 'phoneNumber', label: 'Phone number' },
   { key: 'DOB', label: 'Date of birth' },
   { key: 'emergencyContactName', label: 'Emergency contact name' },

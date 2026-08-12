@@ -18,8 +18,11 @@ export async function GET(request: NextRequest) {
     response_type: 'code',
     scope: 'openid email profile',
     access_type: 'offline',
-    prompt: 'select_account', // Allow user to select account
-    hd: 'bluurock.com', // Restrict to company domain
+    // Always show the account chooser: staff sign in with personal Google
+    // accounts and many are signed into several at once.
+    prompt: 'select_account',
+    // No `hd` — the company-domain restriction is gone. Authorisation is the
+    // allowlist in /api/auth/exchange-code, not Google's domain filter.
   });
 
   const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;

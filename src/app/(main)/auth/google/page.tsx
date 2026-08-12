@@ -1,6 +1,25 @@
 import { redirect } from 'next/navigation';
 
-export default function GoogleAuthPage() {
+/**
+ * Server-side redirect into Google's consent screen. Opened in the user's
+ * system browser (Electron hands it off via `shell.openExternal`), never in-app.
+ *
+ * Two modes:
+ *  • default — normal sign-in.
+ *  • `?mode=migrate` — the one-time move from a company address to a personal
+ *    one. Identical parameters plus a forced re-consent, because the user is
+ *    already signed into Google as their *work* self and we need the chooser to
+ *    behave like a fresh decision rather than silently reusing that session.
+ *    The "you picked your work email again" gate is enforced server-side after
+ *    the exchange (Google has no way to exclude a domain), so this only affects
+ *    how insistently the chooser is shown.
+ */
+export default async function GoogleAuthPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ mode?: string }>;
+}) {
+  const { mode } = await searchParams;
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
   const redirectUri = process.env.NEXT_PUBLIC_REDIRECT_URI || 'http://localhost:3000/auth/callback';
 
@@ -25,8 +44,8 @@ export default function GoogleAuthPage() {
     response_type: 'code',
     scope: 'openid email profile',
     access_type: 'offline',
-    prompt: 'select_account',
-    hd: 'bluurock.com',
+    prompt: mode === 'migrate' ? 'select_account consent' : 'select_account',
+    // No `hd` — see /api/auth/google-url. Access is decided by our allowlist.
   });
 
   const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;

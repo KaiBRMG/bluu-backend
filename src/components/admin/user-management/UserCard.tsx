@@ -15,6 +15,16 @@ interface UserCardProps {
 export default function UserCard({ user, groups, onClick }: UserCardProps) {
   const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.displayName;
   const isActive = user.isActive !== false;
+  // Registered but never signed in. Shown instead of Active/Disabled because it
+  // is the more useful fact: nothing about this account has been confirmed yet,
+  // and a mistyped login email surfaces as an invite that never turns into a
+  // login. Orange = awaiting, per the semantic palette.
+  const isInvited = !user.lastLoginAt;
+  const status = isInvited
+    ? { label: 'Invited', color: '#fb923c', tint: 'rgba(251,146,60,0.10)' }
+    : isActive
+      ? { label: 'Active', color: '#22c55e', tint: 'rgba(34,197,94,0.10)' }
+      : { label: 'Disabled', color: '#ef4444', tint: 'rgba(239,68,68,0.10)' };
   const userGroups = (user.groups || [])
     .map((id) => groups.find((g) => g.id === id))
     .filter(Boolean) as AdminGroup[];
@@ -27,16 +37,13 @@ export default function UserCard({ user, groups, onClick }: UserCardProps) {
     >
       <span
         className="absolute top-3 right-3 flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium"
-        style={{
-          color: isActive ? '#22c55e' : '#ef4444',
-          background: isActive ? 'rgba(34,197,94,0.10)' : 'rgba(239,68,68,0.10)',
-        }}
+        style={{ color: status.color, background: status.tint }}
       >
         <span
           className="inline-block size-1.5 rounded-full"
-          style={{ background: isActive ? '#22c55e' : '#ef4444' }}
+          style={{ background: status.color }}
         />
-        {isActive ? 'Active' : 'Disabled'}
+        {status.label}
       </span>
 
       <div className="flex items-start gap-3">

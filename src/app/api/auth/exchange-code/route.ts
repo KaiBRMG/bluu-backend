@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { adminAuth } from '@/lib/firebase-admin';
-import { ensureUserExists, getUserById, findUserUidByEmail } from '@/lib/services/userService';
+import {
+  recordSuccessfulLogin,
+  getUserById,
+  findUserUidByEmail,
+} from '@/lib/services/userService';
+import { normalizeEmail } from '@/lib/authEmail';
 
 const oauth2Client = new google.auth.OAuth2(
   process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
@@ -9,6 +14,61 @@ const oauth2Client = new google.auth.OAuth2(
   process.env.NEXT_PUBLIC_REDIRECT_URI || 'http://localhost:3000/auth/callback'
 );
 
+/**
+ * The single message shown for every "you may not come in" outcome: unknown
+ * address, deactivated account, archived account. **Deliberately identical in
+ * all three cases** — a distinguishable response would let anyone with a Google
+ * account enumerate who works here and who has been let go.
+ */
+const ACCESS_DENIED = {
+  error: 'Login blocked: your account is not in the system. Please contact your team leader.',
+  code: 'USER_NOT_REGISTERED',
+} as const;
+
+/**
+ * Throttle per normalised email. Since the `@bluurock.com` domain check was
+ * replaced by the allowlist, this endpoint is reachable by anyone on earth with
+ * a Google account, and each call costs a Google token exchange plus a Firestore
+ * lookup. In-process only, so it is per-serverless-instance and best-effort —
+ * enough to blunt a naive loop, not a substitute for edge rate limiting.
+ */
+const ATTEMPT_WINDOW_MS = 60_000;
+const MAX_ATTEMPTS_PER_WINDOW = 10;
+const attempts = new Map<string, { count: number; resetAt: number }>();
+
+function isRateLimited(key: string): boolean {
+  const now = Date.now();
+  const record = attempts.get(key);
+
+  if (!record || now > record.resetAt) {
+    attempts.set(key, { count: 1, resetAt: now + ATTEMPT_WINDOW_MS });
+    // Opportunistic sweep so the map can't grow without bound on a warm instance.
+    if (attempts.size > 500) {
+      for (const [k, v] of attempts) if (now > v.resetAt) attempts.delete(k);
+    }
+    return false;
+  }
+
+  record.count += 1;
+  return record.count > MAX_ATTEMPTS_PER_WINDOW;
+}
+
+/**
+ * POST /api/auth/exchange-code
+ *
+ * Exchanges a Google OAuth code for a Firebase custom token.
+ *
+ * **Google authenticates; Firestore authorises.** Google only proves the caller
+ * owns an address. Whether that address may enter — and which uid it enters as —
+ * comes solely from the `users` collection, which an admin populates ahead of
+ * time through the Employee Registry. This route therefore NEVER creates a user
+ * document and never provisions an Auth account for an unknown address; an
+ * unrecognised email is refused outright.
+ *
+ * (Before the personal-email migration this gate was `email.endsWith('@bluurock.com')`
+ * plus auto-provisioning. With staff on personal Google accounts that test is
+ * meaningless, and auto-provisioning would hand an account to any Gmail user.)
+ */
 export async function POST(request: NextRequest) {
   try {
     const { code } = await request.json();
@@ -24,9 +84,8 @@ export async function POST(request: NextRequest) {
     const decodedCode = decodeURIComponent(code);
 
     // Exchange authorization code for tokens
-    try {
-      const { tokens } = await oauth2Client.getToken(decodedCode);
-      oauth2Client.setCredentials(tokens);
+    const { tokens } = await oauth2Client.getToken(decodedCode);
+    oauth2Client.setCredentials(tokens);
 
     // Get user info from Google
     const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
@@ -39,30 +98,60 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify email domain
-    if (!userInfo.email.endsWith('@bluurock.com')) {
+    // An unverified address proves nothing about who owns it, and the address is
+    // now the authorisation key. Normal Google accounts are always verified.
+    if (userInfo.verified_email === false) {
+      console.warn('[exchange-code] rejected unverified Google email');
+      return NextResponse.json(ACCESS_DENIED, { status: 403 });
+    }
+
+    const email = userInfo.email;
+    const key = normalizeEmail(email);
+    if (!key) {
+      return NextResponse.json(ACCESS_DENIED, { status: 403 });
+    }
+
+    if (isRateLimited(key)) {
       return NextResponse.json(
-        { error: 'Access denied. Only @bluurock.com emails are allowed.' },
-        { status: 403 }
+        { error: 'Too many sign-in attempts. Please wait a minute and try again.' },
+        { status: 429 }
       );
     }
 
-    // Create or get Firebase user
-    let firebaseUser;
+    // ─── The allowlist gate ─────────────────────────────────────────────
+    const uid = await findUserUidByEmail(email);
+    if (!uid) {
+      console.log(`[exchange-code] rejected unregistered email: ${key}`);
+      return NextResponse.json(ACCESS_DENIED, { status: 403 });
+    }
+
+    const userDoc = await getUserById(uid);
+    if (!userDoc || userDoc.isActive === false || userDoc.isArchived === true) {
+      console.log(`[exchange-code] rejected inactive/archived user: ${uid}`);
+      return NextResponse.json(ACCESS_DENIED, { status: 403 });
+    }
+
+    // ─── Reconcile the Auth account ─────────────────────────────────────
+    // The users doc is the source of truth for identity; the Auth account is
+    // downstream of it. Two states to repair, both harmless if they never occur:
+    //  • account missing — the doc outlived it (an Auth-console deletion that
+    //    skipped the app's cascade). Recreate under the SAME uid so all existing
+    //    data reattaches instead of stranding the user.
+    //  • email stale — a migration whose Firestore half committed and whose Auth
+    //    half failed (see migration.md §2.5). Login already works because we key
+    //    off the doc; this is the repair pass that closes the gap.
     try {
-      firebaseUser = await adminAuth.getUserByEmail(userInfo.email);
-    } catch (error: any) {
-      if (error.code === 'auth/user-not-found') {
-        // No Auth account for this email. Before minting a brand-new uid, check
-        // for an existing (possibly orphaned) users doc with this email: if one
-        // exists, recreate the Auth account under that SAME uid so all existing
-        // data (profile, groups, permissions, historical records) reattaches and
-        // we don't create a duplicate users doc. See findUserUidByEmail.
-        const existingUid = await findUserUidByEmail(userInfo.email);
-        // Do NOT pass photoURL so initials avatar is used for genuinely new users.
-        firebaseUser = await adminAuth.createUser({
-          ...(existingUid ? { uid: existingUid } : {}),
-          email: userInfo.email,
+      const authUser = await adminAuth.getUser(uid);
+      if (normalizeEmail(authUser.email) !== key) {
+        await adminAuth
+          .updateUser(uid, { email })
+          .catch((err) => console.error('[exchange-code] Auth email reconcile failed:', err));
+      }
+    } catch (error: unknown) {
+      if ((error as { code?: string })?.code === 'auth/user-not-found') {
+        await adminAuth.createUser({
+          uid,
+          email,
           displayName: userInfo.name || undefined,
           emailVerified: userInfo.verified_email || false,
         });
@@ -71,35 +160,32 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Ensure user doc exists and fetch their groups to set the admin claim.
-    // ensureUserExists writes/updates the doc; getUserById reads it (cached).
-    const sessionToken = await ensureUserExists({
-      uid: firebaseUser.uid,
-      workEmail: userInfo.email,
-      displayName: userInfo.name || '',
+    const sessionToken = await recordSuccessfulLogin({
+      uid,
+      email,
+      googleSub: userInfo.id ?? null,
     });
 
-    const userDoc = await getUserById(firebaseUser.uid);
-    const isAdmin = Array.isArray(userDoc?.groups) && userDoc.groups.includes('admin');
+    // Read AFTER recordSuccessfulLogin, which invalidates the cache — groups may
+    // have changed since the read above.
+    const freshDoc = await getUserById(uid);
+    const isAdmin = Array.isArray(freshDoc?.groups) && freshDoc.groups.includes('admin');
 
     // Set Custom JWT Claim so Firestore rules can check request.auth.token.admin
     // without a billable Firestore read on every rule evaluation.
-    await adminAuth.setCustomUserClaims(firebaseUser.uid, { admin: isAdmin });
+    await adminAuth.setCustomUserClaims(uid, { admin: isAdmin });
 
-    const customToken = await adminAuth.createCustomToken(firebaseUser.uid, { admin: isAdmin });
+    const customToken = await adminAuth.createCustomToken(uid, { admin: isAdmin });
 
     return NextResponse.json({
       customToken,
       sessionToken,
       user: {
-        email: userInfo.email,
+        email,
         name: userInfo.name,
       },
     });
-    } catch (tokenError: any) {
-      throw tokenError;
-    }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[exchange-code] error:', error);
     return NextResponse.json(
       { error: 'Failed to exchange authorization code' },

@@ -550,7 +550,11 @@ export default function ProfilePage() {
         </Section>
 
         <Section title="How we reach you">
-          <Field id="workEmail" label="Company email">
+          {/* "Login email", not "Company email": staff sign in with their own
+              Google accounts now, so the old label described the wrong thing —
+              and sat directly above a "Personal email" field, which read as a
+              contradiction. */}
+          <Field id="workEmail" label="Login email">
             <Input
               id="workEmail"
               type="email"
@@ -567,14 +571,16 @@ export default function ProfilePage() {
             </p>
           </Field>
 
-          <Field id="personalEmail" label="Personal email" required error={errors.personalEmail}>
+          {/* Optional since the login email became personal — for most people
+              this is the same address, and requiring it twice is a pointless
+              wall. Still collected: some staff keep a separate contact address. */}
+          <Field id="personalEmail" label="Alternative email" error={errors.personalEmail}>
             <Input
               id="personalEmail"
               type="email"
               value={formData.personalEmail}
               onChange={(e) => setField('personalEmail', e.target.value)}
-              placeholder="you@example.com"
-              aria-required="true"
+              placeholder="Optional — if different from your login email"
               aria-invalid={!!errors.personalEmail}
               aria-describedby={errors.personalEmail ? 'personalEmail-error' : undefined}
             />

@@ -79,6 +79,7 @@ export default function RegistryFilters({
           <SelectItem value={ALL}>All Status</SelectItem>
           <SelectItem value="active">Active</SelectItem>
           <SelectItem value="inactive">Inactive</SelectItem>
+          <SelectItem value="invited">Invited</SelectItem>
         </SelectContent>
       </Select>
 

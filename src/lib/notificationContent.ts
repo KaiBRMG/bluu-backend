@@ -11,16 +11,28 @@ export const notifications = {
   // ─── User onboarding ──────────────────────────────────────────────────────────
   // Personal information is collected during the onboarding flow itself (the
   // `profile` step), so there is no post-login nudge to go fill in Settings.
-  welcomeToTeam: (firstName: string): NotificationContent => ({
+  // Fires on the user's FIRST LOGIN, not when an admin registers them — someone
+  // may be registered days before their start date, and a welcome sitting in an
+  // account they cannot yet reach is not a welcome.
+  //
+  // Registration normally assigns a group up front, so the group name is the
+  // usual case; the group-less variant covers a deliberate "decide later".
+  welcomeToTeam: (firstName: string, groupName?: string): NotificationContent => ({
     title: 'Welcome to Bluu Rock!',
-    message: `Hi ${firstName}, welcome to the team! You will be assigned to a group soon.`,
+    message: groupName
+      ? `Hi ${firstName}, welcome to the team! You've been added to ${groupName}.`
+      : `Hi ${firstName}, welcome to the team! You will be assigned to a group soon.`,
     type: 'success',
     actionUrl: null,
   }),
 
+  // Only fires when a user reaches their first login while still unassigned —
+  // i.e. an admin registered them without picking a group. In the normal flow
+  // the group is set at registration and there is nothing to action, so this
+  // stays silent rather than pinging every admin about every new hire.
   adminNewUserAlert: (): NotificationContent => ({
     title: 'Action Required',
-    message: 'A new user has logged in, assign them to a group asap to complete onboarding.',
+    message: 'A new user has logged in without a group. Assign them one to give them access.',
     type: 'action',
     actionUrl: '/admin/user-management',
   }),

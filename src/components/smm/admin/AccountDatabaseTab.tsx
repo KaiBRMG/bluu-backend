@@ -38,7 +38,7 @@ export function AccountDatabaseTab({
   // Filtering + lazy-loading run off the debounced value so keystrokes stay
   // smooth; the input itself stays fully responsive on `search`.
   const debouncedSearch = useDebouncedValue(search, 300);
-  const [filters, setFilters] = useState<AccountFilters>({ bonus: false, viral: false });
+  const [filters, setFilters] = useState<AccountFilters>({ bonus: false, viral: false, other: false });
   const [addOpen, setAddOpen] = useState(false);
   const [editAccount, setEditAccount] = useState<SmmAccount | null>(null);
   const [editOpen, setEditOpen] = useState(false);
@@ -113,7 +113,7 @@ export function AccountDatabaseTab({
             <button
               type="button"
               aria-pressed={filters.bonus}
-              onClick={() => setFilters((f) => ({ bonus: !f.bonus, viral: false }))}
+              onClick={() => setFilters((f) => ({ bonus: !f.bonus, viral: false, other: false }))}
               className="cursor-pointer"
             >
               Bonus Accounts
@@ -123,10 +123,20 @@ export function AccountDatabaseTab({
             <button
               type="button"
               aria-pressed={filters.viral}
-              onClick={() => setFilters((f) => ({ viral: !f.viral, bonus: false }))}
+              onClick={() => setFilters((f) => ({ viral: !f.viral, bonus: false, other: false }))}
               className="cursor-pointer gap-1"
             >
               {VIRAL_EMOJI} Viral Bonus Accounts
+            </button>
+          </Badge>
+          <Badge asChild variant={filters.other ? 'default' : 'outline'}>
+            <button
+              type="button"
+              aria-pressed={filters.other}
+              onClick={() => setFilters((f) => ({ other: !f.other, bonus: false, viral: false }))}
+              className="cursor-pointer"
+            >
+              Other
             </button>
           </Badge>
         </div>

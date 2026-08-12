@@ -6,6 +6,7 @@ import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
 import RegistryFilters from './RegistryFilters';
 import UserCard from './UserCard';
 import UserDetailDrawer from './UserDetailDrawer';
+import NewUserDialog from './NewUserDialog';
 
 interface EmployeeRegistryProps {
   users: AdminFullUser[];
@@ -13,6 +14,13 @@ interface EmployeeRegistryProps {
   onUpdateUser: (uid: string, updates: Record<string, unknown>) => Promise<void>;
   onRefetch: () => Promise<void>;
   onDeleteUser: (uid: string) => Promise<void>;
+  onCreateUser?: (payload: {
+    firstName: string;
+    lastName: string;
+    displayName: string;
+    email: string;
+    groupId: string;
+  }) => Promise<void>;
   showArchived?: boolean;
 }
 
@@ -22,6 +30,7 @@ export default function EmployeeRegistry({
   onUpdateUser,
   onRefetch,
   onDeleteUser,
+  onCreateUser,
   showArchived = false,
 }: EmployeeRegistryProps) {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
@@ -38,6 +47,9 @@ export default function EmployeeRegistry({
         if (groupFilter && !u.groups?.includes(groupFilter)) return false;
         if (statusFilter === 'active' && !u.isActive) return false;
         if (statusFilter === 'inactive' && u.isActive) return false;
+        // Registered by an admin but never signed in. Distinct from "inactive",
+        // which is an account that was switched off.
+        if (statusFilter === 'invited' && u.lastLoginAt) return false;
         if (employmentTypeFilter && u.employmentType !== employmentTypeFilter) return false;
         if (q) {
           const first = (u.firstName || '').toLowerCase();
@@ -65,6 +77,15 @@ export default function EmployeeRegistry({
 
   return (
     <div>
+      {onCreateUser && !showArchived && (
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <p className="max-w-prose text-sm text-foreground-secondary">
+            An employee must be registered here before they can sign in.
+          </p>
+          <NewUserDialog groups={groups} onCreate={onCreateUser} />
+        </div>
+      )}
+
       <RegistryFilters
         groups={groups}
         groupFilter={groupFilter}

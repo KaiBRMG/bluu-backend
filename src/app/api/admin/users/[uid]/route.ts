@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb, adminStorage, adminAuth } from '@/lib/firebase-admin';
-import { getUserById, invalidateUserCache } from '@/lib/services/userService';
+import { getUserById, invalidateUserCache, releaseEmailClaim } from '@/lib/services/userService';
 import { invalidateAdminUsersCache } from '@/app/api/admin/users/route';
 import { invalidateDisplayNamesCache } from '@/app/api/users/display-names/route';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
@@ -136,8 +136,15 @@ export const DELETE = withAuth(async (
       return NextResponse.json({ error: 'Cannot delete your own account' }, { status: 400 });
     }
 
-    // ─── 1. User doc, group membership, page permissions ────────────────
+    // ─── 1. User doc, group membership, page permissions, email claim ───
     const membershipBatch = adminDb.batch();
+
+    // Read the email before the doc goes, so the login-allowlist entry can be
+    // released. Leaving it behind would keep the address pointing at a deleted
+    // uid: re-registering that person would hit "email already taken", and a
+    // login attempt would resolve to a uid whose doc no longer exists.
+    const targetSnap = await adminDb.collection('users').doc(targetUid).get();
+    const targetEmail: string | undefined = targetSnap.data()?.workEmail;
 
     membershipBatch.delete(adminDb.collection('users').doc(targetUid));
 
@@ -194,6 +201,13 @@ export const DELETE = withAuth(async (
         console.error(`[DeleteUser] Failed to delete Auth account for ${targetUid}:`, err);
       }
     });
+
+    // ─── 5. Login allowlist entry ───────────────────────────────────────
+    if (targetEmail) {
+      await releaseEmailClaim(targetEmail).catch((err) => {
+        console.error(`[DeleteUser] Failed to release email claim for ${targetUid}:`, err);
+      });
+    }
 
     invalidateUserCache(targetUid);
     invalidateAdminUsersCache();

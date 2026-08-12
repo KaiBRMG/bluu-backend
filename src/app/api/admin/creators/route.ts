@@ -87,6 +87,20 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         // Auth user exists (e.g. from prior testing) but no Firestore doc — reuse the UID.
         // Update displayName and password to match what the admin provided.
         const existing = await adminAuth.getUserByEmail(userEmail);
+
+        // ...unless that account is an EMPLOYEE. Staff now sign in with personal
+        // addresses, so an employee and a creator can collide on one email — and
+        // adopting the account below would reset that employee's password and
+        // displayName, then leave one uid owning both a users and a creators doc
+        // (two auth contexts, one identity). Refuse instead.
+        const employeeDoc = await adminDb.collection('users').doc(existing.uid).get();
+        if (employeeDoc.exists) {
+          return NextResponse.json(
+            { error: 'That email already belongs to an employee account. Use a different address for the creator.' },
+            { status: 409 },
+          );
+        }
+
         uid = existing.uid;
         await adminAuth.updateUser(uid, { displayName: stageName, password, disabled: false });
       } else {

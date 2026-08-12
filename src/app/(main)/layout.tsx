@@ -7,6 +7,7 @@ import ErrorLogger from "@/components/ErrorLogger";
 import AppVersionReporter from "@/components/AppVersionReporter";
 import UpdateBanner from "@/components/UpdateBanner";
 import UpdateAvailableBanner from "@/components/UpdateAvailableBanner";
+import EmailMigrationDialog from "@/components/migration/EmailMigrationDialog";
 import LazyProviders from "@/components/LazyProviders";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
@@ -26,6 +27,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             </BootLoaderProvider>
             <UpdateBanner />
             <UpdateAvailableBanner />
+            {/* Inside LazyProviders because it reads clock state — the card must
+                never interrupt a shift. Renders nothing unless the user's cohort
+                is armed in emailMigrationConfig.ts. */}
+            <EmailMigrationDialog />
             <SpeedInsights />
             <Analytics />
           </LazyProviders>

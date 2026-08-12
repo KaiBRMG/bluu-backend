@@ -11,8 +11,18 @@ import { Loader } from "@/components/ui/loader";
 
 export default function UserManagementPage() {
   const [activeSection, setActiveSection] = useState("employee-registry");
-  const { users, groups, loading, error, refetch, updateUser, addGroupMembers, removeGroupMember, deleteUser } =
-    useAdminUsers();
+  const {
+    users,
+    groups,
+    loading,
+    error,
+    refetch,
+    createUser,
+    updateUser,
+    addGroupMembers,
+    removeGroupMember,
+    deleteUser,
+  } = useAdminUsers();
 
   const { activeCount, archivedCount } = useMemo(() => {
     let active = 0;
@@ -81,6 +91,7 @@ export default function UserManagementPage() {
               onUpdateUser={updateUser}
               onRefetch={refetch}
               onDeleteUser={deleteUser}
+              onCreateUser={createUser}
             />
           </TabsContent>
           <TabsContent value="user-groups">

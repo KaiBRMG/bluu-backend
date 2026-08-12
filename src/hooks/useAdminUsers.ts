@@ -157,6 +157,42 @@ export function useAdminUsers() {
     [user, fetchData]
   );
 
+  /**
+   * Registers an employee who has never logged in. This is the only way an
+   * account is created — login itself only checks the allowlist these docs form.
+   */
+  const createUser = useCallback(
+    async (payload: {
+      firstName: string;
+      lastName: string;
+      displayName: string;
+      email: string;
+      groupId: string;
+    }) => {
+      if (!user) throw new Error('Not authenticated');
+      const idToken = await user.getIdToken();
+
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to register user');
+      }
+
+      invalidateCache(CACHE_KEY);
+      invalidateCache(ADMIN_DATA_CACHE_KEY);
+      await fetchData(true);
+    },
+    [user, fetchData]
+  );
+
   const addGroupMembers = useCallback(
     async (groupId: string, uids: string[]) => {
       if (!user) throw new Error('Not authenticated');
@@ -234,9 +270,10 @@ export function useAdminUsers() {
   return useMemo(() => ({
     ...state,
     refetch: () => fetchData(true),
+    createUser,
     updateUser,
     addGroupMembers,
     removeGroupMember,
     deleteUser,
-  }), [state, fetchData, updateUser, addGroupMembers, removeGroupMember, deleteUser]);
+  }), [state, fetchData, createUser, updateUser, addGroupMembers, removeGroupMember, deleteUser]);
 }

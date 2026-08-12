@@ -55,15 +55,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       authResolved = true;
       clearTimeout(authTimeout);
       if (currentUser && currentUser.email) {
-        // Only manage auth state for internal employees (@bluurock.com).
-        // Creator accounts (non-bluurock email) are handled by CreatorAuthProvider
-        // in the creator portal — do not sign them out from here.
-        if (!currentUser.email.endsWith('@bluurock.com')) {
-          setUser(null);
-          setLoading(false);
-          return;
-        }
-
         // Check isActive — use sessionStorage cache to avoid Firestore reads
         // on every auth state change (token refresh, tab reactivation, etc.)
         let needsCheck = true;
@@ -85,17 +76,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch { /* cache miss — fall through to Firestore check */ }
 
         if (needsCheck) {
-          // Fail open: if this read throws (offline, blocked googleapis.com,
-          // flaky link — common on a brand-new device), we must NOT let the
-          // exception escape, or `setLoading(false)` below never runs and the
-          // boot loader hangs forever. Treat an unreadable doc as active; the
-          // mid-session kill-switch in AuthWrapper (onSnapshot on the user doc)
-          // still revokes access if isActive becomes false once connectivity
-          // returns.
+          // This single read answers two questions at once:
+          //
+          //  1. **Is this an employee at all?** It used to be decided by the
+          //     email domain, but staff now sign in with personal addresses, so
+          //     a domain test would sign out every employee. Owning a `users`
+          //     doc is what makes someone an internal user. Creator accounts
+          //     have a `creators` doc and no `users` doc — they are handled by
+          //     CreatorAuthProvider in the creator portal (a separate layout
+          //     that never mounts this provider), and must not be signed out
+          //     from here, only ignored.
+          //  2. **Is that employee still active?**
+          //
+          // A genuinely ABSENT doc now means "not an internal user" and must
+          // deny — the opposite of the old fail-open. A read that THREW still
+          // fails open (see below): "we couldn't ask" is not "the answer is no".
           let isActive = true;
+          let isEmployee = true;
           try {
             const snap = await getDoc(doc(db, 'users', currentUser.uid));
-            isActive = !snap.exists() || snap.data()?.isActive !== false;
+            isEmployee = snap.exists();
+            isActive = isEmployee && snap.data()?.isActive !== false;
             try {
               sessionStorage.setItem(ACTIVE_CACHE_KEY, JSON.stringify({
                 uid: currentUser.uid, active: isActive, at: Date.now(),
@@ -105,10 +106,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             // Read failed — fall through as active so we don't wedge boot. Log
             // it: a failing isActive read on boot is the throw-path counterpart
             // to the timeout above (blocked/offline Firestore on the device).
+            //
+            // Fail-open is safe here because it grants only a *shell*: every
+            // API route re-authorises server-side, and the mid-session
+            // kill-switch in AuthWrapper revokes access once connectivity
+            // returns. It is not safe to fail open on a doc we successfully
+            // read and found missing, which is why that case is separate.
             Sentry.captureException(err, {
               tags: { area: 'auth-boot', reason: 'isActive-read-failed' },
             });
           }
+
+          // Not an internal user (creator session, or a user deleted mid-session).
+          // Clear our state without signing them out — the creator portal owns
+          // that session.
+          if (!isEmployee) {
+            setUser(null);
+            setLoading(false);
+            return;
+          }
+
           if (!isActive) {
             await auth.signOut();
             setUser(null);
