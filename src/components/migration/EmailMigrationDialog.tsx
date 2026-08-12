@@ -62,13 +62,24 @@ export default function EmailMigrationDialog() {
   // clocked-out user. Mirrors UpdateAvailableBanner: because it never re-runs,
   // clocking in later cannot retroactively dismiss the card, and clocking out
   // later cannot spring it on someone mid-task.
+  //
+  // RULE — do not latch before BOTH inputs have arrived. `isHydrating` settles
+  // when the *clock* state is known, which is routinely before the users/{uid}
+  // snapshot lands. Latching on that alone decided the question while `userData`
+  // was still null — so `shouldPrompt` was false, the ref latched, and the card
+  // never appeared however correctly the cohort was armed. The `!userData` guard
+  // is what makes the "decide once" behaviour mean "decide once, with the
+  // answer", rather than "decide once, too early".
   useEffect(() => {
-    if (decidedRef.current || isHydrating) return;
+    if (decidedRef.current) return;
+    if (isHydrating) return;
+    if (!userData) return;
+
     decidedRef.current = true;
     if (!shouldPrompt) return;
     if (displayState !== 'clocked-out') return;
     setArmed(true);
-  }, [isHydrating, displayState, shouldPrompt]);
+  }, [isHydrating, userData, displayState, shouldPrompt]);
 
   const handleCode = useCallback(async (code: string) => {
     setPhase('saving');
