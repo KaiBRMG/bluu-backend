@@ -2,8 +2,22 @@
 
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { SMM_STATUS_QUALIFIED } from '@/types/firestore';
-import type { SmmAccountStatus, SmmAdminApproval, SmmNetwork, SmmSubmissionStatus, SmmTier } from '@/types/firestore';
+import { SMM_BONUS_TYPE, SMM_STATUS_QUALIFIED } from '@/types/firestore';
+import type { SmmAccount, SmmAccountStatus, SmmAdminApproval, SmmNetwork, SmmSubmissionStatus, SmmTier } from '@/types/firestore';
+
+/** Dark-green treatment for the 'Bonus' type, shared by every badge/label that renders it. */
+const BONUS_TYPE_STYLES = 'bg-green-800/10 text-green-800 dark:text-green-400 border-green-800/30';
+
+/** Emoji shown inline next to a tiered account's name — right of the name. */
+export const TIER_EMOJI: Record<SmmTier, string> = { 1: '1️⃣', 2: '2️⃣' };
+/** Emoji shown inline next to a viral-bonus account's name — left of the name. */
+export const VIRAL_EMOJI = '🔥';
+
+/** Plain-text "🔥 Name" for read-only contexts (dialog titles, table cells, select
+ * items) — never use on an editable name input, it would corrupt the saved value. */
+export function accountDisplayName(account: Pick<SmmAccount, 'accountName' | 'isViralBonus'>): string {
+  return account.isViralBonus ? `${VIRAL_EMOJI} ${account.accountName}` : account.accountName;
+}
 
 /** Color-coding shared across the SMM tables/cards so each network reads at a glance. */
 const NETWORK_STYLES: Record<SmmNetwork, string> = {
@@ -21,7 +35,15 @@ export function TypeBadges({ type, className }: { type: string[]; className?: st
   if (type.length === 0) return null;
   return (
     <span className={cn('flex flex-wrap gap-1', className)}>
-      {type.map((t) => <Badge key={t} variant="secondary" className="font-normal">{t}</Badge>)}
+      {type.map((t) => (
+        <Badge
+          key={t}
+          variant="secondary"
+          className={cn('font-normal', t === SMM_BONUS_TYPE && BONUS_TYPE_STYLES)}
+        >
+          {t}
+        </Badge>
+      ))}
     </span>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { LinkWithCopy } from '@/components/smm/shared/LinkWithCopy';
-import { TypeBadges } from '@/components/smm/shared/badges';
+import { TIER_EMOJI, TypeBadges, VIRAL_EMOJI } from '@/components/smm/shared/badges';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { SmmAccount } from '@/types/firestore';
 
@@ -54,7 +54,9 @@ export function AccountsKanban({
               }}
               className="text-sm font-semibold text-left hover:underline underline-offset-4 break-words min-w-0"
             >
+              {account.isViralBonus && <span aria-hidden>{VIRAL_EMOJI} </span>}
               {account.accountName}
+              {account.tier && <span aria-hidden> {TIER_EMOJI[account.tier]}</span>}
             </button>
           </div>
 

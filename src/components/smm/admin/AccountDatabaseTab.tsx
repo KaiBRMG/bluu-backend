@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/input';
 import { AccountsDatabaseTable, type AccountFilters } from '@/components/smm/admin/AccountsDatabaseTable';
 import { AddAccountDialog } from '@/components/smm/admin/AddAccountDialog';
 import { AccountDialog } from '@/components/smm/shared/AccountDialog';
+import { VIRAL_EMOJI } from '@/components/smm/shared/badges';
+import { cn } from '@/lib/utils';
 import { useSmmAccountDatabase, useSmmAccounts, type SmmAccountPayload } from '@/hooks/useSmmAccounts';
 import { useSmmUsers } from '@/hooks/useSmmUsers';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
@@ -101,13 +103,17 @@ export function AccountDatabaseTab({
             className="pl-8"
           />
         </div>
-        {/* Quick filters — Action Blue marks the active selection. */}
+        {/* Quick filters — mutually exclusive: selecting one clears the other. */}
         <div className="flex items-center gap-2">
-          <Badge asChild variant={filters.bonus ? 'default' : 'outline'}>
+          <Badge
+            asChild
+            variant={filters.bonus ? 'default' : 'outline'}
+            className={cn(filters.bonus && 'border-transparent bg-green-800 text-white [a&]:hover:bg-green-800/90')}
+          >
             <button
               type="button"
               aria-pressed={filters.bonus}
-              onClick={() => setFilters((f) => ({ ...f, bonus: !f.bonus }))}
+              onClick={() => setFilters((f) => ({ bonus: !f.bonus, viral: false }))}
               className="cursor-pointer"
             >
               Bonus Accounts
@@ -117,10 +123,10 @@ export function AccountDatabaseTab({
             <button
               type="button"
               aria-pressed={filters.viral}
-              onClick={() => setFilters((f) => ({ ...f, viral: !f.viral }))}
-              className="cursor-pointer"
+              onClick={() => setFilters((f) => ({ viral: !f.viral, bonus: false }))}
+              className="cursor-pointer gap-1"
             >
-              Viral Bonus Accounts
+              {VIRAL_EMOJI} Viral Bonus Accounts
             </button>
           </Badge>
         </div>

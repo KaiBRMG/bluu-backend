@@ -5,6 +5,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 ## Context
 
 - Internal management platform for **Bluu Rock MGMT**.
+- **RULE:** The Next.js project root is `src/`, not the repo root — it holds its own `package.json`/`node_modules`/`tsconfig.json`. Run `npm`/`tsc`/etc. from inside `src/`, not from the repo root (which has no `package.json`).
 - **RULE:** Always notify the user if changes are made to **Firestore rules** or **Firestore indexes**.
 - **RULE:** Only use visual components/styling from `src/components/ui`; only use `@tabler/icons-react` and `lucide-react` for icons. (Full UI stack in [architecture-overview.md](documentation/architecture-overview.md#ui-stack-strict-constraints).)
 - **RULE:** Always read [`DESIGN.md`](DESIGN.md) before writing or changing **any** frontend UI — it is the design system of record (palette, typography, surfaces, component/interaction conventions, and the signature dashboard-widget pattern). Match it; keep it current when the visual language changes.

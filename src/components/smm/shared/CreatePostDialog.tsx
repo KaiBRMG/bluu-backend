@@ -13,6 +13,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { DateTimePicker } from '@/components/smm/shared/DateTimePicker';
+import { accountDisplayName } from '@/components/smm/shared/badges';
 import type { SmmAccount } from '@/types/firestore';
 import type { SmmPostPayload } from '@/hooks/useSmmPosts';
 import type { ViralCopyDeclaration } from '@/components/smm/shared/ViralCopyDialog';
@@ -118,7 +119,7 @@ export function CreatePostDialog({
                   <div className="px-3 py-2 text-sm text-muted-foreground">No accounts assigned to you</div>
                 )}
                 {accounts.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>{a.accountName}</SelectItem>
+                  <SelectItem key={a.id} value={a.id}>{accountDisplayName(a)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

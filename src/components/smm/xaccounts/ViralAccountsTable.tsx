@@ -7,7 +7,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { GroupHeaderRow } from '@/components/smm/shared/GroupHeaderRow';
 import { LinkWithCopy } from '@/components/smm/shared/LinkWithCopy';
-import { NetworkBadge, TypeBadges } from '@/components/smm/shared/badges';
+import { NetworkBadge, TypeBadges, accountDisplayName } from '@/components/smm/shared/badges';
 import { UserAvatarLabel } from '@/components/UserAvatarLabel';
 import { SMM_NETWORKS } from '@/types/firestore';
 import type { SmmAccount, SmmNetwork } from '@/types/firestore';
@@ -79,7 +79,7 @@ export function ViralAccountsTable({
               </GroupHeaderRow>,
               ...(open ? group.map((account) => (
                 <TableRow key={account.id}>
-                  <TableCell className="font-medium">{account.accountName}</TableCell>
+                  <TableCell className="font-medium">{accountDisplayName(account)}</TableCell>
                   <TableCell>
                     {account.accountLink
                       ? <LinkWithCopy url={account.accountLink} className="max-w-56" />

@@ -21,7 +21,7 @@ import { AccountContentTable } from '@/components/smm/shared/AccountContentTable
 import { LinkWithCopy } from '@/components/smm/shared/LinkWithCopy';
 import { MultiSelect } from '@/components/smm/shared/MultiSelect';
 import { TierField, ViralAccountField, tierError } from '@/components/smm/shared/TierField';
-import { AccountStatusBadge, NetworkBadge, TierBadge, TypeBadges } from '@/components/smm/shared/badges';
+import { AccountStatusBadge, NetworkBadge, TierBadge, TypeBadges, accountDisplayName } from '@/components/smm/shared/badges';
 import { arrayEquals, buildDiff } from '@/lib/smm/diff';
 import { SMM_ACCOUNT_TYPES, SMM_NETWORKS } from '@/types/firestore';
 import type { SmmAccount, SmmTier } from '@/types/firestore';
@@ -133,7 +133,7 @@ export function AccountDialog({
               />
             </div>
           ) : (
-            <DialogTitle className="text-xl">{account.accountName}</DialogTitle>
+            <DialogTitle className="text-xl">{accountDisplayName(account)}</DialogTitle>
           )}
         </DialogHeader>
 

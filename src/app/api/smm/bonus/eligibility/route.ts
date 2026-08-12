@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
-import { checkSmmAccess, checkViralEligibility, resolveOriginalAccount } from '@/lib/services/smmService';
+import {
+  checkSmmAccess, checkViralEligibility, findLinkUsageReport, resolveOriginalAccount,
+} from '@/lib/services/smmService';
 import { extractAccountHandle, normalizePostLink } from '@/lib/smm/linkUtils';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -26,15 +28,17 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       return NextResponse.json({ error: 'A link is required' }, { status: 400 });
     }
 
-    const [eligibility, account] = await Promise.all([
+    const [eligibility, account, report] = await Promise.all([
       checkViralEligibility(normalized),
       resolveOriginalAccount(link),
+      findLinkUsageReport(normalized),
     ]);
 
     return NextResponse.json({
       ...eligibility,
       handle: extractAccountHandle(link),
       account,
+      report,
     });
   } catch (error) {
     console.error('[GET /api/smm/bonus/eligibility]', error);

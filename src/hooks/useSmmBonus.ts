@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from 'react';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { getCache, invalidateCacheByPrefix, setCache } from '@/lib/queryCache';
-import type { SmmBonusRound, SmmNetwork, SmmSubmission } from '@/types/firestore';
+import type { SmmBonusRound, SmmNetwork, SmmSubmission, ViralLinkReport } from '@/types/firestore';
 
 export interface UserTotalRow {
   uid: string;
@@ -45,6 +45,8 @@ export interface EligibilityResult {
    * bonus). null when the handle isn't in the database, which blocks the copy.
    */
   account: { id: string; name: string; network: SmmNetwork } | null;
+  /** Every record found for the pasted link — the result card's full report. */
+  report: ViralLinkReport;
 }
 
 export interface SubmitBonusPayload {

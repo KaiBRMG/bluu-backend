@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { MultiSelect } from '@/components/smm/shared/MultiSelect';
-import { NetworkBadge } from '@/components/smm/shared/badges';
+import { NetworkBadge, VIRAL_EMOJI } from '@/components/smm/shared/badges';
 import { cn } from '@/lib/utils';
 import { SMM_ACCOUNT_TYPES, SMM_NETWORKS, isBonusAccountType } from '@/types/firestore';
 import type { SmmAccount, SmmNetwork } from '@/types/firestore';
@@ -82,11 +82,14 @@ function AccountRow({
   return (
     <TableRow>
       <TableCell>
-        <EditableTextCell
-          value={account.accountName}
-          onSave={(accountName) => onUpdate(account.id, { accountName })}
-          className="font-medium"
-        />
+        <div className="flex items-center gap-1">
+          {account.isViralBonus && <span aria-hidden className="shrink-0">{VIRAL_EMOJI}</span>}
+          <EditableTextCell
+            value={account.accountName}
+            onSave={(accountName) => onUpdate(account.id, { accountName })}
+            className="font-medium"
+          />
+        </div>
       </TableCell>
       <TableCell>
         <EditableTextCell

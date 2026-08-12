@@ -629,6 +629,24 @@ export interface SmmSubmission {
   isResidual: boolean;               // auto-created for the original account's owner
 }
 
+/**
+ * The full search behind the "Did you copy another viral post?" card's result
+ * screen — every record found for the pasted link, categorized by what it
+ * means, not just the single newest one the eligibility verdict needs.
+ */
+export interface ViralLinkReport {
+  /** The post whose OWN postLink matches the pasted link — the original
+   *  itself, if it was ever scheduled through this system. Null when the
+   *  original was never posted here (e.g. it lives on a page the team
+   *  doesn't manage). */
+  originalPost: SmmPost | null;
+  /** Other posts that declared this link as THEIR originalLink — siblings
+   *  that also copied the same source, not the source itself. */
+  copies: SmmPost[];
+  /** Bonus submissions filed against this link as their originalLink. */
+  submissions: SmmSubmission[];
+}
+
 /** Serialised twitterx-page-suggestions doc — an SMM nominating a viral account */
 export interface SmmPageSuggestion {
   id: string;

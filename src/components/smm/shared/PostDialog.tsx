@@ -20,6 +20,7 @@ import { useUserName } from '@/hooks/useUserName';
 import { useBasicUsers } from '@/hooks/useBasicUsers';
 import { DateTimePicker } from '@/components/smm/shared/DateTimePicker';
 import { LinkWithCopy } from '@/components/smm/shared/LinkWithCopy';
+import { accountDisplayName } from '@/components/smm/shared/badges';
 import type { SmmAccount, SmmPost } from '@/types/firestore';
 import type { SmmPostPayload } from '@/hooks/useSmmPosts';
 
@@ -144,7 +145,7 @@ export function PostDialog({
                       <SelectItem value={post.accountId}>{post.accountName}</SelectItem>
                     )}
                     {accounts.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>{a.accountName}</SelectItem>
+                      <SelectItem key={a.id} value={a.id}>{accountDisplayName(a)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

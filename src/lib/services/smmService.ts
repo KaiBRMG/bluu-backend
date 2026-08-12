@@ -15,6 +15,7 @@ import type {
   SmmPost,
   SmmSubmission,
   SmmTier,
+  ViralLinkReport,
 } from '@/types/firestore';
 
 // ─── Collections ─────────────────────────────────────────────────────
@@ -438,4 +439,59 @@ export async function findLinkUsage(normalized: string): Promise<LinkUsage | nul
     return tb - ta;
   });
   return candidates[0];
+}
+
+// ─── Full-result viral-copy report (the card's result screen) ────────
+
+const byPostDateDesc = (a: SmmPost, b: SmmPost) =>
+  (b.postDate ? new Date(b.postDate).getTime() : -Infinity) -
+  (a.postDate ? new Date(a.postDate).getTime() : -Infinity);
+
+const bySubmissionDateDesc = (a: SmmSubmission, b: SmmSubmission) =>
+  (b.submissionDate ? new Date(b.submissionDate).getTime() : -Infinity) -
+  (a.submissionDate ? new Date(a.submissionDate).getTime() : -Infinity);
+
+/**
+ * The full search behind the viral-copy card's result screen — every match in
+ * every category, not just the newest (which is all {@link findLinkUsage}
+ * keeps, since that function only needs a verdict). Runs the same three
+ * collection-group queries so the report and the eligibility verdict never
+ * disagree about what "used" means.
+ */
+export async function findLinkUsageReport(normalized: string): Promise<ViralLinkReport> {
+  if (!normalized) return { originalPost: null, copies: [], submissions: [] };
+
+  const [postLinkSnap, originalLinkSnap, subsSnap] = await Promise.all([
+    adminDb.collectionGroup(SMM_POSTS_SUB).where('postLinkNormalized', '==', normalized).get(),
+    adminDb.collectionGroup(SMM_POSTS_SUB).where('originalLinkNormalized', '==', normalized).get(),
+    adminDb.collectionGroup(SMM_SUBMISSIONS_SUB).where('originalLinkNormalized', '==', normalized).get(),
+  ]);
+
+  const originalCandidates = postLinkSnap.docs.map(serializePost).sort(byPostDateDesc);
+  const copies = originalLinkSnap.docs.map(serializePost).sort(byPostDateDesc);
+  const submissions = subsSnap.docs.map(serializeSubmission).sort(bySubmissionDateDesc);
+
+  const uids = [...new Set([
+    ...originalCandidates.map((p) => p.postedBy),
+    ...copies.map((p) => p.postedBy),
+    ...submissions.map((s) => s.submittedBy),
+  ].filter(Boolean))];
+  const names = await resolveUserInfo(uids);
+
+  const withPostedBy = (p: SmmPost): SmmPost => ({
+    ...p,
+    postedByName: names.get(p.postedBy)?.displayName ?? '',
+    postedByPhotoURL: names.get(p.postedBy)?.photoURL ?? null,
+  });
+  const withSubmittedBy = (s: SmmSubmission): SmmSubmission => ({
+    ...s,
+    submittedByName: names.get(s.submittedBy)?.displayName ?? '',
+    submittedByPhotoURL: names.get(s.submittedBy)?.photoURL ?? null,
+  });
+
+  return {
+    originalPost: originalCandidates[0] ? withPostedBy(originalCandidates[0]) : null,
+    copies: copies.map(withPostedBy),
+    submissions: submissions.map(withSubmittedBy),
+  };
 }
