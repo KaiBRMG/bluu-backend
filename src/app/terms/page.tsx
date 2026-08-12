@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   description: 'Terms of use for Bluu Backend, the internal platform of Bluu Rock MGMT.',
 };
 
-const EFFECTIVE_DATE = 'March 8, 2026';
+const EFFECTIVE_DATE = 'August 12, 2026';
 
 const HAIRLINE = 'rgba(255,255,255,0.07)';
 
@@ -81,14 +81,39 @@ export default function TermsPage() {
             Bluu Backend is a proprietary tool. Access is strictly limited to active employees,
             contractors, clients, and any persons authorized by Bluu Rock MGMT.
           </Term>
+          <Term label="Account Registration:">
+            Accounts are created by an administrator, not by self-registration. An administrator
+            must add your email address to the system before you can sign in; until then, access
+            is refused. If your sign-in is blocked, contact your team leader.
+          </Term>
+          <Term label="Sign-In with a Personal Google Account:">
+            Bluu Backend uses Google sign-in with your own personal Google account. Because that
+            account is the key to company systems and data, you are responsible for keeping it
+            secure — use a strong, unique password, enable two-factor authentication, and never
+            share the account or leave it signed in on a device others can use. Notify your
+            administrator immediately if you believe your Google account has been compromised.
+          </Term>
+          <Term label="What Google Shares With Us:">
+            When you sign in, Bluu Rock MGMT receives only your{' '}
+            <strong className="font-semibold text-white">name, email address, and profile picture</strong>.
+            We do not request, receive, or have any access to your Gmail, Drive, Photos, contacts,
+            or any other content in your Google account, and we cannot act on your behalf within
+            it. Using a personal account to sign in does not give Bluu Rock MGMT access to your
+            personal data.
+          </Term>
+          <Term label="Changing Your Sign-In Address:">
+            Your sign-in address may only be changed through the application or by an
+            administrator. Once changed, the previous address will no longer grant access.
+          </Term>
           <Term label="Credential Security:">
-            Users are responsible for maintaining the confidentiality of their login credentials.
-            Any unauthorized access resulting from shared passwords may lead to disciplinary
-            action.
+            Users are responsible for maintaining the confidentiality of their access to Bluu
+            Backend. Sharing your account, or allowing another person to use your session, may
+            lead to disciplinary action.
           </Term>
           <Term label="Termination of Access:">
             Upon termination of employment or contract, access to Bluu Backend will be revoked
-            immediately.
+            immediately and your address removed from the system. Your personal Google account
+            remains your own and is unaffected.
           </Term>
         </Clause>
 

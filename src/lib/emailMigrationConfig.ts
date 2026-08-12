@@ -42,8 +42,8 @@ export const EMAIL_MIGRATION: EmailMigrationConfig = {
   // Shipped disarmed. Arm a cohort in its own commit, once the code is live.
   enabled: true,
   allUsers: false,
-  uids: ['BSL5DexkFNdb8YC3brfHnHXy5QT2'],
-  groups: [],
+  uids: [],
+  groups: ['CA'],
 };
 
 /**
