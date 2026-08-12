@@ -7,6 +7,7 @@ import RegistryFilters from './RegistryFilters';
 import UserCard from './UserCard';
 import UserDetailDrawer from './UserDetailDrawer';
 import NewUserDialog from './NewUserDialog';
+import { isInvitedUser } from './userStatus';
 
 interface EmployeeRegistryProps {
   users: AdminFullUser[];
@@ -22,6 +23,8 @@ interface EmployeeRegistryProps {
     groupId: string;
   }) => Promise<void>;
   showArchived?: boolean;
+  /** Invited Users tab: only users who haven't finished setting up. */
+  showInvited?: boolean;
 }
 
 export default function EmployeeRegistry({
@@ -32,6 +35,7 @@ export default function EmployeeRegistry({
   onDeleteUser,
   onCreateUser,
   showArchived = false,
+  showInvited = false,
 }: EmployeeRegistryProps) {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -44,12 +48,13 @@ export default function EmployeeRegistry({
     return users
       .filter((u) => {
         if (showArchived ? !u.isArchived : u.isArchived) return false;
+        if (showInvited && !isInvitedUser(u)) return false;
         if (groupFilter && !u.groups?.includes(groupFilter)) return false;
         if (statusFilter === 'active' && !u.isActive) return false;
         if (statusFilter === 'inactive' && u.isActive) return false;
-        // Registered by an admin but never signed in. Distinct from "inactive",
-        // which is an account that was switched off.
-        if (statusFilter === 'invited' && u.lastLoginAt) return false;
+        // Registered but not yet set up. Distinct from "inactive", which is an
+        // account that was deliberately switched off.
+        if (statusFilter === 'invited' && !isInvitedUser(u)) return false;
         if (employmentTypeFilter && u.employmentType !== employmentTypeFilter) return false;
         if (q) {
           const first = (u.firstName || '').toLowerCase();
@@ -67,7 +72,7 @@ export default function EmployeeRegistry({
         if (aFirst !== bFirst) return aFirst.localeCompare(bFirst);
         return aLast.localeCompare(bLast);
       });
-  }, [users, searchQuery, groupFilter, statusFilter, employmentTypeFilter, showArchived]);
+  }, [users, searchQuery, groupFilter, statusFilter, employmentTypeFilter, showArchived, showInvited]);
 
   const handleDeleteUser = useCallback(async () => {
     if (!selectedUserId) return;
@@ -80,7 +85,9 @@ export default function EmployeeRegistry({
       {onCreateUser && !showArchived && (
         <div className="mb-4 flex items-start justify-between gap-4">
           <p className="max-w-prose text-sm text-foreground-secondary">
-            An employee must be registered here before they can sign in.
+            {showInvited
+              ? 'Registered but not yet set up — they have either never signed in, or signed in without finishing onboarding.'
+              : 'An employee must be registered here before they can sign in.'}
           </p>
           <NewUserDialog groups={groups} onCreate={onCreateUser} />
         </div>
@@ -106,7 +113,9 @@ export default function EmployeeRegistry({
           <p className="max-w-xs text-sm text-foreground-muted">
             {showArchived
               ? 'No archived users.'
-              : 'No users match the selected filters. Try adjusting or clearing them.'}
+              : showInvited
+                ? 'Nobody is waiting to be set up. Everyone registered has signed in and finished onboarding.'
+                : 'No users match the selected filters. Try adjusting or clearing them.'}
           </p>
         </div>
       ) : (

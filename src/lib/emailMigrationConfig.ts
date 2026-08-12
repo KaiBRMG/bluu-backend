@@ -40,9 +40,9 @@ export interface EmailMigrationConfig {
 export const EMAIL_MIGRATION: EmailMigrationConfig = {
   // ── Rollout state ──────────────────────────────────────────────────────
   // Shipped disarmed. Arm a cohort in its own commit, once the code is live.
-  enabled: false,
+  enabled: true,
   allUsers: false,
-  uids: [],
+  uids: ['BSL5DexkFNdb8YC3brfHnHXy5QT2'],
   groups: [],
 };
 

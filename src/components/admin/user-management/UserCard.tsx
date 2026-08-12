@@ -3,6 +3,7 @@
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
 import { getGroupBadgeStyle } from './groupColors';
+import { isInvitedUser, invitedStageLabel } from './userStatus';
 
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 
@@ -15,11 +16,12 @@ interface UserCardProps {
 export default function UserCard({ user, groups, onClick }: UserCardProps) {
   const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.displayName;
   const isActive = user.isActive !== false;
-  // Registered but never signed in. Shown instead of Active/Disabled because it
-  // is the more useful fact: nothing about this account has been confirmed yet,
-  // and a mistyped login email surfaces as an invite that never turns into a
-  // login. Orange = awaiting, per the semantic palette.
-  const isInvited = !user.lastLoginAt;
+  // Registered but not yet set up — see isInvitedUser for why this runs until
+  // onboarding completes, not just until first login. Shown instead of
+  // Active/Disabled because it is the more useful fact: nothing about this
+  // account has been confirmed yet, and a mistyped login email surfaces as an
+  // invite that never turns into a login. Orange = awaiting, per the palette.
+  const isInvited = isInvitedUser(user);
   const status = isInvited
     ? { label: 'Invited', color: '#fb923c', tint: 'rgba(251,146,60,0.10)' }
     : isActive
@@ -91,6 +93,14 @@ export default function UserCard({ user, groups, onClick }: UserCardProps) {
           {user.workEmail && (
             <div className="mt-2 truncate text-xs text-foreground-muted">
               {user.workEmail}
+            </div>
+          )}
+
+          {/* The badge says "not set up"; this says how far they got, which is
+              what decides whether to chase the person or check the email. */}
+          {isInvited && (
+            <div className="mt-1 truncate text-xs" style={{ color: '#fb923c' }}>
+              {invitedStageLabel(user)}
             </div>
           )}
         </div>

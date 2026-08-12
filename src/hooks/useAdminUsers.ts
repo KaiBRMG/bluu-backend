@@ -13,7 +13,13 @@ export interface AdminFullUser {
   lastName: string;
   groups: string[];
   createdAt: string | null;
+  /** Null until the registered user actually signs in. */
   lastLoginAt: string | null;
+  /**
+   * Absent on users created before the onboarding flow shipped — see
+   * `isInvitedUser`, which must distinguish `false` from `undefined`.
+   */
+  hasCompletedOnboarding?: boolean;
   isActive: boolean;
   isArchived?: boolean;
   role?: 'admin' | 'member';

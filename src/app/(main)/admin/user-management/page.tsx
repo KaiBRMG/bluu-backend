@@ -5,6 +5,7 @@ import { AlertCircle } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { useAdminUsers } from "@/hooks/useAdminUsers";
 import EmployeeRegistry from "@/components/admin/user-management/EmployeeRegistry";
+import { isInvitedUser } from "@/components/admin/user-management/userStatus";
 import UserGroups from "@/components/admin/user-management/UserGroups";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Loader } from "@/components/ui/loader";
@@ -24,14 +25,22 @@ export default function UserManagementPage() {
     deleteUser,
   } = useAdminUsers();
 
-  const { activeCount, archivedCount } = useMemo(() => {
+  const { activeCount, archivedCount, invitedCount } = useMemo(() => {
     let active = 0;
     let archived = 0;
+    let invited = 0;
     for (const u of users) {
-      if (u.isArchived) archived += 1;
-      else active += 1;
+      if (u.isArchived) {
+        archived += 1;
+        continue;
+      }
+      active += 1;
+      // Counted within the active roster, not instead of it — an invited user
+      // is a real employee record, just an unfinished one. So the tab counts
+      // deliberately overlap rather than partitioning.
+      if (isInvitedUser(u)) invited += 1;
     }
-    return { activeCount: active, archivedCount: archived };
+    return { activeCount: active, archivedCount: archived, invitedCount: invited };
   }, [users]);
 
   if (loading) {
@@ -74,6 +83,10 @@ export default function UserManagementPage() {
               Employee Registry
               <TabCount value={activeCount} />
             </TabsTrigger>
+            <TabsTrigger value="invited-users">
+              Invited Users
+              <TabCount value={invitedCount} />
+            </TabsTrigger>
             <TabsTrigger value="user-groups">
               User Groups
               <TabCount value={groups.length} />
@@ -92,6 +105,17 @@ export default function UserManagementPage() {
               onRefetch={refetch}
               onDeleteUser={deleteUser}
               onCreateUser={createUser}
+            />
+          </TabsContent>
+          <TabsContent value="invited-users">
+            <EmployeeRegistry
+              users={users}
+              groups={groups}
+              onUpdateUser={updateUser}
+              onRefetch={refetch}
+              onDeleteUser={deleteUser}
+              onCreateUser={createUser}
+              showInvited
             />
           </TabsContent>
           <TabsContent value="user-groups">
