@@ -13,6 +13,7 @@ import { DateTimePicker } from '@/components/smm/shared/DateTimePicker';
 import { NetworkBadge, accountDisplayName } from '@/components/smm/shared/badges';
 import { accountHandle, extractAccountHandle, linkMatchesHandle } from '@/lib/smm/linkUtils';
 import { useSmmPostLinkCheck } from '@/hooks/useSmmPostLinkCheck';
+import { useSmmAccountResolve, type SmmAccountResolution } from '@/hooks/useSmmAccountResolve';
 import type { SmmAccount } from '@/types/firestore';
 
 /**
@@ -39,6 +40,54 @@ function withCurrentTime(date: Date | undefined): Date {
   const next = new Date(date);
   next.setHours(now.getHours(), now.getMinutes(), 0, 0);
   return next;
+}
+
+/**
+ * Why the pasted link matched no account of the caller's. The three cases read
+ * very differently to an SMM — one is a typo, one needs an assignment, one is a
+ * data fix — so they are never collapsed into a single line. A failed or
+ * still-unknown lookup falls back to "not in the database", the safest guess.
+ */
+function AccountMissMessage({
+  handle, resolution,
+}: { handle: string; resolution: SmmAccountResolution | null }) {
+  const at = <span className="font-medium">@{handle}</span>;
+
+  if (resolution?.exists && !resolution.active) {
+    return (
+      <p className="text-xs text-destructive">
+        {at} is in the database but is marked inactive, so nothing can be scheduled on it. Ask
+        your team leader to reactivate the account.
+      </p>
+    );
+  }
+  if (resolution?.exists && !resolution.mine) {
+    return (
+      <p className="text-xs text-destructive">
+        {at} is in the database but is not assigned to you, so you cannot schedule posts on it.
+        Ask your team leader to assign the account to you.
+      </p>
+    );
+  }
+  if (resolution?.exists) {
+    // Assigned to the caller and active, yet it didn't match: the account's
+    // saved link points at a different handle than its name (or the cached
+    // account list predates the assignment).
+    return (
+      <p className="text-xs text-destructive">
+        {at} is assigned to you, but its saved account link points at a different handle, so the
+        post cannot be matched to it. Reload the page, and if it still fails, contact your team
+        leader to fix the account link.
+      </p>
+    );
+  }
+  return (
+    <p className="text-xs text-destructive">
+      This link does not appear to come from any accounts in the database. Make sure it is
+      correct and try again. If the account name is not the same as in the link, please contact
+      your team leader to fix the account name.
+    </p>
+  );
 }
 
 /**
@@ -132,6 +181,13 @@ function PostForm({
     : undefined;
   const accountNotFound = linkShapeValid && !matchedAccount;
 
+  // A miss is ambiguous from here — the caller only holds their OWN accounts,
+  // so "no such account" and "someone else's account" look identical. Ask the
+  // server which it was, purely so the message can say the right thing.
+  const { checking: resolving, resolution } = useSmmAccountResolve(postLink, {
+    enabled: accountNotFound,
+  });
+
   // Then: has this exact post already been recorded? Only asked once the link
   // is well-formed and resolves to an account — no point spending a query on a
   // link that is already rejected.
@@ -171,13 +227,9 @@ function PostForm({
           {trimmedLink && !linkShapeValid && (
             <p className="text-xs text-destructive">Enter a valid x.com or twitter.com post link.</p>
           )}
-          {accountNotFound && (
-            <p className="text-xs text-destructive">
-              This link does not appear to come from any accounts in the database. Make sure it is
-              correct and try again. If the account name is not the same as in the link, please
-              contact your team leader to fix the account name.
-            </p>
-          )}
+          {accountNotFound && (resolving
+            ? <p className="text-xs text-muted-foreground">Looking up the account…</p>
+            : <AccountMissMessage handle={linkHandle} resolution={resolution} />)}
           {/* The resolved account — the confirmation that the link was understood
               and which page the post is being filed under. */}
           {matchedAccount && (
