@@ -63,6 +63,7 @@ Every row below is **automated** — fired by a handler on an event, never sent 
 | Dispute — admin approved | `notifications.disputeAdminApproved()` | the dispute's `createdBy` | `disputes/[disputeId]/admin-approval` |
 | Dispute — admin rejected | `notifications.disputeAdminRejected(reason?)` | the dispute's `createdBy` | `disputes/[disputeId]/admin-approval` |
 | Content request completed | `notifications.contentPlanCompleted(stageName, contentSummary)` | `groups/OFAM.members` | `content-planning/[id]/creator-complete` |
+| Model application received | `notifications.modelSubmissionReceived(applicantName, location)` | every user whose `permittedPageIds` contains `apps-model-submissions` | `model-submissions/submit` |
 
 ## The admin notifications page
 

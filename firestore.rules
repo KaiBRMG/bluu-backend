@@ -287,5 +287,24 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 23. Prompt Library
+    // Every read and write goes through /api/prompt-library, which checks the
+    // 'apps-prompt-library' page permission (and the admin claim for a hard
+    // delete). All access is via the Admin SDK, so deny everything here for
+    // defence-in-depth — including the versions subcollection, which is the
+    // edit history and must not be client-writable.
+    match /prompt-library/{promptId} {
+      allow read, write: if false;
+
+      match /versions/{version} {
+        allow read, write: if false;
+      }
+    }
+
+    // The managed category/tag lists behind the library's pickers. Same story.
+    match /prompt-library-meta/{docId} {
+      allow read, write: if false;
+    }
+
   }
 }

@@ -18,7 +18,8 @@ export type AutomatedNotificationCategory =
   | 'Custom Requests'
   | 'Leave'
   | 'Disputes'
-  | 'Content Planning';
+  | 'Content Planning'
+  | 'Model Submissions';
 
 export interface AutomatedNotification {
   /** Factory name in `notificationContent.ts` — stable id for React keys. */
@@ -179,6 +180,18 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     sources: ['src/app/api/content-planning/[id]/creator-complete/route.ts'],
     content: notifications.contentPlanCompleted('{stageName}', '{contentSummary}'),
   },
+
+  // ─── Model Submissions ────────────────────────────────────────────────────
+  {
+    id: 'modelSubmissionReceived',
+    category: 'Model Submissions',
+    event: 'Model application received',
+    trigger:
+      'An applicant submits the public /model-submissions form. This is the only unauthenticated write path in the project, so the notification is the first staff-visible signal.',
+    recipients: 'Every user with permission for the Model Submissions page',
+    sources: ['src/app/api/model-submissions/submit/route.ts'],
+    content: notifications.modelSubmissionReceived('{applicantName}', '{city}, {country}'),
+  },
 ];
 
 export const AUTOMATED_NOTIFICATION_CATEGORIES: AutomatedNotificationCategory[] = [
@@ -187,4 +200,5 @@ export const AUTOMATED_NOTIFICATION_CATEGORIES: AutomatedNotificationCategory[] 
   'Leave',
   'Disputes',
   'Content Planning',
+  'Model Submissions',
 ];

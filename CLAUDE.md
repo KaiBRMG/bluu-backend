@@ -87,6 +87,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 | [smm-portal.md](documentation/smm-portal.md) | **SMM Portal** — Twitter/X accounts, the content schedule, the bonus rounds/submissions engine, Viral Accounts + page suggestions |
 | [campaign-tracking.md](documentation/campaign-tracking.md) | Custom requests vs campaigns, the two archive mechanisms, transfer |
 | [resources.md](documentation/resources.md) | `apps-resources` page, `app-resources` collection, resource management, group/user filtering |
+| [prompt-library.md](documentation/prompt-library.md) | **Prompt Library** — `prompt-library` collection, per-prompt version history + diffing, the client-side search engine, the LLM logo pipeline |
 | [onlyfans-crm.md](documentation/onlyfans-crm.md) | **OF Manager** — the OnlyFans messaging window, the `IOnlyFansClient` adapter seam, the Firestore chat mirror + provider webhook |
 | [model-submissions.md](documentation/model-submissions.md) | The **public** application form `/model-submissions` (the project's only unauthenticated write path), its abuse model, and the `apps-model-submissions` review queue |
 | [boot-loading-screen.md](documentation/boot-loading-screen.md) | `BootLoaderProvider`, `useBootPhase`, home-widget gating |
@@ -100,7 +101,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 3. **Authorization tier choice** — new admin-action routes affecting the auth graph or account state require the **admin claim**, not page permission. See [auth.md](documentation/auth.md#authorization-tiers-least--most-privileged).
 3b. **Login is an allowlist** — `/api/auth/exchange-code` must never create a `users` doc or an Auth account for an unknown address, and must resolve the uid from the `users` doc (not `adminAuth.getUserByEmail` alone). Accounts are created only by `POST /api/admin/users`. Every refusal returns the same generic 403, so staff cannot be enumerated. See [auth.md](documentation/auth.md#the-allowlist-the-authorisation-gate).
 4. **Elapsed time from buffers** — always close with `sessionCloseMs` before `parseBuffer`; never `parseBuffer(events, Date.now())` over a buffer set. See [time-tracking.md](documentation/time-tracking.md#2-session-close-time--sessionclosems-single-source-of-truth).
-5. **Notification copy** — only edit `src/lib/notificationContent.ts`; write via `addNotificationToBatch`.
+5. **Notification copy** — only edit `src/lib/notificationContent.ts`; write via `addNotificationToBatch`. **Every new automated notification must also be added to [`src/lib/automatedNotifications.ts`](src/lib/automatedNotifications.ts) in the same change** — see rule 15.
 6. **Archive ≠ delete** — filter `isArchived` from user pickers; add new per-user collections to the delete cascade. See [user-management.md](documentation/user-management.md).
 7. **Avatars** — only `src/components/ui/avatar.tsx`, never `<img>`. Always seed the fallback from **`displayName`** (`getAvatarColor`/`getInitials`); the colour is a hash of that string, so any other seed renders the same person differently across screens. See [DESIGN.md](DESIGN.md#5-components) (The Avatar Seed Rule).
 8. **Home-page widgets** — async widgets must gate boot via `useBootPhase('home-<name>', isLoading)`.
@@ -136,6 +137,14 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
     ```
 
     Leave a platform `null` if the release does not affect it (e.g. a mac-only fix must not make Windows reinstall). See [electron.md](documentation/electron.md).
+
+15. **New automated notification → update the Automated Notifications catalogue** — the **Automated** tab of `/admin/notifications` is the admin-facing record of everything the system sends on its own, and it renders entirely from `AUTOMATED_NOTIFICATIONS` in [`src/lib/automatedNotifications.ts`](src/lib/automatedNotifications.ts). Any change that adds, removes, or re-targets an automated notification is **incomplete** until that array matches. In the **same** change:
+    - Add/update/remove the entry (`id` = factory name, plus `category`, `event`, `trigger`, `recipients`, `sources`).
+    - **Call the real factory** with `{token}` placeholders for interpolated values — never retype a title or message here (rule 5: copy lives only in `notificationContent.ts`).
+    - A new category also needs adding to `AutomatedNotificationCategory` **and** `AUTOMATED_NOTIFICATION_CATEGORIES` (the second is what the UI iterates — miss it and the section renders nowhere).
+    - Add the matching row to the event → factory table in [notifications.md](documentation/notifications.md#notification-events--factory-functions).
+
+    This applies to admin broadcasts only in reverse: manual sends belong on the **Sent** tab and must **not** be added here.
 
 ## Maintaining This Documentation
 
