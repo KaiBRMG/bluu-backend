@@ -21,6 +21,8 @@ import { useBasicUsers } from '@/hooks/useBasicUsers';
 import { DateTimePicker } from '@/components/smm/shared/DateTimePicker';
 import { LinkWithCopy } from '@/components/smm/shared/LinkWithCopy';
 import { accountDisplayName } from '@/components/smm/shared/badges';
+import { accountHandle, extractAccountHandle, linkMatchesHandle } from '@/lib/smm/linkUtils';
+import { useSmmPostLinkCheck } from '@/hooks/useSmmPostLinkCheck';
 import type { SmmAccount, SmmPost } from '@/types/firestore';
 import type { SmmPostPayload } from '@/hooks/useSmmPosts';
 
@@ -96,6 +98,27 @@ export function PostDialog({
   }, [post, caption, accountId, postLink, postDate]);
   const dirty = Object.keys(updates).length > 0;
 
+  // The link must be a post on the account the post is filed under. Only
+  // checked when the link is actually being rewritten — matching the PATCH
+  // route, which leaves a pure account move alone.
+  const selected = accounts.find((a) => a.id === accountId);
+  // The current account can be outside the caller's list (see the dropdown);
+  // fall back to the denormalized name, which is the handle by convention.
+  const selectedHandle = selected ? accountHandle(selected) : (post?.accountName ?? '');
+  const linkHandle = extractAccountHandle(postLink.trim());
+  const linkChanged = 'postLink' in updates;
+  const linkShapeValid = !!linkHandle;
+  const handleMismatch = linkShapeValid && !!selectedHandle
+    && !linkMatchesHandle(postLink.trim(), selectedHandle);
+  // Same duplicate lookup as the schedule dialog, but the post excludes itself
+  // — its own link is already in the schedule by definition.
+  const { checking: checkingDuplicate, duplicate } = useSmmPostLinkCheck(postLink, {
+    enabled: linkChanged && linkShapeValid && !handleMismatch,
+    exclude: post ? { accountId: post.accountId, postId: post.id } : undefined,
+  });
+
+  const linkInvalid = linkChanged && (!linkShapeValid || handleMismatch || duplicate);
+
   if (!post) return null;
 
   const handleSave = async () => {
@@ -162,7 +185,31 @@ export function PostDialog({
                   viral-copy declaration, which is itself fixed at upload. */}
               <div className="space-y-1.5">
                 <Label>Post link</Label>
-                <Input value={postLink} onChange={(e) => setPostLink(e.target.value)} placeholder="https://x.com/..." />
+                <Input
+                  value={postLink}
+                  onChange={(e) => setPostLink(e.target.value)}
+                  placeholder={selectedHandle ? `https://x.com/${selectedHandle}/status/...` : 'https://x.com/...'}
+                  aria-invalid={linkInvalid}
+                />
+                {linkChanged && !linkShapeValid && (
+                  <p className="text-xs text-destructive">Enter a valid x.com or twitter.com post link.</p>
+                )}
+                {linkChanged && handleMismatch && (
+                  <p className="text-xs text-destructive">
+                    This link is a post on <span className="font-medium">@{linkHandle}</span>, but the
+                    selected account is <span className="font-medium">@{selectedHandle}</span>.
+                  </p>
+                )}
+                {duplicate && (
+                  <p className="text-xs text-destructive">
+                    This post already exists in the database. This form is to record a{' '}
+                    <span className="font-semibold">new</span> post upload to one of{' '}
+                    <span className="font-semibold">your</span> accounts.
+                  </p>
+                )}
+                {checkingDuplicate && (
+                  <p className="text-xs text-muted-foreground">Checking the schedule for this post…</p>
+                )}
               </div>
             </div>
           ) : (
@@ -194,7 +241,7 @@ export function PostDialog({
             {editing ? (
               <>
                 <Button variant="outline" onClick={() => setEditing(false)}>Cancel</Button>
-                <Button onClick={handleSave} disabled={!dirty || saving}>
+                <Button onClick={handleSave} disabled={!dirty || linkInvalid || checkingDuplicate || saving}>
                   {saving ? 'Saving...' : 'Save'}
                 </Button>
               </>

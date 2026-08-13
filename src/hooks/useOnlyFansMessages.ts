@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { collection, limit as fsLimit, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { db } from '@/firebase-config';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
@@ -43,7 +43,17 @@ const LIVE_LIMIT = 50;
 const HISTORY_TTL = 60 * 1000;
 const historyKey = (chatId: string) => `bluu_of_thread_v1:${chatId}`;
 
-export function useOnlyFansMessages(accountId: string | null, chatId: string | null) {
+/**
+ * @param reloadToken Bump to force a re-fetch of the newest history page for the
+ *   chat already open — the chat list's refresh button does this, so refreshing
+ *   updates the thread the operator is reading and not just the list beside it.
+ *   The live tail needs no help: it is an `onSnapshot` and is already current.
+ */
+export function useOnlyFansMessages(
+  accountId: string | null,
+  chatId: string | null,
+  reloadToken = 0,
+) {
   const authFetch = useAuthFetch();
 
   const [history, setHistory] = useState<OFMessageRow[]>([]);
@@ -57,7 +67,12 @@ export function useOnlyFansMessages(accountId: string | null, chatId: string | n
   // "load older" affordance when a page exhausts the thread.
   const [cursor, setCursor] = useState<string | null>(null);
 
-  // Initial page.
+  // Compared against the token the effect last saw, so the effect can tell a
+  // forced reload apart from a chat switch — the two want different behaviour
+  // before the fetch, and identical behaviour after it.
+  const seenReloadRef = useRef(reloadToken);
+
+  // Initial page — and, when `reloadToken` changes, the newest page again.
   useEffect(() => {
     if (!chatId) {
       setHistory([]);
@@ -66,22 +81,40 @@ export function useOnlyFansMessages(accountId: string | null, chatId: string | n
       return;
     }
 
+    const isReload = seenReloadRef.current !== reloadToken;
+    seenReloadRef.current = reloadToken;
+
     let cancelled = false;
     setError(null);
-    setOptimistic([]);
 
-    const cached = getCache<{ messages: OFMessageRow[]; nextCursor: string | null }>(
-      historyKey(chatId),
-      HISTORY_TTL,
-    );
-    if (cached) {
-      setHistory(cached.messages);
-      setCursor(cached.nextCursor);
-      setLoading(false);
-    } else {
-      setHistory([]);
-      setCursor(null);
-      setLoading(true);
+    // A reload deliberately touches none of the pre-fetch state:
+    //  - it does not read the 60s sessionStorage cache, because serving the copy
+    //    the operator just asked to replace is the one thing a refresh must
+    //    never do;
+    //  - it does not blank `history` or flip `loading`, so the thread stays
+    //    readable while the page is in flight instead of flashing a skeleton;
+    //  - it does not clear `optimistic`, so a send still in flight keeps its
+    //    bubble.
+    //
+    // The fetch below then *replaces* history with the newest page, which is the
+    // honest meaning of refresh: a thread paged far back collapses to page one,
+    // exactly as re-opening it would. `loadOlder` walks back from there again.
+    if (!isReload) {
+      setOptimistic([]);
+
+      const cached = getCache<{ messages: OFMessageRow[]; nextCursor: string | null }>(
+        historyKey(chatId),
+        HISTORY_TTL,
+      );
+      if (cached) {
+        setHistory(cached.messages);
+        setCursor(cached.nextCursor);
+        setLoading(false);
+      } else {
+        setHistory([]);
+        setCursor(null);
+        setLoading(true);
+      }
     }
 
     (async () => {
@@ -103,7 +136,7 @@ export function useOnlyFansMessages(accountId: string | null, chatId: string | n
     return () => {
       cancelled = true;
     };
-  }, [chatId, authFetch]);
+  }, [chatId, authFetch, reloadToken]);
 
   // Live tail.
   useEffect(() => {

@@ -26,6 +26,11 @@ export default function OfManagerPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Threads already marked read this session — marking costs a provider call.
   const markedRef = useRef<Set<string>>(new Set());
+  // Refreshing the list must also refresh the thread being read, or the operator
+  // presses refresh and the one pane they are looking at is the one that does
+  // not move. The list is a Firestore mirror the sync route rewrites; the thread
+  // is provider history the sync never touches, so it needs its own nudge.
+  const [threadReloadToken, setThreadReloadToken] = useState(0);
 
   const selected = chats.find((c) => c.id === selectedId) ?? null;
 
@@ -48,8 +53,15 @@ export default function OfManagerPage() {
     [authFetch],
   );
 
+  const handleRefresh = useCallback(() => {
+    setThreadReloadToken((n) => n + 1);
+    refresh();
+  }, [refresh]);
+
   return (
-    <main className="flex h-screen w-screen overflow-hidden bg-background">
+    // `h-full w-full`, not `h-screen w-screen` — the layout's fixed inset-0 box
+    // already spans exactly the client area. See the note there.
+    <main className="flex h-full w-full overflow-hidden bg-background">
       <ChatList
         chats={chats}
         selectedId={selectedId}
@@ -57,7 +69,7 @@ export default function OfManagerPage() {
         loading={loading}
         refreshing={refreshing}
         hasMore={hasMore}
-        onRefresh={refresh}
+        onRefresh={handleRefresh}
         onLoadMore={loadMore}
         timeZone={userData?.timezone}
       />
@@ -71,6 +83,7 @@ export default function OfManagerPage() {
           accountId={accountId}
           chat={selected}
           timeZone={userData?.timezone}
+          reloadToken={threadReloadToken}
         />
       ) : (
         <section className="flex flex-1 items-center justify-center">

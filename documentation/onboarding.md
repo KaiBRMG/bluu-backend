@@ -7,8 +7,10 @@
 | File | Role |
 |---|---|
 | `src/app/download/page.tsx` | Public (browser-accessible) installer download page — pre-login, pre-Electron |
-| `src/lib/services/userService.ts` (`ensureUserExists`) | Creates the `users/{uid}` doc on first login with `hasAcceptedTerms: false`, `hasCompletedOnboarding: false` |
-| `src/app/api/auth/exchange-code/route.ts` | Calls `ensureUserExists` as part of the OAuth login exchange |
+| `src/app/api/admin/users/route.ts` (POST) | **Registration** — an admin creates the `users/{uid}` doc *before* the user can log in |
+| `src/lib/services/userService.ts` (`buildNewUserDoc`) | The doc template registration writes: `hasAcceptedTerms: false`, `hasCompletedOnboarding: false`, `lastLoginAt: null` |
+| `src/lib/services/userService.ts` (`recordSuccessfulLogin`) | Records each login; fires the welcome notifications on the first one |
+| `src/app/api/auth/exchange-code/route.ts` | Allowlist gate + calls `recordSuccessfulLogin` |
 | `src/components/AuthWrapper.tsx` | Owns the **onboarding guard** — redirects a logged-in user into the flow based on Firestore flags |
 | `src/app/(main)/onboarding/steps.ts` | `ONBOARDING_STEPS` — the ordered step list; the source of truth for the progress rail |
 | `src/app/(main)/onboarding/_components/OnboardingCard.tsx` | Shared step chrome: progress dots, identity strip, card surface, optional footer. Also exports `UserAvatar` |
@@ -19,7 +21,7 @@
 | `src/app/(main)/onboarding/permission/notifications/page.tsx` | Step 4 — OS notification permission |
 | `src/app/(main)/onboarding/profile/page.tsx` | Step 5 — personal details form; **this is the step that completes onboarding** |
 | `src/app/(main)/onboarding/done/page.tsx` | Step 6 — terminal confirmation; explains the unassigned-group wait |
-| `src/app/terms/page.tsx` | The terms of use document — opened in the **system browser**, not in-app |
+| `src/app/terms/page.tsx` | The terms of use document (single source) — opened in the **system browser**, not in-app |
 | `src/middleware.ts` | `/terms` is in `BROWSER_ALLOWED_PREFIXES` so the external browser can reach it |
 | `src/app/api/user/onboarding/route.ts` | The only write path for `hasAcceptedTerms` / `hasCompletedOnboarding` — one-way (true only) |
 | `src/app/api/user/update/route.ts` | Writes the profile-step payload (same allowlisted route Settings uses) |
@@ -35,31 +37,47 @@
 
 **Onboarding itself only exists inside Electron.** `/onboarding/*` lives under the `(main)` route group and is *not* in `BROWSER_ALLOWED_PREFIXES`, so a browser hitting it gets rewritten to `/desktop-only`.
 
-## 2. Login creates the user doc — onboarding-incomplete by default
+## 2. An admin registers the user — login no longer creates anything
 
-Google OAuth completes and hits `/api/auth/exchange-code`, which calls `ensureUserExists` ([auth.md](auth.md#oauth-login-flow-internal-employees) has the full login sequence). On a **brand-new uid**, the created `users/{uid}` doc sets:
+**The flow now starts before the user does.** An admin opens Employee Registry → **New**, and enters full name, nickname, login email and (optionally) a group. That writes the `users/{uid}` doc:
 
 ```
 hasAcceptedTerms: false
 hasCompletedOnboarding: false
 screenshotBugFixed: true   // new users are born on the signed build — see CLAUDE.md TCC section
-groups: ['unassigned']
+lastLoginAt: null          // ← this is what the registry renders as "Invited"
+groups: [chosen group, or 'unassigned']
 ```
 
-An **existing** user gets `lastLoginAt` and a rotated `sessionToken` — **and, if their last onboarding run never completed, that run is discarded**: `hasAcceptedTerms` goes back to `false` and `photoURL` back to `null`. See *Onboarding is all-or-nothing* below. Once `hasCompletedOnboarding` is `true` it stays true forever; there is no re-onboarding for a completed user.
+Only then can that person sign in at all: login is an allowlist check against exactly these docs ([auth.md](auth.md#the-allowlist-the-authorisation-gate)). Someone who has not been registered is refused with *"your account is not in the system — contact your team leader"*.
+
+**RULE — `/api/auth/exchange-code` must never create a user document.** It used to; with the company-domain check gone, that would provision an account for any Google user. See [auth.md](auth.md#the-allowlist-the-authorisation-gate).
+
+On **every** login `recordSuccessfulLogin` sets `lastLoginAt`, rotates `sessionToken`, records `googleSub` — **and, if the last onboarding run never completed, discards it**: `hasAcceptedTerms` goes back to `false` and `photoURL` back to `null`. See *Onboarding is all-or-nothing* below. Once `hasCompletedOnboarding` is `true` it stays true forever; there is no re-onboarding for a completed user.
+
+On the **first** login only, the welcome notifications fire (see §Notifications below).
 
 ### Onboarding is all-or-nothing
 
 **A run that never reached "Submit details" is thrown away.** The user is met with the login screen on next launch and walks the whole flow again from the terms step, exactly as a first-time signup would. Two halves, both required:
 
-- **Server (authoritative)** — `ensureUserExists` resets `hasAcceptedTerms` and `photoURL` on any login where `hasCompletedOnboarding !== true`. This is the only trustworthy place, and it runs on every login. `photoURL` is named explicitly because the avatar upload is the *one* field written before completion; everything else on the details step is written in the same request that completes onboarding, so an incomplete run leaves nothing else behind.
+- **Server (authoritative)** — `recordSuccessfulLogin` resets `hasAcceptedTerms` and `photoURL` on any login where `hasCompletedOnboarding !== true`. This is the only trustworthy place, and it runs on every login. `photoURL` is named explicitly because the avatar upload is the *one* field written before completion; everything else on the details step is written in the same request that completes onboarding, so an incomplete run leaves nothing else behind.
 - **Client** — `AuthWrapper` ends a *restored* session whose onboarding never completed, so the user actually lands on Login rather than resuming mid-flow.
 
 The client half is gated on `hasLoginSession()` ([`src/lib/loginSession.ts`](../src/lib/loginSession.ts)), a `sessionStorage` marker set by `Login` immediately **before** sign-in. `sessionStorage` is the right store precisely because it survives in-app navigation and reloads but dies with the renderer — which is exactly the distinction needed: *"did this run begin with a login, or with auth restored from disk?"* Without the marker the effect would sign out the user who just logged in and is standing on step 1.
 
 **RULE — `Login` must write `sessionToken` and the login marker BEFORE `signInWithCustomToken`.** Signing in triggers `onAuthStateChanged` and the `users/{uid}` snapshot that follows reads both immediately. Writing the token afterwards meant the first snapshot of any *second* login compared the freshly rotated token against the previous one, flagged the session as **displaced**, and left `userData` null permanently — the doc never changes again, so no later snapshot corrects it. The symptom was an onboarding step stuck on skeleton avatars with a sign-out button that appeared inert. Now that an incomplete run forces a fresh login on every relaunch, that second login is the common path.
 
-Two notifications fire here (`welcomeToTeam` to the user, `adminNewUserAlert` to every admin — see [notifications.md](notifications.md)). **There is deliberately no "go fill in your personal information" nudge**: that data is collected by step 5 of this flow. The old `onboardingActionRequired()` factory was deleted when the profile step shipped; do not reintroduce it.
+### Notifications on first login
+
+Both fire from `recordSuccessfulLogin` on the **first** login — not at registration, which may be days earlier, and a welcome sitting in an account the person cannot yet reach is not a welcome.
+
+| Notification | When |
+|---|---|
+| `welcomeToTeam` | Always. Names the group when one was assigned at registration (the normal case); falls back to "you will be assigned to a group soon" otherwise. |
+| `adminNewUserAlert` | **Only when the user is still `unassigned`** — i.e. an admin registered them without picking a group. In the normal flow there is nothing to action, so admins are not pinged about every new hire. |
+
+**There is deliberately no "go fill in your personal information" nudge**: that data is collected by step 5 of this flow. The old `onboardingActionRequired()` factory was deleted when the profile step shipped; do not reintroduce it.
 
 ## 3. The onboarding guard (`AuthWrapper`)
 
@@ -166,7 +184,13 @@ Because of that photo the card surface is **opaque `#171717`**, not DESIGN.md's 
 ### Step 0 — `welcome` (terms of use)
 Sets `identity="none"` and renders identity itself, as the heading **"Welcome to Bluu Backend"** with the user's avatar inline, name underneath — so there is exactly one avatar on the step, not two.
 
-The terms link points at **`/terms`** with `target="_blank"`. In Electron that goes through `setWindowOpenHandler` → `openExternalSafe` → `shell.openExternal`, i.e. **it opens in the user's system browser, not in the app**. That is why `/terms` must stay in `BROWSER_ALLOWED_PREFIXES` — the external browser sends no `Electron/` user agent, so without the allowlist entry it would be rewritten to `/desktop-only`. The document content lives in `TOU.md` at the repo root; `src/app/terms/page.tsx` is the rendered version. **Keep the two in sync when the terms change.**
+The terms link points at **`/terms`** with `target="_blank"`. In Electron that goes through `setWindowOpenHandler` → `openExternalSafe` → `shell.openExternal`, i.e. **it opens in the user's system browser, not in the app**. That is why `/terms` must stay in `BROWSER_ALLOWED_PREFIXES` — the external browser sends no `Electron/` user agent, so without the allowlist entry it would be rewritten to `/desktop-only`.
+
+[`src/app/terms/page.tsx`](../src/app/terms/page.tsx) is the **single source** of the terms text. (This spoke previously named a `TOU.md` at the repo root as the master copy — no such file exists, so there is nothing to keep in sync.) Clause 1 covers the access model: admin registration, personal Google sign-in, and what Google does and does not share with us. Keep it accurate when the auth model changes — see [auth.md](auth.md#the-allowlist-the-authorisation-gate).
+
+**Note — editing the terms deliberately does not re-prompt anyone.** `hasAcceptedTerms` is a one-way flag ([§5](#5-write-path-guarantees)) with no version attached, so a user who has already accepted never sees the onboarding step again. **This is by design, not a gap:** `Login` carries *"By signing in you agree with Bluu Backend Terms of Use"* directly above the sign-in button, and every user passes that screen on every login — so agreement is re-affirmed continuously against whatever the current text says. The explicit onboarding step exists to make a new user read it once; it is not the only point of acceptance.
+
+**RULE — that notice on `Login` is load-bearing.** It is what makes updating the terms possible without a re-acceptance flow. Do not remove it, and keep it linked to `/terms`.
 
 On **Next**: `PATCH /api/user/onboarding { hasAcceptedTerms: true }`, then push to `permissions`. A failed write toasts and stays put.
 
@@ -186,8 +210,10 @@ Collects every field the Settings → Personal Information form holds (profile p
 
 Validation is `validateOnboardingProfile` (`src/lib/validation.ts`), which layers a required-field pass over `validatePersonalInfoForm`:
 
-- **Required:** nickname, personal email, phone, DOB, full address (street/city/state/zip/country), emergency contact name + number.
-- **Optional but format-validated:** gender, telegram, emergency contact email, payment method/info, comments, photo.
+- **Required:** nickname, phone, DOB, full address (street/city/state/zip/country), emergency contact name + number.
+- **Optional but format-validated:** gender, telegram, **alternative email**, emergency contact email, payment method/info, comments, photo.
+
+**`personalEmail` is deliberately no longer required.** Since staff sign in with personal Google accounts, `workEmail` already *is* their personal address for almost everyone — requiring it a second time was a blocking field with no information in it. It survives as an optional "Alternative email" for the minority who keep a separate contact address. The read-only login field above it is labelled **"Login email"**, not "Company email", for the same reason.
 - **DOB** additionally runs `validateDateOfBirth` (not future, age 16–100). The picker's `startMonth`/`endMonth` are bound to the same range so it cannot offer a date the form then rejects.
 
 Address is required because it is what resolves the user's timezone — `resolveTimezoneFromAddress` runs client-side and its result rides along in the **same** `/api/user/update` write, rather than the second request Settings makes.
@@ -197,9 +223,16 @@ On success: `POST /api/user/update` (profile + timezone) → `PATCH /api/user/on
 **RULE — the completion flag belongs to this step, not the notifications step.** It is set only after the details are stored, so an interrupted flow re-enters onboarding rather than leaking a user into the app with an empty record.
 
 ### Step 5 — `done`
-Terminal confirmation: "Your information has been received!", followed by the explanation that the user is unassigned until an admin reviews them. **This is the only place that message lives** — the home-page group widget deliberately does not repeat it (it just shows the group name on an orange pending tint). `Go to my workspace` → `/`.
+Terminal confirmation: "Your information has been received!" `Go to my workspace` → `/`.
 
-Below the message sits a two-row **status list** — *Details submitted* (green, done) and *Admin review* (orange, in progress) — that makes the review concrete and visibly in motion. The "Admin review" row notes that managers have been notified, which is true: `adminNewUserAlert` fanned out to every admin at signup. The orange dot carries the app's only looping animation.
+**Two variants, because two things can now be true.** Users are registered by an admin before they can log in, so a group is normally already assigned — there is nothing to wait for, and the old "an admin still has to review you" copy would invent a block that does not exist.
+
+| State | Message | Status rows |
+|---|---|---|
+| Group assigned (normal) | "You're all set up and your workspace is ready." | *Details submitted* (green) · *Team assigned* (green, names the group) |
+| Still `unassigned` | The original "an admin will review you" copy | *Details submitted* (green) · *Admin review* (orange, in progress) |
+
+**This is the only place the waiting message lives** — the home-page group widget deliberately does not repeat it (it just shows the group name on an orange pending tint, which likewise only appears when unassigned). The "Admin review" row notes that managers have been notified, which is true in exactly this case: `adminNewUserAlert` fires on the first login of a user with no group. The orange dot carries the app's only looping animation.
 
 **Do not add a "Workspace access — pending" row.** The user can reach their workspace immediately; group assignment only affects what's *in* it. Listing access as pending would state something false and imply a block that does not exist.
 
@@ -229,4 +262,4 @@ The profile step writes through the existing allowlisted `/api/user/update` rout
 
 ## Maintaining this spoke
 
-Update this file when: a step is added, removed, or reordered (`steps.ts` + the table in §4), the guard logic in `AuthWrapper` changes, `ensureUserExists`'s default flag values change, the required-field set in `validateOnboardingProfile` changes, `TOU.md` / `src/app/terms/page.tsx` diverge, or the temporary macOS TCC repair (step 2) is removed.
+Update this file when: a step is added, removed, or reordered (`steps.ts` + the table in §4), the guard logic in `AuthWrapper` changes, `buildNewUserDoc`'s default flag values change, the registration form's fields change, the required-field set in `validateOnboardingProfile` changes, the terms text in `src/app/terms/page.tsx` changes materially, or the temporary macOS TCC repair (step 2) is removed.

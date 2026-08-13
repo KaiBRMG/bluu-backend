@@ -37,7 +37,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 
 - **Monorepo:** `src/` (Next.js 16 web app, primary), `electron/` (desktop wrapper), `src/app/creator/` (creator interface), `functions/` (Cloud Functions).
 - **Two domains, one Vercel deployment:** the Electron shell is pinned to `bluu-backend.vercel.app` (`BASE_URL`); browser-facing pages use `app.bluurock.com` (`PUBLIC_APP_ORIGIN` in [`src/lib/publicOrigin.ts`](src/lib/publicOrigin.ts)). Build every user-facing link from that constant — **never `window.location.origin`**, which is the vercel.app host inside Electron. See [electron.md](documentation/electron.md#two-domains-one-deployment).
-- **Auth:** Google OAuth only; admin status is a JWT custom claim (`token.admin`), not a Firestore read.
+- **Auth:** Google OAuth only, with **personal** Google accounts — there is no company-domain restriction. **Google authenticates; Firestore authorises:** an admin must register someone in the Employee Registry before they can log in, and `/api/auth/exchange-code` refuses any address without a `users` doc. It **never creates one**. Admin status is a JWT custom claim (`token.admin`), not a Firestore read.
 - Full repo layout, commands, and env vars: [architecture-overview.md](documentation/architecture-overview.md).
 
 ## Temporary Instrumentation (remove after data collection)
@@ -47,6 +47,18 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
   - **Decommissioned:** the three CA-portal pages (`disputes`, `custom-requests`, `campaigns`) were previously instrumented and no longer capture anything — call sites removed. Screenshots already collected from them remain in Storage.
   - Hook: `src/lib/temp-analytics/useTempAnalyticsScreenshot.ts` (`useTempAnalyticsScreenshot(pageKey, options?)`) · Route: `src/app/api/temp-analytics/screenshot/route.ts` · Call site: the home page (search `TEMP ANALYTICS`).
   - **To remove:** delete `src/lib/temp-analytics/` + `src/app/api/temp-analytics/`, then strip the `TEMP ANALYTICS`-tagged lines in each instrumented page. Storage folder `temp-analytics/` can be cleared once the data is pulled.
+
+## Temporary: personal-email migration (remove once the fleet is migrated)
+
+- **What/why:** staff are moving off `@bluurock.com` addresses onto their own Google accounts. The permanent half of that change (allowlist auth, admin registration) is **not** temporary and stays. This section covers only the one-time migration of *existing* users.
+- **The gate is [`src/lib/emailMigrationConfig.ts`](src/lib/emailMigrationConfig.ts)** — the single thing deciding who is prompted, modelled on `appUpdateConfig.ts`. `enabled: false` = nobody, and is the kill switch. Arm cohorts by `uids`, `groups`, or `allUsers`, each in its own commit. Shipped disarmed.
+- **Mechanism:** [`EmailMigrationDialog`](src/components/migration/EmailMigrationDialog.tsx) (mounted in `(main)/layout.tsx`) shows a non-dismissible card → opens the system browser at `/auth/google?mode=migrate` via `window.open` (`setWindowOpenHandler` → `shell.openExternal`) → the existing `bluu://callback` deep link returns the code → posts it to [`/api/auth/migrate-email`](src/app/api/auth/migrate-email/route.ts).
+  - **No Electron build is needed** — nothing under `electron/` changed, so rule 14's two-push dance does not apply. This ships as a plain Vercel deploy.
+  - **Self-clearing:** the gate tests `workEmail` for the company domain, so a migrated user stops matching. No "already done" flag to keep in sync.
+  - **Never interrupts a shift:** the decision latches once per app start and only when clocked out, like `UpdateAvailableBanner`.
+  - **Enforcement is soft** (a renderer dialog). Deliberate — this is a cooperative rollout.
+  - The dialog listens on the **same** `oauth-callback` IPC channel as `Login`. Safe only because the two never coexist (Login renders without a session, the card only with one); `removeOAuthListeners` is `removeAllListeners`, so overlapping them would tear out each other's handlers.
+- **To remove** (once no `users` doc has an `@bluurock.com` `workEmail`): delete `src/lib/emailMigrationConfig.ts`, `src/components/migration/`, `src/app/api/auth/migrate-email/`, the mount in `(main)/layout.tsx`, the `mode=migrate` branch in `src/app/(main)/auth/google/page.tsx`, and `isLegacyWorkEmail`/`LEGACY_WORK_EMAIL_DOMAIN` in `src/lib/authEmail.ts`. Keep `normalizeEmail` — that is permanent. Details in [auth.md](documentation/auth.md).
 
 ## Temporary: screenshot TCC repair (remove after fleet migrates off pre-signing builds)
 
@@ -86,6 +98,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 1. **Firestore rules/indexes** — notify the user on any change. Display the command needed to deploy.
 2. **User doc writes** — call `invalidateUserCache(uid)` in the same handler (`getUserById` has a 60s cache). See [data-layer.md](documentation/data-layer.md#firestore-read-optimization-rules).
 3. **Authorization tier choice** — new admin-action routes affecting the auth graph or account state require the **admin claim**, not page permission. See [auth.md](documentation/auth.md#authorization-tiers-least--most-privileged).
+3b. **Login is an allowlist** — `/api/auth/exchange-code` must never create a `users` doc or an Auth account for an unknown address, and must resolve the uid from the `users` doc (not `adminAuth.getUserByEmail` alone). Accounts are created only by `POST /api/admin/users`. Every refusal returns the same generic 403, so staff cannot be enumerated. See [auth.md](documentation/auth.md#the-allowlist-the-authorisation-gate).
 4. **Elapsed time from buffers** — always close with `sessionCloseMs` before `parseBuffer`; never `parseBuffer(events, Date.now())` over a buffer set. See [time-tracking.md](documentation/time-tracking.md#2-session-close-time--sessionclosems-single-source-of-truth).
 5. **Notification copy** — only edit `src/lib/notificationContent.ts`; write via `addNotificationToBatch`.
 6. **Archive ≠ delete** — filter `isArchived` from user pickers; add new per-user collections to the delete cascade. See [user-management.md](documentation/user-management.md).

@@ -127,7 +127,7 @@ export default function ChatList({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {loading && chats.length === 0 ? (
           <div className="space-y-px p-2" role="status" aria-label="Loading chats">
             {Array.from({ length: 8 }).map((_, i) => (
@@ -196,11 +196,15 @@ const ChatRow = memo(function ChatRow({
       onClick={() => onSelect(chat)}
       aria-current={selected ? 'true' : undefined}
       className={cn(
-        'flex w-full items-start gap-3 border-b border-white/[0.04] px-3 py-2.5 text-left transition-all hover:brightness-110 active:scale-[0.98]',
+        // Colour + transform only. A `hover:brightness-110` here put a filter on
+        // every row the cursor crossed, and a filter forces Chromium to promote
+        // and re-rasterise the whole row — avatar included — on each enter and
+        // leave. Over a fast drag down the list that is the visible tearing.
+        'flex w-full items-start gap-3 border-b border-white/[0.04] px-3 py-2.5 text-left transition-[background-color,transform] active:scale-[0.98]',
         // Selection carries three cues, not one: the Action Blue tint, the name
         // going full-white, and the weight step. An overlay-only selected state
         // measured 1.25:1 against an unselected row — invisible in practice.
-        selected ? 'bg-[#3b82f6]/15' : 'hover:bg-white/[0.055]',
+        selected ? 'bg-[#3b82f6]/15 hover:bg-[#3b82f6]/25' : 'hover:bg-white/[0.055]',
       )}
     >
       <Avatar className="mt-0.5">

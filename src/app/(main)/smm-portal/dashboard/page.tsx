@@ -8,11 +8,11 @@ import { AccountsKanban } from '@/components/smm/dashboard/AccountsKanban';
 import { ShowAllPostsDialog } from '@/components/smm/dashboard/ShowAllPostsDialog';
 import { BonusSection } from '@/components/smm/dashboard/BonusSection';
 import { PostDialog } from '@/components/smm/shared/PostDialog';
-import { CreatePostDialog } from '@/components/smm/shared/CreatePostDialog';
+import { CreatePostDialog, type PostDraft } from '@/components/smm/shared/CreatePostDialog';
 import { AccountDialog } from '@/components/smm/shared/AccountDialog';
 import { BonusWizard } from '@/components/smm/shared/BonusWizard';
 import { ConfirmDialog } from '@/components/smm/shared/ConfirmDialog';
-import { ViralCopyDialog, type ViralCopyDeclaration } from '@/components/smm/shared/ViralCopyDialog';
+import { ViralCopyDialog } from '@/components/smm/shared/ViralCopyDialog';
 import { useSmmAccounts } from '@/hooks/useSmmAccounts';
 import { useSmmPosts, type SmmPostPayload } from '@/hooks/useSmmPosts';
 import type { PostAction } from '@/components/smm/shared/PostsTable';
@@ -33,10 +33,11 @@ export default function SmmDashboardPage() {
   const [postDialogEdit, setPostDialogEdit] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createDate, setCreateDate] = useState<Date | undefined>(undefined);
-  // Scheduling a post is a two-step flow: the viral-copy question, then the
-  // schedule form. `viralCopy` carries the (verified) answer between them.
+  // Scheduling a post is a two-step flow: the schedule form, then the
+  // viral-copy question. `draft` carries the post between them and survives a
+  // "Back", so nothing typed in step one is lost.
   const [viralOpen, setViralOpen] = useState(false);
-  const [viralCopy, setViralCopy] = useState<ViralCopyDeclaration | null>(null);
+  const [draft, setDraft] = useState<PostDraft | null>(null);
   const [notBonusAccount, setNotBonusAccount] = useState<string | null>(null);
   const [selectedAccount, setSelectedAccount] = useState<SmmAccount | null>(null);
   const [accountDialogOpen, setAccountDialogOpen] = useState(false);
@@ -122,7 +123,7 @@ export default function SmmDashboardPage() {
               anchorDate={anchorDate}
               onWeekChange={setAnchorDate}
               onPostClick={(post) => { setSelectedPost(post); setPostDialogEdit(false); setPostDialogOpen(true); }}
-              onDayClick={(date) => { setCreateDate(date); setViralCopy(null); setViralOpen(true); }}
+              onDayClick={(date) => { setCreateDate(date); setDraft(null); setCreateOpen(true); }}
               onShowAll={() => setShowAllOpen(true)}
             />
             <BonusSection />
@@ -152,23 +153,33 @@ export default function SmmDashboardPage() {
         startInEdit={postDialogEdit}
       />
 
-      <ViralCopyDialog
-        open={viralOpen}
-        onOpenChange={setViralOpen}
-        onAnswered={(declaration) => {
-          setViralCopy(declaration);
-          setViralOpen(false);
-          setCreateOpen(true);
-        }}
-      />
-
+      {/* Step 1 — the post itself. Writes nothing; hands a draft to step 2. */}
       <CreatePostDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
         accounts={accounts}
         defaultDate={createDate}
-        viralCopy={viralCopy}
-        onCreate={handleCreate}
+        draft={draft}
+        onNext={(next) => {
+          setDraft(next);
+          setCreateOpen(false);
+          setViralOpen(true);
+        }}
+      />
+
+      {/* Step 2 — the viral-copy question, which creates the post. */}
+      <ViralCopyDialog
+        open={viralOpen}
+        onOpenChange={setViralOpen}
+        postLink={draft?.postLink ?? ''}
+        onBack={() => { setViralOpen(false); setCreateOpen(true); }}
+        onAnswered={async (declaration) => {
+          if (!draft) return;
+          await handleCreate({ ...draft, originalLink: declaration?.originalLink });
+          toast.success('Post scheduled');
+          setViralOpen(false);
+          setDraft(null);
+        }}
       />
 
       <AccountDialog

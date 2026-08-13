@@ -79,6 +79,18 @@ Two costs drive every decision here: **provider credits** (each call is billed) 
 
 `useOnlyFansMessages` merges **history** (provider pages) with the **live tail** (the `messages` subcollection), de-duplicating by message id — the same message legitimately appears in both once the next history page is fetched. Sent messages are written to the subcollection by the send route *and* by the `messages.sent` webhook; both write the same doc id, so it is idempotent.
 
+### Refresh covers both panes
+
+The chat list's refresh button drives two different things, because the two panes have unrelated freshness models. The list is a Firestore mirror, so `refresh` calls `?refresh=1` and lets the snapshot listener deliver the rewritten rows. The **thread is provider history that the sync route never touches**, so it would otherwise sit unchanged behind a refresh the operator just pressed — the one pane they are reading being the one that does not move. The page therefore also bumps a `threadReloadToken`, passed to `ChatThread` → `useOnlyFansMessages(accountId, chatId, reloadToken)`, which re-runs the initial-page effect.
+
+A reload is not the same as opening a thread, and the effect distinguishes them via a ref holding the last token it saw:
+
+- it **bypasses the 60s `sessionStorage` history cache** — serving the copy the operator asked to replace is the one thing a refresh must never do;
+- it leaves `history`, `loading` and `optimistic` alone before the fetch, so the thread stays readable rather than flashing a skeleton, and an in-flight send keeps its bubble;
+- the response then *replaces* history with the newest page, so a thread paged far back collapses to page one exactly as re-opening it would.
+
+The live tail needs no part of this — it is an `onSnapshot` and is already current. Note the spinner on the button tracks the chat-list sync only; the thread updates in place.
+
 ### Optimistic send has exactly one failure model
 
 A send inserts an optimistic row (`pending: true`) which the live listener replaces with the real message. **A send that fails removes its row and returns `false`; the composer restores the draft.** There is deliberately no `failed` message state: the earlier version kept a red bubble *and* refilled the composer, so the operator saw one unsent message twice, the ghost never cleared, and each retry appended another. The composer is the only place unsent text lives. `error` is cleared at the start of every attempt so a second identical failure still toasts.
@@ -132,6 +144,10 @@ Window properties that are part of the spec:
 - `resizable: true` with its own minimums — sized independently of the main window.
 - One window per `key` — a second sidebar click focuses the existing window.
 - `will-navigate` / `setWindowOpenHandler` mirror the main window's posture (app origin in-window, everything else to the system browser), along with the offline screen, crash auto-reload and unresponsive reporting — all applied by the shared `attachWindowBehaviour`.
+
+**Never size this window's shell in `vw`/`vh`.** The layout wraps everything in a single `fixed inset-0 overflow-hidden` box and every surface below it uses `h-full`/`w-full`. Windows Electron uses classic space-consuming scrollbars, so a `w-screen`/`h-screen` shell oscillates: `100vw` exceeds the client width as soon as any vertical scrollbar exists → a horizontal scrollbar appears → it eats height → `100vh` now exceeds the client height → the vertical scrollbar it needs narrows the client width again. The symptom is the window scrolling a little past its own bottom and flickering under the cursor. A `fixed inset-0` box is measured against the client area and adds nothing to the document's scroll height, so it cannot feed the loop. The two scroll containers (chat list, thread) are `overscroll-contain` so a wheel event running out of list does not chain to the document behind it.
+
+Row hover is **colour and transform only** — no `filter`. A `hover:brightness-*` on a chat row makes Chromium promote and re-rasterise the entire row, avatar included, on every enter and leave, which tears visibly when the cursor is dragged down a long list.
 
 `src/middleware.ts` is untouched: `/of-manager` is not on the browser allowlist, so browser traffic rewrites to `/desktop-only` exactly like the rest of the app.
 
@@ -188,3 +204,4 @@ The shape anticipates them: the adapter covers the whole provider surface, `chat
 - [ ] Changing the mirror's shape → update `chatChanged`, or syncs will write every row on every pass.
 - [ ] `electron/` changed → new build, released in **two pushes** (rule 14 in [CLAUDE.md](../CLAUDE.md)).
 - [ ] `ONLYFANS_ACCOUNT_ID` must be pinned before a second account is linked.
+- [ ] New full-height surface in this window → `h-full`, never `h-screen`/`w-screen` (see [The window](#the-window)).

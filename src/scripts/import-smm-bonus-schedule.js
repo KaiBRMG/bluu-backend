@@ -93,15 +93,24 @@ function extractAccountHandle(url) {
   return handle.replace(/^@/, '');
 }
 
+// Keep in lockstep with normalizePostLink in src/lib/smm/linkUtils.ts — the
+// identity is the tweet's status id, so every URL variant of the same post
+// (scheme, www., x.com/twitter.com, handle, /photo/N, ?params) collapses to one
+// value. Diverging here would import rows the app then can't match.
 function normalizePostLink(url) {
   let link = (url || '').trim();
   if (!link) return '';
   link = link.split('#')[0].split('?')[0];
+
+  const statusId = (link.match(/\/status(?:es)?\/(\d+)/i) || [])[1];
+  if (statusId) return `x.com/i/status/${statusId}`;
+
   link = link.replace(/\/(photo|video)\/\d+\/?$/i, '');
   link = link.replace(/\/+$/, '');
-  const schemeHost = link.match(/^(https?:\/\/[^/]+)(.*)$/i);
-  if (schemeHost) link = schemeHost[1].toLowerCase() + schemeHost[2];
-  return link;
+  link = link.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+  const parts = link.split('/');
+  parts[0] = parts[0].toLowerCase().replace(/^twitter\.com$/, 'x.com');
+  return parts.join('/');
 }
 
 // ─── Date parser — the sheet has typos ("Novermber", "Febuary") and

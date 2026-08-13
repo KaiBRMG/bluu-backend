@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -14,140 +13,201 @@ import {
 } from '@/components/ui/select';
 import { DateTimePicker } from '@/components/smm/shared/DateTimePicker';
 import { accountDisplayName } from '@/components/smm/shared/badges';
+import { accountHandle, extractAccountHandle, linkMatchesHandle } from '@/lib/smm/linkUtils';
+import { useSmmPostLinkCheck } from '@/hooks/useSmmPostLinkCheck';
 import type { SmmAccount } from '@/types/firestore';
-import type { SmmPostPayload } from '@/hooks/useSmmPosts';
-import type { ViralCopyDeclaration } from '@/components/smm/shared/ViralCopyDialog';
 
-/** Midnight (a bare day click) becomes 09:00; an explicit time is kept. */
-function startOfWorkday(date: Date): Date {
+/**
+ * The post as filled in here, handed to the viral-copy step. `postDate` is an
+ * ISO instant — the picker works in the user's local time and `toISOString()`
+ * converts it to UTC, which is what the API and Firestore store.
+ */
+export interface PostDraft {
+  accountId: string;
+  caption: string;
+  postDate: string;
+  postLink: string;
+}
+
+/**
+ * A day click hands over that day at midnight. Keep the chosen day but default
+ * the clock to the user's current local time, so an SMM scheduling "now" has
+ * nothing to adjust. An explicit time (a real edit, or a restored draft) wins.
+ */
+function withCurrentTime(date: Date | undefined): Date {
+  const now = new Date();
+  if (!date) return now;
   if (date.getHours() !== 0 || date.getMinutes() !== 0) return date;
   const next = new Date(date);
-  next.setHours(9, 0, 0, 0);
+  next.setHours(now.getHours(), now.getMinutes(), 0, 0);
   return next;
 }
 
 /**
- * Schedule-a-post dialog, step two of the calendar-day flow (the viral-copy
- * question comes first — see {@link ViralCopyDialog}). Clicking a day prefills
- * postDate; postedBy is set server-side from the session.
+ * Schedule-a-post dialog — **step one** of the calendar-day flow. It collects
+ * the post itself and validates the link, then hands a {@link PostDraft} to the
+ * viral-copy question ({@link ViralCopyDialog}), which is what actually creates
+ * the post. Nothing is written here.
+ *
+ * Three things must hold before the draft can move on, each checked here and
+ * again server-side: the link is a Twitter/X post link, it is a post on the
+ * account selected above, and it isn't already in the content schedule.
+ * `postedBy` is set server-side from the session.
  */
 export function CreatePostDialog({
   open,
   onOpenChange,
   accounts,
   defaultDate,
-  viralCopy,
-  onCreate,
+  draft,
+  onNext,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   accounts: SmmAccount[]; // active accounts assigned to the caller
   defaultDate?: Date;
-  viralCopy?: ViralCopyDeclaration | null; // set when the post copies a viral post
-  onCreate: (payload: SmmPostPayload) => Promise<void>;
+  /** A draft to restore — set when the viral step sends the SMM back here. */
+  draft?: PostDraft | null;
+  onNext: (draft: PostDraft) => void;
 }) {
-  const [accountId, setAccountId] = useState('');
-  const [caption, setCaption] = useState('');
-  const [postDate, setPostDate] = useState<Date | undefined>(undefined);
-  const [postLink, setPostLink] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    setAccountId('');
-    setCaption('');
-    // A calendar-day click hands over midnight; open on a sensible hour so the
-    // SMM edits a time rather than accidentally scheduling everything at 00:00.
-    setPostDate(defaultDate ? startOfWorkday(defaultDate) : undefined);
-    setPostLink('');
-  }, [open, defaultDate]);
-
-  // A post link is required and must be an x.com URL to enable Submit.
-  const postLinkValid = postLink.trim().toLowerCase().includes('x.com');
-  const canSubmit = !!accountId && !!postDate && postLinkValid && !saving;
-
-  const handleCreate = async () => {
-    if (!accountId || !postDate || !postLinkValid) return;
-    setSaving(true);
-    try {
-      await onCreate({
-        accountId,
-        caption,
-        postDate: postDate.toISOString(),
-        postLink: postLink.trim(),
-        originalLink: viralCopy?.originalLink,
-      });
-      toast.success('Post scheduled');
-      onOpenChange(false);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to schedule post');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Schedule a post</DialogTitle>
-          <DialogDescription>Add a post to your upload schedule.</DialogDescription>
+          <DialogDescription>
+            Add a post to your upload schedule. You’ll be asked about viral copies next.
+          </DialogDescription>
         </DialogHeader>
-
-        <div className="space-y-3">
-          {viralCopy && (
-            <div className="rounded-lg border p-3 text-sm space-y-0.5">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Copied viral post
-              </p>
-              <p className="break-words">{viralCopy.originalLink}</p>
-              {/* The source is not an input — it is the account the original
-                  lives on, resolved from the link. It decides the network
-                  bonus, so it is shown here rather than asked for. */}
-              <p className="text-xs text-muted-foreground">
-                Uploaded from <span className="text-foreground">{viralCopy.originalAccName}</span> ·
-                {' '}this post’s bonus will be halved if you apply for one.
-              </p>
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <Label>Account</Label>
-            <Select value={accountId} onValueChange={setAccountId}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Select account" /></SelectTrigger>
-              <SelectContent>
-                {accounts.length === 0 && (
-                  <div className="px-3 py-2 text-sm text-muted-foreground">No accounts assigned to you</div>
-                )}
-                {accounts.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>{accountDisplayName(a)}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Post date &amp; time</Label>
-            <DateTimePicker value={postDate} onChange={setPostDate} className="w-full" />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Caption</Label>
-            <Textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={3} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Post link</Label>
-            <Input value={postLink} onChange={(e) => setPostLink(e.target.value)} placeholder="https://x.com/..." />
-            {postLink.trim() && !postLinkValid && (
-              <p className="text-xs text-destructive">Enter a valid x.com post link.</p>
-            )}
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleCreate} disabled={!canSubmit}>
-            {saving ? 'Scheduling...' : 'Schedule'}
-          </Button>
-        </DialogFooter>
+        {/* Mounted only while open, so the form's state is seeded from `draft`
+            (or the defaults) once per opening — no effect syncing props into
+            state, and no stale values from the previous post. */}
+        {open && (
+          <PostForm
+            accounts={accounts}
+            defaultDate={defaultDate}
+            draft={draft}
+            onNext={onNext}
+            onCancel={() => onOpenChange(false)}
+          />
+        )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function PostForm({
+  accounts,
+  defaultDate,
+  draft,
+  onNext,
+  onCancel,
+}: {
+  accounts: SmmAccount[];
+  defaultDate?: Date;
+  draft?: PostDraft | null;
+  onNext: (draft: PostDraft) => void;
+  onCancel: () => void;
+}) {
+  const [accountId, setAccountId] = useState(draft?.accountId ?? '');
+  const [caption, setCaption] = useState(draft?.caption ?? '');
+  const [postDate, setPostDate] = useState<Date | undefined>(
+    draft ? new Date(draft.postDate) : withCurrentTime(defaultDate),
+  );
+  const [postLink, setPostLink] = useState(draft?.postLink ?? '');
+
+  const selectedAccount = accounts.find((a) => a.id === accountId);
+  const selectedHandle = selectedAccount ? accountHandle(selectedAccount) : '';
+
+  // A post link is required, must be a Twitter/X link, and must be a post on
+  // the account picked above — the dropdown is what decides the bonus tier and
+  // ownership, so a link pointing at a different page can't be verified.
+  const trimmedLink = postLink.trim();
+  const linkHandle = extractAccountHandle(trimmedLink);
+  const linkShapeValid = !!linkHandle;
+  const handleMismatch = linkShapeValid && !!selectedHandle
+    && !linkMatchesHandle(trimmedLink, selectedHandle);
+
+  // Then: has this exact post already been recorded? Only asked once the link
+  // is well-formed and matches the account — no point spending a query on a
+  // link that is already rejected.
+  const { checking: checkingDuplicate, duplicate } = useSmmPostLinkCheck(postLink, {
+    enabled: linkShapeValid && !handleMismatch,
+  });
+
+  const postLinkValid = linkShapeValid && !handleMismatch && !duplicate;
+  const canContinue = !!accountId && !!postDate && postLinkValid && !checkingDuplicate;
+
+  const handleNext = () => {
+    if (!accountId || !postDate || !postLinkValid) return;
+    onNext({
+      accountId,
+      caption,
+      postDate: postDate.toISOString(),
+      postLink: trimmedLink,
+    });
+  };
+
+  return (
+    <>
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <Label>Account</Label>
+          <Select value={accountId} onValueChange={setAccountId}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Select account" /></SelectTrigger>
+            <SelectContent>
+              {accounts.length === 0 && (
+                <div className="px-3 py-2 text-sm text-muted-foreground">No accounts assigned to you</div>
+              )}
+              {accounts.map((a) => (
+                <SelectItem key={a.id} value={a.id}>{accountDisplayName(a)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label>Post date &amp; time</Label>
+          <DateTimePicker value={postDate} onChange={setPostDate} className="w-full" />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Caption</Label>
+          <Textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={3} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Post link</Label>
+          <Input
+            value={postLink}
+            onChange={(e) => setPostLink(e.target.value)}
+            placeholder={selectedHandle ? `https://x.com/${selectedHandle}/status/...` : 'https://x.com/...'}
+            aria-invalid={!!trimmedLink && !postLinkValid && !checkingDuplicate}
+          />
+          {trimmedLink && !linkShapeValid && (
+            <p className="text-xs text-destructive">Enter a valid x.com or twitter.com post link.</p>
+          )}
+          {handleMismatch && (
+            <p className="text-xs text-destructive">
+              This link is a post on <span className="font-medium">@{linkHandle}</span>, but the
+              selected account is <span className="font-medium">@{selectedHandle}</span>. Pick the
+              matching account or paste that account’s post link.
+            </p>
+          )}
+          {duplicate && (
+            <p className="text-xs text-destructive">
+              This post already exists in the database. This form is to record a{' '}
+              <span className="font-semibold">new</span> post upload to one of{' '}
+              <span className="font-semibold">your</span> accounts.
+            </p>
+          )}
+          {checkingDuplicate && (
+            <p className="text-xs text-muted-foreground">Checking the schedule for this post…</p>
+          )}
+        </div>
+      </div>
+
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button onClick={handleNext} disabled={!canContinue}>Next</Button>
+      </DialogFooter>
+    </>
   );
 }

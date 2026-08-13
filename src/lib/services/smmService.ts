@@ -441,6 +441,37 @@ export async function findLinkUsage(normalized: string): Promise<LinkUsage | nul
   return candidates[0];
 }
 
+/**
+ * Has this exact post already been recorded in the content schedule? Matches
+ * on `postLinkNormalized` only — a post's OWN link, not a copy source, since
+ * two SMMs legitimately declaring the same viral original is the normal case
+ * and only re-uploading the same post twice is the mistake.
+ *
+ * Kept as cheap as the question deserves: keys only (`select()` with no
+ * fields), capped at two docs — two is enough to still answer "yes" when the
+ * single match found is the post being edited.
+ *
+ * `exclude` is the post doing the asking (an edit), so it doesn't flag itself.
+ */
+export async function findDuplicatePostLink(
+  normalized: string,
+  exclude?: { accountId?: string; postId?: string },
+): Promise<boolean> {
+  if (!normalized) return false;
+
+  const snap = await adminDb
+    .collectionGroup(SMM_POSTS_SUB)
+    .where('postLinkNormalized', '==', normalized)
+    .select()
+    .limit(2)
+    .get();
+
+  if (!exclude?.postId) return !snap.empty;
+  return snap.docs.some(
+    (d) => !(d.id === exclude.postId && d.ref.parent.parent?.id === exclude.accountId),
+  );
+}
+
 // ─── Full-result viral-copy report (the card's result screen) ────────
 
 const byPostDateDesc = (a: SmmPost, b: SmmPost) =>

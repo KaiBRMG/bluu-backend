@@ -20,7 +20,7 @@ export default function OfManagerGuard({ children }: { children: React.ReactNode
   if (loading || (user && userDataLoading)) {
     return (
       <div
-        className="flex h-screen w-screen gap-px bg-background p-0"
+        className="flex h-full w-full gap-px bg-background p-0"
         role="status"
         aria-label="Loading OF Manager"
       >
@@ -41,7 +41,7 @@ export default function OfManagerGuard({ children }: { children: React.ReactNode
 
 function Notice({ title, body }: { title: string; body: string }) {
   return (
-    <div className="flex h-screen w-screen flex-col items-center justify-center gap-2 bg-background px-8 text-center">
+    <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-background px-8 text-center">
       <h1 className="text-lg font-semibold">{title}</h1>
       <p className="text-sm text-zinc-400">{body}</p>
     </div>

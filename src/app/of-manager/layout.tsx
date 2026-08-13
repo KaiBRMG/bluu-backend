@@ -20,7 +20,20 @@ export default function OfManagerLayout({ children }: { children: React.ReactNod
     <AuthProvider>
       <NetworkStatusProvider>
         <UserDataProvider>
-          <OfManagerGuard>{children}</OfManagerGuard>
+          {/*
+            `fixed inset-0` — deliberately, and not `h-screen w-screen`.
+            On Windows Electron the scrollbars are classic (space-consuming), so
+            a `100vw`/`100vh` shell is self-reinforcing: 100vw exceeds the client
+            width the moment any vertical scrollbar exists, the resulting
+            horizontal scrollbar eats height, 100vh then exceeds the client
+            height, and the two scrollbars flip each other on and off forever.
+            That is the over-scroll past the bottom and the flicker under the
+            cursor. A fixed inset-0 box is measured against the client area, adds
+            nothing to the document's scroll height, and cannot feed the loop.
+          */}
+          <div className="fixed inset-0 overflow-hidden">
+            <OfManagerGuard>{children}</OfManagerGuard>
+          </div>
         </UserDataProvider>
       </NetworkStatusProvider>
     </AuthProvider>

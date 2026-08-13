@@ -14,6 +14,7 @@ import { UserAvatarLabel } from '@/components/UserAvatarLabel';
 import { ApprovalBadge, SubmissionStatusBadge } from '@/components/smm/shared/badges';
 import { LinkWithCopy } from '@/components/smm/shared/LinkWithCopy';
 import { formatMoney } from '@/lib/smm/format';
+import { isSameLink } from '@/lib/smm/linkUtils';
 import { useSmmBonus, type EligibilityResult } from '@/hooks/useSmmBonus';
 import type { SmmPost, SmmSubmission } from '@/types/firestore';
 
@@ -92,7 +93,10 @@ function ReportSubmissionRow({ submission }: { submission: SmmSubmission }) {
 }
 
 /**
- * "Did you copy another viral post?" — step one of scheduling a post.
+ * "Did you copy another viral post?" — **step two** of scheduling a post, after
+ * the post itself has been filled in ({@link CreatePostDialog}). This dialog is
+ * what actually creates the post: "No" schedules an ordinary post, and a
+ * verified copy schedules one carrying the declaration.
  *
  * The copy declaration is made at UPLOAD time (not when applying for a bonus)
  * so the 2-week source rule is checked while the SMM can still act on it. A
@@ -110,12 +114,21 @@ function ReportSubmissionRow({ submission }: { submission: SmmSubmission }) {
 export function ViralCopyDialog({
   open,
   onOpenChange,
+  postLink,
+  onBack,
   onAnswered,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** null = not a copy. Advances the caller to the Schedule-a-post dialog. */
-  onAnswered: (declaration: ViralCopyDeclaration | null) => void;
+  /** The link from step one — the NEW upload, which the original can't equal. */
+  postLink: string;
+  /** Return to step one with the draft intact. */
+  onBack: () => void;
+  /**
+   * Creates the post. null = not a copy. Rejects on failure, which keeps this
+   * dialog open so the SMM can retry rather than losing the draft.
+   */
+  onAnswered: (declaration: ViralCopyDeclaration | null) => Promise<void>;
 }) {
   const { checkEligibility } = useSmmBonus();
 
@@ -123,6 +136,7 @@ export function ViralCopyDialog({
   const [originalLink, setOriginalLink] = useState('');
   const [eligibility, setEligibility] = useState<EligibilityResult | null>(null);
   const [checking, setChecking] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -130,6 +144,11 @@ export function ViralCopyDialog({
     setOriginalLink('');
     setEligibility(null);
   }, [open]);
+
+  // The original is a post on ANOTHER account that was copied; the post link
+  // from step one is the new upload. The same link in both means the SMM
+  // pasted their own post here and no copy is being declared at all.
+  const sameAsPostLink = isSameLink(originalLink, postLink);
 
   const runCheck = async () => {
     setChecking(true);
@@ -140,6 +159,20 @@ export function ViralCopyDialog({
       toast.error(err instanceof Error ? err.message : 'Failed to check the original post');
     } finally {
       setChecking(false);
+    }
+  };
+
+  /** Both answers land here — this is where the post is finally created. */
+  const answer = async (declaration: ViralCopyDeclaration | null) => {
+    setSaving(true);
+    try {
+      await onAnswered(declaration);
+    } catch (err) {
+      // Stay open on failure — the draft is only held in memory, so closing
+      // here would lose everything the SMM typed in step one.
+      toast.error(err instanceof Error ? err.message : 'Failed to schedule post');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -176,12 +209,26 @@ export function ViralCopyDialog({
                 value={originalLink}
                 onChange={(e) => setOriginalLink(e.target.value)}
                 placeholder="https://x.com/user/status/1950957999700258876"
+                aria-invalid={sameAsPostLink}
               />
-
+              {sameAsPostLink && (
+                <p className="text-xs text-destructive">
+                  Original Link cannot be the same as Post Link. The previous form records your
+                  new post on one of <span className="font-semibold">your</span> accounts. This
+                  form is for the link of the original viral post on{' '}
+                  <span className="font-semibold">another</span> account, if you copied one.
+                </p>
+              )}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => onAnswered(null)}>No</Button>
-              <Button onClick={runCheck} disabled={!originalLink.trim() || checking}>
+              <Button variant="ghost" onClick={onBack} disabled={checking || saving}>Back</Button>
+              <Button variant="outline" onClick={() => answer(null)} disabled={checking || saving}>
+                {saving ? 'Scheduling...' : 'No'}
+              </Button>
+              <Button
+                onClick={runCheck}
+                disabled={!originalLink.trim() || sameAsPostLink || checking || saving}
+              >
                 {checking ? 'Checking...' : 'Next'}
               </Button>
             </DialogFooter>
@@ -283,15 +330,15 @@ export function ViralCopyDialog({
             </div>
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => setStep('ask')}>Back</Button>
+              <Button variant="outline" onClick={() => setStep('ask')} disabled={saving}>Back</Button>
               <Button
-                onClick={() => onAnswered({
+                onClick={() => answer({
                   originalLink: originalLink.trim(),
                   originalAccName: eligibility.account?.name ?? '',
                 })}
-                disabled={!canContinue}
+                disabled={!canContinue || saving}
               >
-                Next
+                {saving ? 'Scheduling...' : 'Schedule post'}
               </Button>
             </DialogFooter>
           </>

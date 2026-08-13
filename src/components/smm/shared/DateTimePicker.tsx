@@ -20,8 +20,9 @@ function toTimeValue(date: Date | undefined): string {
  * system — the qualifying windows are measured in hours (3d12h / 5d12h / 7d12h)
  * from the post's timestamp — so the schedule captures a time, not just a day.
  *
- * The calendar keeps whatever time is already set (defaulting to 09:00 on a
- * fresh pick), and the time field only edits the clock portion.
+ * The calendar keeps whatever time is already set (defaulting to the user's
+ * current local time on a fresh pick), and the time field only edits the clock
+ * portion. Everything here is local time; callers convert to UTC on save.
  */
 export function DateTimePicker({
   value,
@@ -41,8 +42,9 @@ export function DateTimePicker({
       onChange(undefined);
       return;
     }
+    const now = new Date();
     const next = new Date(day);
-    next.setHours(value?.getHours() ?? 9, value?.getMinutes() ?? 0, 0, 0);
+    next.setHours(value?.getHours() ?? now.getHours(), value?.getMinutes() ?? now.getMinutes(), 0, 0);
     onChange(next);
     setOpen(false);
   };

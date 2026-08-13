@@ -17,6 +17,8 @@ interface ChatThreadProps {
   accountId: string | null;
   chat: OFChatRow;
   timeZone?: string;
+  /** Bumped by the chat list's refresh button — re-pulls this thread's history. */
+  reloadToken?: number;
 }
 
 /** How close to the top counts as "scrolled up" and triggers the older page. */
@@ -24,9 +26,14 @@ const LOAD_OLDER_THRESHOLD_PX = 120;
 /** Distance from the bottom within which we keep the view pinned to new messages. */
 const STICK_TO_BOTTOM_PX = 120;
 
-export default function ChatThread({ accountId, chat, timeZone }: ChatThreadProps) {
+export default function ChatThread({
+  accountId,
+  chat,
+  timeZone,
+  reloadToken,
+}: ChatThreadProps) {
   const { messages, loading, loadingOlder, hasMore, sending, error, loadOlder, send } =
-    useOnlyFansMessages(accountId, chat.id);
+    useOnlyFansMessages(accountId, chat.id, reloadToken);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState('');
@@ -117,7 +124,9 @@ export default function ChatThread({ accountId, chat, timeZone }: ChatThreadProp
         aria-relevant="additions"
         aria-busy={loading}
         aria-label={`Conversation with ${chat.fan.name}`}
-        className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
+        // `overscroll-contain` stops a wheel event that has run out of thread
+        // from chaining to the document behind it.
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4"
       >
         {loading && messages.length === 0 ? (
           <div className="space-y-3">

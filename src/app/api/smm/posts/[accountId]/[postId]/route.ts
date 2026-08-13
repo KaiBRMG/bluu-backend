@@ -8,9 +8,10 @@ import {
   SMM_SCHEDULE,
   assertAccountWritable,
   checkSmmAccess,
+  findDuplicatePostLink,
   isSmmAdmin,
 } from '@/lib/services/smmService';
-import { normalizePostLink } from '@/lib/smm/linkUtils';
+import { accountHandle, linkMatchesHandle, normalizePostLink } from '@/lib/smm/linkUtils';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { DocumentSnapshot } from 'firebase-admin/firestore';
 
@@ -77,12 +78,53 @@ export const PATCH = withAuth(async (
     // fact — the network bonus is exactly what it decides.
 
     const newAccountId = typeof body.accountId === 'string' ? body.accountId : accountId;
+    const moving = newAccountId !== accountId;
+    const linkChanged = typeof updates.postLink === 'string';
 
-    if (newAccountId !== accountId) {
-      const accountSnap = await adminDb.collection(SMM_ACCOUNTS).doc(newAccountId).get();
-      const accountDenied = await assertAccountWritable(token.uid, accountSnap);
+    // One read shared by the move's authorization check and the link/handle
+    // check below.
+    const accountSnap = (moving || linkChanged)
+      ? await adminDb.collection(SMM_ACCOUNTS).doc(newAccountId).get()
+      : null;
+
+    if (moving) {
+      const accountDenied = await assertAccountWritable(token.uid, accountSnap!);
       if (accountDenied) return accountDenied;
-      const account = accountSnap.data()!;
+    }
+
+    // A rewritten link must still be a post on the account the post ends up on
+    // — the same invariant the create route enforces. A pure move is left
+    // alone: the link was already verified against a page, and re-checking it
+    // here would block the admin Content tab's post-move dropdown.
+    if (linkChanged) {
+      const newLink = (updates.postLink as string).trim();
+      const handle = accountHandle(accountSnap!.data() ?? {});
+      if (!linkMatchesHandle(newLink, handle)) {
+        return NextResponse.json(
+          { error: `The post link must be a post on @${handle || 'the selected account'}.` },
+          { status: 400 },
+        );
+      }
+      // The post's own declared copy source can't also be its own link.
+      const normalized = updates.postLinkNormalized as string;
+      if (normalized && normalized === (loaded.data()?.originalLinkNormalized ?? '')) {
+        return NextResponse.json(
+          { error: 'The post link cannot be the same as the original (viral copy) link.' },
+          { status: 400 },
+        );
+      }
+      // …and it can't be a post already in the schedule. The post excludes
+      // itself: its own link is in there by definition.
+      if (await findDuplicatePostLink(normalized, { accountId, postId })) {
+        return NextResponse.json(
+          { error: 'This post already exists in the content schedule.' },
+          { status: 409 },
+        );
+      }
+    }
+
+    if (moving) {
+      const account = accountSnap!.data()!;
 
       const newRef = adminDb
         .collection(SMM_SCHEDULE).doc(newAccountId).collection(SMM_POSTS_SUB).doc();

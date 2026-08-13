@@ -9,12 +9,13 @@ import {
   assertAccountWritable,
   checkSmmAccess,
   checkViralEligibility,
+  findDuplicatePostLink,
   isSmmAdmin,
   resolveOriginalAccount,
   resolveUserInfo,
   serializePost,
 } from '@/lib/services/smmService';
-import { normalizePostLink } from '@/lib/smm/linkUtils';
+import { accountHandle, linkMatchesHandle, normalizePostLink } from '@/lib/smm/linkUtils';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import type { SmmPost } from '@/types/firestore';
@@ -171,28 +172,66 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     if (accountDenied) return accountDenied;
     const account = accountSnap.data()!;
 
-    // Viral-copy declaration, captured at upload time (not at bonus time). The
-    // client already ran the same check for the "⚠️ Already Used Recently" card,
-    // but its answer is never trusted — a copy is only recorded if the source
-    // still qualifies here.
+    // The link must be a post on the account it is being filed under. The
+    // dropdown decides the tier and ownership, so a post linking to a different
+    // page is unverifiable — and the client check is never trusted.
+    const postLink = body.postLink?.trim() ?? '';
+    const handle = accountHandle(account);
+    if (!linkMatchesHandle(postLink, handle)) {
+      return NextResponse.json(
+        { error: `The post link must be a post on @${handle || account.accountName || 'the selected account'}.` },
+        { status: 400 },
+      );
+    }
+
     const originalLink = body.originalLink?.trim() ?? '';
     const originalNormalized = normalizePostLink(originalLink);
-    // The creator page the content was uploaded FROM is the account the copied
-    // original lives on — derived from the link here, never sent by the client,
-    // since it decides the network bonus and the suggester's $2 share.
+    const postNormalized = normalizePostLink(postLink);
+
+    // The post link is the NEW upload; the original is the post it copied. The
+    // same link in both means no new upload is being recorded at all. Pure
+    // string work, so it runs before anything touches Firestore.
+    if (originalNormalized && postNormalized === originalNormalized) {
+      return NextResponse.json(
+        { error: 'The post link cannot be the same as the original (viral copy) link — record the new upload on your own account.' },
+        { status: 400 },
+      );
+    }
+
+    // Everything left is a Firestore lookup and nothing downstream depends on
+    // another's result, so they all go out at once rather than in sequence.
+    const [duplicate, eligibility, original] = await Promise.all([
+      findDuplicatePostLink(postNormalized),
+      // Viral-copy declaration, captured at upload time (not at bonus time).
+      // The client already ran the same check for the "⚠️ Already Used
+      // Recently" card, but its answer is never trusted — a copy is only
+      // recorded if the source still qualifies here.
+      originalNormalized ? checkViralEligibility(originalNormalized) : null,
+      // The creator page the content was uploaded FROM is the account the
+      // copied original lives on — derived from the link here, never sent by
+      // the client, since it decides the network bonus and the suggester's $2
+      // share.
+      originalLink ? resolveOriginalAccount(originalLink) : null,
+    ]);
+
+    if (duplicate) {
+      return NextResponse.json(
+        { error: 'This post already exists in the content schedule.' },
+        { status: 409 },
+      );
+    }
+
     let source = { id: '', name: '' };
     if (originalLink) {
       if (!originalNormalized) {
         return NextResponse.json({ error: 'Invalid original post link' }, { status: 400 });
       }
-      const eligibility = await checkViralEligibility(originalNormalized);
-      if (!eligibility.eligible) {
+      if (!eligibility!.eligible) {
         return NextResponse.json(
           { error: 'That original post has been used too recently to copy' },
           { status: 400 },
         );
       }
-      const original = await resolveOriginalAccount(originalLink);
       if (!original) {
         return NextResponse.json(
           { error: 'That account is not in the account database, so this post can’t be recorded as a copy.' },
@@ -202,7 +241,6 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       source = { id: original.id, name: original.name };
     }
 
-    const postLink = body.postLink?.trim() ?? '';
     const ref = adminDb
       .collection(SMM_SCHEDULE).doc(body.accountId).collection(SMM_POSTS_SUB).doc();
     await ref.set({
@@ -210,7 +248,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       accountName: account.accountName ?? '',
       postDate: Timestamp.fromDate(postDate),
       postLink,
-      postLinkNormalized: normalizePostLink(postLink),
+      postLinkNormalized: postNormalized,
       postedBy: token.uid,
       createdTime: FieldValue.serverTimestamp(),
       bonusSubmission: false,

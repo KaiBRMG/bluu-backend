@@ -37,6 +37,16 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 1b. Auth email index  (doc id = normalised email → { uid, email })
+    // The login allowlist and the only uniqueness constraint on a user's sign-in
+    // address. Fully server-side: written by registration and the email
+    // migration, read by /api/auth/exchange-code. No client ever touches it, and
+    // it must stay that way — a readable index is a staff email directory, and a
+    // writable one is an authentication bypass.
+    match /auth-emails/{emailKey} {
+      allow read, write: if false;
+    }
+
     // 2. Groups collection
     // No client-side listeners; read via API routes (Admin SDK).
     // Keeping a permissive read rule here in case a future client listener

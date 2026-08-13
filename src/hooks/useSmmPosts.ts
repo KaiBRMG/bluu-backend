@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useRef } from 'react';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
+import { invalidatePostLinkCheck } from '@/hooks/useSmmPostLinkCheck';
 import type { SmmPost } from '@/types/firestore';
 
 export interface SmmPostPayload {
@@ -62,6 +63,9 @@ export function useSmmPosts() {
 
   const clearCache = useCallback(() => {
     weekCache.current.clear();
+    // A created/edited/deleted post changes the answer to "does this link
+    // already exist?", so the link-check verdicts go with it.
+    invalidatePostLinkCheck();
   }, []);
 
   const createPost = useCallback(async (payload: SmmPostPayload) => {
