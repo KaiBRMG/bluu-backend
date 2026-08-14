@@ -26,6 +26,9 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       'additionalTimezones',
       'pinnedResources',
       'notificationPreferences',
+      // Always-visible session timer (tray / docked HUD). Default on, so absent
+      // means enabled — only an explicit `false` switches it off.
+      'timerWidgetEnabled',
       // TEMPORARY (see CLAUDE.md): marks the stale-TCC screen-recording repair as
       // applied for this user, so the automatic reset never runs a second time.
       'screenshotBugFixed',
@@ -37,6 +40,13 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     if (updates.screenshotBugFixed !== undefined && updates.screenshotBugFixed !== true) {
       return NextResponse.json(
         { error: 'screenshotBugFixed may only be set to true' },
+        { status: 400 }
+      );
+    }
+
+    if (updates.timerWidgetEnabled !== undefined && typeof updates.timerWidgetEnabled !== 'boolean') {
+      return NextResponse.json(
+        { error: 'timerWidgetEnabled must be a boolean' },
         { status: 400 }
       );
     }

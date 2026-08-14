@@ -35,6 +35,9 @@ The same Vercel project serves **two hosts**, and the difference matters:
 | `electron/preload.js` | `contextBridge` — exposes `window.electronAPI` to the renderer. The **only** bridge between renderer and main. |
 | `electron/loading.html` | Local splash shown instantly on launch (logo inlined as data-URI), then the app navigates to Vercel. |
 | `electron/offline.html` | Local retry screen shown when the Vercel app can't load (logo data-URI + "Try again" button → `app:retry-load`). |
+| `electron/widget.html` | The **Windows** timer HUD page (see [Session timer widget](#session-timer-widget-tray-title--docked-hud)). Renders nothing on its own — main sends it a finished string each second. |
+| `electron/widget-preload.js` | Preload for `widget.html` **only** — exposes `onTick` and nothing else. Deliberately not the app preload. |
+| `electron/public/tray/*.png` | Timer-state glyphs (`*Template.png` + `@2x`), black + alpha. macOS template images; the Windows HUD uses the same files as a CSS mask. |
 | `electron/package.json` | App version, npm scripts, and the full `electron-builder` config (incl. the `build.files` allowlist). |
 | `electron/public/logo/*` | App icons (`icon.icns`, `icon.ico`). |
 | `electron/public/*.mp3` | Notification sound (played in the renderer). |
@@ -69,6 +72,7 @@ All renderer↔main communication goes through `preload.js` → `window.electron
 | `timeTracking.getActivitySince(sinceMs)` | invoke | `timeTracking:getActivitySince` | 5s idle-time samples (45-min rolling buffer) for accurate activity % |
 | `timeTracking.captureScreenshot()` | invoke | `timeTracking:captureScreenshot` | `desktopCapturer`, all screens → base64 PNGs |
 | `timeTracking.setPowerSaveBlocker(bool)` | invoke | `timeTracking:setPowerSaveBlocker` | keep display awake while working |
+| `timerWidget.update(payload)` | send | `timer-widget:update` | Always-visible session timer. Carries an **anchor**, not a time; **main-window only**. Optional — feature-detect. See [Session timer widget](#session-timer-widget-tray-title--docked-hud) |
 | `notifications.show(opts)` | invoke | `notifications:show` | native `Notification` + optional renderer sound/navigate. **Routed to a window** via `opts.target` — see [Notifications](#notifications-routed-to-a-window) |
 | `notifications.close(id)` | invoke | `notifications:close` | dismiss a banner shown with that `id` (v0.10.0+) |
 | `notifications.onActivated/onReply/onAction(cb)` | main→renderer | `notification:*` | click (with `id`), macOS inline reply text, action-button index (v0.10.0+) |
@@ -132,6 +136,52 @@ Three mechanisms, because badge support is per-platform and none of it has a web
 - **macOS / Linux** — `app.setBadgeCount(n)`, a real dock number.
 - **Windows** — no numeric badge exists. `window.setOverlayIcon(dataUrl, desc)` takes an image the **renderer** draws (canvas → data URL), so the badge can be restyled without shipping a native build. `null` clears it.
 - **Attention** — `window.flashFrame(true)` (Windows/Linux) and `app.bounceDock()` (macOS).
+
+## Session timer widget (tray title / docked HUD)
+
+Keeps the live session clock on screen while the app is buried. Toggled per user in **Settings → App Settings → Timer Widget** (`users/{uid}.timerWidgetEnabled`, **default on** — absent means enabled, so read it with `!== false`).
+
+| State | Widget shows |
+|---|---|
+| `working` | Session time, counting up |
+| `on-break` | **Break allowance remaining**, counting down |
+| `idle`, `paused` | The clock **stopped**, holding its last value |
+| `clocked-out` | **Nothing — the widget is destroyed.** Not greyed out, not zeroed. |
+
+### The anchor rule (the thing that makes it correct)
+
+**The renderer pushes the inputs the display is derived from — never a formatted time.** `{ mode, baseSeconds, anchorMs }`, where `baseSeconds` was true at `anchorMs`. Main re-derives the number every second with the same arithmetic `TimeTrackingContext`'s own tick runs.
+
+This is not a micro-optimisation, it is what makes "always in sync with the time tracking service" true rather than aspirational:
+
+- **The two clocks are the same formula over the same anchor**, so they cannot drift. Pushing a per-second string instead would make the widget a *copy* of the timer, correct only as long as every message lands.
+- **It survives a starved renderer.** The renderer's 1s tick freezes when the main thread blocks (the reason `TimeTrackingContext` has a `visibilitychange`/`focus` self-heal at all). A renderer-driven widget would freeze with it; an anchor-driven one keeps counting because main is a different process.
+- **One IPC per transition, not one per second.**
+
+`buildTimerWidgetPayload` ([`src/lib/timerWidget.ts`](../src/lib/timerWidget.ts)) is the only sanctioned way to build the payload, and the effect that pushes it lives **inside `TimeTrackingProvider`** — the one place holding `sessionBaseSecondsRef`, `entryStartTime` and `breakStartTime`. Its break countdown recomputes `allowanceAtStart` from the same two refs the tick's break branch reads, at the same commit, so the two agree by construction. **Don't move this push to a component or widen the context to feed it** — a consumer that only sees `elapsedSeconds` can push a *number*, and the drift is back.
+
+### Per platform
+
+- **macOS — `tray.setTitle()`** (a darwin-only API) with `fontType: 'monospacedDigit'`, so the digits don't jitter as they change width. `tray.setImage()` swaps the state glyph. Clicking the tray focuses the main window.
+- **Windows — a frameless, transparent, always-on-top HUD** pinned to the bottom-right of the **work area**, which is precisely "just above the system tray" (`workArea` already excludes the taskbar, and follows it if the user moves it to another edge). It is `focusable: false`, `skipTaskbar: true`, `type: 'toolbar'`, `setIgnoreMouseEvents(true)` (**click-through — an always-on-top window that swallowed clicks in the busiest corner of the desktop would be worse than no widget**), shown with `showInactive()`, and held at the `'screen-saver'` always-on-top level because plain `alwaysOnTop` loses to a fair number of Windows shells. Repositioned from `registerDisplayListeners` — it has no window record, so the clamp loop does not cover it.
+- **Anything else** — ignored; there is no equivalent surface.
+
+### Template images — verified
+
+**The claim is true.** macOS treats an image whose filename ends in `Template` as a *template image*: it discards the colour, uses only the alpha channel, and re-tints it for the light/dark menu bar and for the pressed state. Electron mirrors AppKit's behaviour for `createFromPath`, and `nativeImage.setTemplateImage()` / `isMacTemplateImage` are typed `@platform darwin`. `trayIconFor()` relies on the suffix **and** calls `setTemplateImage(true)` explicitly, so a future rename can't silently turn the icon into a black-on-black blob.
+
+**The trade-off this forces:** a template image is monochrome by definition, so the tray icon **cannot** carry the `STATE_CONFIG` hue. State is encoded by **glyph shape** instead — the same four lucide icons the time-tracking page uses (`ClockCheck` / `ClockAlert` / `Coffee` / `CirclePause`), which are distinguishable at 16px. Legibility in both menu bars was judged worth more than colour that is redundant with the shape. The Windows HUD has no such constraint and *does* take the hue — **which it receives in the tick payload, sourced from `STATE_CONFIG`, so no state hex is ever re-typed natively** (DESIGN.md §2).
+
+The PNGs are black + alpha at 16px and 32px (`@2x`, auto-selected by `nativeImage`), rendered from the lucide paths at stroke-width 2.4 (lucide's 2 scales to a washed-out 1.33px at 16px; 2.4 lands at ~1.6px, matching the system weight). **One asset set serves both platforms** — Windows tints the same files through `-webkit-mask-image`.
+
+### Failure behaviour
+
+The widget is ambient: nothing depends on it, and it never blocks a session.
+
+- A **stale anchor is worse than no widget**, so main tears it down on the main window's `render-process-gone` and on `did-fail-load` (offline screen). The provider re-pushes on its next mount, so it comes back by itself.
+- The whole `ensure`/`render` path is wrapped in a `try`/`catch` that degrades to "no widget" — a tray asset missing from the asar must not surface as an uncaught exception.
+- Payloads are validated as untrusted input (state/mode against fixed sets, finite numbers, `#rrggbb` colour, control chars stripped from the label) and **accepted only from the main window** — a satellite cannot paint the menu bar.
+- Teardown on the main window's `closed` is also what lets the app quit: a live `Tray` (or the HUD window) would otherwise keep `window-all-closed` from firing.
 
 ## Right-click menu and spellcheck
 
@@ -312,6 +362,9 @@ The reset repairs the **next** scheduled capture, not the one that just failed. 
 - [ ] New satellite window → it inherits crash/offline handling from `attachWindowBehaviour`. Don't hand-roll a second copy.
 - [ ] A notification raised from a satellite must carry `target` (or default to the sender) — routing it to `'main'` drags the operator out of the window they were working in.
 - [ ] Anything that must survive app close → route it through the `close`-event flush (`closingFlushed()`), not `before-quit`.
+- [ ] **Timer widget: push an anchor, never a time.** `buildTimerWidgetPayload` builds it and the push lives inside `TimeTrackingProvider`. A per-second string makes the widget a copy of the timer instead of the same clock, and it freezes whenever the renderer's tick does.
+- [ ] Timer widget must render **nothing** when clocked out — destroyed, not zeroed — and must **stop** (not keep counting) on idle/paused.
+- [ ] A new tray glyph must be **black + alpha** and named `*Template.png`, or macOS renders it black-on-black in a dark menu bar. Add it (and its `@2x`) to `build.files`.
 - [ ] Window size persists via the single `localStorage` key `bluu_window_size`, cleared on logout — keep it **non**-per-uid (reset-on-logout is the spec). Save/restore via **outer** size (`getSize`/`setSize`) to avoid title-bar drift.
 - [ ] Window geometry: never persist maximized bounds, never size from `window.screen.*`, always clamp in main. See [Three rules that keep the window on-screen](#three-rules-that-keep-the-window-on-screen). Verify on a **scaled Windows display** (1920×1080 @150%) — maximize, quit, relaunch, log in.
 - [ ] `shell.openExternal` only via `openExternalSafe`.

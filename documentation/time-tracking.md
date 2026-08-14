@@ -14,6 +14,7 @@
 | `src/lib/localBuffer.ts` | Local event buffer (append-only event log) |
 | `src/lib/parseBuffer.ts` | `parseBuffer(events, nowMs)` + **`sessionCloseMs(buf, isActive, now)`** |
 | `src/contexts/TimeTrackingContext.tsx` | Orchestration: clock in/out, hydration, screenshot upload, `calcActivityPercent` |
+| `src/lib/timerWidget.ts` | Payload for the always-visible timer widget (§7) |
 | `src/hooks/useTimeTracking.ts` | Hook surface over the context |
 | `src/hooks/useTodaySessions.ts` | **Today's sessions from BOTH sources** — local buffers + committed ledger |
 | `src/hooks/useDayTotal.ts` | The "TODAY" total |
@@ -312,6 +313,28 @@ GET /api/time-tracking/entries
 
 ---
 
+## 7. The Always-Visible Timer Widget
+
+> macOS menu-bar tray title, or a small docked HUD above the Windows system tray. Native mechanics live in [electron.md](electron.md#session-timer-widget-tray-title--docked-hud); what follows is the part that belongs to *this* subsystem.
+
+Per-user toggle in Settings → App Settings (`users/{uid}.timerWidgetEnabled`, **default on** — absent means enabled, so read it `!== false`).
+
+**RULE — the widget receives an anchor, never an elapsed value.** The push is `{ mode, baseSeconds, anchorMs }`; the shell re-derives the displayed number every second using the same arithmetic the 1s tick in §2 runs. This is what makes the widget the *same* clock as the page rather than a copy of it — a per-second string would drift the moment a message is dropped, and would freeze exactly when the renderer's tick freezes (the failure the `visibilitychange`/`focus` self-heal in §3 exists to paper over).
+
+The mapping mirrors the tick branch for branch, which is the whole point:
+
+| `displayState` | Widget | Sourced from |
+|---|---|---|
+| `working` | counts **up** | `sessionBaseSecondsRef` + `entryStartTime` |
+| `on-break` | counts the **break allowance down** | `computeBreakAllowance(base) − breakUsedSecondsRef`, anchored at `breakStartTime` |
+| `idle`, `paused` | **stopped**, holding `sessionBaseSecondsRef` | the same value the page renders for those states |
+| `clocked-out` | **destroyed** | — |
+
+- **The push effect must stay inside `TimeTrackingProvider`.** It is the only scope holding `sessionBaseSecondsRef`, `breakUsedSecondsRef`, `entryStartTime` and `breakStartTime` — the actual derivation inputs. A consumer reading the context sees `elapsedSeconds`, a number that is already one tick old, and can therefore only push a *copy*.
+- Its deps are the **transitions** (`displayState`, `entryStartTime`, `breakStartTime`, the toggle), not `elapsedSeconds` — depending on the latter would fire an IPC every second and defeat the anchor entirely.
+- The break countdown recomputes `allowanceAtStart` from the same two refs the tick's break branch reads, in the same commit, so the two agree by construction rather than by two matching copies of the arithmetic (the same discipline as the total-worked invariant in §2).
+- It is torn down on provider unmount as well as on clock-out — a widget outliving its provider would tick on against a session nobody holds.
+
 ## Gotchas Checklist
 
 - [ ] Never `parseBuffer(events, Date.now())` over a buffer set — always close with `sessionCloseMs` first.
@@ -322,6 +345,7 @@ GET /api/time-tracking/entries
 - [ ] Keep `useDayTotal` and `TodayTimeline` *Total worked* summing `workingSeconds + breakSeconds` only.
 - [ ] After clock-in/out, call `invalidateTimesheetCache(uid)`.
 - [ ] A "second active session" is a client buffer bug — check hydration/`isHydrating`, not the server.
+- [ ] Timer widget: push an **anchor**, never an elapsed number, and keep the push inside `TimeTrackingProvider` (§7). Never add `elapsedSeconds` to its deps.
 - [ ] Sample-based activity is feature-detected (`getActivitySince`); the event-log method is the fallback.
 - [ ] `calcActivityPercentFromSamples` must return `null` (never `0`) when it can't cover the window — `0` both libels an active user and kills the fallback.
 - [ ] Never count idle/break/pause minutes in the activity denominator.

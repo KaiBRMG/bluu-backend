@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, session, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification, systemPreferences, Menu, clipboard, dialog, screen: electronScreen } = require('electron');
+const { app, BrowserWindow, session, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification, systemPreferences, Menu, Tray, clipboard, dialog, screen: electronScreen } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fsp = require('fs/promises');
@@ -201,6 +201,271 @@ ipcMain.handle('timeTracking:setPowerSaveBlocker', (_event, enable) => {
     }
   }
   return { success: true };
+});
+
+// ─── Always-visible session timer (macOS tray title / Windows docked HUD) ───
+//
+// The renderer owns the tracker; this owns the *display*. The renderer pushes
+// only on a state transition, and what it pushes is an ANCHOR — `baseSeconds`
+// plus the wall-clock instant that base was true — not a formatted time. The
+// tick below re-derives the number every second with the identical arithmetic
+// TimeTrackingContext runs, so the widget and the time-tracking page cannot
+// drift apart, and a renderer whose own 1s tick is starved by a heavy page load
+// still shows a correct clock. See src/lib/timerWidget.ts for the other half.
+//
+// Per platform:
+//   • darwin — Tray.setTitle (macOS-only API) + a template icon per state.
+//   • win32  — a small frameless, transparent, click-through HUD pinned to the
+//              bottom-right of the work area, which is exactly "just above the
+//              system tray" (workArea already excludes the taskbar).
+//   • other  — ignored; there is no equivalent surface.
+const TIMER_WIDGET_STATES = new Set(['working', 'idle', 'on-break', 'paused']);
+const TIMER_WIDGET_MODES = new Set(['count-up', 'count-down', 'frozen']);
+
+// Template PNGs rendered from the very lucide glyphs STATE_CONFIG uses on the
+// time-tracking page (ClockCheck / ClockAlert / Coffee / CirclePause).
+const TRAY_ICON_BASENAME = {
+  working: 'working',
+  idle: 'idle',
+  'on-break': 'break',
+  paused: 'paused',
+};
+
+const TIMER_WIDGET_PAGE = path.join(__dirname, 'widget.html');
+const TIMER_WIDGET_PAGE_URL = pathToFileURL(TIMER_WIDGET_PAGE).href;
+const TIMER_WIDGET_W = 142;
+const TIMER_WIDGET_H = 38;
+const TIMER_WIDGET_MARGIN = 10;
+// A clock can outrun a day if a session is never closed; cap it rather than let
+// a bad anchor render a title wide enough to crowd out the menu bar.
+const TIMER_WIDGET_MAX_SECONDS = 99 * 3600 + 59 * 60 + 59;
+
+let timerWidgetPayload = null;
+let timerWidgetTray = null;
+let timerWidgetWin = null;
+let timerWidgetInterval = null;
+let timerWidgetLastState = null;
+let timerWidgetLastText = null;
+const trayIconCache = new Map();
+
+function trayIconFor(state) {
+  if (trayIconCache.has(state)) return trayIconCache.get(state);
+  const file = path.join(__dirname, 'public', 'tray', `${TRAY_ICON_BASENAME[state]}Template.png`);
+  const image = nativeImage.createFromPath(file);
+  // A filename ending in `Template` is already enough for macOS to treat this as
+  // a template image (it uses the alpha channel and re-tints for the light/dark
+  // menu bar and the pressed state) — VERIFIED, and the reason the files are
+  // named that way. Setting it explicitly as well means a future rename cannot
+  // silently turn the icon into a black-on-black blob in dark mode.
+  if (!image.isEmpty()) image.setTemplateImage(true);
+  trayIconCache.set(state, image);
+  return image;
+}
+
+function formatHms(totalSeconds) {
+  const s = Math.max(0, Math.min(Math.floor(totalSeconds), TIMER_WIDGET_MAX_SECONDS));
+  const hours = Math.floor(s / 3600);
+  const minutes = Math.floor((s % 3600) / 60);
+  const seconds = s % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+// The one place the widget's number comes from. Mirrors TimeTrackingContext's
+// tick: count up from the segment start, count the break allowance down, or hold
+// still while idle/paused (the session clock genuinely stops there).
+function timerWidgetSeconds(payload, nowMs) {
+  const elapsed = Math.floor((nowMs - payload.anchorMs) / 1000);
+  if (payload.mode === 'count-up') return payload.baseSeconds + Math.max(0, elapsed);
+  if (payload.mode === 'count-down') return Math.max(0, payload.baseSeconds - Math.max(0, elapsed));
+  return payload.baseSeconds;
+}
+
+// The payload crosses a trust boundary, so treat it as untrusted input: the
+// colour is interpolated into the HUD's styles and the label into its tooltip.
+function sanitizeTimerWidgetPayload(raw) {
+  if (!raw || typeof raw !== 'object' || raw.visible !== true) return null;
+  if (!TIMER_WIDGET_STATES.has(raw.state) || !TIMER_WIDGET_MODES.has(raw.mode)) return null;
+
+  const baseSeconds = Number(raw.baseSeconds);
+  if (!Number.isFinite(baseSeconds)) return null;
+
+  const frozen = raw.mode === 'frozen';
+  const anchorMs = frozen ? Date.now() : Number(raw.anchorMs);
+  if (!frozen && !Number.isFinite(anchorMs)) return null;
+
+  return {
+    state: raw.state,
+    mode: raw.mode,
+    baseSeconds: Math.max(0, Math.min(Math.floor(baseSeconds), TIMER_WIDGET_MAX_SECONDS)),
+    anchorMs,
+    color: /^#[0-9a-f]{6}$/i.test(raw.color) ? raw.color : '#ffffff',
+    label: typeof raw.label === 'string' ? raw.label.replace(/[\u0000-\u001f]/g, '').slice(0, 40) : '',
+  };
+}
+
+function positionTimerWidget() {
+  if (!timerWidgetWin || timerWidgetWin.isDestroyed()) return;
+  // workArea already excludes the taskbar, so its bottom-right corner IS the
+  // space immediately above the system tray — and it stays correct for a
+  // taskbar the user has moved to another edge.
+  const { workArea } = electronScreen.getPrimaryDisplay();
+  timerWidgetWin.setBounds({
+    x: Math.round(workArea.x + workArea.width - TIMER_WIDGET_W - TIMER_WIDGET_MARGIN),
+    y: Math.round(workArea.y + workArea.height - TIMER_WIDGET_H - TIMER_WIDGET_MARGIN),
+    width: TIMER_WIDGET_W,
+    height: TIMER_WIDGET_H,
+  });
+}
+
+function ensureTimerWidgetSurface(state) {
+  if (process.platform === 'darwin') {
+    if (timerWidgetTray && !timerWidgetTray.isDestroyed()) return;
+    timerWidgetTray = new Tray(trayIconFor(state));
+    timerWidgetTray.setIgnoreDoubleClickEvents(true);
+    timerWidgetTray.on('click', () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    });
+    return;
+  }
+
+  if (process.platform !== 'win32') return;
+  if (timerWidgetWin && !timerWidgetWin.isDestroyed()) return;
+
+  timerWidgetWin = new BrowserWindow({
+    width: TIMER_WIDGET_W,
+    height: TIMER_WIDGET_H,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    // Not a window the user manages: it must not take a taskbar button, appear
+    // in Alt-Tab, or ever steal focus from what they are actually working in.
+    skipTaskbar: true,
+    focusable: false,
+    hasShadow: false,
+    alwaysOnTop: true,
+    type: 'toolbar',
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'widget-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+    },
+  });
+
+  // Plain alwaysOnTop loses to a fair number of Windows shells; the screen-saver
+  // level is what actually keeps a HUD pinned.
+  timerWidgetWin.setAlwaysOnTop(true, 'screen-saver');
+  timerWidgetWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // Click-through. A floating always-on-top window that swallowed clicks in the
+  // busiest corner of the desktop would be worse than no widget at all.
+  timerWidgetWin.setIgnoreMouseEvents(true);
+
+  // It renders a static local page and needs none of attachWindowBehaviour's
+  // navigation/offline/crash policy — but it must still be unable to navigate.
+  timerWidgetWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  timerWidgetWin.webContents.on('will-navigate', (e, url) => {
+    if (url.split('?')[0] !== TIMER_WIDGET_PAGE_URL) e.preventDefault();
+  });
+
+  timerWidgetWin.on('closed', () => { timerWidgetWin = null; });
+  // The HUD can finish loading well after the first tick was pushed, and a
+  // frozen (idle/paused) clock produces no further change for renderTimerWidget
+  // to send — so the page would stay blank until the next state transition.
+  // Force one full paint once its listener is actually attached.
+  timerWidgetWin.webContents.on('did-finish-load', () => {
+    timerWidgetLastState = null;
+    timerWidgetLastText = null;
+    renderTimerWidget();
+  });
+  timerWidgetWin.loadFile(TIMER_WIDGET_PAGE);
+  // showInactive, not show — showing it must never pull focus off the user's work.
+  timerWidgetWin.once('ready-to-show', () => {
+    if (!timerWidgetWin || timerWidgetWin.isDestroyed()) return;
+    positionTimerWidget();
+    timerWidgetWin.showInactive();
+  });
+  positionTimerWidget();
+}
+
+function renderTimerWidget() {
+  const payload = timerWidgetPayload;
+  if (!payload) return;
+
+  const text = formatHms(timerWidgetSeconds(payload, Date.now()));
+  const stateChanged = payload.state !== timerWidgetLastState;
+  if (!stateChanged && text === timerWidgetLastText) return;
+
+  if (timerWidgetTray && !timerWidgetTray.isDestroyed()) {
+    if (stateChanged) timerWidgetTray.setImage(trayIconFor(payload.state));
+    // monospacedDigit stops the title jittering as the digits change width.
+    timerWidgetTray.setTitle(text, { fontType: 'monospacedDigit' });
+    timerWidgetTray.setToolTip(payload.label ? `${payload.label} — ${text}` : text);
+  }
+  sendTo(timerWidgetWin, 'timer-widget:tick', {
+    text,
+    state: payload.state,
+    color: payload.color,
+    label: payload.label,
+  });
+
+  timerWidgetLastState = payload.state;
+  timerWidgetLastText = text;
+}
+
+function teardownTimerWidget() {
+  if (timerWidgetInterval) {
+    clearInterval(timerWidgetInterval);
+    timerWidgetInterval = null;
+  }
+  if (timerWidgetTray && !timerWidgetTray.isDestroyed()) timerWidgetTray.destroy();
+  timerWidgetTray = null;
+  if (timerWidgetWin && !timerWidgetWin.isDestroyed()) timerWidgetWin.destroy();
+  timerWidgetWin = null;
+  timerWidgetPayload = null;
+  timerWidgetLastState = null;
+  timerWidgetLastText = null;
+}
+
+ipcMain.on('timer-widget:update', (event, raw) => {
+  // Only the main window carries time-tracking state, so only it may drive the
+  // widget — a satellite must not be able to paint the menu bar.
+  const rec = recordFor(senderWindow(event));
+  if (!rec || !rec.isMain) return;
+
+  const payload = sanitizeTimerWidgetPayload(raw);
+  // Hidden covers clocked-out (an explicit requirement — the widget must never
+  // show a closed session), the Settings toggle being off, and a malformed push.
+  if (!payload) {
+    teardownTimerWidget();
+    return;
+  }
+  if (process.platform !== 'darwin' && process.platform !== 'win32') return;
+
+  timerWidgetPayload = payload;
+  // The widget is an ambient convenience — nothing else depends on it, so a
+  // failure here (a tray asset missing from the asar, a display API throwing)
+  // must degrade to "no widget" rather than surface as an uncaught exception.
+  try {
+    ensureTimerWidgetSurface(payload.state);
+    // A push only ever happens on a real transition, so repaint unconditionally
+    // rather than letting renderTimerWidget's no-change guard swallow it (a new
+    // anchor can produce the same digits — a sleep-gap patch, for instance).
+    timerWidgetLastText = null;
+    renderTimerWidget();
+    if (!timerWidgetInterval) timerWidgetInterval = setInterval(renderTimerWidget, 1000);
+  } catch (err) {
+    console.error('[main] timer widget failed:', err.message);
+    teardownTimerWidget();
+  }
 });
 
 // ─── TEMPORARY: stale ScreenCapture permission repair (remove after fleet migrates) ───
@@ -736,6 +1001,11 @@ ipcMain.handle('window:get-zoom', (event) => {
 // window, satellites included.
 function registerDisplayListeners() {
   const reclamp = () => {
+    // The HUD is docked to a corner of the work area, so a resolution change, a
+    // scaling change or the taskbar moving all shift where that corner is. It
+    // carries no window record (it is not an app window), so it is repositioned
+    // explicitly rather than through the clamp loop below.
+    positionTimerWidget();
     for (const rec of winRecords.values()) {
       const win = rec.win;
       if (!win || win.isDestroyed()) continue;
@@ -971,6 +1241,10 @@ function attachWindowBehaviour(win, { isMain, appUrl, minWidth, minHeight, satel
     if (!isMainFrame || errorCode === -3) return;
     if (validatedURL.startsWith(BASE_URL)) {
       console.log(`[main] did-fail-load (${errorCode}) for ${validatedURL} — showing offline screen`);
+      // The tracker's renderer is gone, so its anchor is stale — the widget would
+      // otherwise keep counting up against a session nobody is holding. It comes
+      // back on its own: the provider pushes fresh state when the app reloads.
+      if (isMain) teardownTimerWidget();
       showOfflineScreen(win);
     }
   });
@@ -1006,6 +1280,9 @@ function attachWindowBehaviour(win, { isMain, appUrl, minWidth, minHeight, satel
       `Renderer gone (${satelliteKey || 'main'}): ${details.reason} (exit ${details.exitCode})`,
       undefined,
     );
+    // Same reasoning as did-fail-load: a dead renderer's anchor is stale, so
+    // stop the widget rather than let it tick on by itself.
+    if (isMain) teardownTimerWidget();
     // A clean exit isn't a crash.
     if (details.reason === 'clean-exit') return;
 
@@ -1306,6 +1583,9 @@ function createWindow() {
   // fire and the app would never quit.
   mainWindow.on('closed', () => {
     closeAllSatellites();
+    // A live Tray keeps the app alive on macOS, so this is also what lets
+    // window-all-closed actually quit.
+    teardownTimerWidget();
     mainWindow = null;
   });
 

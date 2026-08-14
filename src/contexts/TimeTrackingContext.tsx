@@ -16,6 +16,7 @@ import {
 import { useUserData } from '@/hooks/useUserData';
 import { getAppInfo } from '@/lib/appVersion';
 import { markScreenshotBugFixed } from '@/lib/markScreenshotBugFixed';
+import { buildTimerWidgetPayload, pushTimerWidgetState, hideTimerWidget } from '@/lib/timerWidget';
 import { toast } from 'sonner';
 
 const HEARTBEAT_INTERVAL_MS   = 15 * 60 * 1000; // 15 minutes — working state only
@@ -750,6 +751,38 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [displayState, entryStartTime, breakStartTime, apiCall]);
+
+  // ─── Timer widget (macOS tray title / Windows docked HUD) ───────────
+  // Pushes the inputs the display is DERIVED from — a base and the instant that
+  // base was true — never a per-second value. The shell re-runs the identical
+  // arithmetic each second, so the widget and the page cannot drift apart, and
+  // the renderer spends one IPC per transition rather than one per second.
+  // Hidden entirely when clocked out, or when the user switches it off in
+  // Settings → App Settings. See src/lib/timerWidget.ts.
+  const timerWidgetEnabled = userData?.timerWidgetEnabled !== false;
+
+  useEffect(() => {
+    pushTimerWidgetState(buildTimerWidgetPayload({
+      enabled: timerWidgetEnabled,
+      displayState,
+      workedBaseSeconds: sessionBaseSecondsRef.current,
+      entryStartTime,
+      breakStartTime,
+      // Mirrors `allowanceAtStart` in the break branch of the tick above: both
+      // read the same two refs at the same commit, so the countdown the widget
+      // shows is the one the page shows.
+      breakRemainingAtStartSeconds: Math.max(
+        0,
+        computeBreakAllowance(sessionBaseSecondsRef.current) - breakUsedSecondsRef.current,
+      ),
+    }));
+  }, [timerWidgetEnabled, displayState, entryStartTime, breakStartTime]);
+
+  // A widget outliving its provider would tick on forever against a session that
+  // no longer exists, so tear it down on unmount as well as on clock-out.
+  useEffect(() => {
+    return () => { hideTimerWidget(); };
+  }, []);
 
   // ─── Display self-heal on focus / visibility ────────────────────────
   // The 1s tick is throttled or frozen while the main thread is blocked (e.g.

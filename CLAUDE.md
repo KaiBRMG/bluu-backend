@@ -27,6 +27,9 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
                     ┌───────────────────────────────────────────────┐
  Second Electron ─►│  OF Manager        /of-manager                │─► own window, own layout
  window (spawned)   └───────────────────────────────────────────────┘   (NO TimeTrackingProvider)
+                    ┌───────────────────────────────────────────────┐
+ Native surface  ─►│  Session timer widget (no route)              │─► mac: tray title
+ (main.js only)     └───────────────────────────────────────────────┘   win: docked HUD
 
  src/middleware.ts  → rewrites all non-Electron, non-allowlisted page traffic to /desktop-only
  Firestore + Storage (Firebase Admin SDK) ← services (src/lib/services) ← API routes (src/app/api)

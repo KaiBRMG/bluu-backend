@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<!--
+  Windows timer HUD — the small frameless, transparent, always-on-top pill that
+  docks just above the system tray. macOS has no equivalent because it uses the
+  menu-bar tray title instead (Tray.setTitle is darwin-only).
+
+  Main owns the clock: it re-derives the time each second from the anchor the
+  renderer pushed and sends the finished string here on 'timer-widget:tick'.
+  This page holds no timer of its own — one clock, one source of truth.
+
+  Visual language follows DESIGN.md: Surface ground, a single hairline border,
+  no shadow, tabular numerals. The state hue is NOT hardcoded here — it arrives
+  in the tick, sourced from STATE_CONFIG (src/lib/stateColors.ts), so the widget
+  can never drift from the colours the time-tracking page uses.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; img-src 'self' file:; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+  <title>Bluu Timer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      user-select: none;
+      cursor: default;
+    }
+
+    .pill {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      height: 100%;
+      /* Surface (#171717), a shade off opaque so it still reads as part of the
+         desktop rather than a pasted rectangle. Depth is the hairline, never a
+         shadow (DESIGN.md — The No-Shadow Rule). */
+      background: rgba(23, 23, 23, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 999px;
+    }
+
+    .icon {
+      width: 15px;
+      height: 15px;
+      flex-shrink: 0;
+      /* One asset set for both platforms: the same black+alpha template PNG the
+         macOS tray uses, tinted here through its alpha channel. */
+      background-color: #ffffff;
+      -webkit-mask-repeat: no-repeat;
+      -webkit-mask-position: center;
+      -webkit-mask-size: contain;
+      transition: background-color 120ms ease-out;
+    }
+
+    .time {
+      font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1;
+      letter-spacing: 0.01em;
+      color: #ffffff;
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: 'tnum' 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="pill">
+    <div class="icon" id="icon" role="img" aria-label="Timer state"></div>
+    <div class="time" id="time">--:--:--</div>
+  </div>
+
+  <script>
+    // Fixed lookup — the state from the tick indexes this table and is never
+    // interpolated into a path, so a malformed value can only fail to match.
+    var ICON_FILE = {
+      'working': 'workingTemplate@2x.png',
+      'idle': 'idleTemplate@2x.png',
+      'on-break': 'breakTemplate@2x.png',
+      'paused': 'pausedTemplate@2x.png'
+    };
+
+    var iconEl = document.getElementById('icon');
+    var timeEl = document.getElementById('time');
+    var currentState = null;
+
+    window.timerWidget.onTick(function (data) {
+      if (!data) return;
+
+      timeEl.textContent = data.text || '--:--:--';
+
+      if (data.state !== currentState) {
+        currentState = data.state;
+        var file = ICON_FILE[data.state];
+        iconEl.style.webkitMaskImage = file ? "url('public/tray/" + file + "')" : 'none';
+        iconEl.setAttribute('aria-label', data.label || 'Timer state');
+      }
+      // Colour is re-applied every tick rather than only on a state change: it
+      // is one cheap style write, and it means a dropped state transition can
+      // never leave the pill wearing the previous state's hue.
+      iconEl.style.backgroundColor = data.color || '#ffffff';
+    });
+  </script>
+</body>
+</html>

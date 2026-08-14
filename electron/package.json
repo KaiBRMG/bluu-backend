@@ -29,10 +29,13 @@
     "files": [
       "main.js",
       "preload.js",
+      "widget-preload.js",
       "loading.html",
       "offline.html",
+      "widget.html",
       "public/logo/icon.icns",
       "public/logo/icon.ico",
+      "public/tray/*.png",
       "public/mixkit-message-pop-alert-2354.mp3",
       "package.json"
     ],

@@ -92,6 +92,26 @@ export interface DownloadDone {
   filePath: string | null;
 }
 
+/**
+ * State for the always-visible session timer (macOS tray title / Windows HUD).
+ *
+ * Deliberately carries an ANCHOR rather than a formatted time: main re-derives
+ * the display every second from `baseSeconds` + `anchorMs`, which is the same
+ * arithmetic the renderer's own tick runs, so the two can never drift. Shaped by
+ * `buildTimerWidgetPayload` in `src/lib/timerWidget.ts` — build it there, never
+ * by hand, or the widget stops mirroring the tracker.
+ */
+export interface TimerWidgetPayload {
+  visible: boolean;
+  state?: 'working' | 'idle' | 'on-break' | 'paused';
+  mode?: 'count-up' | 'count-down' | 'frozen';
+  baseSeconds?: number;
+  anchorMs?: number;
+  /** `#rrggbb` from STATE_CONFIG. Main rejects anything else. */
+  color?: string;
+  label?: string;
+}
+
 export interface DeepLinkRoute {
   url: string;
   host: string;
@@ -153,6 +173,18 @@ interface ElectronAPI {
     captureScreenshot: () => Promise<{ success: boolean; screens?: string[]; error?: string }>;
     setPowerSaveBlocker?: (enable: boolean) => Promise<{ success: boolean }>;
     getActivitySince?: (sinceMs: number) => Promise<Array<{ sampleMs: number; idleSeconds: number }>>;
+  };
+  /**
+   * Always-visible session timer. Optional — absent on every installed build
+   * older than the one that shipped it, so feature-detect (a `?.` call is
+   * enough; there is no fallback, the widget simply doesn't appear).
+   *
+   * macOS renders it as the tray title + a template icon; Windows as a small
+   * frameless HUD docked above the system tray; other platforms ignore it.
+   * Accepted only from the main window — a satellite cannot drive it.
+   */
+  timerWidget?: {
+    update: (payload: TimerWidgetPayload) => void;
   };
   notifications: {
     show: (options: NotificationOptions) => Promise<{ success: boolean }>;

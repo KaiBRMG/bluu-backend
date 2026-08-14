@@ -95,6 +95,11 @@ export interface UserDocument {
   enableIdleTimeout?: boolean;
   enableScreenshots?: boolean;
 
+  // Always-visible session timer (macOS menu-bar tray / Windows docked HUD).
+  // User-controlled in Settings → App Settings and DEFAULT ON, so absent must
+  // read as enabled — test it with `!== false`, never as truthy.
+  timerWidgetEnabled?: boolean;
+
   notificationPreferences?: {
     desktopEnabled: boolean;
     soundEnabled: boolean;

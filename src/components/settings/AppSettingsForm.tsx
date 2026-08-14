@@ -45,6 +45,11 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
   const [screenshotNotifications, setScreenshotNotifications] = useState(true);
   const originalNotifPrefsRef = useRef({ desktopEnabled: true, soundEnabled: true, shiftReminders: true, screenshotNotifications: true });
 
+  // Always-visible session timer (macOS menu bar / Windows docked HUD).
+  // Default ON — absent on the user doc means enabled, so it is read with `!== false`.
+  const [timerWidgetEnabled, setTimerWidgetEnabled] = useState(true);
+  const originalTimerWidgetRef = useRef(true);
+
   const [selectedTimezone, setSelectedTimezone] = useState('');
   const originalTimezoneRef = useRef<string>('');
   const [additionalTimezones, setAdditionalTimezones] = useState<string[]>([]);
@@ -93,6 +98,13 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userData?.notificationPreferences]);
 
+  // Absent = never set = on. Only an explicit false switches the widget off.
+  useEffect(() => {
+    const enabled = userData?.timerWidgetEnabled !== false;
+    setTimerWidgetEnabled(enabled);
+    originalTimerWidgetRef.current = enabled;
+  }, [userData?.timerWidgetEnabled]);
+
   useEffect(() => {
     // undefined = never set → seed with defaults; [] = user explicitly cleared
     const saved = userData?.additionalTimezones !== undefined
@@ -114,8 +126,9 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
       soundEnabled            !== originalNotifPrefsRef.current.soundEnabled            ||
       shiftReminders          !== originalNotifPrefsRef.current.shiftReminders          ||
       screenshotNotifications !== originalNotifPrefsRef.current.screenshotNotifications;
-    setHasChanges(tzChanged || addlChanged || notifChanged);
-  }, [selectedTimezone, additionalTimezones, desktopEnabled, soundEnabled, shiftReminders, screenshotNotifications]);
+    const widgetChanged = timerWidgetEnabled !== originalTimerWidgetRef.current;
+    setHasChanges(tzChanged || addlChanged || notifChanged || widgetChanged);
+  }, [selectedTimezone, additionalTimezones, desktopEnabled, soundEnabled, shiftReminders, screenshotNotifications, timerWidgetEnabled]);
 
   const addressIsSet = !!(userData?.address?.city && userData?.address?.country);
   const isDisabled = !addressIsSet && !userData?.timezone;
@@ -166,6 +179,7 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
     setSoundEnabled(originalNotifPrefsRef.current.soundEnabled);
     setShiftReminders(originalNotifPrefsRef.current.shiftReminders);
     setScreenshotNotifications(originalNotifPrefsRef.current.screenshotNotifications);
+    setTimerWidgetEnabled(originalTimerWidgetRef.current);
   };
 
   // TEMPORARY (see CLAUDE.md): wipes the stale macOS Screen Recording (TCC)
@@ -217,6 +231,7 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
           timezoneOffset: offset,
           additionalTimezones: additionalTimezones.filter(Boolean),
           notificationPreferences: { desktopEnabled, soundEnabled, shiftReminders, screenshotNotifications },
+          timerWidgetEnabled,
         }),
       });
 
@@ -229,6 +244,7 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
       originalTimezoneRef.current = selectedTimezone;
       originalAdditionalTimezonesRef.current = additionalTimezones.filter(Boolean);
       originalNotifPrefsRef.current = { desktopEnabled, soundEnabled, shiftReminders, screenshotNotifications };
+      originalTimerWidgetRef.current = timerWidgetEnabled;
       setHasChanges(false);
       toast.success('Changes saved');
     } catch (error) {
@@ -251,7 +267,7 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
         ))}
         <div className="flex flex-col gap-4 pt-2">
           <Skeleton className="h-3.5 w-24" />
-          {Array.from({ length: 3 }).map((_, i) => (
+          {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="flex items-center justify-between">
               <Skeleton className="h-4 w-40" />
               <Skeleton className="h-5 w-9 rounded-full" />
@@ -460,6 +476,26 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
             id="screenshot-notif"
             checked={screenshotNotifications}
             onCheckedChange={setScreenshotNotifications}
+          />
+        </div>
+      </div>
+
+      {/* Always-visible session timer (macOS menu bar / Windows docked HUD) */}
+      <div className="mb-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <Label htmlFor="timer-widget" className="form-label cursor-pointer">
+              Timer Widget
+            </Label>
+            <p className="text-xs italic mt-1" style={{ color: 'var(--foreground-secondary)' }}>
+              Keep your live session timer on screen while you work — in the menu bar on macOS, or in a small bar just above the system tray on Windows. It shows your break time remaining while you are on a break, pauses when you go idle, and disappears entirely once you clock out.
+            </p>
+          </div>
+          <Switch
+            id="timer-widget"
+            checked={timerWidgetEnabled}
+            onCheckedChange={setTimerWidgetEnabled}
+            className="flex-shrink-0"
           />
         </div>
       </div>

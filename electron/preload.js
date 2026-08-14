@@ -89,6 +89,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getActivitySince: (sinceMs) => ipcRenderer.invoke('timeTracking:getActivitySince', sinceMs),
   },
 
+  // Always-visible session timer (macOS tray title / Windows docked HUD).
+  // Push an ANCHOR, never a per-second value: main re-derives the display each
+  // second from the same base + instant the renderer's own tick uses, so the two
+  // clocks cannot drift and this costs one message per transition. Build the
+  // payload with buildTimerWidgetPayload (src/lib/timerWidget.ts), never by hand.
+  timerWidget: {
+    update: (payload) => ipcRenderer.send('timer-widget:update', payload),
+  },
+
   // Notifications. `target` picks the destination window: omitted → the calling
   // window, 'main' → the main window, or a satellite key.
   notifications: {
