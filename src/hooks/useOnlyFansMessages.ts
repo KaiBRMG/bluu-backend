@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { collection, limit as fsLimit, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { db } from '@/firebase-config';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
-import { getCache, setCache } from '@/lib/queryCache';
+import { getCacheEntry, setCache } from '@/lib/queryCache';
 
 /**
  * One chat thread — history plus live messages.
@@ -24,24 +24,111 @@ import { getCache, setCache } from '@/lib/queryCache';
  * legitimately appears in both once the next history page is fetched.
  */
 
+/**
+ * Client mirror of `OFAttachment`. The `urls` are expiring provider CDN links
+ * that no browser can fetch — they exist to be handed to
+ * `useResolvedMedia`, never to an `<img>`.
+ *
+ * All three are **null on live messages**: the Firestore mirror strips them
+ * before writing, because a signed link is dead long before anything reads the
+ * doc back. The metadata beside them is what lets a tile lay itself out anyway.
+ */
+export interface OFAttachmentRow {
+  id: string;
+  type: 'photo' | 'video' | 'gif' | 'audio' | 'other';
+  canView: boolean;
+  isDrm: boolean;
+  width: number | null;
+  height: number | null;
+  duration: number | null;
+  urls: { full: string | null; preview: string | null; thumb: string | null };
+}
+
 export interface OFMessageRow {
   id: string;
   chatId: string;
   text: string;
   createdAt: string;
   fromMe: boolean;
+  /** PPV unlock price. Always 0 on a tip — tips carry money in `tipAmount`. */
   price: number;
+  /** A tip. `text` is the fan's own note, with the provider's boilerplate stripped. */
   isTip: boolean;
+  /** Amount tipped, USD. Absent on rows written before tips were modelled. */
+  tipAmount?: number;
   isOpened: boolean;
   mediaCount: number;
+  /** May be absent on rows written before media was modelled. */
+  attachments?: OFAttachmentRow[];
   /** Set locally while a send is in flight. A send that fails is removed, not flagged. */
   pending?: boolean;
 }
 
+/** Does this copy of a message carry media links we could actually resolve? */
+function hasLiveMediaUrls(message: OFMessageRow | undefined): boolean {
+  return !!message?.attachments?.some((a) => a.urls.preview || a.urls.thumb || a.urls.full);
+}
+
+/**
+ * Reconcile two copies of the same message.
+ *
+ * History (fetched from the provider) and the live tail (read from Firestore)
+ * legitimately overlap, and the live copy normally wins because it is the newer
+ * fact. Media is the exception: the mirror **strips CDN links before writing**,
+ * so a naive "live wins" blanks the images on any message that has arrived both
+ * ways. Keep the newer row, but keep whichever attachments can still be shown.
+ */
+function mergeMessage(existing: OFMessageRow | undefined, next: OFMessageRow): OFMessageRow {
+  if (!existing) return next;
+  if (hasLiveMediaUrls(next) || !hasLiveMediaUrls(existing)) return next;
+  return { ...next, attachments: existing.attachments };
+}
+
+/**
+ * What the composer hands to `send`.
+ *
+ * `mediaIds` mixes staged uploads (`ofapi_media_…`) and vault ids freely — the
+ * provider takes both in one field, so nothing above it has to track which is
+ * which. `previewIds` is only meaningful with a `price`: it names the members of
+ * `mediaIds` that stay visible outside the paywall.
+ */
+export interface SendInput {
+  text: string;
+  mediaIds?: string[];
+  previewIds?: string[];
+  /** 0, or between 3 and 200 — the provider's own bounds. */
+  price?: number;
+  lockedText?: boolean;
+}
+
 const PAGE_SIZE = 30;
 const LIVE_LIMIT = 50;
-const HISTORY_TTL = 60 * 1000;
-const historyKey = (chatId: string) => `bluu_of_thread_v1:${chatId}`;
+
+/**
+ * How long a cached thread is worth **showing**.
+ *
+ * This was 60s, which made re-opening a chat feel broken: an operator who spent
+ * a minute in another thread came back to a blank pane and a full skeleton, even
+ * though nothing had changed. Ten minutes is safe because the cache is never the
+ * whole truth — the live tail is an `onSnapshot` that is always current, and the
+ * revalidation below replaces the page moments later. The cache only decides
+ * what the operator looks at *while* that happens.
+ */
+const HISTORY_SHOW_TTL = 10 * 60 * 1000;
+
+/**
+ * How long a cached thread is worth **trusting without asking**.
+ *
+ * Inside this window, re-opening a chat makes no request at all. That matters
+ * twice over: every history fetch is a billed provider call, and flicking
+ * between two threads is the single most common thing an operator does.
+ */
+const HISTORY_FRESH_MS = 20 * 1000;
+
+// Account-scoped: the same chat id under a different account is a different
+// thread (Phase 4 makes that routine rather than theoretical).
+const historyKey = (accountId: string | null, chatId: string) =>
+  `bluu_of_thread_v2:${accountId ?? 'unknown'}:${chatId}`;
 
 /**
  * @param reloadToken Bump to force a re-fetch of the newest history page for the
@@ -67,10 +154,15 @@ export function useOnlyFansMessages(
   // "load older" affordance when a page exhausts the thread.
   const [cursor, setCursor] = useState<string | null>(null);
 
+  // A retry from the thread's own error state. Added to the caller's token so
+  // both paths run the identical "re-pull the newest page" effect.
+  const [localReload, setLocalReload] = useState(0);
+  const effectiveReloadToken = reloadToken + localReload;
+
   // Compared against the token the effect last saw, so the effect can tell a
   // forced reload apart from a chat switch — the two want different behaviour
   // before the fetch, and identical behaviour after it.
-  const seenReloadRef = useRef(reloadToken);
+  const seenReloadRef = useRef(effectiveReloadToken);
 
   // Initial page — and, when `reloadToken` changes, the newest page again.
   useEffect(() => {
@@ -81,16 +173,16 @@ export function useOnlyFansMessages(
       return;
     }
 
-    const isReload = seenReloadRef.current !== reloadToken;
-    seenReloadRef.current = reloadToken;
+    const isReload = seenReloadRef.current !== effectiveReloadToken;
+    seenReloadRef.current = effectiveReloadToken;
 
     let cancelled = false;
     setError(null);
 
     // A reload deliberately touches none of the pre-fetch state:
-    //  - it does not read the 60s sessionStorage cache, because serving the copy
-    //    the operator just asked to replace is the one thing a refresh must
-    //    never do;
+    //  - it does not read the sessionStorage cache, because serving the copy the
+    //    operator just asked to replace is the one thing a refresh must never
+    //    do (and it passes `refresh=1` so the server's memo cannot either);
     //  - it does not blank `history` or flip `loading`, so the thread stays
     //    readable while the page is in flight instead of flashing a skeleton;
     //  - it does not clear `optimistic`, so a send still in flight keeps its
@@ -99,17 +191,23 @@ export function useOnlyFansMessages(
     // The fetch below then *replaces* history with the newest page, which is the
     // honest meaning of refresh: a thread paged far back collapses to page one,
     // exactly as re-opening it would. `loadOlder` walks back from there again.
+    const key = historyKey(accountId, chatId);
+
     if (!isReload) {
       setOptimistic([]);
 
-      const cached = getCache<{ messages: OFMessageRow[]; nextCursor: string | null }>(
-        historyKey(chatId),
-        HISTORY_TTL,
+      const cached = getCacheEntry<{ messages: OFMessageRow[]; nextCursor: string | null }>(
+        key,
+        HISTORY_SHOW_TTL,
       );
       if (cached) {
-        setHistory(cached.messages);
-        setCursor(cached.nextCursor);
+        setHistory(cached.data.messages);
+        setCursor(cached.data.nextCursor);
         setLoading(false);
+
+        // Fresh enough to trust outright: re-opening a thread you were just in
+        // costs nothing and shows instantly. The live tail keeps it honest.
+        if (cached.ageMs < HISTORY_FRESH_MS) return;
       } else {
         setHistory([]);
         setCursor(null);
@@ -119,13 +217,15 @@ export function useOnlyFansMessages(
 
     (async () => {
       try {
+        // A reload is an explicit "give me the current truth", so it must skip
+        // the server's page memo as well as the client cache below.
         const page = await authFetch(
-          `/api/onlyfans/chats/${chatId}/messages?limit=${PAGE_SIZE}`,
+          `/api/onlyfans/chats/${chatId}/messages?limit=${PAGE_SIZE}${isReload ? '&refresh=1' : ''}`,
         );
         if (cancelled) return;
         setHistory(page.messages ?? []);
         setCursor(page.nextCursor ?? null);
-        setCache(historyKey(chatId), { messages: page.messages ?? [], nextCursor: page.nextCursor ?? null });
+        setCache(key, { messages: page.messages ?? [], nextCursor: page.nextCursor ?? null });
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load messages');
       } finally {
@@ -136,7 +236,7 @@ export function useOnlyFansMessages(
     return () => {
       cancelled = true;
     };
-  }, [chatId, authFetch, reloadToken]);
+  }, [chatId, accountId, authFetch, effectiveReloadToken]);
 
   // Live tail.
   useEffect(() => {
@@ -159,7 +259,9 @@ export function useOnlyFansMessages(
   /** Oldest → newest, de-duplicated. Optimistic rows are dropped once real. */
   const messages = useMemo(() => {
     const byId = new Map<string, OFMessageRow>();
-    for (const m of [...history, ...live]) byId.set(m.id, m);
+    for (const m of [...history, ...live]) {
+      byId.set(m.id, mergeMessage(byId.get(m.id), m));
+    }
     for (const m of optimistic) if (!byId.has(m.id)) byId.set(m.id, m);
     return [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }, [history, live, optimistic]);
@@ -187,8 +289,10 @@ export function useOnlyFansMessages(
   }, [chatId, authFetch, loadingOlder, cursor]);
 
   const send = useCallback(
-    async (text: string) => {
-      if (!chatId || !text.trim() || sending) return false;
+    async (input: SendInput) => {
+      const text = input.text.trim();
+      const mediaIds = input.mediaIds ?? [];
+      if (!chatId || (!text && mediaIds.length === 0) || sending) return false;
       // Cleared per attempt so a second identical failure still re-toasts — the
       // toast fires on a *change* of `error`.
       setError(null);
@@ -198,13 +302,19 @@ export function useOnlyFansMessages(
         {
           id: tempId,
           chatId,
-          text: text.trim(),
+          text,
           createdAt: new Date().toISOString(),
           fromMe: true,
-          price: 0,
+          price: input.price ?? 0,
           isTip: false,
           isOpened: false,
-          mediaCount: 0,
+          // The placeholder counts the media but describes none of it. The
+          // staged files exist only as local bytes and vault ids at this point;
+          // the real attachments — with resolvable links — arrive on the send
+          // response a moment later. A count renders as "2 attachments", which
+          // is true, rather than as tiles that would have nothing to show.
+          mediaCount: mediaIds.length,
+          attachments: [],
           pending: true,
         },
       ]);
@@ -212,7 +322,13 @@ export function useOnlyFansMessages(
       try {
         const { message } = await authFetch(`/api/onlyfans/chats/${chatId}/messages`, {
           method: 'POST',
-          body: JSON.stringify({ text: text.trim() }),
+          body: JSON.stringify({
+            text,
+            mediaIds,
+            previewIds: input.previewIds ?? [],
+            price: input.price ?? 0,
+            lockedText: input.lockedText ?? false,
+          }),
         });
         // The live listener delivers the real message; drop the placeholder.
         setOptimistic((prev) => prev.filter((m) => m.id !== tempId));
@@ -232,5 +348,8 @@ export function useOnlyFansMessages(
     [chatId, authFetch, sending],
   );
 
-  return { messages, loading, loadingOlder, hasMore, sending, error, loadOlder, send };
+  /** Retry after a failed load, from the thread's own error state. */
+  const reload = useCallback(() => setLocalReload((n) => n + 1), []);
+
+  return { messages, loading, loadingOlder, hasMore, sending, error, loadOlder, send, reload };
 }

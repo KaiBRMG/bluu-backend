@@ -77,8 +77,17 @@ export function useOnlyFansChats() {
   const [hasMore, setHasMore] = useState(true);
 
   const nextOffsetRef = useRef<number | null>(PAGE_SIZE);
-  // Guards the profile back-fill below against re-firing on its own snapshot.
-  const pendingHydrateRef = useRef(false);
+  /**
+   * Chat ids we have already tried to back-fill profiles for.
+   *
+   * This used to be a plain in-flight boolean, which was a cost bug: a fan the
+   * forced sync could not reach (they are not in the first page of chats) stays
+   * `fanMissing` forever, so **every subsequent snapshot re-fired a forced,
+   * billed provider sync** — and each sync writes rows, which produces another
+   * snapshot. One attempt per chat, ever, breaks the loop.
+   */
+  const hydrateAttemptedRef = useRef<Set<string>>(new Set());
+  const hydrateInFlightRef = useRef(false);
 
   const sync = useCallback(
     async (params: string) => {
@@ -93,6 +102,31 @@ export function useOnlyFansChats() {
     },
     [authFetch],
   );
+
+  // Resolve the account id on its own, in parallel with the sync below.
+  //
+  // The list cannot attach its snapshot listener without an account id, and the
+  // sync route only returns one *after* pulling the provider's chat list and
+  // reconciling the mirror — seconds of work the inbox does not need in order to
+  // start rendering what is already mirrored. This route is nearly free, so on a
+  // cold session the list paints as soon as Firestore answers rather than after
+  // the provider does. Skipped entirely when the id is already cached.
+  useEffect(() => {
+    if (accountId) return;
+    let cancelled = false;
+    authFetch('/api/onlyfans/account')
+      .then((result) => {
+        if (cancelled || !result?.accountId) return;
+        setAccountId(result.accountId);
+        setCache(ACCOUNT_CACHE_KEY, result.accountId);
+      })
+      // Not fatal: the sync below also returns the account id, so this is a
+      // head start, not a dependency. Its failure is reported there.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, authFetch]);
 
   // Warm the mirror once per mount. `loading` is cleared by the snapshot
   // listener, not here: clearing it when the sync resolves would render the
@@ -125,13 +159,20 @@ export function useOnlyFansChats() {
         const rows = snap.docs.map((d) => hydrate(d.data() as Partial<OFChatRow>));
         setChats(rows);
         setLoading(false);
+
         // A webhook can create a chat row for a fan we have never synced, so the
         // row arrives without profile fields. Pull the list once to fill them in
-        // rather than leaving "Unknown fan" in the inbox.
-        if (rows.some((r) => r.fanMissing) && !pendingHydrateRef.current) {
-          pendingHydrateRef.current = true;
+        // rather than leaving "Unknown fan" in the inbox — but only once per
+        // chat, because a fan the sync cannot reach would otherwise re-trigger a
+        // billed forced sync on every snapshot for the life of the window.
+        const unhydrated = rows.filter(
+          (r) => r.fanMissing && !hydrateAttemptedRef.current.has(r.id),
+        );
+        if (unhydrated.length > 0 && !hydrateInFlightRef.current) {
+          for (const row of unhydrated) hydrateAttemptedRef.current.add(row.id);
+          hydrateInFlightRef.current = true;
           sync('?refresh=1').finally(() => {
-            pendingHydrateRef.current = false;
+            hydrateInFlightRef.current = false;
           });
         }
       },

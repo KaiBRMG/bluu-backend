@@ -87,3 +87,15 @@ export function formatMoney(amount: number): string {
   if (amount > 0 && amount < 1) return `$${amount.toFixed(2)}`;
   return `$${Math.round(amount).toLocaleString('en-US')}`;
 }
+
+/**
+ * The same amount, split so the currency mark can be set apart from the digits.
+ *
+ * Only worth it where an amount is displayed large enough for the `$` to shout
+ * at the same size as the number — a full-size symbol next to 32px digits reads
+ * as a typo. Typeset small and dimmed beside them, the digits carry the line.
+ */
+export function splitMoney(amount: number): { symbol: string; digits: string } {
+  const formatted = formatMoney(amount);
+  return { symbol: formatted.slice(0, 1), digits: formatted.slice(1) };
+}

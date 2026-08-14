@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useDeferredValue, useMemo, useState } from 'react';
-import { Paperclip, RefreshCw, Search } from 'lucide-react';
+import { Paperclip, RefreshCw, Search, TriangleAlert, WifiOff } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -30,6 +30,9 @@ interface ChatListProps {
   onRefresh: () => void;
   onLoadMore: () => void;
   timeZone?: string;
+  /** Surfaced inline as well as toasted — a toast is gone before it can be acted on. */
+  error?: string | null;
+  offline?: boolean;
 }
 
 export default function ChatList({
@@ -42,6 +45,8 @@ export default function ChatList({
   onRefresh,
   onLoadMore,
   timeZone,
+  error,
+  offline,
 }: ChatListProps) {
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
@@ -126,6 +131,33 @@ export default function ChatList({
           ))}
         </div>
       </header>
+
+      {/* Connection state belongs above the list, not in a toast: it explains
+          why nothing is arriving, and it has to stay visible for as long as it
+          is true. Zinc rather than red — offline is a condition, not an error,
+          and the mirrored inbox below is still perfectly readable. */}
+      {offline && (
+        <div
+          role="status"
+          className="flex shrink-0 items-center gap-2 border-b border-white/[0.07] bg-white/[0.04] px-4 py-2 text-xs text-zinc-400"
+        >
+          <WifiOff className="size-3.5 shrink-0" />
+          Offline — showing the last synced inbox.
+        </div>
+      )}
+
+      {error && !offline && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.07] bg-orange-500/10 px-4 py-2 text-xs text-orange-400">
+          <TriangleAlert className="size-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{error}</span>
+          <button
+            onClick={onRefresh}
+            className="shrink-0 underline underline-offset-2 hover:text-orange-300"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {loading && chats.length === 0 ? (

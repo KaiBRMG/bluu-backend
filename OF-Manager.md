@@ -48,7 +48,7 @@ One linked test account, messaging only. Delivered:
 | `src/app/of-manager/**` | The window: layout, guard, `ChatList`, `ChatThread` |
 | `src/hooks/useOnlyFansChats.ts` / `useOnlyFansMessages.ts` | Client data hooks |
 
-`IOnlyFansClient` currently covers: `listAccounts`, `listChats`, `listMessages`, `sendMessage`, `markChatRead`, `verifyWebhookSignature`, `parseWebhookEvent`.
+`IOnlyFansClient` currently covers: `listAccounts`, `listChats`, `listMessages`, `sendMessage` (media + PPV since 3b), `markChatRead`, `resolveMediaUrl` (3a), `listVaultLists` / `listVaultMedia` / `uploadMediaFromUrl` (3b), `verifyWebhookSignature`, `parseWebhookEvent`.
 
 ### Cost model established (do not regress)
 
@@ -64,7 +64,7 @@ Three independent layers: the Electron main-process check, `requireOnlyFansAcces
 
 ### Deliberately not built in Phases 1–2
 
-Vault/media upload, PPV composition, per-function permissions, audit logs, time-tracking gating, links to the `creators` collection, earnings, notifications, multi-account. Media on existing messages renders as an attachment chip, not an image. **Everything in Part II below.**
+Vault/media upload, PPV composition, per-function permissions, audit logs, time-tracking gating, links to the `creators` collection, earnings, notifications, multi-account. Media on existing messages rendered as an attachment chip, not an image — **that part is done, in pass 3a**, and **vault + upload + PPV composition are done in pass 3b.** Everything else is in Part II below.
 
 ## Pitfalls already paid for — do not regress
 
@@ -115,19 +115,99 @@ Phases are ordered by dependency, not by appetite. Phase 3 is cosmetic and indep
 
 ## Phase 3 — Chat interface fine-tuning
 
-Polish and completeness on the surface that already exists. No Firestore schema change. Media is the one genuinely new provider capability — it adds a `resolveMediaUrl`-shaped method to `IOnlyFansClient` and is much larger than it looks; read its section below before scoping the phase.
+Polish and completeness on the surface that already exists. No Firestore schema change. Split into passes because media alone is larger than it looks.
 
-- **Media rendering.** Replace the attachment chip with real inline media. Needs `mediaCount` on `OFMessage` promoted to a real `attachments: OFAttachment[]` on the contract. **The provider's media contract is now known — see [Media: how it actually works](#media-how-it-actually-works) below before designing anything here.**
-- **Composer.** Attachments (`<input type=file>` + drag-drop give a real `File`; nothing native needed), paste-a-screenshot via `clipboard.readImage()`, emoji, multi-line/shift-enter, draft persistence per thread.
-- **Message affordances.** Reply-to (`SendMessageInput.replyToMessageId` is already on the contract, unused by the UI), copy, delete/unsend if the provider supports it, tip and PPV states rendered distinctly rather than as plain text.
-- **Fan context panel.** A third pane: spend history, subscription status, notes. Read-only first.
+### Pass 3a — media rendering ✅
+
+Shipped. Inline media on received messages, end to end. What landed:
+
+- **`attachments: OFAttachment[]` on `OFMessage`**, alongside the existing `mediaCount` (the two legitimately disagree — a chat row's embedded `lastMessage` carries a count with no `media[]`). `resolveMediaUrl(accountId, cdnUrl) → ResolvedMedia` is on `IOnlyFansClient`.
+- **`POST /api/onlyfans/media/resolve`** — batched (12 max), per-URL failures, `requireOnlyFansAccess` first.
+- **Lazy + batched + memoised resolution.** `useOnlyFansMedia.ts`: IntersectionObserver gate (200px margin), 30ms request coalescing, module-level TTL cache; `resolveMediaUrlCached` memoises server-side. Tiles request `preview`, never `full` — full resolution is an explicit click.
+- **`stripMediaUrls`** blanks every CDN link before a message is written to Firestore, and `mergeMessage` in `useOnlyFansMessages` stops the URL-less live copy from blanking a history copy that still has resolvable links.
+- **Rendering:** photo/GIF/plain-video tiles, blurred locked-PPV previews, a DRM poster + "not playable" line, per-message PPV price row (orange locked / green unlocked), a `Dialog` lightbox. Every tile reserves its aspect ratio from mirrored metadata so it does not fight `ChatThread`'s scroll anchoring.
+
+Two things resolved along the way, both now in the spoke:
+
+- **The origin guard did not need relaxing after all.** The download redirect is followed with `redirect: 'manual'` and only the `Location` is returned, so the API key still never leaves the provider's host. The earlier note about allowlisting `cdn.fansapi.com`/`dl.fansapi.com` applies to the *redirect target check*, not to `request()`.
+- **The provider has no unsend.** `/messages/{message_id}` is `GET` only (plus pin/unpin/like/unlike), so the "delete/unsend" bullet below is dead — it becomes copy + reply + pin + like.
+
+#### Pass 3a.1 — latency, resilience and tips ✅
+
+A follow-up pass against "opening a chat, then another, then the first again buffers" and "everything is slow". Full detail in the spoke ([Latency](documentation/onlyfans-crm.md#latency-what-makes-this-window-feel-fast), [Tips](documentation/onlyfans-crm.md#tips)).
+
+- **The A → B → A complaint was the history TTL.** 60s, governing *display* only, so a minute away meant a blank pane, a skeleton and a billed call. Now: 10-minute stale-while-revalidate, plus a 20s window in which re-opening makes **no request at all**.
+- **Server-side page memo + in-flight dedupe** (20s). Two operators opening one chat cost one provider call. A send invalidates that chat's pages; `?refresh=1` bypasses everything.
+- **First paint no longer waits on the provider** — `GET /api/onlyfans/account` resolves the account id for free so the snapshot listener attaches immediately. **Pinning `ONLYFANS_ACCOUNT_ID` is a latency fix too**, not only the Phase 4 correctness one.
+- **Fixed a silent billing loop.** The `fanMissing` back-fill was guarded by an in-flight boolean only, so an unreachable fan re-fired a forced provider sync on *every* snapshot — and each sync produced another snapshot. Now one attempt per chat, ever.
+- **Media TTL 45s → 5 min with `onError` re-resolve.** The short TTL was a cost bug; scrolling a tile out of view and back was re-billing it.
+- **Degradation is visible:** offline strip, inline chat-list error with Retry (not a toast — it is state, not an event), and a thread error state that never masquerades as "No messages yet".
+- **Tips are rendered properly.** Took three passes and two wrong guesses, both from assuming the documented payload was complete:
+  1. The shared PPV row labelled a tip "$50 locked" — `price` is not an unlock price on a tip.
+  2. Reading `price` rendered every tip as **"$0"** — the provider sends `price: 0` on tips, and documents **no tip-amount field at all**.
+  3. Now: `price` is the PPV price only (forced to 0 on tips) and **`tipAmount`** carries the money, filled by `parseTip` probing the plausible spellings and falling back to the figure in the provider's own generated sentence. That sentence (`I sent you a $150.00 tip`) is stripped from `text`, so what remains is the fan's actual note. A zero amount renders as "Tip", never "$0".
+
+  **Phase 8 depends on this:** earnings must sum `tipAmount`, or every tip counts as zero.
+
+### Pass 3b — composer ✅
+
+Shipped. The composer now holds **everything unsent** — text, staged
+attachments, PPV price — and nothing else does. Full detail in the spoke
+([Composing a message](documentation/onlyfans-crm.md#composing-a-message)).
+
+What landed:
+
+- **Attachments three ways** — file picker, drag-drop onto the composer, and
+  paste. A pasted screenshot is a real `File` on `clipboardData` in Chromium, so
+  `clipboard.readImage()` was not needed after all: **no Electron change, no
+  rule-14 build**.
+- **The bytes never pass through our API.** Vercel caps a request body at ~4.5MB
+  and the media operators send is routinely larger, so it is three hops:
+  `/api/onlyfans/media/upload-url` signs a v4 Storage PUT → the browser uploads
+  straight to GCS (XHR, for progress) → `/api/onlyfans/media/upload` signs a
+  10-minute read URL, the provider fetches it, and the staged object is deleted.
+  Path is server-chosen and re-derived per uid; the signature pins the content
+  type. **No Storage rules involved** — signed URLs bypass them.
+- **Vault picker** as a `Dialog`: categories, type filters, search-on-submit,
+  explicit paging, multi-select. Vault media *is* `OFAttachment`, so it reuses
+  the normaliser, the tile contract and the lazy-resolve gate wholesale.
+- **PPV** — price control disabled without media (the provider rejects a priced
+  message with nothing to unlock, so the button says so rather than the send
+  failing later), bounds of 0 or $3–$200 enforced in three places, per-tile
+  preview toggles, optional locked text, and a strip that states the preview
+  count because "nothing shown before unlocking" is a real choice.
+- **Drafts** persist per account+chat in `localStorage`, cleared only by a
+  confirmed send. Staged upload ids ride along — they are billed and single-use,
+  so dropping them on window close means paying twice. CDN preview links are
+  blanked on save, exactly as `stripMediaUrls` does for the mirror.
+- **Emoji** as a `Popover` over a curated set (shadcn only; no picker library),
+  auto-growing multi-line textarea, character counter past 4500, attachment
+  counter, and a **visible stub** for tagging creators — it needs Phase 5's
+  registry, and a button that silently did nothing would be worse.
+
+Two operational notes carried out of this pass:
+
+- **Orphaned uploads are not cleaned up.** A file PUT to the signed slot whose
+  commit never runs (window closed mid-compose) stays in `onlyfans-outgoing/`. A
+  bucket lifecycle rule on that prefix is the fix — nothing in the app leaks it,
+  but nothing sweeps it either.
+- **Storage rules were not touched** and did not need to be. Worth confirming the
+  project's rules do not let the *client SDK* read `onlyfans-outgoing/`; the
+  route path is signed-URL only and unaffected either way.
+
+### Pass 3c — thread affordances and list ergonomics (next)
+
+The remainder of Phase 3. None of it blocks Phase 4.
+
+- **Message affordances.** Reply-to (`SendMessageInput.replyToMessageId` is already on the contract, unused by the UI), copy, pin/unpin and like/unlike (the provider's whole per-message surface — **there is no unsend**). Tip and PPV states are done: 3a renders the PPV price row and the locked-media state distinctly.
+- **Fan context panel.** A third pane on the right: spend history, subscription status, notes. Read-only first.
 - **List refinements.** Sort options, saved filters, keyboard navigation (j/k, enter, escape), unread-first ordering.
-- **Empty/error/offline states** across both panes, to the standard in [`DESIGN.md`](DESIGN.md).
+- **Empty/error/offline states** across both panes, to the standard in [`DESIGN.md`](DESIGN.md). (3a.1 did the chat-list and thread cases; the composer and vault dialog are new surfaces to hold to the same standard.)
 - **Performance.** Virtualise the chat list and long threads before they are 500 rows deep. Note the existing constraints: no `filter` on row hover (Chromium re-rasterises the whole row and it tears on a fast drag), and never `vw`/`vh` in this window (see the spoke — it oscillates against Windows' space-consuming scrollbars).
 
 ### Media: how it actually works
 
-Researched against `openapi.yaml` and the provider docs. **Read this before writing a line of the media UI** — one of the three cases below cannot be built at all in the current app.
+Researched against `openapi.yaml` and the provider docs, then **implemented in pass 3a**. Kept here as the research record; the living description of the shipped behaviour is [onlyfans-crm.md § Media](documentation/onlyfans-crm.md#media). One of the three cases below cannot be built at all in the current app.
 
 **The payload.** Each message carries `mediaCount` and a `media[]` array ([openapi.yaml:12698-12780](openapi.yaml#L12698-L12780)):
 
@@ -147,7 +227,7 @@ videoSources        { "240": url|null, "720": url|null }
 **`GET /api/{account}/media/download/{cdnUrl}`** → `302`
 
 - `cdnUrl` is the **whole CDN URL including its query string**, percent-encoded into one path segment.
-- Redirects to `cdn.fansapi.com` when cached (free) or `dl.fansapi.com` otherwise, which streams through the account proxy and **reports billing back** — uncached media costs credits.
+- Redirects to `cdn.fansapi.com` when cached (free) or `dl.fansapi.com` otherwise, which streams through the account proxy and **reports billing back** — uncached media costs credits (consider adding a download button for old media in chats).
 - Must use the **same account id** that fetched the URL. On `403`: re-fetch the URL from the messages endpoint and retry.
 
 **Expiry — the docs contradict themselves.** The `cdnUrl` parameter says URLs "expire in approx. 20 minutes"; the 403 FAQ says "don't wait longer than **1 minute**". Budget for 1 minute. Either way, far too short to persist.
@@ -162,14 +242,14 @@ videoSources        { "240": url|null, "720": url|null }
 
 > **DRM is now a confirmed blocker, not an open question.** On DRM media there is no downloadable file at all — only HLS/DASH manifests, with the CloudFront credentials supplied as a *separate object* rather than baked into the URL ([openapi.yaml:10246-10292](openapi.yaml#L10246-L10292)). That is three problems stacked: Chromium plays neither HLS nor DASH natively (needs hls.js / shaka), and the content behind the manifest is Widevine-encrypted, which **stock Electron cannot decrypt at any price** — it ships without the CDM. The only fix is the castlabs ECS Electron fork: a different binary, a full re-sign and re-notarize, released under rule 14. The provider's own bulk exporter hits the same wall — its docs state that "Media Vault exports of **videos** will fail to download when **DRM is enabled**."
 >
-> **Decide the fallback before building:** DRM video should render as a poster (`files.preview`) plus an explicit "not playable here" affordance — probably "open in OnlyFans". Do not ship a player that silently fails.
+> **Decide the fallback before building:** DRM media should render as a poster (`files.preview`) plus an explicit "DRM: not playable here" message. Do not ship a player that silently fails.
 
 **The docs are wrong about one thing, and it matters.** The FAQ says `files.full.url` is null because `convertedToVideo: false` means "still converting". That does not hold: a non-DRM video example has `convertedToVideo: false` *and* a populated `full.url` ([openapi.yaml:17411-17437](openapi.yaml#L17411-L17437)), while the DRM example has `convertedToVideo: false`, `isReady: true`, `canView: true`, and a null `full.url`. **The reliable discriminator is the presence of `files.drm`, not `convertedToVideo`.** Verify empirically against the test account — this single test decides whether a video renders or falls back.
 
 **Consequences for the adapter:**
 
 - **Never mirror or cache a CDN URL.** At a ~1 minute budget it is stale before the Firestore write lands. Mirror media *metadata* only (id, type, dimensions, duration, drm-or-not); resolve URLs on demand.
-- **The foreign-origin guard will block the 302.** `onlyfansApi.ts:152` refuses any origin but the provider's — deliberately, as the key-exfil guard. Downloads need a **narrow allowlist for exactly `cdn.fansapi.com` and `dl.fansapi.com`**, never a relaxation of the check.
+- ~~**The foreign-origin guard will block the 302.**~~ It did not, because the 302 is never followed: `resolveMediaUrl` uses `redirect: 'manual'` and returns the `Location` for the renderer to load. The API key goes only to the provider, exactly as before. `cdn.fansapi.com` / `dl.fansapi.com` are allowlisted as **redirect targets** — the guard in `request()` is untouched.
 - **`canView: false`** = a locked PPV the fan has not purchased; only `thumb`/`preview` exist. Render the blurred preview and a lock state; do not attempt the full file.
 - **Media is billable when uncached**, so a thread that eagerly loads every image is a live cost surface. Lazy-load on viewport and prefer `thumb`/`preview` in the list.
 
@@ -245,14 +325,17 @@ Not yet bugs. Each is a decision that is cheap now and expensive after the phase
 
 **Phase 3 — chat interface**
 
-- **DRM video cannot be played in this app.** Confirmed, not suspected — design the fallback (poster + "open in OnlyFans"), not a player. Full detail in [Media: how it actually works](#media-how-it-actually-works).
-- **Test `files.drm`, never `convertedToVideo`,** to tell DRM from a plain video. The provider's own FAQ gets this wrong; following it renders a broken player on every DRM message.
-- **CDN URLs die in about a minute and cannot be fetched directly.** Never mirror one into Firestore — it is stale before the write lands. Resolve through `/media/download/{cdnUrl}` on demand, and expect to re-fetch the URL on a 403.
-- **Media downloads are billed when uncached.** Eagerly loading a thread's images is a cost surface, not just a perf one. Lazy-load on viewport; prefer `thumb`/`preview`.
-- **The download redirect crosses origins.** `cdn.fansapi.com` / `dl.fansapi.com` must be added to the adapter's origin guard as a narrow allowlist — never by loosening the check that stops a poisoned cursor exfiltrating the API key.
-- **Virtualisation fights the scroll anchoring already in `ChatThread`.** Both manipulate `scrollTop` around a content-height change. Whichever virtualiser is chosen must own the anchoring, not sit beside it.
-- **Attachments make send fail in new ways.** The current failure model assumes an atomic text send; an upload that succeeds followed by a send that fails needs a decision (orphan the upload, or retry against it) before the composer is built.
-- **Draft persistence is unsent text** — it falls under the same rule as the composer. One place only, and clearing it must be tied to a confirmed send.
+The first five below are **handled in pass 3a** and are recorded so a later change does not undo them; the rest are still ahead.
+
+- ~~**DRM video cannot be played in this app.**~~ Handled: poster + an explicit "DRM · not playable" line, no player mounted.
+- ~~**Test `files.drm`, never `convertedToVideo`.**~~ Handled in `normaliseAttachment`, with the reasoning in the code — do not "simplify" it back to the FAQ's rule.
+- ~~**CDN URLs die in about a minute and cannot be fetched directly.**~~ Handled: `stripMediaUrls` before every Firestore write, resolve on demand. **Anything new that writes an `OFMessage` must go through it.**
+- ~~**Media downloads are billed when uncached.**~~ Handled: viewport gate, 30ms batching, two memo layers, `preview` over `full`. Removing any one of those is a cost regression that nothing will visibly break.
+- ~~**The download redirect crosses origins.**~~ Handled *without* touching `request()`'s origin guard: the 302 is followed manually and only its `Location` is returned, so the API key still never leaves the provider's host. The allowlist is on the redirect target.
+- **Virtualisation fights the scroll anchoring already in `ChatThread`** — and now also the media tiles' reserved aspect ratios. All three manipulate or depend on height around a content change. Whichever virtualiser is chosen must own the anchoring, not sit beside it.
+- ~~**Attachments make send fail in new ways.**~~ Decided in 3b: **retry against the upload**, never orphan it. A staged `ofapi_media_` id is billed and single-use, and a failed send does not consume it, so the composer restores text *and* media together and re-sends the same ids.
+- ~~**Draft persistence is unsent text.**~~ Handled: `_lib/drafts.ts`, per account+chat, cleared only by a confirmed send. Staged ids persist with it; CDN preview links are blanked on save.
+- **Never route file bytes through an API route.** Vercel caps a request body at ~4.5MB. The signed-URL path exists for this reason — anything new that uploads (a vault upload surface, a mass-message composer) must use it rather than posting a file to a handler.
 
 **Phase 4 — multiple accounts**
 
@@ -318,10 +401,11 @@ Not yet bugs. Each is a decision that is cheap now and expensive after the phase
 
 ## Instructions
 
+- **NEVER call the OnlyFans provider API yourself.** No scripts, no `curl`, no diagnostic fetches against `app.onlyfansapi.com` — **every call is billed** and an exploratory loop burns credits fast. Permitted sources are `openapi.yaml`, [the provider docs](https://docs.onlyfansapi.com/llms.txt), and whatever the user provides (screenshots, pasted payloads). When the documentation is silent — and it often is, its message examples omit real fields — **ask the user for the payload rather than fetching it**, write the adapter defensively (probe the plausible spellings, as `parseWebhookEvent` does), and state plainly what is still unverified.
 - Minimise firestore reads and writes where possible.
+- ALWAYS read the API documentation first: `openapi.yaml` , [https://docs.onlyfansapi.com/llms.txt]
 - IMPORTANT: minimimse onlyfans api (openapi) reads and writes where possible, and opt for webhooks where relevant [https://docs.onlyfansapi.com/webhooks].
-- See openapi API reference: `openapi.yaml` or [https://docs.onlyfansapi.com/api-reference/overview]
 - Consider the use of cache.
 - Only use shadcn components.
 - Implement lazy load where possible.
-- Interfaces must be built with /impeccable craft
+- Update this document after each pass.

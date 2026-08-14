@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { useCallback, useRef, useState } from 'react';
 import { useUserData } from '@/hooks/useUserData';
+import { useNetworkStatus } from '@/contexts/NetworkStatusContext';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { useOnlyFansChats, type OFChatRow } from '@/hooks/useOnlyFansChats';
 import ChatList from './_components/ChatList';
@@ -19,6 +19,7 @@ import ChatThread from './_components/ChatThread';
  */
 export default function OfManagerPage() {
   const { userData } = useUserData();
+  const { isOnline } = useNetworkStatus();
   const authFetch = useAuthFetch();
   const { accountId, chats, loading, refreshing, error, hasMore, refresh, loadMore } =
     useOnlyFansChats();
@@ -34,9 +35,11 @@ export default function OfManagerPage() {
 
   const selected = chats.find((c) => c.id === selectedId) ?? null;
 
-  useEffect(() => {
-    if (error) toast.error(error);
-  }, [error]);
+  // Deliberately no toast for this one. The chat-list error is *persistent
+  // state*, not an event: it is rendered inline above the list with a Retry, so
+  // a toast beside it would report the same fact twice and then disappear —
+  // leaving the actionable copy on screen and the transient copy remembered.
+  // Send failures still toast, because those genuinely are events.
 
   const select = useCallback(
     (chat: OFChatRow) => {
@@ -72,6 +75,8 @@ export default function OfManagerPage() {
         onRefresh={handleRefresh}
         onLoadMore={loadMore}
         timeZone={userData?.timezone}
+        error={error}
+        offline={!isOnline}
       />
 
       {selected ? (

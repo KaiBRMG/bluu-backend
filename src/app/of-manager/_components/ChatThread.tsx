@@ -1,17 +1,22 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Loader2, Paperclip, SendHorizontal } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { HandCoins, Loader2, Lock, LockOpen, RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Textarea } from '@/components/ui/textarea';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { cn } from '@/lib/utils';
 import type { OFChatRow } from '@/hooks/useOnlyFansChats';
-import { useOnlyFansMessages, type OFMessageRow } from '@/hooks/useOnlyFansMessages';
-import { dayKey, formatClock, formatDayLabel, formatMoney } from '../_lib/format';
+import {
+  useOnlyFansMessages,
+  type OFMessageRow,
+  type SendInput,
+} from '@/hooks/useOnlyFansMessages';
+import MessageAttachments from './MessageAttachments';
+import MessageComposer from './MessageComposer';
+import { dayKey, formatClock, formatDayLabel, formatMoney, splitMoney } from '../_lib/format';
 
 interface ChatThreadProps {
   accountId: string | null;
@@ -32,11 +37,10 @@ export default function ChatThread({
   timeZone,
   reloadToken,
 }: ChatThreadProps) {
-  const { messages, loading, loadingOlder, hasMore, sending, error, loadOlder, send } =
+  const { messages, loading, loadingOlder, hasMore, sending, error, loadOlder, send, reload } =
     useOnlyFansMessages(accountId, chat.id, reloadToken);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [draft, setDraft] = useState('');
 
   // Preserved across an older-page load so the viewport stays on the message the
   // user was reading instead of jumping as content is prepended above it.
@@ -76,19 +80,23 @@ export default function ChatThread({
     }
   }, [messages, chat.id]);
 
-  const submit = async () => {
-    const text = draft.trim();
-    if (!text || sending) return;
-    setDraft('');
-    atBottomRef.current = true;
-    // A failed send drops its optimistic bubble and hands the text back here, so
-    // the composer stays the single place unsent text lives. The error toast is
-    // the only feedback needed — a success toast per message would fire every
-    // few seconds in a live conversation, which is how operators learn to ignore
-    // toasts entirely. The bubble landing in the thread is the confirmation.
-    const ok = await send(text);
-    if (!ok) setDraft(text);
-  };
+  /**
+   * Send, with the view stuck to the bottom for the message about to land.
+   *
+   * A failed send drops its optimistic bubble and returns `false`; the composer
+   * restores the whole draft — text and staged uploads together — so it stays
+   * the single place unsent work lives. The error toast is the only feedback
+   * needed: a success toast per message would fire every few seconds in a live
+   * conversation, which is how operators learn to ignore toasts entirely. The
+   * bubble landing in the thread is the confirmation.
+   */
+  const sendMessage = useCallback(
+    (input: SendInput) => {
+      atBottomRef.current = true;
+      return send(input);
+    },
+    [send],
+  );
 
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col bg-background">
@@ -137,6 +145,23 @@ export default function ChatThread({
               />
             ))}
           </div>
+        ) : error && messages.length === 0 ? (
+          // A failed load with nothing to fall back on must not read as "this
+          // conversation is empty" — that is a different fact, and acting on it
+          // (messaging a fan you believe you have never spoken to) is a real
+          // mistake. The toast is transient; this state is the recoverable one.
+          <div className="flex flex-col items-center gap-3 py-10 text-center">
+            <p className="text-sm text-zinc-400">Couldn&apos;t load this conversation.</p>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={reload}
+              className="gap-1.5 text-zinc-400 hover:text-white"
+            >
+              <RotateCw className="size-3.5" />
+              Try again
+            </Button>
+          </div>
         ) : messages.length === 0 ? (
           <p className="py-8 text-center text-sm text-zinc-400">No messages yet.</p>
         ) : (
@@ -154,49 +179,17 @@ export default function ChatThread({
         )}
       </div>
 
-      <footer className="shrink-0 border-t border-white/[0.07] p-3">
-        {chat.canSendMessage ? (
-          <div className="flex items-end gap-2">
-            <Textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                // `isComposing` guards the IME: the Enter that commits a Japanese
-                // or Korean candidate must not also send the half-typed message.
-                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  submit();
-                }
-              }}
-              placeholder="Type a message…"
-              aria-label={`Message ${chat.fan.name}`}
-              rows={1}
-              className="max-h-40 min-h-[2.5rem] resize-none bg-zinc-800 border-zinc-700 text-sm placeholder-zinc-400 focus:border-zinc-500"
-            />
-            <Button
-              onClick={submit}
-              disabled={!draft.trim() || sending}
-              // Action Blue Deep, not the stock `default` variant: under `.dark`
-              // `--primary` resolves to near-white, which made the one primary
-              // action in this window the loudest pixel on the screen and broke
-              // the One Voice Rule. Deep rather than #3b82f6 because white ink on
-              // #3b82f6 measures 3.68:1 and fails AA; on #2563eb it reads 5.17:1.
-              className="h-10 shrink-0 bg-[#2563eb] text-white hover:bg-[#1d4ed8]"
-            >
-              {sending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <SendHorizontal className="size-4" />
-              )}
-              Send
-            </Button>
-          </div>
-        ) : (
-          <p className="py-2 text-center text-sm text-zinc-400">
-            You cannot send messages to this fan.
-          </p>
-        )}
-      </footer>
+      {/* The composer owns everything unsent: text, staged attachments, price,
+          and the per-thread draft. It is keyed with the thread, so switching
+          chats loads that chat's draft rather than carrying one across. */}
+      <MessageComposer
+        accountId={accountId}
+        chatId={chat.id}
+        fanName={chat.fan.name}
+        canSend={chat.canSendMessage}
+        sending={sending}
+        send={sendMessage}
+      />
     </section>
   );
 }
@@ -231,33 +224,39 @@ function MessageBubble({ message, timeZone }: { message: OFMessageRow; timeZone?
       {/* 75% of a wide window runs past 120ch; the rem cap holds the line length
           in the readable band without shrinking bubbles on a narrow one. */}
       <div className="max-w-[min(75%,34rem)]">
-        <div
-          className={cn(
-            'rounded-xl px-3 py-2 text-sm whitespace-pre-wrap break-words',
-            message.fromMe
-              ? 'bg-[#3b82f6]/15 border border-[#3b82f6]/30 text-foreground'
-              : 'bg-white/[0.04] border border-white/[0.07] text-foreground',
-          )}
-        >
-          {message.text || (message.mediaCount > 0 ? null : <span className="text-zinc-400">—</span>)}
+        {message.isTip ? (
+          <TipBubble message={message} />
+        ) : (
+          <div
+            className={cn(
+              'rounded-xl px-3 py-2 text-sm whitespace-pre-wrap break-words',
+              message.fromMe
+                ? 'bg-[#3b82f6]/15 border border-[#3b82f6]/30 text-foreground'
+                : 'bg-white/[0.04] border border-white/[0.07] text-foreground',
+            )}
+          >
+            {message.text ||
+              (message.mediaCount > 0 ? null : <span className="text-zinc-400">—</span>)}
 
-          {message.mediaCount > 0 && (
-            <span
-              className={cn(
-                'mt-1 flex items-center gap-1.5 text-xs text-zinc-400',
-                message.text && 'border-t border-white/[0.07] pt-1.5',
-              )}
-            >
-              <Paperclip className="size-3" />
-              {message.mediaCount} attachment{message.mediaCount === 1 ? '' : 's'}
-              {message.price > 0 && (
-                <span className="tabular-nums text-orange-400">
-                  {formatMoney(message.price)} {message.isOpened ? 'unlocked' : 'locked'}
-                </span>
-              )}
-            </span>
-          )}
-        </div>
+            <MessageAttachments message={message} />
+
+            {/* PPV price sits on the bubble, not the tile: it is a property of
+                the message, and a four-photo set would otherwise repeat it four
+                times. Orange is the semantic "awaiting" hue, green "paid" (§2).
+                Tips never reach here — `price` means something else on those. */}
+            {message.price > 0 && (
+              <span
+                className={cn(
+                  'mt-1.5 flex items-center gap-1.5 border-t border-white/[0.07] pt-1.5 text-xs tabular-nums',
+                  message.isOpened ? 'text-green-400' : 'text-orange-400',
+                )}
+              >
+                {message.isOpened ? <LockOpen className="size-3" /> : <Lock className="size-3" />}
+                {formatMoney(message.price)} {message.isOpened ? 'unlocked' : 'locked'}
+              </span>
+            )}
+          </div>
+        )}
 
         <div
           className={cn(
@@ -265,11 +264,74 @@ function MessageBubble({ message, timeZone }: { message: OFMessageRow; timeZone?
             message.fromMe ? 'justify-end' : 'justify-start',
           )}
         >
-          {message.isTip && <span className="tabular-nums text-green-400">Tip</span>}
           <span className="tabular-nums">{formatClock(message.createdAt, timeZone)}</span>
           {message.pending && <span>Sending…</span>}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A tip — the one moment in this window that is unambiguously good news.
+ *
+ * **What was wrong.** `price` carries the *tip amount* on a tip message (the
+ * provider has no separate field), so the shared PPV row rendered a $50 tip as
+ * "$50 locked" — not merely ugly, false. And the amount never appeared at all:
+ * the footer said "Tip" and nothing else, so the single number an operator most
+ * wants to see was the one thing the thread would not show them.
+ *
+ * **Why it looks like this.** A tip is not speech, so it does not get a speech
+ * bubble; it is an event, and it reads as one. The amount is the content, so it
+ * is set at display size with the digits carrying the line and the `$` stepped
+ * down beside them — the way money is typeset when someone means it. The fan's
+ * note hangs below a hairline as what it is: words attached to the money, not a
+ * message that happens to be green.
+ *
+ * **Why it does not celebrate.** Tips arrive all day, and this is a surface an
+ * operator lives in for a whole shift — anything that animates would be charming
+ * twice and irritating for the rest of the year. [DESIGN.md](../../../../DESIGN.md)
+ * also reserves celebration for exactly one screen (`/onboarding/done`) and says
+ * in as many words not to extend that vocabulary, because its scarcity is the
+ * point. So the delight here is entirely in the typesetting and the hierarchy,
+ * which cost nothing to see for the thousandth time. Green is the existing
+ * semantic "paid" hue (§2's tinted triad), not a new colour invented for this.
+ */
+function TipBubble({ message }: { message: OFMessageRow }) {
+  const amount = message.tipAmount ?? 0;
+  const { symbol, digits } = splitMoney(amount);
+
+  return (
+    <div className="rounded-xl border border-green-500/30 bg-green-500/[0.09] px-3.5 py-3">
+      {/* One baseline, read as a sentence rather than a stat card: the digits
+          are the loud part, "tip" trails them at label size. `items-baseline`
+          is what keeps the three sizes sitting on one line instead of
+          centring into a stack. */}
+      <p className="flex flex-wrap items-baseline gap-x-1.5 text-green-400">
+        <HandCoins className="size-4 shrink-0 self-center" aria-hidden />
+        {amount > 0 ? (
+          <>
+            <span className="text-[0.9375rem] font-medium opacity-70">{symbol}</span>
+            <span className="text-2xl font-semibold leading-none tracking-tight tabular-nums">
+              {digits}
+            </span>
+            <span className="text-sm font-medium">tip</span>
+          </>
+        ) : (
+          // The amount could not be read from the payload. Say "Tip" and stop —
+          // rendering "$0" states a falsehood about money, which is the worse
+          // failure by a distance.
+          <span className="text-sm font-medium">Tip</span>
+        )}
+      </p>
+
+      {message.text && (
+        <p className="mt-2.5 border-t border-green-500/20 pt-2.5 text-sm whitespace-pre-wrap break-words text-foreground">
+          {message.text}
+        </p>
+      )}
+
+      <MessageAttachments message={message} />
     </div>
   );
 }

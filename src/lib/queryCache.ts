@@ -18,6 +18,29 @@ export function getCache<T>(key: string, ttlMs: number): T | null {
   }
 }
 
+/**
+ * Like `getCache`, but tells you *how old* the hit is.
+ *
+ * Stale-while-revalidate needs two thresholds, not one: a short "still fresh,
+ * don't even ask the network" window and a much longer "show this immediately
+ * while we check" window. A boolean hit cannot express that.
+ */
+export function getCacheEntry<T>(key: string, ttlMs: number): { data: T; ageMs: number } | null {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const entry = JSON.parse(raw) as CacheEntry<T>;
+    const ageMs = Date.now() - entry.cachedAt;
+    if (ageMs > ttlMs) {
+      sessionStorage.removeItem(key);
+      return null;
+    }
+    return { data: entry.data, ageMs };
+  } catch {
+    return null;
+  }
+}
+
 export function setCache<T>(key: string, data: T): void {
   try {
     const entry: CacheEntry<T> = { data, cachedAt: Date.now() };
