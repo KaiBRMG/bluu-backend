@@ -570,6 +570,8 @@ export interface SmmAccount {
   isViralBonus: boolean;
   /** uid of the SMM whose page suggestion added this account — earns the $2 share. */
   suggestedBy: string | null;
+  suggestedByName?: string;          // resolved server-side (viral + admin scopes)
+  suggestedByPhotoURL?: string | null;
   assigned: string | null;           // uid, single value
   assignedName?: string;             // resolved server-side (admin scope only)
   assignedPhotoURL?: string | null;
@@ -642,7 +644,7 @@ export interface SmmSubmission {
   bonusAmount: number;               // dollars, may be fractional
   sysComments: string;               // '\n'-joined system comment lines
   adminApproval: SmmAdminApproval;
-  isResidual: boolean;               // auto-created for the original account's owner
+  isResidual: boolean;               // auto-created share (rule 3️⃣) — not filed by its recipient
 }
 
 /**

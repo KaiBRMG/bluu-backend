@@ -106,9 +106,14 @@ export async function findAccountByHandle(handle: string): Promise<DocumentSnaps
  * bonus and its `suggestedBy` earns the $2 page-suggestion share. Returns null
  * when the handle is not in `twitterx-accounts` — callers must refuse the copy
  * rather than silently record a sourceless post.
+ *
+ * `isViralBonus` comes back so callers can enforce the second gate: only a
+ * listed Viral Account may be copied from. It is returned rather than filtered
+ * here so the caller can tell "not in the database" (add it) apart from "not a
+ * viral account" (contact your team leader) — two different fixes.
  */
 export async function resolveOriginalAccount(originalLink: string): Promise<
-  { id: string; name: string; network: SmmNetwork } | null
+  { id: string; name: string; network: SmmNetwork; isViralBonus: boolean } | null
 > {
   const doc = await findAccountByHandle(extractAccountHandle(originalLink));
   if (!doc) return null;
@@ -117,6 +122,7 @@ export async function resolveOriginalAccount(originalLink: string): Promise<
     id: doc.id,
     name: (d.accountName as string) ?? '',
     network: (d.network ?? 'Other') as SmmNetwork,
+    isViralBonus: d.isViralBonus === true,
   };
 }
 

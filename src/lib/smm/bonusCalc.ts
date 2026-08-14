@@ -20,6 +20,12 @@ export interface TierRule {
  * Target-bonus rules per tier, evaluated top-down — highest bonus first, so a
  * post that clears a higher threshold within its window earns the larger
  * amount (confirmed with the user; SMM.md lists the same rules ascending).
+ *
+ * **The +12h on every window is deliberate, not a rounding slip.** The manual
+ * states the targets in whole days ("within 3 days"); the extra half-day is a
+ * filing grace, so an SMM whose post hit its target on day 3 can still submit
+ * it the following morning. Confirmed with the user — do not "fix" these to
+ * bare multiples of DAY_MS.
  */
 export const TIER_RULES: Record<SmmTier, TierRule[]> = {
   1: [
@@ -61,13 +67,6 @@ export interface BonusResult {
   bonusAmount: number;
   status: SmmSubmissionStatus;
   sysComments: string;
-  /**
-   * Amount owed to the original account's owner when a viral post was copied
-   * — the halved target bonus, frozen BEFORE the network step (per SMM.md the
-   * residual submission is created between the halving and network steps).
-   * null when there is no viral copy or the submission did not qualify.
-   */
-  residualBonusAmount: number | null;
 }
 
 export function calculateBonus(input: BonusInput): BonusResult {
@@ -78,17 +77,19 @@ export function calculateBonus(input: BonusInput): BonusResult {
 
   if (!rule) {
     // Not qualified: $0 total, no viral or network adjustments (user decision).
-    return { bonusAmount: 0, status: SMM_STATUS_LATE, sysComments: '', residualBonusAmount: null };
+    return { bonusAmount: 0, status: SMM_STATUS_LATE, sysComments: '' };
   }
 
   let bonusAmount = rule.amount;
   const comments = [`1️⃣ Target Bonus: $${rule.amount}`];
-  let residualBonusAmount: number | null = null;
 
+  // Rule 6️⃣ pays the COPIER half of the tier target and nobody else — the
+  // owner of the copied page receives nothing. Halving before the network step
+  // is what makes the network bonus survive it whole ("half of the bonus
+  // depending what Tier the page you upload to is").
   if (input.hasOriginalLink) {
     bonusAmount /= 2;
     comments.push('6️⃣ Viral Post copied, bonus halved');
-    residualBonusAmount = bonusAmount;
   }
 
   if (input.network === 'Inhouse') {
@@ -106,5 +107,5 @@ export function calculateBonus(input: BonusInput): BonusResult {
     comments.push(`2️⃣ Network Bonus: half Tier 1 Target Bonus ($${share})`);
   }
 
-  return { bonusAmount, status: SMM_STATUS_QUALIFIED, sysComments: comments.join('\n'), residualBonusAmount };
+  return { bonusAmount, status: SMM_STATUS_QUALIFIED, sysComments: comments.join('\n') };
 }

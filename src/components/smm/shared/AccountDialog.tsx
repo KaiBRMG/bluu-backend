@@ -97,7 +97,12 @@ export function AccountDialog({
 
   if (!account) return null;
 
+  // Both fall back to the cached basic-users map: the names are resolved
+  // server-side only on the viral/admin scopes, and the dashboard reads
+  // `scope=mine`.
   const assignedName = account.assignedName ?? (account.assigned ? names[account.assigned] ?? '' : '');
+  const suggestedByName = account.suggestedByName
+    ?? (account.suggestedBy ? names[account.suggestedBy] ?? '' : '');
   const editing = mode === 'edit' && form;
 
   const patch = (updates: Partial<SmmAccountPayload>) =>
@@ -229,6 +234,14 @@ export function AccountDialog({
           ) : account.isViralBonus ? (
             <Field label="Viral account"><Badge variant="secondary">Viral posts may be copied</Badge></Field>
           ) : null}
+          {/* Read-only in BOTH modes: `suggestedBy` is stamped when a page
+              suggestion is approved and is deliberately absent from the account
+              PATCH allowlist, so it can't be reassigned by hand. */}
+          {account.suggestedBy && (
+            <Field label="Suggested by">
+              <UserChip name={suggestedByName} photoURL={account.suggestedByPhotoURL ?? null} />
+            </Field>
+          )}
           <Field label="Comments">
             {editing ? (
               <Textarea

@@ -39,11 +39,13 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         .get();
       const accounts = snap.docs.map(serializeAccount)
         .filter((a) => a.status === 'active');
-      const names = await resolveUserInfo(accounts.map((a) => a.assigned ?? ''));
+      // This listing shows who *suggested* the page (they earn the $2 share),
+      // not who it is assigned to — so only the suggesters are resolved.
+      const names = await resolveUserInfo(accounts.map((a) => a.suggestedBy ?? ''));
       for (const a of accounts) {
-        if (a.assigned) {
-          a.assignedName = names.get(a.assigned)?.displayName ?? '';
-          a.assignedPhotoURL = names.get(a.assigned)?.photoURL ?? null;
+        if (a.suggestedBy) {
+          a.suggestedByName = names.get(a.suggestedBy)?.displayName ?? '';
+          a.suggestedByPhotoURL = names.get(a.suggestedBy)?.photoURL ?? null;
         }
       }
       accounts.sort((a, b) => a.accountName.localeCompare(b.accountName));
@@ -63,12 +65,16 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       const snap = await (network ? base.where('network', '==', network) : base).get();
       const accounts = snap.docs.map(serializeAccount);
       const names = await resolveUserInfo(
-        accounts.flatMap((a) => [a.assigned ?? '', a.lastUpdatedBy]),
+        accounts.flatMap((a) => [a.assigned ?? '', a.suggestedBy ?? '', a.lastUpdatedBy]),
       );
       for (const a of accounts) {
         if (a.assigned) {
           a.assignedName = names.get(a.assigned)?.displayName ?? '';
           a.assignedPhotoURL = names.get(a.assigned)?.photoURL ?? null;
+        }
+        if (a.suggestedBy) {
+          a.suggestedByName = names.get(a.suggestedBy)?.displayName ?? '';
+          a.suggestedByPhotoURL = names.get(a.suggestedBy)?.photoURL ?? null;
         }
         a.lastUpdatedByName = names.get(a.lastUpdatedBy)?.displayName ?? '';
       }

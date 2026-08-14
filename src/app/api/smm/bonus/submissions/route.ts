@@ -98,29 +98,26 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'No active bonus round' }, { status: 400 });
     }
 
-    // 4. The other account(s) a bonus can involve, recorded on the post:
-    //      - originalAcc: the page whose viral post was copied (residual)
+    // 4. The other accounts a bonus involves, recorded on the post:
+    //      - originalAcc: the page whose viral post was copied. Copied to the
+    //                     submission as an id for audit only — rule 6️⃣ pays its
+    //                     owner nothing, so the doc is never read.
     //      - sourceAcc:   the creator page the content was uploaded FROM. Its
     //                     network drives the network bonus (NOT the posting
     //                     page's — the manual pays for uploading *from* the
     //                     inhouse / X managed / twink lists), and its
     //                     `suggestedBy` earns the $2 page-suggestion share.
-    //    Since a post's source is *derived* from its copy declaration these are
-    //    the same account on every post written today (older posts may still
-    //    carry a hand-picked source), so the ids are deduped before the getAll.
+    //                     This is the ONLY account doc that has to be loaded.
     const isViralCopy = post.isViralCopy === true;
     const originalLink = isViralCopy ? (post.originalLink as string) ?? '' : '';
     const originalNormalized = isViralCopy ? (post.originalLinkNormalized as string) ?? '' : '';
     const originalAccId = isViralCopy ? (post.originalAcc as string) ?? '' : '';
     const sourceAccId = (post.sourceAcc as string) ?? '';
 
-    const extraIds = [...new Set([originalAccId, sourceAccId].filter(Boolean))];
-    const extraSnaps = extraIds.length > 0
-      ? await adminDb.getAll(...extraIds.map((id) => adminDb.collection(SMM_ACCOUNTS).doc(id)))
-      : [];
-    const byId = new Map(extraSnaps.filter((s) => s.exists).map((s) => [s.id, s.data()!]));
-    const originalAccount = originalAccId ? byId.get(originalAccId) ?? null : null;
-    const sourceAccount = sourceAccId ? byId.get(sourceAccId) ?? null : null;
+    const sourceSnap = sourceAccId
+      ? await adminDb.collection(SMM_ACCOUNTS).doc(sourceAccId).get()
+      : null;
+    const sourceAccount = sourceSnap?.exists ? sourceSnap.data()! : null;
 
     // No recorded source ⇒ 'Other' ⇒ no network bonus.
     const sourceNetwork = (sourceAccount?.network ?? 'Other') as SmmNetwork;
@@ -149,7 +146,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       hasOriginalLink: isViralCopy,
     });
 
-    // 7. Single batch: the submission (+ optional residual). No userTotals
+    // 7. Single batch: the submission (+ an optional 3️⃣ share). No userTotals
     //    write — totals move on admin approval.
     const batch = adminDb.batch();
     const submissionDate = FieldValue.serverTimestamp();
@@ -181,24 +178,27 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     // Flag the source post so its calendar card shows the 💰 bonus indicator.
     batch.update(postRef, { bonusSubmission: true });
 
-    // 8. Shares paid to OTHER SMMs off this submission. Both are their own
-    //    pending submission docs, so an admin approves each on its own merits.
-    //    They are independent and can both fire on one post.
+    // 8. The one share paid to ANOTHER SMM off this submission — rule 3️⃣, a
+    //    flat $2 to whoever suggested the creator page this content came from
+    //    ("if a page you suggested was approved and ANOTHER SMM uses their
+    //    content"), so never to the submitter themselves. It is its own pending
+    //    submission doc, approved by an admin on its own merits.
+    //
+    //    Rule 6️⃣ pays NO share: copying halves the copier's own bonus and the
+    //    copied page's owner receives nothing. `originalAccount` is still
+    //    loaded above because the copy declaration is recorded on the
+    //    submission, it just no longer triggers a payout.
     const suggestedBy = (sourceAccount?.suggestedBy as string) ?? '';
-    // Rule 3️⃣: a flat $2 to whoever suggested the creator page this content
-    // came from — "if a page you suggested was approved and ANOTHER SMM uses
-    // their content", so never to the submitter themselves.
     const paysSuggestionShare = result.status === SMM_STATUS_QUALIFIED
       && !!suggestedBy
       && suggestedBy !== token.uid;
 
-    const paysResidual = result.residualBonusAmount !== null && !!originalAccount?.assigned;
-    // Both share comments name the submitter — resolve it once, and only when
-    // a share is actually being written.
-    const names = paysSuggestionShare || paysResidual ? await resolveUserInfo([token.uid]) : null;
+    // The share comment names the submitter — resolve it only when a share is
+    // actually being written.
+    const names = paysSuggestionShare ? await resolveUserInfo([token.uid]) : null;
     const submitterName = names?.get(token.uid)?.displayName ?? 'another SMM';
 
-    /** Every share doc is this post's submission, re-pointed at another SMM. */
+    /** A share doc is this post's submission, re-pointed at another SMM. */
     const shareDoc = (recipient: string, amount: number, comment: string) => ({
       postLink: post.postLink ?? '',
       postLinkNormalized: '', // not the recipient's own post — keep out of dup checks
@@ -236,20 +236,6 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       suggestionShareCreated = true;
     }
 
-    // Rule 6️⃣ — residual for the copied account's owner (viral copy only).
-    let residualCreated = false;
-    if (paysResidual) {
-      batch.set(
-        roundSnap.ref.collection(SMM_SUBMISSIONS_SUB).doc(),
-        shareDoc(
-          originalAccount!.assigned as string,
-          result.residualBonusAmount!,
-          `6️⃣ Viral Post residual from ${submitterName}`,
-        ),
-      );
-      residualCreated = true;
-    }
-
     await batch.commit();
 
     return NextResponse.json({
@@ -257,7 +243,6 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       bonusAmount: result.bonusAmount,
       status: result.status,
       sysComments: result.sysComments,
-      residualCreated,
       suggestionShareCreated,
     });
   } catch (error) {

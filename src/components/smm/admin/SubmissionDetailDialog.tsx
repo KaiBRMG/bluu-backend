@@ -87,7 +87,7 @@ export function SubmissionDetailDialog({
           <DialogTitle className="flex items-center gap-2">
             {submission.accountName}
             <ApprovalBadge value={submission.adminApproval} />
-            {submission.isResidual && <span className="text-xs text-muted-foreground">(residual)</span>}
+            {submission.isResidual && <span className="text-xs text-muted-foreground">(auto-shared)</span>}
           </DialogTitle>
         </DialogHeader>
 

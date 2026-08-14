@@ -18,6 +18,10 @@ const COLS = 4;
  * Read-only listing of every account SMMs may copy viral posts from
  * (`isViralBonus`), grouped by network. Small enough to load in one request,
  * so — unlike the admin database — nothing here is lazy.
+ *
+ * The last column is the page's **suggester** (`suggestedBy`), not its assignee:
+ * on this page the interesting relationship is who nominated the page and
+ * therefore earns the $2 share each time someone copies from it.
  */
 export function ViralAccountsTable({
   accounts,
@@ -62,7 +66,7 @@ export function ViralAccountsTable({
             <TableHead className="min-w-40">Account</TableHead>
             <TableHead className="min-w-44">Link</TableHead>
             <TableHead className="min-w-44">Type</TableHead>
-            <TableHead className="min-w-40">Assigned</TableHead>
+            <TableHead className="min-w-40">Suggested by</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -91,9 +95,9 @@ export function ViralAccountsTable({
                       : <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell>
-                    {account.assigned
-                      ? <UserAvatarLabel name={account.assignedName ?? ''} photoURL={account.assignedPhotoURL ?? null} size="md" />
-                      : <span className="text-muted-foreground">No One</span>}
+                    {account.suggestedBy
+                      ? <UserAvatarLabel name={account.suggestedByName ?? ''} photoURL={account.suggestedByPhotoURL ?? null} size="md" />
+                      : <span className="text-muted-foreground">—</span>}
                   </TableCell>
                 </TableRow>
               )) : []),

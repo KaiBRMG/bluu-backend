@@ -43,8 +43,10 @@ export interface EligibilityResult {
    * The account that handle resolves to in `twitterx-accounts` — the copy's
    * origin AND the post's "uploaded from" source (its network pays the network
    * bonus). null when the handle isn't in the database, which blocks the copy.
+   * A resolved account with `isViralBonus: false` blocks it too — it is not a
+   * page SMMs may copy from.
    */
-  account: { id: string; name: string; network: SmmNetwork } | null;
+  account: { id: string; name: string; network: SmmNetwork; isViralBonus: boolean } | null;
   /** Every record found for the pasted link — the result card's full report. */
   report: ViralLinkReport;
 }
@@ -62,7 +64,6 @@ export interface SubmitBonusResult {
   bonusAmount: number;
   status: string;
   sysComments: string;
-  residualCreated: boolean;
   suggestionShareCreated: boolean;
 }
 

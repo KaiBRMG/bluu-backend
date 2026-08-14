@@ -140,9 +140,6 @@ export function BonusWizard({
             <div className="rounded-lg border p-4 text-center space-y-1">
               <p className="text-sm text-muted-foreground">{result.status}</p>
               <p className="text-2xl font-semibold tabular-nums">{formatMoney(result.bonusAmount)}</p>
-              {result.residualCreated && (
-                <p className="text-xs text-muted-foreground">A residual bonus was shared with the original account’s owner.</p>
-              )}
               {result.suggestionShareCreated && (
                 <p className="text-xs text-muted-foreground">
                   A $2 share was sent to the SMM who suggested this creator page.

@@ -238,6 +238,15 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
           { status: 404 },
         );
       }
+      // Only a listed Viral Account may be copied from. An admin un-ticking
+      // `isViralBonus` retires the page immediately — the client shows the same
+      // message, but this is the enforcement.
+      if (!original.isViralBonus) {
+        return NextResponse.json(
+          { error: 'The selected account is not a viral account you may copy posts from. Please only use accounts from Viral Accounts. If you think this is a mistake, contact your team leader.' },
+          { status: 400 },
+        );
+      }
       source = { id: original.id, name: original.name };
     }
 

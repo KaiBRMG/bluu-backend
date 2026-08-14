@@ -107,7 +107,10 @@ function ReportSubmissionRow({ submission }: { submission: SmmSubmission }) {
  * eligibility check resolves it against `twitterx-accounts` and returns it.
  * That account is also the post's "uploaded from" source, which is what pays
  * the network bonus; an unknown handle therefore blocks the copy too, rather
- * than recording a post whose source nobody can price.
+ * than recording a post whose source nobody can price. A handle that resolves
+ * to an account which is not `isViralBonus` blocks it as well — only pages
+ * listed on Viral Accounts may be copied from, so un-ticking that flag retires
+ * a page for everyone straight away.
  *
  * The result here is advisory — POST /api/smm/posts re-runs both checks.
  */
@@ -176,18 +179,22 @@ export function ViralCopyDialog({
     }
   };
 
-  // Both gates must pass: the source is old enough to copy, AND its account is
-  // one we can price a network bonus from.
+  // Three gates must pass: the account exists, it is a listed Viral Account,
+  // and the source is old enough to copy.
   const accountFound = !!eligibility?.account;
-  const canContinue = !!eligibility?.eligible && accountFound;
+  const isViralAccount = eligibility?.account?.isViralBonus === true;
+  const canContinue = !!eligibility?.eligible && accountFound && isViralAccount;
 
   // The single verdict, in the order the gates are applied: an unknown account
-  // blocks regardless of age, so it wins over the two-week rule.
+  // blocks regardless of anything else, and a non-viral one blocks regardless
+  // of age — so both win over the two-week rule.
   const statusLabel = !accountFound
     ? 'Account not found'
-    : eligibility?.eligible
-      ? (eligibility.found ? 'Eligible — old enough to copy' : 'Eligible — never used')
-      : 'Already used recently';
+    : !isViralAccount
+      ? 'Not a viral account'
+      : eligibility?.eligible
+        ? (eligibility.found ? 'Eligible — old enough to copy' : 'Eligible — never used')
+        : 'Already used recently';
 
   const report = eligibility?.report;
 
@@ -241,14 +248,18 @@ export function ViralCopyDialog({
               <DialogTitle>
                 {!accountFound
                   ? '⚠️ Account Not Found'
-                  : eligibility.eligible ? '✅ Eligible' : '⚠️ Already Used Recently'}
+                  : !isViralAccount
+                    ? '⚠️ Not a Viral Account'
+                    : eligibility.eligible ? '✅ Eligible' : '⚠️ Already Used Recently'}
               </DialogTitle>
               <DialogDescription>
                 {!accountFound
                   ? `${eligibility.handle ? `@${eligibility.handle}` : 'That link'} isn’t in the account database, so we can’t tell which network you uploaded from. Use a post from a listed creator page, ask an admin to add it, or go back and answer “No”.`
-                  : eligibility.eligible
-                    ? 'This original post can be copied. Your bonus for it will be halved.'
-                    : 'An original post may only be copied again once it is more than two weeks old. Go back and use a different post, or answer “No”.'}
+                  : !isViralAccount
+                    ? 'The selected account is not a viral account you may copy posts from. Please only use accounts from Viral Accounts. If you think this is a mistake, contact your team leader.'
+                    : eligibility.eligible
+                      ? 'This original post can be copied. Your bonus for it will be halved.'
+                      : 'An original post may only be copied again once it is more than two weeks old. Go back and use a different post, or answer “No”.'}
               </DialogDescription>
             </DialogHeader>
 
@@ -266,7 +277,15 @@ export function ViralCopyDialog({
                 <p>
                   <span className="text-muted-foreground">Account: </span>
                   {eligibility.account
-                    ? <>{eligibility.account.name}<span className="text-muted-foreground"> ({eligibility.account.network})</span></>
+                    ? (
+                      <>
+                        {eligibility.account.name}
+                        <span className="text-muted-foreground"> ({eligibility.account.network})</span>
+                        {!isViralAccount && (
+                          <span className="text-destructive"> — not a Viral Account</span>
+                        )}
+                      </>
+                    )
                     : <span className="text-destructive">
                         {eligibility.handle ? `@${eligibility.handle} — not in the account database` : 'Not found in the database'}
                       </span>}
