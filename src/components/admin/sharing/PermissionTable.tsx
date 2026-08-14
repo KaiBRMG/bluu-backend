@@ -1,9 +1,34 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { toast } from "sonner";
+import { CheckIcon, ChevronsUpDownIcon } from "lucide-react";
 import type { PagePermissionDoc } from "@/types/firestore";
+import { GROUP_DISPLAY_NAMES } from "@/types/firestore";
 import type { PageDef } from "@/lib/definitions";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 
 interface AdminGroup {
   id: string;
@@ -19,16 +44,24 @@ interface AdminUser {
   photoURL?: string;
 }
 
+type PermissionMap = { groups: Record<string, true>; users: Record<string, true> };
+
 interface PermissionTableProps {
   pages: PageDef[];
   teamspaceName: string;
   pagePermissions: PagePermissionDoc[];
   groups: AdminGroup[];
   users: AdminUser[];
-  onUpdatePermission: (
-    pageId: string,
-    permissions: { groups: Record<string, true>; users: Record<string, true> }
-  ) => Promise<void>;
+  onUpdatePermission: (pageId: string, permissions: PermissionMap) => Promise<void>;
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
+/** A group's human label. Falls back through the fetched name to the raw id. */
+function groupLabel(group: AdminGroup): string {
+  return GROUP_DISPLAY_NAMES[group.id] || group.name || group.id;
 }
 
 export default function PermissionTable({
@@ -39,225 +72,302 @@ export default function PermissionTable({
   users,
   onUpdatePermission,
 }: PermissionTableProps) {
-  const [saving, setSaving] = useState<string | null>(null);
-  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  // Per-page in-flight set: two rows can save concurrently without one
+  // clearing the other's disabled state.
+  const [savingPages, setSavingPages] = useState<ReadonlySet<string>>(new Set());
+  const [openPicker, setOpenPicker] = useState<string | null>(null);
 
-  // Filter out 'unassigned' group, sort by level
-  const assignableGroups = groups
-    .filter((g) => g.id !== "unassigned")
-    .sort((a, b) => a.level - b.level);
+  // Filter out 'unassigned' group, sort by level. `.filter()` copies, so the
+  // sort never touches the prop array.
+  const assignableGroups = useMemo(
+    () => groups.filter((g) => g.id !== "unassigned").sort((a, b) => a.level - b.level),
+    [groups]
+  );
 
-  // Get permission doc for a page
-  const getPermDoc = (pageId: string): PagePermissionDoc | undefined =>
-    pagePermissions.find((p) => p.pageId === pageId);
+  // Never sort the prop array in place — it is owned by useAdminData's state.
+  const sortedPages = useMemo(
+    () => [...pages].sort((a, b) => a.order - b.order),
+    [pages]
+  );
 
-  // Close dropdown on click outside
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setOpenDropdown(null);
+  const permByPageId = useMemo(() => {
+    const map = new Map<string, PagePermissionDoc>();
+    for (const doc of pagePermissions) map.set(doc.pageId, doc);
+    return map;
+  }, [pagePermissions]);
+
+  const currentPermissions = useCallback(
+    (pageId: string): PermissionMap => {
+      const doc = permByPageId.get(pageId);
+      return {
+        groups: { ...(doc?.groups || {}) } as Record<string, true>,
+        users: { ...(doc?.users || {}) } as Record<string, true>,
+      };
+    },
+    [permByPageId]
+  );
+
+  const setSaving = useCallback((pageId: string, saving: boolean) => {
+    setSavingPages((prev) => {
+      const next = new Set(prev);
+      if (saving) next.add(pageId);
+      else next.delete(pageId);
+      return next;
+    });
+  }, []);
+
+  /**
+   * Single write path for both group and user toggles. Every outcome is
+   * reported: success toasts, and revocations carry an Undo that re-applies
+   * the exact permission map we replaced.
+   */
+  const applyPermissions = useCallback(
+    async (opts: {
+      pageId: string;
+      pageTitle: string;
+      next: PermissionMap;
+      previous: PermissionMap;
+      granted: boolean;
+      subject: string;
+      /** Undo re-applies `previous`; it must not offer its own undo. */
+      isUndo?: boolean;
+    }) => {
+      const { pageId, pageTitle, next, previous, granted, subject, isUndo } = opts;
+      setSaving(pageId, true);
+      try {
+        await onUpdatePermission(pageId, next);
+
+        if (isUndo) {
+          toast.success("Change reverted");
+          return;
+        }
+
+        if (granted) {
+          toast.success(`${subject} can now access ${pageTitle}`);
+        } else {
+          toast.success(`${subject} no longer has access to ${pageTitle}`, {
+            action: {
+              label: "Undo",
+              onClick: () => {
+                void applyPermissions({
+                  pageId,
+                  pageTitle,
+                  next: previous,
+                  previous: next,
+                  granted: true,
+                  subject,
+                  isUndo: true,
+                });
+              },
+            },
+          });
+        }
+      } catch (err) {
+        toast.error(`Could not update ${pageTitle}`, {
+          description: errorMessage(err, "Access is unchanged. Please try again."),
+        });
+      } finally {
+        setSaving(pageId, false);
       }
-    }
-    if (openDropdown) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
-    }
-  }, [openDropdown]);
+    },
+    [onUpdatePermission, setSaving]
+  );
 
-  const handleGroupToggle = async (pageId: string, groupId: string, currentlyHasAccess: boolean) => {
-    setSaving(pageId);
-    try {
-      const permDoc = getPermDoc(pageId);
-      const currentGroups = { ...(permDoc?.groups || {}) };
-      const currentUsers = { ...(permDoc?.users || {}) };
+  const handleGroupToggle = useCallback(
+    (page: PageDef, group: AdminGroup, currentlyHasAccess: boolean) => {
+      const previous = currentPermissions(page.pageId);
+      const next = currentPermissions(page.pageId);
+      if (currentlyHasAccess) delete next.groups[group.id];
+      else next.groups[group.id] = true;
 
-      if (currentlyHasAccess) {
-        delete currentGroups[groupId];
-      } else {
-        currentGroups[groupId] = true;
-      }
+      void applyPermissions({
+        pageId: page.pageId,
+        pageTitle: page.title,
+        next,
+        previous,
+        granted: !currentlyHasAccess,
+        subject: groupLabel(group),
+      });
+    },
+    [applyPermissions, currentPermissions]
+  );
 
-      await onUpdatePermission(pageId, { groups: currentGroups as Record<string, true>, users: currentUsers as Record<string, true> });
-    } catch (err) {
-      console.error("Failed to update group permission:", err);
-    } finally {
-      setSaving(null);
-    }
-  };
+  const handleUserToggle = useCallback(
+    (page: PageDef, user: AdminUser, currentlyHasAccess: boolean) => {
+      const previous = currentPermissions(page.pageId);
+      const next = currentPermissions(page.pageId);
+      if (currentlyHasAccess) delete next.users[user.uid];
+      else next.users[user.uid] = true;
 
-  const handleUserToggle = async (pageId: string, uid: string, currentlyHasAccess: boolean) => {
-    setOpenDropdown(null);
-    setSaving(pageId);
-    try {
-      const permDoc = getPermDoc(pageId);
-      const currentGroups = { ...(permDoc?.groups || {}) };
-      const currentUsers = { ...(permDoc?.users || {}) };
-
-      if (currentlyHasAccess) {
-        delete currentUsers[uid];
-      } else {
-        currentUsers[uid] = true;
-      }
-
-      await onUpdatePermission(pageId, { groups: currentGroups as Record<string, true>, users: currentUsers as Record<string, true> });
-    } catch (err) {
-      console.error("Failed to update user permission:", err);
-    } finally {
-      setSaving(null);
-    }
-  };
-
-  const getSharedUserCount = (pageId: string): number => {
-    const permDoc = getPermDoc(pageId);
-    return Object.keys(permDoc?.users || {}).length;
-  };
+      void applyPermissions({
+        pageId: page.pageId,
+        pageTitle: page.title,
+        next,
+        previous,
+        granted: !currentlyHasAccess,
+        subject: user.displayName,
+      });
+    },
+    [applyPermissions, currentPermissions]
+  );
 
   return (
-    <div className="mb-8">
-      <h3
-        className="text-sm font-semibold uppercase tracking-wider mb-3 px-1"
-        style={{ color: "var(--foreground-muted)" }}
+    <section className="mb-8" aria-labelledby={`teamspace-${teamspaceName}`}>
+      <h2
+        id={`teamspace-${teamspaceName}`}
+        className="mb-3 px-1 text-sm font-semibold tracking-wider text-zinc-400 uppercase"
       >
         {teamspaceName}
-      </h3>
+      </h2>
 
-      <div
-        className="rounded-lg"
-        style={{ border: "1px solid var(--border-subtle)" }}
-      >
-        {/* Header */}
-        <div
-          className="grid items-center px-4 py-2 text-xs font-medium uppercase tracking-wider"
-          style={{
-            gridTemplateColumns: `180px repeat(${assignableGroups.length}, 80px) 1fr`,
-            background: "rgba(255, 255, 255, 0.03)",
-            color: "var(--foreground-muted)",
-            borderBottom: "1px solid var(--border-subtle)",
-          }}
-        >
-          <div>Page</div>
-          {assignableGroups.map((g) => (
-            <div key={g.id} className="text-center">{g.id}</div>
-          ))}
-          <div>Individuals</div>
-        </div>
-
-        {/* Rows */}
-        {pages
-          .sort((a, b) => a.order - b.order)
-          .map((page) => {
-            const permDoc = getPermDoc(page.pageId);
-            const sharedCount = getSharedUserCount(page.pageId);
-            const isDropdownOpen = openDropdown === page.pageId;
-
-            return (
-              <div
-                key={page.pageId}
-                className="px-4 py-3"
-                style={{
-                  borderBottom: "1px solid var(--border-subtle)",
-                  opacity: saving === page.pageId ? 0.6 : 1,
-                  transition: "opacity 120ms",
-                }}
+      <div className="overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.025]">
+        <Table>
+          <TableHeader>
+            <TableRow className="border-white/[0.07] hover:bg-transparent">
+              <TableHead
+                scope="col"
+                className="w-[180px] bg-white/[0.04] text-xs font-medium tracking-wider text-zinc-400 uppercase"
               >
-                <div
-                  className="grid items-center"
-                  style={{
-                    gridTemplateColumns: `180px repeat(${assignableGroups.length}, 80px) 1fr`,
-                  }}
+                Page
+              </TableHead>
+              {assignableGroups.map((g) => (
+                <TableHead
+                  key={g.id}
+                  scope="col"
+                  className="bg-white/[0.04] text-center text-xs font-medium tracking-wider text-zinc-400 uppercase"
                 >
-                  {/* Page name */}
-                  <div className="font-medium text-sm">{page.title}</div>
+                  {groupLabel(g)}
+                </TableHead>
+              ))}
+              <TableHead
+                scope="col"
+                className="w-full bg-white/[0.04] text-xs font-medium tracking-wider text-zinc-400 uppercase"
+              >
+                Individuals
+              </TableHead>
+            </TableRow>
+          </TableHeader>
 
-                  {/* Group checkboxes */}
+          <TableBody>
+            {sortedPages.map((page) => {
+              const permDoc = permByPageId.get(page.pageId);
+              const grantedUids = Object.keys(permDoc?.users || {});
+              const sharedCount = grantedUids.length;
+              const isSaving = savingPages.has(page.pageId);
+              const isPickerOpen = openPicker === page.pageId;
+
+              return (
+                <TableRow
+                  key={page.pageId}
+                  aria-busy={isSaving}
+                  className={`border-white/[0.07] transition-opacity hover:bg-white/[0.055] ${
+                    isSaving ? "opacity-60" : ""
+                  }`}
+                >
+                  {/* A real row header, so the checkboxes in this row have a
+                      programmatic name in the accessibility tree. */}
+                  <th
+                    scope="row"
+                    className="p-2 text-left align-middle text-sm font-medium"
+                  >
+                    <span className="block truncate" title={page.title}>
+                      {page.title}
+                    </span>
+                  </th>
+
                   {assignableGroups.map((g) => {
                     const hasAccess = !!permDoc?.groups?.[g.id];
                     return (
-                      <div key={g.id} className="flex justify-center">
-                        <Checkbox
-                          checked={hasAccess}
-                          onCheckedChange={() => handleGroupToggle(page.pageId, g.id, hasAccess)}
-                          disabled={saving === page.pageId}
-                        />
-                      </div>
+                      <TableCell key={g.id} className="text-center">
+                        <div className="flex justify-center">
+                          <Checkbox
+                            checked={hasAccess}
+                            onCheckedChange={() => handleGroupToggle(page, g, hasAccess)}
+                            disabled={isSaving}
+                            aria-label={`${groupLabel(g)} access to ${page.title}`}
+                          />
+                        </div>
+                      </TableCell>
                     );
                   })}
 
-                  {/* Users dropdown */}
-                  <div className="relative" ref={isDropdownOpen ? dropdownRef : undefined}>
-                    <button
-                      onClick={() => setOpenDropdown(isDropdownOpen ? null : page.pageId)}
-                      className="form-input text-sm flex items-center justify-between gap-2 w-full"
-                      style={{ padding: "4px 8px", maxWidth: "220px", cursor: "pointer" }}
-                      disabled={saving === page.pageId}
+                  <TableCell>
+                    <Popover
+                      open={isPickerOpen}
+                      onOpenChange={(open) => setOpenPicker(open ? page.pageId : null)}
                     >
-                      <span style={{ color: sharedCount > 0 ? "var(--foreground)" : "var(--foreground-muted)" }}>
-                        {sharedCount > 0
-                          ? `Shared with ${sharedCount} individual${sharedCount > 1 ? "s" : ""}`
-                          : "No individuals"}
-                      </span>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M6 9l6 6 6-6" />
-                      </svg>
-                    </button>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          role="combobox"
+                          aria-expanded={isPickerOpen}
+                          aria-label={`Individuals with access to ${page.title}`}
+                          disabled={isSaving}
+                          className="w-full max-w-[240px] justify-between font-normal"
+                        >
+                          <span className={sharedCount > 0 ? "truncate" : "truncate text-zinc-400"}>
+                            {sharedCount > 0
+                              ? `${sharedCount} individual${sharedCount > 1 ? "s" : ""}`
+                              : "No individuals"}
+                          </span>
+                          <ChevronsUpDownIcon className="size-3.5 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
 
-                    {isDropdownOpen && (
-                      <div
-                        className="absolute top-full left-0 mt-1 w-64 max-w-[calc(100vw-2rem)] max-h-60 overflow-y-auto rounded-lg z-50"
-                        style={{
-                          background: "var(--sidebar-background)",
-                          border: "1px solid var(--border-subtle)",
-                        }}
-                      >
-                        {users.length === 0 ? (
-                          <div className="px-3 py-2 text-xs" style={{ color: "var(--foreground-muted)" }}>
-                            No users available
-                          </div>
-                        ) : (
-                          users.map((u) => {
-                            const userHasAccess = !!permDoc?.users?.[u.uid];
-                            return (
-                              <button
-                                key={u.uid}
-                                onClick={() => handleUserToggle(page.pageId, u.uid, userHasAccess)}
-                                className="w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors"
-                                style={{
-                                  background: userHasAccess ? "rgba(59, 130, 246, 0.1)" : "transparent",
-                                }}
-                                onMouseEnter={(e) => {
-                                  if (!userHasAccess) e.currentTarget.style.background = "var(--hover-background)";
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.background = userHasAccess ? "rgba(59, 130, 246, 0.1)" : "transparent";
-                                }}
-                                disabled={saving === page.pageId}
-                              >
-                                {userHasAccess ? (
-                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2">
-                                    <polyline points="20 6 9 17 4 12" />
-                                  </svg>
-                                ) : (
-                                  <div className="w-4 h-4" />
-                                )}
-                                <div className="flex flex-col min-w-0">
-                                  <span className="truncate">{u.displayName}</span>
-                                  <span className="text-xs truncate" style={{ color: "var(--foreground-muted)" }}>
-                                    {u.workEmail}
-                                  </span>
-                                </div>
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+                      <PopoverContent align="start" className="w-72 p-0">
+                        <Command
+                          filter={(value, search) =>
+                            value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0
+                          }
+                        >
+                          <CommandInput placeholder="Search people…" />
+                          <CommandList>
+                            <CommandEmpty>No people found.</CommandEmpty>
+                            <CommandGroup>
+                              {users.map((u) => {
+                                const userHasAccess = !!permDoc?.users?.[u.uid];
+                                return (
+                                  <CommandItem
+                                    key={u.uid}
+                                    value={`${u.displayName} ${u.workEmail}`}
+                                    // Keep the picker open so several people can be
+                                    // granted in one pass.
+                                    onSelect={() => handleUserToggle(page, u, userHasAccess)}
+                                    disabled={isSaving}
+                                    className="gap-2"
+                                  >
+                                    <CheckIcon
+                                      className={`size-4 shrink-0 ${
+                                        userHasAccess ? "opacity-100" : "opacity-0"
+                                      }`}
+                                    />
+                                    <span className="flex min-w-0 flex-col">
+                                      <span className="truncate" title={u.displayName}>
+                                        {u.displayName}
+                                      </span>
+                                      <span
+                                        className="truncate text-xs text-zinc-400"
+                                        title={u.workEmail}
+                                      >
+                                        {u.workEmail}
+                                      </span>
+                                    </span>
+                                  </CommandItem>
+                                );
+                              })}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
       </div>
-    </div>
+    </section>
   );
 }

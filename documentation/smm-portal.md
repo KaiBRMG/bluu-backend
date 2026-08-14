@@ -27,7 +27,7 @@ The teamspace + pages are registered in `src/lib/definitions.ts` (`smm-portal`, 
 | `twitterx-accounts/{accountId}` | Twitter/X accounts. `type: string[]` (multi-select), `network` (drives the bonus only when the account is a post's **source**), `tier` (1\|2\|**null**), `isViralBonus: boolean`, `suggestedBy` (uid\|null — earns the $2 share), `assigned` (uid\|null), `status` (active\|inactive), `lastUpdatedTime`/`lastUpdatedBy` stamped on every write |
 | `twitterx-content-schedule/{accountId}/posts/{postId}` | Scheduled posts. **Subcollection** — the parent doc is never created. `bonusSubmission: boolean` is flipped to `true` when the post is submitted for a bonus (drives the calendar card's 💰). `isViralCopy`/`originalLink`/`originalLinkNormalized`/`originalAcc` record the copy declaration made at upload time. `postDate` carries a **time of day**, not just a date. No `mediaCode` — it was removed |
 | `twitterx-bonus/{roundId}` | A bonus round. `userTotals: map<uid, number>` |
-| `twitterx-bonus/{roundId}/submissions/{id}` | Bonus submissions (incl. auto-created residuals) |
+| `twitterx-bonus/{roundId}/submissions/{id}` | Bonus submissions. `isResidual: true` marks an auto-created **3️⃣ share** — filed by the system for its recipient, not submitted by them |
 | `twitterx-page-suggestions/{id}` | Viral-page nominations from the Viral Accounts page. `accountName` (handle, derived server-side from `accountLink`), `submittedBy`, `submissionDate`, `isApproved`, `isRejected` — the pending list queries the two booleans |
 
 All access is via Admin SDK API routes; `firestore.rules` denies client read/write on all five (subcollection matches are explicit — rules don't cascade).
@@ -41,7 +41,9 @@ All access is via Admin SDK API routes; `firestore.rules` denies client read/wri
 
 The UI mirrors this with the shared `TierField` (greyed out with *"Only bonus accounts can have a tier, set this in Type"* until 'Bonus' is selected; blocks save when a bonus account has no tier), and the Account Database hides the tier cell entirely on non-bonus rows.
 
-`isViralBonus` is a **different axis** and is often confused with the `'Bonus'` type: `'Bonus'` = this account may *submit* for a bonus; `isViralBonus` = SMMs may *copy viral posts from* this account (it is what the Viral Accounts page lists).
+`isViralBonus` is a **different axis** and is often confused with the `'Bonus'` type: `'Bonus'` = this account may *submit* for a bonus; `isViralBonus` = SMMs may *copy viral posts from* this account (it is what the Viral Accounts page lists, and the gate `POST /api/smm/posts` enforces on every copy declaration).
+
+`suggestedBy` is **read-only everywhere in the UI** — it is stamped only by suggestion approval and is deliberately absent from the account PATCH allowlist, so it cannot be reassigned by hand. `AccountDialog` renders it as a **Suggested by** field under the Viral account field in *both* modes (admin edit and dashboard view) for that reason.
 
 ### Denormalization (frozen at write time)
 - `posts.accountName` — denormalized from the account so calendars/tables render without an account read. On account rename, the PATCH route fans the new name out to the account's posts (chunked batches). Bonus submissions keep their frozen copies by design.
@@ -60,7 +62,7 @@ First `COLLECTION_GROUP` indexes in the repo: `posts (postedBy, postDate)` asc +
 
 | Route | Gate | Ownership |
 |---|---|---|
-| `accounts` GET `?scope=mine\|active\|viral\|all[&network=]` | mine/active: either; viral: xaccounts (or admin); all: admin | mine = `assigned==uid` + active; `all&network=` filters one group (single-equality, auto-indexed) for the admin database's lazy load |
+| `accounts` GET `?scope=mine\|active\|viral\|all[&network=]` | mine/active: either; viral: xaccounts (or admin); all: admin | mine = `assigned==uid` + active; `all&network=` filters one group (single-equality, auto-indexed) for the admin database's lazy load. **`viral` resolves `suggestedByName`/`suggestedByPhotoURL`, not `assignedName`** — that page shows the suggester; `all` resolves both |
 | `accounts/resolve` GET `?link=` | either | `{ exists }` or `{ exists, accountName, active, mine }` — `findAccountByHandle` (one `in`, `limit(1)`). Never returns the `assigned` uid. Only powers the schedule dialog's error copy; no authorization decision rests on it |
 | `accounts` POST, `accounts/[id]` PATCH/DELETE | admin | DELETE also `recursiveDelete`s the posts subtree |
 | `posts` GET `?view=week\|all`, `?accountId=` | dashboard (accountId: either) | own posts; inactive-account posts filtered out server-side |
@@ -71,7 +73,7 @@ First `COLLECTION_GROUP` indexes in the repo: `posts (postedBy, postDate)` asc +
 | `bonus/rounds` GET/POST | GET per scope; POST admin | |
 | `bonus/rounds/[roundId]/totals` PATCH | admin | absolute payout override |
 | `bonus/rounds/[roundId]/submissions/[submissionId]` PATCH/DELETE | admin | applies the totals delta (below) |
-| `bonus/eligibility` GET `?link=` | dashboard | advisory — re-checked when the **post is created**. Also returns `handle` + the resolved `account` (`{id,name,network}` or `null`) so the dialog can show the source and block an unknown one |
+| `bonus/eligibility` GET `?link=` | dashboard | advisory — re-checked when the **post is created**. Also returns `handle` + the resolved `account` (`{id,name,network,isViralBonus}` or `null`) so the dialog can show the source and block an unknown **or non-viral** one |
 | `bonus/submissions` POST | dashboard | own post; account type must contain 'Bonus' and carry a tier; server computes everything |
 | `suggestions` GET | admin | pending viral-page nominations |
 | `suggestions` POST | viral | submitter + timestamp + handle all derived server-side |
@@ -83,7 +85,7 @@ First `COLLECTION_GROUP` indexes in the repo: `posts (postedBy, postDate)` asc +
 ## Bonus system
 
 ### Calculation (`src/lib/smm/bonusCalc.ts` — pure, server-only)
-`calculateBonus({tier, network, numLikes, postDateMs, submissionDateMs, hasOriginalLink})` → `{bonusAmount, status, sysComments, residualBonusAmount}`.
+`calculateBonus({tier, network, numLikes, postDateMs, submissionDateMs, hasOriginalLink})` → `{bonusAmount, status, sysComments}`.
 
 **The two inputs come from two different accounts** — the single most confusable thing in this subsystem:
 - `tier` ← the **page the SMM posted on** (`accountId`). Only bonus accounts are tiered.
@@ -92,13 +94,19 @@ First `COLLECTION_GROUP` indexes in the repo: `posts (postedBy, postDate)` asc +
 
 Pipeline:
 1. **Target bonus**, evaluated highest-first. Tier 1: 35k→$25 / 20k→$10 / 10k→$5; Tier 2: 35k→$15 / 20k→$7 / 10k→$3 (windows 7d12h / 5d12h / 3d12h). No rule matched ⇒ `❌ Late submission`, $0, STOP (no network bonus on late).
-2. **Viral halving** if `hasOriginalLink` and qualified — `residualBonusAmount` = the halved value, captured BEFORE the network step.
+2. **Viral halving** if `hasOriginalLink` and qualified — applied BEFORE the network step, so the network add-on is never halved.
 3. **Network** (of the *source* creator): Inhouse **+$3**, X Managed **+$1**, Twink **+ half of the _Tier 1_ amount for the threshold that was met** — an addition, and always measured against Tier 1 whatever tier the posting page is ("you will get half of the Tier 1 bonus").
 
-### Shares paid to other SMMs
-Both are written as their own `isResidual: true` submission docs so an admin approves each on its own merits, and both can fire on one post:
-- **Rule 3️⃣ — page-suggestion share.** A flat `SUGGESTION_SHARE` ($2) to `sourceAccount.suggestedBy` — the SMM whose approved page suggestion added that creator — for every qualifying post another SMM uploads from it. Never paid to the submitter themselves. `suggestedBy` is stamped on the account when a suggestion is **approved**, and the first approved suggestion owns the page (never overwritten).
-- **Rule 6️⃣ — viral-copy residual.** The halved target bonus to the `assigned` owner of the copied page.
+**The +12h on every window is deliberate.** The manual states the targets in whole days ("within 3 days"); the extra half-day is a *filing* grace so a post that hit its target on day 3 can still be submitted the next morning. Confirmed with the user — do not "correct" `TIER_RULES` to bare multiples of a day.
+
+**Likes are measured once, at submission.** A post that passed 10k inside 3 days but is only submitted on day 8 with 35k matches no rule and pays $0 — the engine cannot know what the count was earlier. Inherent to single-snapshot submission.
+
+### The one share paid to another SMM
+- **Rule 3️⃣ — page-suggestion share.** A flat `SUGGESTION_SHARE` ($2) to `sourceAccount.suggestedBy` — the SMM whose approved page suggestion added that creator — for every qualifying post another SMM uploads from it. Never paid to the submitter themselves. Written as its own `isResidual: true` submission doc so an admin approves it on its own merits. `suggestedBy` is stamped on the account when a suggestion is **approved**, and the first approved suggestion owns the page (never overwritten).
+
+**Rule 6️⃣ pays no share.** Copying halves the *copier's* bonus and stops there — the owner of the copied page receives nothing. (An earlier build also wrote a residual submission paying them the halved amount; that was removed as it is not in the bonus manual.) `originalAcc` is still recorded on the post and submission for audit, but its account doc is never read at submission time.
+
+> ⚠️ **Rule 2️⃣ currently only fires on a viral copy.** `sourceAcc` is derived *solely* from the copy declaration, so a post scheduled with "No" has no source ⇒ network `'Other'` ⇒ **no network bonus and no 3️⃣ share**, even if its content came from an Inhouse creator. The manual reads 2️⃣ as independent of 6️⃣. This is a **known, accepted divergence** (confirmed with the user) — closing it needs a way for a non-copy post to record the creator page its content came from. Do not treat it as a bug to be quietly patched.
 
 ### Scheduling a post is a two-step flow
 `CreatePostDialog` (**step one**) → `ViralCopyDialog` (**step two**), orchestrated by the dashboard page.
@@ -114,13 +122,15 @@ Both are written as their own `isResidual: true` submission docs so an admin app
 The copy question is part of *scheduling*, not of applying for a bonus. Rationale: the 2-week source rule is only actionable while the SMM can still choose a different source.
 
 - **The account is never typed in.** `extractAccountHandle()` pulls the handle out of the pasted link and `findAccountByHandle()` resolves it against `twitterx-accounts` (three casings in one `in` query — the sheet import is upper-case). That account is *both* the copy's origin and the post's `sourceAcc`, so it is what pays the network bonus; letting the SMM pick it by hand would let them point a post at a better-paying network.
-- The dialog runs `bonus/eligibility` (which returns `handle` + the resolved `account`) and shows **"✅ Eligible"**, **"⚠️ Already Used Recently"**, or **"⚠️ Account Not Found"**. Any of the last two **blocks** the copy — the SMM picks another source or answers "No" and schedules an ordinary post. **A handle that isn't in the database is a hard stop**, not a sourceless post.
-- `POST /api/smm/posts` **re-runs both checks** (`checkViralEligibility` + `resolveOriginalAccount`) and only then stores `isViralCopy`/`originalLink`/`originalAcc`/`sourceAcc`. It takes only `originalLink` from the client — no account id is accepted from the browser at all.
+- The dialog runs `bonus/eligibility` (which returns `handle` + the resolved `account`) and shows **"✅ Eligible"**, **"⚠️ Already Used Recently"**, **"⚠️ Account Not Found"**, or **"⚠️ Not a Viral Account"**. Any of the last three **blocks** the copy — the SMM picks another source or answers "No" and schedules an ordinary post. **A handle that isn't in the database is a hard stop**, not a sourceless post.
+- **Three gates, in this order:** the handle resolves to an account → that account has `isViralBonus` → the source is older than two weeks. The first two win over the age rule, and "not in the database" is kept distinct from "not a viral account" because the fixes differ (ask an admin to add it vs. contact your team leader).
+- **Only a listed Viral Account may be copied from.** Un-ticking `isViralBonus` retires a page for everyone immediately — enforced in `POST /api/smm/posts` (400), mirrored advisorily in `ViralCopyDialog`. Posts already recorded against a retired page keep their source and still pay out.
+- `POST /api/smm/posts` **re-runs all three checks** (`checkViralEligibility` + `resolveOriginalAccount` + its `isViralBonus`) and only then stores `isViralCopy`/`originalLink`/`originalAcc`/`sourceAcc`. It takes only `originalLink` from the client — no account id is accepted from the browser at all.
 - `findLinkUsage` searches posts by `postLinkNormalized` **and** by `originalLinkNormalized`, plus submissions by `originalLinkNormalized` — a source claimed by another SMM's *upload* counts as used straight away, not only once their bonus is filed.
 - The post PATCH allowlist deliberately **excludes** the viral fields **and `sourceAcc`**, so neither the copy nor the network it pays can be changed after the fact. An account move copies the whole doc, so the declaration follows the post.
 
 ### Submission flow (`bonus/submissions` POST)
-Load post (must be caller's) → load account: **type must contain 'Bonus'** and its tier must be 1 or 2 (else 400 — the dashboard shows the same "not a bonus account" dialog before opening the wizard) → require now within the current round window (else 400) → read the viral-copy declaration **off the post** (never off the request body) → reject a duplicate `postLinkNormalized` in the round → `calculateBonus` → single batch writing the submission plus an optional **residual** submission for the original account's `assigned` owner (`isResidual: true`, `✅ Qualified`). **No `userTotals` write here.**
+Load post (must be caller's) → load account: **type must contain 'Bonus'** and its tier must be 1 or 2 (else 400 — the dashboard shows the same "not a bonus account" dialog before opening the wizard) → require now within the current round window (else 400) → read the viral-copy declaration **off the post** (never off the request body) → reject a duplicate `postLinkNormalized` in the round → `calculateBonus` → single batch writing the submission plus an optional **3️⃣ share** for `sourceAccount.suggestedBy` (`isResidual: true`, `✅ Qualified`). Only the **source** account doc is read; `originalAcc` is carried as an id. **No `userTotals` write here.**
 
 ### Totals invariant (credited on approval only)
 `userTotals[uid]` = the sum of that user's **approved** submissions' `bonusAmount` — *unless* an admin manually overrode it via the Earnings Payout cell. Totals move ONLY through:
@@ -134,7 +144,7 @@ Load post (must be caller's) → load account: **type must contain 'Bonus'** and
 
 ## Viral Accounts (`smm-xaccounts`)
 
-A read-only listing of every **active** account with `isViralBonus`, grouped by network (`ViralAccountsTable`) — the accounts SMMs may copy viral posts from. Small enough to load in one request, so nothing here is lazy.
+A read-only listing of every **active** account with `isViralBonus`, grouped by network (`ViralAccountsTable`) — the accounts SMMs may copy viral posts from. Small enough to load in one request, so nothing here is lazy. Its last column is **Suggested by** (`suggestedBy`), **not** Assigned: on this page the relationship that matters is who nominated the page and therefore earns the $2 share.
 
 **Submit Page Suggestion** writes a `twitterx-page-suggestions` doc from a single field (the account link); the submitter, the timestamp and the `accountName` handle are all derived server-side (`extractAccountHandle`). Admins review them in **Bonus Management → Viral Page Suggestions**:
 - **Approve** looks the handle up in `twitterx-accounts` (an `in` query over the three casings, since sheet-imported names are upper-case) and sets `isViralBonus: true`. If no such account exists the route answers `{ accountMissing: true }` **without writing**; the admin confirms, and a retry with `createAccount: true` registers a blank account carrying only the suggested name/link.

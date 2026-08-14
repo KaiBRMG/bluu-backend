@@ -72,6 +72,25 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
   - `permissions:resetScreenCapture` in [`electron/main.js`](electron/main.js): darwin-only `tccutil reset ScreenCapture com.bluu.app`. **No once-per-machine marker** — the old `.screencapture-tcc-reset-done` guard was removed so the Settings button can actually re-run for users whose automatic reset already fired. Exposed via [`preload.js`](electron/preload.js), typed optional in [`electron.d.ts`](src/types/electron.d.ts).
 - **To remove** (once effectively all users are on a signed build and have been fixed): delete the `permissions:resetScreenCapture` handler in `main.js`, its `preload.js`/`electron.d.ts` entries, the mount reset in `onboarding/permission/screen/page.tsx`, the `tccResetAttemptedRef` block in `TimeTrackingContext.tsx`, the Settings field in `AppSettingsForm.tsx`, `src/lib/markScreenshotBugFixed.ts` + its `/api/user/update` allowlist entry, and the `screenshotBugFixed` field (type + `ensureUserExists`). All lines are tagged `TEMPORARY`. Details in [electron.md](documentation/electron.md#screen-capture-permission-repair-macos-tcc-temporary).
 
+## Known Issues: Sharing & Permissions (`/admin/sharing`) — deferred work
+
+The Sharing page's own three files were reworked on 2026-08-14 (real `<table>` semantics, shadcn `Popover`+`Command` pickers, toasts with Undo, AA-legal text colours, skeleton/empty/error states). The findings below were **deliberately left**, because every one of them lives in [`useAdminData.ts`](src/hooks/useAdminData.ts) or the permissions API route — both shared with other admin surfaces, and both out of scope for that pass. Fix them there, not by patching the Sharing page around them.
+
+| # | Issue | Where | Fix |
+|---|---|---|---|
+| 1 | **A write can report success having written nothing.** `updatePermission` opens with `if (!user) return;`, which resolves the promise without a request. The caller's `try` sees no error, so the UI toasts success. | [`useAdminData.ts:110`](src/hooks/useAdminData.ts) | `throw new Error('Not signed in')` instead of returning. Pure bug; no behaviour anyone depends on. |
+| 2 | **The real HTTP status can be masked by a parse error.** `await res.json()` runs inside the `!res.ok` branch, so a non-JSON error body (HTML 500, proxy timeout, empty 502) throws a `SyntaxError` that replaces the actual status. | [`useAdminData.ts:123`](src/hooks/useAdminData.ts) | Wrap the parse in try/catch and fall back to `\`Request failed: ${res.status}\``. |
+| 3 | **Every checkbox toggle refetches the entire admin payload** — pages, teamspaces, pagePermissions, groups *and* users. A row of five group boxes is five full-dataset reads. Runs against cross-cutting rule 9. | [`useAdminData.ts:127-128`](src/hooks/useAdminData.ts) | Apply the server's response to local state instead of refetching, or refetch only `pagePermissions`. Needs an optimistic path in the hook so the page can stop disabling rows mid-write. |
+| 4 | **Concurrent admins silently overwrite each other.** The write is read-modify-write over a snapshot up to **5 minutes** stale (`CACHE_TTL_MS`), PUT as the whole `{groups, users}` object. No version, no etag, no conflict signal — last write wins and nothing surfaces it. | [`useAdminData.ts:105-131`](src/hooks/useAdminData.ts) + `PUT /api/admin/pages/[pageId]/permissions` | Send a delta (`{ add: {...}, remove: {...} }`) and merge server-side, or version the doc and return 409 on mismatch so the client can toast "someone else changed this — reload". **Changes the API contract.** |
+| 5 | **Out-of-order responses can write stale data into state.** `fetchAdminData` has no `AbortController` and no sequence guard, so overlapping refetches (see #3) can land in the wrong order — and that stale state then feeds the next read-modify-write in #4. | [`useAdminData.ts:55-97`](src/hooks/useAdminData.ts) | Abort the in-flight request on re-entry, or stamp each fetch and ignore responses older than the latest. |
+| 6 | **Self-lockout is possible.** An admin can revoke their own group's access to the admin teamspace; the route only checks the *caller's* admin claim, never the *result*. | `PUT /api/admin/pages/[pageId]/permissions` | Reject (or warn on) a write that would remove the acting admin's own access to an admin-teamspace page. Server-side — a client-side guard is not a real one. |
+| 7 | **No audit trail.** Nothing records who changed a page's permissions or when, on the surface that controls access to the whole app. | permissions API + a new collection | Write an audit entry per permission change; surface a "recent changes" strip on the page. Would also serve as the missing confirmation and history. |
+| 8 | **Dead payload.** `members: string[]` and `photoURL` are fetched and typed on every request but never rendered. `members` is exactly the data a blast-radius confirm ("12 people will lose this page") needs. | [`useAdminData.ts:14,21`](src/hooks/useAdminData.ts) | Either use them or stop fetching them. |
+
+Two related notes on the page itself, both **intentional** rather than outstanding:
+- **Revoke is one click with an Undo toast, not a confirm dialog.** A deliberate choice — granting and revoking stay symmetric and fast, and the Undo re-PUTs the exact permission map that was replaced. If revocation ever needs a confirm, item 8's `members` count is the thing to show in it.
+- **Checked checkboxes render near-white, not Action Blue.** That is the app-wide `--primary` issue already documented in [DESIGN.md](DESIGN.md) §2, not drift local to this page. Fixing it is a global change.
+
 ## Documentation Index (spokes)
 
 | Spoke | Read it when you are touching… |
@@ -145,6 +164,8 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
     - Add the matching row to the event → factory table in [notifications.md](documentation/notifications.md#notification-events--factory-functions).
 
     This applies to admin broadcasts only in reverse: manual sends belong on the **Sent** tab and must **not** be added here.
+
+16. **Impeccable workflows may spawn sub-agents** — standing authorisation. When running any `/impeccable` command (`critique`, `audit`, `polish`, `craft`, …), spawn the isolated sub-agents its reference file requires **without asking first**. This overrides the general "don't spawn sub-agents unless the user requested it" default: invoking an `/impeccable` command **is** the request. `critique` in particular mandates two independent, parallel agents (Assessment A: design review · Assessment B: detector + browser evidence) that must not see each other's output — running them inline in one context is a **degraded** run and must be banner-flagged as such, so don't do it here. Applies to `/impeccable` only; it does not widen sub-agent use for ordinary work.
 
 ## Maintaining This Documentation
 
