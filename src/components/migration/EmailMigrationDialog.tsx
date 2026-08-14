@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, ArrowRight, Check, Loader2, Mail } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
 import { useUserData } from '@/hooks/useUserData';
@@ -23,9 +23,14 @@ import {
  * component only renders the decision. The card is non-dismissible, but the
  * gating is deliberately gentle in two ways:
  *
- *  1. **Never mid-shift.** Like `UpdateAvailableBanner`, the decision latches
- *     once per app start and only when the user is clocked out. Someone working
- *     is left alone until their next launch.
+ *  1. **Never mid-shift.** The dialog only ever arms while `displayState` is
+ *     `'clocked-out'`. Unlike `UpdateAvailableBanner`, this is re-checked for
+ *     the whole app session, not just once at start-up — so someone who clocks
+ *     out partway through a long-running session (never fully quitting the
+ *     app between shifts) still gets caught, instead of being stranded until
+ *     a relaunch that may not happen for days. (An earlier version latched
+ *     the decision once at boot, mirroring the update banner; that left
+ *     anyone who kept the app open across shifts permanently unprompted.)
  *  2. **Self-clearing.** The gate tests `workEmail` for the company domain, so
  *     the card disappears the moment the migration lands — `useUserData` is a
  *     live snapshot, so that happens without a reload.
@@ -54,32 +59,28 @@ export default function EmailMigrationDialog() {
   const [armed, setArmed] = useState(false);
   const [phase, setPhase] = useState<Phase>('intro');
   const [error, setError] = useState<string | null>(null);
-  const decidedRef = useRef(false);
 
   const shouldPrompt = shouldPromptEmailMigration(userData);
 
-  // Latch ONCE per app start, after session state settles, and only for a
-  // clocked-out user. Mirrors UpdateAvailableBanner: because it never re-runs,
-  // clocking in later cannot retroactively dismiss the card, and clocking out
-  // later cannot spring it on someone mid-task.
+  // Re-checked for the whole session (not latched once at boot): arm the
+  // instant the user is clocked-out AND the cohort gate says to prompt them.
+  // `armed` itself is the guard against re-firing — once true, this effect is
+  // a no-op for the rest of the session, and the dialog is non-dismissible
+  // short of finishing migration (which flips `shouldPrompt` to false via the
+  // live `workEmail` snapshot, so there is nothing left to re-arm).
   //
-  // RULE — do not latch before BOTH inputs have arrived. `isHydrating` settles
-  // when the *clock* state is known, which is routinely before the users/{uid}
-  // snapshot lands. Latching on that alone decided the question while `userData`
-  // was still null — so `shouldPrompt` was false, the ref latched, and the card
-  // never appeared however correctly the cohort was armed. The `!userData` guard
-  // is what makes the "decide once" behaviour mean "decide once, with the
-  // answer", rather than "decide once, too early".
+  // Still never interrupts a shift: the only trigger condition is
+  // `displayState === 'clocked-out'`, so a user who is currently clocked in
+  // sees nothing — this just stops requiring that they *already* be
+  // clocked-out at the exact moment the app finished hydrating.
   useEffect(() => {
-    if (decidedRef.current) return;
+    if (armed) return;
     if (isHydrating) return;
     if (!userData) return;
-
-    decidedRef.current = true;
     if (!shouldPrompt) return;
     if (displayState !== 'clocked-out') return;
     setArmed(true);
-  }, [isHydrating, userData, displayState, shouldPrompt]);
+  }, [armed, isHydrating, userData, displayState, shouldPrompt]);
 
   const handleCode = useCallback(async (code: string) => {
     setPhase('saving');
