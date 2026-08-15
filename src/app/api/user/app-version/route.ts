@@ -4,6 +4,9 @@ import { adminDb } from '@/lib/firebase-admin';
 import { invalidateUserCache } from '@/lib/services/userService';
 import { invalidateAdminUsersCache } from '@/app/api/admin/users/route';
 import { FieldValue } from 'firebase-admin/firestore';
+import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
+import { notifications } from '@/lib/notificationContent';
+import { APP_UPDATE, releaseNoteAppliesTo } from '@/lib/appUpdateConfig';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
@@ -12,9 +15,14 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
  * can see which version each employee is running (User Management → detail).
  *
  * Machine-reported, so it is deliberately NOT part of the /api/user/update
- * whitelist. The client (AppVersionReporter) only calls this when the reported
- * version differs from the one already on its user snapshot, so this is a
- * write-on-change-only path — no read here, and no write on a normal app start.
+ * whitelist. The client (AppVersionReporter) calls this only when it has
+ * something to say — the running build differs from the stored one, or a release
+ * note is owed — so this is not on the normal app-start path.
+ *
+ * It is also where the **release note** is sent: the version a user is running
+ * is exactly what decides whether they should hear about a release, and this is
+ * the one authenticated place that learns it. The client's opinion is never
+ * trusted — the gate is re-evaluated here against the version it just reported.
  */
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
@@ -33,15 +41,42 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     const platform =
       typeof rawPlatform === 'string' && /^[a-z0-9]{1,16}$/.test(rawPlatform) ? rawPlatform : null;
 
-    await adminDb.collection('users').doc(token.uid).update({
+    const userRef = adminDb.collection('users').doc(token.uid);
+    const update: Record<string, unknown> = {
       appVersion: rawVersion,
       appPlatform: platform,
       appVersionUpdatedAt: FieldValue.serverTimestamp(),
-    });
+    };
+
+    // ─── Release note ────────────────────────────────────────────────────────
+    // Only for a build that actually qualifies, and only once per user per
+    // release. The read is one doc on a route that fires at most a couple of
+    // times per user per release, and it is skipped entirely between releases
+    // (releaseNote: null) — so this adds no I/O to the steady state (rule 9).
+    const note = APP_UPDATE.releaseNote;
+    const batch = adminDb.batch();
+    let sendingNote = false;
+
+    if (note && releaseNoteAppliesTo(rawVersion)) {
+      const snap = await userRef.get();
+      if (snap.exists && snap.data()?.releaseNoteNotifiedVersion !== note.version) {
+        sendingNote = true;
+        update.releaseNoteNotifiedVersion = note.version;
+        // Deterministic id: two app starts racing each other can only produce
+        // this one document, never a duplicate "what's new" in the tray.
+        addNotificationToBatch(batch, token.uid, notifications.releaseNote(note.version), {
+          docId: `${token.uid}__release-${note.version}`,
+        });
+      }
+    }
+
+    batch.update(userRef, update);
+    await batch.commit();
+
     invalidateUserCache(token.uid);
     invalidateAdminUsersCache();
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, releaseNoteSent: sendingNote });
   } catch (error: unknown) {
     console.error('[user/app-version] error:', error);
     return NextResponse.json({ error: 'Failed to record app version' }, { status: 500 });

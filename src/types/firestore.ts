@@ -116,6 +116,11 @@ export interface UserDocument {
   appPlatform?: string | null; // darwin / win32
   appVersionUpdatedAt?: Timestamp;
 
+  // Release note (APP_UPDATE.releaseNote) this user has already been sent, so a
+  // "what's new" notification reaches each user once per release and never again.
+  // Absent = never notified. Written only by /api/user/app-version.
+  releaseNoteNotifiedVersion?: string | null;
+
   // Single active session enforcement: rotated on every login.
   // Client stores this locally; onSnapshot detects a mismatch and forces sign-out.
   sessionToken?: string;

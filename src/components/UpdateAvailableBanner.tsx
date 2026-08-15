@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, Loader2, X } from 'lucide-react';
 import { getAppInfo } from '@/lib/appVersion';
+import { compareSemver } from '@/lib/semver';
 import { APP_UPDATE, getPlatformUpdate } from '@/lib/appUpdateConfig';
 import { useTimeTrackingContext } from '@/contexts/TimeTrackingContext';
 import { Button } from '@/components/ui/button';
@@ -50,17 +51,6 @@ import {
  * it's forced (when its platform is targeted at all) — this bootstraps the fleet
  * onto a readable version, then self-resolves. Only renders inside Electron.
  */
-
-/** Returns >0 if a>b, <0 if a<b, 0 if equal. Tolerant of non-numeric/partial versions. */
-function compareSemver(a: string, b: string): number {
-  const pa = a.split('.').map(n => parseInt(n, 10) || 0);
-  const pb = b.split('.').map(n => parseInt(n, 10) || 0);
-  for (let i = 0; i < 3; i++) {
-    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
-}
 
 function formatMB(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;

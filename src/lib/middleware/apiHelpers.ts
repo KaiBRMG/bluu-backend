@@ -59,8 +59,18 @@ export function addNotificationToBatch(
   batch: WriteBatch,
   userId: string,
   content: NotificationContent,
+  /**
+   * `docId` pins the notification to a deterministic document instead of a
+   * generated one, making the write idempotent: a caller that can fire twice for
+   * the same user and the same event (a "what's new" note racing two app starts)
+   * then produces one notification rather than two. Only use it where the id is
+   * genuinely unique per user per event — reusing an id overwrites, which would
+   * resurface something the user already read.
+   */
+  options?: { docId?: string },
 ): void {
-  batch.set(adminDb.collection('notifications').doc(), {
+  const collection = adminDb.collection('notifications');
+  batch.set(options?.docId ? collection.doc(options.docId) : collection.doc(), {
     userId,
     ...content,
     read: false,

@@ -28,8 +28,12 @@
       background: transparent;
       overflow: hidden;
       user-select: none;
-      cursor: default;
+      /* The pill is a handle: the widget docks above the tray by default, but
+         the user can drag it off whatever it is covering. */
+      cursor: grab;
     }
+
+    body.dragging { cursor: grabbing; }
 
     .pill {
       display: flex;
@@ -44,7 +48,12 @@
       background: rgba(23, 23, 23, 0.94);
       border: 1px solid rgba(255, 255, 255, 0.09);
       border-radius: 999px;
+      /* The only hover affordance: the hairline lifts, so the pill reads as
+         grabbable without a shadow or a scale (DESIGN.md). */
+      transition: border-color 120ms ease-out;
     }
+
+    body:hover .pill { border-color: rgba(255, 255, 255, 0.22); }
 
     .icon {
       width: 15px;
@@ -90,6 +99,72 @@
     var iconEl = document.getElementById('icon');
     var timeEl = document.getElementById('time');
     var currentState = null;
+
+    // ── Moving the widget ───────────────────────────────────────────────────
+    //
+    // The window rests CLICK-THROUGH with mouse-move forwarding, so it never
+    // swallows a click in the corner it lives in. Those forwarded moves are the
+    // only signal that the cursor has arrived — on entry we ask main to make the
+    // window solid (so a press is actually delivered), and on exit we hand the
+    // corner straight back.
+    //
+    // We send no coordinates: main reads the OS cursor and owns the clamp, which
+    // is both the accurate way to do it and the reason this page cannot ask to
+    // be put anywhere in particular.
+    var dragging = false;
+    var interactive = false;
+
+    // Deduped: forwarded moves arrive continuously, and this is an IPC.
+    function setInteractive(on) {
+      if (on === interactive) return;
+      interactive = on;
+      if (window.timerWidget.setInteractive) window.timerWidget.setInteractive(on);
+    }
+
+    // mousemove as well as mouseover: the forwarded stream is guaranteed to
+    // produce moves, whereas over/enter depend on a hit-tested element boundary
+    // actually being crossed.
+    document.addEventListener('mousemove', function () { setInteractive(true); });
+    document.addEventListener('mouseover', function () { setInteractive(true); });
+    document.addEventListener('mouseout', function (e) {
+      // relatedTarget null == the cursor left the window, not just crossed
+      // between the icon and the label inside it.
+      if (!e.relatedTarget && !dragging) setInteractive(false);
+    });
+
+    document.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      dragging = true;
+      document.body.classList.add('dragging');
+      // Capture guarantees the matching pointerup lands here even when a fast
+      // drag outruns the window — without it a released grab would keep
+      // following the cursor.
+      try { e.target.setPointerCapture(e.pointerId); } catch (err) { /* not fatal */ }
+      window.timerWidget.dragStart();
+    });
+
+    function endDrag() {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove('dragging');
+      window.timerWidget.dragEnd();
+    }
+
+    document.addEventListener('pointerup', endDrag);
+    document.addEventListener('pointercancel', endDrag);
+    // Losing the window (a display change, a session lock) must not leave a
+    // grab latched on with no pointer to end it.
+    window.addEventListener('blur', endDrag);
+
+    // Right-click snaps back to the dock above the tray — the way back for
+    // anyone who parks it somewhere they did not mean to. Not double-click: a
+    // left press that does not move is a click, and main reads that as "surface
+    // the app", so a double-click would raise the window on its way through.
+    document.addEventListener('contextmenu', function (e) {
+      e.preventDefault();
+      endDrag();
+      window.timerWidget.resetPosition();
+    });
 
     window.timerWidget.onTick(function (data) {
       if (!data) return;

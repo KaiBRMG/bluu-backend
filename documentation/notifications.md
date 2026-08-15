@@ -64,6 +64,21 @@ Every row below is **automated** — fired by a handler on an event, never sent 
 | Dispute — admin rejected | `notifications.disputeAdminRejected(reason?)` | the dispute's `createdBy` | `disputes/[disputeId]/admin-approval` |
 | Content request completed | `notifications.contentPlanCompleted(stageName, contentSummary)` | `groups/OFAM.members` | `content-planning/[id]/creator-complete` |
 | Model application received | `notifications.modelSubmissionReceived(applicantName, location)` | every user whose `permittedPageIds` contains `apps-model-submissions` | `model-submissions/submit` |
+| Desktop app updated | `notifications.releaseNote(version)` | each user as they reach `APP_UPDATE.releaseNote.version` | `user/app-version` |
+
+### Release notes ("what's new") — gated on the installed build
+
+The one notification whose recipient list is decided by **what version of the desktop app someone is running**, not by an action they took. It exists so a release can announce itself only to people who can actually use it.
+
+**It is deliberately absent from the Automated tab** — the single sanctioned exception to cross-cutting rule 15. That tab records what the system sends *on an ongoing basis*; a release note is once-off and self-disarming, so listing it would describe standing behaviour that does not exist. The exception is noted in `automatedNotifications.ts` itself so nobody "fixes" it.
+
+- **The gate is `APP_UPDATE.releaseNote` in [`src/lib/appUpdateConfig.ts`](../src/lib/appUpdateConfig.ts)** — `{ version }`, or `null` (the default between releases, meaning nobody is notified). It sits in the update config on purpose: that file is already the per-release gate of record, and this is its mirror image — `mac`/`win` target people who have **not** updated, `releaseNote` targets people who **have**.
+- **Not per-platform.** The update *prompt* is, because it asks people to do work; a note just says what changed. Where a release lands differently on the two platforms, the copy says so — the current one covers the timer widget as a single feature with two surfaces (menu bar on Mac, HUD on Windows).
+- **The copy is `notifications.releaseNote(version)`** and, unlike every other factory, it is **rewritten per release** — it describes one specific build. Bumping `releaseNote.version` without rewriting the message ships the previous release's copy, which is the only real failure mode here. Same commit, always.
+- **Delivered once per user, ever.** `users/{uid}.releaseNoteNotifiedVersion` records what they have been told about; the notification also uses a deterministic doc id (`{uid}__release-{version}`) so two app starts racing cannot produce two.
+- **Trigger: `POST /api/user/app-version`**, driven by [`AppVersionReporter`](../src/components/AppVersionReporter.tsx) on app start. That component posts for **two** reasons — the reported build changed, *or* a note is owed for the build already reported. The second is not redundant: a user who updated **before** the note was armed has already reported that version, so a change-only trigger would never fire for them again.
+- **The client's opinion is never trusted.** `releaseNoteAppliesTo()` is re-evaluated server-side against the version that request just reported, so nobody can ask for a note about a build they are not on.
+- **Safe to arm in the same push as the code**, unlike `latestVersion` — cross-cutting rule 14's two-push order does not apply to this field. It can only fire for a build that already reports the target version, and nobody is on that build before the release exists.
 
 ## The admin notifications page
 

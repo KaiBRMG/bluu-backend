@@ -192,6 +192,14 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     sources: ['src/app/api/model-submissions/submit/route.ts'],
     content: notifications.modelSubmissionReceived('{applicantName}', '{city}, {country}'),
   },
+
+  // NOTE — `notifications.releaseNote()` is deliberately NOT catalogued here,
+  // and that is the one sanctioned exception to cross-cutting rule 15. This tab
+  // is a record of what the system sends *on an ongoing basis*, so an admin can
+  // see standing behaviour; a release note is once-off and self-disarming
+  // (`APP_UPDATE.releaseNote` returns to null after the release), so listing it
+  // would describe the system as permanently sending something it sends once.
+  // Do not "fix" this by adding an entry.
 ];
 
 export const AUTOMATED_NOTIFICATION_CATEGORIES: AutomatedNotificationCategory[] = [

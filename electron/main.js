@@ -248,6 +248,64 @@ let timerWidgetLastState = null;
 let timerWidgetLastText = null;
 const trayIconCache = new Map();
 
+// ── Moving the HUD (win32) ────────────────────────────────────────────────────
+//
+// The dock position is a DEFAULT, not a fixture: the widget sits in the busiest
+// corner of the desktop, and the thing it covers is occasionally the thing the
+// user needs to read. So it is draggable, and a position the user chose wins
+// over the default until they reset it (double-click) — across teardown/rebuild
+// (every clock-out → clock-in) and across app restarts.
+//
+// Click-through is still the resting state (see setIgnoreMouseEvents below), so
+// this costs nothing when the user is not actually pointing at the pill.
+//
+// The drag is driven from MAIN off the OS cursor, not from renderer mouse
+// deltas: the renderer only reports "grab started here" once, and every frame
+// after that is `getCursorScreenPoint() - grabOffset`. Renderer-reported deltas
+// accumulate rounding error against a window that is itself moving underneath
+// the pointer, which is what makes hand-rolled Electron drags visibly lag and
+// slide. An absolute cursor-to-origin offset cannot drift.
+const TIMER_WIDGET_DRAG_INTERVAL_MS = 16; // ~60fps
+const TIMER_WIDGET_DRAG_MAX_MS = 60_000; // a drag longer than this is a lost pointerup
+/** User-chosen top-left in screen coords, or null to use the tray-corner dock. */
+let timerWidgetCustomOrigin = null;
+/** `{ moved, interval }` while a drag is in flight, else null. */
+let timerWidgetDrag = null;
+let timerWidgetOriginLoaded = false;
+
+function timerWidgetPositionFile() {
+  return path.join(app.getPath('userData'), 'timer-widget-position.json');
+}
+
+// Persistence is best-effort by design: a widget that forgets where it was put
+// is a small annoyance, an unhandled rejection at drag-end is a real one.
+async function loadTimerWidgetOrigin() {
+  if (timerWidgetOriginLoaded) return;
+  timerWidgetOriginLoaded = true;
+  try {
+    const raw = JSON.parse(await fsp.readFile(timerWidgetPositionFile(), 'utf8'));
+    if (!Number.isFinite(raw?.x) || !Number.isFinite(raw?.y)) return;
+    // A drag that landed while this read was in flight is the newer intent.
+    if (timerWidgetCustomOrigin || timerWidgetDrag) return;
+    timerWidgetCustomOrigin = { x: raw.x, y: raw.y };
+    positionTimerWidget();
+  } catch {
+    // No file yet (the common case) or an unreadable one — dock to the default.
+  }
+}
+
+async function saveTimerWidgetOrigin() {
+  try {
+    if (timerWidgetCustomOrigin) {
+      await fsp.writeFile(timerWidgetPositionFile(), JSON.stringify(timerWidgetCustomOrigin), 'utf8');
+    } else {
+      await fsp.rm(timerWidgetPositionFile(), { force: true });
+    }
+  } catch (err) {
+    console.error('[main] timer widget position not saved:', err.message);
+  }
+}
+
 function trayIconFor(state) {
   if (trayIconCache.has(state)) return trayIconCache.get(state);
   const file = path.join(__dirname, 'public', 'tray', `${TRAY_ICON_BASENAME[state]}Template.png`);
@@ -303,18 +361,54 @@ function sanitizeTimerWidgetPayload(raw) {
   };
 }
 
-function positionTimerWidget() {
-  if (!timerWidgetWin || timerWidgetWin.isDestroyed()) return;
-  // workArea already excludes the taskbar, so its bottom-right corner IS the
-  // space immediately above the system tray — and it stays correct for a
-  // taskbar the user has moved to another edge.
+// workArea already excludes the taskbar, so its bottom-right corner IS the space
+// immediately above the system tray — and it stays correct for a taskbar the
+// user has moved to another edge.
+function defaultTimerWidgetOrigin() {
   const { workArea } = electronScreen.getPrimaryDisplay();
-  timerWidgetWin.setBounds({
+  return {
     x: Math.round(workArea.x + workArea.width - TIMER_WIDGET_W - TIMER_WIDGET_MARGIN),
     y: Math.round(workArea.y + workArea.height - TIMER_WIDGET_H - TIMER_WIDGET_MARGIN),
+  };
+}
+
+// Keep the pill whole and on a real work area. This is what stops a saved
+// position from stranding the widget off-screen after the display it was
+// dragged to is unplugged, or after a resolution/scaling change shrinks the
+// desktop under it — the same failure the window clamp loop exists to prevent.
+function clampTimerWidgetOrigin(origin) {
+  const { workArea } = electronScreen.getDisplayNearestPoint({
+    x: Math.round(origin.x + TIMER_WIDGET_W / 2),
+    y: Math.round(origin.y + TIMER_WIDGET_H / 2),
+  });
+  return {
+    x: Math.round(Math.min(Math.max(origin.x, workArea.x), workArea.x + workArea.width - TIMER_WIDGET_W)),
+    y: Math.round(Math.min(Math.max(origin.y, workArea.y), workArea.y + workArea.height - TIMER_WIDGET_H)),
+  };
+}
+
+function positionTimerWidget() {
+  if (!timerWidgetWin || timerWidgetWin.isDestroyed()) return;
+  // A display event mid-drag must not fight the cursor; the drag clamps anyway,
+  // and its next frame (16ms away) lands on the new work area.
+  if (timerWidgetDrag) return;
+  const origin = clampTimerWidgetOrigin(timerWidgetCustomOrigin || defaultTimerWidgetOrigin());
+  timerWidgetWin.setBounds({
+    x: origin.x,
+    y: origin.y,
     width: TIMER_WIDGET_W,
     height: TIMER_WIDGET_H,
   });
+}
+
+// What a click on the widget does, on either platform: surface the app. The
+// widget is the one piece of the app that stays visible while it is buried, so
+// it is also the fastest way back into it.
+function focusMainWindowFromWidget() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
 }
 
 function ensureTimerWidgetSurface(state) {
@@ -322,12 +416,7 @@ function ensureTimerWidgetSurface(state) {
     if (timerWidgetTray && !timerWidgetTray.isDestroyed()) return;
     timerWidgetTray = new Tray(trayIconFor(state));
     timerWidgetTray.setIgnoreDoubleClickEvents(true);
-    timerWidgetTray.on('click', () => {
-      if (!mainWindow || mainWindow.isDestroyed()) return;
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-    });
+    timerWidgetTray.on('click', focusMainWindowFromWidget);
     return;
   }
 
@@ -340,7 +429,10 @@ function ensureTimerWidgetSurface(state) {
     frame: false,
     transparent: true,
     resizable: false,
-    movable: false,
+    // Movable because the user can drag it out of the way. There is no native
+    // title bar and no app-region, so nothing moves it except our own
+    // setBounds — this flag only stops Electron from refusing that.
+    movable: true,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -365,9 +457,14 @@ function ensureTimerWidgetSurface(state) {
   // level is what actually keeps a HUD pinned.
   timerWidgetWin.setAlwaysOnTop(true, 'screen-saver');
   timerWidgetWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  // Click-through. A floating always-on-top window that swallowed clicks in the
-  // busiest corner of the desktop would be worse than no widget at all.
-  timerWidgetWin.setIgnoreMouseEvents(true);
+  // Click-through, but FORWARDING: a floating always-on-top window that
+  // swallowed clicks in the busiest corner of the desktop would be worse than no
+  // widget at all, so clicks still pass to whatever is underneath — while
+  // `forward: true` keeps delivering mouse *move* events to the page, which is
+  // the only way the HUD can notice the cursor has arrived and ask to become
+  // grabbable. The page flips this off (interactive) on hover and back on leave,
+  // so the pill is solid for exactly as long as the user is pointing at it.
+  timerWidgetWin.setIgnoreMouseEvents(true, { forward: true });
 
   // It renders a static local page and needs none of attachWindowBehaviour's
   // navigation/offline/crash policy — but it must still be unable to navigate.
@@ -377,6 +474,9 @@ function ensureTimerWidgetSurface(state) {
   });
 
   timerWidgetWin.on('closed', () => { timerWidgetWin = null; });
+  // Fire-and-forget: resolves into a reposition if a saved origin exists, and
+  // only ever runs once per app launch.
+  loadTimerWidgetOrigin();
   // The HUD can finish loading well after the first tick was pushed, and a
   // frozen (idle/paused) clock produces no further change for renderTimerWidget
   // to send — so the page would stay blank until the next state transition.
@@ -421,7 +521,99 @@ function renderTimerWidget() {
   timerWidgetLastText = text;
 }
 
+// ── HUD drag IPC (win32) ──────────────────────────────────────────────────────
+//
+// Accepted from the HUD window and nowhere else. These move an always-on-top
+// window and toggle whether it eats clicks, so a satellite (or the main window)
+// must not be able to reach them.
+function fromTimerWidget(event) {
+  return !!timerWidgetWin && !timerWidgetWin.isDestroyed() && senderWindow(event) === timerWidgetWin;
+}
+
+function endTimerWidgetDrag() {
+  if (!timerWidgetDrag) return;
+  clearInterval(timerWidgetDrag.interval);
+  timerWidgetDrag = null;
+}
+
+// Solid while the cursor is on the pill, click-through the moment it leaves.
+ipcMain.on('timer-widget:set-interactive', (event, interactive) => {
+  if (!fromTimerWidget(event)) return;
+  // Never go click-through mid-drag: a fast drag can outrun the pointer leaving
+  // the window, and losing the grab halfway across the screen is the one failure
+  // that would make this feel broken.
+  if (!interactive && timerWidgetDrag) return;
+  timerWidgetWin.setIgnoreMouseEvents(!interactive, { forward: true });
+});
+
+ipcMain.on('timer-widget:drag-start', (event) => {
+  if (!fromTimerWidget(event)) return;
+  endTimerWidgetDrag();
+
+  const cursor = electronScreen.getCursorScreenPoint();
+  const [winX, winY] = timerWidgetWin.getPosition();
+  // The grab offset is captured ONCE. Every frame below is an absolute
+  // cursor→origin translation of it, so the pill stays exactly where it was
+  // grabbed rather than accumulating per-frame rounding error.
+  const offsetX = cursor.x - winX;
+  const offsetY = cursor.y - winY;
+  const startedAt = Date.now();
+
+  timerWidgetDrag = {
+    // A press that never moves must NOT latch a custom origin — otherwise a
+    // stray click on the pill quietly opts the widget out of the default dock,
+    // and it stops following the taskbar for the rest of time.
+    moved: false,
+    interval: setInterval(() => {
+      if (!timerWidgetWin || timerWidgetWin.isDestroyed()) {
+        endTimerWidgetDrag();
+        return;
+      }
+      // Safety net: pointerup is the only thing that ends a drag, and a lost one
+      // (a crashed HUD, a session lock swallowing the release) would otherwise
+      // leave the pill glued to the cursor forever.
+      if (Date.now() - startedAt > TIMER_WIDGET_DRAG_MAX_MS) {
+        endTimerWidgetDrag();
+        return;
+      }
+      const point = electronScreen.getCursorScreenPoint();
+      const origin = clampTimerWidgetOrigin({ x: point.x - offsetX, y: point.y - offsetY });
+      if (!timerWidgetDrag.moved) {
+        if (origin.x === winX && origin.y === winY) return;
+        timerWidgetDrag.moved = true;
+      }
+      timerWidgetCustomOrigin = origin;
+      timerWidgetWin.setPosition(origin.x, origin.y);
+    }, TIMER_WIDGET_DRAG_INTERVAL_MS),
+  };
+});
+
+// A press that ended where it started was never a drag — it was a CLICK, and a
+// click surfaces the app (the same thing the macOS tray click does). Main is
+// where that distinction lives because main is what tracked the movement; the
+// page has no idea whether the pill actually went anywhere.
+ipcMain.on('timer-widget:drag-end', (event) => {
+  if (!fromTimerWidget(event)) return;
+  const moved = !!timerWidgetDrag?.moved;
+  endTimerWidgetDrag();
+  if (moved) saveTimerWidgetOrigin();
+  else focusMainWindowFromWidget();
+});
+
+// Escape hatch — right-click snaps back to the tray corner. Without it, a user
+// who parks the widget somewhere odd has no way back short of editing a file.
+// Right-click rather than double-click because left-click now focuses the app:
+// a double-click gesture would fire that focus on its way through.
+ipcMain.on('timer-widget:reset-position', (event) => {
+  if (!fromTimerWidget(event)) return;
+  endTimerWidgetDrag();
+  timerWidgetCustomOrigin = null;
+  positionTimerWidget();
+  saveTimerWidgetOrigin();
+});
+
 function teardownTimerWidget() {
+  endTimerWidgetDrag();
   if (timerWidgetInterval) {
     clearInterval(timerWidgetInterval);
     timerWidgetInterval = null;

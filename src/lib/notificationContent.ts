@@ -136,4 +136,22 @@ export const notifications = {
     type: 'action',
     actionUrl: '/applications/apps-model-submissions',
   }),
+
+  // ─── Desktop app releases ─────────────────────────────────────────────────────
+  // Sent once to each user AFTER their installed build reaches the version in
+  // APP_UPDATE.releaseNote — so it describes something they can already use, and
+  // never reaches anyone still on the old build.
+  //
+  // ⚠️ THIS COPY IS PER-RELEASE. Rewrite the body every time you bump
+  // APP_UPDATE.releaseNote.version, in the SAME commit. There is deliberately
+  // one factory rather than one per release: the notification is once-off and
+  // never re-sent, so last release's wording has no reader left to serve — but
+  // that also means a bumped version with stale copy ships stale copy.
+  releaseNote: (version: string): NotificationContent => ({
+    title: `✨ What's new in v${version}`,
+    message:
+      'Your session timer now stays visible while the app is out of sight. Click it any time to jump straight back into the app. On Windows you can also drag it anywhere on screen if it covers something you need to see, and right-click it to snap it back to the corner.',
+    type: 'system',
+    actionUrl: null,
+  }),
 };

@@ -170,6 +170,8 @@ Two related notes on the page itself, both **intentional** rather than outstandi
 
     This applies to admin broadcasts only in reverse: manual sends belong on the **Sent** tab and must **not** be added here.
 
+    **One sanctioned exception: `notifications.releaseNote()`.** The "what's new" note gated on `APP_UPDATE.releaseNote` ([appUpdateConfig.ts](src/lib/appUpdateConfig.ts)) is once-off and self-disarming, so cataloguing it would advertise standing behaviour the system does not have. The carve-out is written into `automatedNotifications.ts` at the point someone would add it — don't "fix" it. See [notifications.md](documentation/notifications.md#release-notes-whats-new--gated-on-the-installed-build).
+
 16. **Impeccable workflows may spawn sub-agents** — standing authorisation. When running any `/impeccable` command (`critique`, `audit`, `polish`, `craft`, …), spawn the isolated sub-agents its reference file requires **without asking first**. This overrides the general "don't spawn sub-agents unless the user requested it" default: invoking an `/impeccable` command **is** the request. `critique` in particular mandates two independent, parallel agents (Assessment A: design review · Assessment B: detector + browser evidence) that must not see each other's output — running them inline in one context is a **degraded** run and must be banner-flagged as such, so don't do it here. Applies to `/impeccable` only; it does not widen sub-agent use for ordinary work.
 
 ## Maintaining This Documentation

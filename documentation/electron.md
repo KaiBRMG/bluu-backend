@@ -36,7 +36,7 @@ The same Vercel project serves **two hosts**, and the difference matters:
 | `electron/loading.html` | Local splash shown instantly on launch (logo inlined as data-URI), then the app navigates to Vercel. |
 | `electron/offline.html` | Local retry screen shown when the Vercel app can't load (logo data-URI + "Try again" button → `app:retry-load`). |
 | `electron/widget.html` | The **Windows** timer HUD page (see [Session timer widget](#session-timer-widget-tray-title--docked-hud)). Renders nothing on its own — main sends it a finished string each second. |
-| `electron/widget-preload.js` | Preload for `widget.html` **only** — exposes `onTick` and nothing else. Deliberately not the app preload. |
+| `electron/widget-preload.js` | Preload for `widget.html` **only** — exposes `onTick` plus the four drag channels (`setInteractive`/`dragStart`/`dragEnd`/`resetPosition`), and nothing else. Deliberately not the app preload; the drag channels carry no coordinates, and main accepts them only from the HUD window. |
 | `electron/public/tray/*.png` | Timer-state glyphs (`*Template.png` + `@2x`), black + alpha. macOS template images; the Windows HUD uses the same files as a CSS mask. |
 | `electron/package.json` | App version, npm scripts, and the full `electron-builder` config (incl. the `build.files` allowlist). |
 | `electron/public/logo/*` | App icons (`icon.icns`, `icon.ico`). |
@@ -162,9 +162,28 @@ This is not a micro-optimisation, it is what makes "always in sync with the time
 
 ### Per platform
 
-- **macOS — `tray.setTitle()`** (a darwin-only API) with `fontType: 'monospacedDigit'`, so the digits don't jitter as they change width. `tray.setImage()` swaps the state glyph. Clicking the tray focuses the main window.
-- **Windows — a frameless, transparent, always-on-top HUD** pinned to the bottom-right of the **work area**, which is precisely "just above the system tray" (`workArea` already excludes the taskbar, and follows it if the user moves it to another edge). It is `focusable: false`, `skipTaskbar: true`, `type: 'toolbar'`, `setIgnoreMouseEvents(true)` (**click-through — an always-on-top window that swallowed clicks in the busiest corner of the desktop would be worse than no widget**), shown with `showInactive()`, and held at the `'screen-saver'` always-on-top level because plain `alwaysOnTop` loses to a fair number of Windows shells. Repositioned from `registerDisplayListeners` — it has no window record, so the clamp loop does not cover it.
+- **macOS — `tray.setTitle()`** (a darwin-only API) with `fontType: 'monospacedDigit'`, so the digits don't jitter as they change width. `tray.setImage()` swaps the state glyph. Clicking the tray focuses the main window (`focusMainWindowFromWidget`, shared with the Windows HUD).
+- **Windows — a frameless, transparent, always-on-top HUD** pinned to the bottom-right of the **work area**, which is precisely "just above the system tray" (`workArea` already excludes the taskbar, and follows it if the user moves it to another edge). It is `focusable: false`, `skipTaskbar: true`, `type: 'toolbar'`, shown with `showInactive()`, and held at the `'screen-saver'` always-on-top level because plain `alwaysOnTop` loses to a fair number of Windows shells. Repositioned from `registerDisplayListeners` — it has no window record, so the clamp loop does not cover it. It is **draggable, and clicking it focuses the main window** — see below.
 - **Anything else** — ignored; there is no equivalent surface.
+
+### The HUD is draggable, and clickable (Windows)
+
+The tray corner is the **default**, not a fixture: the widget sits in the busiest corner of the desktop and sometimes covers the thing the user needs to read.
+
+| Gesture | Result |
+|---|---|
+| **Left-click** (press that doesn't move) | Focuses the main window — same as clicking the macOS tray (`focusMainWindowFromWidget`) |
+| **Left-drag** | Moves the widget; the new position is saved |
+| **Right-click** | Snaps back to the tray-corner dock and forgets the saved position |
+
+**Click vs drag is decided in main, not the page**, in the `timer-widget:drag-end` handler: main is what tracked whether the pill actually moved (`timerWidgetDrag.moved`), so `moved` → persist, `!moved` → focus. The page only reports that a press started and ended. **Reset is right-click and not double-click on purpose** — a left press that doesn't move is already a click, so a double-click gesture would raise the main window on its way through.
+
+- **Click-through survives.** The resting state is `setIgnoreMouseEvents(true, { forward: true })` — clicks still pass to whatever is underneath, and `forward` keeps delivering mouse *moves* to the page, which is the only signal the HUD has that the cursor arrived. The page then asks main to make the window solid (`timer-widget:set-interactive`) and hands the corner straight back on exit. **Don't "simplify" this to a plain `setIgnoreMouseEvents(false)`** — that permanently swallows clicks in the corner, which is the thing the original click-through decision existed to prevent.
+- **The drag is driven from main off the OS cursor**, not from renderer deltas. The page sends *no coordinates*: it reports grab start/end, and main translates `getCursorScreenPoint()` by a grab offset captured once. Renderer-reported deltas accumulate rounding error against a window that is moving under the pointer — the classic visibly-sliding hand-rolled Electron drag. It also means the HUD cannot ask to be put anywhere in particular.
+- **The position persists** in `timer-widget-position.json` under `userData`, and survives every teardown/rebuild (i.e. every clock-out → clock-in). Best-effort: an unwritable file loses the position, never throws.
+- **A press that never moves does not latch a position** (`timerWidgetDrag.moved`) — otherwise a stray click would silently opt the widget out of the default dock and it would stop following the taskbar.
+- **Every origin is clamped** into the nearest display's `workArea`, so a saved position cannot strand the widget off-screen after a monitor is unplugged or the resolution changes. `positionTimerWidget` no-ops mid-drag rather than fighting the cursor.
+- Renderer uses **pointer capture** so a fast drag that outruns the window still receives its `pointerup`; main additionally abandons a drag after 60s in case that release is lost entirely.
 
 ### Template images — verified
 
@@ -269,6 +288,7 @@ APP_UPDATE = {
   mac: { latestVersion, compulsory } | null,   // null → macOS never prompted
   win: { latestVersion, compulsory } | null,   // null → Windows never prompted
   downloadUrl,                                 // manual-install landing page
+  releaseNote: { version } | null,             // null → nobody gets a "what's new"
 }
 ```
 
@@ -276,6 +296,7 @@ APP_UPDATE = {
 - **macOS is gated by this file too.** A published GitHub release prompts nobody on its own; `mac.latestVersion` decides who is asked, `electron-updater` only supplies the artifact. If the config targets a version the updater can't see (release not published yet), the prompt is suppressed rather than showing a button that can't work.
 - `compulsory: true` → blocking `AlertDialog`, no cancel. `false` → dismissible `Card` (bottom-right). Same meaning on both platforms.
 - **Old builds without `app.getVersion`** can't be compared, so they're forced — but only if their platform is targeted at all. Self-resolving; guarded by `isElectron`, so a browser is never blocked.
+- **`releaseNote` is the same file's mirror image**: `mac`/`win` target people who have **not** updated; `releaseNote` sends a one-off "what's new" notification to each user once their installed build reaches `version`. Not per-platform — unlike the prompt, it asks nothing of anyone. It is the one field here that is **safe to arm in the same push as the code** — it cannot fire for a build that does not exist yet. Copy lives in `notifications.releaseNote()` and must be rewritten in the same commit that bumps the version. Full mechanism: [notifications.md](notifications.md#release-notes-whats-new--gated-on-the-installed-build).
 
 ### Delivery — feature-detected, never platform-checked
 
@@ -364,6 +385,7 @@ The reset repairs the **next** scheduled capture, not the one that just failed. 
 - [ ] Anything that must survive app close → route it through the `close`-event flush (`closingFlushed()`), not `before-quit`.
 - [ ] **Timer widget: push an anchor, never a time.** `buildTimerWidgetPayload` builds it and the push lives inside `TimeTrackingProvider`. A per-second string makes the widget a copy of the timer instead of the same clock, and it freezes whenever the renderer's tick does.
 - [ ] Timer widget must render **nothing** when clocked out — destroyed, not zeroed — and must **stop** (not keep counting) on idle/paused.
+- [ ] The Windows HUD stays **click-through at rest** (`setIgnoreMouseEvents(true, { forward: true })`), solid only while the cursor is on it. It is draggable, but the drag is main-driven off `getCursorScreenPoint()` — the page never sends coordinates.
 - [ ] A new tray glyph must be **black + alpha** and named `*Template.png`, or macOS renders it black-on-black in a dark menu bar. Add it (and its `@2x`) to `build.files`.
 - [ ] Window size persists via the single `localStorage` key `bluu_window_size`, cleared on logout — keep it **non**-per-uid (reset-on-logout is the spec). Save/restore via **outer** size (`getSize`/`setSize`) to avoid title-bar drift.
 - [ ] Window geometry: never persist maximized bounds, never size from `window.screen.*`, always clamp in main. See [Three rules that keep the window on-screen](#three-rules-that-keep-the-window-on-screen). Verify on a **scaled Windows display** (1920×1080 @150%) — maximize, quit, relaunch, log in.
@@ -372,5 +394,6 @@ The reset repairs the **next** scheduled capture, not the one that just failed. 
 - [ ] **Release in two pushes** — code first (platform entry `null`), then tag + build, then arm the config. Vercel is instant, the build is ~10–30 min; arming in the same push blocks users against a release that doesn't exist yet. Full command sequence: **rule 14 in [CLAUDE.md](../CLAUDE.md)**.
 - [ ] **Tag the commit you just pushed.** Actions runs the workflow *from the tagged commit*, and electron-builder names the release from `electron/package.json`, not the tag. Tagging an earlier commit rebuilds the old version and republishes it to the **old** release — the run goes green and no new release appears.
 - [ ] After publishing, set the **per-platform** entry in `src/lib/appUpdateConfig.ts` (`mac` / `win`). Leave a platform `null` if the release doesn't affect it — that's how you ship a mac-only build without making Windows reinstall for nothing.
+- [ ] Announcing the release? Set `APP_UPDATE.releaseNote` **and rewrite `notifications.releaseNote()`'s copy in the same commit** — a bumped version pointing at the previous release's wording is the failure mode. This one may ship with the code (step 1), not at step 5.
 - [ ] Verify the release has `latest-mac.yml` + **both** `.dmg` and **both** `.zip` before arming. A missing zip or manifest = auto-update silently dead. The x64 `.dmg` has **no arch suffix** (`Bluu Backend-0.8.0.dmg` is Intel) — label the download page accordingly, or Apple Silicon users end up on Rosetta and stay on x64 updates forever.
 - [ ] Prefer `compulsory: false` on **Windows** for routine releases — updating there means quitting and reinstalling by hand, so blocking is a genuine interruption. macOS installs in one click, so compulsory is cheap there.
