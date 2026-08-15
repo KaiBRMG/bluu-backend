@@ -14,9 +14,12 @@ import { APP_UPDATE } from '@/lib/appUpdateConfig';
  * `/download` URL — the same facts as the GitHub release and the download page —
  * and it must answer for a client whose session is not the point. No user data,
  * no reads, no writes.
+ *
+ * No `export const dynamic`: the project runs with `cacheComponents`, which
+ * rejects that segment config outright (build error) because the model is
+ * inverted — handlers are dynamic unless they opt into `'use cache'`. The
+ * `no-store` header below is what keeps a proxy from holding the answer.
  */
-export const dynamic = 'force-dynamic';
-
 export async function GET() {
   return NextResponse.json(APP_UPDATE, {
     headers: { 'Cache-Control': 'no-store' },

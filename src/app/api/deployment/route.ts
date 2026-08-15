@@ -17,9 +17,14 @@ import { NextResponse } from 'next/server';
  *
  * Unauthenticated, like `/api/app-update`: an opaque deployment id is not user
  * data, and it must answer for a client whose session is not the point.
+ *
+ * No `export const dynamic`: the project runs with `cacheComponents`, which
+ * rejects that segment config outright (build error) because the model is
+ * inverted — handlers are dynamic unless they opt into `'use cache'`. The
+ * `no-store` header below is what keeps a proxy from holding the answer. Either
+ * way this value is constant for the life of a deployment, so even a cached
+ * response would be correct.
  */
-export const dynamic = 'force-dynamic';
-
 function currentDeploymentId(): string | null {
   return (
     process.env.VERCEL_DEPLOYMENT_ID ||
