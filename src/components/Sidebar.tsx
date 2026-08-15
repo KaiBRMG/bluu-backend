@@ -4,31 +4,7 @@ import { useState, useRef, useLayoutEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { House, ChevronLeft, ChevronDown, type LucideIcon } from "lucide-react";
-import {
-  MessageSquareQuote,
-  ShieldUser,
-  BookOpen,
-  BookHeart,
-  BookType,
-  PanelLeft,
-  CalendarClock,
-  KeyRound,
-  Cog,
-  FileUser,
-  UserStar,
-  ImagePlay,
-  BookOpenText,
-  SquareStar,
-  CalendarCheck,
-  MessageCircleQuestionMark,
-  UserRoundCog,
-  LayoutDashboard,
-  BellPlus,
-  Share2,
-  CalendarCog,
-  ClockFading,
-} from "lucide-react";
+import { House, ChevronLeft, ChevronDown } from "lucide-react";
 import type { ResolvedAccess } from "@/types/firestore";
 import type { TeamspaceDef } from "@/lib/definitions";
 import {
@@ -52,67 +28,14 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { NavUser } from "@/components/sidebar/NavUser";
+import { PageIcon } from "@/components/PageIcon";
 import { auth } from "@/firebase-config";
 import { toast } from "sonner";
-
-const ICON_MAP: Record<string, LucideIcon> = {
-  House,
-  MessageSquareQuote,
-  ShieldUser,
-  BookOpen,
-  BookHeart,
-  BookType,
-  PanelLeft,
-  CalendarClock,
-  SquareStar,
-  KeyRound,
-  Cog,
-  FileUser,
-  ImagePlay,
-  CalendarCheck,
-  UserStar,
-  LayoutDashboard,
-  BellPlus,
-  BookOpenText,
-  MessageCircleQuestionMark,
-  UserRoundCog,
-  Share2,
-  CalendarCog,
-  ClockFading,
-};
 
 // AppLayout (and thus this Sidebar) is mounted per-page, so it remounts on every
 // navigation. Persist the scroll offset of the content area at module scope so it
 // survives those remounts and the sidebar doesn't jump back to the top.
 let savedScrollTop = 0;
-
-// Brand icons that have no lucide equivalent are served from /Icons as SVGs.
-// Same escape hatch the sidebar logo already uses — everything else stays in
-// ICON_MAP so the icon set remains lucide-only.
-const SVG_ICONS: Record<string, string> = {
-  OnlyFans: "/Icons/onlyfans.svg",
-};
-
-function NavIcon({ name, className }: { name?: string; className?: string }) {
-  if (!name) return null;
-  const svg = SVG_ICONS[name];
-  if (svg) {
-    return (
-      <Image
-        src={svg}
-        alt=""
-        width={16}
-        height={16}
-        aria-hidden
-        className={className}
-        style={{ width: "1rem", height: "1rem" }}
-      />
-    );
-  }
-  const Icon = ICON_MAP[name];
-  if (!Icon) return null;
-  return <Icon className={className} />;
-}
 
 /**
  * OF Manager does not navigate — it spawns its own Electron window (main.js
@@ -154,7 +77,7 @@ function OfManagerButton({ title, icon }: { title: string; icon?: string | null 
 
   return (
     <SidebarMenuButton onClick={open} tooltip={title}>
-      <NavIcon name={icon ?? undefined} />
+      <PageIcon name={icon ?? undefined} />
       <span>{title}</span>
     </SidebarMenuButton>
   );
@@ -286,7 +209,7 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
                               tooltip={page.title}
                             >
                               <Link href={page.href ?? "#"}>
-                                <NavIcon name={page.icon ?? undefined} />
+                                <PageIcon name={page.icon ?? undefined} />
                                 <span>{page.title}</span>
                               </Link>
                             </SidebarMenuButton>

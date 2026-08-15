@@ -29,7 +29,7 @@ export const SMM_SUBMISSIONS_SUB = 'submissions';
 
 // ─── Access gates ────────────────────────────────────────────────────
 
-export type SmmAccessNeed = 'dashboard' | 'admin' | 'either' | 'viral';
+export type SmmAccessNeed = 'dashboard' | 'admin' | 'either' | 'viral' | 'viral-lookup';
 
 /**
  * Page-permission gate for SMM API routes. 'admin' = the smm-admin page,
@@ -39,6 +39,10 @@ export type SmmAccessNeed = 'dashboard' | 'admin' | 'either' | 'viral';
  * Accounts) listing. The dashboard used to need this too, when scheduling a
  * post asked the SMM to name the creator; that source is now derived from the
  * copied link server-side, so the dashboard grant was dropped.
+ * 'viral-lookup' is the widest SMM gate: the read-only viral-link check, which
+ * is asked both while scheduling (dashboard) and from the Viral Accounts page's
+ * own link checker (smm-xaccounts). It reads no account the caller couldn't
+ * already list from one of those two pages.
  * getUserById is cached (60s), so repeated calls in one handler are cheap.
  */
 export async function checkSmmAccess(
@@ -50,6 +54,8 @@ export async function checkSmmAccess(
     need === 'dashboard' ? pages.includes('smm-dashboard') :
     need === 'admin' ? pages.includes('smm-admin') :
     need === 'viral' ? pages.includes('smm-xaccounts') || pages.includes('smm-admin') :
+    need === 'viral-lookup'
+      ? pages.includes('smm-dashboard') || pages.includes('smm-xaccounts') || pages.includes('smm-admin') :
     pages.includes('smm-dashboard') || pages.includes('smm-admin');
   return ok ? null : NextResponse.json({ error: 'Access denied' }, { status: 403 });
 }

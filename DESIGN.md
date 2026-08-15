@@ -249,7 +249,7 @@ Stacking is a **named semantic scale**, declared in `globals.css` and consumed v
 
 ### Navigation
 - **Style:** the 260px `.sidebar` on `#000000`, collapsing to 68px (`width 250ms ease-out`). Nav items are 14px/500, `rounded` 4px; hover raises to the hover overlay, `.active` uses the active overlay + `font-weight 600`. Section headers are the uppercase 11px eyebrow. Every internal page renders inside `AppLayout` (sidebar + top bar + boot gating) — never build a bespoke shell.
-- **Sidebar icons are lucide**, mapped by name in `ICON_MAP`. The one escape hatch is `SVG_ICONS` — brand marks with no lucide equivalent (currently only OF Manager's `/Icons/onlyfans.svg`), rendered through `next/image` at `size-4`, exactly as the sidebar logo already is. Add to it only for a real third-party brand; anything expressible in lucide belongs in `ICON_MAP`.
+- **Page icons are lucide**, mapped by name in `ICON_MAP` in [`src/components/PageIcon.tsx`](src/components/PageIcon.tsx) — the one place the `icon` string on a `PageDef`/`TeamspaceDef` is resolved, shared by the sidebar and `/admin/sharing`. Render them with `<PageIcon name={page.icon ?? undefined} />`; never re-map icon names locally, or a page added to `definitions.ts` renders in one surface and not the other. The one escape hatch is `SVG_ICONS` — brand marks with no lucide equivalent (currently only OF Manager's `/Icons/onlyfans.svg`), rendered through `next/image` at `size-4`, exactly as the sidebar logo already is. Add to it only for a real third-party brand; anything expressible in lucide belongs in `ICON_MAP`.
 
 #### The satellite-window shell (OF Manager)
 

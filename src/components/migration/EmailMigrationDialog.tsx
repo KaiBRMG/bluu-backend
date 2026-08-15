@@ -24,13 +24,14 @@ import {
  * gating is deliberately gentle in two ways:
  *
  *  1. **Never mid-shift.** The dialog only ever arms while `displayState` is
- *     `'clocked-out'`. Unlike `UpdateAvailableBanner`, this is re-checked for
- *     the whole app session, not just once at start-up — so someone who clocks
- *     out partway through a long-running session (never fully quitting the
- *     app between shifts) still gets caught, instead of being stranded until
- *     a relaunch that may not happen for days. (An earlier version latched
- *     the decision once at boot, mirroring the update banner; that left
- *     anyone who kept the app open across shifts permanently unprompted.)
+ *     `'clocked-out'`, re-checked for the whole app session rather than once at
+ *     start-up — so someone who clocks out partway through a long-running
+ *     session (never fully quitting the app between shifts) still gets caught,
+ *     instead of being stranded until a relaunch that may not happen for days.
+ *     (An earlier version latched the decision once at boot, mirroring what
+ *     `UpdateAvailableBanner` did at the time; that left anyone who kept the
+ *     app open across shifts permanently unprompted. The update banner has
+ *     since been moved onto this same pattern for exactly that reason.)
  *  2. **Self-clearing.** The gate tests `workEmail` for the company domain, so
  *     the card disappears the moment the migration lands — `useUserData` is a
  *     live snapshot, so that happens without a reload.

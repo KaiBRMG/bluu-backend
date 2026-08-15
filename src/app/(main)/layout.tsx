@@ -8,6 +8,7 @@ import AppVersionReporter from "@/components/AppVersionReporter";
 import UpdateBanner from "@/components/UpdateBanner";
 import UpdateAvailableBanner from "@/components/UpdateAvailableBanner";
 import EmailMigrationDialog from "@/components/migration/EmailMigrationDialog";
+import DeploymentRefresher from "@/components/DeploymentRefresher";
 import LazyProviders from "@/components/LazyProviders";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
@@ -31,6 +32,11 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 never interrupt a shift. Renders nothing unless the user's cohort
                 is armed in emailMigrationConfig.ts. */}
             <EmailMigrationDialog />
+            {/* Also inside LazyProviders, and for the same reason: it reads
+                clock state to make sure a forced reload never lands mid-shift.
+                Main window only — a satellite must not reload under an
+                operator. */}
+            <DeploymentRefresher />
             <SpeedInsights />
             <Analytics />
           </LazyProviders>

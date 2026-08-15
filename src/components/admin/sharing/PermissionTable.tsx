@@ -6,6 +6,7 @@ import { CheckIcon, ChevronsUpDownIcon } from "lucide-react";
 import type { PagePermissionDoc } from "@/types/firestore";
 import { GROUP_DISPLAY_NAMES } from "@/types/firestore";
 import type { PageDef } from "@/lib/definitions";
+import { PageIcon } from "@/components/PageIcon";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import {
@@ -226,7 +227,7 @@ export default function PermissionTable({
             <TableRow className="border-white/[0.07] hover:bg-transparent">
               <TableHead
                 scope="col"
-                className="w-[180px] bg-white/[0.04] text-xs font-medium tracking-wider text-zinc-400 uppercase"
+                className="w-[204px] bg-white/[0.04] text-xs font-medium tracking-wider text-zinc-400 uppercase"
               >
                 Page
               </TableHead>
@@ -270,8 +271,14 @@ export default function PermissionTable({
                     scope="row"
                     className="p-2 text-left align-middle text-sm font-medium"
                   >
-                    <span className="block truncate" title={page.title}>
-                      {page.title}
+                    <span className="flex min-w-0 items-center gap-2">
+                      <PageIcon
+                        name={page.icon ?? undefined}
+                        className="size-4 shrink-0 text-zinc-400"
+                      />
+                      <span className="truncate" title={page.title}>
+                        {page.title}
+                      </span>
                     </span>
                   </th>
 

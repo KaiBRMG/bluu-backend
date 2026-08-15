@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -11,20 +12,31 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { DateTimePicker } from '@/components/smm/shared/DateTimePicker';
 import { NetworkBadge, accountDisplayName } from '@/components/smm/shared/badges';
-import { accountHandle, extractAccountHandle, linkMatchesHandle } from '@/lib/smm/linkUtils';
+import { accountHandle, extractAccountHandle, isSameLink, linkMatchesHandle } from '@/lib/smm/linkUtils';
 import { useSmmPostLinkCheck } from '@/hooks/useSmmPostLinkCheck';
 import { useSmmAccountResolve, type SmmAccountResolution } from '@/hooks/useSmmAccountResolve';
 import type { SmmAccount } from '@/types/firestore';
 
 /**
- * The post as filled in here, handed to the viral-copy step. `postDate` is an
- * ISO instant — the picker works in the user's local time and `toISOString()`
- * converts it to UTC, which is what the API and Firestore store.
+ * The finished post, handed up to be written. `postDate` is an ISO instant —
+ * the picker works in the user's local time and `toISOString()` converts it to
+ * UTC, which is what the API and Firestore store.
  */
 export interface PostDraft {
   accountId: string;
   caption: string;
   postDate: string;
+  postLink: string;
+}
+
+/**
+ * The form mid-edit, preserved across a "Back" to the viral-copy question so
+ * nothing typed here is lost. Unlike {@link PostDraft} it may be incomplete —
+ * no account has been matched yet, and the date can be cleared.
+ */
+export interface PostFormDraft {
+  caption: string;
+  postDate: string | null;
   postLink: string;
 }
 
@@ -91,21 +103,21 @@ function AccountMissMessage({
 }
 
 /**
- * Schedule-a-post dialog — **step one** of the calendar-day flow. It collects
- * the post itself and validates the link, then hands a {@link PostDraft} to the
- * viral-copy question ({@link ViralCopyDialog}), which is what actually creates
- * the post. Nothing is written here.
+ * Schedule-a-post dialog — **step two** of the calendar-day flow, after the
+ * viral-copy question ({@link ViralCopyDialog}) has been answered. It collects
+ * the post itself, validates the link, and is what finally creates the post,
+ * carrying whatever copy declaration step one produced.
  *
  * The account is never picked — like {@link ViralCopyDialog}, the handle is
  * already in the link, so it is resolved from `accounts` (the caller's own
  * active pages) as the SMM types. That removes the "wrong account selected"
  * mismatch entirely: an unmatched handle is simply not a page we can file the
- * post under, and blocks the draft.
+ * post under, and blocks the write.
  *
- * Three things must hold before the draft can move on, each checked here and
+ * Four things must hold before the post can be scheduled, each checked here and
  * again server-side: the link is a Twitter/X post link, it resolves to one of
- * the caller's accounts, and it isn't already in the content schedule.
- * `postedBy` is set server-side from the session.
+ * the caller's accounts, it isn't already in the content schedule, and it isn't
+ * the declared original itself. `postedBy` is set server-side from the session.
  */
 export function CreatePostDialog({
   open,
@@ -113,15 +125,25 @@ export function CreatePostDialog({
   accounts,
   defaultDate,
   draft,
-  onNext,
+  originalLink,
+  onBack,
+  onSubmit,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   accounts: SmmAccount[]; // active accounts assigned to the caller
   defaultDate?: Date;
-  /** A draft to restore — set when the viral step sends the SMM back here. */
-  draft?: PostDraft | null;
-  onNext: (draft: PostDraft) => void;
+  /** Form values to restore — set when a "Back" brought the SMM here again. */
+  draft?: PostFormDraft | null;
+  /** The original declared in step one, '' when the answer was "No". */
+  originalLink?: string;
+  /** Return to the viral-copy question, keeping what has been typed here. */
+  onBack: (draft: PostFormDraft) => void;
+  /**
+   * Creates the post. Rejects on failure, which keeps this dialog open so the
+   * SMM can retry rather than losing everything they typed.
+   */
+  onSubmit: (draft: PostDraft) => Promise<void>;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -129,7 +151,9 @@ export function CreatePostDialog({
         <DialogHeader>
           <DialogTitle>Schedule a post</DialogTitle>
           <DialogDescription>
-            Add a post to your upload schedule. You’ll be asked about viral copies next.
+            {originalLink
+              ? 'Add your post to the upload schedule. It will be recorded as a copy of the original you just verified.'
+              : 'Add your post to the upload schedule.'}
           </DialogDescription>
         </DialogHeader>
         {/* Mounted only while open, so the form's state is seeded from `draft`
@@ -140,8 +164,9 @@ export function CreatePostDialog({
             accounts={accounts}
             defaultDate={defaultDate}
             draft={draft}
-            onNext={onNext}
-            onCancel={() => onOpenChange(false)}
+            originalLink={originalLink}
+            onBack={onBack}
+            onSubmit={onSubmit}
           />
         )}
       </DialogContent>
@@ -153,20 +178,27 @@ function PostForm({
   accounts,
   defaultDate,
   draft,
-  onNext,
-  onCancel,
+  originalLink,
+  onBack,
+  onSubmit,
 }: {
   accounts: SmmAccount[];
   defaultDate?: Date;
-  draft?: PostDraft | null;
-  onNext: (draft: PostDraft) => void;
-  onCancel: () => void;
+  draft?: PostFormDraft | null;
+  originalLink?: string;
+  onBack: (draft: PostFormDraft) => void;
+  onSubmit: (draft: PostDraft) => Promise<void>;
 }) {
   const [caption, setCaption] = useState(draft?.caption ?? '');
+  // A restored draft keeps exactly what it held — including a cleared date,
+  // which must not be silently refilled behind the SMM.
   const [postDate, setPostDate] = useState<Date | undefined>(
-    draft ? new Date(draft.postDate) : withCurrentTime(defaultDate),
+    draft
+      ? (draft.postDate ? new Date(draft.postDate) : undefined)
+      : withCurrentTime(defaultDate),
   );
   const [postLink, setPostLink] = useState(draft?.postLink ?? '');
+  const [saving, setSaving] = useState(false);
 
   // A post link is required and must be a Twitter/X link. The handle in it is
   // the account the post belongs to, so it is matched against the caller's own
@@ -195,18 +227,38 @@ function PostForm({
     enabled: !!matchedAccount,
   });
 
-  const postLinkValid = !!matchedAccount && !duplicate;
-  const canContinue = !!postDate && postLinkValid && !checkingDuplicate;
+  // The original declared in step one is a post on ANOTHER account that was
+  // copied; this link is the new upload. The same link in both means the SMM
+  // pasted the original here and no new upload is being recorded at all.
+  const sameAsOriginal = isSameLink(trimmedLink, originalLink ?? '');
 
-  const handleNext = () => {
+  const postLinkValid = !!matchedAccount && !duplicate && !sameAsOriginal;
+  const canContinue = !!postDate && postLinkValid && !checkingDuplicate && !saving;
+
+  const handleSubmit = async () => {
     if (!matchedAccount || !postDate || !postLinkValid) return;
-    onNext({
-      accountId: matchedAccount.id,
-      caption,
-      postDate: postDate.toISOString(),
-      postLink: trimmedLink,
-    });
+    setSaving(true);
+    try {
+      await onSubmit({
+        accountId: matchedAccount.id,
+        caption,
+        postDate: postDate.toISOString(),
+        postLink: trimmedLink,
+      });
+    } catch (err) {
+      // Stay open on failure — the draft only lives in memory, so closing here
+      // would lose everything the SMM typed.
+      toast.error(err instanceof Error ? err.message : 'Failed to schedule post');
+    } finally {
+      setSaving(false);
+    }
   };
+
+  const handleBack = () => onBack({
+    caption,
+    postDate: postDate ? postDate.toISOString() : null,
+    postLink,
+  });
 
   return (
     <>
@@ -221,7 +273,7 @@ function PostForm({
           />
           {!trimmedLink && (
             <p className="text-xs text-muted-foreground">
-              Paste the link to your post — the account is matched from it automatically.
+              Paste the link to your <span className="font-semibold">new</span> post — the link must be from an account assigned to you.
             </p>
           )}
           {trimmedLink && !linkShapeValid && (
@@ -240,6 +292,14 @@ function PostForm({
               </span>
               <NetworkBadge network={matchedAccount.network} />
             </div>
+          )}
+          {sameAsOriginal && (
+            <p className="text-xs text-destructive">
+              Post Link cannot be the same as the Original Link. The previous step recorded the
+              original viral post on <span className="font-semibold">another</span> account. This
+              form is for your <span className="font-semibold">new</span> post on one of{' '}
+              <span className="font-semibold">your</span> accounts.
+            </p>
           )}
           {duplicate && (
             <p className="text-xs text-destructive">
@@ -263,8 +323,10 @@ function PostForm({
       </div>
 
       <DialogFooter>
-        <Button variant="outline" onClick={onCancel}>Cancel</Button>
-        <Button onClick={handleNext} disabled={!canContinue}>Next</Button>
+        <Button variant="outline" onClick={handleBack} disabled={saving}>Back</Button>
+        <Button onClick={handleSubmit} disabled={!canContinue}>
+          {saving ? 'Scheduling...' : 'Schedule post'}
+        </Button>
       </DialogFooter>
     </>
   );

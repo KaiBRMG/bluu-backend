@@ -22,6 +22,7 @@ function SharingSkeleton() {
                 key={row}
                 className="flex items-center gap-4 border-b border-white/[0.07] px-2 py-3 last:border-b-0"
               >
+                <Skeleton className="size-4 shrink-0 rounded-[4px]" />
                 <Skeleton className="h-4 w-[164px]" />
                 <div className="flex flex-1 justify-center gap-16">
                   {[0, 1, 2, 3].map((box) => (

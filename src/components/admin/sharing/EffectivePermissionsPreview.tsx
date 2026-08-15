@@ -6,6 +6,7 @@ import type { PagePermissionDoc } from "@/types/firestore";
 import { GROUP_DISPLAY_NAMES } from "@/types/firestore";
 import type { PageDef, TeamspaceDef } from "@/lib/definitions";
 import { resolvePagePermission } from "@/lib/services/permissionResolver";
+import { PageIcon } from "@/components/PageIcon";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -80,6 +81,7 @@ export default function EffectivePermissionsPreview({
         return {
           pageId: page.pageId,
           title: page.title,
+          icon: page.icon,
           teamspaceName: tsName,
           teamspaceId: page.teamspaceId,
           access: resolved
@@ -224,8 +226,14 @@ export default function EffectivePermissionsPreview({
                     key={item.pageId}
                     className="flex items-center justify-between gap-3 rounded-md bg-white/[0.04] px-3 py-2"
                   >
-                    <span className="min-w-0 truncate text-sm" title={item.title}>
-                      {item.title}
+                    <span className="flex min-w-0 items-center gap-2 text-sm">
+                      <PageIcon
+                        name={item.icon ?? undefined}
+                        className="size-4 shrink-0 text-zinc-400"
+                      />
+                      <span className="truncate" title={item.title}>
+                        {item.title}
+                      </span>
                     </span>
 
                     {item.access ? (

@@ -5,6 +5,7 @@ import { PlusIcon } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
 import { ViralAccountsTable } from '@/components/smm/xaccounts/ViralAccountsTable';
+import { LinkUsageChecker } from '@/components/smm/xaccounts/LinkUsageChecker';
 import { SubmitSuggestionDialog } from '@/components/smm/xaccounts/SubmitSuggestionDialog';
 import { useSmmAccounts } from '@/hooks/useSmmAccounts';
 
@@ -32,6 +33,8 @@ export default function SmmViralAccountsPage() {
             Submit Page Suggestion
           </Button>
         </div>
+
+        <LinkUsageChecker />
 
         <ViralAccountsTable accounts={accounts} loading={loading} />
       </div>

@@ -22,7 +22,7 @@ The same Vercel project serves **two hosts**, and the difference matters:
 - OAuth is unaffected: `redirect_uri` comes from the fixed `NEXT_PUBLIC_REDIRECT_URI` env var (vercel.app), not from the requesting host. Auth state is per-origin (Firebase uses IndexedDB, the app sets no cookies), so the two hosts have independent sessions by design.
 
 ### The core constraint: two update channels
-- **Renderer (the web app) updates instantly** via Vercel. Anything in `src/` reaches users on next load.
+- **Renderer (the web app) updates instantly** via Vercel — but only reaches a user **on a full page load**, which a desktop app does not perform on its own. See [Renderer staleness](#renderer-staleness-the-app-that-is-never-closed).
 - **The native shell updates per-platform.** **macOS** builds are Developer ID signed + notarized, so `electron-updater` installs them in-app — checked **once at app start**, never mid-session. **Windows** has no real signing cert, so those users must manually reinstall; they're nudged by the version-gated banner. Pushes are rare either way, and a mac user only picks one up when they **restart the app while clocked out** — so **never assume a given native version is deployed**.
 
 **Implication for every change:** put capability + robustness in the native shell (`electron/`), keep *policy* in the renderer (`src/`). New native APIs must be **feature-detected** on the renderer side (`window.electronAPI?.x?.y`) so the renderer keeps working on older installed builds and can light up new behavior as users update. See the version-gated update nudge below.
@@ -94,6 +94,32 @@ All renderer↔main communication goes through `preload.js` → `window.electron
 | `updater.getPending()` | invoke | `updater:getPending` | result of the start-up check (`{version}` or null); **v0.8.0+ — feature-detect** |
 | `updater.download()` | send | `updater:download` | begin download; only ever from an explicit user click. **v0.8.0+** |
 | `updater.onAvailable/onProgress/onStatus/onBeforeInstall`, `readyToInstall()` | both | `updater:*` | live on macOS; inert on Windows (auto-update is darwin-gated) |
+
+## Renderer staleness: the app that is never closed
+
+"Vercel deploys in seconds" is true of the *server*. The **client bundle** only changes on a full page load, and the shell never performs one on its own:
+
+- `main.js` reloads a window on exactly three events, all failures — `render-process-gone` (crash), `did-fail-load` (offline screen), and the offline screen's retry button. Nothing else.
+- **Sleep/wake is not a page lifecycle event.** The renderer keeps its process (`backgroundThrottling: false` keeps its timers alive), Firestore listeners reconnect silently, and `TimeTrackingContext` patches the sleep gap into the session log. All three paths are built to *survive* without a reload, which is exactly why none causes one. Clocking out doesn't reload either.
+- There is no service worker and no `location.reload()` in app code.
+
+The only other refresh path is Next's own: the App Router hard-navigates (`doMpaNavigation`) when an RSC response's build id differs from the client's. That fires only on a navigation that actually reaches the network, so a user who moves around the app picks up a deploy within minutes — and a user parked on one page (clock out → leave the app open → sleep → wake → repeat) picks it up **never**. Weeks-old client code against a current backend.
+
+**Two mechanisms address this, and they are not alternatives:**
+
+1. **Read policy over HTTP, not from the bundle.** Anything that decides whether a user is blocked, prompted or gated must not be a compiled-in constant, because a stale renderer never sees the new value. `fetchAppUpdateConfig()` → `GET /api/app-update` is the worked example: it is what makes "arm the config → the fleet is prompted" true for the never-quits user. Apply the same shape to any future kill switch.
+2. **[`DeploymentRefresher`](../src/components/DeploymentRefresher.tsx)** (mounted in `(main)/layout.tsx`) forces the page load itself. `GET /api/deployment` returns the id of the deployment serving production; the client learns its own id on first check and reloads when it changes.
+
+### DeploymentRefresher's rules
+
+| | |
+|---|---|
+| **Checks on** | window focus, window blur, `visibilitychange`, a clock-out transition, and a 30-min backstop interval. Rate-limited to one request per minute. |
+| **Why DOM events, not `power:event`** | The native wake signal would be more precise, but `TimeTrackingContext` calls `power.removeEventListener()` (= `removeAllListeners`) in its effect cleanup, so a second listener there is torn out at the first dependency change. Regaining focus after a wake covers the same ground with no shared state. |
+| **Reloads only while `clocked-out`** | An **allowlist of one state**, not "not `working`" — `idle`, `paused` and `on-break` all mean the session is still open and are all excluded. Nor is it deferred to a quiet moment mid-shift; it simply does not happen. Staleness latches in a ref and every later trigger re-tests the gate, and clock-out is itself a trigger, so the wait ends there. Same gate, same form, in `UpdateAvailableBanner`. |
+| **Never reloads** | over a desktop update that is downloading/installing ([`updateInFlight.ts`](../src/lib/updateInFlight.ts), set by `UpdateAvailableBanner`), while an input/textarea/contenteditable has focus, or anywhere under `/onboarding`. A forced reload discards unsubmitted form state. |
+| **Fail-safe** | `/api/deployment` returns `{ id: null }` when it can't determine one (local dev). Null is treated as "don't know", never as "changed" — a per-request-varying id would put every client into a reload loop. |
+| **Main window only** | It lives in `(main)/layout.tsx`; the OF Manager satellite has its own layout and must never reload under an operator mid-conversation. |
 
 ## Multi-window: the main window and its satellites
 
@@ -298,19 +324,39 @@ APP_UPDATE = {
 - **Old builds without `app.getVersion`** can't be compared, so they're forced — but only if their platform is targeted at all. Self-resolving; guarded by `isElectron`, so a browser is never blocked.
 - **`releaseNote` is the same file's mirror image**: `mac`/`win` target people who have **not** updated; `releaseNote` sends a one-off "what's new" notification to each user once their installed build reaches `version`. Not per-platform — unlike the prompt, it asks nothing of anyone. It is the one field here that is **safe to arm in the same push as the code** — it cannot fire for a build that does not exist yet. Copy lives in `notifications.releaseNote()` and must be rewritten in the same commit that bumps the version. Full mechanism: [notifications.md](notifications.md#release-notes-whats-new--gated-on-the-installed-build).
 
-### Delivery — feature-detected, never platform-checked
+### Delivery — feature-detected, with one hard platform rule
 
-`updater.getPending` present (macOS v0.8.0+) → **auto**: `updater.download()` → `Progress` bar from `updater:progress` → flush → restart. Absent (Windows, or any pre-0.8.0 build, which shipped no updater) → **manual**: opens `APP_UPDATE.downloadUrl`.
+> **macOS is NEVER given the download link.** `electron-updater` is the only sanctioned way a Mac updates. A hand reinstall over a running signed app is how users end up on the wrong architecture (the x64 `.dmg` carries no arch suffix, so Apple Silicon users land on Rosetta and then take x64 updates forever) or on a build that quietly stops auto-updating.
 
-Detecting the capability rather than branching on `win32` is deliberate: a pre-0.8.0 mac build would otherwise get an auto button with no updater behind it. It self-resolves as the fleet moves to 0.8.0+.
+| Delivery | When | What the user gets |
+|---|---|---|
+| **auto** | `updater.getPending`/`download` present **and** an update pending | `updater.download()` → `Progress` bar from `updater:progress` → flush → restart |
+| **restart** | **macOS**, targeted, nothing pending | "Quit Bluu Backend and open it again — v_x_ installs itself on the next start-up." **No button** — no in-app action helps, and no link is on offer |
+| **manual** | **Windows** | Opens the config's `downloadUrl` for a hand reinstall (no valid signing cert → no auto-update there) |
+
+The `restart` case is not an edge: the shell checks GitHub **once at start-up**, so any app that has been running since before the release shipped has nothing pending, and that is precisely the never-quits user this whole surface is trying to reach. It used to render nothing at all.
+
+**Known limit:** a mac build old enough to expose **no updater API at all** (pre-0.8.0) also lands on `restart`, where reopening cannot help it — that user needs a support-assisted reinstall. Check `users/{uid}.appVersion` (User Management → user detail) before assuming this population is empty.
 
 ### The never-interrupt-a-session rules
 
-- The decision **latches once** per app start, after `isHydrating` settles, and **returns early unless the user is clocked OUT** at that moment. A user mid-session at launch sees **nothing at all** — compulsory or not — until their next launch.
-- The auto path **re-checks live clock state** (via a ref) before offering, because a slow start-up check can resolve after the user has clocked in.
+- **The only trigger condition is `displayState === 'clocked-out'`**, and it is re-checked for the **whole app session** — not latched at boot. A user mid-session at launch sees nothing (compulsory or not) and is prompted the moment they clock out. `mode !== 'none'` is the latch; `evaluatingRef` stops overlapping async runs.
+- **Both** delivery paths re-check live clock state (via a ref) after their `await`s, because a slow check can resolve after the user has clocked in. Bailing is cheap now — the next clock-out re-runs the decision.
 - Nothing downloads until the user clicks (`autoDownload = false`) — a background download would burn a metered connection unannounced.
 - **An in-flight auto download escalates to the modal even when optional.** The app is about to restart itself; leaving a dismissible card would let the user clock in and start working underneath it. An optional download that *errors* offers "Later" so the user isn't trapped in a modal over a non-critical update.
 - The dialog **does not** call `updater.removeListeners()` on unmount: that's `removeAllListeners` on shared channels and would rip out TimeTrackingContext's before-install flush handler.
+
+### Three ways users used to escape the prompt (all closed)
+
+The rules above are about not *over*-prompting. These were the failure modes in the other direction — a targeted user who was simply never asked. All three are renderer-side; none needed a native build.
+
+| Escape route | Why it happened | Fix |
+|---|---|---|
+| **Clocked in during the check** | The decision ran two `await`s (version IPC, updater IPC) after hydration settled; the auto path bailed if the user clocked in meanwhile, and because the decision also **latched**, bailing meant never prompted that launch. | De-latched — the next clock-out re-runs it. Both paths re-check, not just auto. The window itself is small: Clock In is disabled while `isHydrating`. |
+| **Never quitting the app** | Two separate staleness problems. (a) The decision was boot-only, so someone who clocks in and out for a week off one launch was asked exactly once. (b) Worse, **the config itself was stale**: Electron only picks up a new Vercel bundle on a *full page load*, so that renderer keeps evaluating the `APP_UPDATE` constant from the day it launched — arming a release could not reach it at all. | (a) Re-evaluate on every clock-out. (b) `fetchAppUpdateConfig()` reads the live policy from **`GET /api/app-update`** (no-store, shape-checked, falls back to the compiled constant when the request fails). |
+| **The updater hadn't answered (macOS)** | `updater.getPending()` returns the result of the **start-up** check against GitHub. Null if that check hasn't resolved, or if the release was published after this app launched — and the code returned on null, showing nothing. The `updater:available` event *was* emitted, into a component that never listened for it. | Listen on `onAvailable` → re-evaluate when the late answer lands (only while no prompt is showing — a visible dialog keeps the delivery it was built with). And a null `pending` now shows the **restart** prompt rather than silence: the version comparison has already established the user is behind, and reopening the app is what makes the shell check again. Not a download link — see the platform rule above. |
+
+> **`/api/app-update` is unauthenticated by design** — it returns a public version number and the public `/download` URL, the same facts as the GitHub release, with no reads, writes or user data. `appUpdateConfig.ts` remains the single gate; the route just delivers it to a client whose bundle is older than the deploy.
 
 ## Security posture
 
@@ -383,6 +429,7 @@ The reset repairs the **next** scheduled capture, not the one that just failed. 
 - [ ] New satellite window → it inherits crash/offline handling from `attachWindowBehaviour`. Don't hand-roll a second copy.
 - [ ] A notification raised from a satellite must carry `target` (or default to the sender) — routing it to `'main'` drags the operator out of the window they were working in.
 - [ ] Anything that must survive app close → route it through the `close`-event flush (`closingFlushed()`), not `before-quit`.
+- [ ] **A new kill switch / gate must be read over HTTP, not from a compiled-in constant.** A renderer that is never closed executes the bundle it launched with — see [Renderer staleness](#renderer-staleness-the-app-that-is-never-closed). `DeploymentRefresher` shortens that window; it does not close it, and it deliberately never fires mid-shift.
 - [ ] **Timer widget: push an anchor, never a time.** `buildTimerWidgetPayload` builds it and the push lives inside `TimeTrackingProvider`. A per-second string makes the widget a copy of the timer instead of the same clock, and it freezes whenever the renderer's tick does.
 - [ ] Timer widget must render **nothing** when clocked out — destroyed, not zeroed — and must **stop** (not keep counting) on idle/paused.
 - [ ] The Windows HUD stays **click-through at rest** (`setIgnoreMouseEvents(true, { forward: true })`), solid only while the cursor is on it. It is draggable, but the drag is main-driven off `getCursorScreenPoint()` — the page never sends coordinates.

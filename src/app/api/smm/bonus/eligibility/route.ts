@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import {
+  VIRAL_ELIGIBLE_AFTER_DAYS,
   checkSmmAccess, checkViralEligibility, findLinkUsageReport, resolveOriginalAccount,
 } from '@/lib/services/smmService';
 import { extractAccountHandle, normalizePostLink } from '@/lib/smm/linkUtils';
@@ -9,8 +10,10 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 /**
  * GET /api/smm/bonus/eligibility?link=URL
  * The viral-copy check shown while scheduling a post ("Did you copy another
- * viral post?"). Advisory only — POST /api/smm/posts re-runs the same check
- * server-side before storing the copy declaration.
+ * viral post?"), and the same lookup behind the link checker on Viral Accounts
+ * — hence the 'viral-lookup' gate, which admits either page. Advisory only —
+ * POST /api/smm/posts re-runs the same check server-side before storing the
+ * copy declaration.
  *
  * It also resolves the account the original lives on, straight from the link,
  * so the SMM never types it: that account is both the copy's origin and the
@@ -19,7 +22,7 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
  */
 export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
-    const denied = await checkSmmAccess(token.uid, 'dashboard');
+    const denied = await checkSmmAccess(token.uid, 'viral-lookup');
     if (denied) return denied;
 
     const link = request.nextUrl.searchParams.get('link') ?? '';
@@ -39,6 +42,10 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       handle: extractAccountHandle(link),
       account,
       report,
+      // The two-week rule's own number, so the client can say *when* a blocked
+      // source comes back without re-declaring the rule. The server stays the
+      // one place it is defined; nothing here costs an extra read.
+      eligibleAfterDays: VIRAL_ELIGIBLE_AFTER_DAYS,
     });
   } catch (error) {
     console.error('[GET /api/smm/bonus/eligibility]', error);

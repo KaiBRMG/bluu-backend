@@ -8,11 +8,11 @@ import { AccountsKanban } from '@/components/smm/dashboard/AccountsKanban';
 import { ShowAllPostsDialog } from '@/components/smm/dashboard/ShowAllPostsDialog';
 import { BonusSection } from '@/components/smm/dashboard/BonusSection';
 import { PostDialog } from '@/components/smm/shared/PostDialog';
-import { CreatePostDialog, type PostDraft } from '@/components/smm/shared/CreatePostDialog';
+import { CreatePostDialog, type PostFormDraft } from '@/components/smm/shared/CreatePostDialog';
 import { AccountDialog } from '@/components/smm/shared/AccountDialog';
 import { BonusWizard } from '@/components/smm/shared/BonusWizard';
 import { ConfirmDialog } from '@/components/smm/shared/ConfirmDialog';
-import { ViralCopyDialog } from '@/components/smm/shared/ViralCopyDialog';
+import { ViralCopyDialog, type ViralCopyDeclaration } from '@/components/smm/shared/ViralCopyDialog';
 import { useSmmAccounts } from '@/hooks/useSmmAccounts';
 import { useSmmPosts, type SmmPostPayload } from '@/hooks/useSmmPosts';
 import type { PostAction } from '@/components/smm/shared/PostsTable';
@@ -33,11 +33,14 @@ export default function SmmDashboardPage() {
   const [postDialogEdit, setPostDialogEdit] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createDate, setCreateDate] = useState<Date | undefined>(undefined);
-  // Scheduling a post is a two-step flow: the schedule form, then the
-  // viral-copy question. `draft` carries the post between them and survives a
-  // "Back", so nothing typed in step one is lost.
+  // Scheduling a post is a two-step flow: the viral-copy question, then the
+  // schedule form (which writes). `viralAnswer` carries step one's verdict —
+  // `undefined` = not asked yet, `null` = "No", an object = a verified copy —
+  // and `draft` preserves step two's form across a "Back", so nothing typed in
+  // either step is lost.
   const [viralOpen, setViralOpen] = useState(false);
-  const [draft, setDraft] = useState<PostDraft | null>(null);
+  const [viralAnswer, setViralAnswer] = useState<ViralCopyDeclaration | null | undefined>(undefined);
+  const [draft, setDraft] = useState<PostFormDraft | null>(null);
   const [notBonusAccount, setNotBonusAccount] = useState<string | null>(null);
   const [selectedAccount, setSelectedAccount] = useState<SmmAccount | null>(null);
   const [accountDialogOpen, setAccountDialogOpen] = useState(false);
@@ -123,7 +126,12 @@ export default function SmmDashboardPage() {
               anchorDate={anchorDate}
               onWeekChange={setAnchorDate}
               onPostClick={(post) => { setSelectedPost(post); setPostDialogEdit(false); setPostDialogOpen(true); }}
-              onDayClick={(date) => { setCreateDate(date); setDraft(null); setCreateOpen(true); }}
+              onDayClick={(date) => {
+                setCreateDate(date);
+                setDraft(null);
+                setViralAnswer(undefined);
+                setViralOpen(true);
+              }}
               onShowAll={() => setShowAllOpen(true)}
             />
             <BonusSection />
@@ -153,32 +161,35 @@ export default function SmmDashboardPage() {
         startInEdit={postDialogEdit}
       />
 
-      {/* Step 1 — the post itself. Writes nothing; hands a draft to step 2. */}
+      {/* Step 1 — the viral-copy question. Writes nothing; its answer decides
+          whether the post created in step 2 carries a copy declaration. A
+          failed gate can only go Back, so no blocked copy reaches step 2. */}
+      <ViralCopyDialog
+        open={viralOpen}
+        onOpenChange={setViralOpen}
+        initialOriginalLink={viralAnswer?.originalLink}
+        onAnswered={(declaration) => {
+          setViralAnswer(declaration);
+          setViralOpen(false);
+          setCreateOpen(true);
+        }}
+      />
+
+      {/* Step 2 — the post itself, which is what creates it. */}
       <CreatePostDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
         accounts={accounts}
         defaultDate={createDate}
         draft={draft}
-        onNext={(next) => {
-          setDraft(next);
-          setCreateOpen(false);
-          setViralOpen(true);
-        }}
-      />
-
-      {/* Step 2 — the viral-copy question, which creates the post. */}
-      <ViralCopyDialog
-        open={viralOpen}
-        onOpenChange={setViralOpen}
-        postLink={draft?.postLink ?? ''}
-        onBack={() => { setViralOpen(false); setCreateOpen(true); }}
-        onAnswered={async (declaration) => {
-          if (!draft) return;
-          await handleCreate({ ...draft, originalLink: declaration?.originalLink });
+        originalLink={viralAnswer?.originalLink}
+        onBack={(current) => { setDraft(current); setCreateOpen(false); setViralOpen(true); }}
+        onSubmit={async (next) => {
+          await handleCreate({ ...next, originalLink: viralAnswer?.originalLink });
           toast.success('Post scheduled');
-          setViralOpen(false);
+          setCreateOpen(false);
           setDraft(null);
+          setViralAnswer(undefined);
         }}
       />
 

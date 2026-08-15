@@ -16,19 +16,23 @@
  *   asked; the running app finds the actual artifact via `electron-updater`.
  *
  * ▸ **Delivery differs, policy doesn't.** `compulsory` and `latestVersion` mean
- *   the same thing on both platforms; only the button differs — macOS (v0.8.0+)
- *   downloads and installs in-app with a progress bar, Windows opens
- *   `downloadUrl` for a manual reinstall. A pre-0.8.0 mac build has no updater,
- *   so it falls back to `downloadUrl` too — `UpdateAvailableBanner` picks the
- *   delivery by feature-detecting the native updater, not by platform.
+ *   the same thing on both platforms; only the button differs — macOS downloads
+ *   and installs in-app with a progress bar, Windows opens `downloadUrl` for a
+ *   manual reinstall. **`downloadUrl` is never shown to a Mac**: auto-update is
+ *   the only sanctioned path there (a hand reinstall is how users end up on the
+ *   wrong arch or on a build that stops auto-updating). A Mac with nothing
+ *   pending is told to quit and reopen instead — see `UpdateAvailableBanner`.
  *
  * ▸ **Only bump `latestVersion` AFTER the release artifacts are live** (and, for
  *   Windows, after `downloadUrl` actually serves the new installer). Deploying a
  *   `compulsory` bump early blocks users on a build they cannot obtain.
  *
  * ▸ `compulsory: true`  → blocking dialog; the user can't use the app until they
- *   update. `false` → dismissible card. Either way it is **start-up only** and
- *   never shown to a user who is clocked in — see `UpdateAvailableBanner`.
+ *   update. `false` → dismissible card. Either way it is **never shown to a user
+ *   who is clocked in** — but it is no longer start-up only: the banner
+ *   re-evaluates on every clock-out, and reads this config over HTTP
+ *   (`fetchAppUpdateConfig`) so a renderer that has been running for days still
+ *   sees it. Arming this file reaches the fleet without waiting for relaunches.
  *   On Windows prefer `false` for routine releases: updating means quitting and
  *   reinstalling by hand.
  */
@@ -83,8 +87,8 @@ export interface AppUpdateConfig {
   mac: PlatformUpdate | null;
   /** `null` → Windows users are never prompted. */
   win: PlatformUpdate | null;
-  /** Manual-install landing page (.dmg / .exe). Used by Windows, and by
-   *  pre-0.8.0 mac builds that have no in-app updater. */
+  /** Manual-install landing page (.dmg / .exe). **Windows only** — macOS is
+   *  never sent here by the update prompt; it updates in-app or not at all. */
   downloadUrl: string;
   /** `null` → no release note is sent to anyone. */
   releaseNote: ReleaseNote | null;
@@ -115,10 +119,66 @@ export function releaseNoteAppliesTo(version: string | null): boolean {
   return compareSemver(version, note.version) >= 0;
 }
 
-/** Maps a native `process.platform` onto its config entry. Returns null for
+/** Maps a native `process.platform` onto a config's entry. Returns null for
  *  unknown platforms and for platforms with no update targeted. */
-export function getPlatformUpdate(platform: string | null): PlatformUpdate | null {
-  if (platform === 'darwin') return APP_UPDATE.mac;
-  if (platform === 'win32') return APP_UPDATE.win;
+export function resolvePlatformUpdate(
+  config: AppUpdateConfig,
+  platform: string | null,
+): PlatformUpdate | null {
+  if (platform === 'darwin') return config.mac;
+  if (platform === 'win32') return config.win;
   return null;
+}
+
+/** Same, against the compiled-in config. */
+export function getPlatformUpdate(platform: string | null): PlatformUpdate | null {
+  return resolvePlatformUpdate(APP_UPDATE, platform);
+}
+
+/**
+ * Read the config **as it is deployed right now**, not as it was compiled into
+ * the bundle this renderer happens to be running.
+ *
+ * This exists for one specific user: the one who never quits the app. Vercel
+ * ships a new bundle in seconds, but Electron only picks it up on a **full page
+ * load** — so someone who leaves the app running for a week is still executing
+ * the `APP_UPDATE` constant from the day they launched. Arming a release would
+ * never reach them, no matter how often the banner re-evaluates. Fetching over
+ * HTTP is what makes "arm the config → everyone is prompted" true for them too.
+ *
+ * Falls back to the compiled constant when the request fails (offline, or a
+ * build old enough to predate the route) — that is exactly the previous
+ * behaviour, so the fetch can only ever add prompts, never remove them.
+ * Deliberately uncached: a stale-while-revalidate hit would reintroduce the very
+ * staleness this is here to fix.
+ */
+export async function fetchAppUpdateConfig(): Promise<AppUpdateConfig> {
+  try {
+    const res = await fetch('/api/app-update', { cache: 'no-store' });
+    if (!res.ok) return APP_UPDATE;
+    const data: unknown = await res.json();
+    if (!isAppUpdateConfig(data)) return APP_UPDATE;
+    return data;
+  } catch {
+    return APP_UPDATE;
+  }
+}
+
+function isPlatformUpdate(value: unknown): value is PlatformUpdate {
+  if (value === null) return true;
+  if (typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.latestVersion === 'string' && typeof v.compulsory === 'boolean';
+}
+
+/** The response is same-origin and our own, but it decides whether a user is
+ *  locked out of the app — so it is shape-checked rather than trusted. */
+function isAppUpdateConfig(value: unknown): value is AppUpdateConfig {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return (
+    isPlatformUpdate(v.mac) &&
+    isPlatformUpdate(v.win) &&
+    typeof v.downloadUrl === 'string'
+  );
 }

@@ -49,6 +49,13 @@ export interface EligibilityResult {
   account: { id: string; name: string; network: SmmNetwork; isViralBonus: boolean } | null;
   /** Every record found for the pasted link — the result card's full report. */
   report: ViralLinkReport;
+  /**
+   * How old a source must be before it may be copied again (the two-week rule),
+   * sent by the server so the client can work out when a blocked link unlocks
+   * without hard-coding the rule. Optional — an older cached payload lacks it,
+   * and the countdown is simply not shown.
+   */
+  eligibleAfterDays?: number;
 }
 
 export interface SubmitBonusPayload {
