@@ -271,6 +271,18 @@ This is a shell, not a new visual language: colours, overlays, hairlines, radii,
 - **Loading:** shadcn `Skeleton` shaped to the final layout (`<Skeleton className="h-64 rounded-xl" />`), never a bare spinner mid-layout. Async home widgets gate boot via `useBootPhase('home-<name>', isLoading)`.
 - **Empty:** a single quiet line — `text-sm text-muted-foreground` ("Nothing outstanding.", "None") — never an illustration.
 
+### The notification tray
+
+The top-bar tray ([`NotificationTray.tsx`](src/components/NotificationTray.tsx)) is chrome an operator sits beside all day, so its personality is rationed accordingly: **one** authored beat, and it fires on arrivals only.
+
+- **One mark, two facts.** A leading `size-2` dot carries the notification's **type** as hue and its **read state** as treatment — filled with a `0 0 0 3px hue/15` ring while unread, dropped to `opacity: 0.3` with the ring closed once read (200ms, in place). This is what makes *Mark all read* feel like something happened: every ring in the list fades out together and nothing moves. The old 4px full-height colour stripe is gone — it violated the no-decorative-side-stripe Don't.
+- **Hues come from `NOTIFICATION_TYPE_DOT`** in [`notificationTypeBadge.ts`](src/lib/notificationTypeBadge.ts) — the `-400` semantic steps, the single source for a notification's colour on a dark ground. **Import it; never re-map a type to a hex inline.** Its sibling `NOTIFICATION_TYPE_BADGE` is the *light-chip* map for the admin surfaces (`-600` inks) and must not be used on the tray.
+- **Unread rests at `bg-white/[0.025]`**, one overlay step *below* the hover value — resting at the hover value makes hover invisible on unread rows and makes every read row look unread under the cursor.
+- **The unread badge is status-red filled with near-black ink** (`#f87171` / `#0A0A0A`, 7.2:1). White on `#f87171` measures 2.6:1 and fails outright — the same rule as the portal's `ACCENT_BTN`. Red rather than the strictly-semantic "pending" orange because a count badge is platform chrome first; every OS trains that shape to mean red.
+- **The bell strike** (`.notification-bell-strike`, 420ms, ±9°, origin at the bell's crown) is the one authored moment: it swings when a notification *arrives* while the app is open — never on open, never on click, and never on the cold-start delivery, which the tray swallows deliberately. `.notification-badge-in` lands the count with it; `.notification-tray-in` is popover chrome, not an effect. All three declare their final state as the base style.
+- **Day labels are sticky** inside the 480px scroll area, and relative stamps re-tick off one shared clock while the panel is open — a tray left open on a second monitor used to freeze at "5m ago" for the rest of the shift.
+- **Row clicks do not toast on success** (the dot dimming is the confirmation, and this is a per-row action — the same high-frequency exception the satellite shell's send takes). *Mark all read* and *Clear read* do toast, with the real count.
+
 ### Stepped Flows (onboarding)
 
 Multi-step first-run flows use one shared chrome — `src/app/(main)/onboarding/_components/OnboardingCard.tsx` — so every step is the same object with different contents. Never hand-roll a step card.

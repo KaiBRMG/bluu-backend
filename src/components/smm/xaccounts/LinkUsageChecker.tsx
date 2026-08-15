@@ -57,9 +57,9 @@ export function LinkUsageChecker() {
   return (
     <Card className="gap-3 py-4">
       <CardHeader className="px-4">
-        <CardTitle className="text-sm font-semibold">Check a link</CardTitle>
+        <CardTitle className="text-sm font-semibold">Check Link Usage</CardTitle>
         <CardDescription>
-          Quickly check the usage of a link to determine if it is eligible for reposting.
+          Check the usage of a link from a Viral Account to determine if it is eligible for reposting.
         </CardDescription>
       </CardHeader>
       <CardContent className="px-4 space-y-4">

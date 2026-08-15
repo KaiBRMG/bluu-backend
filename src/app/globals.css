@@ -564,6 +564,58 @@ input[type="date"].form-input {
   }
 }
 
+/* ─── Notification tray ───────────────────────────────────────────────
+   Three beats, in descending order of how often an operator sees them.
+
+   The bell strike is the authored one: when a notification *arrives* while
+   the app is open, the bell swings once and settles. It is the physical
+   behaviour of the object the icon already depicts, it fires only on a real
+   arrival (never on open, never on boot, never per click), and it is over in
+   420ms. Amplitude is deliberately small — 9° — because this is chrome an
+   operator sits beside for eight hours, not a screen they visit.
+
+   Every base style below is the FINAL state, so the tray is correct if none
+   of these ever run; `prefers-reduced-motion` collapses them globally. */
+.notification-bell-strike {
+  animation: notification-bell-strike 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: 50% 15%; /* the bell's crown, where it would actually hang */
+}
+
+@keyframes notification-bell-strike {
+  0%   { transform: rotate(0deg); }
+  22%  { transform: rotate(-9deg); }
+  48%  { transform: rotate(6deg); }
+  74%  { transform: rotate(-3deg); }
+  100% { transform: rotate(0deg); }
+}
+
+/* The count landing with the strike. Scale only — it must not travel, or it
+   reads as a second, separate event. */
+.notification-badge-in {
+  animation: notification-badge-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes notification-badge-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+/* The panel opening from the bell it belongs to. Popover chrome, not an
+   effect: one 160ms ease-out anchored at the trigger corner. */
+.notification-tray-in {
+  animation: notification-tray-in 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: top right;
+}
+
+@keyframes notification-tray-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+
 /* ─── Model application thank-you (public form) ───────────────────────
    The applicant's once-ever completion beat on /model-submissions. It reuses
    the onboarding seal/rise/tick vocabulary above so the two completion moments

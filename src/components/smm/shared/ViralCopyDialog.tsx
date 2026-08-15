@@ -115,7 +115,7 @@ export function ViralCopyDialog({
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-1.5">
-              <Label>Please paste the original post link</Label>
+              <Label>Original Link</Label>
               <Input
                 value={originalLink}
                 onChange={(e) => setOriginalLink(e.target.value)}
@@ -150,7 +150,7 @@ export function ViralCopyDialog({
               </DialogTitle>
               <DialogDescription>
                 {!verdict.accountFound
-                  ? `${eligibility.handle ? `@${eligibility.handle}` : 'That link'} isn’t in the account database, so we can’t tell which network you uploaded from. Use a post from a listed creator page, ask an admin to add it, or go back and answer “No”.`
+                  ? `${eligibility.handle ? `@${eligibility.handle}` : 'That link'} isn’t in the account database, so we can’t tell which network you uploaded from. Use a post from a Viral Account, ask an admin to add it, or go back and answer “No”.`
                   : !verdict.isViralAccount
                     ? 'The selected account is not a viral account you may copy posts from. Please only use accounts from Viral Accounts. If you think this is a mistake, contact your team leader.'
                     : eligibility.eligible

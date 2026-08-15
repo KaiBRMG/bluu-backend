@@ -9,10 +9,10 @@
 | `src/lib/notificationContent.ts` | **ONLY** place notification copy (titles, messages, types, actionUrls) lives. Named factory functions returning `NotificationContent`. |
 | `src/lib/middleware/apiHelpers.ts` | `addNotificationToBatch(batch, userId, content)` — writes to Firestore with boilerplate fields |
 | `src/hooks/useNotifications.tsx` | Client-side notification stream |
-| `src/components/NotificationTray.tsx` | UI surface |
+| `src/components/NotificationTray.tsx` | UI surface. Its visual + motion contract (the type/read dot, the bell strike, the badge ink) is documented in [DESIGN.md](../DESIGN.md#the-notification-tray) — read it before changing the tray's look. |
 | `src/hooks/useAdminNotifications.ts` | Admin broadcast/announcement management |
 | `src/lib/automatedNotifications.ts` | **Display-only catalogue** of every *automated* notification (trigger, recipients, source route). Derives its copy by calling the real factories with `{token}` placeholders — it never retypes a title or message. |
-| `src/lib/notificationTypeBadge.ts` | `notificationTypeBadge(type)` — the one badge label/colour map per `NotificationType`, shared by all three admin notification surfaces |
+| `src/lib/notificationTypeBadge.ts` | Two maps, one per ground. `notificationTypeBadge(type)` — badge label/colour for the three **admin** surfaces (light chips, `-600` inks). `notificationTypeDot(type)` — the `-400` semantic hue for the **tray's** leading dot on the near-black panel. Import the one that matches the surface; never re-map a type to a hex inline. |
 | `src/components/admin/notifications/AutomatedNotificationsList.tsx` | Renders the catalogue on the **Automated** tab of `/admin/notifications` |
 | API: `src/app/api/notifications/*` | `create`, `dismiss`, `mark-read` |
 | API: `src/app/api/admin/notifications/*` | admin send + `[batchId]/recipients` (GET) + `[batchId]` (DELETE = "unsend": removes every per-user notification doc for the batch + the batch record) |

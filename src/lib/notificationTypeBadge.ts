@@ -17,3 +17,26 @@ export const NOTIFICATION_TYPE_BADGE: Record<string, { label: string; className:
 export function notificationTypeBadge(type: NotificationType | string) {
   return NOTIFICATION_TYPE_BADGE[type] ?? NOTIFICATION_TYPE_BADGE.system;
 }
+
+/**
+ * Dark-surface mark colour per notification type — the `-400` step of the
+ * semantic palette (DESIGN.md §2), for the leading status dot in the
+ * notification tray. Separate from `NOTIFICATION_TYPE_BADGE` on purpose: that
+ * map's `-600` inks are pitched at the admin surfaces' light chips and are far
+ * too dark to read as a mark on the near-black tray.
+ *
+ * This is the single source for a notification's hue on a dark ground —
+ * import it, never re-map a type to a hex inline.
+ */
+export const NOTIFICATION_TYPE_DOT: Record<string, string> = {
+  shift:      '#60a5fa', // status-blue   — info / scheduled
+  alert:      '#f87171', // status-red    — error / rejected
+  success:    '#4ade80', // status-green  — complete / approved
+  action:     '#facc15', // status-yellow — attention needed
+  system:     '#a1a1aa', // status-zinc   — neutral
+  onboarding: '#a1a1aa',
+};
+
+export function notificationTypeDot(type: NotificationType | string): string {
+  return NOTIFICATION_TYPE_DOT[type] ?? NOTIFICATION_TYPE_DOT.system;
+}
