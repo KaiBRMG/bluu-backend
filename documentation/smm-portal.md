@@ -76,7 +76,7 @@ First `COLLECTION_GROUP` indexes in the repo: `posts (postedBy, postDate)` asc +
 | `bonus/eligibility` GET `?link=` | viral-lookup (dashboard \| xaccounts \| admin) — the schedule flow **and** the Viral Accounts link checker both call it | advisory — re-checked when the **post is created**. Also returns `handle` + the resolved `account` (`{id,name,network,isViralBonus}` or `null`) so the dialog can show the source and block an unknown **or non-viral** one, plus `eligibleAfterDays` (the two-week constant) so the client can date the unlock without re-declaring the rule |
 | `bonus/submissions` POST | dashboard | own post; account type must contain 'Bonus' and carry a tier; server computes everything |
 | `suggestions` GET | admin | pending viral-page nominations |
-| `suggestions` POST | viral | submitter + timestamp + handle all derived server-side |
+| `suggestions` POST | viral | submitter + timestamp + handle all derived server-side; **409** if the handle already resolves to an account with `isViralBonus` |
 | `suggestions/[id]` PATCH | admin | approve (flag `isViralBonus`, optionally create the account) / deny |
 | `users` GET | admin | non-archived SMM group members |
 
@@ -159,6 +159,8 @@ A search box above the table — "Quickly check the usage of a link to determine
 - **Gate:** the route moved from `checkSmmAccess(uid, 'dashboard')` to **`'viral-lookup'`** (dashboard **or** `smm-xaccounts` **or** admin) so an SMM who holds only Viral Accounts can use it. It stays read-only and exposes nothing a holder of either page cannot already list.
 
 **Submit Page Suggestion** writes a `twitterx-page-suggestions` doc from a single field (the account link); the submitter, the timestamp and the `accountName` handle are all derived server-side (`extractAccountHandle`). Admins review them in **Bonus Management → Viral Page Suggestions**:
+
+- **An already-listed page cannot be nominated.** `POST` resolves the handle with `findAccountByHandle` and returns **409 "This account is already a Viral Account."** when that account has `isViralBonus` — one lookup, only on submit. The dialog mirrors it advisorily against the viral list the page already holds (`accountHandle()` vs. the pasted link's handle, case-insensitive — so every link form collapses to the same answer), naming the page before the request is sent; that list is **active accounts only**, so an inactive viral account is caught by the route alone.
 - **Approve** looks the handle up in `twitterx-accounts` (an `in` query over the three casings, since sheet-imported names are upper-case) and sets `isViralBonus: true`. If no such account exists the route answers `{ accountMissing: true }` **without writing**; the admin confirms, and a retry with `createAccount: true` registers a blank account carrying only the suggested name/link.
 - **Deny** sets `isRejected: true`; neither approved nor denied entries appear again.
 

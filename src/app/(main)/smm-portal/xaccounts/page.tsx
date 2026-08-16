@@ -39,7 +39,11 @@ export default function SmmViralAccountsPage() {
         <ViralAccountsTable accounts={accounts} loading={loading} />
       </div>
 
-      <SubmitSuggestionDialog open={suggestOpen} onOpenChange={setSuggestOpen} />
+      <SubmitSuggestionDialog
+        open={suggestOpen}
+        onOpenChange={setSuggestOpen}
+        accounts={accounts}
+      />
     </AppLayout>
   );
 }

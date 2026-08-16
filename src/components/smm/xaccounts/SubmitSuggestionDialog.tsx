@@ -9,19 +9,26 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useSmmSuggestions } from '@/hooks/useSmmSuggestions';
-import { extractAccountHandle } from '@/lib/smm/linkUtils';
+import { accountHandle, extractAccountHandle } from '@/lib/smm/linkUtils';
+import type { SmmAccount } from '@/types/firestore';
 
 /**
  * "Submit Page Suggestion" — an SMM nominating an account worth copying viral
  * posts from. Only the link is asked for; the submitter, the timestamp and the
  * account handle are all derived server-side.
+ *
+ * `accounts` is the viral list the page already holds, used only to name an
+ * already-listed page before the request is sent (zero extra reads). It covers
+ * active accounts only — `POST /api/smm/suggestions` re-checks and is the gate.
  */
 export function SubmitSuggestionDialog({
   open,
   onOpenChange,
+  accounts = [],
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  accounts?: SmmAccount[];
 }) {
   const { submitSuggestion } = useSmmSuggestions();
   const [accountLink, setAccountLink] = useState('');
@@ -32,6 +39,9 @@ export function SubmitSuggestionDialog({
   }, [open]);
 
   const handle = extractAccountHandle(accountLink);
+  const alreadyViral = !!handle && accounts.some(
+    (a) => accountHandle(a).toLowerCase() === handle.toLowerCase(),
+  );
 
   const submit = async () => {
     setSaving(true);
@@ -66,12 +76,17 @@ export function SubmitSuggestionDialog({
           {accountLink.trim() && !handle && (
             <p className="text-xs text-destructive">Enter a valid X/Twitter account link.</p>
           )}
-          {handle && <p className="text-xs text-muted-foreground">Account: @{handle}</p>}
+          {handle && !alreadyViral && (
+            <p className="text-xs text-muted-foreground">Account: @{handle}</p>
+          )}
+          {alreadyViral && (
+            <p className="text-xs text-destructive">This account is already a Viral Account.</p>
+          )}
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={submit} disabled={!handle || saving}>
+          <Button onClick={submit} disabled={!handle || alreadyViral || saving}>
             {saving ? 'Submitting...' : 'Submit'}
           </Button>
         </DialogFooter>

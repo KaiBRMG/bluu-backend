@@ -5,6 +5,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import {
   SMM_SUGGESTIONS,
   checkSmmAccess,
+  findAccountByHandle,
   resolveUserInfo,
   serializeSuggestion,
 } from '@/lib/services/smmService';
@@ -60,6 +61,17 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json(
         { error: 'Enter a valid X/Twitter account link (e.g. https://x.com/example)' },
         { status: 400 },
+      );
+    }
+
+    // Nominating a page that is already listed is a no-op an admin would have
+    // to deny by hand. The handle is the identity (the raw link varies freely),
+    // so this is one keys-light lookup on the same `in` query approval uses.
+    const existing = await findAccountByHandle(accountName);
+    if (existing?.get('isViralBonus') === true) {
+      return NextResponse.json(
+        { error: 'This account is already a Viral Account.' },
+        { status: 409 },
       );
     }
 
