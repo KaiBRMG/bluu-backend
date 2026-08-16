@@ -94,6 +94,7 @@ All renderer↔main communication goes through `preload.js` → `window.electron
 | `updater.getPending()` | invoke | `updater:getPending` | result of the start-up check (`{version}` or null); **v0.8.0+ — feature-detect** |
 | `updater.download()` | send | `updater:download` | begin download; only ever from an explicit user click. **v0.8.0+** |
 | `updater.onAvailable/onProgress/onStatus/onBeforeInstall`, `readyToInstall()` | both | `updater:*` | live on macOS; inert on Windows (auto-update is darwin-gated) |
+| `updater.check()` | invoke | `updater:check` | re-run the start-up check on demand. **Typed optional; the main-process handler is NOT built yet** — it ships with the next Electron build. Until then the renderer's "Check again" button falls back to re-reading `getPending()` |
 
 ## Renderer staleness: the app that is never closed
 
@@ -331,10 +332,23 @@ APP_UPDATE = {
 | Delivery | When | What the user gets |
 |---|---|---|
 | **auto** | `updater.getPending`/`download` present **and** an update pending | `updater.download()` → `Progress` bar from `updater:progress` → flush → restart |
-| **restart** | **macOS**, targeted, nothing pending | "Quit Bluu Backend and open it again — v_x_ installs itself on the next start-up." **No button** — no in-app action helps, and no link is on offer |
+| **restart** | **macOS**, targeted, nothing pending **yet** | "Bluu Backend is contacting the update server…" + a **Check again** button. **Provisional** — it polls `getPending()` and upgrades itself to `auto`. Still no download link |
 | **manual** | **Windows** | Opens the config's `downloadUrl` for a hand reinstall (no valid signing cert → no auto-update there) |
 
 The `restart` case is not an edge: the shell checks GitHub **once at start-up**, so any app that has been running since before the release shipped has nothing pending, and that is precisely the never-quits user this whole surface is trying to reach. It used to render nothing at all.
+
+> ### `pending === null` is a "not yet", never a verdict
+>
+> **This is what stranded the fleet on v0.10.0 (Aug 2026).** The `restart` prompt originally *closed* the decision — it set `mode`, which is the latch — so the `updater:available` listener added for exactly this case hit the `mode !== 'none'` guard and was discarded. And a null read is the **expected** one on a slow link: the shell's check is two GitHub round trips (releases feed, then `latest-mac.yml` behind a redirect to `objects.githubusercontent.com`) racing a renderer that needs one warm Vercel call to hydrate. Every relaunch re-ran the same race at the same odds, which is why quitting and reopening — the only thing the dialog told users to do — never helped. With `compulsory: true` the app was unusable, permanently, for anyone the race went against.
+>
+> Worse, the advice was **untrue**: `autoDownload` and `autoInstallOnAppQuit` are both `false`, so a relaunch installs nothing on its own — it only re-runs the check. The prompt deliberately rendered **no button**, so a compulsory update on this path had no reachable action anywhere in the app.
+>
+> Three things now hold, all renderer-side:
+> - **The restart path does not latch.** The decision effect's guard is `mode !== 'none' && delivery !== 'restart'`, so a late `updater:available` (or any clock-out) re-evaluates and can upgrade it.
+> - **It polls itself out of existence** — `getPending()` every 2s for 60s, upgrading to `auto` in place; the dialog turns into a working Download button under the user. After the window expires the copy says so, and **Check again** re-polls (and calls `updater.check()` when the shell exposes it).
+> - **A failed check is visible.** `updater:status` errors are registered on *every* delivery path now, not just `auto` — main only `console.error`s the check failure, so this is the only evidence a user ever gets. An app auto-launched at login before Wi-Fi is up lands here.
+>
+> Disarming the platform entry in `appUpdateConfig.ts` is the **emergency lever** for a fleet stuck behind this prompt, and it now clears a visible prompt without a relaunch (`setMode('none')` on the `!cfg` path).
 
 **Known limit:** a mac build old enough to expose **no updater API at all** (pre-0.8.0) also lands on `restart`, where reopening cannot help it — that user needs a support-assisted reinstall. Check `users/{uid}.appVersion` (User Management → user detail) before assuming this population is empty.
 
@@ -354,7 +368,7 @@ The rules above are about not *over*-prompting. These were the failure modes in 
 |---|---|---|
 | **Clocked in during the check** | The decision ran two `await`s (version IPC, updater IPC) after hydration settled; the auto path bailed if the user clocked in meanwhile, and because the decision also **latched**, bailing meant never prompted that launch. | De-latched — the next clock-out re-runs it. Both paths re-check, not just auto. The window itself is small: Clock In is disabled while `isHydrating`. |
 | **Never quitting the app** | Two separate staleness problems. (a) The decision was boot-only, so someone who clocks in and out for a week off one launch was asked exactly once. (b) Worse, **the config itself was stale**: Electron only picks up a new Vercel bundle on a *full page load*, so that renderer keeps evaluating the `APP_UPDATE` constant from the day it launched — arming a release could not reach it at all. | (a) Re-evaluate on every clock-out. (b) `fetchAppUpdateConfig()` reads the live policy from **`GET /api/app-update`** (no-store, shape-checked, falls back to the compiled constant when the request fails). |
-| **The updater hadn't answered (macOS)** | `updater.getPending()` returns the result of the **start-up** check against GitHub. Null if that check hasn't resolved, or if the release was published after this app launched — and the code returned on null, showing nothing. The `updater:available` event *was* emitted, into a component that never listened for it. | Listen on `onAvailable` → re-evaluate when the late answer lands (only while no prompt is showing — a visible dialog keeps the delivery it was built with). And a null `pending` now shows the **restart** prompt rather than silence: the version comparison has already established the user is behind, and reopening the app is what makes the shell check again. Not a download link — see the platform rule above. |
+| **The updater hadn't answered (macOS)** | `updater.getPending()` returns the result of the **start-up** check against GitHub. Null if that check hasn't resolved, or if the release was published after this app launched — and the code returned on null, showing nothing. The `updater:available` event *was* emitted, into a component that never listened for it. | Listen on `onAvailable` → re-evaluate when the late answer lands. And a null `pending` shows the **restart** prompt rather than silence: the version comparison has already established the user is behind. Not a download link — see the platform rule above. ⚠️ **The first version of this fix caused the v0.10.0 lockout** — the restart prompt latched, so the late answer had nothing to land in. See the callout above; the prompt is now provisional and polled. |
 
 > **`/api/app-update` is unauthenticated by design** — it returns a public version number and the public `/download` URL, the same facts as the GitHub release, with no reads, writes or user data. `appUpdateConfig.ts` remains the single gate; the route just delivers it to a client whose bundle is older than the deploy.
 

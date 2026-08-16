@@ -266,6 +266,15 @@ interface ElectronAPI {
    */
   updater: {
     getPending?: () => Promise<{ version: string | null } | null>;
+    /**
+     * Re-run the start-up check on demand. The shell checks GitHub ONCE at
+     * launch, so a check that lost a race with renderer boot — or failed
+     * because the network was not up yet — can otherwise never be repeated
+     * without quitting the app. Optional because the main-process handler ships
+     * with the next Electron build; on older shells the renderer falls back to
+     * re-reading `getPending()`.
+     */
+    check?: () => Promise<void>;
     onAvailable?: (callback: (data: { version: string | null }) => void) => void;
     download?: () => void;
     onStatus: (callback: (data: { status: 'downloading' | 'error'; version?: string; message?: string }) => void) => void;

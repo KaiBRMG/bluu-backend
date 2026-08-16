@@ -81,6 +81,26 @@ import {
  *     config has already established this user is behind, and reopening the app
  *     is what makes the shell check again.
  *
+ * **`pending === null` is a "not yet", never a verdict — and the 'restart'
+ * prompt is provisional.** This is the failure that stranded the fleet on
+ * v0.10.0: `mode` is the latch, so the moment the restart prompt was shown the
+ * decision was closed, and the `updater:available` listener above — added for
+ * exactly this case — was discarded by the `mode !== 'none'` guard it ran into.
+ * Meanwhile a null read is the *expected* one on a slow link: the shell's check
+ * is two GitHub round trips (releases feed, then `latest-mac.yml` behind a
+ * redirect) racing a renderer that needs one warm Vercel call to hydrate. Every
+ * relaunch re-ran the same race at the same odds, which is why quitting and
+ * reopening — the one thing the dialog told users to do — never helped.
+ *
+ * So the restart path now (a) does not close the decision: it re-evaluates on a
+ * late `updater:available`, (b) polls `getPending()` for a bounded window and
+ * upgrades itself to 'auto' in place, and (c) carries a **Check again** button.
+ * The old copy ("v0.x installs itself on the next start-up") was also simply
+ * untrue — `autoDownload` and `autoInstallOnAppQuit` are both false in
+ * `main.js`, so a relaunch only re-runs the check; nothing installs until the
+ * user presses Download. A compulsory update on this path therefore had no
+ * reachable action anywhere in the app.
+ *
  * An Electron build too old to expose `app.getVersion()` can't be compared, so
  * it's forced (when its platform is targeted at all) — this bootstraps the fleet
  * onto a readable version, then self-resolves. Only renders inside Electron.
@@ -97,15 +117,19 @@ type Mode = 'none' | 'optional' | 'blocking';
  * - `auto`    — in-app download + restart (`electron-updater`). **The only path
  *               macOS is ever offered.**
  * - `manual`  — opens `downloadUrl` for a hand reinstall. **Windows only.**
- * - `restart` — macOS, update targeted but the shell has nothing pending: the
- *               updater checks GitHub once at start-up, so a long-running app
- *               simply hasn't looked since the release went out. Quitting and
- *               reopening makes it check again. No button, because there is no
- *               in-app action that helps — and no link, per the rule above.
+ * - `restart` — macOS, update targeted but the shell has nothing pending yet.
+ *               **Provisional**: it is polled out of, and upgrades itself to
+ *               `auto` the moment the check answers. Still no download link
+ *               (per the rule above) — the only actions offered are Check again
+ *               and, as a last resort, quitting.
  */
 type Delivery = 'auto' | 'manual' | 'restart';
 /** Sub-state of the auto path. */
 type Phase = 'prompt' | 'downloading' | 'installing' | 'error';
+
+/** How often the restart path re-reads the shell's check, and for how long. */
+const RESTART_POLL_INTERVAL_MS = 2000;
+const RESTART_POLL_WINDOW_MS = 60_000;
 
 export default function UpdateAvailableBanner() {
   const { displayState, isHydrating } = useTimeTrackingContext();
@@ -123,6 +147,15 @@ export default function UpdateAvailableBanner() {
   // Bumped when the shell reports an update *after* we already looked.
   const [availableTick, setAvailableTick] = useState(0);
 
+  // Restart path only. `checkError` is the shell's own check failure (the main
+  // process merely console.errors it, so this is the only place it surfaces);
+  // `pollExhausted` means we waited out the window and the check still has not
+  // answered — the point at which quitting really is the remaining option.
+  const [checkError, setCheckError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [pollExhausted, setPollExhausted] = useState(false);
+  const [pollNonce, setPollNonce] = useState(0);
+
   const [phase, setPhase] = useState<Phase>('prompt');
   const [percent, setPercent] = useState(0);
   const [transferred, setTransferred] = useState(0);
@@ -133,6 +166,11 @@ export default function UpdateAvailableBanner() {
   // network); by then the user may have clocked in, and we must not interrupt.
   const displayStateRef = useRef(displayState);
   useEffect(() => { displayStateRef.current = displayState; }, [displayState]);
+
+  // Read inside the updater listeners, which are registered once and outlive a
+  // restart → auto upgrade.
+  const deliveryRef = useRef(delivery);
+  useEffect(() => { deliveryRef.current = delivery; }, [delivery]);
 
   // A late `update-available` from the shell's start-up check. The renderer
   // usually mounts after that check resolves and reads the result from
@@ -152,7 +190,12 @@ export default function UpdateAvailableBanner() {
   // so latching bought nothing and cost every user who was mid-shift at launch,
   // or who never quits the app, their prompt entirely.
   useEffect(() => {
-    if (mode !== 'none') return;          // already decided — `mode` is the latch
+    // `mode` is the latch — EXCEPT on the restart path, which is a "the check
+    // hasn't answered yet" placeholder rather than a decision. Letting it
+    // re-evaluate is what makes the `updater:available` listener above worth
+    // anything: without this, the late answer arrived, bumped `availableTick`,
+    // and was thrown away right here.
+    if (mode !== 'none' && delivery !== 'restart') return;
     if (isHydrating) return;              // clock state not settled yet
     if (displayState !== 'clocked-out') return; // never interrupt a shift
     if (evaluatingRef.current) return;    // a decision is already in flight
@@ -170,12 +213,17 @@ export default function UpdateAvailableBanner() {
         const config = await fetchAppUpdateConfig();
 
         // The one gate: no config entry → this release isn't aimed at this OS.
+        // Clearing `mode` matters on the provisional restart path: disarming the
+        // config is the emergency lever for a fleet stuck behind a compulsory
+        // prompt, and it has to release them without a relaunch (a stuck user is
+        // clocked out, so they re-evaluate on the next `updater:available` and
+        // are reloaded by `DeploymentRefresher` regardless).
         const cfg = resolvePlatformUpdate(config, platform);
-        if (!cfg) return;
+        if (!cfg) { setMode('none'); return; }
 
         // A build too old to report its version can't be compared — force it.
         // Self-resolving: once updated, getVersion exists and this never fires.
-        if (appVersion && compareSemver(appVersion, cfg.latestVersion) >= 0) return; // up to date
+        if (appVersion && compareSemver(appVersion, cfg.latestVersion) >= 0) { setMode('none'); return; } // up to date
         const compulsory = appVersion ? cfg.compulsory : true;
 
         const updater = api.updater;
@@ -213,11 +261,83 @@ export default function UpdateAvailableBanner() {
         evaluatingRef.current = false;
       }
     })();
-  }, [mode, isHydrating, displayState, availableTick]);
+  }, [mode, delivery, isHydrating, displayState, availableTick]);
 
-  // Download progress + failures. Auto path only.
+  /**
+   * Re-read the shell's start-up check. Returns true once it has an answer, and
+   * moves the banner onto the auto path in place — the user is looking at the
+   * restart dialog and it turns into a working Download button under them.
+   */
+  const pollPending = useCallback(async (): Promise<boolean> => {
+    const updater = window.electronAPI?.updater;
+    if (!updater?.getPending || !updater.download) return false;
+    const pending = await updater.getPending().catch(() => null);
+    if (!pending) return false;
+    setTarget(prev => pending.version ?? prev);
+    setCheckError(null);
+    setPhase('prompt');
+    setDelivery('auto');
+    return true;
+  }, []);
+
+  // The restart path polls itself out of existence. A null `getPending()` at
+  // decision time is nearly always a check still in flight, not a check that
+  // found nothing — so keep asking for a bounded window instead of sending the
+  // user off to relaunch into the very same race.
   useEffect(() => {
-    if (mode === 'none' || delivery !== 'auto') return;
+    if (mode === 'none' || delivery !== 'restart') return;
+    const updater = window.electronAPI?.updater;
+    if (!updater?.getPending || !updater.download) return;
+
+    let cancelled = false;
+    let waited = 0;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    setPollExhausted(false);
+
+    const tick = async () => {
+      const found = await pollPending();
+      if (cancelled || found) return;
+      waited += RESTART_POLL_INTERVAL_MS;
+      if (waited < RESTART_POLL_WINDOW_MS) return;
+      if (timer) clearInterval(timer);
+      setPollExhausted(true);
+    };
+
+    void tick(); // don't make the user wait out the first interval
+    timer = setInterval(tick, RESTART_POLL_INTERVAL_MS);
+    return () => { cancelled = true; if (timer) clearInterval(timer); };
+  }, [mode, delivery, pollNonce, pollPending]);
+
+  const recheck = useCallback(async () => {
+    setChecking(true);
+    setCheckError(null);
+    try {
+      // Only present in shells built after this fix. An older shell checks
+      // GitHub once at launch and cannot be asked again, so there all we can do
+      // is re-read the answer — which is still strictly better than the old
+      // advice, because the answer usually did arrive, just too late.
+      await window.electronAPI?.updater?.check?.();
+      await pollPending();
+    } finally {
+      setChecking(false);
+      setPollNonce(n => n + 1); // fresh polling window either way
+    }
+  }, [pollPending]);
+
+  // Updater events. Registered on EVERY delivery path, not just `auto`:
+  //
+  //  - `updater:status` errors are the only evidence a user ever gets that the
+  //    shell's check failed. Main only `console.error`s it, and this effect used
+  //    to bail before registering unless the auto path had already been chosen —
+  //    so an app that launched before the network was up showed a restart
+  //    dialog that silently described the wrong problem forever.
+  //  - The restart path upgrades to `auto` underneath these listeners, so the
+  //    download handlers have to already be in place.
+  //
+  // Progress and before-install can only fire once a download is running, and
+  // only the auto path can start one, so registering them early costs nothing.
+  useEffect(() => {
+    if (mode === 'none') return;
     const updater = window.electronAPI?.updater;
     if (!updater) return;
 
@@ -228,6 +348,12 @@ export default function UpdateAvailableBanner() {
     });
     updater.onStatus(s => {
       if (s.status !== 'error') return;
+      if (deliveryRef.current !== 'auto') {
+        // Not a failed download — no download has been started. This is the
+        // start-up check itself failing, which the restart copy reports.
+        setCheckError(s.message ?? null);
+        return;
+      }
       setErrorMsg(s.message ?? null);
       setPhase('error');
       setUpdateInFlight(false); // nothing is running — a reload is safe again
@@ -245,7 +371,7 @@ export default function UpdateAvailableBanner() {
     // before-install flush handler. This effect latches once per app start and
     // the app is restarting anyway; re-registering the handlers is harmless
     // (they only call setState) whereas clobbering the flush loses time data.
-  }, [mode, delivery]);
+  }, [mode]);
 
   const openDownload = () => {
     // target=_blank is intercepted by the shell's setWindowOpenHandler → opens
@@ -273,10 +399,17 @@ export default function UpdateAvailableBanner() {
   // is about to restart, so the user must not start working underneath it.
   const inProgress = delivery === 'auto' && phase !== 'prompt';
 
-  // macOS with nothing pending: there is no in-app action, and no download link
-  // is offered on that platform. Quitting and reopening is the whole remedy.
+  // macOS with nothing pending YET. No download link on this platform, but there
+  // is an in-app action after all — re-reading the check — so the copy stops
+  // promising the one thing the shell cannot do. `autoDownload` and
+  // `autoInstallOnAppQuit` are both false in main.js: a relaunch never installs
+  // anything on its own, it only re-runs the check that we are already polling.
   const needsRestart = delivery === 'restart';
-  const restartLine = `Quit Bluu Backend and open it again — v${target} installs itself on the next start-up.`;
+  const restartLine = checkError
+    ? `Bluu Backend couldn’t reach the update server (${checkError}). Check your connection, then press Check again.`
+    : pollExhausted
+      ? 'Bluu Backend hasn’t been able to reach the update server. Check your connection and press Check again — if it keeps failing, quit and reopen the app.'
+      : 'Bluu Backend is contacting the update server. This can take a moment on a slow connection.';
 
   if (mode === 'blocking' || inProgress) {
     const busy = phase === 'downloading' || phase === 'installing';
@@ -322,10 +455,23 @@ export default function UpdateAvailableBanner() {
             </p>
           )}
 
-          {/* No footer on the restart path: every action lives outside the app
-              (Cmd-Q, then reopen), and a button that can't do the thing it
-              names is worse than none. */}
-          {!needsRestart && (
+          {/* The restart path gets a real action. It used to render no footer at
+              all, on the reasoning that every remedy lived outside the app —
+              but that left a compulsory dialog with no reachable way forward,
+              and the remedy it named (relaunch) does not install anything.
+              Re-reading the check is something the app can genuinely do. */}
+          {needsRestart ? (
+            <AlertDialogFooter>
+              <AlertDialogAction
+                disabled={checking}
+                onClick={(e) => { e.preventDefault(); void recheck(); }}
+              >
+                {checking
+                  ? <><Loader2 className="size-4 animate-spin" />Checking…</>
+                  : <><RefreshCw className="size-4" />Check again</>}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          ) : (
             <AlertDialogFooter>
               {/* An optional update that failed to download must not trap the user
                   in a modal — let them carry on and retry at the next start-up. */}
@@ -363,10 +509,17 @@ export default function UpdateAvailableBanner() {
       </CardHeader>
       <CardContent>
         {needsRestart ? (
-          <p className="flex items-start gap-2 text-xs text-muted-foreground">
-            <RefreshCw className="mt-0.5 size-4 shrink-0" />
-            {restartLine}
-          </p>
+          <div className="space-y-3">
+            <p className="flex items-start gap-2 text-xs text-muted-foreground">
+              <RefreshCw className="mt-0.5 size-4 shrink-0" />
+              {restartLine}
+            </p>
+            <Button size="sm" disabled={checking} onClick={() => void recheck()}>
+              {checking
+                ? <><Loader2 className="size-4 animate-spin" />Checking…</>
+                : <><RefreshCw className="size-4" />Check again</>}
+            </Button>
+          </div>
         ) : (
           <Button size="sm" onClick={delivery === 'auto' ? startDownload : openDownload}>
             <Download className="size-4" />
