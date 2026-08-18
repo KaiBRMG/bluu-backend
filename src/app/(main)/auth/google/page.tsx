@@ -13,6 +13,9 @@ import { redirect } from 'next/navigation';
  *    The "you picked your work email again" gate is enforced server-side after
  *    the exchange (Google has no way to exclude a domain), so this only affects
  *    how insistently the chooser is shown.
+ *  • `?mode=revert` — the same round-trip pointing the other way, for a user
+ *    migrated by mistake. Treated identically here; only the domain the server
+ *    accepts differs.
  */
 export default async function GoogleAuthPage({
   searchParams,
@@ -44,7 +47,8 @@ export default async function GoogleAuthPage({
     response_type: 'code',
     scope: 'openid email profile',
     access_type: 'offline',
-    prompt: mode === 'migrate' ? 'select_account consent' : 'select_account',
+    prompt:
+      mode === 'migrate' || mode === 'revert' ? 'select_account consent' : 'select_account',
     // No `hd` — see /api/auth/google-url. Access is decided by our allowlist.
   });
 

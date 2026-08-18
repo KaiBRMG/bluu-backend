@@ -26,8 +26,32 @@ export interface DraftMedia {
   type: string;
   /** Expiring CDN preview link for vault media; uploads have none. */
   previewUrl: string | null;
+  /**
+   * Which rendition `previewUrl` was taken from, so the chip asks the media
+   * cache for the same one. Absent on drafts saved before this was recorded, and
+   * on uploads — both fall back to `preview`, which is what the vault serves for
+   * all but a handful of items.
+   *
+   * This is what lets a *restored* draft show its thumbnails again: the saved
+   * link is blanked (it dies in minutes) but the media id survives, and the cache
+   * can answer from the id alone once the file has been seen once.
+   */
+  previewVariant?: 'preview' | 'thumb';
   width: number | null;
   height: number | null;
+}
+
+/**
+ * The message this draft replies to.
+ *
+ * `text` is kept alongside the id purely so the quote strip can render without
+ * the replied-to message still being in the loaded page — an operator can reply
+ * to something, scroll, and have history collapse back to page one under them.
+ */
+export interface DraftReply {
+  id: string;
+  text: string;
+  fromMe: boolean;
 }
 
 export interface Draft {
@@ -38,6 +62,8 @@ export interface Draft {
   /** Ids within `media` that stay visible outside the paywall. */
   previewIds: string[];
   lockedText: boolean;
+  /** Null for an ordinary message. Unsent, so it belongs here and nowhere else. */
+  replyTo: DraftReply | null;
 }
 
 export const EMPTY_DRAFT: Draft = {
@@ -46,11 +72,17 @@ export const EMPTY_DRAFT: Draft = {
   price: 0,
   previewIds: [],
   lockedText: false,
+  replyTo: null,
 };
 
 const key = (accountId: string | null, chatId: string) =>
   `bluu_of_draft_v1:${accountId ?? 'unknown'}:${chatId}`;
 
+/**
+ * A reply target alone is not worth persisting — nothing has been written yet,
+ * and restoring a bare "replying to…" strip on a thread the operator moved on
+ * from is noise. It rides along once there is actual content.
+ */
 export function isEmptyDraft(draft: Draft): boolean {
   return draft.text.trim() === '' && draft.media.length === 0;
 }
@@ -66,6 +98,7 @@ export function loadDraft(accountId: string | null, chatId: string): Draft {
       price: typeof parsed.price === 'number' ? parsed.price : 0,
       previewIds: Array.isArray(parsed.previewIds) ? parsed.previewIds : [],
       lockedText: parsed.lockedText === true,
+      replyTo: parsed.replyTo?.id ? parsed.replyTo : null,
     };
   } catch {
     return EMPTY_DRAFT;

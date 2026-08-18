@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
 import { requireOnlyFansAccess, resolveMediaUrlCached } from '@/lib/services/onlyfansService';
+import { resolveMediaVariant } from '@/lib/services/onlyfansMediaCache';
+import { mediaErrorCode } from '../../_lib/mediaErrors';
 import { OnlyFansApiError, resolveAccountId } from '@/lib/onlyfans';
+import type { OFMediaVariant } from '@/lib/onlyfans/types';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
@@ -10,58 +13,96 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
  * thumbnails, not to let one caller trigger an unbounded number of billed
  * provider downloads in a single shot.
  */
-const MAX_URLS = 12;
+const MAX_ITEMS = 12;
+
+/** The small renditions a tile renders itself with. Large ones use `/media/file`. */
+const BATCH_VARIANTS: readonly OFMediaVariant[] = ['thumb', 'preview'];
 
 /**
- * POST /api/onlyfans/media/resolve — turn expiring provider CDN links into URLs
- * the renderer can actually load.
+ * A copy into our bucket is a network hop with a file at the end of it, so the
+ * batch needs more than a default lambda's ten seconds — but far less than the
+ * file route, because nothing here is bigger than a preview image.
+ */
+export const maxDuration = 60;
+
+/**
+ * POST /api/onlyfans/media/resolve — turn attachment renditions into URLs the
+ * renderer can actually load.
  *
  * `cdn*.onlyfans.com` is IP-locked to the provider's proxy, so no attachment can
  * be displayed without passing through here. The body is a batch because a
- * message with four photos would otherwise be four round trips; the provider
- * work is per URL either way.
+ * message with four photos would otherwise be four round trips.
  *
- * **This costs credits when the provider has not cached the file**, which is why
- * the client resolves on viewport rather than on load and prefers the preview
- * variant over the full one. Repeats inside one server instance are memoised.
+ * Requests name **`{ id, variant, url }`**, not a bare URL, and that is
+ * load-bearing in two directions:
  *
- * Failures are reported **per URL** rather than failing the batch: one expired
- * link should degrade its own tile, not blank the other three beside it.
+ *  - the caches key on `id:variant`, which survives the provider re-signing its
+ *    links on every history fetch — URL-keyed caching missed on every refresh
+ *    and re-billed the whole viewport;
+ *  - `url` is optional, so a message that arrived by webhook (metadata mirrored,
+ *    links deliberately not) still renders whenever the file is already cached.
+ *
+ * Billed bytes are streamed into Cloud Storage once and served from there
+ * afterwards — see `onlyfansMediaCache.ts`. Failures are reported **per item**
+ * rather than failing the batch: one dead link should degrade its own tile, not
+ * blank the other three beside it.
  */
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   const denied = await requireOnlyFansAccess(token.uid);
   if (denied) return denied;
 
   const body = await request.json().catch(() => null);
-  const urls = Array.isArray(body?.urls) ? body.urls : null;
-  if (!urls || urls.length === 0) {
-    return NextResponse.json({ error: 'urls is required' }, { status: 400 });
+
+  // TEMPORARY (renderer compatibility) — an OF Manager window opened before this
+  // shipped posts `{ urls: [...] }` and knows nothing about ids or variants. It
+  // keeps the old pass-through behaviour, including the old cost profile. Remove
+  // once no client can still be running that bundle.
+  if (!body?.items && Array.isArray(body?.urls)) {
+    return legacyResolve(body.urls as unknown[]);
   }
-  if (urls.length > MAX_URLS) {
-    return NextResponse.json({ error: `At most ${MAX_URLS} urls per request` }, { status: 400 });
+
+  const items = Array.isArray(body?.items) ? body.items : null;
+  if (!items || items.length === 0) {
+    return NextResponse.json({ error: 'items is required' }, { status: 400 });
   }
-  if (!urls.every((u: unknown) => typeof u === 'string' && u.length > 0)) {
-    return NextResponse.json({ error: 'urls must be strings' }, { status: 400 });
+  if (items.length > MAX_ITEMS) {
+    return NextResponse.json({ error: `At most ${MAX_ITEMS} items per request` }, { status: 400 });
+  }
+
+  const parsed: { id: string; variant: OFMediaVariant; url: string | null }[] = [];
+  for (const item of items) {
+    const id = typeof item?.id === 'string' ? item.id.trim() : '';
+    const variant = item?.variant as OFMediaVariant;
+    if (!id || !BATCH_VARIANTS.includes(variant)) {
+      return NextResponse.json(
+        { error: 'Each item needs an id and a thumb/preview variant' },
+        { status: 400 },
+      );
+    }
+    parsed.push({ id, variant, url: typeof item?.url === 'string' && item.url ? item.url : null });
   }
 
   // Duplicates in one batch would each be a lookup; collapse them here so the
   // memo is not the only thing standing between a repeated tile and a bill.
-  const unique = [...new Set(urls as string[])];
+  const unique = new Map<string, (typeof parsed)[number]>();
+  for (const item of parsed) unique.set(`${item.id}:${item.variant}`, item);
 
   try {
     const accountId = await resolveAccountId();
 
-    // The URL shape itself is validated behind the adapter — knowing what a
-    // provider CDN link looks like is provider-shaped knowledge, so an invalid
-    // one arrives here as a per-URL failure rather than a route-level check.
     const entries = await Promise.all(
-      unique.map(async (url) => {
+      [...unique].map(async ([key, item]) => {
         try {
-          const { url: resolved, ttlMs } = await resolveMediaUrlCached(accountId, url);
-          return [url, { url: resolved, ttlMs }] as const;
+          const { url, ttlMs } = await resolveMediaVariant({
+            accountId,
+            mediaId: item.id,
+            variant: item.variant,
+            sourceUrl: item.url,
+            large: false,
+          });
+          return [key, { url, ttlMs }] as const;
         } catch (error) {
-          const expired = error instanceof OnlyFansApiError && error.status === 403;
-          return [url, { error: expired ? 'expired' : 'failed' }] as const;
+          return [key, { error: mediaErrorCode(error) }] as const;
         }
       }),
     );
@@ -78,3 +119,31 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     return handleApiError(error, 'POST /api/onlyfans/media/resolve');
   }
 });
+
+/** TEMPORARY — see the call site. The pre-`items` contract, unchanged. */
+async function legacyResolve(urls: unknown[]): Promise<NextResponse> {
+  if (urls.length === 0 || urls.length > MAX_ITEMS) {
+    return NextResponse.json({ error: 'urls is required' }, { status: 400 });
+  }
+  if (!urls.every((u) => typeof u === 'string' && u.length > 0)) {
+    return NextResponse.json({ error: 'urls must be strings' }, { status: 400 });
+  }
+
+  const unique = [...new Set(urls as string[])];
+  try {
+    const accountId = await resolveAccountId();
+    const entries = await Promise.all(
+      unique.map(async (url) => {
+        try {
+          const { url: resolved, ttlMs } = await resolveMediaUrlCached(accountId, url);
+          return [url, { url: resolved, ttlMs }] as const;
+        } catch (error) {
+          return [url, { error: mediaErrorCode(error) }] as const;
+        }
+      }),
+    );
+    return NextResponse.json({ resolved: Object.fromEntries(entries) });
+  } catch (error) {
+    return handleApiError(error, 'POST /api/onlyfans/media/resolve (legacy)');
+  }
+}

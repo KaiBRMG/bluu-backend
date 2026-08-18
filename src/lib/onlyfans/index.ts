@@ -13,6 +13,13 @@ import { OnlyFansApiError, type IOnlyFansClient } from './types';
 
 export * from './types';
 
+/**
+ * Re-exported so the service layer can collect a provider quirk the adapter
+ * noticed without importing from `providers/` — the seam holds either way, but
+ * everything above it should only ever reach for this barrel.
+ */
+export { takeUnrecognisedVideoSourceHost } from './providers/onlyfansApi';
+
 let client: IOnlyFansClient | null = null;
 
 export function getOnlyFansClient(): IOnlyFansClient {

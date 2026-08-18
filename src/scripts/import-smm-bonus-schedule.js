@@ -1,33 +1,63 @@
 'use strict';
 // Run from the app root: cd src && node scripts/import-smm-bonus-schedule.js
 // Add --dry-run to preview every change without writing anything.
+// Add --wipe to delete EVERY existing post in twitterx-content-schedule first
+//   (see "Wiping" below — destructive, opt-in, and honoured by --dry-run).
 //
 // Imports "SMM _ Bonus Scheme Tracking - CONTENTS.csv" (repo root) into
 // twitterx-content-schedule/{accountId}/posts/{postId}.
 //
-// Mapping:
+// ── What the sheet's "POST LINK" column actually is ─────────────────────────
+// It is NOT the SMM's own upload. Every link in it is the **original viral
+// post that was copied** — the same thing an SMM types into ViralCopyDialog
+// ("Did you copy another viral post?"). That is provable from the handles:
+// they resolve to the viral pages seeded by import-twitterx-accounts.js
+// (isViralBonus = true), never to the SMMs' own managed pages.
+//
+// So the sheet maps onto the copy declaration, not onto the post link:
 //   SMM        → postedBy   (uid, resolved via SMM_NAME_MAP below; some SMMs
 //                are deliberately left unassigned — see UNASSIGNED_SMMS)
-//   POST LINK  → postLink & postLinkNormalized (normalizePostLink)
+//   POST LINK  → originalLink & originalLinkNormalized, isViralCopy: true,
+//                and the resolved source account → originalAcc / sourceAcc /
+//                sourceAccName — exactly what POST /api/smm/posts stores for a
+//                declared copy.
 //   DATE POSTED→ postDate, at 00:00 local time (the sheet has no time of day)
 //
-// The account a post belongs to (and therefore which posts subcollection it
-// is written into) is NOT the SMM column — it is derived the same way the
-// live app derives a viral-copy source: the handle is pulled out of the
-// POST LINK and resolved against twitterx-accounts (case-insensitive, same
-// rule as findAccountByHandle in smmService.ts). A handle not found in
-// twitterx-accounts is a hard failure for that row — there is nowhere to
-// write the post.
+// `postLink`/`postLinkNormalized` are written EMPTY. The sheet never recorded
+// the SMM's own upload URL, and inventing one would poison findDuplicatePostLink
+// and findLinkUsage. Live posts created through the app always carry one; these
+// historical rows simply cannot. Nothing breaks on '': both lookups short-circuit
+// on an empty normalized link.
 //
-// Idempotent: re-running skips any row whose (accountId, postLinkNormalized)
-// already exists in that account's posts subcollection, or that appears
-// twice within the CSV itself.
+// ── Which account the post is written under ─────────────────────────────────
+// The parent account is the **source (viral) account** resolved from the link
+// — because it is the only account the sheet identifies. The page the SMM
+// actually posted on is not recorded anywhere in the CSV, and guessing one of
+// their assigned pages would fabricate the bonus tier. Consequence: for these
+// seeded rows, parent accountId === originalAcc === sourceAcc. That is fine for
+// the job this seed exists to do — the 2-week source rule is a collection-group
+// query on originalLinkNormalized (findLinkUsage), so it is parent-independent.
+// A handle not found in twitterx-accounts is a hard failure for that row —
+// there is nowhere to write the post.
+//
+// ── Idempotency ─────────────────────────────────────────────────────────────
+// Doc ids are deterministic — a hash of (SMM, normalized original link, date) —
+// so re-running rewrites the same documents instead of duplicating them, and a
+// row repeated verbatim inside the CSV collapses to one doc. Rows already
+// present are reported as skipped rather than rewritten.
+//
+// ── Wiping ──────────────────────────────────────────────────────────────────
+// --wipe deletes every doc under twitterx-content-schedule/{any}/posts before
+// importing. Parent docs are never created, so the accounts are enumerated with
+// listDocuments() (which returns refs for missing parents that have
+// subcollections) rather than a collection-group query.
 //
 // Extra CSV columns (D/E/F) are sheet validation notes/examples, not data —
 // only the first three columns (SMM, POST LINK, DATE POSTED) are read.
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const admin = require('firebase-admin');
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
 
@@ -57,6 +87,39 @@ const SMM_SCHEDULE = 'twitterx-content-schedule';
 const SMM_POSTS_SUB = 'posts';
 const BATCH_SIZE = 400;
 const dryRun = process.argv.includes('--dry-run');
+const wipe = process.argv.includes('--wipe');
+
+/**
+ * Deterministic doc id for a row: the same row always lands on the same
+ * document, so a re-run overwrites instead of duplicating. Keyed on the three
+ * columns the sheet actually carries — the SMM, the copied original (normalized,
+ * so URL variants collapse) and the date.
+ */
+function rowDocId(smmKey, originalNormalized, date) {
+  const key = `${smmKey}|${originalNormalized}|${date.toISOString().slice(0, 10)}`;
+  return `csv-${crypto.createHash('sha1').update(key).digest('hex').slice(0, 24)}`;
+}
+
+/** Delete every doc under twitterx-content-schedule/{account}/posts. */
+async function wipeSchedule() {
+  const accountRefs = await db.collection(SMM_SCHEDULE).listDocuments();
+  let found = 0;
+  let deleted = 0;
+  for (const accountRef of accountRefs) {
+    const snap = await accountRef.collection(SMM_POSTS_SUB).select().get();
+    found += snap.size;
+    if (dryRun || snap.empty) continue;
+    for (let i = 0; i < snap.docs.length; i += BATCH_SIZE) {
+      const batch = db.batch();
+      for (const doc of snap.docs.slice(i, i + BATCH_SIZE)) batch.delete(doc.ref);
+      await batch.commit();
+      deleted += Math.min(BATCH_SIZE, snap.docs.length - i);
+    }
+  }
+  console.log(dryRun
+    ? `  [dry run] would delete ${found} posts across ${accountRefs.length} accounts`
+    : `  Deleted ${deleted} posts across ${accountRefs.length} accounts`);
+}
 
 // ─── CSV parser (quote-aware; the sheet's warning notes are multi-line
 //     quoted cells in columns beyond the ones we read) ─────────────────────
@@ -173,15 +236,25 @@ async function main() {
 
   console.log('Loading twitterx-accounts...');
   const accountsSnap = await db.collection(SMM_ACCOUNTS).get();
-  const accountsByHandle = new Map(); // normalized accountName → { id, accountName }
+  const accountsByHandle = new Map(); // normalized accountName → { id, accountName, isViralBonus, status }
   for (const doc of accountsSnap.docs) {
     const d = doc.data();
     const key = nameKey(d.accountName);
     if (key && !accountsByHandle.has(key)) {
-      accountsByHandle.set(key, { id: doc.id, accountName: d.accountName });
+      accountsByHandle.set(key, {
+        id: doc.id,
+        accountName: d.accountName,
+        isViralBonus: d.isViralBonus === true,
+        status: d.status ?? 'active',
+      });
     }
   }
   console.log(`  ${accountsSnap.size} accounts indexed`);
+
+  if (wipe) {
+    console.log('Wiping twitterx-content-schedule posts...');
+    await wipeSchedule();
+  }
 
   console.log('Parsing CSV...');
   const rows = parseCSV(fs.readFileSync(CSV_PATH, 'utf8'));
@@ -199,7 +272,9 @@ async function main() {
     if (raw.every((cell) => (cell || '').trim() === '')) return; // blank line
 
     const smmRaw = (raw[0] || '').trim();
-    const postLinkRaw = (raw[1] || '').trim();
+    // The sheet's "POST LINK" column is the copied ORIGINAL, not the SMM's own
+    // upload — see the header comment.
+    const originalLinkRaw = (raw[1] || '').trim();
     const datePostedRaw = (raw[2] || '').trim();
     const label = smmRaw || '(blank)';
 
@@ -208,21 +283,31 @@ async function main() {
       return;
     }
 
-    if (!postLinkRaw || postLinkRaw === '-') {
-      failed.push({ row: rowNum, name: label, reason: `No post link (${postLinkRaw ? `placeholder "${postLinkRaw}"` : 'blank'})` });
+    if (!originalLinkRaw || originalLinkRaw === '-') {
+      failed.push({ row: rowNum, name: label, reason: `No original link (${originalLinkRaw ? `placeholder "${originalLinkRaw}"` : 'blank'})` });
       return;
     }
 
-    const handle = extractAccountHandle(postLinkRaw);
+    const handle = extractAccountHandle(originalLinkRaw);
     if (!handle) {
-      failed.push({ row: rowNum, name: label, reason: `Could not extract an X/Twitter handle from "${postLinkRaw}"` });
+      failed.push({ row: rowNum, name: label, reason: `Could not extract an X/Twitter handle from "${originalLinkRaw}"` });
       return;
     }
 
+    // The account the copied original lives on — the post's source, resolved
+    // exactly as resolveOriginalAccount does in the live app.
     const account = accountsByHandle.get(nameKey(handle));
     if (!account) {
       failed.push({ row: rowNum, name: label, reason: `Account "@${handle}" not found in twitterx-accounts` });
       return;
+    }
+    // Written anyway: these rows predate the flags, and the seed's job is to
+    // record that the source was used, not to re-litigate whether it may be.
+    if (!account.isViralBonus) {
+      warnings.push({ row: rowNum, name: label, message: `Source "@${handle}" is not flagged isViralBonus — the live app would block this copy` });
+    }
+    if (account.status !== 'active') {
+      warnings.push({ row: rowNum, name: label, message: `Source "@${handle}" is ${account.status} — the post will be hidden from dashboards (still counts for the 2-week rule)` });
     }
 
     const date = parseDatePosted(datePostedRaw);
@@ -256,40 +341,43 @@ async function main() {
       return;
     }
 
-    const postLinkNormalized = normalizePostLink(postLinkRaw);
+    const originalLinkNormalized = normalizePostLink(originalLinkRaw);
     candidates.push({
       row: rowNum,
       name: label,
+      docId: rowDocId(smmKey, originalLinkNormalized, date),
       accountId: account.id,
       accountName: account.accountName,
-      postLink: postLinkRaw,
-      postLinkNormalized,
+      originalLink: originalLinkRaw,
+      originalLinkNormalized,
       postedBy,
       postDate: date,
     });
   });
 
   // ── Dedup against Firestore (existing posts) and within the CSV itself ──
+  // The doc id IS the row's identity (see rowDocId), so both questions are the
+  // same one: does that id already exist?
   console.log('Checking for already-imported posts...');
   const uniqueAccountIds = [...new Set(candidates.map((c) => c.accountId))];
-  const existingByAccount = new Map(); // accountId → Set(postLinkNormalized)
+  const existingByAccount = new Map(); // accountId → Set(docId)
   for (const accountId of uniqueAccountIds) {
     const snap = await db
       .collection(SMM_SCHEDULE).doc(accountId).collection(SMM_POSTS_SUB)
-      .select('postLinkNormalized')
+      .select()
       .get();
-    existingByAccount.set(accountId, new Set(snap.docs.map((d) => d.data().postLinkNormalized).filter(Boolean)));
+    existingByAccount.set(accountId, new Set(snap.docs.map((d) => d.id)));
   }
 
   const skippedDuplicate = []; // { row, name, reason }
   const toWrite = [];
   for (const c of candidates) {
     const seen = existingByAccount.get(c.accountId);
-    if (seen.has(c.postLinkNormalized)) {
-      skippedDuplicate.push({ row: c.row, name: c.name, reason: `Post link already exists under ${c.accountName}` });
+    if (seen.has(c.docId)) {
+      skippedDuplicate.push({ row: c.row, name: c.name, reason: `Already imported under ${c.accountName} (same SMM, original link and date)` });
       continue;
     }
-    seen.add(c.postLinkNormalized); // catches a repeat later in the same CSV
+    seen.add(c.docId); // catches a repeat later in the same CSV
     toWrite.push(c);
   }
 
@@ -301,21 +389,24 @@ async function main() {
     for (let i = 0; i < toWrite.length; i += BATCH_SIZE) {
       const batch = db.batch();
       for (const c of toWrite.slice(i, i + BATCH_SIZE)) {
-        const ref = db.collection(SMM_SCHEDULE).doc(c.accountId).collection(SMM_POSTS_SUB).doc();
+        const ref = db.collection(SMM_SCHEDULE).doc(c.accountId).collection(SMM_POSTS_SUB).doc(c.docId);
         batch.set(ref, {
           caption: '',
           accountName: c.accountName,
           postDate: Timestamp.fromDate(c.postDate),
-          postLink: c.postLink,
-          postLinkNormalized: c.postLinkNormalized,
+          // The sheet never recorded the SMM's own upload — deliberately empty.
+          postLink: '',
+          postLinkNormalized: '',
           postedBy: c.postedBy,
           createdTime: FieldValue.serverTimestamp(),
           bonusSubmission: false,
-          isViralCopy: false,
-          originalLink: '',
-          originalAcc: '',
-          sourceAcc: '',
-          sourceAccName: '',
+          // Every row IS a viral copy: the link is the original that was copied.
+          isViralCopy: true,
+          originalLink: c.originalLink,
+          originalLinkNormalized: c.originalLinkNormalized,
+          originalAcc: c.accountId,
+          sourceAcc: c.accountId,
+          sourceAccName: c.accountName,
         });
       }
       await batch.commit();
@@ -362,4 +453,4 @@ if (require.main === module) {
 }
 
 // Exported for offline testing of the pure parsing helpers.
-module.exports = { parseCSV, extractAccountHandle, normalizePostLink, parseDatePosted, nameKey, SMM_NAME_MAP, UNASSIGNED_SMMS, CSV_PATH };
+module.exports = { parseCSV, extractAccountHandle, normalizePostLink, parseDatePosted, nameKey, rowDocId, SMM_NAME_MAP, UNASSIGNED_SMMS, CSV_PATH };

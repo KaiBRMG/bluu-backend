@@ -19,7 +19,8 @@ export type AutomatedNotificationCategory =
   | 'Leave'
   | 'Disputes'
   | 'Content Planning'
-  | 'Model Submissions';
+  | 'Model Submissions'
+  | 'OF Manager';
 
 export interface AutomatedNotification {
   /** Factory name in `notificationContent.ts` — stable id for React keys. */
@@ -193,6 +194,40 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     content: notifications.modelSubmissionReceived('{applicantName}', '{city}, {country}'),
   },
 
+  // ─── OF Manager ───────────────────────────────────────────────────────────
+  // Both of these are operational diagnostics rather than workflow events, and
+  // both are addressed to a single named maintainer rather than to a group —
+  // see the note on OPS_ALERT_RECIPIENT_UID for why that is deliberate here and
+  // not a violation of "never hardcode a uid". They are catalogued anyway: rule
+  // 15 asks for a record of everything the system sends on its own, and an
+  // admin looking at this tab should be able to see that these exist.
+  {
+    id: 'ofMediaCacheCritical',
+    category: 'OF Manager',
+    event: 'Media cache reached its size threshold',
+    trigger:
+      'The daily Vercel Cron reading of the onlyfans-media/ Cloud Storage prefix finds it at or above 50 GB. Sent once ever — the condition persists until someone sets a lifecycle rule, so repeating it would add nothing.',
+    recipients: 'One named maintainer (OPS_ALERT_RECIPIENT_UID)',
+    sources: [
+      'src/app/api/cron/onlyfans-media-usage/route.ts',
+      'src/lib/services/onlyfansMediaUsage.ts',
+    ],
+    content: notifications.ofMediaCacheCritical('{size}', '{period}'),
+  },
+  {
+    id: 'ofVideoSourceHostUnrecognised',
+    category: 'OF Manager',
+    event: 'Video renditions served from an unrecognised host',
+    trigger:
+      'Normalising a message page finds the provider serving its 240p/720p video renditions from a host CDN_URL_PATTERN rejects, so every video falls back to the billed-by-the-megabyte source file. Sent once ever, from `after()` on the message-history route.',
+    recipients: 'One named maintainer (OPS_ALERT_RECIPIENT_UID)',
+    sources: [
+      'src/app/api/onlyfans/chats/[chatId]/messages/route.ts',
+      'src/lib/services/onlyfansOpsAlerts.ts',
+    ],
+    content: notifications.ofVideoSourceHostUnrecognised('{host}'),
+  },
+
   // NOTE — `notifications.releaseNote()` is deliberately NOT catalogued here,
   // and that is the one sanctioned exception to cross-cutting rule 15. This tab
   // is a record of what the system sends *on an ongoing basis*, so an admin can
@@ -209,4 +244,5 @@ export const AUTOMATED_NOTIFICATION_CATEGORIES: AutomatedNotificationCategory[] 
   'Disputes',
   'Content Planning',
   'Model Submissions',
+  'OF Manager',
 ];

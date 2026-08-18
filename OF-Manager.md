@@ -48,7 +48,7 @@ One linked test account, messaging only. Delivered:
 | `src/app/of-manager/**` | The window: layout, guard, `ChatList`, `ChatThread` |
 | `src/hooks/useOnlyFansChats.ts` / `useOnlyFansMessages.ts` | Client data hooks |
 
-`IOnlyFansClient` currently covers: `listAccounts`, `listChats`, `listMessages`, `sendMessage` (media + PPV since 3b), `markChatRead`, `resolveMediaUrl` (3a), `listVaultLists` / `listVaultMedia` / `uploadMediaFromUrl` (3b), `verifyWebhookSignature`, `parseWebhookEvent`.
+`IOnlyFansClient` currently covers: `listAccounts`, `listChats`, `listMessages`, `sendMessage` (media + PPV since 3b), `markChatRead`, `resolveMediaUrl` (3a), `listVaultLists` / `listVaultMedia` / `uploadMediaFromUrl` (3b), `setMessagePinned` / `setMessageLiked` / `getFanNotes` (3c), `verifyWebhookSignature`, `parseWebhookEvent`.
 
 ### Cost model established (do not regress)
 
@@ -64,7 +64,7 @@ Three independent layers: the Electron main-process check, `requireOnlyFansAcces
 
 ### Deliberately not built in Phases 1–2
 
-Vault/media upload, PPV composition, per-function permissions, audit logs, time-tracking gating, links to the `creators` collection, earnings, notifications, multi-account. Media on existing messages rendered as an attachment chip, not an image — **that part is done, in pass 3a**, and **vault + upload + PPV composition are done in pass 3b.** Everything else is in Part II below.
+Vault/media upload, PPV composition, per-function permissions, audit logs, time-tracking gating, links to the `creators` collection, earnings, notifications, multi-account. Media on existing messages rendered as an attachment chip, not an image — **that part is done, in pass 3a**; **vault + upload + PPV composition are done in pass 3b**; **message affordances, the fan panel and list ergonomics are done in pass 3c.** Everything else is in Part II below.
 
 ## Pitfalls already paid for — do not regress
 
@@ -109,13 +109,20 @@ Each of these was a real bug. The shape of the code is the fix, so a "tidy-up" t
 
 # Part II — Upcoming work
 
-Phases are ordered by dependency, not by appetite. Phase 3 is cosmetic and independent; **Phase 4 (multi-account) is the structural unlock and blocks 5, 8 and 9.** Do not start sales tracking or multi-account views before the account model is real.
+Phases are ordered by dependency, not by appetite. **Phase 3 is complete** (see Part I). **Phase 4 (multi-account) is the structural unlock and blocks 5, 8 and 9, and it is next.** Do not start sales tracking or multi-account views before the account model is real.
 
 ---
 
-## Phase 3 — Chat interface fine-tuning
+## Phase 3 — Chat interface fine-tuning ✅
 
-Polish and completeness on the surface that already exists. No Firestore schema change. Split into passes because media alone is larger than it looks.
+**Complete** (3a, 3a.1, 3b, 3c). Kept here rather than moved into Part I because
+the research below it — the media payload, the DRM finding, the three-cases table
+— is the record of *why* the shipped code is shaped the way it is, and it belongs
+next to the passes it decided.
+
+Polish and completeness on the surface that already exists. No Firestore schema
+change and no rules/index change in any pass. Split into passes because media
+alone was larger than it looked.
 
 ### Pass 3a — media rendering ✅
 
@@ -195,15 +202,59 @@ Two operational notes carried out of this pass:
   project's rules do not let the *client SDK* read `onlyfans-outgoing/`; the
   route path is signed-URL only and unaffected either way.
 
-### Pass 3c — thread affordances and list ergonomics (next)
+### Pass 3c — thread affordances and list ergonomics ✅
 
-The remainder of Phase 3. None of it blocks Phase 4.
+Shipped, and **Phase 3 is complete**. Full detail in the spoke ([the message
+menu](documentation/onlyfans-crm.md#the-message-menu-and-the-two-things-it-cannot-do),
+[the fan panel](documentation/onlyfans-crm.md#the-fan-panel), [working the list
+without the mouse](documentation/onlyfans-crm.md#working-the-list-without-the-mouse)).
 
-- **Message affordances.** Reply-to (`SendMessageInput.replyToMessageId` is already on the contract, unused by the UI), copy, pin/unpin and like/unlike (the provider's whole per-message surface — **there is no unsend**). Tip and PPV states are done: 3a renders the PPV price row and the locked-media state distinctly.
-- **Fan context panel.** A third pane on the right: spend history, subscription status, notes. Read-only first.
-- **List refinements.** Sort options, saved filters, keyboard navigation (j/k, enter, escape), unread-first ordering.
-- **Empty/error/offline states** across both panes, to the standard in [`DESIGN.md`](DESIGN.md). (3a.1 did the chat-list and thread cases; the composer and vault dialog are new surfaces to hold to the same standard.)
-- **Performance.** Virtualise the chat list and long threads before they are 500 rows deep. Note the existing constraints: no `filter` on row hover (Chromium re-rasterises the whole row and it tears on a fast drag), and never `vw`/`vh` in this window (see the spoke — it oscillates against Windows' space-consuming scrollbars).
+- **Message affordances** — reply, copy, pin/unpin, like/unlike, in one menu per
+  bubble revealed on hover *and* keyboard focus. Optimistic and **reverted** on
+  failure, which is the opposite trade to a send: a failed pin has no unsent work
+  to protect, so the honest thing is to put the flag back. The override lives in
+  a `flags` map applied at merge time, because history and the live tail are
+  unwritable in different ways.
+- **Fan context panel** — a third pane, default closed, remembered. **It costs
+  zero provider calls:** the chat-list payload already embeds a full fan profile
+  (subscription status and dates, the spend split, join date, location, bio), so
+  it is mirrored and read from Firestore. Notes are the one billed part and sit
+  behind an explicit click. Mirroring the profile meant teaching `chatChanged`
+  about it — via a digest that deliberately **excludes `lastSeen`**, which is on
+  the same payload and would otherwise rewrite every row on every sync forever.
+- **List refinements** — saved filter + sort (Most recent / Unread first /
+  Highest spend), `j`/`k`/arrows, Enter, Escape. The keys move **DOM focus, not
+  selection**: opening a chat fires a billed mark-as-read, so a cursor that
+  selected as it moved would be a call per keystroke. Focus also means the
+  browser owns the ring and the scroll-into-view, and there is no second cursor
+  state to keep in sync.
+- **Empty/error/offline states** — the composer disables Send behind an offline
+  strip (the draft persists, so nothing is lost), a failed upload is retryable in
+  place from the chip (nothing was staged, so a retry is free), and the vault
+  dialog's error state grew a Retry and names offline as itself rather than
+  reporting it as a vault failure.
+- **Performance** — the chat list uses `content-visibility: auto` with a
+  remembered intrinsic size rather than a virtualiser. Chromium skips style,
+  layout and paint for offscreen rows while **every row stays in the DOM**, which
+  is what `j`/`k`, find-in-page and the screen reader all need. This window is
+  Chromium-only, so there is no fallback to carry.
+
+Three things settled along the way, all now in the spoke:
+
+- **The provider never reports a reply target.** It accepts `replyToMessageId` on
+  a send and reports it on no message it returns — so the composer's quote strip
+  is the only place the relationship is ever visible, and it exists until Send.
+  Not a gap in the UI; the thread cannot render what it is never told.
+- **`subscribedOnData`, not `subscribedByData`.** The two are mirror images on the
+  same object and only the first carries the spend sums. The choice is made once,
+  in `normaliseFanProfile`.
+- **The thread is deliberately still un-windowed.** `ChatThread` restores
+  `scrollTop` around content-height changes and media tiles reserve their aspect
+  ratios for that same reason; a virtualiser estimating those heights fights both,
+  and the list's `content-visibility` trick does not transfer — it estimates
+  content that has never rendered, which is exactly what gets prepended above the
+  viewport. Whichever virtualiser is eventually chosen must **own** the anchoring.
+  Left as the one open item of Phase 3, tracked in the spoke's gotchas.
 
 ### Media: how it actually works
 
@@ -323,16 +374,20 @@ Every OnlyFans action is a real-world action on a real creator's account, taken 
 
 Not yet bugs. Each is a decision that is cheap now and expensive after the phase ships.
 
-**Phase 3 — chat interface**
+**Phase 3 — chat interface (shipped; these are now regression risks, not future traps)**
 
-The first five below are **handled in pass 3a** and are recorded so a later change does not undo them; the rest are still ahead.
+Every one of these is **handled**. They are recorded so a later change does not undo them.
 
 - ~~**DRM video cannot be played in this app.**~~ Handled: poster + an explicit "DRM · not playable" line, no player mounted.
 - ~~**Test `files.drm`, never `convertedToVideo`.**~~ Handled in `normaliseAttachment`, with the reasoning in the code — do not "simplify" it back to the FAQ's rule.
 - ~~**CDN URLs die in about a minute and cannot be fetched directly.**~~ Handled: `stripMediaUrls` before every Firestore write, resolve on demand. **Anything new that writes an `OFMessage` must go through it.**
 - ~~**Media downloads are billed when uncached.**~~ Handled: viewport gate, 30ms batching, two memo layers, `preview` over `full`. Removing any one of those is a cost regression that nothing will visibly break.
 - ~~**The download redirect crosses origins.**~~ Handled *without* touching `request()`'s origin guard: the 302 is followed manually and only its `Location` is returned, so the API key still never leaves the provider's host. The allowlist is on the redirect target.
-- **Virtualisation fights the scroll anchoring already in `ChatThread`** — and now also the media tiles' reserved aspect ratios. All three manipulate or depend on height around a content change. Whichever virtualiser is chosen must own the anchoring, not sit beside it.
+- ~~**The chat list needs virtualising before 500 rows.**~~ Handled in 3c *without* a virtualiser: `content-visibility: auto` + a remembered intrinsic size skips style/layout/paint offscreen while every row stays in the DOM — which `j`/`k`, find-in-page and the screen reader all need. Do not "upgrade" it to a windowing library; that would take all three away.
+- **Virtualisation fights the scroll anchoring already in `ChatThread`** — and now also the media tiles' reserved aspect ratios. All three manipulate or depend on height around a content change. **Still true, and the thread is deliberately still un-windowed** (the `content-visibility` trick does not transfer: it estimates content that has never rendered, which is exactly what gets prepended above the viewport). Whichever virtualiser is eventually chosen must own the anchoring, not sit beside it. The **one open item** of Phase 3.
+- ~~**Opening a chat costs a billed mark-as-read.**~~ Handled: the keyboard cursor moves DOM *focus*, not selection, and Enter opens. A "select as you scroll" convenience here would be a provider call per keystroke.
+- ~~**The fan panel wants data the provider bills for.**~~ Handled: the fan profile rides in on the chat-list payload and is mirrored, so the panel opens for free. **Anything added to that mirrored profile must go into `profileDigest`** — and must not be a volatile field (`lastSeen` is right there on the same payload and would rewrite every row on every sync forever).
+- **The provider has no unsend, no edit, and never echoes a reply target.** Pin/unpin and like/unlike are its whole per-message surface. Do not design around affordances it does not have.
 - ~~**Attachments make send fail in new ways.**~~ Decided in 3b: **retry against the upload**, never orphan it. A staged `ofapi_media_` id is billed and single-use, and a failed send does not consume it, so the composer restores text *and* media together and re-sends the same ids.
 - ~~**Draft persistence is unsent text.**~~ Handled: `_lib/drafts.ts`, per account+chat, cleared only by a confirmed send. Staged ids persist with it; CDN preview links are blanked on save.
 - **Never route file bytes through an API route.** Vercel caps a request body at ~4.5MB. The signed-URL path exists for this reason — anything new that uploads (a vault upload surface, a mass-message composer) must use it rather than posting a file to a handler.

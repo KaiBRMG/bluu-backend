@@ -16,6 +16,38 @@ import { getCache, setCache } from '@/lib/queryCache';
  * is rate limited server-side, so mounting repeatedly is cheap.
  */
 
+/**
+ * The fan profile mirrored from the chat list — the fan panel's whole data
+ * source, and free: it arrives on the payload the sync already pays for.
+ *
+ * Every field is nullable because the provider guarantees none of them. The
+ * panel must render a fact only when it has one; a confident `$0` on a fan who
+ * has spent thousands is worse than a blank.
+ */
+export interface OFFanProfileRow {
+  about: string;
+  location: string | null;
+  joinDate: string | null;
+  isVerified: boolean;
+  subscribePrice: number;
+  subscription: {
+    status: string | null;
+    isActive: boolean;
+    duration: string | null;
+    subscribedAt: string | null;
+    expiresAt: string | null;
+    renewedAt: string | null;
+  } | null;
+  spend: {
+    total: number;
+    tips: number;
+    messages: number;
+    posts: number;
+    streams: number;
+    subscriptions: number;
+  } | null;
+}
+
 export interface OFChatRow {
   id: string;
   accountId: string;
@@ -29,6 +61,8 @@ export interface OFChatRow {
   spentTotal: number;
   isPinned: boolean;
   canSendMessage: boolean;
+  /** Null on rows mirrored before the profile was, and on a webhook-created row. */
+  profile?: OFFanProfileRow | null;
   /** True when the row was created by a webhook before the fan was ever synced. */
   fanMissing?: boolean;
 }
@@ -53,6 +87,7 @@ function hydrate(raw: Partial<OFChatRow>): OFChatRow {
     spentTotal: raw.spentTotal ?? 0,
     isPinned: raw.isPinned ?? false,
     canSendMessage: raw.canSendMessage ?? true,
+    profile: raw.profile ?? null,
     fanMissing: !raw.fan,
   };
 }

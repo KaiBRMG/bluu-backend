@@ -10,6 +10,7 @@ import {
 import { invalidateAdminUsersCache } from '@/app/api/admin/users/route';
 import { invalidateDisplayNamesCache } from '@/app/api/users/display-names/route';
 import { normalizeEmail, isLegacyWorkEmail } from '@/lib/authEmail';
+import { isEmailReversalCohort } from '@/lib/emailMigrationConfig';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -41,12 +42,28 @@ const oauth2Client = new google.auth.OAuth2(
  *     new one was never registered. The user can log in with NEITHER. That is a
  *     hard lockout needing admin recovery, from a transient network blip.
  * Never reorder these.
+ *
+ * ── `mode: 'revert'` — the same move, backwards ──────────────────────────────
+ * For a user migrated by mistake (wrong group membership swept them into a
+ * cohort). Identical machinery and identical write order; only the domain gate
+ * flips — the new address must now BE a `@bluurock.com` one. Two things keep it
+ * from being a hole in the allowlist:
+ *   • The caller must be listed in `EMAIL_MIGRATION_REVERSAL` server-side. The
+ *     client cannot opt itself in.
+ *   • Ownership is still proven by OAuth, so a reverting user can only land on a
+ *     company address they can actually sign into, and the collision checks
+ *     below are unchanged — a company address held by someone else is refused.
  */
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
-    const { code } = await request.json();
+    const { code, mode } = await request.json();
     if (!code) {
       return NextResponse.json({ error: 'Authorization code is required' }, { status: 400 });
+    }
+
+    const isRevert = mode === 'revert';
+    if (isRevert && !isEmailReversalCohort(token.uid)) {
+      return NextResponse.json({ error: 'Not permitted' }, { status: 403 });
     }
 
     const currentUser = await getUserById(token.uid);
@@ -73,14 +90,25 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'That address is not usable.' }, { status: 400 });
     }
 
-    // ─── The "you picked your work email again" gate ────────────────────
-    // Google has no way to *exclude* a domain from the account chooser, so this
-    // can only be caught here, after the fact. The client re-prompts.
-    if (isLegacyWorkEmail(email)) {
+    // ─── The "you picked the wrong account" gate ────────────────────────
+    // Google has no way to *constrain* the account chooser to (or away from) a
+    // domain, so this can only be caught here, after the fact. The client
+    // re-prompts. The reversal wants the exact opposite address to the
+    // migration, so the test inverts with it.
+    if (!isRevert && isLegacyWorkEmail(email)) {
       return NextResponse.json(
         {
           error: 'That is your company email. Choose your personal Google account instead.',
           code: 'STILL_WORK_EMAIL',
+        },
+        { status: 409 },
+      );
+    }
+    if (isRevert && !isLegacyWorkEmail(email)) {
+      return NextResponse.json(
+        {
+          error: 'That is not your company email. Choose your @bluurock.com account instead.',
+          code: 'NOT_WORK_EMAIL',
         },
         { status: 409 },
       );
@@ -141,10 +169,19 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         tx.update(adminDb.collection('users').doc(token.uid), {
           workEmail: email,
           googleSub: userInfo.id ?? null,
-          emailMigratedAt: FieldValue.serverTimestamp(),
           // Audit trail: which address this account used to answer to. Cheap,
           // and the only record of it once the index entry is released.
           previousWorkEmail: oldEmail ?? null,
+          // A reversal un-does the migration, so `emailMigratedAt` must go with
+          // it — leaving it set would report this user as migrated on every
+          // surface that reads it, and would misreport progress if the fleet is
+          // ever audited by that field.
+          ...(isRevert
+            ? {
+                emailMigratedAt: FieldValue.delete(),
+                emailRevertedAt: FieldValue.serverTimestamp(),
+              }
+            : { emailMigratedAt: FieldValue.serverTimestamp() }),
         });
       });
     } catch (error: unknown) {
@@ -173,7 +210,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       );
     });
 
-    console.log(`[migrate-email] ${token.uid} migrated to ${key}`);
+    console.log(`[migrate-email] ${token.uid} ${isRevert ? 'reverted' : 'migrated'} to ${key}`);
     return NextResponse.json({ success: true, email });
   } catch (error: unknown) {
     console.error('[migrate-email] error:', error);

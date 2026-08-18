@@ -5,7 +5,10 @@ import { AlertCircle, ArrowRight, Check, Loader2, Mail } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
 import { useUserData } from '@/hooks/useUserData';
 import { useTimeTrackingContext } from '@/contexts/TimeTrackingContext';
-import { shouldPromptEmailMigration } from '@/lib/emailMigrationConfig';
+import {
+  shouldPromptEmailMigration,
+  shouldPromptEmailReversal,
+} from '@/lib/emailMigrationConfig';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -48,6 +51,16 @@ import {
  * `removeAllListeners` on those channels, so if they ever did overlap, whichever
  * unmounted last would tear out the other's handler. Keep them mutually
  * exclusive.
+ *
+ * ── It also renders the reversal ────────────────────────────────────────────
+ * A user migrated by mistake gets the same card pointing the other way ("sign
+ * back in with your @bluurock.com account"). That is **one component with a
+ * direction**, not a second component, and deliberately so: both would listen
+ * on the same `oauth-callback` channel, and `removeOAuthListeners` is
+ * `removeAllListeners` — two mounted copies would tear out each other's
+ * handler, exactly the hazard described above for `Login`. The two gates are
+ * mutually exclusive by construction (`shouldPromptEmailMigration` excludes the
+ * reversal cohort), and `direction` picks whichever matched.
  */
 
 type Phase = 'intro' | 'waiting' | 'saving' | 'done' | 'error';
@@ -61,7 +74,13 @@ export default function EmailMigrationDialog() {
   const [phase, setPhase] = useState<Phase>('intro');
   const [error, setError] = useState<string | null>(null);
 
-  const shouldPrompt = shouldPromptEmailMigration(userData);
+  const isReversal = shouldPromptEmailReversal(userData);
+  const shouldPrompt = isReversal || shouldPromptEmailMigration(userData);
+
+  // Latched at arm time: once the round-trip is running, the gate that started
+  // it goes false the moment the write lands, and the 'done' copy must still
+  // say which direction just happened.
+  const [direction, setDirection] = useState<'migrate' | 'revert'>('migrate');
 
   // Re-checked for the whole session (not latched once at boot): arm the
   // instant the user is clocked-out AND the cohort gate says to prompt them.
@@ -80,8 +99,9 @@ export default function EmailMigrationDialog() {
     if (!userData) return;
     if (!shouldPrompt) return;
     if (displayState !== 'clocked-out') return;
+    setDirection(isReversal ? 'revert' : 'migrate');
     setArmed(true);
-  }, [armed, isHydrating, userData, displayState, shouldPrompt]);
+  }, [armed, isHydrating, userData, displayState, shouldPrompt, isReversal]);
 
   const handleCode = useCallback(async (code: string) => {
     setPhase('saving');
@@ -95,7 +115,7 @@ export default function EmailMigrationDialog() {
           Authorization: `Bearer ${idToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code, mode: direction === 'revert' ? 'revert' : undefined }),
       });
       const data = await res.json();
 
@@ -110,7 +130,7 @@ export default function EmailMigrationDialog() {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
       setPhase('error');
     }
-  }, [user]);
+  }, [user, direction]);
 
   // Listen for the code coming back from the system browser.
   useEffect(() => {
@@ -132,7 +152,7 @@ export default function EmailMigrationDialog() {
     setError(null);
     // `_blank` → setWindowOpenHandler → shell.openExternal. No native change
     // needed, which is why this whole migration ships as a web deploy.
-    window.open('/auth/google?mode=migrate', '_blank', 'noopener,noreferrer');
+    window.open(`/auth/google?mode=${direction}`, '_blank', 'noopener,noreferrer');
   };
 
   if (!armed) return null;
@@ -153,7 +173,9 @@ export default function EmailMigrationDialog() {
             ) : (
               <>
                 <Mail className="size-5" />
-                Switch to your personal email
+                {direction === 'revert'
+                  ? 'Switch back to your company email'
+                  : 'Switch to your personal email'}
               </>
             )}
           </AlertDialogTitle>
@@ -162,7 +184,19 @@ export default function EmailMigrationDialog() {
               <>
                 Bluu Backend now uses <strong className="text-foreground">{userData?.workEmail}</strong>.
                 Use that account the next time you sign in — your{' '}
-                <span className="whitespace-nowrap">@bluurock.com</span> address will no longer work.
+                {direction === 'revert' ? 'personal address' : (
+                  <span className="whitespace-nowrap">@bluurock.com</span>
+                )}{' '}
+                will no longer work.
+              </>
+            ) : direction === 'revert' ? (
+              <>
+                Your login was switched to a personal Google account by mistake. Sign in with
+                your <span className="whitespace-nowrap">@bluurock.com</span> account and
+                we&apos;ll switch it back.
+                <span className="mt-2 block">
+                  You&apos;ll stay signed in — nothing else about your account changes.
+                </span>
               </>
             ) : (
               <>

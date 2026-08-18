@@ -1,7 +1,19 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Check, FileQuestion, Image as ImageIcon, Loader2, Music, Play, Search, ShieldAlert, Video } from 'lucide-react';
+import {
+  Check,
+  FileQuestion,
+  Image as ImageIcon,
+  Loader2,
+  Music,
+  Play,
+  RotateCw,
+  Search,
+  ShieldAlert,
+  Video,
+  WifiOff,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -14,6 +26,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { useNetworkStatus } from '@/contexts/NetworkStatusContext';
 import { useInViewport, useResolvedMedia } from '@/hooks/useOnlyFansMedia';
 import type { OFAttachmentRow } from '@/hooks/useOnlyFansMessages';
 import { useOnlyFansVault, type VaultFilters, type VaultType } from '@/hooks/useOnlyFansVault';
@@ -70,11 +83,12 @@ export default function VaultDialog({
   const [picked, setPicked] = useState<Map<string, OFAttachmentRow>>(new Map());
 
   const filters: VaultFilters = useMemo(() => ({ listId, type, query }), [listId, type, query]);
-  const { lists, media, loading, loadingMore, error, hasMore, loadMore } = useOnlyFansVault(
+  const { lists, media, loading, loadingMore, error, hasMore, loadMore, retry } = useOnlyFansVault(
     accountId,
     filters,
     open,
   );
+  const { isOnline } = useNetworkStatus();
 
   const staged = new Set(stagedIds);
   const full = picked.size >= remaining;
@@ -102,8 +116,10 @@ export default function VaultDialog({
         type: item.type,
         // The vault's own preview link, resolved by the composer's chip exactly
         // as a thread tile resolves one. Expiring, so it is never persisted for
-        // longer than the draft it belongs to.
+        // longer than the draft it belongs to — the variant beside it is what
+        // lets a restored chip find the cached file without the link.
         previewUrl: item.urls.preview ?? item.urls.thumb,
+        previewVariant: item.urls.preview ? ('preview' as const) : ('thumb' as const),
         width: item.width,
         height: item.height,
       })),
@@ -179,7 +195,26 @@ export default function VaultDialog({
               ))}
             </div>
           ) : error ? (
-            <p className="py-10 text-center text-sm text-zinc-400">{error}</p>
+            // Recoverable in place. This dialog is a step inside composing a
+            // message, so making the operator close and re-open it to get
+            // another attempt costs them the composer's focus over a blip.
+            // Offline is named as itself rather than reported as a vault error —
+            // "the vault failed" would send them looking in the wrong place.
+            <div className="flex flex-col items-center gap-3 py-10 text-center">
+              <p className="flex items-center gap-2 text-sm text-zinc-400">
+                {!isOnline && <WifiOff className="size-3.5 shrink-0" />}
+                {isOnline ? error : 'Offline — the vault needs a connection.'}
+              </p>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={retry}
+                className="gap-1.5 text-zinc-400 hover:text-white"
+              >
+                <RotateCw className="size-3.5" />
+                Try again
+              </Button>
+            </div>
           ) : media.length === 0 ? (
             <p className="py-10 text-center text-sm text-zinc-400">
               {query || type || listId ? 'Nothing matches those filters.' : 'The vault is empty.'}
@@ -298,8 +333,14 @@ function VaultTile({
   onToggle: () => void;
 }) {
   const { ref, inView } = useInViewport<HTMLDivElement>();
-  const previewUrl = item.urls.preview ?? item.urls.thumb;
-  const { url, onLoadError } = useResolvedMedia(previewUrl, inView);
+  // Keyed on the media id, so a vault page re-listed after its links were
+  // re-signed reuses what is already cached instead of paying for the grid again.
+  const { url, onLoadError } = useResolvedMedia(
+    item.urls.preview
+      ? { id: item.id, variant: 'preview', url: item.urls.preview }
+      : { id: item.id, variant: 'thumb', url: item.urls.thumb },
+    inView,
+  );
 
   const label = item.type === 'other' ? 'attachment' : item.type;
 

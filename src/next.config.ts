@@ -27,10 +27,37 @@ const nextConfig: NextConfig = {
         : false,
   },
 
+  // Incremental PPR: opt routes in with `export const experimental_ppr = true`.
+  // Top-level, not under `experimental` — Next 16 moved this key out and warns
+  // at build time if it is still nested.
+  cacheComponents: true,
+
   // Experimental optimizations for package imports
   experimental: {
-    // Incremental PPR: opt routes in with `export const experimental_ppr = true`
-    cacheComponents: true,
+    // How long the App Router client may reuse a route's payload before
+    // considering it stale.
+    //
+    // `dynamic` defaults to **0**, which means a fetched RSC payload is stale
+    // the instant it lands and is never reused. That interacts badly with
+    // `cacheComponents` (every route here is dynamic, so nothing is ever
+    // reusable): when a navigation transition is interrupted before it commits,
+    // React retries — and with a zero stale time the retry issues a *fresh*
+    // request, producing a new promise, which suspends again. Each retry
+    // restarts the cycle instead of resolving it, so the payload keeps arriving
+    // and the navigation never lands. That is the sidebar-navigation hang: the
+    // network is healthy and the same `?_rsc=` request repeats indefinitely.
+    //
+    // A non-zero value lets an interrupted transition reuse the payload it
+    // already fetched, so the retry can actually complete. 30s was the
+    // pre-Next-15 default; the only cost is that back/forward may show data up
+    // to 30s old, which nothing here depends on.
+    //
+    // See the "App-shell re-render on every navigation" note in CLAUDE.md for
+    // the other half of this problem.
+    staleTimes: {
+      dynamic: 30,
+      static: 300,
+    },
     // Optimize barrel imports to reduce bundle size
     optimizePackageImports: [
       'firebase/app',

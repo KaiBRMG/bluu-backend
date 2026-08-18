@@ -141,6 +141,8 @@ A one-time move of existing staff off `@bluurock.com`. See the *Temporary: perso
 
 **RULE — the Firestore write commits before the Auth write, never the reverse.** Login keys off the `users` doc, so a doc-committed/Auth-failed migration still works (and self-heals next login), whereas Auth-committed/doc-failed locks the user out of *both* addresses.
 
+**Reversing a mistaken migration.** List the uid in `EMAIL_MIGRATION_REVERSAL` in the same config file. The same card runs backwards (`/auth/google?mode=revert` → `POST /api/auth/migrate-email` with `mode: 'revert'`), the domain gate inverts, and the doc gets `emailRevertedAt` in place of `emailMigratedAt`. Two invariants hold it together: the route **403s a `revert` from any uid not in that list** (the list, not the client, is the authority), and `shouldPromptEmailMigration` excludes listed uids so the forward cohort cannot immediately re-prompt them.
+
 ### Auth contexts
 - **`AuthProvider`** — internal employees. Enforces the `isActive` check.
   - **The employee/creator discriminator is `users/{uid}` existing**, not the email domain — staff use personal addresses now, so a domain test would sign out every employee. The provider already read that doc for `isActive`, so this costs zero extra reads.

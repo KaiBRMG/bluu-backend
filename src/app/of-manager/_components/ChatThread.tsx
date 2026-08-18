@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
-import { HandCoins, Loader2, Lock, LockOpen, RotateCw } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { HandCoins, Heart, Loader2, Lock, LockOpen, PanelRight, Pin, RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import {
   type OFMessageRow,
   type SendInput,
 } from '@/hooks/useOnlyFansMessages';
+import MessageActions from './MessageActions';
 import MessageAttachments from './MessageAttachments';
 import MessageComposer from './MessageComposer';
 import { dayKey, formatClock, formatDayLabel, formatMoney, splitMoney } from '../_lib/format';
@@ -24,6 +25,16 @@ interface ChatThreadProps {
   timeZone?: string;
   /** Bumped by the chat list's refresh button — re-pulls this thread's history. */
   reloadToken?: number;
+  /** Null hides the toggle entirely — the window is too narrow for a third pane. */
+  fanPanelOpen?: boolean;
+  onToggleFanPanel?: () => void;
+}
+
+/** What the composer is handed when a bubble's Reply is chosen. */
+export interface ReplyTarget {
+  id: string;
+  text: string;
+  fromMe: boolean;
 }
 
 /** How close to the top counts as "scrolled up" and triggers the older page. */
@@ -36,11 +47,39 @@ export default function ChatThread({
   chat,
   timeZone,
   reloadToken,
+  fanPanelOpen,
+  onToggleFanPanel,
 }: ChatThreadProps) {
-  const { messages, loading, loadingOlder, hasMore, sending, error, loadOlder, send, reload } =
-    useOnlyFansMessages(accountId, chat.id, reloadToken);
+  const {
+    messages,
+    loading,
+    loadingOlder,
+    hasMore,
+    sending,
+    error,
+    loadOlder,
+    send,
+    setFlag,
+    reload,
+  } = useOnlyFansMessages(accountId, chat.id, reloadToken);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * A one-shot handoff to the composer, not a second home for unsent state.
+   *
+   * Reply-to *is* unsent work, so by this window's standing rule it must live in
+   * the composer alongside the text, the attachments and the price — it is
+   * persisted with the draft and restored with it. But the action that creates
+   * it happens up here, on a bubble. So this is an **event**: the thread raises
+   * a target, the composer takes it into its draft and calls back to clear it.
+   * There is never a moment where both hold the answer.
+   */
+  const [replyRequest, setReplyRequest] = useState<ReplyTarget | null>(null);
+
+  const requestReply = useCallback((message: OFMessageRow) => {
+    setReplyRequest({ id: message.id, text: message.text, fromMe: message.fromMe });
+  }, []);
 
   // Preserved across an older-page load so the viewport stays on the message the
   // user was reading instead of jumping as content is prepended above it.
@@ -119,6 +158,22 @@ export default function ChatThread({
             {formatMoney(chat.spentTotal)} lifetime
           </span>
         )}
+        {onToggleFanPanel && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggleFanPanel}
+            aria-pressed={fanPanelOpen}
+            aria-label={fanPanelOpen ? 'Hide fan details' : 'Show fan details'}
+            className={cn(
+              'size-7 shrink-0 text-zinc-400 hover:text-zinc-200',
+              chat.spentTotal > 0 ? 'ml-1' : 'ml-auto',
+              fanPanelOpen && 'text-white',
+            )}
+          >
+            <PanelRight className="size-4" />
+          </Button>
+        )}
       </header>
 
       <div
@@ -174,14 +229,20 @@ export default function ChatThread({
             {!hasMore && !loadingOlder && (
               <p className="pb-4 text-center text-xs text-zinc-400">Start of conversation</p>
             )}
-            <MessageGroups messages={messages} timeZone={timeZone} />
+            <MessageGroups
+              messages={messages}
+              timeZone={timeZone}
+              onReply={requestReply}
+              setFlag={setFlag}
+            />
           </>
         )}
       </div>
 
       {/* The composer owns everything unsent: text, staged attachments, price,
-          and the per-thread draft. It is keyed with the thread, so switching
-          chats loads that chat's draft rather than carrying one across. */}
+          reply target, and the per-thread draft. It is keyed with the thread, so
+          switching chats loads that chat's draft rather than carrying one
+          across. */}
       <MessageComposer
         accountId={accountId}
         chatId={chat.id}
@@ -189,12 +250,21 @@ export default function ChatThread({
         canSend={chat.canSendMessage}
         sending={sending}
         send={sendMessage}
+        replyRequest={replyRequest}
+        onReplyConsumed={() => setReplyRequest(null)}
       />
     </section>
   );
 }
 
-function MessageGroups({ messages, timeZone }: { messages: OFMessageRow[]; timeZone?: string }) {
+interface MessageListProps {
+  messages: OFMessageRow[];
+  timeZone?: string;
+  onReply: (message: OFMessageRow) => void;
+  setFlag: (messageId: string, flag: 'pinned' | 'liked', value: boolean) => Promise<boolean>;
+}
+
+function MessageGroups({ messages, timeZone, onReply, setFlag }: MessageListProps) {
   const rows: React.ReactNode[] = [];
   let lastDay = '';
 
@@ -212,18 +282,51 @@ function MessageGroups({ messages, timeZone }: { messages: OFMessageRow[]; timeZ
         </div>,
       );
     }
-    rows.push(<MessageBubble key={message.id} message={message} timeZone={timeZone} />);
+    rows.push(
+      <MessageBubble
+        key={message.id}
+        message={message}
+        timeZone={timeZone}
+        onReply={onReply}
+        setFlag={setFlag}
+      />,
+    );
   }
 
   return <div className="space-y-2">{rows}</div>;
 }
 
-function MessageBubble({ message, timeZone }: { message: OFMessageRow; timeZone?: string }) {
+function MessageBubble({
+  message,
+  timeZone,
+  onReply,
+  setFlag,
+}: {
+  message: OFMessageRow;
+  timeZone?: string;
+  onReply: (message: OFMessageRow) => void;
+  setFlag: (messageId: string, flag: 'pinned' | 'liked', value: boolean) => Promise<boolean>;
+}) {
   return (
-    <div className={cn('flex', message.fromMe ? 'justify-end' : 'justify-start')}>
+    <div
+      // `group/message` is named so the action trigger's reveal cannot be fired
+      // by any other group wrapper that ends up around a bubble later.
+      className={cn('group/message flex', message.fromMe ? 'justify-end' : 'justify-start')}
+    >
+      {/* An optimistic bubble has no provider id yet, so none of its actions
+          would resolve — the menu appears with the real message a moment later. */}
+      {!message.pending && (
+        <MessageActions
+          message={message}
+          fromMe={message.fromMe}
+          onReply={onReply}
+          setFlag={setFlag}
+        />
+      )}
+
       {/* 75% of a wide window runs past 120ch; the rem cap holds the line length
           in the readable band without shrinking bubbles on a narrow one. */}
-      <div className="max-w-[min(75%,34rem)]">
+      <div className="min-w-0 max-w-[min(75%,34rem)]">
         {message.isTip ? (
           <TipBubble message={message} />
         ) : (
@@ -266,6 +369,21 @@ function MessageBubble({ message, timeZone }: { message: OFMessageRow; timeZone?
         >
           <span className="tabular-nums">{formatClock(message.createdAt, timeZone)}</span>
           {message.pending && <span>Sending…</span>}
+          {/* State marks, not decoration: each says the message carries a flag
+              on OnlyFans itself. Both stay in Ink Secondary — neither is a
+              status hue, and a red heart here would be colour as decoration. */}
+          {message.isLiked && (
+            <span className="inline-flex items-center gap-1">
+              <Heart className="size-3 fill-current" aria-hidden />
+              <span className="sr-only">Liked</span>
+            </span>
+          )}
+          {message.isPinned && (
+            <span className="inline-flex items-center gap-1">
+              <Pin className="size-3" aria-hidden />
+              Pinned
+            </span>
+          )}
         </div>
       </div>
     </div>

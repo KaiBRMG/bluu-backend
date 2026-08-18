@@ -62,6 +62,11 @@ export function useOnlyFansVault(
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
+  // Bumped by `retry`. A failed first page has to be recoverable in place: the
+  // dialog is a step inside composing a message, and making the operator close
+  // and re-open it to get another attempt loses the composer's focus for a
+  // network blip.
+  const [attempt, setAttempt] = useState(0);
 
   // Categories are fetched once per session and then read from cache: they cost
   // a call and change about never.
@@ -147,7 +152,7 @@ export function useOnlyFansVault(
       cancelled = true;
     };
     // `filterKey` stands in for the filters object, which is rebuilt each render.
-  }, [enabled, filterKey, fetchPage]);
+  }, [enabled, filterKey, fetchPage, attempt]);
 
   const loadMore = useCallback(async () => {
     if (nextOffset === null || loadingMore) return;
@@ -169,5 +174,17 @@ export function useOnlyFansVault(
     }
   }, [fetchPage, nextOffset, loadingMore]);
 
-  return { lists, media, loading, loadingMore, error, hasMore: nextOffset !== null, loadMore };
+  /** Re-run the first page after a failure. Cheap: a cached page still hits. */
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+
+  return {
+    lists,
+    media,
+    loading,
+    loadingMore,
+    error,
+    hasMore: nextOffset !== null,
+    loadMore,
+    retry,
+  };
 }

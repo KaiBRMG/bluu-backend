@@ -35,8 +35,84 @@ export interface OFFan {
   avatar: string | null;
 }
 
+/**
+ * What the fan context panel shows, and **all of it rides in on the chat list**.
+ *
+ * The provider's `/chats` payload embeds a full profile object per fan —
+ * subscription dates, the spend breakdown, join date, location. Reading it from
+ * there and mirroring it costs **zero extra provider calls**; asking
+ * `/users/{username}` per opened thread would bill once per chat switch, which
+ * on this surface is a call every few seconds.
+ *
+ * Every field is optional-shaped (`null` / `0`) because the provider documents
+ * none of them as guaranteed and its `skip_users` behaviour is unclear. The
+ * panel renders a fact only when it has one — it never prints a zero it guessed.
+ */
+export interface OFFanProfile {
+  /** Profile bio, HTML-stripped. */
+  about: string;
+  location: string | null;
+  /** ISO-8601 UTC, or null when the provider omitted it. */
+  joinDate: string | null;
+  isVerified: boolean;
+  /** The fan's current subscription price on this page, USD. 0 = free page. */
+  subscribePrice: number;
+  subscription: OFFanSubscription | null;
+  spend: OFFanSpend | null;
+}
+
+/**
+ * The fan's subscription **to us** — from `subscribedOnData`, which is also
+ * where the provider files the spend sums. (`subscribedByData` is the mirror
+ * image: our subscription to them. They are easy to swap and the wrong one is
+ * silently plausible, so this is the only place the choice is made.)
+ */
+export interface OFFanSubscription {
+  /** The provider's own words, e.g. `Set to Expire`. Null when it says nothing. */
+  status: string | null;
+  /** False once the subscription has lapsed. */
+  isActive: boolean;
+  /** Human-readable run length as the provider phrases it, e.g. `22 days`. */
+  duration: string | null;
+  subscribedAt: string | null;
+  expiresAt: string | null;
+  renewedAt: string | null;
+}
+
+/**
+ * Lifetime spend, split by where it came from. `total` is the provider's own
+ * `totalSumm` rather than a sum of the parts — the parts are not documented as
+ * exhaustive, and a total we computed could disagree with OnlyFans' own.
+ */
+export interface OFFanSpend {
+  total: number;
+  tips: number;
+  messages: number;
+  posts: number;
+  streams: number;
+  subscriptions: number;
+}
+
 /** What kind of file an attachment is. `other` covers anything unmodelled. */
 export type OFAttachmentType = 'photo' | 'video' | 'gif' | 'audio' | 'other';
+
+/**
+ * The renditions of one attachment that can be displayed, cheapest first.
+ *
+ * **This is a cost ordering, not a quality one.** The provider bills a media
+ * download at roughly 3 credits per megabyte with a 1-credit floor, so the gap
+ * between `video720` and `full` on a source-resolution clip is the difference
+ * between tens of credits and hundreds. Everything that asks for media names the
+ * variant it wants, and the caches key on it.
+ */
+export type OFMediaVariant = 'thumb' | 'preview' | 'video240' | 'video720' | 'full';
+
+/**
+ * Variants big enough that fetching one is a deliberate act rather than a tile
+ * rendering itself. These go one at a time through the file route, never in a
+ * viewport-driven batch.
+ */
+export const LARGE_MEDIA_VARIANTS: readonly OFMediaVariant[] = ['video240', 'video720', 'full'];
 
 /**
  * One piece of media on a message.
@@ -69,11 +145,30 @@ export interface OFAttachment {
   height: number | null;
   /** Seconds. Video/audio only; null otherwise. */
   duration: number | null;
-  /** Expiring provider CDN URLs — see the interface note. Any may be null. */
+  /**
+   * Size of the **full** file in bytes, when the provider reports one.
+   *
+   * Often 0 (and therefore null here) — the provider's own examples show
+   * `files.full.size: 0` on media that plainly has a size. Treat it as a bonus:
+   * when it is there, the UI can price a download before the operator commits to
+   * it; when it is not, say nothing rather than guess.
+   */
+  sizeBytes: number | null;
+  /**
+   * Expiring provider CDN URLs — see the interface note. Any may be null.
+   *
+   * `video240` / `video720` are the provider's transcoded renditions of a video
+   * (`videoSources` on the raw payload). They are typically a small fraction of
+   * `full`, which is the source master an operator's phone recorded, and
+   * **playing `full` when a rendition exists is the single most expensive thing
+   * this app can do.** Prefer a rendition; make `full` an explicit choice.
+   */
   urls: {
     full: string | null;
     preview: string | null;
     thumb: string | null;
+    video240: string | null;
+    video720: string | null;
   };
 }
 
@@ -122,6 +217,16 @@ export interface OFMessage {
    * while `mediaCount > 0` — see above; render a count-only affordance then.
    */
   attachments: OFAttachment[];
+  /** Pinned to the top of the thread on OnlyFans itself. */
+  isPinned: boolean;
+  /** Liked (the heart), by us. The provider reports no fan-side like. */
+  isLiked: boolean;
+  /**
+   * Whether the provider will accept a pin for this message. Some cannot be
+   * pinned (its rules are undocumented), and offering the action anyway means an
+   * error toast instead of a disabled item.
+   */
+  canBePinned: boolean;
 }
 
 /** A chat thread as shown in the list. */
@@ -140,6 +245,11 @@ export interface OFChat {
   spentTotal: number;
   isPinned: boolean;
   canSendMessage: boolean;
+  /**
+   * The fan's profile as the chat payload carries it — the fan context panel's
+   * entire data source. Null when the provider sent no profile object.
+   */
+  profile: OFFanProfile | null;
 }
 
 // ─── Paging ─────────────────────────────────────────────────────────
@@ -166,6 +276,20 @@ export interface ResolvedMedia {
   url: string;
   /** Milliseconds this URL may be reused for. */
   ttlMs: number;
+  /**
+   * True when fetching `url` will be **billed** by the provider.
+   *
+   * The download endpoint answers a 302 to one of two hosts: its own CDN cache
+   * (free) or a streaming proxy that "reports billing back to the API". The host
+   * is therefore a free, exact read on whether these bytes cost money — which is
+   * both the metering signal and the trigger for copying them into our own
+   * bucket so they are never paid for twice.
+   *
+   * **A billed URL must never be handed to the renderer.** A `<video>` element
+   * issues a fresh range request on every seek, and each one is another stream
+   * through the metered proxy.
+   */
+  billed: boolean;
 }
 
 export interface SendMessageInput {
@@ -296,6 +420,37 @@ export interface IOnlyFansClient {
   markChatRead(accountId: string, chatId: string): Promise<void>;
 
   /**
+   * Pin or unpin a message in a thread.
+   *
+   * The provider's per-message surface is **pin, unpin, like, unlike and
+   * nothing else** — in particular there is no unsend, so never design a delete
+   * affordance for a sent message.
+   */
+  setMessagePinned(
+    accountId: string,
+    chatId: string,
+    messageId: string,
+    pinned: boolean,
+  ): Promise<void>;
+
+  /** Like or unlike a message. */
+  setMessageLiked(
+    accountId: string,
+    chatId: string,
+    messageId: string,
+    liked: boolean,
+  ): Promise<void>;
+
+  /**
+   * The creator's private notes on a fan, as plain text. Empty string when there
+   * are none.
+   *
+   * Billed per call and per fan, so it is never fetched with the chat list —
+   * only on an explicit request from the fan panel, and memoised behind it.
+   */
+  getFanNotes(accountId: string, fanId: string): Promise<string>;
+
+  /**
    * The creator's vault categories. Billed, and the answer changes about never —
    * callers memoise it rather than fetching per dialog open.
    */
@@ -319,9 +474,13 @@ export interface IOnlyFansClient {
    * load, and return it with the milliseconds it is good for.
    *
    * Provider CDN links are IP-locked to the provider's proxy, so fetching one
-   * directly always fails — every display goes through here. **Resolving media
-   * the provider has not cached is billed**, so callers must resolve lazily
-   * (on viewport) and prefer the smallest variant that will do.
+   * directly always fails — every display goes through here. **Fetching what
+   * comes back is billed whenever `billed` is true**, so callers must resolve
+   * lazily (on viewport) and prefer the smallest variant that will do.
+   *
+   * Callers must not hand a `billed` URL to a browser: `resolveMediaVariant` in
+   * the media cache is the only sanctioned consumer of one, and it streams those
+   * bytes into our own bucket exactly once.
    *
    * Throws `OnlyFansApiError` with status 403 when the source URL has expired;
    * the fix is to re-fetch the message page and resolve the fresh URL.

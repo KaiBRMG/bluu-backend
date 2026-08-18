@@ -36,6 +36,9 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
  Client hooks (src/hooks) ← contexts (src/contexts) ← React 19 / Next 16 App Router UI
  functions/ → generateThumbnail (Storage trigger) + daily stale-session cleanup
               + daily page-permissions sync + nightly analytics rollup
+ Vercel Cron (src/vercel.json) → daily OF media-cache size reading
+              (scheduled work that must send a notification lives HERE, not in
+               functions/ — copy lives only in notificationContent.ts)
 ```
 
 - **Monorepo:** `src/` (Next.js 16 web app, primary), `electron/` (desktop wrapper), `src/app/creator/` (creator interface), `functions/` (Cloud Functions).
@@ -60,6 +63,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
   - **Self-clearing:** the gate tests `workEmail` for the company domain, so a migrated user stops matching. No "already done" flag to keep in sync.
   - **Never interrupts a shift:** the dialog only arms while `displayState === 'clocked-out'`, re-checked for the whole app session (not latched once at boot) — so a user who leaves the app running across shifts is still caught the moment they clock out, instead of needing to fully quit and relaunch while already clocked out. `UpdateAvailableBanner` now follows the same pattern.
   - **Enforcement is soft** (a renderer dialog). Deliberate — this is a cooperative rollout.
+  - **Reversal (undo) — same machinery, pointed backwards.** A user swept into a cohort by mistake (wrong group membership) is moved *back* onto `@bluurock.com` by listing their uid in `EMAIL_MIGRATION_REVERSAL` in the same config file. uid-only by design — no groups, no `allUsers`. It is **the same dialog with a `direction`**, not a second component, because two components would both listen on the `oauth-callback` channel and `removeOAuthListeners` is `removeAllListeners`. The two gates are mutually exclusive: `shouldPromptEmailMigration` returns false for any uid in the reversal list, which is what stops revert → CA cohort → migrate → revert ping-ponging. Server side, `POST /api/auth/migrate-email` takes `mode: 'revert'`, **403s any uid not in the reversal list**, inverts the domain gate (the new address must now be `@bluurock.com`), and swaps `emailMigratedAt` for `emailRevertedAt`. Fix the underlying group membership separately — the reversal only corrects the address.
   - The dialog listens on the **same** `oauth-callback` IPC channel as `Login`. Safe only because the two never coexist (Login renders without a session, the card only with one); `removeOAuthListeners` is `removeAllListeners`, so overlapping them would tear out each other's handlers.
 - **To remove** (once no `users` doc has an `@bluurock.com` `workEmail`): delete `src/lib/emailMigrationConfig.ts`, `src/components/migration/`, `src/app/api/auth/migrate-email/`, the mount in `(main)/layout.tsx`, the `mode=migrate` branch in `src/app/(main)/auth/google/page.tsx`, and `isLegacyWorkEmail`/`LEGACY_WORK_EMAIL_DOMAIN` in `src/lib/authEmail.ts`. Keep `normalizeEmail` — that is permanent. Details in [auth.md](documentation/auth.md).
 
@@ -93,6 +97,28 @@ The Sharing page's own three files were reworked on 2026-08-14 (real `<table>` s
 Two related notes on the page itself, both **intentional** rather than outstanding:
 - **Revoke is one click with an Undo toast, not a confirm dialog.** A deliberate choice — granting and revoking stay symmetric and fast, and the Undo re-PUTs the exact permission map that was replaced. If revocation ever needs a confirm, item 8's `members` count is the thing to show in it.
 - **Checked checkboxes render near-white, not Action Blue.** That is the app-wide `--primary` issue already documented in [DESIGN.md](DESIGN.md) §2, not drift local to this page. Fixing it is a global change.
+
+## Known Issues: sidebar navigation hangs / app-shell re-render — deferred work
+
+**Symptom.** Clicking a page in the sidebar does nothing — no URL change, no skeleton — while the page already open stays fully interactive (tabs, buttons and dialogs all work). Reported as "the app freezes", but nothing is frozen: a `<Link>` click runs inside `startTransition`, and React keeps the old tree mounted and responsive while it renders the new one. The transition never commits.
+
+**Not the network.** A capture during a live occurrence showed every `?_rsc=` request returning 200/304 in 46–186 ms, with the *same* route payload arriving repeatedly while nothing rendered. The data lands; the commit does not. Don't re-investigate the transport.
+
+**Two causes. One is fixed:**
+
+- ✅ **`staleTimes.dynamic` defaulted to `0`** — a fetched RSC payload was stale on arrival and never reusable, so an interrupted transition's retry issued a *fresh* request and re-suspended on a new promise, restarting the cycle forever. Set to `30` in [`next.config.ts`](src/next.config.ts).
+- ❌ **The app shell re-renders on every navigation — still outstanding. This is fix 3, and it is also the single biggest available navigation speed-up.**
+
+| # | Issue | Where | Fix |
+|---|---|---|---|
+| 1 | **`AppLayout` is mounted per-page, not in the layout.** Every navigation renders a complete fresh `SidebarProvider` + `Sidebar` + `TopBar` + `usePermissions` tree *on top of* the destination page (600–1400 lines each). That is what makes the transition render long enough to lose the race against an interrupting urgent update. | [`AppLayout.tsx`](src/components/AppLayout.tsx), imported by ~every page under `(main)/` | Hoist it into [`(main)/layout.tsx`](src/app/(main)/layout.tsx) so a navigation swaps only the page body. Also removes the module-scope `savedScrollTop` hack at [`Sidebar.tsx:38`](src/components/Sidebar.tsx#L38), which exists purely to paper over the remount. Touches every page file — mechanical but wide. |
+| 2 | **`TimeTrackingContext` changes value identity every second.** `setElapsedSeconds` runs on a 1000 ms interval and `elapsedSeconds` sits in the provider's `useMemo` deps, so every consumer re-renders at urgent priority once a second — including `NavUser` *inside the sidebar*, `TimerPill`, `AuthWrapper`, and the home page body. React interrupts pending transitions per-root, so this preempts navigation no matter where it sits in the tree. | [`TimeTrackingContext.tsx:723,744,1198,1212`](src/contexts/TimeTrackingContext.tsx) | Splitting it into a smaller context only makes each interruption *cheaper*, not less frequent — it does not fix this. To remove the interrupt you must take the 1 Hz update out of React: hold elapsed time in a ref and write it to the DOM from the interval (`el.current.textContent = …`). Only ticks while clocked in or on break. |
+
+**The clocked-out test.** Free and decisive: if navigation is reliable while clocked out and only wedges while clocked in or on break, issue 2's tick is confirmed as the driver. If it wedges clocked out too, that model is wrong — profile a stuck click in the Performance tab rather than reasoning further.
+
+**[`NavigationWatchdog`](src/components/NavigationWatchdog.tsx) is the safety net, not a fix.** Mounted in `(main)/layout.tsx`; forces a hard navigation if the URL has not changed 4s after a link click, and reports to Sentry (`area: navigation`). Keep it regardless of the above — it is the only thing that rescues an already-stuck user, and unlike `DeploymentRefresher` it reloads mid-shift on purpose (being unable to navigate is a failure state; the session survives a reload). **Those Sentry events are the signal for whether the underlying cause is actually gone.**
+
+**Related but separate: Skew Protection is set to 12 hours** while this renderer routinely stays open for weeks (rule 9c). Past that window a stale client's pinned assets stop resolving, and `DeploymentRefresher` only rescues users while clocked out. Raise the window; the watchdog covers the rest.
 
 ## Documentation Index (spokes)
 

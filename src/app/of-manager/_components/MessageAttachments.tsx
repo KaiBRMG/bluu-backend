@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FileQuestion,
   Image as ImageIcon,
@@ -16,23 +16,34 @@ import {
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { useInViewport, useResolvedMedia, type MediaStatus } from '@/hooks/useOnlyFansMedia';
+import {
+  useInViewport,
+  useResolvedFile,
+  useResolvedMedia,
+  type MediaRef,
+  type MediaStatus,
+} from '@/hooks/useOnlyFansMedia';
 import type { OFAttachmentRow, OFMessageRow } from '@/hooks/useOnlyFansMessages';
-import { formatMoney } from '../_lib/format';
+import type { OFMediaVariant } from '@/lib/onlyfans/types';
+import { estimateCredits, formatBytes, formatMoney } from '../_lib/format';
 
 /**
  * Media on a message.
  *
- * Three constraints shape this component, and each one is visible in the markup:
+ * Four constraints shape this component, and each one is visible in the markup:
  *
- * 1. **Resolving a tile can cost provider credits.** Nothing is requested until
- *    it scrolls into view, every tile asks for the *preview* variant rather than
- *    the full file, and the full file is fetched only when the operator opens
- *    the lightbox and asks for it.
- * 2. **DRM media cannot be played here at all** — stock Electron has no Widevine
+ * 1. **The provider bills media by the megabyte, once per file.** Nothing is
+ *    requested until it scrolls into view; tiles ask for the *preview* rendition;
+ *    and a video plays a **240p/720p rendition** rather than the source master,
+ *    which on a phone-shot clip is the difference between tens of credits and
+ *    several hundred. Source resolution is always an explicit, priced choice.
+ * 2. **Nothing autoplays.** A video used to start downloading the moment its
+ *    tile was clicked, so opening the wrong attachment cost more than a day of
+ *    ordinary browsing. Play is a button now.
+ * 3. **DRM media cannot be played here at all** — stock Electron has no Widevine
  *    CDM. Such an attachment renders as its poster with an explicit line saying
  *    so. A player that silently fails would be worse than no player.
- * 3. **Every tile reserves its own space from metadata before the image lands.**
+ * 4. **Every tile reserves its own space from metadata before the image lands.**
  *    The thread restores `scrollTop` around content-height changes; media that
  *    pops in at its natural size after the fact would move the reading position
  *    under the operator on every resolve.
@@ -47,12 +58,77 @@ function ratioOf(attachment: OFAttachmentRow): number {
 }
 
 /**
- * The variant a tile displays. `preview` (~960px) rather than `thumb` (300²)
- * because the same URL is reused as the lightbox's image and a video's poster —
- * one resolve per attachment on the common path instead of two.
+ * What a tile displays.
+ *
+ * `preview` (~960px) rather than `thumb` (300²) because the same file is reused
+ * as the lightbox's image and as a video's poster — one cached file per
+ * attachment on the common path instead of two. Asking for `thumb` would not
+ * save anything anyway: both land under the provider's 1-credit floor.
+ *
+ * The URL may be null and the ref is still worth making. A message that arrived
+ * by webhook has its attachment metadata mirrored but never its links, and the
+ * media cache can serve any file it has already stored from the id alone — so
+ * live messages now show their images instead of a grey placeholder, provided
+ * the file has been seen once before.
  */
-function previewUrlOf(attachment: OFAttachmentRow): string | null {
-  return attachment.urls.preview ?? attachment.urls.thumb ?? null;
+function previewRefOf(attachment: OFAttachmentRow): MediaRef {
+  if (!attachment.urls.preview && attachment.urls.thumb) {
+    return { id: attachment.id, variant: 'thumb', url: attachment.urls.thumb };
+  }
+  return { id: attachment.id, variant: 'preview', url: attachment.urls.preview };
+}
+
+interface QualityOption {
+  variant: OFMediaVariant;
+  label: string;
+  url: string | null;
+  /** Bytes, when known. Only the source master ever reports one. */
+  bytes: number | null;
+}
+
+/**
+ * The renditions a video can be played at, cheapest first.
+ *
+ * `videoSources` on the provider's payload carries 240p and 720p transcodes of
+ * every non-DRM video. They were being dropped on the floor before, so every
+ * play fetched `files.full` — the source file, routinely 100–250MB. Offering the
+ * renditions first is the single largest cost reduction available on this
+ * surface.
+ *
+ * When the row carries no links at all (mirrored from a webhook), a single
+ * source-variant option with a null URL is still returned: the cache may already
+ * hold the file, and if it does not the viewer says so rather than showing
+ * nothing.
+ */
+function qualityOptions(attachment: OFAttachmentRow): QualityOption[] {
+  const options: QualityOption[] = [];
+  if (attachment.urls.video240) {
+    options.push({ variant: 'video240', label: '240p', url: attachment.urls.video240, bytes: null });
+  }
+  if (attachment.urls.video720) {
+    options.push({ variant: 'video720', label: '720p', url: attachment.urls.video720, bytes: null });
+  }
+  // Source is offered when there is a source link to offer — or when it is the
+  // only thing left, in which case a null URL is still worth trying, because the
+  // cache may hold the file from a sighting that did have one.
+  if (attachment.urls.full || options.length === 0) {
+    options.push({
+      variant: 'full',
+      label: options.length > 0 ? 'Source' : 'Play',
+      url: attachment.urls.full,
+      bytes: attachment.sizeBytes ?? null,
+    });
+  }
+  return options;
+}
+
+/** Prefer 720p, then 240p, then the source master. */
+function defaultQuality(options: QualityOption[]): OFMediaVariant {
+  return (
+    options.find((o) => o.variant === 'video720')?.variant ??
+    options.find((o) => o.variant === 'video240')?.variant ??
+    'full'
+  );
 }
 
 function TypeIcon({ type, className }: { type: string; className?: string }) {
@@ -158,11 +234,18 @@ function MediaTile({
   // reaches the viewport is a cost control before it is a perf one.
   const { ref, inView } = useInViewport<HTMLDivElement>();
 
-  const previewUrl = previewUrlOf(attachment);
-  const { url, status, retry, onLoadError } = useResolvedMedia(previewUrl, inView);
+  const mediaRef = previewRefOf(attachment);
+  const { url, status, retry, onLoadError } = useResolvedMedia(mediaRef, inView);
 
   const locked = !attachment.canView;
-  const interactive = !!previewUrl || attachment.type === 'audio';
+  // Openable if there is anything the lightbox could show: a poster it already
+  // has, a playable rendition, or audio (which has no poster at all).
+  const interactive =
+    !!url ||
+    !!attachment.urls.full ||
+    !!attachment.urls.video720 ||
+    !!attachment.urls.video240 ||
+    attachment.type === 'audio';
 
   return (
     <div
@@ -176,15 +259,15 @@ function MediaTile({
       )}
     >
       {url && (
-        // A short-lived signed provider URL cannot go through next/image: it is
-        // not a configured remote host, and the link is dead long before an
-        // optimizer cache entry would pay for itself.
+        // A signed URL cannot go through next/image: it is not a configured
+        // remote host, and an optimizer cache entry would never pay for itself
+        // against a link that rotates.
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={url}
           alt=""
-          // Resolved links are cached optimistically for minutes; this is what
-          // makes that safe. A link that has actually died re-resolves once.
+          // Cached links are handed out optimistically; this is what makes that
+          // safe. One that has actually died re-resolves once.
           onError={onLoadError}
           loading="lazy"
           decoding="async"
@@ -193,7 +276,7 @@ function MediaTile({
         />
       )}
 
-      {!url && <TilePlaceholder attachment={attachment} status={previewUrl ? status : 'idle'} />}
+      {!url && <TilePlaceholder attachment={attachment} status={status} />}
 
       {/* Overlays, outermost meaning first: locked outranks DRM outranks play. */}
       {locked ? (
@@ -222,7 +305,7 @@ function MediaTile({
         </span>
       )}
 
-      {status === 'error' && previewUrl && (
+      {status === 'error' && (
         <span className="absolute inset-x-0 bottom-0 flex justify-center pb-1">
           <Button
             size="sm"
@@ -266,10 +349,10 @@ function OverlayPill({ children }: { children: React.ReactNode }) {
 /**
  * What fills a tile before (or instead of) an image.
  *
- * `idle` covers the case worth understanding: live messages arriving by webhook
- * carry attachment *metadata* but no URLs, because CDN links expire in about a
- * minute and are deliberately never mirrored. The tile still says what the media
- * is; refreshing the thread pulls links that can be resolved.
+ * `uncached` is the case worth understanding: a live message carries attachment
+ * metadata but no links, so the only way to show it is from a file the cache has
+ * already stored. The first time a fan sends something, that has not happened
+ * yet — refreshing the thread fetches links the cache can fill itself from.
  */
 function TilePlaceholder({
   attachment,
@@ -290,8 +373,8 @@ function TilePlaceholder({
     <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-2 text-center text-zinc-400">
       <TypeIcon type={attachment.type} className="size-5" />
       <span className="text-[11px]">
-        {status === 'expired'
-          ? 'Link expired — refresh'
+        {status === 'expired' || status === 'uncached'
+          ? 'Refresh to load'
           : status === 'error'
             ? 'Could not load'
             : typeLabel(attachment)}
@@ -305,24 +388,32 @@ function TilePlaceholder({
 /**
  * The opened attachment.
  *
- * Photos show the already-resolved preview immediately and offer the full file
- * as an explicit second step — a full-size resolve is a second billed download,
- * so it is the operator's choice rather than a side effect of clicking.
- * Non-DRM video resolves its file on open (there is nothing useful to show
- * without it); DRM video never does, because there is no file to resolve.
+ * Everything expensive here is opt-in. Photos show the already-cached preview
+ * immediately and offer source resolution as a second, priced step. Video shows
+ * its poster and a play button, defaulting to the 720p rendition — it does not
+ * autoplay, and it does not reach for the source master unless asked. DRM video
+ * resolves nothing at all, because there is no file to resolve.
  */
 function MediaViewer({ attachment }: { attachment: OFAttachmentRow }) {
+  const options = useMemo(() => qualityOptions(attachment), [attachment]);
+  const [quality, setQuality] = useState<OFMediaVariant>(() => defaultQuality(options));
+  const [playing, setPlaying] = useState(false);
   const [wantFull, setWantFull] = useState(false);
 
-  const previewUrl = previewUrlOf(attachment);
-  const playable = !attachment.isDrm && attachment.canView && !!attachment.urls.full;
+  const playable = !attachment.isDrm && attachment.canView;
   const isMedia = attachment.type === 'video' || attachment.type === 'audio';
+  const chosen = options.find((o) => o.variant === quality) ?? options[options.length - 1];
 
-  const preview = useResolvedMedia(previewUrl, true);
-  // Video/audio needs the file to be of any use at all; a photo waits to be asked.
-  const full = useResolvedMedia(
-    playable && (isMedia || wantFull) ? attachment.urls.full : null,
-    playable && (isMedia || wantFull),
+  const preview = useResolvedMedia(previewRefOf(attachment), true);
+
+  // Audio has nothing to show without the file, so it loads on open. Video waits
+  // for the play button; a photo waits for "source resolution".
+  const wantFile = playable && (attachment.type === 'audio' || (isMedia ? playing : wantFull));
+  const fileVariant: OFMediaVariant = isMedia ? chosen.variant : 'full';
+  const fileUrl = isMedia ? chosen.url : attachment.urls.full;
+  const file = useResolvedFile(
+    wantFile ? { id: attachment.id, variant: fileVariant, url: fileUrl } : null,
+    wantFile,
   );
 
   if (attachment.isDrm) {
@@ -353,27 +444,38 @@ function MediaViewer({ attachment }: { attachment: OFAttachmentRow }) {
   if (attachment.type === 'audio') {
     return (
       <div className="p-4">
-        {full.url ? (
-          <audio src={full.url} controls className="w-full" />
+        {file.url ? (
+          <audio src={file.url} controls className="w-full" />
         ) : (
-          <ViewerStatus status={full.status} onRetry={full.retry} />
+          <ViewerStatus status={file.status} slow={file.slow} onRetry={file.retry} />
         )}
       </div>
     );
   }
 
   if (attachment.type === 'video') {
-    return full.url ? (
-      <video
-        src={full.url}
-        controls
-        autoPlay
-        poster={preview.url ?? undefined}
-        className="max-h-[75vh] w-full rounded-md bg-black"
-      />
-    ) : (
-      <div className="p-6">
-        <ViewerStatus status={full.status} onRetry={full.retry} />
+    if (file.url) return <VideoPlayer src={file.url} poster={preview.url} />;
+
+    return (
+      <div className="space-y-3">
+        <PreviewFrame attachment={attachment} url={preview.url} onError={preview.onLoadError} />
+        {playing ? (
+          <div className="pb-2">
+            <ViewerStatus status={file.status} slow={file.slow} onRetry={file.retry} />
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-2 pb-2">
+            <Button
+              onClick={() => setPlaying(true)}
+              className="gap-2 bg-white/10 text-white hover:bg-white/15"
+            >
+              <Play className="size-4 fill-white" />
+              Play {options.length > 1 ? chosen.label : ''}
+            </Button>
+            <QualityPicker options={options} value={quality} onChange={setQuality} />
+            <CostNote option={chosen} />
+          </div>
+        )}
       </div>
     );
   }
@@ -382,11 +484,12 @@ function MediaViewer({ attachment }: { attachment: OFAttachmentRow }) {
     <div className="space-y-2">
       <PreviewFrame
         attachment={attachment}
-        url={full.url ?? preview.url}
-        onError={full.url ? full.onLoadError : preview.onLoadError}
+        url={file.url ?? preview.url}
+        onError={file.url ? file.onLoadError : preview.onLoadError}
       />
       {!wantFull && attachment.urls.full && (
-        <div className="flex justify-end px-2 pb-1">
+        <div className="flex items-center justify-end gap-3 px-2 pb-1">
+          <CostNote option={{ variant: 'full', label: 'Source', url: null, bytes: attachment.sizeBytes ?? null }} />
           <Button
             size="sm"
             variant="ghost"
@@ -397,10 +500,105 @@ function MediaViewer({ attachment }: { attachment: OFAttachmentRow }) {
           </Button>
         </div>
       )}
-      {wantFull && full.status === 'loading' && (
-        <p className="px-2 pb-1 text-right text-xs text-zinc-400">Loading full resolution…</p>
+      {wantFull && file.status === 'loading' && (
+        <p className="px-2 pb-1 text-right text-xs text-zinc-400">
+          {file.slow ? 'Fetching and caching full resolution…' : 'Loading full resolution…'}
+        </p>
       )}
     </div>
+  );
+}
+
+/**
+ * The player.
+ *
+ * Split out so it can hold a ref and **tear itself down on unmount** — pausing
+ * and clearing `src` aborts whatever the element is still fetching. Radix
+ * unmounts dialog content on close, so this fires whenever the lightbox is
+ * dismissed mid-stream. It matters less than it used to, now that `src` always
+ * points at our own bucket rather than at the provider's metered proxy, but a
+ * half-finished download of a few hundred megabytes is still worth stopping.
+ */
+function VideoPlayer({ src, poster }: { src: string; poster: string | null }) {
+  const ref = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    return () => {
+      if (!el) return;
+      el.pause();
+      el.removeAttribute('src');
+      el.load();
+    };
+  }, []);
+
+  return (
+    <video
+      ref={ref}
+      src={src}
+      controls
+      autoPlay
+      poster={poster ?? undefined}
+      className="max-h-[75vh] w-full rounded-md bg-black"
+    />
+  );
+}
+
+/**
+ * Which rendition to play.
+ *
+ * Rendered as plain buttons rather than a `Select` because there are two or
+ * three of them and the choice has a price attached — a control the operator has
+ * to open to read is the wrong shape for that.
+ */
+function QualityPicker({
+  options,
+  value,
+  onChange,
+}: {
+  options: QualityOption[];
+  value: OFMediaVariant;
+  onChange: (variant: OFMediaVariant) => void;
+}) {
+  if (options.length < 2) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-1">
+      {options.map((option) => (
+        <Button
+          key={option.variant}
+          size="sm"
+          variant="ghost"
+          onClick={() => onChange(option.variant)}
+          aria-pressed={option.variant === value}
+          className={cn(
+            'h-7 px-2.5 text-xs',
+            option.variant === value
+              ? 'bg-white/10 text-white hover:bg-white/15'
+              : 'text-zinc-400 hover:text-white',
+          )}
+        >
+          {option.label}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * What this download will cost, when that is knowable.
+ *
+ * Only shown for the source master, and only when the provider reported a size —
+ * which it often does not. Saying nothing is correct in that case: a made-up
+ * figure about money is worse than no figure, the same rule the tip bubble
+ * follows when it renders an unparseable amount as "Tip" rather than "$0".
+ */
+function CostNote({ option }: { option: QualityOption }) {
+  if (option.variant !== 'full' || !option.bytes) return null;
+  return (
+    <p className="text-xs text-zinc-400">
+      Source is {formatBytes(option.bytes)} — about {estimateCredits(option.bytes).toLocaleString()}{' '}
+      credits the first time it is opened, then free.
+    </p>
   );
 }
 
@@ -437,18 +635,30 @@ function PreviewFrame({
   );
 }
 
-function ViewerStatus({ status, onRetry }: { status: MediaStatus; onRetry: () => void }) {
+function ViewerStatus({
+  status,
+  slow,
+  onRetry,
+}: {
+  status: MediaStatus;
+  slow?: boolean;
+  onRetry: () => void;
+}) {
   if (status === 'loading' || status === 'idle') {
     return (
       <p className="flex items-center justify-center gap-2 text-sm text-zinc-400">
         <Loader2 className="size-4 animate-spin" />
-        Loading…
+        {slow ? 'Fetching this once and caching it — replays are instant.' : 'Loading…'}
       </p>
     );
   }
   return (
     <div className="flex flex-col items-center gap-2 text-sm text-zinc-400">
-      <p>{status === 'expired' ? 'This link expired. Refresh the thread to load it.' : 'Could not load this media.'}</p>
+      <p>
+        {status === 'expired' || status === 'uncached'
+          ? 'Refresh the thread to load this.'
+          : 'Could not load this media.'}
+      </p>
       {status === 'error' && (
         <Button size="sm" variant="ghost" onClick={onRetry} className="gap-1 text-zinc-400 hover:text-white">
           <RotateCw className="size-3" />

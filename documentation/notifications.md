@@ -12,6 +12,7 @@
 | `src/components/NotificationTray.tsx` | UI surface. Its visual + motion contract (the type/read dot, the bell strike, the badge ink) is documented in [DESIGN.md](../DESIGN.md#the-notification-tray) — read it before changing the tray's look. |
 | `src/hooks/useAdminNotifications.ts` | Admin broadcast/announcement management |
 | `src/lib/automatedNotifications.ts` | **Display-only catalogue** of every *automated* notification (trigger, recipients, source route). Derives its copy by calling the real factories with `{token}` placeholders — it never retypes a title or message. |
+| `src/lib/services/onlyfansOpsAlerts.ts` | `sendOpsAlertOnce` + the single-maintainer recipient uid, for the two OF Manager diagnostics |
 | `src/lib/notificationTypeBadge.ts` | Two maps, one per ground. `notificationTypeBadge(type)` — badge label/colour for the three **admin** surfaces (light chips, `-600` inks). `notificationTypeDot(type)` — the `-400` semantic hue for the **tray's** leading dot on the near-black panel. Import the one that matches the surface; never re-map a type to a hex inline. |
 | `src/components/admin/notifications/AutomatedNotificationsList.tsx` | Renders the catalogue on the **Automated** tab of `/admin/notifications` |
 | API: `src/app/api/notifications/*` | `create`, `dismiss`, `mark-read` |
@@ -65,6 +66,21 @@ Every row below is **automated** — fired by a handler on an event, never sent 
 | Content request completed | `notifications.contentPlanCompleted(stageName, contentSummary)` | `groups/OFAM.members` | `content-planning/[id]/creator-complete` |
 | Model application received | `notifications.modelSubmissionReceived(applicantName, location)` | every user whose `permittedPageIds` contains `apps-model-submissions` | `model-submissions/submit` |
 | Desktop app updated | `notifications.releaseNote(version)` | each user as they reach `APP_UPDATE.releaseNote.version` | `user/app-version` |
+| OF media cache hit its size threshold | `notifications.ofMediaCacheCritical(sizeLabel, periodLabel)` | **one named maintainer** — see below | `cron/onlyfans-media-usage` |
+| OF video renditions on an unrecognised host | `notifications.ofVideoSourceHostUnrecognised(host)` | **one named maintainer** — see below | `onlyfans/chats/[chatId]/messages` (via `after()`) |
+
+### The two OF Manager alerts — one recipient, once ever
+
+These two are operational diagnostics, not workflow events, and they break the "iterate `groups/admin.members`, never hardcode a uid" rule on purpose. That rule exists to stop a notification **meant for all admins** silently reaching only the one whose id someone typed. These are the opposite: they name a Cloud Storage prefix and a regex constant, and they are addressed to the person who maintains that subsystem. Broadcasting them would be noise for everyone who cannot act.
+
+The uid is a single named constant, `OPS_ALERT_RECIPIENT_UID` in [`src/lib/services/onlyfansOpsAlerts.ts`](../src/lib/services/onlyfansOpsAlerts.ts), with exactly one definition. **Change it there when ownership moves** — nothing else refers to it.
+
+`sendOpsAlertOnce(key, content)` is what makes them once-ever, with two guards that fail differently:
+
+- a **latch document** (`onlyfans-meta/ops-alerts`, already denied to every client by the existing rule, so no rules change was needed) survives lambdas, deploys, and the recipient dismissing the notification;
+- a **deterministic doc id** (`{uid}__ops-{key}`) means two instances reading the latch in the same instant write one document rather than two.
+
+Both conditions persist until a human fixes them and neither can un-fire, so a repeat would restate a fact the reader already has. They are catalogued on the Automated tab regardless — an admin should be able to see that they exist.
 
 ### Release notes ("what's new") — gated on the installed build
 

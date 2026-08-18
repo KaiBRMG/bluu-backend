@@ -9,6 +9,7 @@ import UpdateBanner from "@/components/UpdateBanner";
 import UpdateAvailableBanner from "@/components/UpdateAvailableBanner";
 import EmailMigrationDialog from "@/components/migration/EmailMigrationDialog";
 import DeploymentRefresher from "@/components/DeploymentRefresher";
+import NavigationWatchdog from "@/components/NavigationWatchdog";
 import LazyProviders from "@/components/LazyProviders";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
@@ -20,6 +21,12 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         <UserDataProvider>
           <ErrorLogger />
           <AppVersionReporter />
+          {/* Outside LazyProviders on purpose: it needs no context, and a
+              navigation can be clicked (and stall) before the lazily-imported
+              providers have finished loading. Mounted on the layout, not in
+              AppLayout, so the timer survives navigations instead of being torn
+              down with the page. */}
+          <NavigationWatchdog />
           <LazyProviders>
             <BootLoaderProvider>
               <AuthWrapper>

@@ -80,12 +80,50 @@ export function dayKey(iso: string, timeZone?: string): string {
 }
 
 /**
+ * `2 Aug 2026` — an absolute date, for the fan panel.
+ *
+ * Absolute rather than relative ("3 months ago") on purpose: these are facts an
+ * operator cross-references against a subscription or a payout, and a relative
+ * stamp that silently re-renders as the panel sits open is unquotable.
+ */
+export function formatDate(iso: string | null, timeZone?: string): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return formatter(timeZone, { day: 'numeric', month: 'short', year: 'numeric' }).format(date);
+}
+
+/**
  * `$817`, or `$0.40` under a dollar — rounding sub-dollar spend to `$0` renders
  * a chip that says a paying fan paid nothing.
  */
 export function formatMoney(amount: number): string {
   if (amount > 0 && amount < 1) return `$${amount.toFixed(2)}`;
   return `$${Math.round(amount).toLocaleString('en-US')}`;
+}
+
+/** `223 MB` — sizes are only ever shown at this coarseness, so no decimals below MB. */
+export function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/**
+ * What the provider will charge to stream a file of this size, the first time.
+ *
+ * Derived from billing records rather than documented: two downloads of 222.89MB
+ * and 83.56MB were charged 668 and 250 credits, both landing on **3 credits per
+ * megabyte**, and files well under a third of a megabyte are still charged 1. It
+ * is an estimate and is presented as one ("~670 credits"), but it is close enough
+ * to tell an operator that the source video they are about to open costs two
+ * orders of magnitude more than the 720p rendition beside it.
+ *
+ * Only ever shown for a download that has not been cached yet — once the bytes
+ * are in our bucket, replaying costs nothing and quoting a price would be a lie.
+ */
+export function estimateCredits(bytes: number): number {
+  return Math.max(1, Math.ceil((bytes / 1024 / 1024) * 3));
 }
 
 /**

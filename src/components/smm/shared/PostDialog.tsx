@@ -181,7 +181,7 @@ export function PostDialog({
                 <Label>Post date &amp; time</Label>
                 <DateTimePicker value={postDate} onChange={setPostDate} className="w-full" />
               </div>
-              {/* "Uploaded from" is not editable: it is derived from the
+              {/* "Copied from" is not editable: it is derived from the
                   viral-copy declaration, which is itself fixed at upload. */}
               <div className="space-y-1.5">
                 <Label>Post link</Label>
@@ -217,23 +217,32 @@ export function PostDialog({
               <Field label="Post date">
                 {post.postDate ? format(new Date(post.postDate), 'PPp') : '—'}
               </Field>
-              <Field label="Post link">
-                {post.postLink ? <LinkWithCopy url={post.postLink} /> : '—'}
+              {/* The two accounts are deliberately adjacent and both labelled with
+                  their direction: "Uploaded to" is the page this post lives on
+                  (the post link), "Copied from" is the page the content came
+                  from (the original link). */}
+              <Field label="Uploaded to">
+                <span className="space-y-0.5 block">
+                  <span className="block font-medium">{post.accountName}</span>
+                  {post.postLink
+                    ? <LinkWithCopy url={post.postLink} />
+                    : <span className="block text-xs text-muted-foreground">No post link recorded.</span>}
+                </span>
               </Field>
-              <Field label="Uploaded from">
-                {post.sourceAccName || <span className="text-muted-foreground">Not a copy — no network bonus</span>}
+              <Field label="Copied from">
+                {post.sourceAccName ? (
+                  <span className="space-y-0.5 block">
+                    <span className="block font-medium">{post.sourceAccName}</span>
+                    {post.originalLink && <LinkWithCopy url={post.originalLink} />}
+                    <span className="block text-xs text-muted-foreground">Bonus is halved for copied posts.</span>
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">Not a copy — no network bonus</span>
+                )}
               </Field>
               <Field label="Posted by">
                 <UserChip name={postedByName} photoURL={postedByPhoto} />
               </Field>
-              {post.isViralCopy && (
-                <Field label="Copied from">
-                  <span className="space-y-0.5 block">
-                    <LinkWithCopy url={post.originalLink} />
-                    <span className="block text-xs text-muted-foreground">Bonus is halved for copied posts.</span>
-                  </span>
-                </Field>
-              )}
             </div>
           )}
 

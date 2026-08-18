@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
 import {
@@ -6,6 +6,7 @@ import {
   recordLiveMessage,
   requireOnlyFansAccess,
 } from '@/lib/services/onlyfansService';
+import { reportUnrecognisedVideoSourceHost } from '@/lib/services/onlyfansOpsAlerts';
 import { OnlyFansApiError, getOnlyFansClient, resolveAccountId } from '@/lib/onlyfans';
 import {
   MAX_MESSAGE_MEDIA,
@@ -55,6 +56,14 @@ export const GET = withAuth<Params>(
         // Only ever set by the explicit refresh button.
         force: search.get('refresh') === '1',
       });
+
+      // Normalising that page may have found the provider serving its video
+      // renditions from a host we reject — which silently switches off the
+      // largest media saving in the app. `after()` so the check never sits in
+      // front of the operator's thread; it is a no-op on all but the first
+      // sighting in a given lambda, and does nothing at all once alerted.
+      after(reportUnrecognisedVideoSourceHost);
+
       return NextResponse.json(page);
     } catch (error) {
       return providerError(error, 'GET /api/onlyfans/chats/[chatId]/messages');
@@ -130,10 +139,20 @@ export const POST = withAuth<Params>(
       return NextResponse.json({ error: 'Previews must be part of the attached media' }, { status: 400 });
     }
 
+    // A reply target is a message id and goes into a provider payload verbatim,
+    // so it is shape-checked here rather than assumed. Absent is the norm.
+    const replyToRaw = body?.replyToMessageId;
+    const replyToMessageId =
+      replyToRaw === undefined || replyToRaw === null ? undefined : String(replyToRaw);
+    if (replyToMessageId !== undefined && !/^[0-9]{1,32}$/.test(replyToMessageId)) {
+      return NextResponse.json({ error: 'Invalid reply target' }, { status: 400 });
+    }
+
     try {
       const accountId = await resolveAccountId();
       const message = await getOnlyFansClient().sendMessage(accountId, chatId, {
         text,
+        replyToMessageId,
         mediaIds,
         previewIds: price > 0 ? previewIds : undefined,
         price,

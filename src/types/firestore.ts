@@ -50,6 +50,12 @@ export interface UserDocument {
   googleSub?: string | null;
   /** Set when the user moved off their @bluurock.com address. */
   emailMigratedAt?: Timestamp;
+  /**
+   * Set when a mistaken migration was undone and the user was moved *back* onto
+   * their @bluurock.com address. Mutually exclusive with `emailMigratedAt`,
+   * which the reversal deletes.
+   */
+  emailRevertedAt?: Timestamp;
   /** The company address they migrated away from. Audit only. */
   previousWorkEmail?: string | null;
   isActive: boolean;

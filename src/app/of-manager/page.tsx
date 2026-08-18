@@ -7,6 +7,15 @@ import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { useOnlyFansChats, type OFChatRow } from '@/hooks/useOnlyFansChats';
 import ChatList from './_components/ChatList';
 import ChatThread from './_components/ChatThread';
+import FanPanel from './_components/FanPanel';
+
+/**
+ * Whether the fan panel is open, remembered across window closes.
+ *
+ * Not per account or per chat: it is a working style ("I keep context open"),
+ * not a fact about a fan.
+ */
+const FAN_PANEL_KEY = 'bluu_of_fan_panel_v1';
 
 /**
  * OF Manager — the messaging console.
@@ -32,6 +41,34 @@ export default function OfManagerPage() {
   // not move. The list is a Firestore mirror the sync route rewrites; the thread
   // is provider history the sync never touches, so it needs its own nudge.
   const [threadReloadToken, setThreadReloadToken] = useState(0);
+
+  /**
+   * Default **closed**, deliberately.
+   *
+   * A satellite window's minimum is 900px, and three panes at that width leaves
+   * the thread — the reason the window exists — under 280px. Opening the panel
+   * is therefore the operator's trade to make on a wide monitor, not one made
+   * for them on a narrow one. Read lazily so the first paint is already correct.
+   */
+  const [fanPanelOpen, setFanPanelOpen] = useState(() => {
+    try {
+      return typeof window !== 'undefined' && localStorage.getItem(FAN_PANEL_KEY) === '1';
+    } catch {
+      // Private mode. Closed is the safe default.
+      return false;
+    }
+  });
+
+  const toggleFanPanel = useCallback(() => {
+    setFanPanelOpen((open) => {
+      try {
+        localStorage.setItem(FAN_PANEL_KEY, open ? '0' : '1');
+      } catch {
+        // A forgotten preference is not a broken window.
+      }
+      return !open;
+    });
+  }, []);
 
   const selected = chats.find((c) => c.id === selectedId) ?? null;
 
@@ -84,16 +121,33 @@ export default function OfManagerPage() {
         // position and the older-page cursor all reset together, with no
         // reset-on-prop-change effects to keep in sync.
         <ChatThread
-          key={selected.id}
+          key={`thread-${selected.id}`}
           accountId={accountId}
           chat={selected}
           timeZone={userData?.timezone}
           reloadToken={threadReloadToken}
+          fanPanelOpen={fanPanelOpen}
+          onToggleFanPanel={toggleFanPanel}
         />
       ) : (
         <section className="flex flex-1 items-center justify-center">
           <p className="text-sm text-zinc-400">Select a chat to start messaging.</p>
         </section>
+      )}
+
+      {/* Keyed on the chat for the same reason the thread is: the notes section
+          is per-fan and lazily loaded, and a stale note under the wrong fan's
+          name is the worst thing this panel could do. The `fan-`/`thread-`
+          prefixes are load-bearing — both panes are siblings in this same
+          children array, so a bare chat id would collide between them. */}
+      {selected && fanPanelOpen && (
+        <FanPanel
+          key={`fan-${selected.id}`}
+          accountId={accountId}
+          chat={selected}
+          timeZone={userData?.timezone}
+          onClose={toggleFanPanel}
+        />
       )}
     </main>
   );

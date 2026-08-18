@@ -137,6 +137,34 @@ export const notifications = {
     actionUrl: '/applications/apps-model-submissions',
   }),
 
+  // ─── OF Manager operations ────────────────────────────────────────────────────
+  // Two diagnostics about the OnlyFans media cache. Both go to ONE named
+  // operator rather than to a group, and both are sent ONCE EVER — see
+  // `sendOpsAlertOnce` in `services/onlyfansOpsAlerts.ts`. They report a
+  // standing condition that someone has to go and fix; repeating them would add
+  // nothing after the first, and neither can un-fire once the fix lands.
+
+  // The cache never deletes anything and it holds fans' media, so its size is a
+  // retention question as much as a cost one. `periodLabel` is how long the
+  // measured growth took — a figure that turns "it is 50 GB" into something you
+  // can extrapolate from.
+  ofMediaCacheCritical: (sizeLabel: string, periodLabel: string): NotificationContent => ({
+    title: '⚠️ OnlyFans media cache needs a lifecycle rule',
+    message: `Cached OnlyFans media in Cloud Storage has reached ${sizeLabel}, accumulated over ${periodLabel} of measurement. Nothing deletes it and it holds fans' media — set an age-based lifecycle rule on the onlyfans-media/ prefix to bound it. Sent once only.`,
+    type: 'alert',
+    actionUrl: null,
+  }),
+
+  // The single failure mode that would silently undo the largest media saving in
+  // the app: renditions we cannot accept mean every video plays at source
+  // resolution, which is billed by the megabyte.
+  ofVideoSourceHostUnrecognised: (host: string): NotificationContent => ({
+    title: '⚠️ OnlyFans video savings are not applying',
+    message: `The provider is serving its 240p/720p video renditions from ${host}, which the app does not accept as a media host — so videos are falling back to the full-resolution source file, the most expensive download available. Allow that host in CDN_URL_PATTERN to restore the saving. Sent once only.`,
+    type: 'alert',
+    actionUrl: null,
+  }),
+
   // ─── Desktop app releases ─────────────────────────────────────────────────────
   // Sent once to each user AFTER their installed build reaches the version in
   // APP_UPDATE.releaseNote — so it describes something they can already use, and

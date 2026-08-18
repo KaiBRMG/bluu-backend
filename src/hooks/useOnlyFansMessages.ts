@@ -41,7 +41,24 @@ export interface OFAttachmentRow {
   width: number | null;
   height: number | null;
   duration: number | null;
-  urls: { full: string | null; preview: string | null; thumb: string | null };
+  /** Bytes of the full file when the provider reported one. Absent on older rows. */
+  sizeBytes?: number | null;
+  /**
+   * Source links, all expiring and all blanked before the row is mirrored.
+   *
+   * `video240` / `video720` are the provider's transcoded renditions and are
+   * absent on rows written before they were modelled — which is why every read
+   * of them is optional. Playing `full` when a rendition exists costs an order
+   * of magnitude more, so the viewer prefers a rendition and makes source
+   * resolution an explicit choice.
+   */
+  urls: {
+    full: string | null;
+    preview: string | null;
+    thumb: string | null;
+    video240?: string | null;
+    video720?: string | null;
+  };
 }
 
 export interface OFMessageRow {
@@ -60,13 +77,42 @@ export interface OFMessageRow {
   mediaCount: number;
   /** May be absent on rows written before media was modelled. */
   attachments?: OFAttachmentRow[];
+  /** Pinned on OnlyFans. Absent on rows written before pinning was modelled. */
+  isPinned?: boolean;
+  /** Liked by us. Absent on rows written before liking was modelled. */
+  isLiked?: boolean;
+  /** False when the provider will refuse a pin for this message. */
+  canBePinned?: boolean;
   /** Set locally while a send is in flight. A send that fails is removed, not flagged. */
   pending?: boolean;
 }
 
-/** Does this copy of a message carry media links we could actually resolve? */
+/**
+ * A local override of a message's pin/like state.
+ *
+ * Needed because the two halves of a thread are read-only from the client's
+ * point of view in *different* ways: history is fetched state we could patch,
+ * but the live tail is an `onSnapshot` we cannot write to and which will keep
+ * re-delivering the pre-change row until the provider's own copy catches up.
+ * Applying the override at merge time covers both without either source
+ * fighting it back.
+ */
+interface MessageFlags {
+  isPinned?: boolean;
+  isLiked?: boolean;
+}
+
+/**
+ * Does this copy of a message carry media links we could actually resolve?
+ *
+ * Less decisive than it used to be — the media cache can now serve a file it has
+ * seen before with no source link at all — but still worth keeping: a copy with
+ * links can fetch media that has *never* been cached, and one without cannot.
+ */
 function hasLiveMediaUrls(message: OFMessageRow | undefined): boolean {
-  return !!message?.attachments?.some((a) => a.urls.preview || a.urls.thumb || a.urls.full);
+  return !!message?.attachments?.some(
+    (a) => a.urls.preview || a.urls.thumb || a.urls.full || a.urls.video720 || a.urls.video240,
+  );
 }
 
 /**
@@ -94,6 +140,15 @@ function mergeMessage(existing: OFMessageRow | undefined, next: OFMessageRow): O
  */
 export interface SendInput {
   text: string;
+  /**
+   * Id of the message being replied to.
+   *
+   * Send-only: the provider accepts it but does **not** report it back on any
+   * message it returns, so a reply cannot be rendered as a quoted bubble in the
+   * thread — not for the fan's replies to us, and not for our own. The composer's
+   * quote strip is the only place the relationship is visible on this surface.
+   */
+  replyToMessageId?: string;
   mediaIds?: string[];
   previewIds?: string[];
   /** 0, or between 3 and 200 — the provider's own bounds. */
@@ -146,6 +201,9 @@ export function useOnlyFansMessages(
   const [history, setHistory] = useState<OFMessageRow[]>([]);
   const [live, setLive] = useState<OFMessageRow[]>([]);
   const [optimistic, setOptimistic] = useState<OFMessageRow[]>([]);
+  const [flags, setFlags] = useState<Record<string, MessageFlags>>({});
+  const flagsRef = useRef(flags);
+  flagsRef.current = flags;
   const [loading, setLoading] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [sending, setSending] = useState(false);
@@ -263,8 +321,15 @@ export function useOnlyFansMessages(
       byId.set(m.id, mergeMessage(byId.get(m.id), m));
     }
     for (const m of optimistic) if (!byId.has(m.id)) byId.set(m.id, m);
+
+    // Pin/like overrides land last, over whichever source won — see MessageFlags.
+    for (const [id, flag] of Object.entries(flags)) {
+      const existing = byId.get(id);
+      if (existing) byId.set(id, { ...existing, ...flag });
+    }
+
     return [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  }, [history, live, optimistic]);
+  }, [history, live, optimistic, flags]);
 
   const hasMore = cursor !== null;
 
@@ -324,6 +389,7 @@ export function useOnlyFansMessages(
           method: 'POST',
           body: JSON.stringify({
             text,
+            replyToMessageId: input.replyToMessageId,
             mediaIds,
             previewIds: input.previewIds ?? [],
             price: input.price ?? 0,
@@ -348,8 +414,58 @@ export function useOnlyFansMessages(
     [chatId, authFetch, sending],
   );
 
+  /**
+   * Pin/unpin or like/unlike a message.
+   *
+   * Optimistic and **reverted on failure**, which is the opposite trade to a
+   * failed send: there is no draft to hand back and nothing the operator must
+   * re-type, so the honest thing is to put the flag back where the provider says
+   * it is. The mutation reports its own outcome by returning false; the caller
+   * toasts, because unlike a send the result is a single icon that is easy to
+   * miss snapping back.
+   */
+  const setFlag = useCallback(
+    async (messageId: string, flag: 'pinned' | 'liked', value: boolean) => {
+      const key = flag === 'pinned' ? 'isPinned' : 'isLiked';
+      // Read through a ref so this callback stays stable across every flag
+      // change — it is handed to every bubble in the thread.
+      const previous = flagsRef.current[messageId]?.[key];
+
+      setFlags((prev) => ({ ...prev, [messageId]: { ...prev[messageId], [key]: value } }));
+
+      try {
+        await authFetch(`/api/onlyfans/chats/${chatId}/messages/${messageId}/${flag === 'pinned' ? 'pin' : 'like'}`, {
+          method: value ? 'POST' : 'DELETE',
+        });
+        return true;
+      } catch {
+        setFlags((prev) => {
+          const next = { ...prev, [messageId]: { ...prev[messageId], [key]: previous } };
+          // An override that reverted to "no opinion" must be dropped, not kept
+          // as `undefined` — the merge spreads it over the real row and would
+          // blank a flag the provider actually reports.
+          if (previous === undefined) delete next[messageId][key];
+          return next;
+        });
+        return false;
+      }
+    },
+    [authFetch, chatId],
+  );
+
   /** Retry after a failed load, from the thread's own error state. */
   const reload = useCallback(() => setLocalReload((n) => n + 1), []);
 
-  return { messages, loading, loadingOlder, hasMore, sending, error, loadOlder, send, reload };
+  return {
+    messages,
+    loading,
+    loadingOlder,
+    hasMore,
+    sending,
+    error,
+    loadOlder,
+    send,
+    setFlag,
+    reload,
+  };
 }

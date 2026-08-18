@@ -17,6 +17,9 @@ import {
   type OFAttachmentType,
   type OFChat,
   type OFChatPage,
+  type OFFanProfile,
+  type OFFanSpend,
+  type OFFanSubscription,
   type OFMessage,
   type OFMessagePage,
   type OFStagedMedia,
@@ -150,6 +153,67 @@ function toCdnUrl(value: unknown): string | null {
   return typeof value === 'string' && CDN_URL_PATTERN.test(value) ? value : null;
 }
 
+/** Hosts already reported as rejected, so the warning below fires once each. */
+const warnedVideoSourceHosts = new Set<string>();
+
+/**
+ * The most recent rejected host, waiting to be collected.
+ *
+ * A rejected rendition means every video falls back to the source master, which
+ * is billed by the megabyte — worth telling a human about, not just a log. But
+ * *how* to tell them is not the adapter's business: this file may not touch
+ * Firestore or notifications, and normalisation runs in the middle of parsing a
+ * message page, which is no place for a write. So the fact is recorded here and
+ * `takeUnrecognisedVideoSourceHost` hands it to the service layer, which decides
+ * what to do with it.
+ */
+let unrecognisedVideoSourceHost: string | null = null;
+
+/**
+ * Collect the recorded host, clearing it. Returns null when there is nothing to
+ * report, which is the overwhelmingly common case: `warnedVideoSourceHosts`
+ * means at most one host is ever recorded per process.
+ */
+export function takeUnrecognisedVideoSourceHost(): string | null {
+  const host = unrecognisedVideoSourceHost;
+  unrecognisedVideoSourceHost = null;
+  return host;
+}
+
+/**
+ * A `videoSources` entry — the provider's transcoded 240p/720p renditions.
+ *
+ * These are the cheap way to play a video: the source master an operator's phone
+ * recorded is routinely 200MB+, and at ~3 credits per megabyte that is hundreds
+ * of credits a play. `openapi.yaml` shows the renditions under a placeholder
+ * host (`cdn.example.com`), so whether real ones satisfy `CDN_URL_PATTERN` is
+ * **unverified**. The pattern is not widened to find out — it is the guard that
+ * stops the download endpoint being aimed at an arbitrary host — so a rendition
+ * we cannot accept degrades to `full` and logs its host once, which is enough to
+ * tell whether the pattern needs a documented exception.
+ */
+function toVideoSourceUrl(value: unknown): string | null {
+  const url = toCdnUrl(value);
+  if (url || typeof value !== 'string' || !value.startsWith('http')) return url;
+
+  let host: string;
+  try {
+    host = new URL(value).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (!warnedVideoSourceHosts.has(host)) {
+    warnedVideoSourceHosts.add(host);
+    unrecognisedVideoSourceHost = host;
+    console.warn(
+      `[onlyfans] videoSources served from unrecognised host ${host} — falling back to the ` +
+        'full-resolution file, which is billed by the megabyte. If this host is legitimate, ' +
+        'add it to CDN_URL_PATTERN.',
+    );
+  }
+  return null;
+}
+
 /**
  * One entry of a message's `media[]`.
  *
@@ -176,6 +240,12 @@ export function normaliseAttachment(raw: Raw): OFAttachment | null {
 
   const duration = toNumber(raw.duration);
 
+  // `videoSources` is keyed by the rendition height as a string in the payload
+  // the docs show, but the schema block spells the same keys unquoted — read
+  // both rather than depending on which one the serialiser produced.
+  const sources: Raw = raw.videoSources ?? {};
+  const size = toNumber(files.full?.size);
+
   return {
     id,
     type,
@@ -184,7 +254,14 @@ export function normaliseAttachment(raw: Raw): OFAttachment | null {
     width: toDimension(files.full?.width ?? files.preview?.width),
     height: toDimension(files.full?.height ?? files.preview?.height),
     duration: duration > 0 ? duration : null,
-    urls: { full, preview, thumb: toCdnUrl(files.thumb?.url) },
+    sizeBytes: size > 0 ? size : null,
+    urls: {
+      full,
+      preview,
+      thumb: toCdnUrl(files.thumb?.url),
+      video240: toVideoSourceUrl(sources['240'] ?? sources[240]),
+      video720: toVideoSourceUrl(sources['720'] ?? sources[720]),
+    },
   };
 }
 
@@ -309,6 +386,75 @@ export function normaliseMessage(raw: Raw, chatId: string): OFMessage | null {
     isOpened: raw.isOpened === true,
     mediaCount: toNumber(raw.mediaCount) || attachments.length,
     attachments,
+    isPinned: raw.isPinned === true,
+    isLiked: raw.isLiked === true,
+    // Default true rather than false: the flag is absent on the `lastMessage`
+    // embedded in a chat row and on the send response, and a menu item that is
+    // disabled because a field was missing is indistinguishable from one the
+    // provider actually refused.
+    canBePinned: raw.canBePinned !== false,
+  };
+}
+
+/**
+ * The fan profile embedded in a chat row — the fan panel's whole data source.
+ *
+ * **`subscribedOnData`, not `subscribedByData`.** The two are mirror images (the
+ * fan's subscription to us vs ours to them) and both exist on the same object,
+ * but only `subscribedOnData` carries the spend sums, and it is the one
+ * `spentTotal` has always read. Getting it wrong is silently plausible, so the
+ * choice is made here once and nowhere else.
+ *
+ * Returns null when the provider sent no profile at all, so the panel can say
+ * "not available" rather than render a screen of confident zeros.
+ */
+function normaliseFanProfile(fanRaw: Raw): OFFanProfile | null {
+  const on: Raw | undefined = fanRaw.subscribedOnData;
+  const hasIdentity =
+    typeof fanRaw.joinDate === 'string' ||
+    typeof fanRaw.location === 'string' ||
+    typeof fanRaw.about === 'string';
+  if (!on && !hasIdentity) return null;
+
+  const subscription: OFFanSubscription | null = on
+    ? {
+        status: typeof on.status === 'string' && on.status ? on.status : null,
+        // `subscribedOnExpiredNow` is the provider's own "has it lapsed" flag;
+        // absent, an unexpired `expiredAt` is the next best evidence.
+        isActive:
+          fanRaw.subscribedOnExpiredNow === true
+            ? false
+            : fanRaw.subscribedOn === true ||
+              (toIso(on.expiredAt) !== null && Date.parse(on.expiredAt) > Date.now()),
+        duration: typeof on.duration === 'string' && on.duration ? on.duration : null,
+        subscribedAt: toIso(on.subscribeAt),
+        expiresAt: toIso(on.expiredAt),
+        renewedAt: toIso(on.renewedAt),
+      }
+    : null;
+
+  const spend: OFFanSpend | null = on
+    ? {
+        // The provider's own total, never a sum of the parts below: the parts
+        // are not documented as exhaustive, and a computed total that disagreed
+        // with OnlyFans would be worse than no total.
+        total: toMoney(on.totalSumm),
+        tips: toMoney(on.tipsSumm),
+        messages: toMoney(on.messagesSumm),
+        posts: toMoney(on.postsSumm),
+        streams: toMoney(on.streamsSumm),
+        subscriptions: toMoney(on.subscribesSumm),
+      }
+    : null;
+
+  return {
+    about: htmlToText(fanRaw.about),
+    location: typeof fanRaw.location === 'string' && fanRaw.location ? fanRaw.location : null,
+    joinDate: toIso(fanRaw.joinDate),
+    isVerified: fanRaw.isVerified === true,
+    subscribePrice: toMoney(fanRaw.subscribePrice),
+    subscription,
+    spend,
   };
 }
 
@@ -335,6 +481,7 @@ function normaliseChat(raw: Raw): OFChat | null {
     spentTotal: toNumber(fanRaw.subscribedOnData?.totalSumm),
     isPinned: raw.isPinned === true,
     canSendMessage: raw.canSendMessage !== false,
+    profile: normaliseFanProfile(fanRaw),
   };
 }
 
@@ -494,6 +641,68 @@ export class OnlyFansApiClient implements IOnlyFansClient {
       `/api/${encodeURIComponent(accountId)}/chats/${encodeURIComponent(chatId)}/mark-as-read`,
       { method: 'POST' },
     );
+  }
+
+  // ─── Per-message actions ──────────────────────────────────────────
+
+  /**
+   * Pin/unpin and like/unlike are the provider's **entire** per-message surface
+   * (`/messages/{id}` itself is GET-only) — there is no unsend and no edit.
+   *
+   * Each is a different verb on a different path rather than one endpoint with a
+   * flag, so the boolean is resolved here and callers above the seam never learn
+   * that `unpin` is a DELETE.
+   */
+  setMessagePinned(
+    accountId: string,
+    chatId: string,
+    messageId: string,
+    pinned: boolean,
+  ): Promise<void> {
+    return this.messageAction(accountId, chatId, messageId, pinned ? 'pin' : 'unpin');
+  }
+
+  setMessageLiked(
+    accountId: string,
+    chatId: string,
+    messageId: string,
+    liked: boolean,
+  ): Promise<void> {
+    return this.messageAction(accountId, chatId, messageId, liked ? 'like' : 'unlike');
+  }
+
+  private async messageAction(
+    accountId: string,
+    chatId: string,
+    messageId: string,
+    action: 'pin' | 'unpin' | 'like' | 'unlike',
+  ): Promise<void> {
+    await this.request(
+      `/api/${encodeURIComponent(accountId)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(
+        messageId,
+      )}/${action}`,
+      // The undo half of each pair is a DELETE on its own path — `unpin` is not
+      // a DELETE on `pin`.
+      { method: action === 'unpin' || action === 'unlike' ? 'DELETE' : 'POST' },
+    );
+  }
+
+  // ─── Fans ─────────────────────────────────────────────────────────
+
+  /**
+   * The creator's private note on a fan.
+   *
+   * Read-only here on purpose: writing one is a real-world action on a creator's
+   * account and belongs behind the audit log Phase 9 builds, not behind a
+   * textarea in a read-only panel.
+   */
+  async getFanNotes(accountId: string, fanId: string): Promise<string> {
+    const body = await this.request<Envelope<Raw>>(
+      `/api/${encodeURIComponent(accountId)}/fans/${encodeURIComponent(fanId)}/notes`,
+    );
+    // Notes are typed as a plain string but arrive from a rich-text field on
+    // OnlyFans, so they get the same HTML strip every other body does.
+    return htmlToText(body.data?.notes ?? '');
   }
 
   // ─── Vault ────────────────────────────────────────────────────────
@@ -670,7 +879,11 @@ export class OnlyFansApiClient implements IOnlyFansClient {
       throw new OnlyFansApiError(`Unexpected media redirect host ${host}`, 502);
     }
 
-    return { url: location, ttlMs: RESOLVED_MEDIA_TTL_MS };
+    // The host *is* the billing answer, for free: the provider's own docs say a
+    // cache hit redirects to `cdn.fansapi.com` while everything else goes to
+    // `dl.fansapi.com`, "which streams it through the account proxy and reports
+    // billing back to the API". Nothing above this needs to know the hostnames.
+    return { url: location, ttlMs: RESOLVED_MEDIA_TTL_MS, billed: host === 'dl.fansapi.com' };
   }
 
   // ─── Webhooks ─────────────────────────────────────────────────────
