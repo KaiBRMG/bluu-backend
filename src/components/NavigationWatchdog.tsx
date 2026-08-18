@@ -30,7 +30,7 @@ import * as Sentry from '@sentry/nextjs';
  *      update racing an expensive transition render is what interrupts it.
  *      Both still outstanding — see CLAUDE.md.
  *
- * ── Why this exists anyway ──────────────────────────────────────────────────
+ * ── Why this exists anyway ──────────────────────────────────────────────────────
  * Every one of those fixes is a hypothesis about the root cause. This is not:
  * whatever the reason a transition fails to commit, a hard navigation always
  * works, because it discards the entire client router state. Keep it even if
@@ -38,7 +38,7 @@ import * as Sentry from '@sentry/nextjs';
  * *already* stuck, and the population here (long shifts, an Electron renderer
  * that never reloads on its own) has no other way out but quitting the app.
  *
- * ── Deliberate divergence from `DeploymentRefresher` ────────────────────────
+ * ── Deliberate divergence from `DeploymentRefresher` ────────────────────────────
  * That component refuses to reload outside `clocked-out`, because a reload for a
  * routine code update is not worth churning an open session. This one reloads
  * whenever it fires, mid-shift included. The difference is that the user is in a
