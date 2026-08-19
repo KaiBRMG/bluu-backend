@@ -16,7 +16,13 @@ import { redirect } from 'next/navigation';
  *  • `?mode=revert` — the same round-trip pointing the other way, for a user
  *    migrated by mistake. Treated identically here; only the domain the server
  *    accepts differs.
+ *  • `?mode=correct` — the round-trip pointing sideways, for a user who migrated
+ *    onto the wrong *personal* account. The forced re-consent matters most here:
+ *    the browser is already signed into the wrong Google account, and a silent
+ *    reuse of that session would hand back the very address we are replacing.
  */
+const RE_CONSENT_MODES = new Set(['migrate', 'revert', 'correct']);
+
 export default async function GoogleAuthPage({
   searchParams,
 }: {
@@ -47,8 +53,7 @@ export default async function GoogleAuthPage({
     response_type: 'code',
     scope: 'openid email profile',
     access_type: 'offline',
-    prompt:
-      mode === 'migrate' || mode === 'revert' ? 'select_account consent' : 'select_account',
+    prompt: RE_CONSENT_MODES.has(mode ?? '') ? 'select_account consent' : 'select_account',
     // No `hd` — see /api/auth/google-url. Access is decided by our allowlist.
   });
 

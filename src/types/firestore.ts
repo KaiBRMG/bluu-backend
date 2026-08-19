@@ -56,7 +56,14 @@ export interface UserDocument {
    * which the reversal deletes.
    */
   emailRevertedAt?: Timestamp;
-  /** The company address they migrated away from. Audit only. */
+  /**
+   * Set when an already-migrated user was moved from one personal address to
+   * another (they migrated signed into the wrong Google account). Coexists with
+   * `emailMigratedAt`, which a correction deliberately leaves untouched — they
+   * came off the company domain then, not now.
+   */
+  emailCorrectedAt?: Timestamp;
+  /** The previous address, replaced on each move. Audit only. */
   previousWorkEmail?: string | null;
   isActive: boolean;
   isArchived?: boolean;

@@ -26,6 +26,8 @@
  * Suggested order: one or two volunteers by uid → a single group → `allUsers`.
  */
 
+import { normalizeEmail } from '@/lib/authEmail';
+
 export interface EmailMigrationConfig {
   /** Master switch. `false` → nobody is prompted, whatever else is set. */
   enabled: boolean;
@@ -86,6 +88,108 @@ export const EMAIL_MIGRATION_REVERSAL: EmailReversalConfig = {
     'qKiuhTreQDU6GAw8h5UuIr50eNp1',
   ],
 };
+
+/**
+ * ── The correction cohort (redo) ───────────────────────────────────────────
+ *
+ * The third direction: a user who completed the migration but signed in with the
+ * **wrong personal account** (a second Gmail, a typo'd chooser click), and needs
+ * to move from that address onto the right one. Personal → personal.
+ *
+ * ▸ **Why it cannot reuse the forward gate.** `shouldPromptEmailMigration` is
+ *   self-clearing because it tests for the company domain, and this user no
+ *   longer holds one. Re-arming them there would match nothing. The correction
+ *   gate therefore pins the *exact address to be replaced* per uid, and that
+ *   pinned address is what makes it self-clearing: the moment `workEmail` is
+ *   anything else, the card is gone and cannot come back.
+ *
+ * ▸ **uid + wrong address, deliberately.** No groups, no `allUsers`, and no
+ *   "prompt whoever asks". Listing the address the user is currently stuck on is
+ *   what turns this into a genuinely once-off flow rather than a standing licence
+ *   for that uid to re-point their login at will — the server re-checks it, so a
+ *   corrected user's second attempt is a 403, not a second change.
+ *
+ * ▸ **We do not name the intended address.** Ownership is proven by OAuth, same
+ *   as the other two directions; pinning the destination as well would mean a
+ *   typo in this file locks the user out of finishing. The only rule enforced on
+ *   the destination is that it is not a company address (that is a migration, not
+ *   a correction) and not the address they already hold.
+ *
+ * ▸ **Mutually exclusive with the other two gates**, same as reversal: a uid
+ *   listed for reversal is never offered a correction, and a correction user
+ *   holds no company address so cannot match the forward gate.
+ */
+export interface EmailCorrectionEntry {
+  /** The user being corrected. */
+  uid: string;
+  /**
+   * The address they migrated onto **by mistake**. The prompt shows only while
+   * `workEmail` still matches this (normalised), and the server refuses the
+   * request once it does not — that pairing is the once-off guarantee.
+   */
+  wrongEmail: string;
+}
+
+export interface EmailCorrectionConfig {
+  /** Master switch for corrections only. `false` → nobody is corrected. */
+  enabled: boolean;
+  /** The individual users moving from one personal address to another. */
+  users: EmailCorrectionEntry[];
+}
+
+export const EMAIL_MIGRATION_CORRECTION: EmailCorrectionConfig = {
+  enabled: true,
+  users: [
+    // Completed the migration signed into the wrong personal Google account.
+    // TODO(arm): fill in the address this uid is currently stuck on, exactly as
+    // it appears on their `users` doc `workEmail`. Left blank = disarmed, so
+    // this entry prompts nobody until it is filled in (same one-line-commit
+    // rollout discipline as the cohorts above).
+    { uid: 'CsyRaKMXhiOAQCEVsOENBcxfDud2', wrongEmail: 'jenellemonterde14@gmail.com' },
+  ],
+};
+
+/**
+ * Cohort membership **and** the still-to-do test in one, because for corrections
+ * the two are inseparable: the entry is only meaningful while the user still
+ * holds the address it names. This is what the API route checks before honouring
+ * a `mode: 'correct'` call — it is handed the *server's* copy of `workEmail`, not
+ * the client's claim.
+ *
+ * Returns the entry (truthy) or `null`.
+ */
+export function getEmailCorrectionEntry(
+  uid: string | null | undefined,
+  workEmail: string | null | undefined,
+): EmailCorrectionEntry | null {
+  if (!EMAIL_MIGRATION_CORRECTION.enabled) return null;
+  if (!uid || !workEmail) return null;
+  if (isEmailReversalCohort(uid)) return null;
+
+  const entry = EMAIL_MIGRATION_CORRECTION.users.find((u) => u.uid === uid);
+  if (!entry) return null;
+
+  // An unfilled entry is disarmed, never a wildcard. (`normalizeEmail('')` is
+  // '' and would not match a real address anyway — this is the explicit form,
+  // so the intent does not rest on that coincidence.)
+  const wrongKey = normalizeEmail(entry.wrongEmail);
+  if (!wrongKey) return null;
+
+  // Still on the wrong address? Compare on the normalised key — the mistaken
+  // address is typed by hand here, and `j.doe@gmail.com` must match `jdoe@…`.
+  return normalizeEmail(workEmail) === wrongKey ? entry : null;
+}
+
+/**
+ * Whether this user should see the *correction* card — "sign in with the right
+ * personal account". Same self-clearing shape as the other two gates.
+ */
+export function shouldPromptEmailCorrection(user: {
+  uid?: string;
+  workEmail?: string;
+} | null | undefined): boolean {
+  return !!getEmailCorrectionEntry(user?.uid, user?.workEmail);
+}
 
 /**
  * Whether this user should see the migration card.

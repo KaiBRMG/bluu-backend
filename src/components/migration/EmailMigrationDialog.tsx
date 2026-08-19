@@ -8,6 +8,7 @@ import { useTimeTrackingContext } from '@/contexts/TimeTrackingContext';
 import {
   shouldPromptEmailMigration,
   shouldPromptEmailReversal,
+  shouldPromptEmailCorrection,
 } from '@/lib/emailMigrationConfig';
 import { Button } from '@/components/ui/button';
 import {
@@ -52,18 +53,21 @@ import {
  * unmounted last would tear out the other's handler. Keep them mutually
  * exclusive.
  *
- * ── It also renders the reversal ────────────────────────────────────────────
+ * ── It also renders the reversal and the correction ─────────────────────────
  * A user migrated by mistake gets the same card pointing the other way ("sign
- * back in with your @bluurock.com account"). That is **one component with a
- * direction**, not a second component, and deliberately so: both would listen
- * on the same `oauth-callback` channel, and `removeOAuthListeners` is
- * `removeAllListeners` — two mounted copies would tear out each other's
- * handler, exactly the hazard described above for `Login`. The two gates are
- * mutually exclusive by construction (`shouldPromptEmailMigration` excludes the
- * reversal cohort), and `direction` picks whichever matched.
+ * back in with your @bluurock.com account"); a user who migrated onto the wrong
+ * *personal* account gets it pointing sideways ("sign in with the right one").
+ * That is **one component with a direction**, not three components, and
+ * deliberately so: each would listen on the same `oauth-callback` channel, and
+ * `removeOAuthListeners` is `removeAllListeners` — two mounted copies would tear
+ * out each other's handler, exactly the hazard described above for `Login`. The
+ * three gates are mutually exclusive by construction (the reversal cohort is
+ * excluded from both of the others; a correction user holds no company address
+ * so cannot match the forward gate), and `direction` picks whichever matched.
  */
 
 type Phase = 'intro' | 'waiting' | 'saving' | 'done' | 'error';
+type Direction = 'migrate' | 'revert' | 'correct';
 
 export default function EmailMigrationDialog() {
   const { user } = useAuth();
@@ -75,12 +79,13 @@ export default function EmailMigrationDialog() {
   const [error, setError] = useState<string | null>(null);
 
   const isReversal = shouldPromptEmailReversal(userData);
-  const shouldPrompt = isReversal || shouldPromptEmailMigration(userData);
+  const isCorrection = !isReversal && shouldPromptEmailCorrection(userData);
+  const shouldPrompt = isReversal || isCorrection || shouldPromptEmailMigration(userData);
 
   // Latched at arm time: once the round-trip is running, the gate that started
   // it goes false the moment the write lands, and the 'done' copy must still
   // say which direction just happened.
-  const [direction, setDirection] = useState<'migrate' | 'revert'>('migrate');
+  const [direction, setDirection] = useState<Direction>('migrate');
 
   // Re-checked for the whole session (not latched once at boot): arm the
   // instant the user is clocked-out AND the cohort gate says to prompt them.
@@ -99,9 +104,9 @@ export default function EmailMigrationDialog() {
     if (!userData) return;
     if (!shouldPrompt) return;
     if (displayState !== 'clocked-out') return;
-    setDirection(isReversal ? 'revert' : 'migrate');
+    setDirection(isReversal ? 'revert' : isCorrection ? 'correct' : 'migrate');
     setArmed(true);
-  }, [armed, isHydrating, userData, displayState, shouldPrompt, isReversal]);
+  }, [armed, isHydrating, userData, displayState, shouldPrompt, isReversal, isCorrection]);
 
   const handleCode = useCallback(async (code: string) => {
     setPhase('saving');
@@ -115,7 +120,9 @@ export default function EmailMigrationDialog() {
           Authorization: `Bearer ${idToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ code, mode: direction === 'revert' ? 'revert' : undefined }),
+        // `migrate` is the default on the server, so it is sent as no mode at
+        // all — keeps the original request shape untouched.
+        body: JSON.stringify({ code, mode: direction === 'migrate' ? undefined : direction }),
       });
       const data = await res.json();
 
@@ -175,7 +182,9 @@ export default function EmailMigrationDialog() {
                 <Mail className="size-5" />
                 {direction === 'revert'
                   ? 'Switch back to your company email'
-                  : 'Switch to your personal email'}
+                  : direction === 'correct'
+                    ? 'Switch to the right personal email'
+                    : 'Switch to your personal email'}
               </>
             )}
           </AlertDialogTitle>
@@ -184,9 +193,9 @@ export default function EmailMigrationDialog() {
               <>
                 Bluu Backend now uses <strong className="text-foreground">{userData?.workEmail}</strong>.
                 Use that account the next time you sign in — your{' '}
-                {direction === 'revert' ? 'personal address' : (
-                  <span className="whitespace-nowrap">@bluurock.com</span>
-                )}{' '}
+                {direction === 'revert' ? 'personal address'
+                  : direction === 'correct' ? 'previous address'
+                  : <span className="whitespace-nowrap">@bluurock.com</span>}{' '}
                 will no longer work.
               </>
             ) : direction === 'revert' ? (
@@ -194,6 +203,16 @@ export default function EmailMigrationDialog() {
                 Your login was switched to a personal Google account by mistake. Sign in with
                 your <span className="whitespace-nowrap">@bluurock.com</span> account and
                 we&apos;ll switch it back.
+                <span className="mt-2 block">
+                  You&apos;ll stay signed in — nothing else about your account changes.
+                </span>
+              </>
+            ) : direction === 'correct' ? (
+              <>
+                Your login is set to{' '}
+                <strong className="text-foreground">{userData?.workEmail}</strong>, which
+                isn&apos;t the account you meant to use. Sign in with the correct personal
+                Google account and we&apos;ll switch it over.
                 <span className="mt-2 block">
                   You&apos;ll stay signed in — nothing else about your account changes.
                 </span>

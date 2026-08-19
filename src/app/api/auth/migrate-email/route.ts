@@ -10,7 +10,7 @@ import {
 import { invalidateAdminUsersCache } from '@/app/api/admin/users/route';
 import { invalidateDisplayNamesCache } from '@/app/api/users/display-names/route';
 import { normalizeEmail, isLegacyWorkEmail } from '@/lib/authEmail';
-import { isEmailReversalCohort } from '@/lib/emailMigrationConfig';
+import { isEmailReversalCohort, getEmailCorrectionEntry } from '@/lib/emailMigrationConfig';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -53,6 +53,20 @@ const oauth2Client = new google.auth.OAuth2(
  *   • Ownership is still proven by OAuth, so a reverting user can only land on a
  *     company address they can actually sign into, and the collision checks
  *     below are unchanged — a company address held by someone else is refused.
+ *
+ * ── `mode: 'correct'` — personal → a *different* personal ────────────────────
+ * For a user who migrated while signed into the wrong personal Google account.
+ * Same machinery and same write order again; what differs is the authority:
+ *   • `EMAIL_MIGRATION_CORRECTION` must list the caller **paired with the exact
+ *     address they currently hold**, and that pairing is checked against the
+ *     *server's* copy of `workEmail`, never the client's claim. So the flow can
+ *     fire once and only once: the instant it lands, `workEmail` no longer
+ *     matches the entry and a second request is a 403. Without that pairing,
+ *     listing a uid would hand them a standing licence to re-point their login.
+ *   • The destination is not pinned — ownership is proven by OAuth, and pinning
+ *     it would mean a typo in the config file strands the user. The only rule on
+ *     it is "not a company address" (that would be un-migrating, i.e. a revert)
+ *     and "not the one you already have".
  */
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
@@ -62,6 +76,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     }
 
     const isRevert = mode === 'revert';
+    const isCorrection = mode === 'correct';
     if (isRevert && !isEmailReversalCohort(token.uid)) {
       return NextResponse.json({ error: 'Not permitted' }, { status: 403 });
     }
@@ -69,6 +84,14 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     const currentUser = await getUserById(token.uid);
     if (!currentUser) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    // A correction is authorised by uid *and* by the address the user is
+    // currently on, so it must be checked after the doc read. This is what makes
+    // the flow once-off: after the write, `workEmail` no longer matches the
+    // config entry and the same request 403s.
+    if (isCorrection && !getEmailCorrectionEntry(token.uid, currentUser.workEmail)) {
+      return NextResponse.json({ error: 'Not permitted' }, { status: 403 });
     }
 
     // ─── Who did they just sign in as? ──────────────────────────────────
@@ -176,12 +199,20 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
           // it — leaving it set would report this user as migrated on every
           // surface that reads it, and would misreport progress if the fleet is
           // ever audited by that field.
+          //
+          // A correction is the opposite case: the user *is* migrated and stays
+          // migrated, they just landed on the wrong personal account. So
+          // `emailMigratedAt` is left exactly as it was — overwriting it would
+          // falsify when they actually came off the company domain — and the
+          // redo is recorded separately.
           ...(isRevert
             ? {
                 emailMigratedAt: FieldValue.delete(),
                 emailRevertedAt: FieldValue.serverTimestamp(),
               }
-            : { emailMigratedAt: FieldValue.serverTimestamp() }),
+            : isCorrection
+              ? { emailCorrectedAt: FieldValue.serverTimestamp() }
+              : { emailMigratedAt: FieldValue.serverTimestamp() }),
         });
       });
     } catch (error: unknown) {
@@ -210,7 +241,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       );
     });
 
-    console.log(`[migrate-email] ${token.uid} ${isRevert ? 'reverted' : 'migrated'} to ${key}`);
+    const action = isRevert ? 'reverted' : isCorrection ? 'corrected' : 'migrated';
+    console.log(`[migrate-email] ${token.uid} ${action} to ${key}`);
     return NextResponse.json({ success: true, email });
   } catch (error: unknown) {
     console.error('[migrate-email] error:', error);
