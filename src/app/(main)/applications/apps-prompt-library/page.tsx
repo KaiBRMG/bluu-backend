@@ -91,8 +91,8 @@ export default function PromptLibraryPage() {
         )}
 
         <section aria-labelledby="models-heading" className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1">
-            <h2 id="models-heading" className="text-sm font-semibold text-zinc-300">
+          <div className="flex flex-col gap-1.5">
+            <h2 id="models-heading" className="text-lg font-semibold">
               Model Types
             </h2>
             <p className="text-sm text-zinc-400">
@@ -141,7 +141,7 @@ export default function PromptLibraryPage() {
 
         {!loading && live.length > 0 && (
           <section aria-labelledby="recent-heading" className="flex flex-col gap-3">
-            <h2 id="recent-heading" className="text-sm font-semibold text-zinc-300">
+            <h2 id="recent-heading" className="text-lg font-semibold">
               Recently updated
             </h2>
             <PromptKanban prompts={live} onOpen={setOpenPromptId} />
