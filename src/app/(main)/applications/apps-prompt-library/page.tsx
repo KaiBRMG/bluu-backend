@@ -7,16 +7,17 @@ import AppLayout from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePromptLibrary } from '@/contexts/PromptLibraryContext';
-import { LLM_LIST, type LlmType, type PromptDocument } from '@/types/promptLibrary';
+import { type PromptModel } from '@/types/promptLibrary';
 import { LlmMark } from './_components/LlmMark';
 import { PromptSearch } from './_components/PromptSearch';
 import { NewPromptDialog } from './_components/NewPromptDialog';
-import { pluralise, relativeTime } from './_lib/format';
-
-const RECENT_COUNT = 6;
+import { AddModelDialog } from './_components/AddModelDialog';
+import { PromptDetailDialog } from './_components/PromptDetailDialog';
+import { PromptKanban } from './_components/PromptKanban';
+import { pluralise } from './_lib/format';
 
 function LlmTile({ llm, count, share }: {
-  llm: (typeof LLM_LIST)[number];
+  llm: PromptModel;
   count: number;
   share: number;
 }) {
@@ -24,12 +25,12 @@ function LlmTile({ llm, count, share }: {
   return (
     <Link
       href={`/applications/apps-prompt-library/${llm.id}`}
-      className="group flex flex-col gap-4 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4 transition-all hover:border-white/[0.12] hover:bg-white/[0.055] hover:brightness-110 active:scale-[0.98]"
+      className="group flex w-40 shrink-0 flex-col gap-4 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4 transition-all hover:border-white/[0.12] hover:bg-white/[0.055] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6] active:scale-[0.98]"
     >
       <LlmMark llm={llm.id} size={40} className={empty ? 'opacity-45' : undefined} />
 
       <div className="flex flex-col gap-2">
-        <p className="text-sm font-bold text-white">{llm.name}</p>
+        <p className="truncate text-sm font-bold text-white">{llm.name}</p>
         <p className="text-xs text-zinc-400">
           {empty ? 'No prompts yet' : <span className="tabular-nums">{pluralise(count, 'prompt')}</span>}
         </p>
@@ -52,61 +53,31 @@ function LlmTile({ llm, count, share }: {
   );
 }
 
-function RecentRow({ prompt }: { prompt: PromptDocument }) {
-  return (
-    <li>
-      <Link
-        href={`/applications/apps-prompt-library/${prompt.llmType}/${prompt.id}`}
-        className="flex items-center gap-3 rounded-lg bg-white/[0.04] px-3 py-2 transition-all hover:bg-white/[0.055] hover:brightness-110 active:scale-[0.98]"
-      >
-        <LlmMark llm={prompt.llmType} size={16} className="shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-zinc-200">
-          {prompt.title}
-        </span>
-        <span className="hidden shrink-0 text-xs text-zinc-400 sm:inline">{prompt.category}</span>
-        <span className="shrink-0 text-[11px] tabular-nums text-zinc-400">
-          v{prompt.version} · {relativeTime(prompt.lastUpdatedTime)}
-        </span>
-      </Link>
-    </li>
-  );
-}
-
 export default function PromptLibraryPage() {
-  const { prompts, loading, error } = usePromptLibrary();
+  const { prompts, models, loading, error } = usePromptLibrary();
   const [creating, setCreating] = useState(false);
+  const [addingModel, setAddingModel] = useState(false);
+  const [openPromptId, setOpenPromptId] = useState<string | null>(null);
 
   const live = useMemo(() => prompts.filter(p => !p.isArchived), [prompts]);
 
+  // A prompt targeting three models counts once under each of them.
   const counts = useMemo(() => {
-    const map = {} as Record<LlmType, number>;
-    for (const llm of LLM_LIST) map[llm.id] = 0;
-    for (const p of live) map[p.llmType] = (map[p.llmType] ?? 0) + 1;
+    const map: Record<string, number> = {};
+    for (const m of models) map[m.id] = 0;
+    for (const p of live) {
+      for (const id of p.llmTypes) map[id] = (map[id] ?? 0) + 1;
+    }
     return map;
-  }, [live]);
+  }, [live, models]);
 
-  const busiest = Math.max(1, ...LLM_LIST.map(l => counts[l.id]));
-  const recent = live.slice(0, RECENT_COUNT);
+  const busiest = Math.max(1, ...models.map(l => counts[l.id] ?? 0));
 
   return (
     <AppLayout>
       <div className="flex max-w-5xl flex-col gap-8">
         <header className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Prompt Library</h1>
-            <p className="mt-1 text-sm text-zinc-400">
-              {loading ? (
-                'Loading…'
-              ) : (
-                <>
-                  <span className="tabular-nums">{live.length}</span>
-                  {live.length === 1 ? ' prompt' : ' prompts'} across{' '}
-                  <span className="tabular-nums">{LLM_LIST.length}</span> models, each with its own
-                  version history.
-                </>
-              )}
-            </p>
-          </div>
+          <h1 className="text-2xl font-bold tracking-tight">Prompt Library</h1>
           <Button onClick={() => setCreating(true)}>
             <Plus className="size-4" aria-hidden />
             New prompt
@@ -120,25 +91,43 @@ export default function PromptLibraryPage() {
         )}
 
         <section aria-labelledby="models-heading" className="flex flex-col gap-3">
-          <h2 id="models-heading" className="sr-only">
-            Models
-          </h2>
+          <div className="flex flex-col gap-1">
+            <h2 id="models-heading" className="text-sm font-semibold text-zinc-300">
+              Model Types
+            </h2>
+            <p className="text-sm text-zinc-400">
+              Prompts are organized by Model types. Add one{' '}
+              <button
+                type="button"
+                onClick={() => setAddingModel(true)}
+                className="rounded-sm text-zinc-200 underline underline-offset-2 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]"
+              >
+                here
+              </button>
+              .
+            </p>
+          </div>
+
           {loading ? (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              {LLM_LIST.map(llm => (
-                <Skeleton key={llm.id} className="h-[9.5rem] rounded-xl" />
+            <div className="flex gap-3">
+              {[0, 1, 2, 3, 4].map(i => (
+                <Skeleton key={i} className="h-[9.5rem] w-40 shrink-0 rounded-xl" />
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              {LLM_LIST.map(llm => (
-                <LlmTile
-                  key={llm.id}
-                  llm={llm}
-                  count={counts[llm.id]}
-                  share={counts[llm.id] / busiest}
-                />
-              ))}
+            // A row rather than a grid: the list grows every time someone coins
+            // a model, and it scrolls on its own so the page body never does.
+            <div className="-mx-1 overflow-x-auto px-1 pb-2">
+              <div className="flex w-max gap-3">
+                {models.map(llm => (
+                  <LlmTile
+                    key={llm.id}
+                    llm={llm}
+                    count={counts[llm.id] ?? 0}
+                    share={(counts[llm.id] ?? 0) / busiest}
+                  />
+                ))}
+              </div>
             </div>
           )}
         </section>
@@ -147,19 +136,15 @@ export default function PromptLibraryPage() {
           <h2 id="search-heading" className="sr-only">
             Search
           </h2>
-          <PromptSearch />
+          <PromptSearch onOpen={setOpenPromptId} />
         </section>
 
-        {!loading && recent.length > 0 && (
+        {!loading && live.length > 0 && (
           <section aria-labelledby="recent-heading" className="flex flex-col gap-3">
             <h2 id="recent-heading" className="text-sm font-semibold text-zinc-300">
               Recently updated
             </h2>
-            <ul className="flex flex-col gap-1.5">
-              {recent.map(p => (
-                <RecentRow key={p.id} prompt={p} />
-              ))}
-            </ul>
+            <PromptKanban prompts={live} onOpen={setOpenPromptId} />
           </section>
         )}
 
@@ -170,7 +155,12 @@ export default function PromptLibraryPage() {
         )}
       </div>
 
-      <NewPromptDialog open={creating} onOpenChange={setCreating} />
+      <NewPromptDialog open={creating} onOpenChange={setCreating} onCreated={setOpenPromptId} />
+      <AddModelDialog open={addingModel} onOpenChange={setAddingModel} />
+      <PromptDetailDialog
+        promptId={openPromptId}
+        onOpenChange={open => !open && setOpenPromptId(null)}
+      />
     </AppLayout>
   );
 }

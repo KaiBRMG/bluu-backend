@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { checkPageAccess, handleApiError } from '@/lib/middleware/apiHelpers';
 import { createPrompt, getPromptLibrary, MAX_TEXT_LENGTH } from '@/lib/services/promptLibraryService';
-import { isLlmType } from '@/types/promptLibrary';
+import { isValidModelId, MAX_MODELS_PER_PROMPT } from '@/types/promptLibrary';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 export const PAGE_ID = 'apps-prompt-library';
@@ -49,8 +49,14 @@ export const POST = withAuth(async (req: NextRequest, token: DecodedIdToken) => 
         { status: 400 }
       );
     }
-    if (!isLlmType(body?.llmType)) {
-      return NextResponse.json({ error: 'Unknown LLM' }, { status: 400 });
+    // A prompt may target several models, but must target at least one.
+    if (
+      !Array.isArray(body?.llmTypes) ||
+      body.llmTypes.length === 0 ||
+      body.llmTypes.length > MAX_MODELS_PER_PROMPT ||
+      !body.llmTypes.every(isValidModelId)
+    ) {
+      return NextResponse.json({ error: 'Choose at least one model' }, { status: 400 });
     }
     if (typeof body?.category !== 'string' || !body.category.trim()) {
       return NextResponse.json({ error: 'A category is required' }, { status: 400 });

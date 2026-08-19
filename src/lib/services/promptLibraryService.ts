@@ -2,14 +2,18 @@ import 'server-only';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { summariseChange } from '@/lib/promptDiff';
+import { htmlToPlainText, sanitizePromptHtml } from '@/lib/promptHtml';
 import {
-  isLlmType,
   EMPTY_TAXONOMY,
+  isValidModelId,
+  MAX_EDIT_NOTE_LENGTH,
+  MAX_MODELS_PER_PROMPT,
   type ChangeStat,
   type LlmType,
   type PromptCreateInput,
   type PromptDocument,
   type PromptMetaInput,
+  type PromptModel,
   type PromptTaxonomy,
   type PromptVersion,
 } from '@/types/promptLibrary';
@@ -26,6 +30,7 @@ const MAX_LABEL_LENGTH = 48;
 const MAX_TAGS_PER_PROMPT = 20;
 const MAX_CATEGORIES = 200;
 const MAX_TAGS = 500;
+const MAX_MODELS = 100;
 
 export interface PromptLibrarySnapshot {
   prompts: PromptDocument[];
@@ -70,6 +75,19 @@ function dedupeLabels(values: unknown, max: number): string[] {
   return out;
 }
 
+/** Model ids, deduped and validated. Unknown-but-well-formed ids are kept —
+ *  the managed list can lose an entry without orphaning the prompts on it. */
+function cleanModelIds(values: unknown): LlmType[] {
+  if (!Array.isArray(values)) return [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    if (!isValidModelId(raw) || seen.has(raw)) continue;
+    seen.add(raw);
+    if (seen.size >= MAX_MODELS_PER_PROMPT) break;
+  }
+  return Array.from(seen);
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function readChange(d: any): ChangeStat | null {
   if (!d || typeof d !== 'object') return null;
@@ -84,21 +102,58 @@ function readChange(d: any): ChangeStat | null {
   };
 }
 
+function readModels(v: any): PromptModel[] {
+  if (!Array.isArray(v)) return [];
+  const seen = new Set<string>();
+  const out: PromptModel[] = [];
+  for (const raw of v) {
+    if (!raw || typeof raw !== 'object') continue;
+    const id = typeof raw.id === 'string' ? raw.id.toLowerCase() : '';
+    if (!isValidModelId(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      name: cleanLabel(raw.name) || id,
+      logo: null,
+      addedAt: Number(raw.addedAt) || 1,
+      builtin: false,
+    });
+    if (out.length >= MAX_MODELS) break;
+  }
+  return out;
+}
+
+/**
+ * Reads the model list off a head document.
+ *
+ * `llmTypes` is the current field. Documents written before multi-model support
+ * only have the singular `llmType`, so it is the fallback — no migration, no
+ * backfill, and a prompt written by an older client still reads correctly.
+ */
+function readLlmTypes(d: any): LlmType[] {
+  const many = cleanModelIds(d?.llmTypes);
+  if (many.length > 0) return many;
+  return isValidModelId(d?.llmType) ? [d.llmType] : [];
+}
+
 function mapPrompt(doc: FirebaseFirestore.QueryDocumentSnapshot): PromptDocument {
   const d = doc.data() ?? {};
   const created = typeof d.createdTime === 'string' ? d.createdTime : new Date(0).toISOString();
   const version = Number(d.version) || 1;
+  const llmTypes = readLlmTypes(d);
   return {
     id: doc.id,
-    llmType: isLlmType(d.llmType) ? d.llmType : 'chatgpt',
+    llmTypes: llmTypes.length > 0 ? llmTypes : ['chatgpt'],
     category: typeof d.category === 'string' ? d.category : '',
     title: typeof d.title === 'string' ? d.title : '',
     tags: dedupeLabels(d.tags, MAX_TAGS_PER_PROMPT),
     text: typeof d.text === 'string' ? d.text : '',
+    textHtml: sanitizePromptHtml(d.textHtml) || null,
     version,
     versionCount: Number(d.versionCount) || version,
     basedOn: typeof d.basedOn === 'number' ? d.basedOn : null,
     change: readChange(d.change),
+    editNote: clampText(d.editNote, MAX_EDIT_NOTE_LENGTH),
     isArchived: d.isArchived === true,
     createdTime: created,
     createdBy: typeof d.createdBy === 'string' ? d.createdBy : '',
@@ -112,13 +167,31 @@ function mapVersion(doc: FirebaseFirestore.QueryDocumentSnapshot): PromptVersion
   return {
     version: Number(d.version) || Number(doc.id) || 1,
     text: typeof d.text === 'string' ? d.text : '',
+    textHtml: sanitizePromptHtml(d.textHtml) || null,
     basedOn: typeof d.basedOn === 'number' ? d.basedOn : null,
     change: readChange(d.change),
+    editNote: clampText(d.editNote, MAX_EDIT_NOTE_LENGTH),
     createdTime: typeof d.createdTime === 'string' ? d.createdTime : new Date(0).toISOString(),
     createdBy: typeof d.createdBy === 'string' ? d.createdBy : '',
   };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
+
+/**
+ * Resolves a submitted body into the pair that gets stored.
+ *
+ * When rich markup is supplied the plain text is DERIVED from it rather than
+ * taken from the client, so `text` — which copy, search and diff all rely on —
+ * can never disagree with what is rendered.
+ */
+function resolveBody(rawText: unknown, rawHtml: unknown): { text: string; textHtml: string | null } {
+  const html = sanitizePromptHtml(rawHtml);
+  if (html) {
+    const derived = htmlToPlainText(html).slice(0, MAX_TEXT_LENGTH);
+    return { text: derived, textHtml: html };
+  }
+  return { text: clampText(rawText, MAX_TEXT_LENGTH), textHtml: null };
+}
 
 // ─── Reads ───────────────────────────────────────────────────────────────────
 
@@ -144,6 +217,7 @@ export async function getPromptLibrary(): Promise<PromptLibrarySnapshot> {
     ? {
         categories: dedupeLabels(t.categories, MAX_CATEGORIES),
         tags: dedupeLabels(t.tags, MAX_TAGS),
+        models: readModels(t.models),
       }
     : { ...EMPTY_TAXONOMY };
 
@@ -169,20 +243,22 @@ export async function createPrompt(
   uid: string
 ): Promise<PromptDocument> {
   const now = new Date().toISOString();
-  const llmType: LlmType = isLlmType(input.llmType) ? input.llmType : 'chatgpt';
-  const text = clampText(input.text, MAX_TEXT_LENGTH);
+  const llmTypes = cleanModelIds(input.llmTypes);
+  const { text, textHtml } = resolveBody(input.text, input.textHtml);
   const change: ChangeStat = { added: 0, removed: 0, ratio: 0, region: 'none', kind: 'initial' };
 
   const doc: Omit<PromptDocument, 'id'> = {
-    llmType,
+    llmTypes: llmTypes.length > 0 ? llmTypes : ['chatgpt'],
     category: cleanLabel(input.category),
     title: clampText(input.title, MAX_TITLE_LENGTH).trim(),
     tags: dedupeLabels(input.tags, MAX_TAGS_PER_PROMPT),
     text,
+    textHtml,
     version: 1,
     versionCount: 1,
     basedOn: null,
     change,
+    editNote: '',
     isArchived: false,
     createdTime: now,
     createdBy: uid,
@@ -192,12 +268,21 @@ export async function createPrompt(
 
   const ref = adminDb.collection(PROMPTS_COLLECTION).doc();
   const batch = adminDb.batch();
-  batch.set(ref, { ...doc, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+  batch.set(ref, {
+    ...doc,
+    // Still written singular so a renderer running an older bundle — which may
+    // be weeks old — keeps resolving this prompt's model (rule 9c).
+    llmType: doc.llmTypes[0],
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
   batch.set(ref.collection(VERSIONS_SUBCOLLECTION).doc('1'), {
     version: 1,
     text,
+    textHtml,
     basedOn: null,
     change,
+    editNote: '',
     createdTime: now,
     createdBy: uid,
   });
@@ -205,7 +290,7 @@ export async function createPrompt(
 
   // The new labels join the managed taxonomy so they stay offerable even if
   // this prompt is later archived or recategorised.
-  await mergeTaxonomy(doc.category ? [doc.category] : [], doc.tags);
+  await mergeTaxonomy(doc.category ? [doc.category] : [], doc.tags, []);
 
   invalidatePromptLibraryCache();
   return { id: ref.id, ...doc };
@@ -227,30 +312,38 @@ export interface AddVersionResult {
 export async function addPromptVersion(
   id: string,
   rawText: string,
+  rawHtml: string | null | undefined,
+  rawEditNote: unknown,
   basedOn: number,
   uid: string
 ): Promise<AddVersionResult | null | 'unchanged'> {
   const headRef = adminDb.collection(PROMPTS_COLLECTION).doc(id);
   const baseRef = headRef.collection(VERSIONS_SUBCOLLECTION).doc(String(basedOn));
-  const text = clampText(rawText, MAX_TEXT_LENGTH);
+  const { text, textHtml } = resolveBody(rawText, rawHtml);
+  const editNote = clampText(rawEditNote, MAX_EDIT_NOTE_LENGTH).trim();
 
   const result = await adminDb.runTransaction(async tx => {
     const [headSnap, baseSnap] = await tx.getAll(headRef, baseRef);
     if (!headSnap.exists || !baseSnap.exists) return null;
 
     const head = mapPrompt(headSnap as FirebaseFirestore.QueryDocumentSnapshot);
-    const baseText = mapVersion(baseSnap as FirebaseFirestore.QueryDocumentSnapshot).text;
-    if (baseText === text) return 'unchanged' as const;
+    const base = mapVersion(baseSnap as FirebaseFirestore.QueryDocumentSnapshot);
+    // Formatting alone is a real change, so the comparison covers both layers.
+    if (base.text === text && (base.textHtml ?? '') === (textHtml ?? '')) {
+      return 'unchanged' as const;
+    }
 
     const now = new Date().toISOString();
     const nextVersion = head.versionCount + 1;
-    const change = summariseChange(baseText, text);
+    const change = summariseChange(base.text, text);
 
     const version: PromptVersion = {
       version: nextVersion,
       text,
+      textHtml,
       basedOn,
       change,
+      editNote,
       createdTime: now,
       createdBy: uid,
     };
@@ -258,10 +351,12 @@ export async function addPromptVersion(
     tx.set(headRef.collection(VERSIONS_SUBCOLLECTION).doc(String(nextVersion)), version);
     tx.update(headRef, {
       text,
+      textHtml,
       version: nextVersion,
       versionCount: nextVersion,
       basedOn,
       change,
+      editNote,
       lastUpdatedTime: now,
       lastUpdatedBy: uid,
       updatedAt: FieldValue.serverTimestamp(),
@@ -271,10 +366,12 @@ export async function addPromptVersion(
       prompt: {
         ...head,
         text,
+        textHtml,
         version: nextVersion,
         versionCount: nextVersion,
         basedOn,
         change,
+        editNote,
         lastUpdatedTime: now,
         lastUpdatedBy: uid,
       },
@@ -286,8 +383,8 @@ export async function addPromptVersion(
   return result;
 }
 
-/** Title / category / tags / LLM / archive state. Does not cut a version — the
- *  version history is the history of the prompt TEXT. */
+/** Title / category / tags / models / archive state. Does not cut a version —
+ *  the version history is the history of the prompt TEXT. */
 export async function updatePromptMeta(
   id: string,
   input: PromptMetaInput,
@@ -300,9 +397,11 @@ export async function updatePromptMeta(
   const current = mapPrompt(snap as FirebaseFirestore.QueryDocumentSnapshot);
   const now = new Date().toISOString();
 
+  const nextModels = input.llmTypes !== undefined ? cleanModelIds(input.llmTypes) : current.llmTypes;
+
   const next: PromptDocument = {
     ...current,
-    llmType: isLlmType(input.llmType) ? input.llmType : current.llmType,
+    llmTypes: nextModels.length > 0 ? nextModels : current.llmTypes,
     category: input.category !== undefined ? cleanLabel(input.category) : current.category,
     title:
       input.title !== undefined
@@ -315,7 +414,8 @@ export async function updatePromptMeta(
   };
 
   await ref.update({
-    llmType: next.llmType,
+    llmTypes: next.llmTypes,
+    llmType: next.llmTypes[0],
     category: next.category,
     title: next.title,
     tags: next.tags,
@@ -325,7 +425,7 @@ export async function updatePromptMeta(
     updatedAt: FieldValue.serverTimestamp(),
   });
 
-  await mergeTaxonomy(next.category ? [next.category] : [], next.tags);
+  await mergeTaxonomy(next.category ? [next.category] : [], next.tags, []);
   invalidatePromptLibraryCache();
   return next;
 }
@@ -348,6 +448,16 @@ export async function deletePrompt(id: string): Promise<boolean> {
 
 // ─── Taxonomy ────────────────────────────────────────────────────────────────
 
+function readTaxonomyDoc(snap: FirebaseFirestore.DocumentSnapshot): PromptTaxonomy {
+  if (!snap.exists) return { ...EMPTY_TAXONOMY };
+  const d = snap.data() ?? {};
+  return {
+    categories: dedupeLabels(d.categories, MAX_CATEGORIES),
+    tags: dedupeLabels(d.tags, MAX_TAGS),
+    models: readModels(d.models),
+  };
+}
+
 /**
  * Adds labels to the managed lists, skipping the write entirely when every
  * label is already known — which is the common case, so coining a label costs a
@@ -355,25 +465,39 @@ export async function deletePrompt(id: string): Promise<boolean> {
  */
 export async function mergeTaxonomy(
   categories: string[],
-  tags: string[]
+  tags: string[],
+  models: { id: string; name: string }[] = []
 ): Promise<PromptTaxonomy> {
   const ref = adminDb.collection(META_COLLECTION).doc(TAXONOMY_DOC);
   const snap = await ref.get();
-  const current: PromptTaxonomy = snap.exists
-    ? {
-        categories: dedupeLabels(snap.data()?.categories, MAX_CATEGORIES),
-        tags: dedupeLabels(snap.data()?.tags, MAX_TAGS),
-      }
-    : { ...EMPTY_TAXONOMY };
+  const current = readTaxonomyDoc(snap);
+
+  const known = new Set(current.models.map(m => m.id));
+  const addedModels: PromptModel[] = [];
+  for (const m of models) {
+    const id = typeof m?.id === 'string' ? m.id.toLowerCase() : '';
+    if (!isValidModelId(id) || known.has(id)) continue;
+    known.add(id);
+    addedModels.push({
+      id,
+      name: cleanLabel(m.name) || id,
+      logo: null,
+      // Monotonic and never reused, so "most recently added" survives a rename.
+      addedAt: Date.now() + addedModels.length,
+      builtin: false,
+    });
+  }
 
   const next: PromptTaxonomy = {
     categories: dedupeLabels([...current.categories, ...categories], MAX_CATEGORIES),
     tags: dedupeLabels([...current.tags, ...tags], MAX_TAGS),
+    models: [...current.models, ...addedModels].slice(0, MAX_MODELS),
   };
 
   const unchanged =
     next.categories.length === current.categories.length &&
-    next.tags.length === current.tags.length;
+    next.tags.length === current.tags.length &&
+    addedModels.length === 0;
   if (unchanged && snap.exists) return current;
 
   await ref.set({ ...next, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
@@ -384,23 +508,20 @@ export async function mergeTaxonomy(
 /** Removes a label from the managed lists. Prompts already carrying it keep it —
  *  the list governs what is offered, not what exists. */
 export async function removeTaxonomyLabel(
-  kind: 'category' | 'tag',
+  kind: 'category' | 'tag' | 'model',
   label: string
 ): Promise<PromptTaxonomy> {
   const ref = adminDb.collection(META_COLLECTION).doc(TAXONOMY_DOC);
   const snap = await ref.get();
-  const current: PromptTaxonomy = snap.exists
-    ? {
-        categories: dedupeLabels(snap.data()?.categories, MAX_CATEGORIES),
-        tags: dedupeLabels(snap.data()?.tags, MAX_TAGS),
-      }
-    : { ...EMPTY_TAXONOMY };
+  const current = readTaxonomyDoc(snap);
 
   const target = cleanLabel(label).toLowerCase();
   const next: PromptTaxonomy =
     kind === 'category'
       ? { ...current, categories: current.categories.filter(c => c.toLowerCase() !== target) }
-      : { ...current, tags: current.tags.filter(t => t.toLowerCase() !== target) };
+      : kind === 'tag'
+        ? { ...current, tags: current.tags.filter(t => t.toLowerCase() !== target) }
+        : { ...current, models: current.models.filter(m => m.id !== target) };
 
   await ref.set({ ...next, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   invalidatePromptLibraryCache();

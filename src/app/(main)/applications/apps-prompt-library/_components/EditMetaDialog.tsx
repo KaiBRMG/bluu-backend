@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -12,10 +11,10 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { usePromptLibrary } from '@/contexts/PromptLibraryContext';
-import { LLM_LIST, type LlmType, type PromptDocument } from '@/types/promptLibrary';
+import { type LlmType, type PromptDocument } from '@/types/promptLibrary';
 import { CategoryPicker, TagPicker } from './LabelPicker';
 import { FieldError } from './FieldError';
-import { LlmMark } from './LlmMark';
+import { ModelPicker } from './ModelPicker';
 
 const inputClass =
   'w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white transition-colors placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none';
@@ -58,26 +57,26 @@ function EditMetaForm({
   prompt: PromptDocument;
   onOpenChange: (open: boolean) => void;
 }) {
-  const router = useRouter();
   const { taxonomy, updateMeta, addLabels } = usePromptLibrary();
 
-  const [llmType, setLlmType] = useState<LlmType>(prompt.llmType);
+  const [llmTypes, setLlmTypes] = useState<LlmType[]>(prompt.llmTypes);
   const [title, setTitle] = useState(prompt.title);
   const [category, setCategory] = useState(prompt.category);
   const [tags, setTags] = useState<string[]>(prompt.tags);
   const [saving, setSaving] = useState(false);
-  const [errors, setErrors] = useState<{ title?: string; category?: string }>({});
+  const [errors, setErrors] = useState<{ models?: string; title?: string; category?: string }>({});
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (saving) return;
 
     const found: typeof errors = {};
+    if (llmTypes.length === 0) found.models = 'Pick at least one model.';
     if (!title.trim()) found.title = 'Give the prompt a title.';
     if (!category.trim()) found.category = 'Choose or create a category.';
     setErrors(found);
 
-    const firstInvalid = (['title', 'category'] as const).find(k => found[k]);
+    const firstInvalid = (['models', 'title', 'category'] as const).find(k => found[k]);
     if (firstInvalid) {
       document.getElementById(`edit-${firstInvalid}`)?.focus();
       return;
@@ -85,13 +84,9 @@ function EditMetaForm({
 
     setSaving(true);
     try {
-      const next = await updateMeta(prompt.id, { llmType, title, category, tags });
+      await updateMeta(prompt.id, { llmTypes, title, category, tags });
       toast.success('Prompt updated');
       onOpenChange(false);
-      // Moving a prompt to another model changes its URL.
-      if (next.llmType !== prompt.llmType) {
-        router.replace(`/applications/apps-prompt-library/${next.llmType}/${next.id}`);
-      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update the prompt');
       setSaving(false);
@@ -100,29 +95,26 @@ function EditMetaForm({
 
   return (
     <form onSubmit={submit} className="mt-5 flex flex-col gap-4">
-      <fieldset className="flex flex-col gap-1.5">
-        <legend className="mb-1.5 text-xs text-zinc-400">Model</legend>
-        <div className="flex flex-wrap gap-1.5">
-          {LLM_LIST.map(llm => {
-            const selected = llm.id === llmType;
-            return (
-              <button
-                key={llm.id}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => setLlmType(llm.id)}
-                className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition-all active:scale-[0.98] ${
-                  selected
-                    ? 'bg-[#2563eb] text-white'
-                    : 'bg-white/[0.04] text-zinc-300 hover:bg-white/[0.055] hover:text-white'
-                }`}
-              >
-                <LlmMark llm={llm.id} size={14} />
-                {llm.name}
-              </button>
-            );
-          })}
-        </div>
+      {/* Focusable only so the focus-first-invalid recovery can reach it — a
+          bare <fieldset> is not, so `.focus()` here used to do nothing. */}
+      <fieldset
+        id="edit-models"
+        tabIndex={-1}
+        aria-describedby={errors.models ? 'edit-models-error' : undefined}
+        className="flex flex-col gap-1.5 focus:outline-none"
+      >
+        <legend className="mb-1.5 text-xs text-zinc-400">
+          Models <span className="text-zinc-400">(pick one or more)</span>
+        </legend>
+        <ModelPicker
+          value={llmTypes}
+          onChange={next => {
+            setLlmTypes(next);
+            if (errors.models) setErrors(prev => ({ ...prev, models: undefined }));
+          }}
+          describedBy={errors.models ? 'edit-models-error' : undefined}
+        />
+        <FieldError id="edit-models-error" message={errors.models} />
       </fieldset>
 
       <div className="flex flex-col gap-1">

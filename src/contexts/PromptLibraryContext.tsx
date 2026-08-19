@@ -14,14 +14,18 @@ import { apiRequest } from '@/lib/clientApi';
 import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
 import {
   EMPTY_TAXONOMY,
+  mergeModels,
   type PromptCreateInput,
   type PromptDocument,
   type PromptMetaInput,
+  type PromptModel,
   type PromptTaxonomy,
   type PromptVersion,
 } from '@/types/promptLibrary';
 
-const CACHE_KEY = 'bluu_prompt_library_v1';
+// Bumped from _v1: the cached shape gained `taxonomy.models`, `llmTypes` and
+// the rich-text body, and a stale v1 entry would render a modelless library.
+const CACHE_KEY = 'bluu_prompt_library_v2';
 const TTL = 5 * 60 * 1000;
 
 interface Snapshot {
@@ -29,10 +33,22 @@ interface Snapshot {
   taxonomy: PromptTaxonomy;
 }
 
+/** What a save carries beyond the text: the rich body and the author's note. */
+export interface SaveVersionInput {
+  text: string;
+  textHtml: string | null;
+  editNote: string;
+  basedOn: number;
+}
+
 interface PromptLibraryValue extends Snapshot {
   loading: boolean;
   error: string | null;
   refresh: () => void;
+
+  /** Built-ins plus everything the team has added, most recently added first. */
+  models: PromptModel[];
+  modelsById: Record<string, PromptModel>;
 
   /** Version history, lazily fetched per prompt and kept for the session. */
   getVersions: (id: string) => Promise<PromptVersion[]>;
@@ -40,13 +56,16 @@ interface PromptLibraryValue extends Snapshot {
   createPrompt: (input: PromptCreateInput) => Promise<PromptDocument>;
   saveVersion: (
     id: string,
-    text: string,
-    basedOn: number
+    input: SaveVersionInput
   ) => Promise<{ prompt: PromptDocument; version: PromptVersion }>;
   updateMeta: (id: string, input: PromptMetaInput) => Promise<PromptDocument>;
   removePrompt: (id: string) => Promise<void>;
-  addLabels: (input: { categories?: string[]; tags?: string[] }) => Promise<void>;
-  removeLabel: (kind: 'category' | 'tag', label: string) => Promise<void>;
+  addLabels: (input: {
+    categories?: string[];
+    tags?: string[];
+    models?: { id: string; name: string }[];
+  }) => Promise<void>;
+  removeLabel: (kind: 'category' | 'tag' | 'model', label: string) => Promise<void>;
 }
 
 const PromptLibraryContext = createContext<PromptLibraryValue | null>(null);
@@ -152,6 +171,7 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
         const next: Snapshot = {
           prompts: [prompt, ...prev.prompts],
           taxonomy: {
+            ...prev.taxonomy,
             categories: prev.taxonomy.categories.includes(prompt.category)
               ? prev.taxonomy.categories
               : [...prev.taxonomy.categories, prompt.category],
@@ -166,10 +186,10 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
     []
   );
 
-  const saveVersion = useCallback(async (id: string, text: string, basedOn: number) => {
+  const saveVersion = useCallback(async (id: string, input: SaveVersionInput) => {
     const res = await apiRequest(`/api/prompt-library/${id}/versions`, {
       method: 'POST',
-      body: JSON.stringify({ text, basedOn }),
+      body: JSON.stringify(input),
     });
     if (!res.ok) await readError(res, 'Failed to save the new version');
     const result = (await res.json()) as { prompt: PromptDocument; version: PromptVersion };
@@ -200,6 +220,7 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
       const next: Snapshot = {
         prompts: prev.prompts.map(p => (p.id === id ? prompt : p)),
         taxonomy: {
+          ...prev.taxonomy,
           categories: prev.taxonomy.categories.includes(prompt.category)
             ? prev.taxonomy.categories
             : [...prev.taxonomy.categories, prompt.category],
@@ -224,10 +245,18 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
     });
   }, []);
 
-  const addLabels = useCallback(async (input: { categories?: string[]; tags?: string[] }) => {
+  const addLabels = useCallback(async (input: {
+    categories?: string[];
+    tags?: string[];
+    models?: { id: string; name: string }[];
+  }) => {
     const res = await apiRequest('/api/prompt-library/taxonomy', {
       method: 'POST',
-      body: JSON.stringify({ categories: input.categories ?? [], tags: input.tags ?? [] }),
+      body: JSON.stringify({
+        categories: input.categories ?? [],
+        tags: input.tags ?? [],
+        models: input.models ?? [],
+      }),
     });
     if (!res.ok) await readError(res, 'Failed to save the label');
     const { taxonomy } = (await res.json()) as { taxonomy: PromptTaxonomy };
@@ -239,7 +268,7 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
     });
   }, []);
 
-  const removeLabel = useCallback(async (kind: 'category' | 'tag', label: string) => {
+  const removeLabel = useCallback(async (kind: 'category' | 'tag' | 'model', label: string) => {
     const res = await apiRequest(
       `/api/prompt-library/taxonomy?kind=${kind}&label=${encodeURIComponent(label)}`,
       { method: 'DELETE' }
@@ -254,12 +283,23 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
     });
   }, []);
 
+  // The built-in five merged with whatever the team has added, newest first.
+  // Derived here so every surface shares one ordering and one id → model map.
+  const models = useMemo(() => mergeModels(snapshot.taxonomy.models), [snapshot.taxonomy.models]);
+  const modelsById = useMemo(() => {
+    const map: Record<string, PromptModel> = {};
+    for (const m of models) map[m.id] = m;
+    return map;
+  }, [models]);
+
   const value = useMemo<PromptLibraryValue>(
     () => ({
       ...snapshot,
       loading,
       error,
       refresh,
+      models,
+      modelsById,
       getVersions,
       createPrompt,
       saveVersion,
@@ -273,6 +313,8 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
       loading,
       error,
       refresh,
+      models,
+      modelsById,
       getVersions,
       createPrompt,
       saveVersion,

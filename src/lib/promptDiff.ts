@@ -127,45 +127,16 @@ export function summariseChange(before: string, after: string): ChangeStat {
   };
 }
 
-const KIND_LABEL: Record<ChangeKind, string> = {
-  initial: 'First version',
-  tweak: 'Tweak',
-  edit: 'Edit',
-  rewrite: 'Rewrite',
-};
-
-const REGION_LABEL: Record<ChangeRegion, string> = {
-  none: '',
-  start: 'near the start',
-  middle: 'in the middle',
-  end: 'near the end',
-  throughout: 'throughout',
-};
-
-export function changeKindLabel(kind: ChangeKind): string {
-  return KIND_LABEL[kind];
-}
-
 /**
- * One line a human can read at a glance: what scale of edit, how many words
- * moved, and roughly where. Falls back gracefully when nothing textual changed
- * (a reordering, or a metadata-only save).
+ * There is deliberately no `describeChange` here any more.
+ *
+ * The detail card used to render `change` as a line of prose — "Rewrite · +4
+ * words · near the end". It was removed: a word count and a rough position are
+ * not what someone wants to know about an edit, and the author's own EDIT NOTE
+ * now occupies that space and answers the real question. The `ChangeStat` is
+ * still computed and still written to every version document — nothing stored
+ * changed shape — it is simply no longer surfaced as text.
  */
-export function describeChange(change: ChangeStat | null): string {
-  if (!change) return '';
-  if (change.kind === 'initial') return KIND_LABEL.initial;
-  if (change.added === 0 && change.removed === 0) return 'Reworded — no words added or removed';
-
-  const counts = [
-    change.added > 0 ? `+${change.added}` : null,
-    change.removed > 0 ? `−${change.removed}` : null,
-  ]
-    .filter(Boolean)
-    .join(' / ');
-
-  const where = REGION_LABEL[change.region];
-  return `${KIND_LABEL[change.kind]} · ${counts} words${where ? ` · ${where}` : ''}`;
-}
 
 export type DiffOp = 'same' | 'added' | 'removed';
 

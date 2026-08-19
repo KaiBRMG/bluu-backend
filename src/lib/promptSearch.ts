@@ -10,7 +10,10 @@
  */
 
 import type { PromptDocument } from '@/types/promptLibrary';
-import { LLM_META } from '@/types/promptLibrary';
+
+/** uid → display name, or model id → model name. Both resolve asynchronously,
+ *  so both are part of an entry's cache stamp. */
+export type Resolver = (id: string) => string;
 
 // Field weights. Ordered by how deliberately a person put the word there: a
 // title is chosen, prompt text is written at length.
@@ -159,21 +162,24 @@ export function parseQuery(query: string): string[] {
 
 function buildIndex(
   prompt: PromptDocument,
-  resolveName: (uid: string) => string
+  resolveName: Resolver,
+  resolveModel: Resolver
 ): PromptIndex {
   const people = `${resolveName(prompt.createdBy)} ${resolveName(prompt.lastUpdatedBy)}`;
   const dates = `${dateStrings(prompt.createdTime)} ${dateStrings(prompt.lastUpdatedTime)}`;
+  // Every model a prompt targets is searchable, and its id as well as its
+  // display name — a prompt on both ChatGPT and Claude answers to either.
+  const modelText = prompt.llmTypes.map(id => `${resolveModel(id)} ${id}`).join(' ');
   return {
     id: prompt.id,
-    // Name resolution arrives asynchronously, so it is part of the cache key.
-    stamp: `${prompt.lastUpdatedTime}|${prompt.version}|${people}`,
+    stamp: buildStamp(prompt, resolveName, resolveModel),
     prompt,
     rawText: prompt.text,
     fields: {
       title: field(prompt.title),
       category: field(prompt.category),
       tags: field(prompt.tags.join(' ')),
-      llm: field(LLM_META[prompt.llmType]?.name ?? prompt.llmType),
+      llm: field(modelText),
       people: field(people),
       date: field(dates),
       text: field(prompt.text),
@@ -188,7 +194,11 @@ function buildIndex(
 export class PromptSearchIndex {
   private entries = new Map<string, PromptIndex>();
 
-  sync(prompts: PromptDocument[], resolveName: (uid: string) => string): PromptIndex[] {
+  sync(
+    prompts: PromptDocument[],
+    resolveName: Resolver,
+    resolveModel: Resolver
+  ): PromptIndex[] {
     const live = new Set<string>();
     const out: PromptIndex[] = [];
 
@@ -196,9 +206,9 @@ export class PromptSearchIndex {
       live.add(p.id);
       const existing = this.entries.get(p.id);
       const next =
-        existing && existing.stamp === buildStamp(p, resolveName)
+        existing && existing.stamp === buildStamp(p, resolveName, resolveModel)
           ? existing
-          : buildIndex(p, resolveName);
+          : buildIndex(p, resolveName, resolveModel);
       this.entries.set(p.id, next);
       out.push(next);
     }
@@ -209,8 +219,11 @@ export class PromptSearchIndex {
   }
 }
 
-function buildStamp(prompt: PromptDocument, resolveName: (uid: string) => string): string {
-  return `${prompt.lastUpdatedTime}|${prompt.version}|${resolveName(prompt.createdBy)} ${resolveName(prompt.lastUpdatedBy)}`;
+/** Name resolution arrives asynchronously, so both resolutions — and the set of
+ *  models a prompt targets — are part of the cache key. */
+function buildStamp(prompt: PromptDocument, resolveName: Resolver, resolveModel: Resolver): string {
+  const models = prompt.llmTypes.map(id => `${id}:${resolveModel(id)}`).join(',');
+  return `${prompt.lastUpdatedTime}|${prompt.version}|${models}|${resolveName(prompt.createdBy)} ${resolveName(prompt.lastUpdatedBy)}`;
 }
 
 const SNIPPET_RADIUS = 90;

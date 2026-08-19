@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { checkPageAccess, handleApiError } from '@/lib/middleware/apiHelpers';
 import { deletePrompt, updatePromptMeta } from '@/lib/services/promptLibraryService';
-import { isLlmType, type PromptMetaInput } from '@/types/promptLibrary';
+import { isValidModelId, MAX_MODELS_PER_PROMPT, type PromptMetaInput } from '@/types/promptLibrary';
 import { PAGE_ID } from '../route';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -23,8 +23,14 @@ export const PATCH = withAuth(async (
     const { id } = await params;
     const body = await req.json();
 
-    if (body?.llmType !== undefined && !isLlmType(body.llmType)) {
-      return NextResponse.json({ error: 'Unknown LLM' }, { status: 400 });
+    if (
+      body?.llmTypes !== undefined &&
+      (!Array.isArray(body.llmTypes) ||
+        body.llmTypes.length === 0 ||
+        body.llmTypes.length > MAX_MODELS_PER_PROMPT ||
+        !body.llmTypes.every(isValidModelId))
+    ) {
+      return NextResponse.json({ error: 'Choose at least one model' }, { status: 400 });
     }
     if (body?.title !== undefined && (typeof body.title !== 'string' || !body.title.trim())) {
       return NextResponse.json({ error: 'Title cannot be empty' }, { status: 400 });
@@ -34,7 +40,7 @@ export const PATCH = withAuth(async (
     }
 
     const input: PromptMetaInput = {
-      llmType: body?.llmType,
+      llmTypes: body?.llmTypes,
       category: body?.category,
       title: body?.title,
       tags: Array.isArray(body?.tags) ? body.tags : undefined,

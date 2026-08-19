@@ -94,12 +94,29 @@ function SidebarProvider({
   }, [isMobile, setOpen, setOpenMobile])
 
   // Adds a keyboard shortcut to toggle the sidebar.
+  //
+  // LOCAL MODIFICATION (do not lose this to `shadcn add sidebar --overwrite`):
+  // the two guards below. This listener is on the WINDOW, so it fires for every
+  // keystroke anywhere in the app — including Ctrl/Cmd+B inside a rich-text
+  // editor, where it means Bold. The Prompt Library's prompt editor is the
+  // current case; any future one inherits the fix.
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
         event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
         (event.metaKey || event.ctrlKey)
       ) {
+        // Something nearer the keystroke already claimed it.
+        if (event.defaultPrevented) return
+
+        // A contenteditable region owns Ctrl/Cmd+B outright. `isContentEditable`
+        // is inherited, so this is true for any element inside the editor, not
+        // just its root. Plain inputs and textareas are deliberately NOT
+        // excluded — Ctrl+B does nothing in them, so the shortcut still works
+        // while a search box has focus.
+        const target = event.target as HTMLElement | null
+        if (target?.isContentEditable) return
+
         event.preventDefault()
         toggleSidebar()
       }
@@ -606,10 +623,24 @@ function SidebarMenuSkeleton({
 }: React.ComponentProps<"div"> & {
   showIcon?: boolean
 }) {
-  // Random width between 50 to 90%.
+  // Varied width between 50 and 90%, so a stack of these reads as a list of
+  // uneven labels rather than identical bars.
+  //
+  // LOCAL MODIFICATION (do not lose this to `shadcn add sidebar --overwrite`):
+  // upstream calls `Math.random()` here. That is impure during render — React
+  // may render twice and get two different widths — and, because this component
+  // is server-rendered, the server and client passes disagree, which is a
+  // hydration mismatch on the inline style. `useId` is stable across both passes
+  // and unique per instance, so hashing it keeps the variety and drops both
+  // problems.
+  const instanceId = React.useId()
   const width = React.useMemo(() => {
-    return `${Math.floor(Math.random() * 40) + 50}%`
-  }, [])
+    let hash = 0
+    for (let i = 0; i < instanceId.length; i++) {
+      hash = (hash * 31 + instanceId.charCodeAt(i)) | 0
+    }
+    return `${(Math.abs(hash) % 41) + 50}%`
+  }, [instanceId])
 
   return (
     <div

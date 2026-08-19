@@ -202,7 +202,7 @@ export function TagPicker({ options, value, onChange, onCreate, id }: {
               <button
                 type="button"
                 onClick={() => onChange(value.filter(v => v !== tag))}
-                className="inline-flex items-center gap-1 rounded-full bg-white/[0.06] py-0.5 pl-2.5 pr-1.5 text-xs text-zinc-300 transition-colors hover:bg-white/[0.1] hover:text-white"
+                className="inline-flex items-center gap-1 rounded-full bg-white/[0.06] py-0.5 pl-2.5 pr-1.5 text-xs text-zinc-300 transition-colors hover:bg-white/[0.1] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]"
               >
                 {tag}
                 <X className="size-3" aria-hidden />

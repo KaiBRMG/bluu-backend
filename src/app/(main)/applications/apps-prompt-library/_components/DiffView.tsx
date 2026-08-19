@@ -20,7 +20,7 @@ export function DiffView({ before, after }: { before: string; after: string }) {
   if (!parts) {
     return (
       <p className="p-4 text-sm text-muted-foreground">
-        This prompt is too long to diff inline. The summary above still describes the change.
+        This prompt is too long to compare inline.
       </p>
     );
   }

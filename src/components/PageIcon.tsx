@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import {
+  Astroid,
   House,
   MessageSquareQuote,
   ShieldUser,
@@ -34,6 +35,7 @@ import {
  * it, so a page added to `definitions.ts` only needs its icon registered once.
  */
 export const ICON_MAP: Record<string, LucideIcon> = {
+  Astroid,
   House,
   MessageSquareQuote,
   ShieldUser,

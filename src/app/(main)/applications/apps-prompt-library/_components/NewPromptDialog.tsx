@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -13,10 +12,10 @@ import {
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { usePromptLibrary } from '@/contexts/PromptLibraryContext';
-import { LLM_LIST, type LlmType } from '@/types/promptLibrary';
+import { type LlmType } from '@/types/promptLibrary';
 import { CategoryPicker, TagPicker } from './LabelPicker';
 import { FieldError } from './FieldError';
-import { LlmMark } from './LlmMark';
+import { ModelPicker } from './ModelPicker';
 import { wordCount } from '../_lib/format';
 
 const inputClass =
@@ -26,10 +25,13 @@ export function NewPromptDialog({
   open,
   onOpenChange,
   defaultLlm,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   defaultLlm?: LlmType;
+  /** Hands the new prompt's id back so the caller can open its detail card. */
+  onCreated?: (id: string) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -42,7 +44,13 @@ export function NewPromptDialog({
         </DialogHeader>
         {/* The form lives inside the dialog content, so closing unmounts it and
             the next open starts clean — no reset effect to keep in sync. */}
-        {open && <NewPromptForm onOpenChange={onOpenChange} defaultLlm={defaultLlm} />}
+        {open && (
+          <NewPromptForm
+            onOpenChange={onOpenChange}
+            defaultLlm={defaultLlm}
+            onCreated={onCreated}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -51,20 +59,28 @@ export function NewPromptDialog({
 function NewPromptForm({
   onOpenChange,
   defaultLlm,
+  onCreated,
 }: {
   onOpenChange: (open: boolean) => void;
   defaultLlm?: LlmType;
+  onCreated?: (id: string) => void;
 }) {
-  const router = useRouter();
-  const { taxonomy, createPrompt, addLabels } = usePromptLibrary();
+  const { taxonomy, models, createPrompt, addLabels } = usePromptLibrary();
 
-  const [llmType, setLlmType] = useState<LlmType>(defaultLlm ?? 'chatgpt');
+  const [llmTypes, setLlmTypes] = useState<LlmType[]>(
+    defaultLlm ? [defaultLlm] : models[0] ? [models[0].id] : []
+  );
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [text, setText] = useState('');
   const [saving, setSaving] = useState(false);
-  const [errors, setErrors] = useState<{ title?: string; category?: string; text?: string }>({});
+  const [errors, setErrors] = useState<{
+    models?: string;
+    title?: string;
+    category?: string;
+    text?: string;
+  }>({});
 
   // The submit button stays enabled and the form answers on submit. A disabled
   // button that never says which field is missing is a dead end — especially
@@ -74,12 +90,13 @@ function NewPromptForm({
     if (saving) return;
 
     const found: typeof errors = {};
+    if (llmTypes.length === 0) found.models = 'Pick at least one model.';
     if (!title.trim()) found.title = 'Give the prompt a title.';
     if (!category.trim()) found.category = 'Choose or create a category.';
     if (!text.trim()) found.text = 'Write the prompt text.';
     setErrors(found);
 
-    const firstInvalid = (['title', 'category', 'text'] as const).find(k => found[k]);
+    const firstInvalid = (['models', 'title', 'category', 'text'] as const).find(k => found[k]);
     if (firstInvalid) {
       document
         .getElementById(firstInvalid === 'text' ? 'prompt-text' : `prompt-${firstInvalid}`)
@@ -90,7 +107,7 @@ function NewPromptForm({
     setSaving(true);
     try {
       const prompt = await createPrompt({
-        llmType,
+        llmTypes,
         category,
         title,
         tags,
@@ -98,7 +115,7 @@ function NewPromptForm({
       });
       toast.success('Prompt created');
       onOpenChange(false);
-      router.push(`/applications/apps-prompt-library/${prompt.llmType}/${prompt.id}`);
+      onCreated?.(prompt.id);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create the prompt');
       setSaving(false);
@@ -107,29 +124,29 @@ function NewPromptForm({
 
   return (
     <form onSubmit={submit} className="mt-5 flex flex-col gap-4">
-      <fieldset className="flex flex-col gap-1.5">
-        <legend className="mb-1.5 text-xs text-zinc-400">Model</legend>
-        <div className="flex flex-wrap gap-1.5">
-          {LLM_LIST.map(llm => {
-            const selected = llm.id === llmType;
-            return (
-              <button
-                key={llm.id}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => setLlmType(llm.id)}
-                className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition-all active:scale-[0.98] ${
-                  selected
-                    ? 'bg-[#2563eb] text-white'
-                    : 'bg-white/[0.04] text-zinc-300 hover:bg-white/[0.055] hover:text-white'
-                }`}
-              >
-                <LlmMark llm={llm.id} size={14} />
-                {llm.name}
-              </button>
-            );
-          })}
-        </div>
+      {/* `tabIndex={-1}` is what makes the focus-first-invalid recovery work at
+          all: a <fieldset> is not focusable by default, so `.focus()` on it was
+          a silent no-op and the first field in the form was the one field the
+          error recovery could never reach. The description rides the fieldset
+          too, so focusing the group announces WHY it was focused. */}
+      <fieldset
+        id="prompt-models"
+        tabIndex={-1}
+        aria-describedby={errors.models ? 'prompt-models-error' : undefined}
+        className="flex flex-col gap-1.5 focus:outline-none"
+      >
+        <legend className="mb-1.5 text-xs text-zinc-400">
+          Models <span className="text-zinc-400">(pick one or more)</span>
+        </legend>
+        <ModelPicker
+          value={llmTypes}
+          onChange={next => {
+            setLlmTypes(next);
+            if (errors.models) setErrors(prev => ({ ...prev, models: undefined }));
+          }}
+          describedBy={errors.models ? 'prompt-models-error' : undefined}
+        />
+        <FieldError id="prompt-models-error" message={errors.models} />
       </fieldset>
 
       <div className="flex flex-col gap-1">

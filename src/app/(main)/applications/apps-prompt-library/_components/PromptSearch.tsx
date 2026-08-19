@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { ChevronRight, CornerDownLeft, Search, X } from 'lucide-react';
 import { usePromptLibrary } from '@/contexts/PromptLibraryContext';
 import { useUserName } from '@/hooks/useUserName';
@@ -12,16 +11,12 @@ import {
   searchPrompts,
   type PromptSearchHit,
 } from '@/lib/promptSearch';
-import { LLM_META, type LlmType, type PromptDocument } from '@/types/promptLibrary';
-import { LlmMark } from './LlmMark';
+import { type LlmType } from '@/types/promptLibrary';
+import { LlmMarks } from './LlmMark';
 import { Highlight } from './Highlight';
 import { relativeTime } from '../_lib/format';
 
 const MAX_RESULTS = 40;
-
-function promptHref(prompt: PromptDocument): string {
-  return `/applications/apps-prompt-library/${prompt.llmType}/${prompt.id}`;
-}
 
 /** Stable per-hit id, so `aria-activedescendant` can point at the active row. */
 function optionId(hit: PromptSearchHit): string {
@@ -34,9 +29,8 @@ function optionId(hit: PromptSearchHit): string {
  * from another model is presented, so a search inside ChatGPT still surfaces
  * the Claude prompt you were actually thinking of.
  */
-export function PromptSearch({ scope }: { scope?: LlmType }) {
-  const router = useRouter();
-  const { prompts } = usePromptLibrary();
+export function PromptSearch({ scope, onOpen }: { scope?: LlmType; onOpen: (id: string) => void }) {
+  const { prompts, modelsById } = usePromptLibrary();
   const { names } = useUserName();
 
   const [query, setQuery] = useState('');
@@ -50,11 +44,13 @@ export function PromptSearch({ scope }: { scope?: LlmType }) {
   const [index] = useState(() => new PromptSearchIndex());
   const entries = useMemo(() => {
     const resolve = (uid: string) => names[uid] ?? '';
+    const resolveModel = (id: string) => modelsById[id]?.name ?? id;
     return index.sync(
       prompts.filter(p => !p.isArchived),
-      resolve
+      resolve,
+      resolveModel
     );
-  }, [index, prompts, names]);
+  }, [index, prompts, names, modelsById]);
 
   const terms = useMemo(() => parseQuery(query), [query]);
   const hits = useMemo(
@@ -66,8 +62,8 @@ export function PromptSearch({ scope }: { scope?: LlmType }) {
   const ordered = useMemo(() => {
     if (!scope) return hits;
     return [...hits].sort((a, b) => {
-      const aIn = a.prompt.llmType === scope ? 0 : 1;
-      const bIn = b.prompt.llmType === scope ? 0 : 1;
+      const aIn = a.prompt.llmTypes.includes(scope) ? 0 : 1;
+      const bIn = b.prompt.llmTypes.includes(scope) ? 0 : 1;
       return aIn - bIn || b.score - a.score;
     });
   }, [hits, scope]);
@@ -80,7 +76,7 @@ export function PromptSearch({ scope }: { scope?: LlmType }) {
     listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [activeIndex]);
 
-  const open = (hit: PromptSearchHit) => router.push(promptHref(hit.prompt));
+  const open = (hit: PromptSearchHit) => onOpen(hit.prompt.id);
 
   const changeQuery = (next: string) => {
     setQuery(next);
@@ -143,7 +139,7 @@ export function PromptSearch({ scope }: { scope?: LlmType }) {
               inputRef.current?.focus();
             }}
             aria-label="Clear search"
-            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-zinc-400 transition-colors hover:text-white"
+            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-zinc-400 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]"
           >
             <X className="size-4" />
           </button>
@@ -195,7 +191,7 @@ export function PromptSearch({ scope }: { scope?: LlmType }) {
           className="flex flex-col gap-1.5"
         >
           {ordered.map((hit, i) => {
-            const elsewhere = scope !== undefined && hit.prompt.llmType !== scope;
+            const elsewhere = scope !== undefined && !hit.prompt.llmTypes.includes(scope);
             return (
               // The option role sits on the <li> itself: a listbox owns options
               // directly, and an intervening listitem breaks that relationship.
@@ -211,8 +207,6 @@ export function PromptSearch({ scope }: { scope?: LlmType }) {
                 onClick={() => open(hit)}
                 className="group flex cursor-pointer items-start gap-3 rounded-lg border border-transparent bg-white/[0.04] px-3 py-2.5 transition-all hover:brightness-110 active:scale-[0.98] data-[active=true]:border-white/[0.07] data-[active=true]:bg-white/[0.055]"
               >
-                <LlmMark llm={hit.prompt.llmType} size={18} className="mt-0.5 shrink-0" />
-
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                     <span className="text-sm font-semibold text-zinc-100 underline-offset-2 group-hover:text-white group-hover:underline">
@@ -224,8 +218,7 @@ export function PromptSearch({ scope }: { scope?: LlmType }) {
                     {elsewhere && (
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.06] px-2 py-0.5 text-[11px] text-zinc-300">
                         in
-                        <LlmMark llm={hit.prompt.llmType} size={12} />
-                        {LLM_META[hit.prompt.llmType].name}
+                        <LlmMarks llms={hit.prompt.llmTypes} size={12} max={3} />
                       </span>
                     )}
                   </div>
@@ -244,6 +237,10 @@ export function PromptSearch({ scope }: { scope?: LlmType }) {
                     <span>matched in {hit.fields.map(f => MATCH_FIELD_LABEL[f]).join(', ')}</span>
                   </p>
                 </div>
+
+                {/* Trailing rather than leading, now that a prompt can carry
+                    several marks and the strip's width varies with it. */}
+                <LlmMarks llms={hit.prompt.llmTypes} size={16} max={4} className="mt-0.5" />
 
                 {/* A mark, not a control: the row itself is the button, and a
                       second target inside an option would be unreachable. */}
