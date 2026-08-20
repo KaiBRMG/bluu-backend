@@ -18,6 +18,7 @@ import { getAppInfo } from '@/lib/appVersion';
 import { markScreenshotBugFixed } from '@/lib/markScreenshotBugFixed';
 import { buildTimerWidgetPayload, pushTimerWidgetState, hideTimerWidget } from '@/lib/timerWidget';
 import { toast } from 'sonner';
+import * as Sentry from '@sentry/nextjs';
 
 const HEARTBEAT_INTERVAL_MS   = 15 * 60 * 1000; // 15 minutes — working state only
 const SLEEP_GAP_THRESHOLD_MS  = HEARTBEAT_INTERVAL_MS + 5 * 60 * 1000; // 20 min — gap larger than this implies the process was suspended
@@ -243,12 +244,52 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   /**
+   * Tell the server which state the session moved to — DELIBERATELY NOT AWAITED.
+   *
+   * `active_sessions.currentState` is presence bookkeeping for the admin Active
+   * Users view. It is NOT the source of truth for a session: the event log in
+   * the local buffer is, and it is uploaded wholesale at clock-out.
+   *
+   * RULE — a transition must never be gated on this call. Every transition used
+   * to run `await Promise.all([appendEvent(...), apiCall('transition', ...)])`
+   * and only then apply its state setters. A transient failure of the network
+   * half rejected the Promise.all while the event had already landed in the log,
+   * so the setters were skipped and the renderer went on ticking as `working`
+   * against a log that said `idle`. That desync:
+   *   1. double-counted elapsed time (the pre-idle segment was credited to
+   *      `sessionBaseSecondsRef` AND still accruing via a stale `entryStartTime`),
+   *      which in turn inflated `computeBreakAllowance` past the 8h boundary; and
+   *   2. killed the recovery — the idle-resume poll and the unlock handler both
+   *      only run while `displayState === 'idle'`, so nothing was left to write
+   *      the matching `idle-end`. A spurious idle that should self-correct in
+   *      5s (IDLE_RESUME_CHECK_MS) instead ran until the next clock-out, banking
+   *      real work as idle and scoring those screenshots 0% activity.
+   *
+   * Apply local state first, then call this. Failures are reported, not thrown.
+   */
+  const syncTransition = useCallback((transition: string) => {
+    apiCall('transition', 'POST', { transition }).catch(err => {
+      console.error(`[TimeTracking] Transition '${transition}' failed to sync:`, err);
+      // Telemetry is half the point: these failures were previously silent, which
+      // is how ~43h of mislabelled time accumulated across the fleet unnoticed.
+      Sentry.captureException(err, {
+        level: 'warning',
+        tags: { area: 'time-tracking', reason: 'transition-sync-failed' },
+        extra: { transition },
+      });
+    });
+  }, [apiCall]);
+
+  /**
    * Retroactively exclude a span the machine was asleep: inject pause/resume
    * around it and rebase the running totals so the sleep isn't counted as work.
    */
   const patchSleepGap = useCallback(async (sid: string, pauseAtMs: number, resumeAtMs: number) => {
-    await appendEvent(sid, { type: 'pause', timestamp: pauseAtMs });
-    await appendEvent(sid, { type: 'resume', timestamp: resumeAtMs });
+    // Tag the pair so the rollup does not have to infer it from the timestamp
+    // offset — `findSyntheticPauses` treats this tag as authoritative and only
+    // falls back to the heuristic for logs written before it existed.
+    await appendEvent(sid, { type: 'pause', timestamp: pauseAtMs, meta: { trigger: 'sleep-gap' } });
+    await appendEvent(sid, { type: 'resume', timestamp: resumeAtMs, meta: { trigger: 'sleep-gap' } });
     const patchedBuf = await getBuffer(sid);
     if (!patchedBuf) return;
     const totals = parseBuffer(patchedBuf.events);
@@ -259,6 +300,77 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     entryStartTimeRef.current = resumeAtMs;
     setEntryStartTime(resumeAtMs);
     setElapsedSeconds(totals.workingSeconds);
+  }, []);
+
+  /**
+   * Watchdog for §3c: the renderer and the event log must agree on the current
+   * state. If they ever drift, THE LOG WINS — it is what the timesheet, the
+   * activity score and payroll are built from.
+   *
+   * The fingerprint is exact and cheap to test: the heartbeat only appends
+   * `activity` while `displayState === 'working'`, so a renderer claiming
+   * `working` over a log whose last state event is an unclosed
+   * `idle-start`/`break-start`/`pause` is, by definition, desynced. That state
+   * used to be unrecoverable — the idle-resume poll and the unlock handler both
+   * only run while `displayState === 'idle'`, so nothing was left to close the
+   * span and it ran to the next clock-out.
+   *
+   * Healing moves the RENDERER to the log's state — it does not write a closing
+   * event. Writing one would assert that the user resumed at this instant, which
+   * is precisely what we do not know; the OS does. Landing in `idle` hands the
+   * question to the resume poll, which reads `getIdleTime()` within
+   * IDLE_RESUME_CHECK_MS and returns to working on the first real input, closing
+   * the span at a timestamp we can actually justify.
+   *
+   * Totals are rebased from the log as of the boundary that opened the stranded
+   * state, the same way hydration and `patchSleepGap` do — which is what clears
+   * the double-counted elapsed time and the inflated break allowance.
+   *
+   * Nothing should reach this now. If Sentry says otherwise, some transition
+   * path is still gated on something it should not be.
+   */
+  const reconcileLogState = useCallback(async (sid: string) => {
+    if (displayStateRef.current !== 'working') return;
+    try {
+      const buf = await getBuffer(sid);
+      if (!buf || buf.events.length === 0) return;
+
+      const now = Date.now();
+      const logState = stateAtMs(buf.events, now);
+      if (logState === 'working' || logState === 'clocked-out') return;
+
+      // The event that opened the stranded state. `stateAtMs` is non-working, so
+      // the most recent state-changing event is necessarily that opener.
+      const opener = [...buf.events].reverse().find(e =>
+        e.type === 'idle-start' || e.type === 'break-start' || e.type === 'pause');
+      if (!opener) return;
+      const boundaryMs = opener.timestamp;
+
+      // Closing at the boundary — not at `now` — is what excludes the stranded
+      // span from working time instead of banking it.
+      const totals = parseBuffer(buf.events, boundaryMs);
+      sessionBaseSecondsRef.current = totals.workingSeconds;
+      breakUsedSecondsRef.current   = totals.breakSeconds;
+      entryStartTimeRef.current     = null;
+      displayStateRef.current       = logState;
+      setEntryStartTime(null);
+      // Only 'on-break' needs an anchor; the tick's break branch is inert without
+      // one, which would freeze the countdown mid-break.
+      setBreakStartTime(logState === 'on-break' ? boundaryMs : null);
+      setElapsedSeconds(totals.workingSeconds);
+      setBreakUsedSeconds(totals.breakSeconds);
+      setBreakAllowanceSeconds(computeBreakAllowance(totals.workingSeconds));
+      setDisplayState(logState);
+
+      console.warn(`[TimeTracking] Repaired desync: log said '${logState}', renderer said 'working'`);
+      Sentry.captureMessage('Time tracking state desync repaired', {
+        level: 'warning',
+        tags: { area: 'time-tracking', reason: 'log-renderer-desync' },
+        extra: { logState, openedBy: opener.meta?.trigger ?? 'unknown', strandedForMs: now - boundaryMs },
+      });
+    } catch (err) {
+      console.error('[TimeTracking] Desync reconciliation failed:', err);
+    }
   }, []);
 
   // ─── Session retention: prune old flushed sessions once per app load ─
@@ -497,6 +609,12 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
           // Non-critical — proceed with the normal heartbeat regardless
         }
 
+        // Appending `activity` is precisely the act that would strand a desynced
+        // session, so check agreement immediately before doing it. This is the
+        // only watchdog coverage users with `enableIdleTimeout: false` get — the
+        // idle poll does not run for them at all.
+        await reconcileLogState(sid);
+
         appendEvent(sid, { type: 'activity', timestamp: now }).catch(() => {});
         apiCall('heartbeat', 'POST').catch(err => {
           console.error('[TimeTracking] Heartbeat failed:', err);
@@ -510,7 +628,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         heartbeatRef.current = null;
       }
     };
-  }, [displayState, apiCall, patchSleepGap]);
+  }, [displayState, apiCall, patchSleepGap, reconcileLogState]);
 
   // ─── Idle Detection ──────────────────────────────────────────────────
   const enableIdleTimeout = userData?.enableIdleTimeout ?? true;
@@ -523,13 +641,41 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
 
     const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
     if (!electronAPI?.timeTracking) return;
-    if (!enableIdleTimeout) return;
+
+    // Idle tracking switched off while the user is sitting in idle would strand
+    // them there — the resume poll below is the only thing that returns from
+    // 'idle', and it is about to not exist. Return them to working first.
+    if (!enableIdleTimeout) {
+      if (displayState === 'idle') {
+        const sid = sessionIdRef.current;
+        if (sid) {
+          const now = Date.now();
+          appendEvent(sid, { type: 'idle-end', timestamp: now, meta: { trigger: 'idle-tracking-disabled' } })
+            .then(() => {
+              entryStartTimeRef.current = now;
+              displayStateRef.current = 'working';
+              setEntryStartTime(now);
+              setDisplayState('working');
+              syncTransition('resume');
+            })
+            .catch(err => console.error('[TimeTracking] Idle exit on disable failed:', err));
+        }
+      }
+      return;
+    }
 
     if (displayState === 'working') {
       idleCheckRef.current = setInterval(async () => {
         if (isTransitioningRef.current) return;
         if (displayStateRef.current !== 'working') return;
         try {
+          // Cheap local read; bounds a desync at one poll interval rather than
+          // the 15-min heartbeat. The log is authoritative — if it says we are
+          // not working, stop counting as if we were.
+          const sid = sessionIdRef.current;
+          if (sid) await reconcileLogState(sid);
+          if (displayStateRef.current !== 'working') return;
+
           const idleTime = await electronAPI.timeTracking.getIdleTime();
           if (idleTime >= IDLE_THRESHOLD_SECONDS) {
             isTransitioningRef.current = true;
@@ -537,16 +683,23 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
               const sid = sessionIdRef.current;
               if (!sid) return;
 
+              const now = Date.now();
               const startTime = entryStartTimeRef.current;
-              const segmentSeconds = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
-              sessionBaseSecondsRef.current += segmentSeconds;
+              const segmentSeconds = startTime ? Math.floor((now - startTime) / 1000) : 0;
 
-              await Promise.all([
-                appendEvent(sid, { type: 'idle-start', timestamp: Date.now() }),
-                apiCall('transition', 'POST', { transition: 'idle' }),
-              ]);
+              // The log is written first and the renderer follows it in lockstep.
+              // If appendEvent throws we fall through having changed nothing, so
+              // log and display still agree (both 'working') — the safe failure.
+              await appendEvent(sid, { type: 'idle-start', timestamp: now, meta: { trigger: 'poll' } });
+              sessionBaseSecondsRef.current += segmentSeconds;
+              // Refs eagerly, ahead of the React commit: isTransitioningRef is
+              // released the moment this block exits, so the power-event handler
+              // must not see a stale 'working'.
+              entryStartTimeRef.current = null;
+              displayStateRef.current = 'idle';
               setEntryStartTime(null);
               setDisplayState('idle');
+              syncTransition('idle');
             } finally {
               isTransitioningRef.current = false;
             }
@@ -569,12 +722,13 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
               const sid = sessionIdRef.current;
               if (!sid) return;
 
-              await Promise.all([
-                appendEvent(sid, { type: 'idle-end', timestamp: Date.now() }),
-                apiCall('transition', 'POST', { transition: 'resume' }),
-              ]);
-              setEntryStartTime(Date.now());
+              const now = Date.now();
+              await appendEvent(sid, { type: 'idle-end', timestamp: now, meta: { trigger: 'poll' } });
+              entryStartTimeRef.current = now;
+              displayStateRef.current = 'working';
+              setEntryStartTime(now);
               setDisplayState('working');
+              syncTransition('resume');
             } finally {
               isTransitioningRef.current = false;
             }
@@ -592,7 +746,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         idleCheckRef.current = null;
       }
     };
-  }, [displayState, enableIdleTimeout, apiCall]);
+  }, [displayState, enableIdleTimeout, syncTransition, reconcileLogState]);
 
   // ─── Native power/lock events (Electron) ─────────────────────────────
   // Native suspend/resume/lock/unlock carry exact timestamps, so they beat both
@@ -603,19 +757,32 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     if (!electronAPI?.power?.onEvent) return;
     if (!enableIdleTimeout) return;
 
-    /** working → idle, crediting the segment worked up to `atMs`. */
-    const goIdle = async (atMs: number) => {
+    /**
+     * working → idle, crediting the segment worked up to `atMs`.
+     *
+     * `trigger` is recorded on the event because the three producers of
+     * `idle-start` carry very different confidence: the 30s poll has 15 minutes
+     * of measured silence behind it, `suspend` is certain, and `lock` is only a
+     * heuristic (LOCK_CONFIRM_IDLE_SECONDS). Collapsing them into one
+     * indistinguishable event is what made the false-idle reports impossible to
+     * attribute — see documentation/time-tracking.md.
+     */
+    const goIdle = async (atMs: number, trigger: 'suspend' | 'lock') => {
       const sid = sessionIdRef.current;
       if (!sid) return;
       const startTime = entryStartTimeRef.current;
       const segmentSeconds = startTime ? Math.max(0, Math.floor((atMs - startTime) / 1000)) : 0;
+      // Log first, then the renderer — never gate the state change on the network.
+      // On the `suspend` path the request is issued as the OS tears down
+      // networking, so it fails routinely; awaiting it used to strand the session
+      // as "working" against a log that said "idle".
+      await appendEvent(sid, { type: 'idle-start', timestamp: atMs, meta: { trigger } });
       sessionBaseSecondsRef.current += segmentSeconds;
-      await Promise.all([
-        appendEvent(sid, { type: 'idle-start', timestamp: atMs }),
-        apiCall('transition', 'POST', { transition: 'idle' }),
-      ]);
+      entryStartTimeRef.current = null;
+      displayStateRef.current = 'idle';
       setEntryStartTime(null);
       setDisplayState('idle');
+      syncTransition('idle');
     };
 
     electronAPI.power.onEvent(async ({ event, at }) => {
@@ -627,7 +794,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
           // what makes the heartbeat's gap guess unnecessary on this path.
           if (isTransitioningRef.current || displayStateRef.current !== 'working') return;
           isTransitioningRef.current = true;
-          try { await goIdle(atMs); } finally { isTransitioningRef.current = false; }
+          try { await goIdle(atMs, 'suspend'); } finally { isTransitioningRef.current = false; }
           return;
         }
 
@@ -643,7 +810,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
           if (idleTime >= LOCK_CONFIRM_IDLE_SECONDS) return;
           if (isTransitioningRef.current || displayStateRef.current !== 'working') return;
           isTransitioningRef.current = true;
-          try { await goIdle(atMs); } finally { isTransitioningRef.current = false; }
+          try { await goIdle(atMs, 'lock'); } finally { isTransitioningRef.current = false; }
           return;
         }
 
@@ -660,12 +827,13 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         try {
           const activeSid = sessionIdRef.current;
           if (!activeSid) return;
-          await Promise.all([
-            appendEvent(activeSid, { type: 'idle-end', timestamp: Date.now() }),
-            apiCall('transition', 'POST', { transition: 'resume' }),
-          ]);
-          setEntryStartTime(Date.now());
+          const now = Date.now();
+          await appendEvent(activeSid, { type: 'idle-end', timestamp: now, meta: { trigger: event } });
+          entryStartTimeRef.current = now;
+          displayStateRef.current = 'working';
+          setEntryStartTime(now);
           setDisplayState('working');
+          syncTransition('resume');
         } finally {
           isTransitioningRef.current = false;
         }
@@ -677,7 +845,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     return () => {
       electronAPI.power?.removeEventListener();
     };
-  }, [enableIdleTimeout, apiCall]);
+  }, [enableIdleTimeout, syncTransition]);
 
   // ─── Timer Tick (1s) ─────────────────────────────────────────────────
   useEffect(() => {
@@ -708,11 +876,12 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
             // Accumulate the break time before auto-ending
             breakUsedSecondsRef.current += Math.floor((now - breakStartTime) / 1000);
             // Auto-end break → transition back to working
-            Promise.all([
-              appendEvent(sid, { type: 'break-end', timestamp: now }),
-              apiCall('transition', 'POST', { transition: 'break-end' }),
-            ]).catch(err => console.error('[TimeTracking] Break auto-end failed:', err));
+            appendEvent(sid, { type: 'break-end', timestamp: now, meta: { trigger: 'allowance-exhausted' } })
+              .catch(err => console.error('[TimeTracking] Break auto-end failed:', err));
+            syncTransition('break-end');
           }
+          entryStartTimeRef.current = now;
+          displayStateRef.current = 'working';
           setBreakStartTime(null);
           setBreakRemainingSeconds(null);
           setEntryStartTime(now);
@@ -750,7 +919,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         tickRef.current = null;
       }
     };
-  }, [displayState, entryStartTime, breakStartTime, apiCall]);
+  }, [displayState, entryStartTime, breakStartTime, syncTransition]);
 
   // ─── Timer widget (macOS tray title / Windows docked HUD) ───────────
   // Pushes the inputs the display is DERIVED from — a base and the instant that
@@ -1099,24 +1268,28 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     try {
       // Stop the tick immediately so no further updates race with state changes
       if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+      const now = Date.now();
+      // `trigger` distinguishes a real user pause from the synthetic sleep-gap
+      // pair patchSleepGap injects — the rollup counts only the former as an
+      // interruption to focus.
+      await appendEvent(sid, { type: 'pause', timestamp: now, meta: { trigger: 'user' } });
       // Accumulate current working segment before pausing
       if (displayState === 'working' && entryStartTime) {
-        const segmentSeconds = Math.floor((Date.now() - entryStartTime) / 1000);
+        const segmentSeconds = Math.floor((now - entryStartTime) / 1000);
         sessionBaseSecondsRef.current += segmentSeconds;
       }
       setElapsedSeconds(sessionBaseSecondsRef.current);
-      await Promise.all([
-        appendEvent(sid, { type: 'pause', timestamp: Date.now() }),
-        apiCall('transition', 'POST', { transition: 'pause' }),
-      ]);
+      entryStartTimeRef.current = null;
+      displayStateRef.current = 'paused';
       setEntryStartTime(null);
       setDisplayState('paused');
+      syncTransition('pause');
     } catch (err) {
       console.error('[TimeTracking] Pause failed:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, displayState, sessionId, entryStartTime, apiCall]);
+  }, [isLoading, displayState, sessionId, entryStartTime, syncTransition]);
 
   const resumeFromPause = useCallback(async () => {
     if (isLoading || displayState !== 'paused') return;
@@ -1124,18 +1297,19 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     if (!sid) return;
     setIsLoading(true);
     try {
-      await Promise.all([
-        appendEvent(sid, { type: 'resume', timestamp: Date.now() }),
-        apiCall('transition', 'POST', { transition: 'resume-from-pause' }),
-      ]);
-      setEntryStartTime(Date.now());
+      const now = Date.now();
+      await appendEvent(sid, { type: 'resume', timestamp: now, meta: { trigger: 'user' } });
+      entryStartTimeRef.current = now;
+      displayStateRef.current = 'working';
+      setEntryStartTime(now);
       setDisplayState('working');
+      syncTransition('resume-from-pause');
     } catch (err) {
       console.error('[TimeTracking] Resume from pause failed:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, displayState, sessionId, apiCall]);
+  }, [isLoading, displayState, sessionId, syncTransition]);
 
   const startBreak = useCallback(async () => {
     if (isLoading || displayState !== 'working') return;
@@ -1147,25 +1321,29 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     try {
       // Stop the tick immediately so no further updates race with state changes
       if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+      const now = Date.now();
+      await appendEvent(sid, { type: 'break-start', timestamp: now });
       // Accumulate current working segment
       if (entryStartTime) {
-        const segmentSeconds = Math.floor((Date.now() - entryStartTime) / 1000);
+        const segmentSeconds = Math.floor((now - entryStartTime) / 1000);
         sessionBaseSecondsRef.current += segmentSeconds;
       }
       setElapsedSeconds(sessionBaseSecondsRef.current);
-      await Promise.all([
-        appendEvent(sid, { type: 'break-start', timestamp: Date.now() }),
-        apiCall('transition', 'POST', { transition: 'break-start' }),
-      ]);
+      entryStartTimeRef.current = null;
+      displayStateRef.current = 'on-break';
       setEntryStartTime(null);
-      setBreakStartTime(Date.now());
+      // The SAME `now` the event carries. This used to be a second Date.now()
+      // taken after the network round-trip, so the on-screen break clock started
+      // late and under-counted the break by the request latency.
+      setBreakStartTime(now);
       setDisplayState('on-break');
+      syncTransition('break-start');
     } catch (err) {
       console.error('[TimeTracking] Break start failed:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, displayState, sessionId, entryStartTime, apiCall]);
+  }, [isLoading, displayState, sessionId, entryStartTime, syncTransition]);
 
   const endBreak = useCallback(async () => {
     if (isLoading || displayState !== 'on-break') return;
@@ -1174,23 +1352,23 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     try {
       const now = Date.now();
+      await appendEvent(sid, { type: 'break-end', timestamp: now, meta: { trigger: 'user' } });
       if (breakStartTime) {
         breakUsedSecondsRef.current += Math.floor((now - breakStartTime) / 1000);
       }
-      await Promise.all([
-        appendEvent(sid, { type: 'break-end', timestamp: now }),
-        apiCall('transition', 'POST', { transition: 'break-end' }),
-      ]);
+      entryStartTimeRef.current = now;
+      displayStateRef.current = 'working';
       setBreakStartTime(null);
       setBreakRemainingSeconds(null);
       setEntryStartTime(now);
       setDisplayState('working');
+      syncTransition('break-end');
     } catch (err) {
       console.error('[TimeTracking] Break end failed:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, displayState, sessionId, breakStartTime, apiCall]);
+  }, [isLoading, displayState, sessionId, breakStartTime, syncTransition]);
 
   const value = useMemo(() => ({
     displayState,

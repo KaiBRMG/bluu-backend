@@ -125,6 +125,62 @@ The path that hit this: device A closes the app without pressing Clock Out (a **
 - `buildInterruptedLedgerDoc` **mirrors `cleanupStaleSessions` in `functions/index.js`** — change both together.
 - **`/upload-log` is authorization-scoped.** The `sessionId` is client-supplied and `updateSessionLog` rewrites a doc's event log and totals wholesale, so `getLedgerSessionMeta` returns the owner and status: a doc owned by another uid is **403**, and a `status: 'completed'` doc returns `already-committed` without merging — its log was written at clock-out and a replayed upload must not rewrite settled hours.
 
+### 3c. A Transition Must Never Be Gated on the Network
+
+**RULE — write the event, apply the local state, *then* sync the server. Never `await` the `transition` call in a way that can skip a state update.**
+
+`/api/time-tracking/transition` only updates `active_sessions.currentState`/`lastUpdated` — presence bookkeeping for the admin Active Users view. **The event log is the source of truth**, and it is uploaded wholesale at clock-out. A transient failure of that request must therefore cost nothing.
+
+Every transition once ran:
+
+```ts
+sessionBaseSecondsRef.current += segmentSeconds;
+await Promise.all([
+  appendEvent(sid, { type: 'idle-start', timestamp: Date.now() }),
+  apiCall('transition', 'POST', { transition: 'idle' }),   // ← rejects
+]);
+setEntryStartTime(null);      // never ran
+setDisplayState('idle');      // never ran
+```
+
+`Promise.all` rejects on the network half while the IndexedDB write still lands, so the log said `idle` and the renderer went on ticking as `working`. Two compounding failures follow, and **the second is the damaging one**:
+
+1. **Elapsed time double-counts.** The pre-idle segment is credited to `sessionBaseSecondsRef` *and* keeps accruing through a stale `entryStartTime`, so the display reads `base + (now − clock-in)`. Crossing 8h then doubles `computeBreakAllowance` — a 45-min allowance renders as 1:30 and the `startBreak` guard hands out break nobody earned. The ledger is unaffected (`/stop` re-derives from the log), so the giveaway is **the timer disagreeing with "Total worked" right below it**.
+2. **Recovery dies.** The idle-resume poll (`IDLE_RESUME_CHECK_MS`, 5s) and the `unlock`/`resume` power handler *both* only run while `displayState === 'idle'`. With the renderer stuck on `working`, nothing is left to write the matching `idle-end`. A spurious idle that should self-correct in five seconds instead runs to the next clock-out — banking real work as idle and scoring every screenshot in it **0% activity**.
+
+`syncTransition(transition)` in `TimeTrackingContext.tsx` is the only sanctioned caller. It is fire-and-forget and reports failures to Sentry (`area: 'time-tracking'`, `reason: 'transition-sync-failed'`) — they were previously silent `console.error`s, which is how **~43h of mislabelled time across 9 users accumulated unnoticed over 45 days**.
+
+Two supporting disciplines:
+
+- **Append the event first.** If `appendEvent` throws, the transition aborts having changed nothing, so log and display still agree — the safe failure direction.
+- **Set `displayStateRef`/`entryStartTimeRef` eagerly**, ahead of the React commit. `isTransitioningRef` is released the instant the block exits, and the power-event handler reads the refs — it must not see a stale `working`.
+
+**Detecting historical damage:** the heartbeat only appends `activity` while `displayState === 'working'`, so an `activity` event *inside* an idle/break/pause span proves the renderer never entered that state. That fingerprint is what makes old desynced spans machine-identifiable.
+
+### 3d. `reconcileLogState` — the Desync Watchdog
+
+The same fingerprint, evaluated live. `reconcileLogState(sid)` compares `stateAtMs(buf.events, now)` against `displayStateRef.current`; when the renderer claims `working` over a log that says otherwise, **the log wins** and the renderer is moved to *its* state.
+
+Called from the **idle poll's working branch** (every `IDLE_CHECK_INTERVAL_MS`, bounding a desync at 30s) and from the **heartbeat**, immediately before it appends the `activity` event that would strand the session. The heartbeat call is the only coverage for `enableIdleTimeout: false` users — the idle poll does not run for them at all.
+
+**RULE — heal backwards, never forwards.** The watchdog does **not** write a closing event. Writing `idle-end` at `now` would assert the user resumed at that instant, which is exactly what is not known. Landing the renderer in `idle` hands the question to the resume poll, which reads `getIdleTime()` and closes the span at a timestamp the OS can justify. Totals are rebased with `parseBuffer(events, boundaryMs)` — closing at the **boundary that opened the stranded state**, not at `now`, which is what excludes the span from working time rather than banking it. `on-break` additionally needs `breakStartTime` set to that boundary or the tick's break branch is inert and the countdown freezes.
+
+It reports every repair to Sentry (`reason: 'log-renderer-desync'`, with the stranded duration and the opener's `trigger`). **It should never fire.** If it does, a transition path is still gated on something it should not be.
+
+### 3e. Returning From Idle Is the Load-Bearing Guarantee
+
+The `lock` heuristic is retained deliberately (§4) on the strength of one property: **a wrongly-entered idle must end the moment real input reappears.** Three things deliver it, and none may be weakened without revisiting the lock policy:
+
+| Mechanism | Latency |
+|---|---|
+| Idle-resume poll — `getIdleTime() < IDLE_THRESHOLD_SECONDS` | ≤ `IDLE_RESUME_CHECK_MS` (5s) |
+| `resume`/`unlock` power events — immediate re-check, no waiting for the poll | instant |
+| `reconcileLogState` → resume poll (pathological desync only) | ≤ 35s |
+
+- **`backgroundThrottling: false` on the main window ([`electron/main.js`](../electron/main.js)) is load-bearing, not an optimisation.** Chromium throttles timers in hidden renderers to ~1/minute after 5 minutes; a minimised app — the normal state for this fleet — would degrade the 5s resume poll to a minute or worse. The flag is what keeps "the moment activity is detected" true. Never remove it.
+- **Turning `enableIdleTimeout` off while a user sits in `idle` would strand them there**, because the resume poll is the only exit and it is about to stop existing. The idle effect returns them to `working` first (`trigger: 'idle-tracking-disabled'`).
+- **Residual risk, outside the app's reach:** `getSystemIdleTime()` is an OS counter. Input delivered to an elevated-privilege window (Windows `GetLastInputInfo`) or arriving over a remote-control session may not reset it, in which case a genuinely working user reads as idle and will *not* auto-resume. No app-side logic fixes that — it needs the affected machine identified.
+
 **RULE — a heartbeat gap alone must never erase worked time.** The heartbeat period (15 min) sits only 5 min under `SLEEP_GAP_THRESHOLD_MS` (20 min), so a throttled timer or a stalled network call can overshoot it while the machine was awake and the user was working. `wasAwakeDuring(from, to)` settles it with evidence: the native sampler ticks every 5s in the main process, so samples spanning the gap **prove** the machine was running and the patch is skipped; a hole (> `SAMPLE_GAP_TOLERANCE_MS`) means it genuinely slept. It is deliberately conservative — it returns `false` (patch, i.e. legacy behavior) whenever it cannot prove wakefulness: no sampler on older builds, samples aged out of the 45-min retention, or IPC failure.
 
 ---
@@ -189,6 +245,10 @@ The main process forwards `powerMonitor` `suspend`/`lock-screen`/`unlock-screen`
 | `suspend` | **Immediate idle**, `idle-start` stamped at the suspend instant. The machine is stopping, so no work can happen past it — this also brackets the sleep exactly, which is why the resume side needs no gap patch (idle is excluded from worked time). |
 | `lock` | **Confirmed, not trusted.** Only transitions to idle when `getIdleTime() < LOCK_CONFIRM_IDLE_SECONDS` (60s). |
 | `resume` / `unlock` | Re-checks `getIdleTime()` and returns to `working` immediately if under threshold, instead of waiting up to `IDLE_RESUME_CHECK_MS` (5s). A **check, not an assumption** — the OS idle counter can read high right after a resume, in which case the idle-resume poll handles it. |
+
+**Every `idle-start` records which producer fired it** — `meta: { trigger: 'poll' | 'suspend' | 'lock' }` — because the three carry very different confidence: the poll has 15 minutes of measured silence behind it, `suspend` is certain, and `lock` is only the heuristic below. `idle-end` is tagged the same way (`'poll' | 'resume' | 'unlock'`), and user-initiated `pause`/`resume`/`break-end` carry `trigger: 'user'`.
+
+**The `lock` heuristic has a measured false-positive problem.** Of the 332 `idle-start` events in a 30-day sample with screenshot evidence covering the required quiet window, **147 (44%) were poll-impossible** — a capture 0–6 minutes earlier scored 68–100% activity, so the 15-minute silence the poll requires demonstrably did not happen. Those can only have come from the power-event path, and since captures continued through them the machine was not suspended. Before the §3c fix these were catastrophic (nothing ended them); after it they self-correct within `IDLE_RESUME_CHECK_MS`. **The `trigger` tag exists to settle whether the residual rate justifies tightening or retiring the `lock` path** — until enough tagged logs accumulate, that remains unquantified per-producer.
 
 **RULE — never trust a bare `lock` as "user is away".** macOS fires `lock-screen` on screensaver activation, and a screensaver by definition only starts *after* an inactivity timeout, so it carries no new information about presence. Acting on it marks a user who is reading on-screen idle at their screensaver timeout (often 5 min) instead of the real 15-min threshold. Only a lock preceded by recent input (`< LOCK_CONFIRM_IDLE_SECONDS`) means the user deliberately locked and walked away; everything else is left to the normal idle poll. `powerSaveBlocker` is `prevent-display-sleep` only and does **not** suppress screensaver locks.
 
@@ -272,7 +332,7 @@ It `require`s the same `functions/rollup.js` module as the CF, so backfilled and
 ### Traps (all verified against source)
 
 1. **An empty `eventLog` means "unknown", NOT "100% working".** `computeWorkedInWindow` (`sessionSegments.ts:136-138`) and `sessionToSegments` (`:26-34`) both treat an empty log as one full working segment — but `cleanupStaleSessions` writes `workingSeconds: 0` **with** an empty log, which is the default state of every crashed session until the client reopens. The rollup **skips** `status === 'interrupted' && eventLog.length === 0` and records the span as `unknownSeconds`. Feeding those docs to the helpers would claim the entire session span as work.
-2. **`pause` has two meanings.** `patchSleepGap` injects a synthetic `pause`/`resume` pair to exclude machine sleep, so `pauseSeconds` conflates user pauses with sleep. The rollup detects the synthetic pair (stamped at exactly `prevEvent.timestamp + 1000`, with its `resume` > `SLEEP_GAP_THRESHOLD_MS` later), accumulates it into `asleepSeconds`, and **excludes it from `interruptionCount`** — a laptop sleeping is not an interruption to focus. **This is a heuristic**; the durable fix is tagging `meta: { trigger: 'sleep-gap' }` at the injection site (`findSyntheticPauses` already honours the tag when present).
+2. **`pause` has two meanings.** `patchSleepGap` injects a synthetic `pause`/`resume` pair to exclude machine sleep, so `pauseSeconds` conflates user pauses with sleep. The rollup accumulates the synthetic pair into `asleepSeconds` and **excludes it from `interruptionCount`** — a laptop sleeping is not an interruption to focus. `patchSleepGap` now stamps `meta: { trigger: 'sleep-gap' }` at the injection site and `findSyntheticPauses` treats that tag as authoritative; the old timestamp heuristic (stamped at exactly `prevEvent.timestamp + 1000`, `resume` > `SLEEP_GAP_THRESHOLD_MS` later) survives **only** as the fallback for logs written before the tag existed. Do not remove it — historical `time_entries` still depend on it.
 3. **`didNotClockOut` is never cleared on merge.** `updateSessionLog` sets `status: 'completed'` but leaves `didNotClockOut: true`. **Discriminate on `status`, never on `didNotClockOut`.**
 4. **`logUploadedAt` is not a watermark.** `commitSession` sets it to a client-clock `Timestamp.fromMillis(endTimeMs)`; `updateSessionLog` uses `serverTimestamp()`. Use the dirty queue.
 5. **The ledger's `pauseSeconds` under-reports.** `parseBuffer` discards `pauseStart` on `resume` without accumulating it (`parseBuffer.ts:99-105`), so the stored value only ever counts a pause that was *never resumed*. **Verified**: for a work→pause(30m)→resume→break(10m) log, `parseBuffer` reports `pauseSeconds: 0` where the real paused time was 1800s. The rollup therefore derives all four totals from the event log — `working`/`idle`/`break` match the ledger exactly, and `pauseSeconds` becomes correct rather than under-reported.
@@ -284,7 +344,8 @@ It `require`s the same `functions/rollup.js` module as the CF, so backfilled and
 ### Findings — investigated, not yet actioned
 
 - **`activityPercent` is two different metrics mixed at the per-capture level.** `TimeTrackingContext.tsx:819-829` prefers native 5s `powerMonitor` samples, but `calcActivityPercentFromSamples` returns `null` whenever the sample buffer can't answer (main process restarted, window predates the 45-min retention, no working slots) — and the caller then silently falls back to the coarse event-log method. **The method therefore varies per screenshot, not per Electron build**, so it cannot be inferred from `appVersion` even in principle (`appVersion` lives only on `active_sessions`, which is deleted at clock-out). The two are now closer in semantics — both exclude idle/break/pause from the denominator — but still diverge sharply below the 15-min idle threshold: a user reading on-screen for 10 minutes scores **100% by event-log and ~0% by samples**. **Cross-user activity comparisons are unsound until an `activityMethod: 'samples' | 'eventlog'` field is stamped on `ScreenshotDocument`** (one string per capture, no migration). The dashboard caveats this in the UI; the fix is cheap and worth doing before anyone acts on activity numbers.
-- **`SessionEvent.meta` is defined but populated at zero call sites.** Two high-value uses: (a) tag the synthetic pause in `patchSleepGap` with `{ trigger: 'sleep-gap' }`, replacing the timestamp heuristic in trap 2; (b) tag `idle-start` with `{ trigger: 'poll' | 'suspend' | 'lock' }` — there are now **three** producers of differing fidelity (the 30s poll, `suspend` stamping the exact instant, `lock` confirmed against `LOCK_CONFIRM_IDLE_SECONDS`), currently collapsed into one indistinguishable event. That distinction separates "walked away" from "at desk reading" from "closed the laptop".
+- ~~**`SessionEvent.meta` is defined but populated at zero call sites.**~~ **Done** — `patchSleepGap` tags its synthetic pair `{ trigger: 'sleep-gap' }` (trap 2) and every state event now records its producer (§4). **Only logs written from this build forward carry tags**, so any analysis over `meta` must treat an absent tag as *unknown* and keep the pre-existing fallback, never read it as a distinct category.
+- **A historical repair is possible but not yet run.** Desynced spans are machine-identifiable by the `activity`-inside-a-non-working-span fingerprint (§3c), so a backfill could reclassify those stretches as working and re-run the affected `analytics_daily` rollups via `analytics_dirty`. The 45-day sample found ~43h across 9 users. Left undone deliberately: it rewrites settled hours, which is a payroll decision rather than an engineering one.
 - **Integrity + fleet analytics** (deliberately out of scope): `modifications[]` + `originalData` support a per-admin edit audit (who adjusted whose hours, by how much, and why); `isManual` and `didNotClockOut` rates are payroll-risk signals; `appVersion`/`platform` on `active_sessions` give an update-adoption curve — valuable precisely because Electron updates are manual; `captureGroup` + `screenIndex` implicitly record each user's monitor count and when it changes.
 - **Fidelity limits of rollups.** Intra-day activity percentiles are approximated by the decile histogram (±5% at bucket boundaries); cross-day and cross-user percentiles remain exact because every daily doc is fetched. Any new metric requires a `version` bump + backfill re-run. **Group history is as-of-now, not as-of-then**: moving a user between groups retroactively re-attributes their history (this is what people expect from "show me the CA team's last 90 days", and the UI says so).
 - **Interpretation caveat.** Activity % measures *input*, not value — reading, calls, and thinking all register as inactive. The dashboard surfaces a distribution rather than a bare mean and frames it as a coverage/wellbeing signal, deliberately not a ranking.
@@ -351,7 +412,13 @@ The mapping mirrors the tick branch for branch, which is the whole point:
 - [ ] Never count idle/break/pause minutes in the activity denominator.
 - [ ] Never default a missing `lastActivityPercent` to a number — screenshots-off users have no activity value at all. Use `active_sessions.enableScreenshots` to tell "off" from "not captured yet".
 - [ ] `active_sessions.lastUpdated` is a **client→server check-in time** (clock-in, state transition, 15-min heartbeat), *not* a last-user-input time — Active Users surfaces it as "Last Synced at" for exactly that reason. Never relabel it as activity/presence.
-- [ ] Never trust a bare `lock` as "away" — confirm with `getIdleTime()` first (screensavers fire it).
+- [ ] **Never gate a state transition on `/transition`** — append the event, apply local state, then `syncTransition()` fire-and-forget (§3c). Awaiting it strands the renderer out of step with the log and kills idle recovery.
+- [ ] Set `displayStateRef`/`entryStartTimeRef` eagerly in a transition, not just the React state — `isTransitioningRef` releases before the commit lands.
+- [ ] Tag every new state event with `meta.trigger`, and treat an **absent** tag as unknown (pre-existing logs have none).
+- [ ] Never trust a bare `lock` as "away" — confirm with `getIdleTime()` first (screensavers fire it). Measured false-positive rate is high; the policy is retained **only** because §3e guarantees a fast return from idle.
+- [ ] Never remove `backgroundThrottling: false` from the main window — it is what keeps the 5s idle-resume poll running while the app is minimised (§3e).
+- [ ] Never lengthen `IDLE_RESUME_CHECK_MS` or add an await in front of the resume poll without revisiting the `lock` policy that depends on it.
+- [ ] The desync watchdog heals **backwards** (renderer → log's state), never by inventing a closing event (§3d).
 - [ ] Never patch a heartbeat gap without confirming sleep via `wasAwakeDuring()` — the gap alone erases real work.
 - [ ] **Analytics:** never feed an empty-`eventLog` session to `sessionToSegments`/`computeWorkedInWindow` — they read it as 100% working. Skip it and record `unknownSeconds`.
 - [ ] **Analytics:** discriminate crashed sessions on `status`, never on `didNotClockOut` (never cleared on merge).
