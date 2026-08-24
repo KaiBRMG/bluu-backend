@@ -43,7 +43,7 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
   // Routes that render with no internal-employee session at all: the OAuth pages
   // and the creator portal (which runs its own auth context). The `/creator`
   // check must be segment-bounded — a bare startsWith('/creator') would also
-  // swallow the internal staff pages at `/creators/*` and silently skip session
+  // swallow the internal staff pages at `/creator-portal/*` and silently skip session
   // enforcement there.
   const isUnauthenticatedRoute =
     pathname?.startsWith('/auth/') ||

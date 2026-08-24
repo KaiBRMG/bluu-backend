@@ -41,7 +41,7 @@ import { useBasicUsers } from "@/hooks/useBasicUsers";
 import { apiRequest } from "@/lib/clientApi";
 import { PUBLIC_APP_ORIGIN } from "@/lib/publicOrigin";
 import { toast } from "sonner";
-import { ConfirmDialog, ARCHIVE_CR_TEXT, UNARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
+import { TransferDialog, ConfirmDialog, ARCHIVE_CR_TEXT, UNARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
 
 // ─── Date picker ─────────────────────────────────────────────────────────────
 
@@ -193,6 +193,7 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmUnarchive, setConfirmUnarchive] = useState(false);
   const [archiveSaving, setArchiveSaving] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
 
   const hasChanged =
     fields.fanName !== entry.fanName ||
@@ -529,6 +530,8 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
                 Mark as Complete
               </DropdownMenuItem>
               <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setShowTransfer(true)}>Transfer</DropdownMenuItem>
+              <DropdownMenuSeparator />
               {entry.status === "Archived" ? (
                 <DropdownMenuItem onClick={() => setConfirmUnarchive(true)}>Unarchive</DropdownMenuItem>
               ) : (
@@ -582,6 +585,14 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
         </AlertDialogContent>
       </AlertDialog>
 
+      {showTransfer && (
+        <TransferDialog
+          entryId={entry.id}
+          currentOwnerUid={entry.createdBy}
+          onClose={() => setShowTransfer(false)}
+          onTransferred={onClose}
+        />
+      )}
       {confirmArchive && (
         <ConfirmDialog
           title="Archive Custom"
@@ -1493,6 +1504,7 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
   const [deleteTarget, setDeleteTarget] = useState<CampaignEntry | null>(null);
   const [archiveEntry, setArchiveEntry] = useState<CampaignEntry | null>(null);
   const [unarchiveEntry, setUnarchiveEntry] = useState<CampaignEntry | null>(null);
+  const [transferEntry, setTransferEntry] = useState<CampaignEntry | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const unsubRef = useRef<(() => void) | null>(null);
@@ -1707,6 +1719,8 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => setTransferEntry(entry)}>Transfer</DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         {entry.status === "Archived" ? (
                           <DropdownMenuItem onClick={() => setUnarchiveEntry(entry)}>Unarchive</DropdownMenuItem>
                         ) : (
@@ -1769,6 +1783,13 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
         </AlertDialogContent>
       </AlertDialog>
 
+      {transferEntry && (
+        <TransferDialog
+          entryId={transferEntry.id}
+          currentOwnerUid={transferEntry.createdBy}
+          onClose={() => setTransferEntry(null)}
+        />
+      )}
       {archiveEntry && (
         <ConfirmDialog
           title="Archive Custom"
@@ -1811,6 +1832,7 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
   const [deleteTarget, setDeleteTarget] = useState<CampaignEntry | null>(null);
   const [archiveEntry, setArchiveEntry] = useState<CampaignEntry | null>(null);
   const [unarchiveEntry, setUnarchiveEntry] = useState<CampaignEntry | null>(null);
+  const [transferEntry, setTransferEntry] = useState<CampaignEntry | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const unsubRef = useRef<(() => void) | null>(null);
@@ -2033,6 +2055,8 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => setTransferEntry(entry)}>Transfer</DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         {entry.status === "Archived" ? (
                           <DropdownMenuItem onClick={() => setUnarchiveEntry(entry)}>Unarchive</DropdownMenuItem>
                         ) : (
@@ -2093,6 +2117,13 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
         </AlertDialogContent>
       </AlertDialog>
 
+      {transferEntry && (
+        <TransferDialog
+          entryId={transferEntry.id}
+          currentOwnerUid={transferEntry.createdBy}
+          onClose={() => setTransferEntry(null)}
+        />
+      )}
       {archiveEntry && (
         <ConfirmDialog
           title="Archive Custom"

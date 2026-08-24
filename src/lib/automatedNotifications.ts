@@ -2,7 +2,7 @@ import { notifications, type NotificationContent } from '@/lib/notificationConte
 
 /**
  * Read-only catalogue of every notification the system sends **automatically**
- * (i.e. not an admin broadcast from /admin/notifications).
+ * (i.e. not an admin broadcast from /admin-portal/notifications).
  *
  * This file adds no copy of its own — RULE 1 of the notification system is that
  * titles/messages live only in `notificationContent.ts`. Each entry calls the
@@ -98,10 +98,20 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     category: 'Custom Requests',
     event: 'CR / campaign transferred',
     trigger:
-      'A CA transfers an entry to another user, making them responsible for the fan follow-up and remaining balance.',
+      'A CA transfers their own entry to another user, making them responsible for the fan follow-up and remaining balance.',
     recipients: 'The user receiving the transfer',
     sources: ['src/app/api/campaign-tracking/[id]/transfer/route.ts'],
     content: notifications.crTransferred('{transferrerName}', '{stageName}', '{campaigns | custom-requests}'),
+  },
+  {
+    id: 'crTransferredOnBehalf',
+    category: 'Custom Requests',
+    event: 'CR / campaign transferred by someone else',
+    trigger:
+      'A manager (or any user who does not own the entry) transfers it to another user — the copy names the previous owner instead of the transferrer.',
+    recipients: 'The user receiving the transfer',
+    sources: ['src/app/api/campaign-tracking/[id]/transfer/route.ts'],
+    content: notifications.crTransferredOnBehalf('{previousOwnerName}', '{stageName}', '{campaigns | custom-requests}'),
   },
 
   // ─── Leave ────────────────────────────────────────────────────────────────

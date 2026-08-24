@@ -518,7 +518,7 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
               Screenshots can be enabled in the user&apos;s profile information in{' '}
               <span
                 className="underline cursor-pointer"
-                onClick={() => router.push('/admin/user-management')}
+                onClick={() => router.push('/admin-portal/user-management')}
               >
                 User Management &gt; Employee Registry &gt; Time Tracking
               </span>

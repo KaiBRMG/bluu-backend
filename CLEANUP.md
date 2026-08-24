@@ -54,7 +54,7 @@
 
 ### The big one: custom-requests pages
 
-`src/app/(main)/creators/custom-requests/page.tsx` (**1,952 lines**) and `src/app/(main)/ca-portal/custom-requests/page.tsx` (**1,433 lines**) each locally define near-identical copies of `DatePickerInput`, `StatusBadge`, `Field`, `SummaryTile`, and a ~230-line `NewEntryWizard`. Some sharing already exists (`src/components/campaign/entryActions.tsx`), so the pattern is established — it just wasn't followed for the rest.
+`src/app/(main)/creator-portal/custom-requests/page.tsx` (**1,952 lines**) and `src/app/(main)/ca-portal/custom-requests/page.tsx` (**1,433 lines**) each locally define near-identical copies of `DatePickerInput`, `StatusBadge`, `Field`, `SummaryTile`, and a ~230-line `NewEntryWizard`. Some sharing already exists (`src/components/campaign/entryActions.tsx`), so the pattern is established — it just wasn't followed for the rest.
 
 **Why it matters:** highest-value item in this review. Any status-badge or wizard change must be made twice, and the copies have already drifted (the CA `DatePickerInput` grew `disabled`/`disabledClassName` props the manager one lacks).
 **Impact:** ~500–800 lines removed; future campaign-tracking changes become single-site edits.
@@ -90,7 +90,7 @@ Ten `src/components/ui/` files have zero consumers:
 
 - The two custom-requests pages (§2) — splitting them into components *is* the simplification.
 - `src/contexts/TimeTrackingContext.tsx` (898 lines) — long but **deliberately** so: the crash-robustness/buffer design in `documentation/time-tracking.md` explains the state machine. **Do not simplify** — load-bearing complexity.
-- `src/components/admin/user-management/UserDetailContent.tsx` (958 lines) and `src/app/(main)/creators/content-planning/page.tsx` (1,157 lines) — same monolithic-page smell as custom-requests, lower urgency.
+- `src/components/admin/user-management/UserDetailContent.tsx` (958 lines) and `src/app/(main)/creator-portal/content-planning/page.tsx` (1,157 lines) — same monolithic-page smell as custom-requests, lower urgency.
 
 ---
 

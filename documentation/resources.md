@@ -1,6 +1,6 @@
 # Resources (app-resources collection)
 
-> The `/applications/apps-resources` page lists documents from the Firestore `app-resources` collection. Group- and user-filtered server-side, client-cached. Managed from `/admin/resource-management`.
+> The `/applications/apps-resources` page lists documents from the Firestore `app-resources` collection. Group- and user-filtered server-side, client-cached. Managed from `/admin-portal/resource-management`.
 >
 > Historic note: this data originated in a Notion database and was migrated into Firestore. The `notionPageUrl` / `isNotionPage` fields are retained so a row that references a page (rather than an external link) still resolves to a URL. There is no longer any live Notion API dependency.
 
@@ -17,7 +17,7 @@
 | `src/hooks/useResources.ts` | End-user client cache (sessionStorage, 5 min, key `bluu_resources_v1`) |
 | `src/hooks/useAdminResources.ts` | Management client cache + CRUD (key `bluu_admin_resources_v1`) |
 | `src/hooks/usePinnedResources.ts` | Pinned-resource state |
-| `src/app/(main)/admin/resource-management/` | Management UI (table, filters, search, create/edit dialogs) |
+| `src/app/(main)/admin-portal/resource-management/` | Management UI (table, filters, search, create/edit dialogs) |
 
 ## Firestore
 
@@ -48,7 +48,7 @@
 - **Admins** (`token.admin === true` or `admin` group) **bypass** the filter.
 - The page is gated by the sidebar `apps-resources` page permission, so no per-page `permittedPageIds` check runs inside the route.
 
-## Management (`/admin/resource-management`)
+## Management (`/admin-portal/resource-management`)
 
 - Gated by the `admin-resource-management` page permission (also allowed for `token.admin`).
 - The three admin API routes all re-check that permission server-side.

@@ -259,7 +259,7 @@ The main process holds the window `close` (the single choke-point for both the X
 
 ## 5. Analytics (admin dashboard)
 
-> `/admin/shift-management` → **Analytics** tab. Individual / group / company-wide views over up to 90 days.
+> `/admin-portal/shift-management` → **Analytics** tab. Individual / group / company-wide views over up to 90 days.
 
 ### Why rollups, not live queries
 
@@ -354,7 +354,7 @@ It `require`s the same `functions/rollup.js` module as the CF, so backfilled and
 
 ## 6. Session Walkthrough (admin timesheets)
 
-> `/admin/shift-management` → **Timesheets** → click any segment on a day bar. Renders the session's verbatim `eventLog` on a timeline spanning its start to its end.
+> `/admin-portal/shift-management` → **Timesheets** → click any segment on a day bar. Renders the session's verbatim `eventLog` on a timeline spanning its start to its end.
 
 ```
 GET /api/time-tracking/entries

@@ -365,7 +365,12 @@ function ViewCard({ entry, creatorName, onClose, userNames = {} }: ViewCardProps
       </Card>
 
       {showTransfer && (
-        <TransferDialog entryId={entry.id} onClose={() => setShowTransfer(false)} onTransferred={onClose} />
+        <TransferDialog
+          entryId={entry.id}
+          currentOwnerUid={entry.createdBy}
+          onClose={() => setShowTransfer(false)}
+          onTransferred={onClose}
+        />
       )}
       {confirmArchive && (
         <ConfirmDialog
@@ -1082,7 +1087,11 @@ function CreatorRequestsTable({ creatorID, creatorName, creators, userNames, onC
         />
       )}
       {transferEntry && (
-        <TransferDialog entryId={transferEntry.id} onClose={() => setTransferEntry(null)} />
+        <TransferDialog
+          entryId={transferEntry.id}
+          currentOwnerUid={transferEntry.createdBy}
+          onClose={() => setTransferEntry(null)}
+        />
       )}
       {archiveEntry && (
         <ConfirmDialog
@@ -1379,7 +1388,9 @@ export default function CACustomRequestsPage() {
     <AppLayout>
       <div className="max-w-7xl">
         <h1 className="text-2xl font-bold tracking-tight mb-2">Custom Requests</h1>
-
+        <p className="text-zinc-400">
+          For a custom that has been completed, please notify your team leader. Make sure to include the CR code and creator!
+        </p>
         <div className="mt-6 flex items-center gap-3">
           <label htmlFor="creator-select" className="text-sm font-medium text-zinc-300 shrink-0">
             Select a Creator

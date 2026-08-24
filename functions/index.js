@@ -258,7 +258,7 @@ exports.cleanupStaleSessions = onSchedule({ schedule: '0 2 * * *', timeZone: 'UT
  * Daily analytics rollup — runs once per day at 04:00 UTC.
  *
  * Writes one analytics_daily/{userId}_{YYYY-MM-DD} document per user per LOCAL
- * day, powering the Analytics tab on /admin/shift-management. This exists
+ * day, powering the Analytics tab on /admin-portal/shift-management. This exists
  * because no Firestore index supports querying `time_entries` without `userId`
  * — company-wide analytics read live would fan out across every user on every
  * dashboard load. See documentation/time-tracking.md § Analytics.

@@ -17,14 +17,22 @@ export interface PageDef {
 }
 
 export const TEAMSPACES: TeamspaceDef[] = [
-  { id: 'ca-portal', name: 'CA Portal', icon: 'MessageSquareQuote', order: 0 },
-  { id: 'smm-portal', name: 'SMM Portal', icon: 'MessageSquareQuote', order: 1 },
-  { id: 'creators', name: 'Creators', icon: 'ShieldUser', order: 2 },
-  { id: 'admin', name: 'Admin', icon: 'ShieldUser', order: 3 },
+  { id: 'admin-portal', name: 'Admin Portal', icon: 'ShieldUser', order: 0 },
+  { id: 'ca-portal', name: 'CA Portal', icon: 'MessageSquareQuote', order: 1 },
+  { id: 'smm-portal', name: 'SMM Portal', icon: 'MessageSquareQuote', order: 2 },
+  { id: 'creator-portal', name: 'Creator Portal', icon: 'ShieldUser', order: 3 },
   { id: 'apps', name: 'Apps', icon: 'PanelLeft', order: 4 },
 ];
 
 export const PAGES: PageDef[] = [
+  // Admin Portal
+  { pageId: 'user-management', title: 'User Management', teamspaceId: 'admin-portal', href: '/admin-portal/user-management', icon: 'UserRoundCog', order: 0 },
+  { pageId: 'sharing', title: 'Sharing', teamspaceId: 'admin-portal', href: '/admin-portal/sharing', icon: 'Share2', order: 1 },
+  { pageId: 'shift-management', title: 'Shift Management', teamspaceId: 'admin-portal', href: '/admin-portal/shift-management', icon: 'CalendarCog', order: 2 },
+  { pageId: 'admin-notifications', title: 'Notifications', teamspaceId: 'admin-portal', href: '/admin-portal/notifications', icon: 'BellPlus', order: 3 },
+  { pageId: 'admin-creator-management', title: 'Creator Management', teamspaceId: 'admin-portal', href: '/admin-portal/creator-management', icon: 'UserStar', order: 4 },
+  { pageId: 'admin-resource-management', title: 'Resource Management', teamspaceId: 'admin-portal', href: '/admin-portal/resource-management', icon: 'BookOpenText', order: 5 },
+
   // CA Portal
   { pageId: 'ca-admin', title: 'Admin', teamspaceId: 'ca-portal', href: '/ca-portal/admin', icon: 'Cog', order: 0 },
   { pageId: 'ca-dashboard', title: 'Dashboard', teamspaceId: 'ca-portal', href: '/ca-portal/dashboard', icon: 'LayoutDashboard', order: 1 },
@@ -39,19 +47,10 @@ export const PAGES: PageDef[] = [
   { pageId: 'smm-dashboard', title: 'Dashboard', teamspaceId: 'smm-portal', href: '/smm-portal/dashboard', icon: 'LayoutDashboard', order: 1 },
   { pageId: 'smm-xaccounts', title: 'Viral Accounts', teamspaceId: 'smm-portal', href: '/smm-portal/xaccounts', icon: 'BookHeart', order: 2 },
 
-
-  // Admin
-  { pageId: 'user-management', title: 'User Management', teamspaceId: 'admin', href: '/admin/user-management', icon: 'UserRoundCog', order: 0 },
-  { pageId: 'sharing', title: 'Sharing', teamspaceId: 'admin', href: '/admin/sharing', icon: 'Share2', order: 1 },
-  { pageId: 'shift-management', title: 'Shift Management', teamspaceId: 'admin', href: '/admin/shift-management', icon: 'CalendarCog', order: 2 },
-  { pageId: 'admin-notifications', title: 'Notifications', teamspaceId: 'admin', href: '/admin/notifications', icon: 'BellPlus', order: 3 },
-  { pageId: 'admin-creator-management', title: 'Creator Management', teamspaceId: 'admin', href: '/admin/creator-management', icon: 'UserStar', order: 4 },
-  { pageId: 'admin-resource-management', title: 'Resource Management', teamspaceId: 'admin', href: '/admin/resource-management', icon: 'BookOpenText', order: 5 },
-
   
-  // Creators
-  { pageId: 'creators-custom-requests', title: 'Custom Requests', teamspaceId: 'creators', href: '/creators/custom-requests', icon: 'ImagePlay', order: 0 },
-  { pageId: 'creators-content-planning', title: 'Content Planning', teamspaceId: 'creators', href: '/creators/content-planning', icon: 'CalendarCheck', order: 1 },
+  // Creator Portal
+  { pageId: 'creators-custom-requests', title: 'Custom Requests', teamspaceId: 'creator-portal', href: '/creator-portal/custom-requests', icon: 'ImagePlay', order: 0 },
+  { pageId: 'creators-content-planning', title: 'Content Planning', teamspaceId: 'creator-portal', href: '/creator-portal/content-planning', icon: 'CalendarCheck', order: 1 },
 
   // Apps
   { pageId: 'time-tracking', title: 'Time Tracking', teamspaceId: 'apps', href: '/applications/time-tracking', icon: 'ClockFading', order: 0 },

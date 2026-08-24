@@ -62,9 +62,25 @@
 
 ## Transfer
 
-`POST /api/campaign-tracking/[id]/transfer` reassigns `createdBy` to another active `CA`-group user and notifies them (`crTransferred` — see [notifications.md](notifications.md)).
+`POST /api/campaign-tracking/[id]/transfer` reassigns `createdBy` to another active `CA`-group user and notifies them (see [notifications.md](notifications.md)).
 
 - Both dashboards update instantly via live `onSnapshot` queries keyed on `createdBy` → **no cache invalidation needed**.
 - **RULE:** `createdBy` is deliberately **not** in `EDITABLE_FIELDS` of `PATCH /api/campaign-tracking/[id]`. Reassignment **must** go through the transfer route so the notification always fires.
 
-Shared UI (`TransferDialog`, `ConfirmDialog`) lives in `src/components/campaign/entryActions.tsx`, reached from the **Actions** menu on CA-view cards + table rows.
+### Two notification variants — chosen server-side, never by the client
+
+| Who transferred | Factory | Names |
+|---|---|---|
+| The entry's own owner (`createdBy === token.uid`) | `crTransferred` | the **transferrer** |
+| Anyone else — a **manager** on `creators/custom-requests`, or a CA moving a colleague's entry from the CA creator table | `crTransferredOnBehalf` | the **previous owner** |
+
+The route derives this from the stored `createdBy` vs `token.uid`. Do **not** add a client-supplied variant flag — the recipient is inheriting the previous owner's fan and outstanding balance, and that name must come from the doc.
+
+### Where the action lives
+
+Shared UI (`TransferDialog`, `ConfirmDialog`) lives in `src/components/campaign/entryActions.tsx`, reached from the **Actions** menu on:
+
+- **CA view** (`ca-portal/custom-requests`, `ca-portal/campaigns`) — view cards + table rows.
+- **Manager view** (`creators/custom-requests`) — `ManagerViewCard`, `ManagerCreatorTable` rows, and `ChatAgentTable` rows.
+
+`TransferDialog` takes an optional **`currentOwnerUid`** and drops that uid from the picker alongside the acting user's. Managers transfer entries they do not own, so without it the current owner would be offered as a target (a silent no-op that still fires a notification). Every call site passes `entry.createdBy`.

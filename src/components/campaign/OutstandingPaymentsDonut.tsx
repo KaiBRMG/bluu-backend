@@ -120,7 +120,7 @@ export function OutstandingPaymentsDonut({ entries, creators }: OutstandingPayme
               </button>
             </TooltipTrigger>
             <TooltipContent className="max-w-xs">
-              Outstanding payments on customs should always be minimised. Complete a payment by following up with the fan -- or, by <b>Archiving</b> the custom if the fan/model can no longer proceed with the custom. If are no longer working on the creator, you can <b>Transfer</b> to another agent.
+              Outstanding payments on customs should always be minimised. Complete a payment by following up with the fan &mdash; or, by <b>Archiving</b> the custom if the fan/model can no longer proceed with the custom. If you are no longer working on the creator, you can <b>Transfer</b> to another agent.
             </TooltipContent>
           </Tooltip>
         </div>

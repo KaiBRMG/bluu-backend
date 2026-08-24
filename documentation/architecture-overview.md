@@ -71,7 +71,8 @@ ONLYFANS_ACCOUNT_ID        # optional; pins the operated account (required once 
 ```
                  ┌─────────────────────────────────────────┐
    Electron ───► │  Internal portals (employees)           │
-   (desktop)     │  /ca-portal/  /admin/  /applications/    │
+   (desktop)     │  /admin-portal/  /ca-portal/            │
+                 │  /creator-portal/  /applications/       │
                  │  AuthProvider  +  withAuth               │
                  └─────────────────────────────────────────┘
                  ┌─────────────────────────────────────────┐
@@ -83,7 +84,7 @@ ONLYFANS_ACCOUNT_ID        # optional; pins the operated account (required once 
 
 | Portal | Route prefix | Auth context | API middleware |
 |---|---|---|---|
-| Internal (employees) | `/ca-portal/`, `/admin/`, `/applications/` | `AuthProvider` | `withAuth` |
+| Internal (employees) | `/admin-portal/`, `/ca-portal/`, `/creator-portal/`, `/applications/` | `AuthProvider` | `withAuth` |
 | Creator | `/creator/` | `CreatorAuthProvider` | `withCreatorAuth` |
 
 Browser access to internal routes is blocked by `src/middleware.ts` — see [auth.md](auth.md#browser-access-middleware).

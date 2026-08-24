@@ -34,7 +34,7 @@ export const notifications = {
     title: 'Action Required',
     message: 'A new user has logged in without a group. Assign them one to give them access.',
     type: 'action',
-    actionUrl: '/admin/user-management',
+    actionUrl: '/admin-portal/user-management',
   }),
 
   // ─── Custom requests ──────────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ export const notifications = {
     title: '📷 A New CR has been Created!',
     message: `${creatorName} has added a new CR for ${stageName}. Review the details and approve ASAP!`,
     type: 'action',
-    actionUrl: '/creators/custom-requests',
+    actionUrl: '/creator-portal/custom-requests',
   }),
 
   crRejected: (editorName: string, cr: string, stageName: string): NotificationContent => ({
@@ -56,12 +56,22 @@ export const notifications = {
     title: '✅ Custom Request Completed',
     message: `${cr} has been completed on ${stageName}. Please review and send to the fan ASAP!`,
     type: 'success',
-    actionUrl: '/creators/custom-requests',
+    actionUrl: '/creator-portal/custom-requests',
   }),
 
   crTransferred: (transferrerName: string, creatorName: string, actionUrl: string): NotificationContent => ({
     title: '🔄 Custom Transferred to You',
     message: `❗${transferrerName} transferred a custom on ${creatorName} to you. You are now responsible for following up the fan, collecting the remaining balance, and completing the request.`,
+    type: 'action',
+    actionUrl,
+  }),
+
+  // Sent when the transfer was performed by someone who did not own the entry
+  // (e.g. a manager reassigning a CA's custom) — the recipient needs to know
+  // whose custom they are inheriting, not who moved it.
+  crTransferredOnBehalf: (previousOwnerName: string, creatorName: string, actionUrl: string): NotificationContent => ({
+    title: '🔄 Custom Transferred to You',
+    message: `❗${previousOwnerName}'s custom on ${creatorName} has been transferred to you. You are now responsible for following up the fan, collecting the remaining balance, and completing the request.`,
     type: 'action',
     actionUrl,
   }),
@@ -126,7 +136,7 @@ export const notifications = {
     title: '✅ Content Request Completed',
     message: `${stageName} has completed ${contentSummary}!`,
     type: 'success',
-    actionUrl: '/creators/content-planning',
+    actionUrl: '/creator-portal/content-planning',
   }),
 
   // ─── Model submissions ────────────────────────────────────────────────────────

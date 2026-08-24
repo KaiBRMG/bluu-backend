@@ -16,6 +16,21 @@ const nextConfig: NextConfig = {
   // Enable React strict mode for better performance warnings in development
   reactStrictMode: true,
 
+  // Compatibility shims for the Admin Portal / Creator Portal rename.
+  // `actionUrl` is persisted on every notification doc, so notifications sent
+  // before the rename still point at `/admin/*` and `/creators/*`. These keep
+  // them (and any bookmark, or a renderer stale enough to hold the old hrefs —
+  // rule 9c) resolving. Deliberately 307, not 308: browsers cache a permanent
+  // redirect indefinitely, and these are meant to be deletable once the old
+  // notifications have aged out. `/api/admin/*` and `/api/creators/*` are
+  // untouched — they start with `/api` and never match these sources.
+  async redirects() {
+    return [
+      { source: '/admin/:path*', destination: '/admin-portal/:path*', permanent: false },
+      { source: '/creators/:path*', destination: '/creator-portal/:path*', permanent: false },
+    ];
+  },
+
   // Production optimizations
   compiler: {
     // Remove console logs in production (except errors and warnings)

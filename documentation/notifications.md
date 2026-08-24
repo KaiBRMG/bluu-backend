@@ -14,7 +14,7 @@
 | `src/lib/automatedNotifications.ts` | **Display-only catalogue** of every *automated* notification (trigger, recipients, source route). Derives its copy by calling the real factories with `{token}` placeholders — it never retypes a title or message. |
 | `src/lib/services/onlyfansOpsAlerts.ts` | `sendOpsAlertOnce` + the single-maintainer recipient uid, for the two OF Manager diagnostics |
 | `src/lib/notificationTypeBadge.ts` | Two maps, one per ground. `notificationTypeBadge(type)` — badge label/colour for the three **admin** surfaces (light chips, `-600` inks). `notificationTypeDot(type)` — the `-400` semantic hue for the **tray's** leading dot on the near-black panel. Import the one that matches the surface; never re-map a type to a hex inline. |
-| `src/components/admin/notifications/AutomatedNotificationsList.tsx` | Renders the catalogue on the **Automated** tab of `/admin/notifications` |
+| `src/components/admin/notifications/AutomatedNotificationsList.tsx` | Renders the catalogue on the **Automated** tab of `/admin-portal/notifications` |
 | API: `src/app/api/notifications/*` | `create`, `dismiss`, `mark-read` |
 | API: `src/app/api/admin/notifications/*` | admin send + `[batchId]/recipients` (GET) + `[batchId]` (DELETE = "unsend": removes every per-user notification doc for the batch + the batch record) |
 
@@ -55,7 +55,8 @@ Every row below is **automated** — fired by a handler on an event, never sent 
 | CR submitted | `notifications.crCreated(creatorName, stageName)` | every uid in `groups/OFAM.members` | `campaign-tracking/create` |
 | CR rejected | `notifications.crRejected(editorName, cr, stageName)` | the entry's `createdBy` | `campaign-tracking/[id]` |
 | CR completed | `notifications.crCompleted(cr, stageName)` | `groups/OFAM.members` | `campaign-tracking/[id]` **and** `campaign-tracking/[id]/creator-complete` |
-| CR/campaign transferred | `notifications.crTransferred(transferrerName, creatorName, actionUrl)` | the receiving uid | `campaign-tracking/[id]/transfer` |
+| CR/campaign transferred **by its owner** | `notifications.crTransferred(transferrerName, creatorName, actionUrl)` | the receiving uid | `campaign-tracking/[id]/transfer` |
+| CR/campaign transferred **by someone else** (manager) | `notifications.crTransferredOnBehalf(previousOwnerName, creatorName, actionUrl)` | the receiving uid | `campaign-tracking/[id]/transfer` |
 | Leave approved | `notifications.leaveApproved(leaveLabel, dateStr)` | the requesting user | `shifts/leave/[leaveId]/approve` |
 | Leave denied | `notifications.leaveDenied(leaveLabel, dateStr)` | the requesting user | `shifts/leave/[leaveId]/approve` |
 | Dispute assigned | `notifications.disputeAssigned(createdByName)` | `assignedTo` (skipped when `'No One'`) | `disputes` (POST) |
@@ -98,7 +99,7 @@ The one notification whose recipient list is decided by **what version of the de
 
 ## The admin notifications page
 
-`/admin/notifications` has two tabs:
+`/admin-portal/notifications` has two tabs:
 
 - **Sent** — history of manual admin broadcasts (`notifications-batches`), click a row for per-recipient read/dismiss state and to unsend.
 - **Automated** — a **read-only** catalogue of the table above, grouped by category, from `src/lib/automatedNotifications.ts`. Expanding an entry shows the message template (interpolated values render as `{token}` chips), what fires it, who receives it, the `actionUrl`, and the source route. Nothing on this tab is sendable, editable or unsendable — it exists so admins can see what the system sends on its own.

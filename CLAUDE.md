@@ -15,7 +15,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 
 ```
                     ┌───────────────────────────────────────────────┐
- Electron desktop ─►│  Internal portals  /ca-portal /admin /apps    │─► AuthProvider + withAuth
+ Electron desktop ─►│  Internal portals /admin-portal /ca-portal ..│─► AuthProvider + withAuth
  (employees only)   └───────────────────────────────────────────────┘
                     ┌───────────────────────────────────────────────┐
  System browser  ─►│  Creator portal    /creator                   │─► CreatorAuthProvider + withCreatorAuth
@@ -80,7 +80,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
   - `permissions:resetScreenCapture` in [`electron/main.js`](electron/main.js): darwin-only `tccutil reset ScreenCapture com.bluu.app`. **No once-per-machine marker** — the old `.screencapture-tcc-reset-done` guard was removed so the Settings button can actually re-run for users whose automatic reset already fired. Exposed via [`preload.js`](electron/preload.js), typed optional in [`electron.d.ts`](src/types/electron.d.ts).
 - **To remove** (once effectively all users are on a signed build and have been fixed): delete the `permissions:resetScreenCapture` handler in `main.js`, its `preload.js`/`electron.d.ts` entries, the mount reset in `onboarding/permission/screen/page.tsx`, the `tccResetAttemptedRef` block in `TimeTrackingContext.tsx`, the Settings field in `AppSettingsForm.tsx`, `src/lib/markScreenshotBugFixed.ts` + its `/api/user/update` allowlist entry, and the `screenshotBugFixed` field (type + `ensureUserExists`). All lines are tagged `TEMPORARY`. Details in [electron.md](documentation/electron.md#screen-capture-permission-repair-macos-tcc-temporary).
 
-## Known Issues: Sharing & Permissions (`/admin/sharing`) — deferred work
+## Known Issues: Sharing & Permissions (`/admin-portal/sharing`) — deferred work
 
 The Sharing page's own three files were reworked on 2026-08-14 (real `<table>` semantics, shadcn `Popover`+`Command` pickers, toasts with Undo, AA-legal text colours, skeleton/empty/error states). The findings below were **deliberately left**, because every one of them lives in [`useAdminData.ts`](src/hooks/useAdminData.ts) or the permissions API route — both shared with other admin surfaces, and both out of scope for that pass. Fix them there, not by patching the Sharing page around them.
 
@@ -190,7 +190,7 @@ Two related notes on the page itself, both **intentional** rather than outstandi
 
     Leave a platform `null` if the release does not affect it (e.g. a mac-only fix must not make Windows reinstall). See [electron.md](documentation/electron.md).
 
-15. **New automated notification → update the Automated Notifications catalogue** — the **Automated** tab of `/admin/notifications` is the admin-facing record of everything the system sends on its own, and it renders entirely from `AUTOMATED_NOTIFICATIONS` in [`src/lib/automatedNotifications.ts`](src/lib/automatedNotifications.ts). Any change that adds, removes, or re-targets an automated notification is **incomplete** until that array matches. In the **same** change:
+15. **New automated notification → update the Automated Notifications catalogue** — the **Automated** tab of `/admin-portal/notifications` is the admin-facing record of everything the system sends on its own, and it renders entirely from `AUTOMATED_NOTIFICATIONS` in [`src/lib/automatedNotifications.ts`](src/lib/automatedNotifications.ts). Any change that adds, removes, or re-targets an automated notification is **incomplete** until that array matches. In the **same** change:
     - Add/update/remove the entry (`id` = factory name, plus `category`, `event`, `trigger`, `recipients`, `sources`).
     - **Call the real factory** with `{token}` placeholders for interpolated values — never retype a title or message here (rule 5: copy lives only in `notificationContent.ts`).
     - A new category also needs adding to `AutomatedNotificationCategory` **and** `AUTOMATED_NOTIFICATION_CATEGORIES` (the second is what the UI iterates — miss it and the section renders nowhere).

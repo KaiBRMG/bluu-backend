@@ -23,9 +23,14 @@ interface TransferDialogProps {
   entryId: string;
   onClose: () => void;
   onTransferred?: () => void;
+  /**
+   * The entry's current owner (`createdBy`). Managers transfer entries they do
+   * not own, so the owner — not just the acting user — must be off the list.
+   */
+  currentOwnerUid?: string;
 }
 
-export function TransferDialog({ entryId, onClose, onTransferred }: TransferDialogProps) {
+export function TransferDialog({ entryId, onClose, onTransferred, currentOwnerUid }: TransferDialogProps) {
   const { user } = useAuth();
   const { users } = useBasicUsers();
   const [selected, setSelected] = useState<{ uid: string; name: string } | null>(null);
@@ -34,10 +39,10 @@ export function TransferDialog({ entryId, onClose, onTransferred }: TransferDial
   const caUsers = useMemo(
     () =>
       users
-        .filter(u => !u.isArchived && u.groups.includes("CA") && u.uid !== user?.uid)
+        .filter(u => !u.isArchived && u.groups.includes("CA") && u.uid !== user?.uid && u.uid !== currentOwnerUid)
         .map(u => ({ uid: u.uid, name: u.displayName || `${u.firstName} ${u.lastName}`.trim() || u.uid }))
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [users, user?.uid]
+    [users, user?.uid, currentOwnerUid]
   );
 
   const handleSubmit = async () => {

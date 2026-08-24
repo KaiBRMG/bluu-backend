@@ -119,7 +119,7 @@ export default function AdminLeave() {
               <TooltipContent className="max-w-64 text-center leading-relaxed">
                 Paid leave can be enabled in the user&apos;s profile information in{' '}
                 <Link
-                  href="/admin/user-management"
+                  href="/admin-portal/user-management"
                   className="underline hover:opacity-80"
                 >
                   User Management &gt; Employee Registry &gt; Time Tracking

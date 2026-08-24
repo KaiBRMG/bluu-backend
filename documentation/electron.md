@@ -18,7 +18,7 @@ The same Vercel project serves **two hosts**, and the difference matters:
 `src/middleware.ts` is host-agnostic, so both domains expose exactly the same surface (browser traffic outside the allowlist rewrites to `/desktop-only`).
 
 - **Never point the vercel.app host at a redirect to the custom domain.** `BASE_URL` is compared with `startsWith` in `will-navigate`, `did-fail-load` and `did-finish-load`; landing on a foreign origin makes the shell kick its own navigations out to the system browser and silently skips the offline-retry reset and the 0.9 zoom default.
-- **Never build a user-facing link from `window.location.origin`.** Staff run the app inside Electron, so that resolves to the vercel.app host. Use `PUBLIC_APP_ORIGIN` — as the "copy creator link" button in `src/app/(main)/creators/custom-requests/page.tsx` and `APP_UPDATE.downloadUrl` do.
+- **Never build a user-facing link from `window.location.origin`.** Staff run the app inside Electron, so that resolves to the vercel.app host. Use `PUBLIC_APP_ORIGIN` — as the "copy creator link" button in `src/app/(main)/creator-portal/custom-requests/page.tsx` and `APP_UPDATE.downloadUrl` do.
 - OAuth is unaffected: `redirect_uri` comes from the fixed `NEXT_PUBLIC_REDIRECT_URI` env var (vercel.app), not from the requesting host. Auth state is per-origin (Firebase uses IndexedDB, the app sets no cookies), so the two hosts have independent sessions by design.
 
 ### The core constraint: two update channels

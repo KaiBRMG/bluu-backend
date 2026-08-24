@@ -1,7 +1,12 @@
 import type { ResolvedAccess } from '@/types/firestore';
 import type { TeamspaceDef } from '@/lib/definitions';
 
-const CACHE_KEY = 'bluu_permissions_v1';
+// Bumped to v2 with the Admin Portal / Creator Portal rename: a cached payload
+// carries page `href`s and teamspace ids, so a warm v1 cache would keep serving
+// the dead `/admin/*` and `/creators/*` links (and AppLayout's `startsWith(href)`
+// access check would bounce the user off the new routes) for the full TTL.
+// Bump this whenever a teamspace id or a page href changes in definitions.ts.
+const CACHE_KEY = 'bluu_permissions_v2';
 const PERMISSIONS_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 interface CachedPermissions {

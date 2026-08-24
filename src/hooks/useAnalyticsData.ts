@@ -60,7 +60,7 @@ export function invalidateAnalyticsCache(uid: string): void {
 }
 
 /**
- * Reads the precomputed analytics rollups behind /admin/shift-management →
+ * Reads the precomputed analytics rollups behind /admin-portal/shift-management →
  * Analytics. Pass `null` for start/end to suppress the fetch (e.g. while the
  * range picker is in an invalid state).
  */

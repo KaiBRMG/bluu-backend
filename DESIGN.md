@@ -113,7 +113,7 @@ Bluu Backend is a dark, dense operations console for an internal team — not a 
 
 Color is rationed like a signal, never spent as decoration. The interface is greyscale by default — near-black canvas, translucent white overlays, hairline borders — and reaches for hue only when hue *means* something: a status, a priority, a category. Depth is built from layered translucent-white overlays on a dark ground, not from drop shadows. Motion is fast and almost subliminal: 120ms ease-out on color and opacity, a small `scale`/`brightness` nudge on press, and nothing that bounces, slides far, or asks to be watched. This system explicitly rejects the SaaS marketing look: no gradient heroes, no glassmorphism-as-decoration, no oversized display type, no color used for mood. If a screen looks like it wants to sell you something, it is wrong.
 
-The canonical reference implementation is `src/app/(main)/creators/custom-requests/page.tsx` — when in doubt, mirror it. Its overview widgets are the house style for every dashboard and summary surface (the [Signature widget pattern](#5-components)).
+The canonical reference implementation is `src/app/(main)/creator-portal/custom-requests/page.tsx` — when in doubt, mirror it. Its overview widgets are the house style for every dashboard and summary surface (the [Signature widget pattern](#5-components)).
 
 **Key Characteristics:**
 - Near-black canvas (`#0A0A0A`), low-chroma surfaces, 14px base type, tight spacing.
@@ -235,7 +235,7 @@ Stacking is a **named semantic scale**, declared in `globals.css` and consumed v
 - **Badges:** `variant="secondary"` for counts, `variant="destructive"` for alerts ("3 over 30d").
 - **Status pill:** `rounded-full px-2 py-0.5 text-xs font-medium` span, colored from `STATUS_COLORS` (the `-400` text / `/10` fill triad).
 - **Status dot:** `inline-block w-2 h-2 rounded-full` + `STATUS_DOT[status]` — the compact indicator in dense lists.
-- **Template-token chip:** a `<code>` on the overlay recipe — `rounded bg-white/[0.08] px-1 py-0.5 font-mono text-xs text-zinc-300` — marking a value interpolated at runtime inside otherwise literal copy (the automated-notification templates on `/admin/notifications`). Greyscale by design: a placeholder is not a state, so it takes no hue.
+- **Template-token chip:** a `<code>` on the overlay recipe — `rounded bg-white/[0.08] px-1 py-0.5 font-mono text-xs text-zinc-300` — marking a value interpolated at runtime inside otherwise literal copy (the automated-notification templates on `/admin-portal/notifications`). Greyscale by design: a placeholder is not a state, so it takes no hue.
 
 ### Inputs / Fields
 - **Style:** the shared `inputClass` — `w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500`. `Select` / `SelectTrigger` match with `bg-zinc-800 border-zinc-700`.
@@ -249,7 +249,7 @@ Stacking is a **named semantic scale**, declared in `globals.css` and consumed v
 
 ### Navigation
 - **Style:** the 260px `.sidebar` on `#000000`, collapsing to 68px (`width 250ms ease-out`). Nav items are 14px/500, `rounded` 4px; hover raises to the hover overlay, `.active` uses the active overlay + `font-weight 600`. Section headers are the uppercase 11px eyebrow. Every internal page renders inside `AppLayout` (sidebar + top bar + boot gating) — never build a bespoke shell.
-- **Page icons are lucide**, mapped by name in `ICON_MAP` in [`src/components/PageIcon.tsx`](src/components/PageIcon.tsx) — the one place the `icon` string on a `PageDef`/`TeamspaceDef` is resolved, shared by the sidebar and `/admin/sharing`. Render them with `<PageIcon name={page.icon ?? undefined} />`; never re-map icon names locally, or a page added to `definitions.ts` renders in one surface and not the other. The one escape hatch is `SVG_ICONS` — brand marks with no lucide equivalent (currently only OF Manager's `/Icons/onlyfans.svg`), rendered through `next/image` at `size-4`, exactly as the sidebar logo already is. Add to it only for a real third-party brand; anything expressible in lucide belongs in `ICON_MAP`.
+- **Page icons are lucide**, mapped by name in `ICON_MAP` in [`src/components/PageIcon.tsx`](src/components/PageIcon.tsx) — the one place the `icon` string on a `PageDef`/`TeamspaceDef` is resolved, shared by the sidebar and `/admin-portal/sharing`. Render them with `<PageIcon name={page.icon ?? undefined} />`; never re-map icon names locally, or a page added to `definitions.ts` renders in one surface and not the other. The one escape hatch is `SVG_ICONS` — brand marks with no lucide equivalent (currently only OF Manager's `/Icons/onlyfans.svg`), rendered through `next/image` at `size-4`, exactly as the sidebar logo already is. Add to it only for a real third-party brand; anything expressible in lucide belongs in `ICON_MAP`.
 
 #### The satellite-window shell (OF Manager)
 
