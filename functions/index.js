@@ -317,13 +317,26 @@ exports.rollupDailyAnalytics = onSchedule(
     }
 
     // ── 2. Recompute ──────────────────────────────────────────────────
-    let written = 0, deleted = 0, skipped = 0, failed = 0;
+    // Each user-day is two range queries plus a write, and they are independent
+    // of one another. Run them through a bounded pool rather than serially: at
+    // full roster the serial version is ~3N sequential round-trips inside a
+    // 540s timeout. The cap keeps this an async fan-out and not a write burst
+    // (Firestore best practices: prefer async calls; ramp writes gradually).
+    const ROLLUP_CONCURRENCY = 8;
 
+    const tasks = [];
     for (const [uid, dates] of work) {
-      const userData = userMap.get(uid);
-      for (const date of dates) {
+      for (const date of dates) tasks.push({ uid, date });
+    }
+
+    let written = 0, deleted = 0, skipped = 0, failed = 0;
+    let cursor = 0;
+
+    const worker = async () => {
+      while (cursor < tasks.length) {
+        const { uid, date } = tasks[cursor++];
         try {
-          const result = await rollupUserDay(db, uid, userData, date);
+          const result = await rollupUserDay(db, uid, userMap.get(uid), date);
           if (result === 'written') written++;
           else if (result === 'deleted') deleted++;
           else skipped++;
@@ -332,19 +345,30 @@ exports.rollupDailyAnalytics = onSchedule(
           console.error(`[rollupDailyAnalytics] ${uid} ${date} failed:`, err);
         }
       }
-    }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(ROLLUP_CONCURRENCY, tasks.length) }, worker),
+    );
 
     // ── 3. Drain the queue ────────────────────────────────────────────
     // Only after the recompute above, so a crash leaves the entry queued for
     // the next run rather than dropping the backfill on the floor.
+    //
+    // BulkWriter rather than chunked batches: this is a bulk delete over a
+    // contiguous key range (the queue is written and drained repeatedly), which
+    // is the contention case Firestore's best practices call out. BulkWriter
+    // ramps its own throughput and retries the failures instead of failing the
+    // whole 400-doc batch.
     if (!dirtySnap.empty) {
-      let batch = db.batch();
-      let ops = 0;
-      for (const doc of dirtySnap.docs) {
-        batch.delete(doc.ref);
-        if (++ops === 400) { await batch.commit(); batch = db.batch(); ops = 0; }
-      }
-      if (ops > 0) await batch.commit();
+      const writer = db.bulkWriter();
+      writer.onWriteError((err) => {
+        if (err.failedAttempts < 3) return true;
+        console.error('[rollupDailyAnalytics] dirty drain failed:', err.documentRef.path, err.message);
+        return false;
+      });
+      for (const doc of dirtySnap.docs) writer.delete(doc.ref);
+      await writer.close();
     }
 
     console.log(

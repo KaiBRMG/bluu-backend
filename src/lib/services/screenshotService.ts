@@ -151,11 +151,9 @@ export async function deleteScreenshotsByUsersAndDateRange(
       if (snap.empty) return;
 
       const ids = snap.docs.map((d) => d.id);
-      // deleteScreenshots uses getAll which supports up to 500 docs; chunk to be safe
-      const CHUNK = 400;
-      for (let i = 0; i < ids.length; i += CHUNK) {
-        await deleteScreenshots(ids.slice(i, i + CHUNK));
-      }
+      // No chunking here — deleteScreenshots chunks its own reads and hands the
+      // deletes to a BulkWriter, which paces them itself.
+      await deleteScreenshots(ids);
       totalDeleted += ids.length;
     })
   );
@@ -163,37 +161,70 @@ export async function deleteScreenshotsByUsersAndDateRange(
   return totalDeleted;
 }
 
+/** `getAll` takes a bounded argument list; read the docs back in slices. */
+const READ_CHUNK = 300;
+
+/** Concurrent Storage object deletes. Bounded so a large purge cannot fan out to thousands. */
+const STORAGE_DELETE_CONCURRENCY = 20;
+
+/**
+ * Delete screenshot documents and their Storage objects.
+ *
+ * Uses a BulkWriter rather than a 500-op batch: this is a bulk delete over a
+ * contiguous key range (`userId` + adjacent `timestampUTC`), which is exactly
+ * the contention case Firestore's best practices warn about. BulkWriter ramps
+ * its own throughput and retries individual failures, where one bad document
+ * fails an entire batch.
+ */
 export async function deleteScreenshots(
   screenshotIds: string[],
 ): Promise<void> {
   if (screenshotIds.length === 0) return;
 
   const bucket = adminStorage.bucket();
-  const docRefs = screenshotIds.map(id => adminDb.collection(COLLECTION).doc(id));
+  const writer = adminDb.bulkWriter();
+  writer.onWriteError((err) => {
+    if (err.failedAttempts < 3) return true;
+    console.error(`[Screenshot] Failed to delete doc ${err.documentRef.path}:`, err.message);
+    return false;
+  });
 
-  // Batch-read all docs in a single round-trip instead of N sequential reads
-  const snaps = await adminDb.getAll(...docRefs);
+  const storagePaths: string[] = [];
 
-  const batch = adminDb.batch();
-  await Promise.all(snaps.map(async (doc) => {
-    if (!doc.exists) return;
-    const data = doc.data();
-    const storagePath = data?.storagePath;
-    const thumbnailPath = data?.thumbnailPath;
-    await Promise.all([
-      storagePath
-        ? bucket.file(storagePath).delete().catch(err => {
-            console.error(`[Screenshot] Failed to delete storage file ${storagePath}:`, err);
-          })
-        : Promise.resolve(),
-      thumbnailPath
-        ? bucket.file(thumbnailPath).delete().catch(err => {
-            console.error(`[Screenshot] Failed to delete thumbnail ${thumbnailPath}:`, err);
-          })
-        : Promise.resolve(),
-    ]);
-    batch.delete(doc.ref);
-  }));
+  for (let i = 0; i < screenshotIds.length; i += READ_CHUNK) {
+    const docRefs = screenshotIds
+      .slice(i, i + READ_CHUNK)
+      .map(id => adminDb.collection(COLLECTION).doc(id));
 
-  await batch.commit();
+    // Batch-read the slice in a single round-trip instead of N sequential reads
+    const snaps = await adminDb.getAll(...docRefs);
+
+    for (const doc of snaps) {
+      if (!doc.exists) continue;
+      const data = doc.data();
+      if (data?.storagePath) storagePaths.push(data.storagePath);
+      if (data?.thumbnailPath) storagePaths.push(data.thumbnailPath);
+      void writer.delete(doc.ref);
+    }
+  }
+
+  // Storage deletes run alongside the Firestore ones, bounded rather than
+  // fanned out across every object at once.
+  let cursor = 0;
+  const storageWorker = async () => {
+    while (cursor < storagePaths.length) {
+      const path = storagePaths[cursor++];
+      await bucket.file(path).delete().catch(err => {
+        console.error(`[Screenshot] Failed to delete storage file ${path}:`, err);
+      });
+    }
+  };
+
+  await Promise.all([
+    writer.close(),
+    ...Array.from(
+      { length: Math.min(STORAGE_DELETE_CONCURRENCY, storagePaths.length) },
+      storageWorker,
+    ),
+  ]);
 }

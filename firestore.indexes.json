@@ -255,6 +255,30 @@
         { "queryScope": "COLLECTION", "arrayConfig": "CONTAINS" },
         { "queryScope": "COLLECTION_GROUP", "order": "ASCENDING" }
       ]
-    }
+    },
+
+    { "collectionGroup": "time_entries", "fieldPath": "eventLog", "indexes": [] },
+    { "collectionGroup": "time_entries", "fieldPath": "modifications", "indexes": [] },
+    { "collectionGroup": "time_entries", "fieldPath": "originalData", "indexes": [] },
+
+    { "collectionGroup": "prompt-library", "fieldPath": "text", "indexes": [] },
+    { "collectionGroup": "prompt-library", "fieldPath": "textHtml", "indexes": [] },
+    { "collectionGroup": "versions", "fieldPath": "text", "indexes": [] },
+    { "collectionGroup": "versions", "fieldPath": "textHtml", "indexes": [] },
+
+    { "collectionGroup": "analytics_daily", "fieldPath": "segments", "indexes": [] },
+    { "collectionGroup": "analytics_daily", "fieldPath": "sessionBounds", "indexes": [] },
+    { "collectionGroup": "analytics_daily", "fieldPath": "hourBuckets", "indexes": [] },
+    { "collectionGroup": "analytics_daily", "fieldPath": "sessionIds", "indexes": [] },
+    { "collectionGroup": "analytics_daily", "fieldPath": "groupsSnapshot", "indexes": [] },
+
+    { "collectionGroup": "onlyfans-chats", "fieldPath": "lastMessageText", "indexes": [] },
+    { "collectionGroup": "onlyfans-chats", "fieldPath": "fan", "indexes": [] },
+    { "collectionGroup": "onlyfans-chats", "fieldPath": "profile", "indexes": [] },
+    { "collectionGroup": "messages", "fieldPath": "text", "indexes": [] },
+    { "collectionGroup": "messages", "fieldPath": "attachments", "indexes": [] },
+
+    { "collectionGroup": "model-submission-sessions", "fieldPath": "expiresAt", "indexes": [] },
+    { "collectionGroup": "model-submission-rate", "fieldPath": "expiresAt", "indexes": [] }
   ]
 }

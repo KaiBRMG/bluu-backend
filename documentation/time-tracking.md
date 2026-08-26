@@ -290,7 +290,8 @@ time_entries + screenshots ──► rollupDailyAnalytics (04:00 UTC, functions/
 - **04:00 UTC** is deliberate: after `cleanupStaleSessions` (02:00) so orphaned sessions are already ledgered, and after `syncPagePermissions` (03:00) so `permittedPageIds` is settled before enumerating users.
 - Recomputes a **3-day rolling window** of each user's local dates `[today-3 .. today-1]`. This is what makes a fixed UTC schedule timezone-agnostic: a UTC−11 user's "yesterday" hasn't ended at 04:00 UTC, so it's recomputed correctly on a later run. **Never computes the current local day** — partial data.
 - **Idempotent by construction**: full recompute + `set()`, never merge/increment. (`computedAt` is a serverTimestamp, so it differs between runs — exclude it when diffing.)
-- Drains `analytics_dirty` **after** the recompute, so a crash re-queues rather than dropping work.
+- Recomputes user-days through a **bounded pool (`ROLLUP_CONCURRENCY = 8`)**, not serially — each user-day is two independent range queries plus a write, and at full roster the serial version was ~3N sequential round-trips inside the 540s timeout. The cap is what keeps it an async fan-out rather than a write burst; raise it only with the 500/50/5 ramp in mind.
+- Drains `analytics_dirty` **after** the recompute, so a crash re-queues rather than dropping work. The drain is a `bulkWriter()` — a repeatedly written-and-emptied queue is a contiguous-key-range delete, so batches were the wrong tool.
 
 ### Backfill
 

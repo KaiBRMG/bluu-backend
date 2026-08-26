@@ -97,6 +97,37 @@
 
 ---
 
+## Firestore Write Optimization (rules)
+
+### Single-field index exemptions
+
+Firestore indexes **every** field of **every** document by default — ascending, descending, and array-contains. For a large string, a long array, or a nested map that nothing ever queries, that is pure write latency, index storage, and pressure on the per-document index-entry caps.
+
+The `fieldOverrides` block in [`firestore.indexes.json`](../firestore.indexes.json) carries two kinds of entry, and they look similar — read the `indexes` array:
+
+- **`"indexes": [...]`** — *additive*. Widens a field's indexing (e.g. giving `posts.postDate` `COLLECTION_GROUP` scope). The `posts` / `submissions` entries are these.
+- **`"indexes": []`** — an **exemption**. Removes the field's single-field indexes entirely.
+
+Currently exempted (all write-only payload — nothing filters or orders on them):
+
+| Collection | Fields |
+|---|---|
+| `time_entries` | `eventLog`, `modifications`, `originalData` |
+| `prompt-library` + `versions` | `text`, `textHtml` |
+| `analytics_daily` | `segments`, `sessionBounds`, `hourBuckets`, `sessionIds`, `groupsSnapshot` |
+| `onlyfans-chats` + `messages` | `lastMessageText`, `fan`, `profile`, `text`, `attachments` |
+| `model-submission-sessions`, `model-submission-rate` | `expiresAt` (TTL fields — the TTL policy maintains its own index) |
+
+**When adding a field, exempt it if nothing queries it** — particularly free text, HTML, arrays of maps, and any timestamp driving a TTL policy.
+
+**An exemption is not free to reverse.** It *deletes* the field's single-field indexes, so a later query that filters or orders on an exempted field fails until the exemption is removed and the index rebuilt (a backfill over the whole collection). Check the read path before exempting.
+
+### Bulk deletes
+
+Use `bulkWriter()`, not chunked `batch()`, for any delete larger than a handful of documents — `deleteScreenshots` ([screenshotService.ts](../src/lib/services/screenshotService.ts)) and the `analytics_dirty` drain ([functions/index.js](../functions/index.js)) are the two examples. Both delete over a contiguous key range, which is the contention case Firestore calls out; BulkWriter paces itself and retries individual documents where one bad document fails a whole batch.
+
+---
+
 ## Session Token (single active session)
 
 `users/{uid}.sessionToken` is a UUID rotated on every login. Client stores it locally; `onSnapshot` on the user doc detects a mismatch and forces sign-out. Detail duplicated in [auth.md](auth.md#single-active-session) — the write path is login; the enforcement path is the client snapshot.
