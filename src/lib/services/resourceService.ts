@@ -46,7 +46,7 @@ function toStringArray(v: any): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
 }
 
-function mapDoc(doc: FirebaseFirestore.QueryDocumentSnapshot): ResourceDocument {
+function mapDoc(doc: FirebaseFirestore.DocumentSnapshot): ResourceDocument {
   const d = doc.data() ?? {};
   return {
     id: doc.id,
@@ -79,16 +79,18 @@ export async function getAllResources(): Promise<ResourceDocument[]> {
   return docs;
 }
 
-/** Distinct, sorted list of all `types` values across active resources. */
-export async function getResourceTypes(): Promise<string[]> {
-  const docs = await getAllResources();
-  const set = new Set<string>();
-  for (const d of docs) {
-    if (d.status !== 'Active') continue;
-    for (const t of d.types) set.add(t);
-  }
-  return Array.from(set).sort((a, b) => a.localeCompare(b));
-}
+/**
+ * Outcome of a write that had to load the target first. `forbidden` means the
+ * caller may not act on the resource **as it is stored** — the check runs
+ * against the live document, never the 60s cache, so a resource that was just
+ * re-tagged cannot be written on the strength of a stale group list.
+ */
+export type ResourceWriteResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: 'not-found' | 'forbidden' };
+
+/** Authorization predicate run against the stored document before a write. */
+export type ResourceAuthorizer = (existing: ResourceDocument) => boolean;
 
 /** Coerce arbitrary client input into a persisted resource payload. */
 function sanitiseInput(input: Partial<ResourceInput>): ResourceInput {
@@ -124,11 +126,13 @@ export async function createResource(input: Partial<ResourceInput>): Promise<Res
 
 export async function updateResource(
   id: string,
-  input: Partial<ResourceInput>
-): Promise<ResourceDocument | null> {
+  input: Partial<ResourceInput>,
+  authorize?: ResourceAuthorizer
+): Promise<ResourceWriteResult<ResourceDocument>> {
   const ref = adminDb.collection(RESOURCES_COLLECTION).doc(id);
   const existing = await ref.get();
-  if (!existing.exists) return null;
+  if (!existing.exists) return { ok: false, reason: 'not-found' };
+  if (authorize && !authorize(mapDoc(existing))) return { ok: false, reason: 'forbidden' };
 
   const clean = sanitiseInput({ ...existing.data(), ...input } as Partial<ResourceInput>);
   const now = new Date().toISOString();
@@ -137,14 +141,18 @@ export async function updateResource(
     { merge: true }
   );
   invalidateResourcesCache();
-  return { id, ...clean, lastEditedTime: now };
+  return { ok: true, value: { id, ...clean, lastEditedTime: now } };
 }
 
-export async function deleteResource(id: string): Promise<boolean> {
+export async function deleteResource(
+  id: string,
+  authorize?: ResourceAuthorizer
+): Promise<ResourceWriteResult<true>> {
   const ref = adminDb.collection(RESOURCES_COLLECTION).doc(id);
   const existing = await ref.get();
-  if (!existing.exists) return false;
+  if (!existing.exists) return { ok: false, reason: 'not-found' };
+  if (authorize && !authorize(mapDoc(existing))) return { ok: false, reason: 'forbidden' };
   await ref.delete();
   invalidateResourcesCache();
-  return true;
+  return { ok: true, value: true };
 }

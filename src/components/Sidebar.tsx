@@ -7,6 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { House, ChevronLeft, ChevronDown } from "lucide-react";
 import type { ResolvedAccess } from "@/types/firestore";
 import type { TeamspaceDef } from "@/lib/definitions";
+import { UNIVERSAL_PAGES } from "@/lib/definitions";
 import {
   Sidebar as SidebarPrimitive,
   SidebarContent,
@@ -169,6 +170,23 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
+          {/* Org-wide pages sit alongside Home, above the teamspaces. They carry
+              no page permission, so they render for everyone unconditionally —
+              there is no `accessiblePages` entry to look them up in. */}
+          {UNIVERSAL_PAGES.map((page) => (
+            <SidebarMenuItem key={page.href}>
+              <SidebarMenuButton
+                asChild
+                isActive={pathname.startsWith(page.href)}
+                tooltip={page.title}
+              >
+                <Link href={page.href}>
+                  <PageIcon name={page.icon} />
+                  <span>{page.title}</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
         </SidebarMenu>
       </SidebarHeader>
 

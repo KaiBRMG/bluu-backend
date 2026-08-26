@@ -41,8 +41,12 @@ export interface EmailMigrationConfig {
 
 export const EMAIL_MIGRATION: EmailMigrationConfig = {
   // ── Rollout state ──────────────────────────────────────────────────────
-  // Shipped disarmed. Arm a cohort in its own commit, once the code is live.
-  enabled: true,
+  // DISARMED 2026-08-26 — the CA cohort is done and nobody is being prompted.
+  // The cohort below is left in place deliberately: the machinery still works
+  // and re-arming a future cohort is a one-line commit (`enabled: true`).
+  // The forward gate is self-clearing, so re-arming can never re-prompt a
+  // user who has already migrated.
+  enabled: false,
   allUsers: false,
   uids: [],
   groups: ['CA'],
@@ -82,7 +86,9 @@ export interface EmailReversalConfig {
 }
 
 export const EMAIL_MIGRATION_REVERSAL: EmailReversalConfig = {
-  enabled: true,
+  // DISARMED 2026-08-26 — this reversal has landed. Kept listed so the record
+  // of who was reverted survives; flip `enabled` back to true to re-arm.
+  enabled: false,
   uids: [
     // Mistakenly assigned to the CA group, so swept up by the CA cohort above.
     'qKiuhTreQDU6GAw8h5UuIr50eNp1',
@@ -138,13 +144,13 @@ export interface EmailCorrectionConfig {
 }
 
 export const EMAIL_MIGRATION_CORRECTION: EmailCorrectionConfig = {
-  enabled: true,
+  // DISARMED 2026-08-26 — this correction has landed. The entry is kept as the
+  // record of what was corrected; it is doubly inert (the pinned wrong address
+  // no longer matches the user's `workEmail`). Flip `enabled` back to true and
+  // add an entry to run another correction.
+  enabled: false,
   users: [
     // Completed the migration signed into the wrong personal Google account.
-    // TODO(arm): fill in the address this uid is currently stuck on, exactly as
-    // it appears on their `users` doc `workEmail`. Left blank = disarmed, so
-    // this entry prompts nobody until it is filled in (same one-line-commit
-    // rollout discipline as the cohorts above).
     { uid: 'CsyRaKMXhiOAQCEVsOENBcxfDud2', wrongEmail: 'jenellemonterde14@gmail.com' },
   ],
 };

@@ -44,25 +44,53 @@ const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 
-// ─── Page definitions (mirrors src/lib/definitions.ts) ────────────────────
+// ─── Page definitions ──────────────────────────────────────────────────────
+//
+// Parsed out of src/lib/definitions.ts at runtime rather than mirrored here.
+// This script OVERWRITES permittedPageIds wholesale, so any page it does not
+// know about is silently classified as EXTRA and deleted from every user. A
+// hardcoded copy went stale once (it lagged 8 pages behind — the whole SMM
+// teamspace, Resources, Model Submissions, OF Manager, Prompt Library and
+// Resource Management) and a --fix run wiped those pages off the entire fleet.
+// definitions.ts is the source of truth; read it, never restate it.
 
-const PAGES = [
-  { pageId: 'ca-admin',                 teamspaceId: 'ca-portal' },
-  { pageId: 'ca-dashboard',             teamspaceId: 'ca-portal' },
-  { pageId: 'ca-shifts',                teamspaceId: 'ca-portal' },
-  { pageId: 'ca-disputes',              teamspaceId: 'ca-portal' },
-  { pageId: 'ca-custom-requests',       teamspaceId: 'ca-portal' },
-  { pageId: 'ca-campaigns',             teamspaceId: 'ca-portal' },
-  { pageId: 'user-management',          teamspaceId: 'admin-portal'   },
-  { pageId: 'sharing',                  teamspaceId: 'admin-portal'   },
-  { pageId: 'shift-management',         teamspaceId: 'admin-portal'   },
-  { pageId: 'admin-notifications',      teamspaceId: 'admin-portal'   },
-  { pageId: 'admin-creator-management', teamspaceId: 'admin-portal'   },
-  { pageId: 'creators-custom-requests', teamspaceId: 'creator-portal' },
-  { pageId: 'creators-content-planning',teamspaceId: 'creator-portal' },
-  { pageId: 'time-tracking',            teamspaceId: 'apps'      },
-  { pageId: 'apps-password-manager',    teamspaceId: 'apps'      },
-];
+function loadPagesFromDefinitions() {
+  const defPath = path.resolve(__dirname, '..', 'lib', 'definitions.ts');
+  if (!fs.existsSync(defPath)) {
+    console.error(`ERROR: cannot find ${defPath} — refusing to run without the page list.`);
+    process.exit(1);
+  }
+  const src = fs.readFileSync(defPath, 'utf8');
+
+  // Isolate the PAGES array so TEAMSPACES entries can't leak in, and drop
+  // commented-out page lines (e.g. the parked `calendar` entry).
+  const start = src.indexOf('export const PAGES');
+  if (start === -1) {
+    console.error('ERROR: could not locate `export const PAGES` in definitions.ts.');
+    process.exit(1);
+  }
+  const end = src.indexOf('];', start);
+  const body = src
+    .slice(start, end === -1 ? undefined : end)
+    .split('\n')
+    .filter(line => !line.trim().startsWith('//'))
+    .join('\n');
+
+  const pages = [];
+  const re = /pageId:\s*'([^']+)'[^}]*?teamspaceId:\s*'([^']+)'/g;
+  let m;
+  while ((m = re.exec(body)) !== null) {
+    pages.push({ pageId: m[1], teamspaceId: m[2] });
+  }
+
+  if (pages.length === 0) {
+    console.error('ERROR: parsed 0 pages out of definitions.ts — refusing to run.');
+    process.exit(1);
+  }
+  return pages;
+}
+
+const PAGES = loadPagesFromDefinitions();
 const ALL_PAGE_IDS = new Set(PAGES.map(p => p.pageId));
 
 // ─── Permission resolver (mirrors src/lib/services/permissionResolver.ts) ──
@@ -104,6 +132,19 @@ async function main() {
     console.warn('WARNING: The following pages have no page-permissions document:');
     missingPermDocs.forEach(id => console.warn(`  - ${id}`));
     console.warn('');
+  }
+
+  // The inverse is not a warning, it is a stop. A page id that Firestore knows
+  // about but this script does not means the page list it just parsed is
+  // incomplete — and --fix would delete that page from every user's
+  // permittedPageIds as "EXTRA". Never write under that condition.
+  const unknownPermDocs = [...permPageIds].filter(id => !ALL_PAGE_IDS.has(id));
+  if (unknownPermDocs.length > 0) {
+    console.error('ERROR: page-permissions contains pages this script does not know about:');
+    unknownPermDocs.forEach(id => console.error(`  - ${id}`));
+    console.error('\nThe page list is out of date. --fix would DELETE these from every');
+    console.error('user. Reconcile src/lib/definitions.ts first. Aborting.\n');
+    process.exit(1);
   }
 
   let totalUsers = 0;

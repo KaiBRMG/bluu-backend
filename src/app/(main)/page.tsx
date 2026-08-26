@@ -20,6 +20,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { STATE_CONFIG } from "@/lib/stateColors";
+import { navigateToNotificationAction } from "@/lib/notificationNavigation";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
 // TEMP ANALYTICS — remove after data collection (see src/lib/temp-analytics/).
 import {
@@ -322,13 +323,7 @@ function NotificationsWidget() {
       console.error('[NotificationsWidget] mark-read error:', err);
     }
 
-    if (actionUrl) {
-      if (actionUrl.startsWith('http://') || actionUrl.startsWith('https://')) {
-        window.open(actionUrl, '_blank', 'noopener,noreferrer');
-      } else {
-        router.push(actionUrl);
-      }
-    }
+    navigateToNotificationAction(router, actionUrl);
   }
 
   return (
@@ -558,7 +553,7 @@ export default function Home() {
   const displayGroup = userGroup.charAt(0).toUpperCase() + userGroup.slice(1);
 
   const showTimeTracking = userData?.permittedPageIds?.includes('time-tracking') ?? false;
-  const showResources = userData?.permittedPageIds?.includes('apps-resources') ?? false;
+  // Resources is org-wide (UNIVERSAL_PAGES) — there is no permission to check.
 
   // Being unassigned is a pending state awaiting an admin, not an error the user
   // caused — orange, per the semantic palette. The explanation now lives at the
@@ -614,11 +609,7 @@ export default function Home() {
         <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
           {/* Left two columns: each is an independent vertical stack, so a
               widget growing/shrinking never leaves a gap in the other column. */}
-          <div
-            className={`flex flex-col sm:flex-row gap-6 items-start ${
-              showResources ? 'md:col-span-2' : 'md:col-span-3'
-            }`}
-          >
+          <div className="flex flex-col sm:flex-row gap-6 items-start md:col-span-2">
             <div className="flex flex-col gap-6 w-full sm:flex-1 min-w-0">
               {groupCard}
               <NotificationsWidget />
@@ -631,7 +622,7 @@ export default function Home() {
           </div>
 
           {/* Right column: pinned resources, spanning all the way to the right */}
-          {showResources && <PinnedResourcesWidget />}
+          <PinnedResourcesWidget />
         </div>
       </div>
     </AppLayout>

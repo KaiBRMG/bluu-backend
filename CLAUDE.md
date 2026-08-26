@@ -57,7 +57,8 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 ## Temporary: personal-email migration (remove once the fleet is migrated)
 
 - **What/why:** staff are moving off `@bluurock.com` addresses onto their own Google accounts. The permanent half of that change (allowlist auth, admin registration) is **not** temporary and stays. This section covers only the one-time migration of *existing* users.
-- **The gate is [`src/lib/emailMigrationConfig.ts`](src/lib/emailMigrationConfig.ts)** — the single thing deciding who is prompted, modelled on `appUpdateConfig.ts`. `enabled: false` = nobody, and is the kill switch. Arm cohorts by `uids`, `groups`, or `allUsers`, each in its own commit. Shipped disarmed.
+- **The gate is [`src/lib/emailMigrationConfig.ts`](src/lib/emailMigrationConfig.ts)** — the single thing deciding who is prompted, modelled on `appUpdateConfig.ts`. `enabled: false` = nobody, and is the kill switch. Arm cohorts by `uids`, `groups`, or `allUsers`, each in its own commit.
+- **Currently DISARMED (2026-08-26).** All three gates — `EMAIL_MIGRATION`, `EMAIL_MIGRATION_REVERSAL`, `EMAIL_MIGRATION_CORRECTION` — are `enabled: false`, so nothing prompts. The cohort/uid entries are kept in place on purpose as the record of what ran; the machinery is intact and re-arming is a one-line commit. **Do not delete the subsystem yet** — see "To remove" below for when that becomes appropriate.
 - **Mechanism:** [`EmailMigrationDialog`](src/components/migration/EmailMigrationDialog.tsx) (mounted in `(main)/layout.tsx`) shows a non-dismissible card → opens the system browser at `/auth/google?mode=migrate` via `window.open` (`setWindowOpenHandler` → `shell.openExternal`) → the existing `bluu://callback` deep link returns the code → posts it to [`/api/auth/migrate-email`](src/app/api/auth/migrate-email/route.ts).
   - **No Electron build is needed** — nothing under `electron/` changed, so rule 14's two-push dance does not apply. This ships as a plain Vercel deploy.
   - **Self-clearing:** the gate tests `workEmail` for the company domain, so a migrated user stops matching. No "already done" flag to keep in sync.
@@ -103,7 +104,9 @@ Two related notes on the page itself, both **intentional** rather than outstandi
 
 **Symptom.** Clicking a page in the sidebar does nothing — no URL change, no skeleton — while the page already open stays fully interactive (tabs, buttons and dialogs all work). Reported as "the app freezes", but nothing is frozen: a `<Link>` click runs inside `startTransition`, and React keeps the old tree mounted and responsive while it renders the new one. The transition never commits.
 
-**Not the network.** A capture during a live occurrence showed every `?_rsc=` request returning 200/304 in 46–186 ms, with the *same* route payload arriving repeatedly while nothing rendered. The data lands; the commit does not. Don't re-investigate the transport.
+**That specific hang is not the network.** A capture during a live occurrence showed every `?_rsc=` request returning 200/304 in 46–186 ms, with the *same* route payload arriving repeatedly while nothing rendered. The data lands; the commit does not. Don't re-investigate the transport *for that failure*.
+
+**But "the page didn't change" has more than one cause, and they are not all bugs.** A slow connection produces the identical symptom — a click, then nothing — because a `<Link>` transition keeps the current page mounted and interactive until the next one is ready, and an Electron window has no tab spinner to hint otherwise. Two things follow, both now implemented: the app must *say* it is loading ([`NavigationProgress`](src/components/NavigationProgress.tsx)), and the watchdog must not treat slow as stuck — force-reloading mid-fetch discards the in-flight payload and is strictly slower than waiting. The watchdog tells them apart by whether an RSC request is still on the wire; see its header comment.
 
 **Two causes. One is fixed:**
 
@@ -117,7 +120,14 @@ Two related notes on the page itself, both **intentional** rather than outstandi
 
 **The clocked-out test.** Free and decisive: if navigation is reliable while clocked out and only wedges while clocked in or on break, issue 2's tick is confirmed as the driver. If it wedges clocked out too, that model is wrong — profile a stuck click in the Performance tab rather than reasoning further.
 
-**[`NavigationWatchdog`](src/components/NavigationWatchdog.tsx) is the safety net, not a fix.** Mounted in `(main)/layout.tsx`; forces a hard navigation if the URL has not changed 4s after a link click, and reports to Sentry (`area: navigation`). Keep it regardless of the above — it is the only thing that rescues an already-stuck user, and unlike `DeploymentRefresher` it reloads mid-shift on purpose (being unable to navigate is a failure state; the session survives a reload). **Those Sentry events are the signal for whether the underlying cause is actually gone.**
+**[`NavigationWatchdog`](src/components/NavigationWatchdog.tsx) is the safety net, not a fix.** Mounted in `(main)/layout.tsx`. At 4s it *classifies* the stall rather than reloading on the spot — RSC request still in flight → slow, extend (≈28s cap); payload returned but uncommitted → stuck, rescue; RSC request **failed** → a stale client whose deployment is gone, reload immediately; offline or window hidden → hold. Every rescue reports to Sentry (`area: navigation`, tagged with `source` and `reason`).
+
+Three things about it are load-bearing and were each a real failure:
+- **The rescue is verified, not fire-and-forget.** It used to latch a `rescuing` flag and never clear it, so a forced navigation that itself failed left the watchdog permanently dead for that renderer — every later click silently ignored. It now escalates `assign(href)` → `reload()` → a visible Reload button, and never latches.
+- **It is evaluated on clicks, focus, `visibilitychange` and `online`** — not only a timer. A wedged render loop starves `setTimeout`, so clicking again must be the escape hatch rather than a no-op. (Timer *throttling* is not a factor — `backgroundThrottling: false` is set on every window.)
+- **Its click listener only sees anchors**, so imperative navigations must arm it via the exported `watchNavigation(to, source)`. Notification `actionUrl`s are that whole category today; all three surfaces (tray, home widget, OS toast) go through [`navigateToNotificationAction`](src/lib/notificationNavigation.ts) — see [notifications.md](documentation/notifications.md) RULE 3.
+
+**It is also the only cover for "clocked in when a deploy lands."** `DeploymentRefresher` deliberately refuses to reload outside `clocked-out`, so that user stays stale on purpose; when their pinned assets stop resolving, this is what stands between them and a dead sidebar. Keep it regardless of the above — it is the only thing that rescues an already-stuck user, and unlike `DeploymentRefresher` it reloads mid-shift on purpose (being unable to navigate is a failure state; the session survives a reload). **Those Sentry events are the signal for whether the underlying cause is actually gone.**
 
 **Related but separate: Skew Protection is set to 12 hours** while this renderer routinely stays open for weeks (rule 9c). Past that window a stale client's pinned assets stop resolving, and `DeploymentRefresher` only rescues users while clocked out. Raise the window; the watchdog covers the rest.
 
@@ -129,13 +139,13 @@ Two related notes on the page itself, both **intentional** rather than outstandi
 | [architecture-overview.md](documentation/architecture-overview.md) | Repo layout, commands, env vars, portal topology, UI stack |
 | [auth.md](documentation/auth.md) | Browser middleware, OAuth login, `withAuth`/`withCreatorAuth`, the 3 authorization tiers |
 | [onboarding.md](documentation/onboarding.md) | First-run flow: download → login → terms → OS permissions → personal details, the `AuthWrapper` guard, `hasAcceptedTerms`/`hasCompletedOnboarding`, `/terms` |
-| [permissions.md](documentation/permissions.md) | Page definitions, `page-permissions`, `permittedPageIds`, `checkPageAccess` |
+| [permissions.md](documentation/permissions.md) | Page definitions, `page-permissions`, `permittedPageIds`, `checkPageAccess`, **`UNIVERSAL_PAGES`** (org-wide pages with no permission) |
 | [data-layer.md](documentation/data-layer.md) | Server services, client hooks, Firestore collections, read-optimization rules, session token |
 | [time-tracking.md](documentation/time-tracking.md) | Event-log sessions, `sessionCloseMs`, crash robustness, activity percent, **analytics rollups** |
 | [notifications.md](documentation/notifications.md) | `notificationContent.ts`, `addNotificationToBatch`, event → factory table |
 | [smm-portal.md](documentation/smm-portal.md) | **SMM Portal** — Twitter/X accounts, the content schedule, the bonus rounds/submissions engine, Viral Accounts + page suggestions |
 | [campaign-tracking.md](documentation/campaign-tracking.md) | Custom requests vs campaigns, the two archive mechanisms, transfer |
-| [resources.md](documentation/resources.md) | `apps-resources` page, `app-resources` collection, resource management, group/user filtering |
+| [resources.md](documentation/resources.md) | `apps-resources` page (reading **and** managing — there is no separate admin page), `app-resources` collection, the group-based read/write access matrix |
 | [prompt-library.md](documentation/prompt-library.md) | **Prompt Library** — `prompt-library` collection, per-prompt version history + diffing, the client-side search engine, the LLM logo pipeline |
 | [onlyfans-crm.md](documentation/onlyfans-crm.md) | **OF Manager** — the OnlyFans messaging window, the `IOnlyFansClient` adapter seam, the Firestore chat mirror + provider webhook |
 | [model-submissions.md](documentation/model-submissions.md) | The **public** application form `/model-submissions` (the project's only unauthenticated write path), its abuse model, and the `apps-model-submissions` review queue |

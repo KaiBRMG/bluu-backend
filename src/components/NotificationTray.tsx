@@ -10,6 +10,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { NotificationDocument, NotificationType } from '@/types/firestore';
 import type { Timestamp } from '@/types/firestore';
 import { notificationTypeDot } from '@/lib/notificationTypeBadge';
+import { navigateToNotificationAction } from '@/lib/notificationNavigation';
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -304,11 +305,7 @@ export default function NotificationTray() {
     }
 
     if (actionUrl) {
-      if (actionUrl.startsWith('http://') || actionUrl.startsWith('https://')) {
-        window.open(actionUrl, '_blank', 'noopener,noreferrer');
-      } else {
-        router.push(actionUrl);
-      }
+      navigateToNotificationAction(router, actionUrl);
       setIsOpen(false);
     }
   }

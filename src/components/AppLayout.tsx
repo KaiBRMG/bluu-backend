@@ -9,13 +9,20 @@ import { useAuth } from "@/components/AuthProvider";
 import { useUserData } from "@/hooks/useUserData";
 import { usePermissions, getHighestGroupName } from "@/hooks/usePermissions";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
+import { UNIVERSAL_PAGES } from "@/lib/definitions";
 
 interface AppLayoutProps {
   children: React.ReactNode;
 }
 
-// Routes that are always accessible (no permission check needed)
-const ALWAYS_ACCESSIBLE = ['/', '/applications/settings'];
+// Routes that are always accessible (no permission check needed). UNIVERSAL_PAGES
+// are org-wide by definition and carry no page permission, so the guard below
+// would bounce every user off them without this.
+const ALWAYS_ACCESSIBLE = [
+  '/',
+  '/applications/settings',
+  ...UNIVERSAL_PAGES.map(p => p.href),
+];
 
 export default function AppLayout({ children }: AppLayoutProps) {
   const { user } = useAuth();

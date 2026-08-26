@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { AuthProvider } from "@/components/AuthProvider";
 import { NetworkStatusProvider } from "@/contexts/NetworkStatusContext";
 import { UserDataProvider } from "@/hooks/useUserData";
@@ -10,6 +11,7 @@ import UpdateAvailableBanner from "@/components/UpdateAvailableBanner";
 import EmailMigrationDialog from "@/components/migration/EmailMigrationDialog";
 import DeploymentRefresher from "@/components/DeploymentRefresher";
 import NavigationWatchdog from "@/components/NavigationWatchdog";
+import NavigationProgress from "@/components/NavigationProgress";
 import LazyProviders from "@/components/LazyProviders";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
@@ -27,6 +29,19 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
               AppLayout, so the timer survives navigations instead of being torn
               down with the page. */}
           <NavigationWatchdog />
+          {/* Reads the watchdog's state, so it must sit outside LazyProviders
+              with it — a slow navigation is exactly when the lazily-imported
+              providers may not have arrived yet, and that is the moment the
+              user most needs to be told something is loading.
+
+              The Suspense boundary is required, not decorative: it subscribes
+              to an external store, which Cache Components counts as uncached
+              dynamic data, and prerendering the route fails outright without a
+              boundary to stream it into. `null` is the right fallback — there
+              is nothing to show before the first navigation anyway. */}
+          <Suspense fallback={null}>
+            <NavigationProgress />
+          </Suspense>
           <LazyProviders>
             <BootLoaderProvider>
               <AuthWrapper>

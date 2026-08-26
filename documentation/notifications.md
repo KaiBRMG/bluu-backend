@@ -15,6 +15,7 @@
 | `src/lib/services/onlyfansOpsAlerts.ts` | `sendOpsAlertOnce` + the single-maintainer recipient uid, for the two OF Manager diagnostics |
 | `src/lib/notificationTypeBadge.ts` | Two maps, one per ground. `notificationTypeBadge(type)` — badge label/colour for the three **admin** surfaces (light chips, `-600` inks). `notificationTypeDot(type)` — the `-400` semantic hue for the **tray's** leading dot on the near-black panel. Import the one that matches the surface; never re-map a type to a hex inline. |
 | `src/components/admin/notifications/AutomatedNotificationsList.tsx` | Renders the catalogue on the **Automated** tab of `/admin-portal/notifications` |
+| `src/lib/notificationNavigation.ts` | `navigateToNotificationAction(router, actionUrl)` — the **only** place an `actionUrl` is followed. External vs internal branch + arms `NavigationWatchdog`. See RULE 3. |
 | API: `src/app/api/notifications/*` | `create`, `dismiss`, `mark-read` |
 | API: `src/app/api/admin/notifications/*` | admin send + `[batchId]/recipients` (GET) + `[batchId]` (DELETE = "unsend": removes every per-user notification doc for the batch + the batch record) |
 
@@ -41,6 +42,22 @@ const batch = adminDb.batch();
 addNotificationToBatch(batch, userId, notifications.crCompleted(cr, stageName));
 await batch.commit();
 ```
+
+## RULE 3 — Following an `actionUrl` goes through `navigateToNotificationAction`
+
+`src/lib/notificationNavigation.ts` is the only place a notification's `actionUrl` is acted on. All three surfaces call it — the tray (`NotificationTray`), the home-page widget (`(main)/page.tsx`), and the OS toast's `notification:navigate` IPC (`useNotifications`):
+
+```ts
+import { navigateToNotificationAction } from '@/lib/notificationNavigation';
+navigateToNotificationAction(router, notification.actionUrl); // no-ops on null/undefined
+```
+
+It settles two things that must not be allowed to drift apart between surfaces:
+
+- **An `http(s)://` action URL opens in the system browser**, never `router.push` — pushing an absolute external URL navigates the Electron window itself off the app.
+- **A relative one arms [`NavigationWatchdog`](../src/components/NavigationWatchdog.tsx)** via its exported `watchNavigation(to, source)`. The watchdog's own listener only sees anchor clicks; a `router.push` gives it nothing to observe, so without this call an action URL is the one navigation it cannot rescue — and the worst one to lose, because clicking the notification is also what dismisses it. Rescues from this path are tagged `source: notification-action` in Sentry. `watchNavigation` only schedules a check (4s) and no-ops when there is no transition to watch, so calling it is never a navigation of its own.
+
+Any new surface that renders notifications must use this helper rather than re-implementing the branch.
 
 ---
 

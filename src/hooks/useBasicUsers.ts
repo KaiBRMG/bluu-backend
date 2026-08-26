@@ -23,18 +23,23 @@ interface BasicUsersCacheData {
 const CACHE_KEY = 'bluu_basic_users_v1';
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-export function useBasicUsers() {
+/**
+ * @param enabled Set false to skip the fetch entirely — for surfaces where the
+ * user/group lists are only needed by controls the caller is not allowed to see.
+ */
+export function useBasicUsers(enabled = true) {
   const { user } = useAuth();
   const [state, setState] = useState<BasicUsersState>(() => {
     const cached = getCache<BasicUsersCacheData>(CACHE_KEY, CACHE_TTL_MS);
     if (cached) {
       return { users: cached.users, groups: cached.groups, loading: false, error: null };
     }
-    return { users: [], groups: [], loading: true, error: null };
+    // Disabled means nothing will ever load — never report a pending state.
+    return { users: [], groups: [], loading: enabled, error: null };
   });
 
   const fetchData = useCallback(async (forceRefresh = false) => {
-    if (!user) return;
+    if (!user || !enabled) return;
 
     if (!forceRefresh) {
       const cached = getCache<BasicUsersCacheData>(CACHE_KEY, CACHE_TTL_MS);
@@ -69,7 +74,7 @@ export function useBasicUsers() {
         error: err instanceof Error ? err.message : 'Unknown error',
       }));
     }
-  }, [user]);
+  }, [user, enabled]);
 
   useEffect(() => {
     fetchData();

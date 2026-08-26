@@ -16,6 +16,33 @@ export interface PageDef {
   order: number;
 }
 
+/**
+ * A page that sits **outside** the teamspace/permission system entirely, like
+ * Home: every authenticated employee can reach it.
+ *
+ * These are deliberately **not** in `PAGES`. That is the whole mechanism — no
+ * `page-permissions/{pageId}` doc, no `permittedPageIds` entry, and no row on
+ * the Sharing page, so there is nothing for an admin to grant or revoke. The
+ * sidebar renders them directly under Home and `AppLayout` exempts their hrefs
+ * from the route guard (`ALWAYS_ACCESSIBLE`).
+ *
+ * Adding one is a decision that the page is org-wide. If access should ever be
+ * narrowed, move it back into `PAGES` — and remember that a page moving in
+ * either direction leaves an orphan in Firestore; see
+ * [permissions.md](../../documentation/permissions.md).
+ */
+export interface UniversalPageDef {
+  title: string;
+  href: string;
+  icon: string;
+}
+
+export const UNIVERSAL_PAGES: UniversalPageDef[] = [
+  // Moved out of the Apps teamspace on 2026-08-26: the whole organisation uses
+  // Resources, and the page filters its own contents by group anyway.
+  { title: 'Resources', href: '/applications/apps-resources', icon: 'FileSearch' },
+];
+
 export const TEAMSPACES: TeamspaceDef[] = [
   { id: 'admin-portal', name: 'Admin Portal', icon: 'ShieldUser', order: 0 },
   { id: 'ca-portal', name: 'CA Portal', icon: 'MessageSquareQuote', order: 1 },
@@ -31,7 +58,8 @@ export const PAGES: PageDef[] = [
   { pageId: 'shift-management', title: 'Shift Management', teamspaceId: 'admin-portal', href: '/admin-portal/shift-management', icon: 'CalendarCog', order: 2 },
   { pageId: 'admin-notifications', title: 'Notifications', teamspaceId: 'admin-portal', href: '/admin-portal/notifications', icon: 'BellPlus', order: 3 },
   { pageId: 'admin-creator-management', title: 'Creator Management', teamspaceId: 'admin-portal', href: '/admin-portal/creator-management', icon: 'UserStar', order: 4 },
-  { pageId: 'admin-resource-management', title: 'Resource Management', teamspaceId: 'admin-portal', href: '/admin-portal/resource-management', icon: 'BookOpenText', order: 5 },
+  // Resource Management was merged into the Resources app page (apps-resources)
+  // on 2026-08-26 — management is gated by group there, not by a separate page.
 
   // CA Portal
   { pageId: 'ca-admin', title: 'Admin', teamspaceId: 'ca-portal', href: '/ca-portal/admin', icon: 'Cog', order: 0 },
@@ -55,7 +83,8 @@ export const PAGES: PageDef[] = [
   // Apps
   { pageId: 'time-tracking', title: 'Time Tracking', teamspaceId: 'apps', href: '/applications/time-tracking', icon: 'ClockFading', order: 0 },
   { pageId: 'apps-password-manager', title: 'Password Manager', teamspaceId: 'apps', href: '/applications/password-manager', icon: 'KeyRound', order: 2 },
-  { pageId: 'apps-resources', title: 'Resources', teamspaceId: 'apps', href: '/applications/apps-resources', icon: 'BookOpen', order: 1 },
+  // Resources left this teamspace on 2026-08-26 — it is org-wide now, so it
+  // lives in UNIVERSAL_PAGES above and has no page permission at all.
   // OF Manager opens in its own Electron window rather than navigating in-app,
   // so it deliberately has no href — the sidebar special-cases this pageId.
   // Its icon is the brand SVG at /Icons/onlyfans.svg (no lucide equivalent).

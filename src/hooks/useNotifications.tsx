@@ -13,6 +13,7 @@ import { db } from '@/firebase-config';
 import { useAuth } from '@/components/AuthProvider';
 import { useUserData } from '@/hooks/useUserData';
 import { NotificationDocument } from '@/types/firestore';
+import { navigateToNotificationAction } from '@/lib/notificationNavigation';
 
 interface NotificationsContextType {
   notifications: NotificationDocument[];
@@ -40,7 +41,10 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   useEffect(() => {
     if (!window.electronAPI?.notifications) return;
     window.electronAPI.notifications.onNavigate((url) => {
-      router.push(url);
+      // The OS toast is gone the moment it is clicked, so a transition that
+      // never commits strands the user with no way back to where they were
+      // being sent. `navigateToNotificationAction` arms `NavigationWatchdog`.
+      navigateToNotificationAction(router, url);
     });
     window.electronAPI.notifications.onPlaySound(() => {
       const audio = new Audio('/mixkit-message-pop-alert-2354.mp3');

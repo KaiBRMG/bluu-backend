@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/select';
 import { OptionMultiSelect, type MultiOption } from './OptionMultiSelect';
 import type { ResourceDocument } from '@/types/resource';
-import type { ResourcePayload } from '@/hooks/useAdminResources';
+import type { ResourcePayload } from '@/hooks/useResources';
 
 const STATUS_OPTIONS = ['Active', 'Unlisted'];
 
@@ -45,6 +45,7 @@ export function ResourceFormDialog({
   mode,
   resource,
   groupOptions,
+  groupsRequired = false,
   typeOptions,
   userOptions,
   onSubmit,
@@ -53,7 +54,13 @@ export function ResourceFormDialog({
   onOpenChange: (open: boolean) => void;
   mode: 'create' | 'edit';
   resource?: ResourceDocument;
+  /** Only the groups the caller may write — the API rejects anything else. */
   groupOptions: MultiOption[];
+  /**
+   * True for a non-admin manager: an untagged resource is admin-only, so saving
+   * one without a group would come back 403. Admins may leave it empty.
+   */
+  groupsRequired?: boolean;
   typeOptions: MultiOption[];
   userOptions: MultiOption[];
   onSubmit: (payload: ResourcePayload) => Promise<void>;
@@ -76,8 +83,9 @@ export function ResourceFormDialog({
   );
 
   const nameValid = form.name.trim().length > 0;
-  // Create: enabled once a name exists. Edit: enabled only after a change.
-  const canSave = nameValid && (mode === 'create' ? true : dirty);
+  const groupsValid = !groupsRequired || form.groups.length > 0;
+  // Create: enabled once the required fields exist. Edit: only after a change.
+  const canSave = nameValid && groupsValid && (mode === 'create' ? true : dirty);
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -126,11 +134,7 @@ export function ResourceFormDialog({
         </DialogHeader>
 
         <div className="space-y-3">
-          <div className="grid grid-cols-[1fr_5rem] gap-3">
-            <div className="space-y-1.5">
-              <Label>Name *</Label>
-              <Input value={form.name} onChange={e => set('name', e.target.value)} />
-            </div>
+          <div className="grid grid-cols-[5rem_1fr] gap-3">
             <div className="space-y-1.5">
               <Label>Icon</Label>
               <Input
@@ -139,6 +143,10 @@ export function ResourceFormDialog({
                 placeholder="📄"
                 className="text-center"
               />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Name *</Label>
+              <Input value={form.name} onChange={e => set('name', e.target.value)} />
             </div>
           </div>
 
@@ -162,7 +170,7 @@ export function ResourceFormDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label>Groups</Label>
+            <Label>Groups {groupsRequired && '*'}</Label>
             <OptionMultiSelect
               options={groupOptions}
               value={form.groups}
@@ -170,6 +178,11 @@ export function ResourceFormDialog({
               placeholder="Select groups"
               className="w-full"
             />
+            {groupsRequired && (
+              <p className="text-xs text-muted-foreground">
+                You can share with the groups you manage.
+              </p>
+            )}
           </div>
 
           <div className="space-y-1.5">

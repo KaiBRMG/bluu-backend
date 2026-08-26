@@ -6,8 +6,8 @@ colors:
   sidebar: "#18181b"
   surface: "#171717"
   ink: "#ffffff"
-  ink-secondary: "#9ca3af"
-  ink-muted: "#6b7280"
+  ink-secondary: "#a1a1aa"
+  ink-muted: "#71717a"
   hairline: "#2a2a2a"
   action-blue: "#3b82f6"
   action-blue-deep: "#2563eb"
@@ -96,6 +96,21 @@ components:
     textColor: "{colors.status-blue}"
     rounded: "{rounded.full}"
     padding: "2px 8px"
+  attribute-chip:
+    backgroundColor: "rgba(255,255,255,0.08)"
+    textColor: "#d4d4d8"
+    rounded: "{rounded.md}"
+    padding: "2px 6px"
+  facet-row:
+    backgroundColor: "transparent"
+    textColor: "{colors.ink-secondary}"
+    rounded: "{rounded.sm}"
+    padding: "6px 8px"
+  facet-row-selected:
+    backgroundColor: "rgba(59,130,246,0.15)"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.sm}"
+    padding: "6px 8px"
   widget-card:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.ink}"
@@ -120,7 +135,7 @@ The canonical reference implementation is `src/app/(main)/creator-portal/custom-
 - Greyscale by default; color is strictly semantic (status / priority / category).
 - Soft elevation from translucent white overlays + hairline borders — never shadows.
 - Every number is `tabular-nums`; every code/ID is `font-mono`.
-- Fast, subtle motion: 120ms ease-out; `hover:brightness-110 active:scale-[0.98]` on tappable rows.
+- Fast, subtle motion: 120ms ease-out; tappable rows step through the overlay recipe (transparent rows) or `hover:brightness-110 active:scale-[0.98]` (rows that carry their own fill) — see [Interaction / Motion](#interaction--motion).
 
 ## 2. Colors
 
@@ -131,6 +146,8 @@ A greyscale-on-black palette where the only saturated pixels carry state.
 - **Action Blue Deep** (`#2563eb`): The **filled** step — any Action Blue surface that carries white text (primary buttons, a selected filter chip). Hover deepens again to `#1d4ed8`. This is an accessibility floor, not a preference: white on `#3b82f6` measures **3.68:1** and fails AA for anything under 18px, while white on `#2563eb` reads **5.17:1**. Tint at `#3b82f6`, fill at `#2563eb`.
 
   Two things do **not** yet follow this and are outstanding, both one-line changes with app-wide visual effect (deliberately left for a separate decision): `.btn-primary` in `globals.css` still fills at `#3b82f6` with white ink, and shadcn's `Button` `default` variant resolves `--primary` to **near-white** (`oklch(0.92 …)`, the stock `.dark` value) rather than to Action Blue at all — so most primary buttons in the app are currently white, not blue. OF Manager's Send button is inked correctly at `#2563eb` in-component; treat it as the reference, not as drift.
+
+  **Do not ink ordinary page buttons in-component to work around this.** OF Manager earns the exception because it is a satellite window with its own shell; an in-app page that inks its own primary action just makes itself the odd one out, and leaves a second button somewhere in the same flow still rendering white. Ordinary pages use the plain shadcn `Button` and look like every other page — **the fix for `--primary` is one global change to `globals.css`, and that is where it belongs.** Until someone makes it, near-white primary buttons are the app's actual, consistent look.
 
 ### Neutral
 
@@ -179,10 +196,12 @@ Chart hues are **validated for dark-surface contrast and CVD-safety**, not taken
 
 ### Hierarchy
 - **Instrument** (700, `text-5xl` → `sm:text-6xl` / 48–60px, `tabular-nums`): The **single** sanctioned oversized number — the live clock on the time-tracking page ([`applications/time-tracking/page.tsx`](src/app/(main)/applications/time-tracking/page.tsx)), read from across a desk. This is the one exception to the "no oversized display type" Don't; it earns it because the timer *is* the page's reason to exist, not decoration. `tabular-nums` does the alignment (in this project `font-mono` also maps to Google Sans, so the mono class is cosmetic here — the numeric feature is what matters). Do **not** cite this step to justify another big number: outside the timer, `Display` is the ceiling.
-- **Display** (600, `text-2xl` / 24px, `tabular-nums`): Stat and hero numbers in summary tiles. Always tabular.
+- **Page title** (700, `text-2xl` / 24px, `tracking-tight`): The `<h1>` every page under `(main)/` opens with, followed by one `text-sm text-zinc-400` line of description. It is the **only** 700-weight step and the only place `tracking-tight` appears; a page's primary action sits to its right on the same row, not below it. Do not restyle it per page — the console's pages are recognisably the same object, and that starts at the header.
+- **Display** (600, `text-2xl` / 24px, `tabular-nums`): Stat and hero numbers in summary tiles. Always tabular. Same size as Page title, distinguished by weight and by never carrying prose.
 - **Title** (600, `text-lg` / 18px): Dialog titles, card titles, section headers.
 - **Body** (500, `text-sm` / 14px, line-height 1.5): The default — set on `body`, inherited nearly everywhere. Prose caps at 65–75ch; data and tables may run denser.
 - **Label** (500, `text-xs` / 12px, `text-zinc-400`): Field labels sit above inputs (`mb-1`); meta and captions.
+- **Meta** (400–500, `text-[11px]`, `text-zinc-400`): The second line of a dense two-line row and the smallest step that may carry real content — a timestamp under a message bubble, the host + groups + date line under a resource name. Facts on it are `·`-separated with an `aria-hidden` separator, numbers are `tabular-nums`, and an identifier on it takes `font-mono`. **Never stack `opacity` on it**; at this size Ink Secondary is already the floor.
 - **Eyebrow** (600, `11px`, uppercase, `letter-spacing: 0.06em`, low opacity): Sidebar section headers only (`.sidebar-section-header`) — a deliberate, single-use brand device, not a per-section scaffold.
 - **Code** (500, `text-xs`, `font-mono`, `tabular-nums`): IDs and codes (CR0001). Dense captions drop to `text-[10px]` / `text-[8px]` (avatar fallbacks).
 
@@ -235,6 +254,7 @@ Stacking is a **named semantic scale**, declared in `globals.css` and consumed v
 - **Badges:** `variant="secondary"` for counts, `variant="destructive"` for alerts ("3 over 30d").
 - **Status pill:** `rounded-full px-2 py-0.5 text-xs font-medium` span, colored from `STATUS_COLORS` (the `-400` text / `/10` fill triad).
 - **Status dot:** `inline-block w-2 h-2 rounded-full` + `STATUS_DOT[status]` — the compact indicator in dense lists.
+- **Attribute chip:** `rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[11px] font-medium text-zinc-300` — a free-form label a record *carries* (a resource's types) as opposed to a state it is *in*. **Greyscale, always.** A status has a closed vocabulary and a meaning per value, so it earns a hue from `campaignTracking.ts`; an open-ended label has neither, and colouring it is decoration wearing a status pill's clothes. Square-ish (`rounded-md`) rather than `rounded-full` so the two are never confused at a glance.
 - **Template-token chip:** a `<code>` on the overlay recipe — `rounded bg-white/[0.08] px-1 py-0.5 font-mono text-xs text-zinc-300` — marking a value interpolated at runtime inside otherwise literal copy (the automated-notification templates on `/admin-portal/notifications`). Greyscale by design: a placeholder is not a state, so it takes no hue.
 
 ### Inputs / Fields
@@ -270,9 +290,25 @@ Stacking is a **named semantic scale**, declared in `globals.css` and consumed v
 
 This is a shell, not a new visual language: colours, overlays, hairlines, radii, motion and the empty-state line are all unchanged. A second satellite window should reuse this shell rather than invent a third.
 
+### The faceted index (Resources)
+
+`/applications/apps-resources` is the reference for a **browse-and-open collection** — a list whose task is "find the one I need and open it", not "audit a table". When the surface is a directory rather than a ledger, build this shape instead of reaching for `Table`. The layout is `grid lg:grid-cols-[12rem_minmax(0,1fr)] gap-x-10`: a facet rail, then the index.
+
+- **A filter rail, not pill rows.** Vertical facet groups in the 12rem column ([`FilterRail.tsx`](src/app/(main)/applications/apps-resources/components/FilterRail.tsx)): each row a label plus a right-aligned `tabular-nums` count, each group headed by a plain `text-xs font-medium text-zinc-400` label — **not** the sidebar eyebrow, which stays a single-use device. Selection is the Action Blue **tint** (`/15`) plus `font-semibold text-white`; unselected rows sit at `text-zinc-400` and hover to the overlay, so hue separates selection from hover exactly as it does on the satellite shell's chat rows. Every facet carries `aria-pressed`. The rail is `lg:sticky lg:top-4` and folds into a `Popover` below `lg`, triggered by a button showing the active-filter count.
+- **Counts are faceted, or they are lies.** Each facet is counted against every *other* active filter, so the number beside it is what clicking it will actually produce. Implement it by running the same predicate with that one facet cleared. A count taken over the whole collection leads people into empty lists and is worse than showing no count at all.
+- **Rows are two lines, and the whole row is one target.** Line one is the name at `font-medium text-white` plus any state marks; line two is the Meta step (see § Typography). If a row's name and one of its fields point at the same destination, only the row is a link — two hit areas for one target is a table habit, not an affordance.
+- **Show the identity of a link, not its address.** A truncated URL is a column of noise; the **host** (`docs.google.com`) is the fact the reader wants, with the full URL on `title` for anyone who needs it.
+- **Section rails, not sticky headers.** A section is headed by a `font-mono text-xs font-semibold text-zinc-400` marker, a hairline rule (`h-px bg-white/[0.07]`) filling the width, and a right-aligned count. No sticky mechanics, so it can never fight the layout's own scroll container.
+- **Sort for retrieval, and let a section carry the state.** Pinned first, then A–Z under letter rails — a known name is found by position, which a `lastEditedTime` sort never allows. This is also what makes a pin worth having: pinning **promotes the row into a Pinned section** rather than lighting an icon in a column. When a search suppresses the sections, the row must show the mark inline instead — state may not simply vanish because its container did.
+- **Row actions crossfade with the row's own trailing content**, in one lane, on `:hover` **and** `:focus-within`. The lane takes a `min-w` equal to the action cluster, so nothing shifts, no long value runs underneath it, and the lane is never dead space. Omitting `:focus-within` makes the actions keyboard-unreachable — the same rule as the satellite shell's per-message menu.
+- **Gate affordances, don't duplicate surfaces.** Readers and managers see one page; what a viewer may do is decided per row, and a row outside a manager's write scope renders a spacer so the action lane stays one column. There is no second "management" screen for the same collection.
+
 ### Loading & Empty States
-- **Loading:** shadcn `Skeleton` shaped to the final layout (`<Skeleton className="h-64 rounded-xl" />`), never a bare spinner mid-layout. Async home widgets gate boot via `useBootPhase('home-<name>', isLoading)`.
-- **Empty:** a single quiet line — `text-sm text-muted-foreground` ("Nothing outstanding.", "None") — never an illustration.
+- **Loading:** shadcn `Skeleton` shaped to the final layout (`<Skeleton className="h-64 rounded-xl" />`), never a bare spinner mid-layout. "Shaped to the layout" means the real thing — a two-line row skeletons as two bars of the right widths, and a facet rail as a stack of rail-height blocks — so nothing jumps when the data lands. Async home widgets gate boot via `useBootPhase('home-<name>', isLoading)`.
+- **Empty:** a single quiet line — `text-sm text-zinc-400` ("Nothing outstanding.", "None") — never an illustration, and never wrapped in a bordered box. A box drawn around one sentence is a container pretending there is content in it. *(`text-muted-foreground` reads `#9f9fa9` and is a third grey for the same role — see the One-Grey Rule in §2. Use Ink Secondary.)*
+- **Empty because of a filter is a different state from empty because there is nothing.** "No resources are shared with your group yet" is a fact; "Nothing matches these filters" is a dead end, and it must carry its own way out — an inline control that clears the filters and names what is behind them ("Clear them to see all 47"). Same one quiet line, one more verb in it.
+- **A client-side lazy window needs no indicator.** When the next page is already in memory, it arrives in the same frame; a spinner on the sentinel is theatre for work that isn't happening. Render the sentinel as a bare `h-px` and let the count line below carry the state ("Showing 24 of 61").
+- **Navigating between pages:** [`NavigationProgress`](src/components/NavigationProgress.tsx), and nothing else. A `<Link>` transition keeps the current page mounted and interactive until the next one is ready, so on a slow connection a click looks like a dead app — and an Electron window has no tab spinner to say otherwise. The escalation is deliberately reluctant: **nothing under 400ms** (most navigations land in under 200ms, and a bar that flashes on every click makes a fast app look slow), then a **2px Action Blue hairline** across the top on `--z-banner`, trickling toward 90% and never reaching 100 on its own — only the commit finishes it, so the bar never promises an arrival it does not control. Past that it earns **one quiet `text-xs text-zinc-400` line** in an overlay pill ("Still loading — slow connection", or a `WifiOff` variant when offline), and if the navigation cannot be rescued at all, a `size="xs"` **Reload** button. Never a spinner in the layout, never a modal, and never a bar with no way out of it. The indicator is inked `#3b82f6` in-component for the same reason OF Manager's Send button is — shadcn's `--primary` resolves to near-white here (see §2).
 
 ### The notification tray
 
@@ -316,7 +352,9 @@ The throughline: **the card's tint tells you the category at a glance, the kanba
 
 ### Interaction / Motion
 - Global 120ms ease-out transition on color/opacity for all interactive elements (`globals.css`).
-- Clickable list items: `transition-all hover:brightness-110 active:scale-[0.98]`.
+- **Clickable rows have two idioms, chosen by whether the row has a fill of its own.** A row that sits on a surface (kanban items, tinted cards) uses `transition-all hover:brightness-110 active:scale-[0.98]`. A row that is **transparent on the canvas** steps through the overlay recipe instead — `hover:bg-white/[0.055]` → `active:bg-white/[0.08]` (§4) — because `brightness` on a transparent element changes nothing, and a `scale` on a full-bleed row drags any absolutely-positioned actions with it. Picking the wrong one is why a row can look inert under the cursor.
+- **Focus is a 2px inset Action Blue ring** (`focus-visible:ring-2 focus-visible:ring-inset`, `--tw-ring-color: #3b82f6`) on rows, facets and any full-width interactive element. Inset so it can't be clipped by the row's own rounding, and Action Blue because keyboard focus *is* current selection — the One Voice Rule. Never remove the ring without replacing it with something equally visible.
+- **Reveal-on-hover must also reveal on `:focus-within`.** Anything hidden until hover is invisible to the keyboard otherwise. This applies to every hover-revealed action cluster in the app.
 - Text links in dense lists: `hover:text-white hover:underline underline-offset-2`.
 - Custom scrollbars are thin (6px) translucent-white, inherited globally — don't override.
 
@@ -328,14 +366,17 @@ The throughline: **the card's tint tells you the category at a glance, the kanba
 - **Do** pull every status/priority color from `campaignTracking.ts` and apply the `-400` text / `/10` fill / `/30` border triad.
 - **Do** put `tabular-nums` on every count, amount, and metric, and `font-mono text-xs` on every code/ID (CR0001).
 - **Do** use only `src/components/ui` components, only `@tabler/icons-react` / `lucide-react` icons, and only `Avatar` for images.
-- **Do** shape `Skeleton`s to the final layout, write empty states as one quiet `text-muted-foreground` line, and `toast` every mutation outcome.
-- **Do** keep motion to 120ms transitions and `hover:brightness-110 active:scale-[0.98]` on tappable rows.
+- **Do** shape `Skeleton`s to the final layout, write empty states as one quiet `text-zinc-400` line, and `toast` every mutation outcome.
+- **Do** keep motion to 120ms transitions, and pick the right row idiom: the overlay steps for transparent rows, `hover:brightness-110 active:scale-[0.98]` for rows with their own fill.
+- **Do** give a filtered-empty state a way out of itself, and reveal hover-only actions on `:focus-within` too.
 - **Do** stack app surfaces with the `--z-*` scale (`--z-overlay` < `--z-banner` < `--z-toast`) via `var(--z-*)`.
 - **Do** make it read like `custom-requests/page.tsx`. If it doesn't, reconcile.
 
 ### Don't:
 - **Don't** add drop shadows for depth — raise the white overlay instead (The No-Shadow Rule).
 - **Don't** use color as decoration; if a colored pixel doesn't encode state, category, or the one Action Blue voice, remove it (The Semantic-Only Rule).
+- **Don't** hash a free-form string to a colour palette. Mapping an open-ended label — a type, a tag, an author — onto N hues *looks* semantic and encodes nothing: the hue is unlearnable, it changes if the string is edited, and N of them at once is a rainbow on a greyscale console. The Resources page shipped ten such hues and they were removed wholesale. Open-ended labels are Attribute chips; only a closed vocabulary with a meaning per value earns a hue, from `campaignTracking.ts`.
+- **Don't** put a border around an empty state, a single sentence, or a lone control — a box implies contents.
 - **Don't** hardcode a themeable hex — use the CSS variables / Tailwind tokens.
 - **Don't** introduce another component library, hand-roll a primitive that exists in `src/components/ui`, or use icons outside `@tabler/icons-react` / `lucide-react`.
 - **Don't** use a raw `<img>` — always `Avatar`.
