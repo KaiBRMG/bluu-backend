@@ -101,6 +101,30 @@ Every rejection is logged (`console.warn` with the reason and, for quota trips, 
 
 Section 3 only exists when the applicant answers **yes** to "do you already have an OnlyFans account linked to your identity?". The step list is derived from that answer, so the progress rail shows 3 or 4 segments accordingly, and the submit route **blanks** `niche` / `trialLink` / `socialLinks` / `earningsPhoto` when `hasOnlyFans` is false rather than trusting whatever the client sent.
 
+### Browser translation is disabled on this route — it used to crash the form
+
+On 2026-08-28 an applicant in Safari with **Translate → Spanish** on lost a half-filled application. Sentry recorded them filling steps 1 and 2, opening the country `Select`, picking an option, and the React root dying on `NotFoundError: The object can not be found here.` The tell was the breadcrumb reading `[aria-label="Ciudad"]` — the source says `City`, and "Ciudad" appears nowhere in the repo, so the DOM had been rewritten under React.
+
+Translators replace text nodes **in place** (Safari swaps the node, Chrome wraps it in a `<font>`). React keeps a reference to the node it created, and the next unmount of that subtree calls `parent.removeChild(node)` on a node that is no longer a child. Picking a `SelectItem` unmounts the dropdown, which is exactly that deletion. Every Radix overlay on this surface has the same shape.
+
+[`NoTranslate`](../src/app/model-submissions/_components/NoTranslate.tsx) sets `translate="no"` + `.notranslate` **on `<html>`**, mounted from the route layout and restored on unmount.
+
+- **It has to be `<html>`, not the form.** Radix portals its overlays to `document.body` — a *sibling* of the form, not a descendant — and `translate` is inherited down the tree. Marking the form alone leaves the exact subtree that crashed still translatable.
+- **It is route-scoped, not global**, because translation is a real convenience elsewhere in the app. This is the surface where it is both most likely (an international, often non-English-speaking audience) and most costly (one unauthenticated shot at a form with no server-side draft).
+- `<main>` also carries the static pair in both branches, covering the window before hydration runs the effect.
+
+### A crash no longer costs the applicant their answers
+
+Two halves, both added with the fix above:
+
+1. **[`error.tsx`](../src/app/model-submissions/error.tsx)** — before it, a render crash escaped to `app/global-error.tsx`, which renders an unstyled `NextError`: a stranger part-way through sending us their legal name and photographs got a bare "An error occurred" on an unbranded page with no way forward. It now reports to Sentry (`area: model-submissions`) behind a stage-skinned screen with a **Continue your application** button.
+2. **A module-scope draft in `page.tsx`** — `reset()` re-renders the segment *without a document reload*, so a plain module variable survives it. Form state, step index, photo slots and the session are seeded back from it on remount.
+
+Two things about that draft are load-bearing:
+
+- **It is in memory, never in storage.** This is the most sensitive data the project holds, and the rule that applicant details do not land on disk is the same one the review queue follows for opened records. Module scope recovers the case that actually hurt us (a render crash in a live tab) and nothing else — a reload or a closed tab starts clean, which for this data is the right trade, not a gap.
+- **It carries the `session`, and the session effect returns early when one is recovered.** Photos upload against a session id, and `resolvePhotos` only honours ids that session was issued — so re-opening a session after a crash would silently orphan every photo already uploaded and burn a per-IP session slot doing it. `startedAt` is preserved for the same reason in miniature: a restarted clock could push a genuine applicant under `MIN_FILL_SECONDS` and get them silently treated as a bot.
+
 ### One schema, three places
 
 `submissionSchema` in `src/lib/modelSubmissions.ts` is the single definition. It runs:
@@ -142,6 +166,7 @@ The public endpoints are the only unauthenticated write path in the project. Def
 4. **Every new public endpoint takes the session token and a rate-limit consume**, in that order (signature first: it costs no reads).
 5. **The bot heuristics answer `200`, not `403`.** Telling a script it was detected teaches it what to change.
 6. **HMAC key**: `MODEL_SUBMISSION_SECRET` if set, otherwise derived deterministically from `FIREBASE_SERVICE_ACCOUNT`. Setting the env var later **invalidates every open session** (applicants mid-form see "session expired" and must refresh) — do it at a quiet hour.
+7. **Do not remove `<NoTranslate />`, and never persist the draft to storage.** Both are documented above with the incident that produced them — the first is what stops a translated DOM from killing the React root, the second is what keeps applicant PII off disk.
 
 ---
 
