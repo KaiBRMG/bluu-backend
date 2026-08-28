@@ -95,16 +95,52 @@ const EMPTY_FORM: FormState = {
   socialLinks: '',
 };
 
+// ─── Crash recovery ──────────────────────────────────────────────────────────
+
+interface Draft {
+  form: FormState;
+  stepIndex: number;
+  session: { sessionId: string; token: string } | null;
+  selfies: PhotoSlot[];
+  bodyPhotos: PhotoSlot[];
+  earnings: PhotoSlot[];
+  startedAt: number;
+}
+
+/**
+ * The in-progress application, held in module scope so it survives this
+ * component being torn down and remounted by `error.tsx`'s `reset()`.
+ *
+ * DELIBERATELY IN MEMORY, NOT IN STORAGE. This is the most sensitive data the
+ * project collects — legal name, email, age, city, sexuality, photographs — and
+ * `model-submissions.md` already holds the line that applicant details must not
+ * land on disk (the review queue caches opened records in memory for the same
+ * reason). Module scope buys back exactly the case that hurt us, a render crash
+ * inside a live tab, and buys nothing else: a reload or a closed tab starts
+ * clean, which for this data is the correct trade rather than a shortcoming.
+ *
+ * It holds the `session` too, which is not an optimisation. Photos upload
+ * against a session id and `resolvePhotos` only honours ids that session was
+ * issued — so re-opening a session after a crash would silently orphan every
+ * photo already uploaded, and burn a per-IP session slot doing it.
+ */
+let draft: Draft | null = null;
+
 export default function ModelSubmissionsPage() {
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  // Read once, at first render — the effect below overwrites `draft` immediately.
+  const recovered = useRef(draft).current;
+
+  const [form, setForm] = useState<FormState>(() => recovered?.form ?? EMPTY_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [stepIndex, setStepIndex] = useState(0);
+  const [stepIndex, setStepIndex] = useState(() => recovered?.stepIndex ?? 0);
 
-  const [selfies, setSelfies] = useState<PhotoSlot[]>([]);
-  const [bodyPhotos, setBodyPhotos] = useState<PhotoSlot[]>([]);
-  const [earnings, setEarnings] = useState<PhotoSlot[]>([]);
+  const [selfies, setSelfies] = useState<PhotoSlot[]>(() => recovered?.selfies ?? []);
+  const [bodyPhotos, setBodyPhotos] = useState<PhotoSlot[]>(() => recovered?.bodyPhotos ?? []);
+  const [earnings, setEarnings] = useState<PhotoSlot[]>(() => recovered?.earnings ?? []);
 
-  const [session, setSession] = useState<{ sessionId: string; token: string } | null>(null);
+  const [session, setSession] = useState<{ sessionId: string; token: string } | null>(
+    () => recovered?.session ?? null,
+  );
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -127,8 +163,14 @@ export default function ModelSubmissionsPage() {
   // Open a submission session up front, so photos can start uploading the
   // instant they're picked rather than waiting on a round trip at step 4.
   useEffect(() => {
+    // Recovered from a crash: the session — and every photo already uploaded
+    // against it — is still good. Opening a second one would strand them.
+    if (session) return;
+
     let cancelled = false;
-    startedAt.current = Date.now();
+    // Keep the original stamp on recovery, so a crash can't restart the clock
+    // and push a genuine applicant under MIN_FILL_SECONDS on resubmit.
+    startedAt.current = recovered?.startedAt || Date.now();
     (async () => {
       try {
         const res = await fetch('/api/model-submissions/session', { method: 'POST' });
@@ -144,7 +186,24 @@ export default function ModelSubmissionsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [session, recovered]);
+
+  // Keep the recovery copy current. Dropped once the application is in — past
+  // that point there is nothing to recover and no reason to still hold it.
+  useEffect(() => {
+    draft =
+      submittedName === null
+        ? {
+            form,
+            stepIndex,
+            session,
+            selfies,
+            bodyPhotos,
+            earnings,
+            startedAt: startedAt.current,
+          }
+        : null;
+  }, [form, stepIndex, session, selfies, bodyPhotos, earnings, submittedName]);
 
   const steps = useMemo<StepId[]>(
     () => (form.hasOnlyFans ? ['info', 'about', 'onlyfans', 'photos'] : ['info', 'about', 'photos']),
@@ -261,14 +320,18 @@ export default function ModelSubmissionsPage() {
 
   if (submittedName !== null) {
     return (
-      <main className="min-h-dvh text-white" style={STAGE_GROUND}>
+      <main translate="no" className="notranslate min-h-dvh text-white" style={STAGE_GROUND}>
         <ThankYou name={submittedName} />
       </main>
     );
   }
 
   return (
-    <main className="min-h-dvh text-white" style={STAGE_GROUND}>
+    // `translate="no"` is also set on <html> by <NoTranslate />, which is what
+    // actually covers Radix's portalled overlays. This static pair is the belt
+    // to that brace: it applies in the server-rendered markup, before hydration
+    // has had a chance to run the effect.
+    <main translate="no" className="notranslate min-h-dvh text-white" style={STAGE_GROUND}>
       <div className="mx-auto flex min-h-dvh w-full max-w-xl flex-col px-5 sm:px-8">
         {/* ── Masthead ─────────────────────────────────────────────────── */}
         <header className="flex flex-col gap-5 pt-10 pb-8 sm:pt-14">

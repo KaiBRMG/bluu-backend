@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { NoTranslate } from './_components/NoTranslate';
 
 export const metadata: Metadata = {
   title: 'Model Application · Bluu Rock',
@@ -10,5 +11,12 @@ export const metadata: Metadata = {
 };
 
 export default function ModelSubmissionsLayout({ children }: { children: React.ReactNode }) {
-  return children;
+  return (
+    <>
+      {/* Mounted in the layout, not the page, so the opt-out also covers the
+          error boundary this route renders when something does go wrong. */}
+      <NoTranslate />
+      {children}
+    </>
+  );
 }

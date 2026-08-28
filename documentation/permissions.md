@@ -76,6 +76,20 @@ That made it dangerous while it carried a **hardcoded mirror of `PAGES`**. The c
 
 **Adding a page to `definitions.ts` is all that is required** — the script follows automatically. Do not add a page list back into it.
 
+### The nightly sync is the same overwrite, unattended
+
+**`syncPagePermissions` in [`functions/index.js`](../functions/index.js) does the identical wholesale overwrite on a cron — `0 3 * * *` UTC, every night, across the whole `users` collection.** It is the safety net that catches drift the cascade logic misses, and it is the more dangerous of the two precisely because nobody triggers it.
+
+This is the trap that cost two incidents. On 2026-08-26 a manual repair restored the fleet; the cron re-applied its own stale list at 03:00 UTC and wiped the pages again overnight, which read as the bug "randomly coming back". **Repairing `permittedPageIds` without checking this function only lasts until 03:00 UTC.**
+
+It no longer carries a page list. `resolvePageIds()` iterates the **`page-permissions` collection itself** — the thing the job is reconciling against — so a page it could delete is by construction a page the collection does not have. Cloud Functions cannot read `definitions.ts` at runtime (it is not deployed with `functions/`), which is why this one derives from Firestore rather than parsing the source like the script does. It also **aborts without writing if `page-permissions` reads back empty**, since an empty map resolves every user to `[]`.
+
+Consequences worth knowing:
+
+- **`page-permissions` is the page registry for anything under `functions/`.** A page in `PAGES` with no `page-permissions` doc grants nobody — fail-closed, and `seedDefaultPagePermissions()` is what creates the doc.
+- **Retiring a page means deleting its `page-permissions` doc**, not just removing it from `PAGES`. Leave the doc and the cron keeps re-adding that id to `permittedPageIds` nightly, bumping `permissionsVersion` for everyone forever. `src/scripts/remove-retired-pages.js` does both halves.
+- **Never reintroduce a hardcoded page list in `functions/`.** There is no test that would catch it going stale; the failure is silent, nightly, and fleet-wide.
+
 ## Universal pages (outside the permission system)
 
 Some pages are org-wide, like Home: **every** authenticated employee reaches them and there is nothing for an admin to grant. Those live in `UNIVERSAL_PAGES` in `src/lib/definitions.ts` and are deliberately **not** in `PAGES`.

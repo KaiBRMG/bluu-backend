@@ -76,19 +76,25 @@ exports.generateThumbnail = onObjectFinalized({ bucket: STORAGE_BUCKET }, async 
  * between 15 min and 6 h stale), the startup hydration logic handles it via
  * the /upload-log route instead.
  */
-// Page IDs that exist in the app — must be kept in sync with src/lib/definitions.ts.
-const KNOWN_PAGE_IDS = [
-  'ca-admin', 'ca-dashboard', 'ca-shifts', 'ca-disputes',
-  'ca-custom-requests', 'ca-campaigns',
-  'user-management', 'sharing', 'shift-management',
-  'admin-notifications', 'admin-creator-management',
-  'creators-custom-requests', 'creators-content-planning',
-  'time-tracking', 'apps-password-manager',
-];
-
 /**
  * Resolves which page IDs a user should have access to.
  * Mirrors src/lib/services/permissionResolver.ts — resolveAccessiblePages.
+ *
+ * The page registry is `permMap` itself — i.e. the page-permissions collection,
+ * which seedDefaultPagePermissions() keeps one document per page in. This
+ * function deliberately has NO hardcoded page list.
+ *
+ * Why that matters: syncPagePermissions writes `permittedPageIds: expected` as a
+ * WHOLESALE OVERWRITE, so any page id absent from the list it iterates is
+ * deleted from every user in the fleet on the next nightly run. A hardcoded
+ * mirror of definitions.ts went 8 pages stale here and did exactly that — twice,
+ * because the cron re-applied it the night after a manual repair. Iterating the
+ * collection it is reconciling against makes that failure structurally
+ * impossible. Do not reintroduce a constant; adding a page to definitions.ts
+ * (which seeds a page-permissions doc) is all that should ever be required.
+ *
+ * A page with no page-permissions doc simply grants nobody — the fail-closed
+ * direction, and the sidebar filters ids through PAGES anyway.
  *
  * @param {Map<string, {groups?: Record<string,boolean>, users?: Record<string,boolean>}>} permMap
  * @param {string} uid
@@ -97,8 +103,7 @@ const KNOWN_PAGE_IDS = [
  */
 function resolvePageIds(permMap, uid, userGroups) {
   const accessible = [];
-  for (const pageId of KNOWN_PAGE_IDS) {
-    const perm = permMap.get(pageId);
+  for (const [pageId, perm] of permMap) {
     if (!perm) continue;
     if (perm.users?.[uid]) { accessible.push(pageId); continue; }
     for (const g of userGroups) {
@@ -133,17 +138,23 @@ exports.syncPagePermissions = onSchedule({ schedule: '0 3 * * *', timeZone: 'UTC
     db.collection('page-permissions').get(),
   ]);
 
-  // Build a pageId → permission doc map
+  // Build a pageId → permission doc map. This doubles as the page registry —
+  // see resolvePageIds().
   const permMap = new Map();
   for (const doc of permSnap.docs) {
     permMap.set(doc.id, doc.data());
   }
 
-  // Warn about pages with no permission doc (missing seed)
-  for (const pageId of KNOWN_PAGE_IDS) {
-    if (!permMap.has(pageId)) {
-      console.warn(`[syncPagePermissions] No page-permissions doc for page: ${pageId}`);
-    }
+  // Fail closed on an empty collection. Every write below is a wholesale
+  // overwrite, so an empty permMap resolves every user to [] and would strip
+  // the entire fleet's access in one batch. An empty page-permissions
+  // collection is never legitimate — treat it as a failed read and bail.
+  if (permMap.size === 0) {
+    console.error(
+      '[syncPagePermissions] page-permissions is empty — aborting without writing. ' +
+      'Refusing to clear permittedPageIds for every user.'
+    );
+    return;
   }
 
   const batch = db.batch();

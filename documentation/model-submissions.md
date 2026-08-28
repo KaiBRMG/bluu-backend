@@ -7,7 +7,8 @@
 | File | Role |
 |---|---|
 | `src/app/model-submissions/page.tsx` | The public 3–4 step form ("the stage" skin) |
-| `src/app/model-submissions/_components/` | `Field`, `PhotoUploader`, `ThankYou` |
+| `src/app/model-submissions/_components/` | `Field`, `PhotoUploader`, `ThankYou`, `NoTranslate` |
+| `src/app/model-submissions/error.tsx` | Route error boundary — the branded crash screen, with `reset()` |
 | `src/app/model-submissions/_lib/theme.ts` | **The public surface's design tokens — import, never inline** |
 | `src/app/model-submissions/_lib/prepareImage.ts` | **Browser-side HEIC→JPEG transcode** + downscale before upload |
 | `src/lib/modelSubmissions.ts` | Limits, status vocabulary, **the shared zod schema** (client + server) |
