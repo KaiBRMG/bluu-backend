@@ -13,7 +13,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { formatCount } from '@/lib/growth/metrics';
-import { PlatformIcon, ScrapeStatus } from './growthUi';
+import { AccountIdentity, ScrapeStatus } from './growthUi';
 import { AddAccountDialog } from './AddAccountDialog';
 import type { AddGrowthAccountPayload } from '@/hooks/useGrowthTracking';
 import type { GrowthAccount } from '@/types/firestore';
@@ -237,20 +237,23 @@ export function ManageAccountsTab({
 
 function AccountCell({ account }: { account: GrowthAccount }) {
   return (
-    <div className="min-w-0">
-      <div className="flex items-center gap-2">
-        <PlatformIcon platform={account.platform} />
-        <span className="truncate font-medium text-zinc-300">{account.displayName}</span>
+    // The marks sit beside the two-line block rather than on its first line, so
+    // the avatar is centred against the pair and the handle lines up under the
+    // name instead of under the picture.
+    <div className="flex min-w-0 items-center gap-2">
+      <AccountIdentity account={account} />
+      <div className="min-w-0">
+        <p className="truncate font-medium text-zinc-300">{account.displayName}</p>
+        <a
+          href={account.profileUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-[11px] text-zinc-400 underline-offset-2 transition-colors hover:text-white hover:underline"
+        >
+          @{account.handle}
+          <ExternalLinkIcon className="size-2.5" aria-hidden />
+        </a>
       </div>
-      <a
-        href={account.profileUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-zinc-400 underline-offset-2 transition-colors hover:text-white hover:underline"
-      >
-        @{account.handle}
-        <ExternalLinkIcon className="size-2.5" aria-hidden />
-      </a>
     </div>
   );
 }

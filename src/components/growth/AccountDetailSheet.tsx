@@ -16,7 +16,7 @@ import {
   type DayMap,
   type GrowthRange,
 } from '@/lib/growth/metrics';
-import { DeltaValue, PlatformChip } from './growthUi';
+import { AccountAvatar, DeltaValue, PlatformChip } from './growthUi';
 import type { GrowthAccount, GrowthSnapshot } from '@/types/firestore';
 
 const config = { followers: { label: 'Followers', color: '#3b82f6' } } satisfies ChartConfig;
@@ -64,18 +64,25 @@ export function AccountDetailSheet({
                   </span>
                 )}
               </div>
-              <SheetTitle className="text-lg">{account.displayName}</SheetTitle>
-              <SheetDescription asChild>
-                <a
-                  href={account.profileUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex w-fit items-center gap-1 text-sm text-zinc-400 underline-offset-2 transition-colors hover:text-white hover:underline"
-                >
-                  @{account.handle}
-                  <ExternalLinkIcon className="size-3" aria-hidden />
-                </a>
-              </SheetDescription>
+              {/* The platform is already carried by the chip above, so this is
+                  the avatar alone rather than the identity pair. */}
+              <div className="flex items-center gap-3">
+                <AccountAvatar account={account} className="size-10" />
+                <div className="min-w-0">
+                  <SheetTitle className="truncate text-lg">{account.displayName}</SheetTitle>
+                  <SheetDescription asChild>
+                    <a
+                      href={account.profileUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex w-fit items-center gap-1 text-sm text-zinc-400 underline-offset-2 transition-colors hover:text-white hover:underline"
+                    >
+                      @{account.handle}
+                      <ExternalLinkIcon className="size-3" aria-hidden />
+                    </a>
+                  </SheetDescription>
+                </div>
+              </div>
             </SheetHeader>
 
             <div className="space-y-6 px-4 pb-6">

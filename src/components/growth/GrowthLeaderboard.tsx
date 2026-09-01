@@ -13,7 +13,7 @@ import {
   type GrowthDelta,
   type SeriesPoint,
 } from '@/lib/growth/metrics';
-import { DeltaValue, PlatformIcon } from './growthUi';
+import { AccountIdentity, DeltaValue } from './growthUi';
 import { Sparkline } from './Sparkline';
 import type { GrowthAccount } from '@/types/firestore';
 
@@ -138,7 +138,7 @@ const LeaderboardRow = memo(function LeaderboardRow({
     >
       <TableCell className="max-w-0">
         <div className="flex items-center gap-2">
-          <PlatformIcon platform={account.platform} />
+          <AccountIdentity account={account} />
           <button
             type="button"
             // The row already handles the mouse; letting this bubble would open

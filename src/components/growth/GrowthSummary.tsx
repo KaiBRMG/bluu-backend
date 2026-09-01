@@ -11,7 +11,7 @@ import {
   type DayMap,
   type GrowthRange,
 } from '@/lib/growth/metrics';
-import { PlatformIcon } from './growthUi';
+import { AccountIdentity } from './growthUi';
 import type { GrowthAccount } from '@/types/firestore';
 
 /**
@@ -111,8 +111,8 @@ export const GrowthSummary = memo(function GrowthSummary({
           <CardDescription>Biggest mover</CardDescription>
           {summary.top ? (
             <>
-              <CardTitle className="flex items-center gap-1.5 truncate text-2xl font-semibold">
-                <PlatformIcon platform={summary.top.account.platform} className="size-4" />
+              <CardTitle className="flex items-center gap-2 truncate text-2xl font-semibold">
+                <AccountIdentity account={summary.top.account} avatarClassName="size-5" />
                 <span className="truncate">{summary.top.account.displayName}</span>
               </CardTitle>
               <p className="text-[11px] text-zinc-400">

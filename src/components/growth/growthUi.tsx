@@ -1,6 +1,8 @@
 'use client';
 
-import { IconBrandFacebookFilled, IconBrandXFilled } from '@tabler/icons-react';
+import Image from 'next/image';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { cn } from '@/lib/utils';
 import { PLATFORM_LABEL, type GrowthPlatform } from '@/lib/growth/platform';
 import { formatDelta, formatPercent, type GrowthDelta } from '@/lib/growth/metrics';
@@ -15,11 +17,17 @@ import type { GrowthAccount } from '@/types/firestore';
  * reserved for direction of travel (up / down) and for the one Action Blue
  * voice, which here marks the highlighted account.
  *
- * The `Filled` Tabler variants, not the outline ones: both platforms' real marks
- * are solid glyphs, and the stroked versions read as a generic "f" in a box
- * rather than as Facebook. These are still Tabler's interpretations, not the
- * official brand assets — see DESIGN.md § Navigation for the `SVG_ICONS`
- * escape hatch if a true brand mark is ever wanted here.
+ * The marks themselves are image assets, not Tabler glyphs — the `SVG_ICONS`
+ * escape hatch in DESIGN.md § Navigation, taken for the same reason OF Manager
+ * takes it: these are real third-party brand marks with no lucide equivalent,
+ * and Tabler's interpretations read as a generic "f" in a box rather than as
+ * Facebook. They render through `next/image` exactly as `PageIcon` does.
+ *
+ * **The ink is baked into the file at zinc-400.** A raster cannot inherit
+ * `currentColor`, so a `text-*` class on this component does nothing — sizing is
+ * all `className` can still do. That is fine today (the mark is greyscale on
+ * every surface it appears on), but a future hover- or selection-tint cannot be
+ * a colour class: it needs a second asset, or the marks go back to inline SVG.
  */
 
 /**
@@ -39,9 +47,88 @@ import type { GrowthAccount } from '@/types/firestore';
 export const SEGMENT_ITEM_CLASS =
   'text-xs data-[state=on]:bg-[#2563eb]! data-[state=on]:font-medium data-[state=on]:text-white!';
 
+const PLATFORM_MARK: Record<GrowthPlatform, string> = {
+  facebook: '/Icons/icons8-facebook.webp',
+  twitter: '/Icons/icons8-x.webp',
+};
+
 export function PlatformIcon({ platform, className }: { platform: GrowthPlatform; className?: string }) {
-  const Icon = platform === 'facebook' ? IconBrandFacebookFilled : IconBrandXFilled;
-  return <Icon className={cn('size-3.5 shrink-0 text-zinc-400', className)} aria-hidden />;
+  return (
+    <Image
+      src={PLATFORM_MARK[platform]}
+      alt=""
+      aria-hidden
+      // The source is 128px square so the mark stays crisp at 3x DPI; the
+      // rendered size is the `size-*` class, as it was with the glyphs.
+      width={128}
+      height={128}
+      className={cn('size-3.5 shrink-0', className)}
+    />
+  );
+}
+
+/**
+ * The account's own profile picture, scraped alongside the follower count.
+ *
+ * Both actors return one inside the already-billed result (Facebook
+ * `profilePictureUrl`, X `profilePicture`), and it is re-read on every
+ * successful nightly scrape — which is what makes it usable at all, because
+ * **Facebook's `fbcdn.net` URLs are signed and expire**, typically within days.
+ * A stored URL is therefore at most a night old; one belonging to an account
+ * whose scrape has been failing will eventually rot, and the fallback is what
+ * the reader sees then. It is a real state, not decoration:
+ *
+ *  - the twelve seeded accounts have `null` until their first successful scrape
+ *    (the spreadsheets had no images), and
+ *  - an expired or 404ing URL falls through to the same place.
+ *
+ * So the fallback is seeded from `displayName` per DESIGN.md's Avatar Seed Rule
+ * — `getAvatarColor` hashes the string it is given, so seeding from the handle
+ * or the id instead would render the same account differently across screens.
+ */
+export function AccountAvatar({
+  account,
+  className,
+}: {
+  account: Pick<GrowthAccount, 'displayName' | 'handle' | 'profilePictureUrl'>;
+  className?: string;
+}) {
+  const seed = account.displayName || account.handle || 'Account';
+  return (
+    <Avatar className={cn('size-6 shrink-0', className)}>
+      {account.profilePictureUrl && (
+        // Decorative: the account name sits directly beside it in every use.
+        <AvatarImage src={account.profilePictureUrl} alt="" />
+      )}
+      <AvatarFallback
+        className="text-[10px] font-medium"
+        style={{ background: getAvatarColor(seed), color: '#fff' }}
+      >
+        {getInitials(seed)}
+      </AvatarFallback>
+    </Avatar>
+  );
+}
+
+/**
+ * Platform mark + profile picture, the pair that identifies an account at a
+ * glance. The platform leads because it is the fact that never fails to load —
+ * the picture beside it may be absent, and a row that opened with a hole would
+ * read as broken rather than as pending.
+ */
+export function AccountIdentity({
+  account,
+  avatarClassName,
+}: {
+  account: Pick<GrowthAccount, 'platform' | 'displayName' | 'handle' | 'profilePictureUrl'>;
+  avatarClassName?: string;
+}) {
+  return (
+    <>
+      <PlatformIcon platform={account.platform} />
+      <AccountAvatar account={account} className={avatarClassName} />
+    </>
+  );
 }
 
 /** Platform as a greyscale attribute chip — a label the account carries, not a state. */
