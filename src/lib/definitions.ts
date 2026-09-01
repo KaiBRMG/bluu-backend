@@ -74,6 +74,7 @@ export const PAGES: PageDef[] = [
   { pageId: 'smm-admin', title: 'Admin', teamspaceId: 'smm-portal', href: '/smm-portal/admin', icon: 'Cog', order: 0 },
   { pageId: 'smm-dashboard', title: 'Dashboard', teamspaceId: 'smm-portal', href: '/smm-portal/dashboard', icon: 'LayoutDashboard', order: 1 },
   { pageId: 'smm-xaccounts', title: 'Viral Accounts', teamspaceId: 'smm-portal', href: '/smm-portal/xaccounts', icon: 'BookHeart', order: 2 },
+  { pageId: 'smm-growth-tracking', title: 'Growth Tracking', teamspaceId: 'smm-portal', href: '/smm-portal/growth-tracking', icon: 'ChartNoAxesCombined', order: 3 },
 
   
   // Creator Portal

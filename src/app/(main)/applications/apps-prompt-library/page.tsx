@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Plus } from 'lucide-react';
+import { Globe, Plus } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -15,6 +15,7 @@ import { NewPromptDialog } from './_components/NewPromptDialog';
 import { AddModelDialog } from './_components/AddModelDialog';
 import { PromptDetailDialog } from './_components/PromptDetailDialog';
 import { PromptKanban } from './_components/PromptKanban';
+import { PublicPrompts } from './_components/PublicPrompts';
 import { pluralise } from './_lib/format';
 
 function LlmTile({ llm, count, share }: {
@@ -182,6 +183,26 @@ function PromptLibraryBoard() {
               Recently updated
             </h2>
             <PromptKanban prompts={live} onOpen={setOpenPromptId} />
+          </section>
+        )}
+
+        {/* Rendered even when empty, unlike "Recently updated" above. This
+            section answers "what have we put on the open internet?", and an
+            absent section is indistinguishable from one scrolled past — a
+            silence is not the same as an explicit "nothing is shared". */}
+        {!loading && (
+          <section aria-labelledby="public-heading" className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <h2 id="public-heading" className="flex items-center gap-2 text-lg font-semibold">
+                <Globe className="size-4 text-zinc-400" aria-hidden />
+                Public Prompts
+              </h2>
+              <p className="text-sm text-zinc-400">
+                Readable by anyone with the link — no sign-in required. Stop sharing from a
+                prompt’s ⋯ menu.
+              </p>
+            </div>
+            <PublicPrompts prompts={prompts} onOpen={setOpenPromptId} />
           </section>
         )}
 

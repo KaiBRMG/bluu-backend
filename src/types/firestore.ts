@@ -718,6 +718,55 @@ export interface SmmPageSuggestion {
   isRejected: boolean;
 }
 
+// ─── Growth Tracking (smm-growth-tracking) ───────────────────────────
+//
+// Deliberately unrelated to SmmAccount / twitterx-accounts: no shared ids, no
+// joins. See documentation/growth-tracking.md.
+
+/** One day's reading for one account. Only `followers` is guaranteed. */
+export interface GrowthSnapshot {
+  followers: number;
+  // Facebook extras — returned inside the same billed result, so free.
+  likes?: number;
+  rating?: number;
+  ratingCount?: number;
+  // X extras — likewise free.
+  following?: number;
+  posts?: number;
+  media?: number;
+  favourites?: number;
+}
+
+/** Serialised growth-accounts/{platform}_{handleNormalized} doc */
+export interface GrowthAccount {
+  id: string;
+  platform: 'facebook' | 'twitter';
+  displayName: string;
+  handle: string;
+  handleNormalized: string;
+  profileUrl: string;
+  /** false = tracking stopped. History is retained; the account can be resumed. */
+  isActive: boolean;
+  profilePictureUrl: string | null;
+  isVerified: boolean;
+  /** Most recent reading, denormalized so a list renders without a series read. */
+  latest: (GrowthSnapshot & { date: string }) | null;
+  /** The reading before `latest`, so a day-over-day delta needs no series read. */
+  previous: (GrowthSnapshot & { date: string }) | null;
+  lastScrapeAt: string | null;
+  lastScrapeStatus: 'ok' | 'failed' | null;
+  lastScrapeError: string | null;
+  addedBy: string;
+  addedTime: string | null;
+}
+
+/** Serialised growth-accounts/{id}/series/{YYYY} doc, flattened for the client. */
+export interface GrowthSeries {
+  accountId: string;
+  /** Day key (`YYYY-MM-DD`) → reading, merged across every year document. */
+  days: Record<string, GrowthSnapshot>;
+}
+
 // ─── Resolved access (returned to client after permission resolution) ─
 
 export interface ResolvedAccess {

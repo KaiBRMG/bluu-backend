@@ -27,6 +27,10 @@ import { ShareMark } from '../_components/ShareMark';
  * must be read INSIDE a `<Suspense>` boundary, so the shell renders immediately
  * and only the prompt itself streams in. Both `params` and the Firestore read
  * therefore live in `SharedPromptContent`, never in the default export.
+ *
+ * **One boundary, not two.** The header carries the "Open in Bluu Backend"
+ * button, which needs the prompt id — putting it in its own boundary would mean
+ * resolving the same share token twice.
  */
 export default function SharedPromptPage({
   params,
@@ -35,14 +39,6 @@ export default function SharedPromptPage({
 }) {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-5 py-10 sm:px-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo/bluu_long.svg" alt="Bluu" className="h-6 w-auto" />
-        <span className="rounded-full border border-white/[0.07] px-2.5 py-0.5 text-[11px] font-medium text-zinc-400">
-          Shared prompt · read only
-        </span>
-      </div>
-
       <Suspense fallback={<SharedPromptSkeleton />}>
         <SharedPromptContent params={params} />
       </Suspense>
@@ -67,6 +63,23 @@ async function SharedPromptContent({ params }: { params: Promise<{ shareId: stri
 
   return (
     <>
+      {/* `items-start`, not `items-center`: the right column is two stacked
+          elements, and centring would drag the wordmark down to meet them. */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo/bluu_long.svg" alt="Bluu" className="h-6 w-auto" />
+
+        {/* The hand-off into the app sits under the label framing this page as
+            read-only — the one thing a recipient can act on, in the corner an
+            action is looked for, rather than trailing the prompt body. */}
+        <div className="flex flex-col items-end gap-2">
+          <span className="rounded-full border border-white/[0.07] px-2.5 py-0.5 text-[11px] font-medium text-zinc-400">
+            Shared prompt · read only
+          </span>
+          <OpenInApp promptId={prompt.promptId} />
+        </div>
+      </div>
+
       <header className="flex flex-col gap-3">
         <h1 className="text-2xl font-bold tracking-tight text-white">{prompt.title}</h1>
 
@@ -107,17 +120,22 @@ async function SharedPromptContent({ params }: { params: Promise<{ shareId: stri
       </header>
 
       <SharedPromptBody html={promptBodyHtml(prompt.text, prompt.textHtml)} text={prompt.text} />
-
-      <OpenInApp promptId={prompt.promptId} />
     </>
   );
 }
 
-/** Holds the page's shape while the prompt streams in, so the header and footer
- *  do not jump once it arrives. */
+/** Holds the page's shape while the prompt streams in, so the footer does not
+ *  jump once it arrives. */
 function SharedPromptSkeleton() {
   return (
     <div className="flex flex-col gap-6" aria-hidden>
+      <div className="flex items-start justify-between gap-4">
+        <div className="h-6 w-28 rounded-md bg-white/[0.06]" />
+        <div className="flex flex-col items-end gap-2">
+          <div className="h-5 w-36 rounded-full bg-white/[0.04]" />
+          <div className="h-9 w-48 rounded-md bg-white/[0.06]" />
+        </div>
+      </div>
       <div className="flex flex-col gap-3">
         <div className="h-8 w-2/3 rounded-md bg-white/[0.06]" />
         <div className="h-3 w-1/3 rounded-md bg-white/[0.04]" />
