@@ -21,6 +21,16 @@ export interface LoginRecord {
   email: string;
   /** Google's stable account id (`sub`) — survives the user renaming their Gmail. */
   googleSub?: string | null;
+  /**
+   * Which client is logging in. `'desktop'` is the default because that is what
+   * every bundle predating device identity is, and those send no `kind` at all.
+   *
+   * It decides whether the legacy `sessionToken` rotates: a **web** login must
+   * leave it alone, or every long-lived Electron renderer still comparing that
+   * single token (rule 9c) would be displaced the moment anyone linked a
+   * browser. See `sessionService.ts`.
+   */
+  kind?: 'desktop' | 'web';
 }
 
 /**
@@ -44,7 +54,11 @@ export async function recordSuccessfulLogin(record: LoginRecord): Promise<string
   }
 
   const data = userDoc.data() ?? {};
-  const sessionToken = randomUUID();
+  const isWebLogin = record.kind === 'web';
+  // Rotated for a desktop login only. A web login leaves the legacy token
+  // exactly as it found it, so a weeks-old renderer still comparing that single
+  // value is not displaced by someone signing in on a browser.
+  const sessionToken = isWebLogin ? (data.sessionToken ?? randomUUID()) : randomUUID();
   const isFirstLogin = !data.lastLoginAt;
 
   // An onboarding run that never reached "Submit details" is discarded, so the
@@ -71,7 +85,7 @@ export async function recordSuccessfulLogin(record: LoginRecord): Promise<string
 
   await userRef.update({
     lastLoginAt: FieldValue.serverTimestamp(),
-    sessionToken,
+    ...(isWebLogin ? {} : { sessionToken }),
     ...(emailNeedsSync ? { workEmail: record.email } : {}),
     ...(record.googleSub && data.googleSub !== record.googleSub
       ? { googleSub: record.googleSub }

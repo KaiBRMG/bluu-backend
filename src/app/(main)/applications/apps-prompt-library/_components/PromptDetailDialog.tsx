@@ -9,6 +9,8 @@ import {
   ChevronRight,
   Copy,
   GitCompare,
+  Link2,
+  Link2Off,
   MoreHorizontal,
   NotebookPen,
   Pencil,
@@ -123,8 +125,17 @@ function PromptDetailBody({
   onClose: () => void;
   registerGuard: (fn: (() => boolean) | null) => void;
 }) {
-  const { prompts, loading, refresh, getVersions, saveVersion, updateMeta, removePrompt } =
-    usePromptLibrary();
+  const {
+    prompts,
+    loading,
+    refresh,
+    getVersions,
+    saveVersion,
+    updateMeta,
+    removePrompt,
+    shareLink,
+    revokeShare,
+  } = usePromptLibrary();
   const { names } = useUserName();
   const { userData } = useUserData();
 
@@ -142,6 +153,8 @@ function PromptDetailBody({
   const [saving, setSaving] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [editingMeta, setEditingMeta] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pendingVersion, setPendingVersion] = useState<number | null>(null);
@@ -317,6 +330,46 @@ function PromptDetailBody({
     }
   };
 
+  /**
+   * Copies the prompt's public link, minting one on first use.
+   *
+   * The clipboard write happens in the same user gesture wherever possible, but
+   * minting needs a round trip — Chromium (this renderer, by construction)
+   * still honours `writeText` after an await in a click handler, so the link is
+   * written directly rather than through a pre-opened placeholder.
+   */
+  const copyLink = async () => {
+    if (!prompt || sharing) return;
+    setSharing(true);
+    try {
+      const url = await shareLink(prompt.id);
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 1600);
+      toast.success('Share link copied', {
+        description: prompt.shareId
+          ? 'Anyone with this link can read the prompt.'
+          : 'This prompt is now readable by anyone with the link.',
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not copy the share link');
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const stopSharing = async () => {
+    if (!prompt) return;
+    try {
+      await revokeShare(prompt.id);
+      toast.success('Sharing stopped', {
+        description: 'The old link no longer works. Sharing again creates a new one.',
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to withdraw the link');
+    }
+  };
+
   const toggleArchive = async () => {
     if (!prompt) return;
     try {
@@ -397,6 +450,16 @@ function PromptDetailBody({
                     </span>
                   </>
                 )}
+                {/* A prompt readable by anyone holding a URL should say so on
+                    its face, not only inside a menu. */}
+                {prompt.shareId && (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span className="rounded-full bg-[#3b82f6]/15 px-2 py-0.5 text-[11px] font-medium text-[#93c5fd]">
+                      Shared link active
+                    </span>
+                  </>
+                )}
               </p>
             </DialogDescription>
           </div>
@@ -411,6 +474,24 @@ function PromptDetailBody({
               {copied ? 'Copied' : 'Copy'}
             </Button>
 
+            {/* Distinct from "Copy", which takes the TEXT. This takes a URL that
+                opens a public read-only page — a different act with a different
+                audience, so it gets its own control rather than a menu item. */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
+              onClick={copyLink}
+              disabled={sharing}
+            >
+              {linkCopied ? (
+                <Check className="size-3.5 text-green-400" aria-hidden />
+              ) : (
+                <Link2 className="size-3.5" aria-hidden />
+              )}
+              {linkCopied ? 'Link copied' : 'Copy link'}
+            </Button>
+
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon-sm" aria-label="Prompt actions">
@@ -422,6 +503,12 @@ function PromptDetailBody({
                   <Pencil className="size-4" aria-hidden />
                   Edit details
                 </DropdownMenuItem>
+                {prompt.shareId && (
+                  <DropdownMenuItem onSelect={stopSharing}>
+                    <Link2Off className="size-4" aria-hidden />
+                    Stop sharing
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onSelect={toggleArchive}>
                   {prompt.isArchived ? (
                     <ArchiveRestore className="size-4" aria-hidden />

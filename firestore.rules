@@ -306,5 +306,23 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 24. Share-token index for the Prompt Library: doc id = the 160-bit share
+    // token, body = { promptId }. Read only by the PUBLIC share page, through
+    // the Admin SDK, which projects a narrow read-only view of the prompt.
+    // Client-readable would let anyone walk the token space; client-writable
+    // would let anyone publish any prompt. Deny both.
+    match /prompt-shares/{shareId} {
+      allow read, write: if false;
+    }
+
+    // 25. Device-session index: doc id = a client-minted device id, body =
+    // { uid, kind }. The reverse lookup behind per-device session enforcement
+    // and behind "is this browser one of ours" on the public share page.
+    // It maps an opaque id to a REAL uid, so a client-readable version would
+    // turn a leaked device id into an account identifier. Admin SDK only.
+    match /device-sessions/{deviceId} {
+      allow read, write: if false;
+    }
+
   }
 }

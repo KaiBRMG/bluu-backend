@@ -7,6 +7,7 @@ import {
   findUserUidByEmail,
 } from '@/lib/services/userService';
 import { normalizeEmail } from '@/lib/authEmail';
+import { isValidDeviceId, registerSession } from '@/lib/services/sessionService';
 
 const oauth2Client = new google.auth.OAuth2(
   process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
@@ -71,7 +72,7 @@ function isRateLimited(key: string): boolean {
  */
 export async function POST(request: NextRequest) {
   try {
-    const { code } = await request.json();
+    const { code, deviceId, deviceLabel } = await request.json();
 
     if (!code) {
       return NextResponse.json(
@@ -160,11 +161,35 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // This route is only ever reached from the Electron shell, so the login is
+    // a desktop one by definition — which is what makes it exclusive against
+    // other desktop sessions and what rotates the legacy `sessionToken`.
     const sessionToken = await recordSuccessfulLogin({
       uid,
       email,
       googleSub: userInfo.id ?? null,
+      kind: 'desktop',
     });
+
+    // Bind this installation to the user. A bundle predating device identity
+    // sends no id; it simply gets no entry and keeps running on the legacy
+    // token, which is exactly the intended fallback. A registration failure must
+    // not fail an otherwise-valid login, so it is logged and swallowed.
+    let deviceToken = sessionToken;
+    if (isValidDeviceId(deviceId)) {
+      try {
+        const registered = await registerSession({
+          uid,
+          deviceId,
+          kind: 'desktop',
+          label: typeof deviceLabel === 'string' ? deviceLabel : undefined,
+          legacyToken: sessionToken,
+        });
+        deviceToken = registered.token;
+      } catch (err) {
+        console.error('[exchange-code] device session registration failed:', err);
+      }
+    }
 
     // Read AFTER recordSuccessfulLogin, which invalidates the cache — groups may
     // have changed since the read above.
@@ -179,7 +204,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       customToken,
-      sessionToken,
+      // Desktop registration reuses the rotated legacy token, so these are the
+      // same value today. Returned as one field the client stores verbatim, so
+      // the two can diverge later without another client change.
+      sessionToken: deviceToken,
       user: {
         email,
         name: userInfo.name,

@@ -60,6 +60,15 @@ interface PromptLibraryValue extends Snapshot {
   ) => Promise<{ prompt: PromptDocument; version: PromptVersion }>;
   updateMeta: (id: string, input: PromptMetaInput) => Promise<PromptDocument>;
   removePrompt: (id: string) => Promise<void>;
+
+  /**
+   * Mints (or returns) the prompt's public link. Idempotent — copying twice
+   * gives the same URL, so a link already sent keeps working.
+   */
+  shareLink: (id: string) => Promise<string>;
+  /** Withdraws the public link. A later re-share mints a NEW one. */
+  revokeShare: (id: string) => Promise<void>;
+
   addLabels: (input: {
     categories?: string[];
     tags?: string[];
@@ -245,6 +254,39 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
     });
   }, []);
 
+  /** Patches one prompt's `shareId` in state and the sessionStorage mirror —
+   *  no write is ever followed by a re-read of the collection. */
+  const patchShareId = useCallback((id: string, shareId: string | null) => {
+    setSnapshot(prev => {
+      const next: Snapshot = {
+        ...prev,
+        prompts: prev.prompts.map(p => (p.id === id ? { ...p, shareId } : p)),
+      };
+      setCache(CACHE_KEY, next);
+      return next;
+    });
+  }, []);
+
+  const shareLink = useCallback(
+    async (id: string) => {
+      const res = await apiRequest(`/api/prompt-library/${id}/share`, { method: 'POST' });
+      if (!res.ok) await readError(res, 'Failed to create the share link');
+      const { shareId, url } = (await res.json()) as { shareId: string; url: string };
+      patchShareId(id, shareId);
+      return url;
+    },
+    [patchShareId]
+  );
+
+  const revokeShare = useCallback(
+    async (id: string) => {
+      const res = await apiRequest(`/api/prompt-library/${id}/share`, { method: 'DELETE' });
+      if (!res.ok) await readError(res, 'Failed to withdraw the share link');
+      patchShareId(id, null);
+    },
+    [patchShareId]
+  );
+
   const addLabels = useCallback(async (input: {
     categories?: string[];
     tags?: string[];
@@ -305,6 +347,8 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
       saveVersion,
       updateMeta,
       removePrompt,
+      shareLink,
+      revokeShare,
       addLabels,
       removeLabel,
     }),
@@ -320,6 +364,8 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
       saveVersion,
       updateMeta,
       removePrompt,
+      shareLink,
+      revokeShare,
       addLabels,
       removeLabel,
     ]

@@ -5,6 +5,7 @@ import { signInWithPopup, signInWithCustomToken } from 'firebase/auth';
 import { AlertCircle } from 'lucide-react';
 import { auth, googleProvider } from '../firebase-config';
 import { markLoginSession } from '@/lib/loginSession';
+import { getDeviceId, getDeviceLabel } from '@/lib/deviceId';
 
 /**
  * The refusal a user sees when Google authenticated them fine but they are not
@@ -33,7 +34,15 @@ function Login() {
         const response = await fetch('/api/auth/exchange-code', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code }),
+          // The device id binds this installation to the account, so session
+          // enforcement is per-device rather than one-session-per-user. Null
+          // when storage is blocked — the server then falls back to the legacy
+          // single token, exactly as before.
+          body: JSON.stringify({
+            code,
+            deviceId: getDeviceId(),
+            deviceLabel: getDeviceLabel(),
+          }),
         });
 
         const data = await response.json();
@@ -121,7 +130,11 @@ function Login() {
       const idToken = await result.user.getIdToken();
       const res = await fetch('/api/auth/session-token', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${idToken}` },
+        headers: {
+          'Authorization': `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ deviceId: getDeviceId(), deviceLabel: getDeviceLabel() }),
       });
 
       if (!res.ok) {

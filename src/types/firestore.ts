@@ -134,9 +134,26 @@ export interface UserDocument {
   // Absent = never notified. Written only by /api/user/app-version.
   releaseNoteNotifiedVersion?: string | null;
 
-  // Single active session enforcement: rotated on every login.
-  // Client stores this locally; onSnapshot detects a mismatch and forces sign-out.
+  // LEGACY single-session token, rotated on every DESKTOP login (a web login
+  // leaves it alone on purpose). Superseded by `sessions` below, but still
+  // written and still the fallback comparison — a renderer open for weeks is
+  // running a bundle that knows nothing else. See lib/services/sessionService.ts.
   sessionToken?: string;
+
+  // Device-keyed sessions: deviceId -> that device's own token. The unit of
+  // session enforcement, so a desktop session and a web session can coexist
+  // while two desktop sessions still cannot. Absent on users who have not
+  // logged in since device identity shipped.
+  sessions?: Record<
+    string,
+    {
+      token: string;
+      kind: 'desktop' | 'web';
+      label: string;
+      createdTime: string;
+      lastSeenTime: string;
+    }
+  >;
 
   // Onboarding state
   hasAcceptedTerms: boolean;

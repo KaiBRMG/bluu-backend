@@ -1,4 +1,5 @@
 import 'server-only';
+import { randomBytes } from 'crypto';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { summariseChange } from '@/lib/promptDiff';
@@ -6,6 +7,7 @@ import { htmlToPlainText, sanitizePromptHtml } from '@/lib/promptHtml';
 import {
   EMPTY_TAXONOMY,
   isValidModelId,
+  mergeModels,
   MAX_EDIT_NOTE_LENGTH,
   MAX_MODELS_PER_PROMPT,
   type ChangeStat,
@@ -16,12 +18,22 @@ import {
   type PromptModel,
   type PromptTaxonomy,
   type PromptVersion,
+  type SharedPrompt,
 } from '@/types/promptLibrary';
 
 export const PROMPTS_COLLECTION = 'prompt-library';
 export const VERSIONS_SUBCOLLECTION = 'versions';
 const META_COLLECTION = 'prompt-library-meta';
 const TAXONOMY_DOC = 'taxonomy';
+
+/**
+ * Server-only reverse index: doc id = share token, body = `{ promptId, createdBy }`.
+ *
+ * A separate collection rather than a `where('share.id','==',…)` query on the
+ * library, for the same reason `auth-emails` exists: the public page resolves a
+ * link on every render, and that must be one O(1) doc get, never a query.
+ */
+export const SHARES_COLLECTION = 'prompt-shares';
 
 /** Firestore caps a document at 1MiB; this leaves generous room for metadata. */
 export const MAX_TEXT_LENGTH = 100_000;
@@ -155,6 +167,7 @@ function mapPrompt(doc: FirebaseFirestore.QueryDocumentSnapshot): PromptDocument
     change: readChange(d.change),
     editNote: clampText(d.editNote, MAX_EDIT_NOTE_LENGTH),
     isArchived: d.isArchived === true,
+    shareId: isValidShareId(d.share?.id) ? d.share.id : null,
     createdTime: created,
     createdBy: typeof d.createdBy === 'string' ? d.createdBy : '',
     lastUpdatedTime: typeof d.lastUpdatedTime === 'string' ? d.lastUpdatedTime : created,
@@ -247,7 +260,10 @@ export async function createPrompt(
   const { text, textHtml } = resolveBody(input.text, input.textHtml);
   const change: ChangeStat = { added: 0, removed: 0, ratio: 0, region: 'none', kind: 'initial' };
 
-  const doc: Omit<PromptDocument, 'id'> = {
+  // `shareId` is deliberately absent: it is the READ shape of the stored `share`
+  // map, which only ensurePromptShare writes. An unshared prompt carries no
+  // sharing field at all.
+  const doc: Omit<PromptDocument, 'id' | 'shareId'> = {
     llmTypes: llmTypes.length > 0 ? llmTypes : ['chatgpt'],
     category: cleanLabel(input.category),
     title: clampText(input.title, MAX_TITLE_LENGTH).trim(),
@@ -293,7 +309,7 @@ export async function createPrompt(
   await mergeTaxonomy(doc.category ? [doc.category] : [], doc.tags, []);
 
   invalidatePromptLibraryCache();
-  return { id: ref.id, ...doc };
+  return { id: ref.id, ...doc, shareId: null };
 }
 
 export interface AddVersionResult {
@@ -439,11 +455,155 @@ export async function deletePrompt(id: string): Promise<boolean> {
   const versions = await ref.collection(VERSIONS_SUBCOLLECTION).get();
   const batch = adminDb.batch();
   for (const v of versions.docs) batch.delete(v.ref);
+  // The share index must go with it, or the public URL outlives the prompt and
+  // resolves to a dangling promptId.
+  const shareId = snap.data()?.share?.id;
+  if (isValidShareId(shareId)) {
+    batch.delete(adminDb.collection(SHARES_COLLECTION).doc(shareId));
+  }
   batch.delete(ref);
   await batch.commit();
 
   invalidatePromptLibraryCache();
   return true;
+}
+
+// ─── Sharing ─────────────────────────────────────────────────────────────────
+
+/**
+ * Share tokens are 32 base32 characters — ~160 bits. The public page is
+ * unauthenticated, so the token IS the access control and has to be
+ * unguessable at internet scale. The prompt's own Firestore id (20 chars, and
+ * printed in internal URLs) deliberately is not used for this.
+ */
+const SHARE_ID_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789';
+const SHARE_ID_LENGTH = 32;
+
+export function isValidShareId(v: unknown): v is string {
+  return typeof v === 'string' && new RegExp(`^[${SHARE_ID_ALPHABET}]{${SHARE_ID_LENGTH}}$`).test(v);
+}
+
+function mintShareId(): string {
+  const bytes = randomBytes(SHARE_ID_LENGTH);
+  let out = '';
+  for (let i = 0; i < SHARE_ID_LENGTH; i++) {
+    out += SHARE_ID_ALPHABET[bytes[i] % SHARE_ID_ALPHABET.length];
+  }
+  return out;
+}
+
+/**
+ * The prompt's share token, minting one on first use.
+ *
+ * Idempotent: copying the link twice yields the same URL, so a link already sent
+ * to someone keeps working. Re-sharing after a revoke mints a NEW token, which
+ * is the point of revoking.
+ *
+ * Runs in a transaction over the head document, so two people hitting "Copy
+ * link" at the same moment cannot mint two tokens and leave one index doc
+ * orphaned.
+ */
+export async function ensurePromptShare(id: string, uid: string): Promise<string | null> {
+  const headRef = adminDb.collection(PROMPTS_COLLECTION).doc(id);
+
+  const result = await adminDb.runTransaction(async tx => {
+    const snap = await tx.get(headRef);
+    if (!snap.exists) return null;
+
+    const existing = snap.data()?.share?.id;
+    if (isValidShareId(existing)) return { shareId: existing, minted: false };
+
+    const shareId = mintShareId();
+    tx.update(headRef, {
+      share: { id: shareId, createdBy: uid, createdTime: new Date().toISOString() },
+    });
+    tx.set(adminDb.collection(SHARES_COLLECTION).doc(shareId), {
+      promptId: id,
+      createdBy: uid,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    return { shareId, minted: true };
+  });
+
+  if (!result) return null;
+  if (result.minted) invalidatePromptLibraryCache();
+  return result.shareId;
+}
+
+/**
+ * Withdraws the public link.
+ *
+ * Both halves are deleted: the index entry (so the URL resolves to nothing) and
+ * the head's `share` map (so the library stops offering the old URL). A later
+ * re-share mints a fresh token — a revoked link is dead permanently, not
+ * dormant.
+ */
+export async function revokePromptShare(id: string): Promise<boolean> {
+  const headRef = adminDb.collection(PROMPTS_COLLECTION).doc(id);
+  const snap = await headRef.get();
+  if (!snap.exists) return false;
+
+  const shareId = snap.data()?.share?.id;
+
+  const batch = adminDb.batch();
+  batch.update(headRef, { share: FieldValue.delete() });
+  if (isValidShareId(shareId)) {
+    batch.delete(adminDb.collection(SHARES_COLLECTION).doc(shareId));
+  }
+  await batch.commit();
+
+  invalidatePromptLibraryCache();
+  return true;
+}
+
+/**
+ * Resolves a share token to the public projection of its prompt.
+ *
+ * The ONLY read path in this file with no caller-side authorisation, so what it
+ * returns is the whole of what an anonymous visitor can ever see. Three refusals
+ * are folded into one `null`, and must stay indistinguishable to the caller:
+ * unknown token, deleted prompt, archived prompt.
+ *
+ * An **archived** prompt stops resolving on purpose. Archiving is how the team
+ * retires a prompt, and a retired prompt must not keep serving itself to
+ * whoever still holds the link.
+ */
+export async function getSharedPrompt(shareId: string): Promise<SharedPrompt | null> {
+  if (!isValidShareId(shareId)) return null;
+
+  const indexSnap = await adminDb.collection(SHARES_COLLECTION).doc(shareId).get();
+  const promptId = indexSnap.data()?.promptId;
+  if (typeof promptId !== 'string' || !promptId) return null;
+
+  const headSnap = await adminDb.collection(PROMPTS_COLLECTION).doc(promptId).get();
+  if (!headSnap.exists) return null;
+
+  const prompt = mapPrompt(headSnap as FirebaseFirestore.QueryDocumentSnapshot);
+  // The index can outlive a revoke that half-committed; the head document is the
+  // authority on whether this token is still live.
+  if (prompt.shareId !== shareId) return null;
+  if (prompt.isArchived) return null;
+
+  // One extra doc get to label the model chips — the alternative is pulling the
+  // whole library on a page that needs exactly one prompt.
+  const taxonomySnap = await adminDb.collection(META_COLLECTION).doc(TAXONOMY_DOC).get();
+  const byId = new Map(mergeModels(readModels(taxonomySnap.data()?.models)).map(m => [m.id, m]));
+
+  return {
+    promptId,
+    title: prompt.title,
+    category: prompt.category,
+    tags: prompt.tags,
+    // An id with no registered model still renders — as itself, with a monogram —
+    // exactly as `cleanModelIds` keeps retired ids rather than dropping them.
+    models: prompt.llmTypes.map(
+      id => byId.get(id) ?? { id, name: id, logo: null, addedAt: 0, builtin: false }
+    ),
+    text: prompt.text,
+    textHtml: prompt.textHtml,
+    version: prompt.version,
+    lastUpdatedTime: prompt.lastUpdatedTime,
+  };
 }
 
 // ─── Taxonomy ────────────────────────────────────────────────────────────────

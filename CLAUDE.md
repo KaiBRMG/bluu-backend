@@ -23,6 +23,10 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
                     ┌───────────────────────────────────────────────┐
  System browser  ─►│  Model application /model-submissions         │─► UNAUTHENTICATED (session token
  (public)           └───────────────────────────────────────────────┘   + rate limit + sharp validation)
+                    ┌───────────────────────────────────────────────┐
+ System browser  ─►│  Shared prompt     /p/[shareId]               │─► UNAUTHENTICATED (160-bit share
+ (public)           └───────────────────────────────────────────────┘   token IS the access control;
+                                                                        read-only projection, no names)
 
                     ┌───────────────────────────────────────────────┐
  Second Electron ─►│  OF Manager        /of-manager                │─► own window, own layout
@@ -43,6 +47,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 
 - **Monorepo:** `src/` (Next.js 16 web app, primary), `electron/` (desktop wrapper), `src/app/creator/` (creator interface), `functions/` (Cloud Functions).
 - **Two domains, one Vercel deployment:** the Electron shell is pinned to `bluu-backend.vercel.app` (`BASE_URL`); browser-facing pages use `app.bluurock.com` (`PUBLIC_APP_ORIGIN` in [`src/lib/publicOrigin.ts`](src/lib/publicOrigin.ts)). Build every user-facing link from that constant — **never `window.location.origin`**, which is the vercel.app host inside Electron. See [electron.md](documentation/electron.md#two-domains-one-deployment).
+- **Sessions are per-DEVICE, not per user.** `users/{uid}.sessions[deviceId]` plus the `device-sessions/{deviceId} → uid` index replaced the single `sessionToken`. A desktop login still evicts other **desktop** sessions (nobody is clocked in on two machines); web sessions run concurrently. The legacy `sessionToken` is still written on desktop logins and is still the fallback comparison — **a web login must never rotate it** (rule 9c). This is the groundwork for web access. See [auth.md](documentation/auth.md#device-identity--session-enforcement).
 - **Auth:** Google OAuth only, with **personal** Google accounts — there is no company-domain restriction. **Google authenticates; Firestore authorises:** an admin must register someone in the Employee Registry before they can log in, and `/api/auth/exchange-code` refuses any address without a `users` doc. It **never creates one**. Admin status is a JWT custom claim (`token.admin`), not a Firestore read.
 - Full repo layout, commands, and env vars: [architecture-overview.md](documentation/architecture-overview.md).
 

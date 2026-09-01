@@ -4,6 +4,7 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/firebase-config';
 import { useAuth } from '@/components/AuthProvider';
 import { useNetworkStatus } from '@/contexts/NetworkStatusContext';
+import { getDeviceId } from '@/lib/deviceId';
 import { UserDocument } from '@/types/firestore';
 
 interface UserDataContextType {
@@ -35,11 +36,28 @@ export function UserDataProvider({ children }: { children: React.ReactNode }): R
         if (docSnapshot.exists()) {
           const data = docSnapshot.data() as UserDocument;
 
-          // Single active session enforcement: if the session token in Firestore
-          // doesn't match what we stored locally at login, another device has
-          // logged in and this session should be terminated.
+          // Session enforcement, per DEVICE rather than per user.
+          //
+          // `users/{uid}.sessions[deviceId].token` is the authority when an entry
+          // for this device exists: a desktop login evicts other desktop
+          // entries, a revocation rotates one, and either way this client's own
+          // token stops matching. Web sessions coexist with the desktop one.
+          //
+          // The legacy single `sessionToken` is the fallback, and MUST stay one.
+          // A session established before device identity shipped has no entry in
+          // the map, and a client that cannot mint a device id (storage blocked)
+          // never will — treating either as "revoked" would sign out a user who
+          // did nothing wrong. See lib/services/sessionService.ts.
           const localToken = localStorage.getItem('sessionToken');
-          if (localToken && data.sessionToken && data.sessionToken !== localToken) {
+          const deviceId = getDeviceId();
+          const sessions = (data as { sessions?: Record<string, { token?: string }> }).sessions;
+          const entry = deviceId && sessions ? sessions[deviceId] : undefined;
+
+          const revoked = entry
+            ? !!localToken && !!entry.token && entry.token !== localToken
+            : !!localToken && !!data.sessionToken && data.sessionToken !== localToken;
+
+          if (revoked) {
             setDisplaced(true);
             setLoading(false);
             return;

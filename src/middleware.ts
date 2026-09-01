@@ -9,6 +9,11 @@ const BROWSER_ALLOWED_PREFIXES = [
   // The public model application form. Handed out as a link to prospective
   // models, who have no desktop app — it must resolve in a normal browser.
   '/model-submissions',
+  // Shared prompts. The whole point of the link is that it resolves for someone
+  // who does not have the desktop app — a recipient rewritten to /desktop-only
+  // would make sharing useless. Read-only, and reachable only with the 160-bit
+  // share token in the path.
+  '/p',
   '/raffle',
   // Onboarding links the terms of use out to the system browser (Electron routes
   // target=_blank through shell.openExternal), so it must resolve without the

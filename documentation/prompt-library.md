@@ -14,6 +14,10 @@
 | `src/app/api/prompt-library/route.ts` | GET the whole library + taxonomy · POST create |
 | `src/app/api/prompt-library/[id]/route.ts` | PATCH metadata/archive · DELETE (**admin claim**) |
 | `src/app/api/prompt-library/[id]/versions/route.ts` | GET history · POST a new version |
+| `src/app/api/prompt-library/[id]/share/route.ts` | POST mint/return the public share link · DELETE revoke it |
+| `src/lib/promptShareUrl.ts` | `promptShareUrl` (public URL) and `promptDeepLink` (`bluu://prompt?id=`) |
+| `src/app/p/[shareId]/` | The **public, unauthenticated** read-only page + its `_components` |
+| `src/components/DeepLinkRouter.tsx` | Turns `bluu://prompt?id=…` into a navigation that opens the detail dialog |
 | `src/app/api/prompt-library/taxonomy/route.ts` | POST coin labels **and models** · DELETE retire one |
 | `src/contexts/PromptLibraryContext.tsx` | One provider for the whole route subtree; sessionStorage cache, 5 min, key `bluu_prompt_library_v2` |
 | `src/app/(main)/applications/apps-prompt-library/` | The surfaces + `_components` / `_lib` |
@@ -24,7 +28,8 @@
 - **`prompt-library/{promptId}`** — the head of a prompt. Carries the **current text** alongside its metadata, so the list, the search index and the detail card's default view are all served by one collection read.
 - **`prompt-library/{promptId}/versions/{n}`** (subcollection) — the full text of every version. Document id is the version number as a string. **Lazy** — only read when a detail card opens.
 - **`prompt-library-meta/taxonomy`** — the managed `categories[]` / `tags[]` / **`models[]`** lists.
-- **Rules:** all three deny `read, write` (firestore.rules #23). Every access is Admin-SDK-only through the API routes.
+- **`prompt-shares/{shareId}`** — the public share-token index, `{ promptId, createdBy }`. See *Sharing a prompt* below.
+- **Rules:** all four deny `read, write` (firestore.rules #23, #24). Every access is Admin-SDK-only through the API routes.
 - **No composite indexes.** The service does one unfiltered `.get()` and sorts in memory, exactly as `resourceService` does.
 
 ### Head document schema
@@ -42,14 +47,16 @@
 | `basedOn` | number \| null | Which version the current one was edited from |
 | `change` | `ChangeStat` \| null | `{added, removed, ratio, region, kind}` — still computed and stored, no longer displayed |
 | `editNote` | string | The author's note for the current version. `''` when none |
-| `isArchived` | boolean | Hidden from lists and search; recoverable |
+| `isArchived` | boolean | Hidden from lists and search; recoverable. Also **stops the public share page resolving** |
+| `share` | `{id, createdBy, createdTime}` \| absent | The public share token. Absent until someone copies a link; read back as `shareId` |
 | `createdTime` / `lastUpdatedTime` | string (ISO) | |
 | `createdBy` / `lastUpdatedBy` | string (uid) | |
 | `createdAt` / `updatedAt` | Timestamp | Audit fields |
 
 ## Authorization
 
-- Reads and ordinary writes: the **`apps-prompt-library` page permission** (tier 2, via `checkPageAccess`). Anyone with the page can create prompts, save versions, edit metadata, archive, coin labels, and **add a model type**.
+- Reads and ordinary writes: the **`apps-prompt-library` page permission** (tier 2, via `checkPageAccess`). Anyone with the page can create prompts, save versions, edit metadata, archive, coin labels, **add a model type**, and **share or unshare a prompt**.
+- **`/p/[shareId]` is the one unauthenticated read path.** It is gated by the share token alone, and projects a narrow read-only view — see *Sharing a prompt*.
 - **Hard delete requires the `token.admin` claim** (tier 3). Archiving is the reversible act anyone can take; destroying a version history is not. See [auth.md](auth.md#authorization-tiers-least--most-privileged).
 
 ## Many models per prompt — and no migration
@@ -172,6 +179,54 @@ The input is a **combobox** (`role="combobox"` + `aria-activedescendant`) over a
 - Mutations **patch state and the cache in place**; no write is followed by a re-read.
 - Version histories are fetched per prompt on first open and memoised for the session.
 - Coining a label or a model writes; reusing one does not (`mergeTaxonomy` skips the write when nothing is new).
+
+## Sharing a prompt
+
+> **Copy link** on the detail card mints a public URL; the recipient gets a read-only page in an ordinary browser, with a button that hands the prompt back to the desktop app.
+
+### The link
+
+`POST /api/prompt-library/[id]/share` (tier 2, the page permission) mints a **32-character base32 token — ~160 bits** and records it twice: `prompt-library/{id}.share = { id, createdBy, createdTime }`, and a reverse-index doc `prompt-shares/{shareId} → { promptId, createdBy }`. Both writes are in one transaction over the head document, so two people hitting Copy link at the same moment cannot mint two tokens and orphan one index doc.
+
+Three properties, each deliberate:
+
+- **Minted on demand, not at creation.** A prompt with no `shareId` has no public URL *at all*. Sharing is an explicit act.
+- **Idempotent.** Copying twice returns the same link, so a URL already sent to someone keeps resolving.
+- **Revocable, permanently.** "Stop sharing" (`DELETE`) destroys the token and the index doc; re-sharing later mints a *new* one. A revoked link is dead, not dormant.
+
+The token is **not** the prompt's Firestore id. The public page is unauthenticated, so the token *is* the access control and has to be unguessable at internet scale — a 20-char id that also appears in internal URLs is not that.
+
+The URL is built by `lib/promptShareUrl.ts` from `PUBLIC_APP_ORIGIN`, **never** from `window.location.origin` (which inside Electron is the host the shell is pinned to — see [electron.md](electron.md#two-domains-one-deployment)). The `/p` prefix is allowlisted in `src/middleware.ts`; without that entry every recipient is rewritten to `/desktop-only`.
+
+### The public page (`/p/[shareId]`)
+
+A server component that calls `getSharedPrompt` **directly** — no public API route, because there is no second consumer and a public HTTP endpoint returning prompt text is one more thing to rate limit.
+
+Everything a visitor can ever see is what the `SharedPrompt` projection chooses to expose: title, category, tags, resolved model names + marks, the current version's body, the version number, and the updated date. **No uids, no author names, no edit notes, no version history** — the link may be forwarded anywhere, and nothing about *who works here* travels with it. Model names are resolved server-side by one extra doc get on the taxonomy, rather than pulling the whole library for one prompt.
+
+Four refusals collapse into **one 404**: unknown token, deleted prompt, **archived** prompt, revoked link. Distinguishing them would tell a stranger which tokens once existed. Archiving stopping the public page is the point — a retired prompt must not keep serving itself to whoever still holds the link.
+
+Two things about the render are load-bearing:
+
+- **It must stay uncached.** The project runs with Cache Components, where a segment is uncached unless it opts into `"use cache"` — so a revoke or an archive takes effect on the next request. `export const dynamic` is *rejected outright* under that flag; don't add one, and don't mark the page or `getSharedPrompt` cacheable.
+- **The data read lives inside a `<Suspense>` boundary**, in `SharedPromptContent`, not in the default export. Cache Components fails the build for uncached data read outside one. `params` is awaited in there too, for the same reason.
+
+`dangerouslySetInnerHTML` is safe here for exactly the reason it is safe on the detail card — the dialect strips **every attribute** (see *Rich text* above). Widening that dialect would break this page's safety, not just the app's.
+
+### Back into the app
+
+The button fires `bluu://prompt?id=<promptId>`. `main.js` does not interpret it — it forwards the parsed parts on `deeplink:route`, and [`DeepLinkRouter`](../src/components/DeepLinkRouter.tsx) (mounted in `(main)/layout.tsx`) turns `host === 'prompt'` into `/applications/apps-prompt-library?prompt=<id>`, which opens the detail dialog over the board. **No Electron build is needed** — nothing under `electron/` changed, so rule 14's two-push dance does not apply.
+
+`DeepLinkRouter` reads `getPendingDeepLink()` on mount *and* subscribes to `onDeepLink`: a link that launches a cold app arrives before React exists. Its `router.push` is imperative, so it arms the watchdog with `watchNavigation` — `NavigationWatchdog`'s own listener only sees anchor clicks.
+
+### The gate on the button
+
+An external recipient has no app, so the deep link does nothing and the control is dead. So `OpenInApp` asks `POST /api/auth/device` whether this browser's device id is bound to a registered user (see [auth.md](auth.md#device-identity--session-enforcement)):
+
+- **Recognised** → the button is the page's primary action.
+- **Unrecognised** → it is quiet, sits beside a "Get the app" link, and offers **"I work here — link this browser"**, which runs a Google sign-in and registers this browser as a web session.
+
+**It is never hidden outright.** A staff member on a browser they have not linked is indistinguishable from an external recipient, and hiding the control would leave them no route in and no way to fix it. The quiet variant still works if they do have the app. Every failure path — no device id, network error, malformed id — resolves to *unrecognised*: recognition fails closed.
 
 ## Taxonomy
 

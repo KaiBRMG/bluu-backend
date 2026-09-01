@@ -143,10 +143,42 @@ export interface PromptDocument {
   /** The author's note explaining the current version. '' when none was given. */
   editNote: string;
   isArchived: boolean;
+  /**
+   * The public share token, or `null` while the prompt has never been shared.
+   *
+   * Minted on demand by "Copy link" rather than at creation, so a prompt with no
+   * `shareId` has no public URL at all — sharing is an explicit act, and
+   * revoking it (which clears this) genuinely removes the page.
+   */
+  shareId: string | null;
   createdTime: string;
   createdBy: string;
   lastUpdatedTime: string;
   lastUpdatedBy: string;
+}
+
+/**
+ * What the PUBLIC share page renders. A deliberately narrow projection of
+ * {@link PromptDocument}: no uids, no author names, no edit notes, no version
+ * history. The link may be forwarded anywhere, so nothing about *who works here*
+ * or *how the prompt was arrived at* travels with it.
+ */
+export interface SharedPrompt {
+  /** The real prompt id — needed to build the `bluu://` deep link back. */
+  promptId: string;
+  title: string;
+  category: string;
+  tags: string[];
+  /**
+   * The models this prompt targets, already resolved to display names. Resolved
+   * server-side because the public page has no PromptLibraryProvider and must
+   * not pull the whole library just to label a chip.
+   */
+  models: PromptModel[];
+  text: string;
+  textHtml: string | null;
+  version: number;
+  lastUpdatedTime: string;
 }
 
 /** One entry in `prompt-library/{id}/versions`. Lazy-loaded. */

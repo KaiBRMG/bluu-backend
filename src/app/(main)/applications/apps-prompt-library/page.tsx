@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
@@ -53,11 +54,47 @@ function LlmTile({ llm, count, share }: {
   );
 }
 
+/**
+ * Opens the detail dialog for `?prompt=<id>`.
+ *
+ * That parameter is how a deep link lands: the public share page's "Open in
+ * Bluu Backend" fires `bluu://prompt?id=…`, `DeepLinkRouter` turns it into this
+ * URL, and the dialog opens over the board — the same result as clicking the
+ * card, which is the point.
+ *
+ * It runs once per id rather than on every render of the param, so closing the
+ * dialog does not immediately reopen it. The URL is deliberately left alone: a
+ * user who reloads gets the prompt back, which is what a link should do.
+ */
+function usePromptDeepLinkParam(open: (id: string) => void) {
+  const searchParams = useSearchParams();
+  const requested = searchParams.get('prompt');
+
+  useEffect(() => {
+    if (requested) open(requested);
+    // `open` is a setState function and stable; keying on the id alone is what
+    // makes this fire once per link rather than once per render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requested]);
+}
+
 export default function PromptLibraryPage() {
+  return (
+    // `useSearchParams` opts the subtree into client-side rendering, so it needs
+    // a boundary of its own or the whole route fails to prerender.
+    <Suspense fallback={null}>
+      <PromptLibraryBoard />
+    </Suspense>
+  );
+}
+
+function PromptLibraryBoard() {
   const { prompts, models, loading, error } = usePromptLibrary();
   const [creating, setCreating] = useState(false);
   const [addingModel, setAddingModel] = useState(false);
   const [openPromptId, setOpenPromptId] = useState<string | null>(null);
+
+  usePromptDeepLinkParam(setOpenPromptId);
 
   const live = useMemo(() => prompts.filter(p => !p.isArchived), [prompts]);
 

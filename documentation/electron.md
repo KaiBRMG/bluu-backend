@@ -285,6 +285,16 @@ OAuth runs in the system browser (native `signInWithCustomToken` flow, not `sign
 
 **Any other `bluu://` URL is a routing request the shell deliberately does not interpret.** It is parsed into `{ url, host, pathname, params }` and handed to the main window on `deeplink:route`; the renderer owns routing policy and can, for example, turn `bluu://of/chat/123` into `openSatellite(token, { path: '/of-manager/chat/123' })`. New deep-link routes therefore never need a native build. The payload is also cached and readable once via `app.getPendingDeepLink()` — same pattern as `updater:getPending`, because the URL can arrive before React mounts and the event alone would be missed.
 
+**The renderer-side consumer is [`DeepLinkRouter`](../src/components/DeepLinkRouter.tsx)**, mounted in `(main)/layout.tsx` outside `LazyProviders` (a link can launch a cold app, and must be honoured before the lazily-imported providers arrive). It reads the pending payload on mount **and** subscribes — both intakes are required, for the reason above.
+
+| Host | Routes to |
+|---|---|
+| `prompt` (`bluu://prompt?id=<promptId>`) | `/applications/apps-prompt-library?prompt=<id>` — opens the prompt's detail dialog. Fired by the public share page's "Open in Bluu Backend" ([prompt-library.md](prompt-library.md#back-into-the-app)) |
+
+Two rules for adding a host:
+- **Arm the watchdog.** These navigations are imperative, and `NavigationWatchdog`'s own listener only sees anchor clicks — call `watchNavigation(to)` before `router.push`. Same category as notification `actionUrl`s ([notifications.md](notifications.md) RULE 3).
+- **Ignore unknown hosts silently.** A shell installed for weeks can emit a route this bundle has never heard of, and vice versa; doing nothing is the correct handling of both.
+
 ## Robustness (crash recovery, unresponsive)
 
 The renderer *is* the product, so a renderer crash must not leave a blank window. All of this is applied by `attachWindowBehaviour` to **every** window, satellites included — before v0.10.0 the OF window had none of it and a Vercel hiccup left the operator with a blank window and no retry:

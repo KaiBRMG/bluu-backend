@@ -12,6 +12,7 @@ import EmailMigrationDialog from "@/components/migration/EmailMigrationDialog";
 import DeploymentRefresher from "@/components/DeploymentRefresher";
 import NavigationWatchdog from "@/components/NavigationWatchdog";
 import NavigationProgress from "@/components/NavigationProgress";
+import DeepLinkRouter from "@/components/DeepLinkRouter";
 import LazyProviders from "@/components/LazyProviders";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
@@ -29,6 +30,11 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
               AppLayout, so the timer survives navigations instead of being torn
               down with the page. */}
           <NavigationWatchdog />
+          {/* Outside LazyProviders for the same reason as the watchdog: a
+              `bluu://` link can arrive before the lazily-imported providers
+              have loaded — a cold launch from a shared prompt link is exactly
+              that case. Renders nothing; it only routes. */}
+          <DeepLinkRouter />
           {/* Reads the watchdog's state, so it must sit outside LazyProviders
               with it — a slow navigation is exactly when the lazily-imported
               providers may not have arrived yet, and that is the moment the

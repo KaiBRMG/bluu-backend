@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb, adminStorage, adminAuth } from '@/lib/firebase-admin';
 import { getUserById, invalidateUserCache, releaseEmailClaim } from '@/lib/services/userService';
+import { releaseAllDeviceSessions } from '@/lib/services/sessionService';
 import { invalidateAdminUsersCache } from '@/app/api/admin/users/route';
 import { invalidateDisplayNamesCache } from '@/app/api/users/display-names/route';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
@@ -71,8 +72,15 @@ export const PUT = withAuth(async (
 
     // Rotating sessionToken forces an immediate sign-out via the onSnapshot
     // mismatch check in useUserData — required when deactivating an account.
+    //
+    // The device-keyed sessions map is dropped in the same write, and both halves
+    // are needed: a client running the newer bundle compares
+    // `sessions[deviceId].token`, so rotating only the legacy value would leave
+    // it signed in. With the map gone it falls back to the legacy comparison,
+    // which the rotation above has already made fail.
     if (sanitizedUpdates.isActive === false) {
       sanitizedUpdates.sessionToken = randomUUID();
+      sanitizedUpdates.sessions = FieldValue.delete();
     }
 
     const userRef = adminDb.collection('users').doc(targetUid);
@@ -83,6 +91,14 @@ export const PUT = withAuth(async (
     invalidateUserCache(targetUid);
     invalidateAdminUsersCache();
     invalidateDisplayNamesCache();
+
+    // Stop the deactivated account's browsers being recognised on public share
+    // pages. Best-effort: the sign-out above has already happened.
+    if (sanitizedUpdates.isActive === false) {
+      await releaseAllDeviceSessions(targetUid).catch((err) => {
+        console.error(`[UpdateUser] Failed to release device sessions for ${targetUid}:`, err);
+      });
+    }
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
@@ -208,6 +224,14 @@ export const DELETE = withAuth(async (
         console.error(`[DeleteUser] Failed to release email claim for ${targetUid}:`, err);
       });
     }
+
+    // ─── 6. Device-session index ────────────────────────────────────────
+    // Without this, `device-sessions` keeps resolving a deleted employee's
+    // browser to their old uid — which is exactly the lookup the public share
+    // page uses to decide whether a visitor is staff.
+    await releaseAllDeviceSessions(targetUid).catch((err) => {
+      console.error(`[DeleteUser] Failed to release device sessions for ${targetUid}:`, err);
+    });
 
     invalidateUserCache(targetUid);
     invalidateAdminUsersCache();

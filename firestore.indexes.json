@@ -263,6 +263,7 @@
 
     { "collectionGroup": "prompt-library", "fieldPath": "text", "indexes": [] },
     { "collectionGroup": "prompt-library", "fieldPath": "textHtml", "indexes": [] },
+    { "collectionGroup": "prompt-library", "fieldPath": "share", "indexes": [] },
     { "collectionGroup": "versions", "fieldPath": "text", "indexes": [] },
     { "collectionGroup": "versions", "fieldPath": "textHtml", "indexes": [] },
 
@@ -279,6 +280,12 @@
     { "collectionGroup": "messages", "fieldPath": "attachments", "indexes": [] },
 
     { "collectionGroup": "model-submission-sessions", "fieldPath": "expiresAt", "indexes": [] },
-    { "collectionGroup": "model-submission-rate", "fieldPath": "expiresAt", "indexes": [] }
+    { "collectionGroup": "model-submission-rate", "fieldPath": "expiresAt", "indexes": [] },
+
+    { "collectionGroup": "users", "fieldPath": "sessions", "indexes": [] },
+    { "collectionGroup": "prompt-shares", "fieldPath": "promptId", "indexes": [] },
+    { "collectionGroup": "prompt-shares", "fieldPath": "createdBy", "indexes": [] },
+    { "collectionGroup": "device-sessions", "fieldPath": "kind", "indexes": [] },
+    { "collectionGroup": "device-sessions", "fieldPath": "label", "indexes": [] }
   ]
 }
