@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from 'recharts';
 import { ChartContainer, ChartTooltip, type ChartConfig } from '@/components/ui/chart';
 import {
@@ -30,8 +30,15 @@ import type { GrowthAccount } from '@/types/firestore';
  * and a far better one at thirty.
  */
 
-const FIELD = 'rgba(255,255,255,0.20)';
-const FIELD_DIMMED = 'rgba(255,255,255,0.07)';
+/**
+ * These carry the page's primary information, so they are held above the 3:1
+ * non-text contrast floor (WCAG 1.4.11) rather than tuned by eye: 0.34 white on
+ * the card ground measures ~3.1:1, where the 0.20 this shipped with was ~2.1:1.
+ * The dimmed step is a de-emphasis, not a disappearance — 0.16 still resolves as
+ * a line, which is what makes the field read as a field.
+ */
+const FIELD = 'rgba(255,255,255,0.34)';
+const FIELD_DIMMED = 'rgba(255,255,255,0.16)';
 const HIGHLIGHT = '#3b82f6';
 
 interface GrowthChartProps {
@@ -44,7 +51,7 @@ interface GrowthChartProps {
   onHighlight: (id: string | null) => void;
 }
 
-export function GrowthChart({
+export const GrowthChart = memo(function GrowthChart({
   accounts,
   seriesById,
   from,
@@ -79,68 +86,78 @@ export function GrowthChart({
   const suffix = mode === 'indexed' ? '%' : '';
 
   return (
-    <ChartContainer config={config} className="h-[320px] w-full">
-      <LineChart
-        data={rows}
-        margin={{ left: 4, right: 12, top: 8, bottom: 4 }}
-        onMouseLeave={() => onHighlight(null)}
-      >
-        <CartesianGrid vertical={false} strokeOpacity={0.12} />
-        <XAxis
-          dataKey="date"
-          tickLine={false}
-          axisLine={false}
-          tickMargin={8}
-          minTickGap={32}
-          tickFormatter={formatAxisDate}
-        />
-        <YAxis
-          tickLine={false}
-          axisLine={false}
-          tickMargin={8}
-          width={mode === 'absolute' ? 48 : 44}
-          tickFormatter={(v: number) => `${formatCompact(v)}${suffix}`}
-        />
-        {/* Zero is the baseline every account is measured from in the relative
-            modes, so it earns a line. In absolute mode zero is off-scale and
-            meaningless, so it is not drawn. */}
-        {mode !== 'absolute' && (
-          <ReferenceLine y={0} stroke="rgba(255,255,255,0.28)" strokeDasharray="3 3" />
-        )}
-        <ChartTooltip
-          cursor={{ stroke: 'rgba(255,255,255,0.2)', strokeWidth: 1 }}
-          content={<GrowthTooltip accounts={accounts} mode={mode} highlightId={highlightId} />}
-        />
-        {accounts.map((account) => {
-          const isHighlighted = account.id === highlightId;
-          const dimmed = highlightId !== null && !isHighlighted;
-          return (
-            <Line
-              key={account.id}
-              dataKey={account.id}
-              name={account.displayName}
-              type="monotone"
-              // A gap is a day nobody recorded, not a fall to zero. Bridging it
-              // keeps the trend honest; dropping to the axis would invent a
-              // crash every weekend in the imported months.
-              connectNulls
-              stroke={isHighlighted ? HIGHLIGHT : dimmed ? FIELD_DIMMED : FIELD}
-              strokeWidth={isHighlighted ? 2.25 : 1.5}
-              dot={false}
-              activeDot={isHighlighted ? { r: 3, strokeWidth: 0, fill: HIGHLIGHT } : false}
-              isAnimationActive={false}
-              onMouseEnter={() => onHighlight(account.id)}
-              // Colour only. Transitioning `stroke-width` re-rasterises every
-              // path in the field on each hover — the same defect DESIGN.md
-              // flags for `filter` on the chat rows. The hue is what reads.
-              style={{ transition: 'stroke 120ms ease-out' }}
-            />
-          );
-        })}
-      </LineChart>
-    </ChartContainer>
+    <>
+      {/* The field resolves by pointing, which a keyboard or a screen reader
+          cannot do. The leaderboard below already states every one of these
+          figures as text — this is what says so. */}
+      <p className="sr-only">
+        {MODE_LABEL[mode]} for {accounts.length} account{accounts.length === 1 ? '' : 's'}.
+        The same figures are listed as text in the account table below this chart.
+      </p>
+      <ChartContainer config={config} className="h-[320px] w-full">
+        <LineChart
+          accessibilityLayer
+          data={rows}
+          margin={{ left: 4, right: 12, top: 8, bottom: 4 }}
+          onMouseLeave={() => onHighlight(null)}
+        >
+          <CartesianGrid vertical={false} strokeOpacity={0.12} />
+          <XAxis
+            dataKey="date"
+            tickLine={false}
+            axisLine={false}
+            tickMargin={8}
+            minTickGap={32}
+            tickFormatter={formatAxisDate}
+          />
+          <YAxis
+            tickLine={false}
+            axisLine={false}
+            tickMargin={8}
+            width={mode === 'absolute' ? 48 : 44}
+            tickFormatter={(v: number) => `${formatCompact(v)}${suffix}`}
+          />
+          {/* Zero is the baseline every account is measured from in the relative
+              modes, so it earns a line. In absolute mode zero is off-scale and
+              meaningless, so it is not drawn. */}
+          {mode !== 'absolute' && (
+            <ReferenceLine y={0} stroke="rgba(255,255,255,0.28)" strokeDasharray="3 3" />
+          )}
+          <ChartTooltip
+            cursor={{ stroke: 'rgba(255,255,255,0.2)', strokeWidth: 1 }}
+            content={<GrowthTooltip accounts={accounts} mode={mode} highlightId={highlightId} />}
+          />
+          {accounts.map((account) => {
+            const isHighlighted = account.id === highlightId;
+            const dimmed = highlightId !== null && !isHighlighted;
+            return (
+              <Line
+                key={account.id}
+                dataKey={account.id}
+                name={account.displayName}
+                type="monotone"
+                // A gap is a day nobody recorded, not a fall to zero. Bridging it
+                // keeps the trend honest; dropping to the axis would invent a
+                // crash every weekend in the imported months.
+                connectNulls
+                stroke={isHighlighted ? HIGHLIGHT : dimmed ? FIELD_DIMMED : FIELD}
+                strokeWidth={isHighlighted ? 2.25 : 1.5}
+                dot={false}
+                activeDot={isHighlighted ? { r: 3, strokeWidth: 0, fill: HIGHLIGHT } : false}
+                isAnimationActive={false}
+                onMouseEnter={() => onHighlight(account.id)}
+                // Colour only. Transitioning `stroke-width` re-rasterises every
+                // path in the field on each hover — the same defect DESIGN.md
+                // flags for `filter` on the chat rows. The hue is what reads.
+                style={{ transition: 'stroke 120ms ease-out' }}
+              />
+            );
+          })}
+        </LineChart>
+      </ChartContainer>
+    </>
   );
-}
+});
 
 /** Day keys are UTC, so they must be rendered in UTC or the axis shifts a day. */
 function formatAxisDate(value: string): string {

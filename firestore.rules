@@ -210,6 +210,18 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 18c. Growth Tracking (smm-growth-tracking). Follower history for the
+    // Facebook/X pages, written by the nightly Apify cron and read through
+    // /api/smm/growth/*. Deliberately unrelated to twitterx-accounts. The
+    // series subcollection is matched explicitly — rules do not cascade.
+    match /growth-accounts/{accountId} {
+      allow read, write: if false;
+
+      match /series/{year} {
+        allow read, write: if false;
+      }
+    }
+
     // 19. App resources
     // Group/user-filtered reads happen server-side in /api/resources; management
     // writes go through /api/admin/resources. All access via Admin SDK, so no

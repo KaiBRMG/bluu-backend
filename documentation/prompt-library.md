@@ -219,14 +219,22 @@ The button fires `bluu://prompt?id=<promptId>`. `main.js` does not interpret it 
 
 `DeepLinkRouter` reads `getPendingDeepLink()` on mount *and* subscribes to `onDeepLink`: a link that launches a cold app arrives before React exists. Its `router.push` is imperative, so it arms the watchdog with `watchNavigation` — `NavigationWatchdog`'s own listener only sees anchor clicks.
 
-### The gate on the button
+### The "Public Prompts" section
 
-An external recipient has no app, so the deep link does nothing and the control is dead. So `OpenInApp` asks `POST /api/auth/device` whether this browser's device id is bound to a registered user (see [auth.md](auth.md#device-identity--session-enforcement)):
+Below *Recently updated* on the home screen ([`PublicPrompts.tsx`](../src/app/(main)/applications/apps-prompt-library/_components/PublicPrompts.tsx)) — every prompt currently readable by anyone holding a link.
 
-- **Recognised** → the button is the page's primary action.
-- **Unrecognised** → it is quiet, sits beside a "Get the app" link, and offers **"I work here — link this browser"**, which runs a Google sign-in and registers this browser as a web session.
+- **A flat list, not the board.** The question it answers is "what have we put on the open internet?"; grouping by category would scatter the answer. Newest-updated first.
+- **Rendered even when empty**, unlike *Recently updated*. An absent section is indistinguishable from one you scrolled past, and a silence is not the same as an explicit "nothing is shared".
+- **Archived prompts are excluded even when they still carry a share token**, because `getSharedPrompt` refuses an archived prompt — its link already 404s, so listing it would report exposure that does not exist. The token stays on the document and comes back if the prompt is restored, which is why archiving is **not** a substitute for "Stop sharing".
+- Its Copy-link button **issues no request** — the token is already on the head doc, so the URL is built locally rather than re-POSTing the share route for a share that exists.
 
-**It is never hidden outright.** A staff member on a browser they have not linked is indistinguishable from an external recipient, and hiding the control would leave them no route in and no way to fix it. The quiet variant still works if they do have the app. Every failure path — no device id, network error, malformed id — resolves to *unrecognised*: recognition fails closed.
+### The button is not gated
+
+`OpenInApp` shows the button to **everyone**, unconditionally. There is no reliable way to tell from a cold browser whether the visitor has the desktop app, and gating on a guess is worse than a click that does nothing — a staff member on an unrecognised browser would be left with no route into the app at all.
+
+**The unhandled-protocol dialog is the OS's and cannot be changed.** Chrome's "Open Bluu Backend?" and Windows' "You'll need a new app to open this link" are outside the page: not stylable, not re-wordable, not suppressible. What *is* ours is what the visitor reads on returning to the tab, so a one-line explanation — *Bluu Backend is an internal tool for Bluu Rock members only* — is **revealed by the click**, not standing permanently above the button.
+
+Revealed on click rather than on a failure heuristic, deliberately. Detecting "nothing happened" means racing blur/`visibilitychange` against a system dialog that behaves differently per OS and browser, and a false positive would tell a staff member *with* the app that they have no access. Anyone the link worked for is already in the desktop app and never reads the line.
 
 ## Taxonomy
 

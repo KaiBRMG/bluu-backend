@@ -1,6 +1,6 @@
 'use client';
 
-import { useId } from 'react';
+import { memo, useId } from 'react';
 import type { SeriesPoint } from '@/lib/growth/metrics';
 
 /**
@@ -15,7 +15,7 @@ import type { SeriesPoint } from '@/lib/growth/metrics';
  * so it is drawn greyscale unless the row is highlighted, and it is
  * `aria-hidden`: the delta cell already states the same thing in words.
  */
-export function Sparkline({
+export const Sparkline = memo(function Sparkline({
   points,
   highlighted = false,
   width = 88,
@@ -26,7 +26,10 @@ export function Sparkline({
   width?: number;
   height?: number;
 }) {
-  const gradientId = useId();
+  // React 19 emits ids like `«r0»`. A fragment reference resolves today, but
+  // React's own guidance is not to put a generated id into a selector — stripped
+  // to word characters it is a plain, portable id.
+  const gradientId = `growth-spark-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
 
   if (points.length < 2) {
     // One reading cannot describe a trend, and a flat line implies it measured
@@ -85,4 +88,4 @@ export function Sparkline({
       />
     </svg>
   );
-}
+});

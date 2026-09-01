@@ -95,14 +95,6 @@ export function useGrowthTracking() {
     await refresh();
   }, [authFetch, refresh]);
 
-  const renameAccount = useCallback(async (id: string, displayName: string) => {
-    await authFetch(`/api/smm/growth/accounts/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ displayName }),
-    });
-    await refresh();
-  }, [authFetch, refresh]);
-
   const deleteAccount = useCallback(async (id: string) => {
     await authFetch(`/api/smm/growth/accounts/${id}`, { method: 'DELETE' });
     await refresh();
@@ -123,7 +115,6 @@ export function useGrowthTracking() {
     refresh,
     addAccount,
     setTracking,
-    renameAccount,
     deleteAccount,
-  }), [accounts, seriesById, loading, error, refresh, addAccount, setTracking, renameAccount, deleteAccount]);
+  }), [accounts, seriesById, loading, error, refresh, addAccount, setTracking, deleteAccount]);
 }

@@ -56,12 +56,6 @@ export function shiftDayKey(dayKey: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Whole days between two day keys. */
-export function daysBetween(from: string, to: string): number {
-  const ms = Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`);
-  return Math.round(ms / 86_400_000);
-}
-
 /**
  * The inclusive start key for a range, or `null` for "all time".
  * `7d` means the last 7 days *including today*, so it shifts by 6.
@@ -184,31 +178,6 @@ export function toChartRows(
 /** A compact value series for an inline sparkline. */
 export function sparklineFor(days: DayMap, from: string | null): SeriesPoint[] {
   return pointsFor(days, from, 'absolute');
-}
-
-// ─── Data health ─────────────────────────────────────────────────────
-
-export interface DataHealth {
-  captured: number;
-  /** Days in the covered window with no reading — the hand-typed months are gappy. */
-  missed: number;
-  firstDay: string | null;
-  lastDay: string | null;
-}
-
-/**
- * Coverage over the account's *own* window (first reading → last reading),
- * clipped to the range. Measuring against the range instead would report every
- * account as 90% missing on an "all time" view simply for being added recently.
- */
-export function dataHealth(days: DayMap, from: string | null): DataHealth {
-  const keys = dayKeysIn(days, from);
-  if (keys.length === 0) return { captured: 0, missed: 0, firstDay: null, lastDay: null };
-
-  const firstDay = keys[0];
-  const lastDay = keys[keys.length - 1];
-  const span = daysBetween(firstDay, lastDay) + 1;
-  return { captured: keys.length, missed: Math.max(0, span - keys.length), firstDay, lastDay };
 }
 
 // ─── Formatting ──────────────────────────────────────────────────────

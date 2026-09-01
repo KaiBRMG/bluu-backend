@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   RANGE_LABEL,
@@ -32,7 +32,13 @@ interface GrowthSummaryProps {
   range: GrowthRange;
 }
 
-export function GrowthSummary({ accounts, seriesById, from, range }: GrowthSummaryProps) {
+/**
+ * Memoised: none of these tiles depend on the highlight, and the highlight
+ * changes on every row and line the cursor crosses.
+ */
+export const GrowthSummary = memo(function GrowthSummary({
+  accounts, seriesById, from, range,
+}: GrowthSummaryProps) {
   const summary = useMemo(() => {
     const withDelta = accounts.map((account) => ({
       account,
@@ -132,4 +138,4 @@ export function GrowthSummary({ accounts, seriesById, from, range }: GrowthSumma
       </Card>
     </div>
   );
-}
+});

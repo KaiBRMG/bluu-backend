@@ -16,7 +16,6 @@
 | `src/lib/authEmail.ts` | `normalizeEmail` (the comparison key), `isLegacyWorkEmail` |
 | `src/lib/emailMigrationConfig.ts` | Phased-rollout gate for the migration card |
 | `src/app/api/auth/session-token/route.ts` | Browser login + "link this browser": registers a **web** device session; allowlist check on the browser path |
-| `src/app/api/auth/device/route.ts` | **Unauthenticated** `{ known: boolean }` — is this browser bound to a registered user? |
 | `src/lib/deviceId.ts` | Client half of device identity: mint/read `bluu_device_id`, device kind and label |
 | `src/lib/services/sessionService.ts` | Device-keyed sessions, the `device-sessions` reverse index, eviction and revocation |
 | `src/components/AuthProvider.tsx` | Internal-employee auth context (`isActive` enforced) |
@@ -187,18 +186,15 @@ The delete cascade calls `releaseAllDeviceSessions` — without it the index kee
 
 **RULE — a displaced logout must clock the timer out first.** `AuthWrapper`'s displaced effect `await`s `clockOutAndFlush()` (from `TimeTrackingContext`) *before* `auth.signOut()`. A displaced user is signed out without ever reaching the Clock Out button, so skipping this leaves the session open server-side until the daily stale-session Cloud Function closes it — and leaves a buffer with no `clock-out` event, which renders as a phantom live session. See [time-tracking.md](time-tracking.md#3-crash--restart-robustness).
 
-#### Linking a browser (the seed of web access)
+#### Web sessions (the groundwork for web access)
 
-`POST /api/auth/session-token` is the browser login path and now doubles as "link this browser": it takes `{ deviceId, deviceLabel }`, runs the same allowlist check, and registers a **web** session. Two callers today — the browser Login screen, and the "I work here" affordance on a public share page. With no usable `deviceId` it falls back to the original behaviour (rotate the single token) rather than refusing the login.
+`POST /api/auth/session-token` is the browser login path. It takes `{ deviceId, deviceLabel }`, runs the same allowlist check, and registers a **web** session. With no usable `deviceId` it falls back to the original behaviour (rotate the single token) rather than refusing the login.
 
-`POST /api/auth/device` is **unauthenticated** and answers one question — `{ known: boolean }` — by looking a device id up in the index. It is the narrowest possible surface on purpose:
+That is what makes browser access *possible* — a browser can now hold a real, server-recognised session without evicting the user's desktop app. **No surface exercises it yet**: the internal portals are still Electron-only behind `src/middleware.ts`, and the public share page shows its "Open in Bluu Backend" button to everyone rather than gating on recognition (see [prompt-library.md](prompt-library.md#the-button-is-not-gated)).
 
-- **No PII leaves it.** Not a name, not an email, not a uid. A device id is a random UUID held only by the browser that minted it, so `true` tells its owner something they already know.
-- **It grants nothing.** Being recognised only decides which button the share page emphasises; every real read is authorised elsewhere.
-- Deactivated and archived users resolve to `false` — `lookupDeviceOwner` re-checks the user doc rather than trusting the index, and also re-checks that the session still exists.
-- Rate limited per id (20/min, in-process).
+`lookupDeviceOwner` exists for the reverse question — "which registered, still-permitted user owns this device?" — and re-checks the user doc rather than trusting the index, so a deactivated or archived user's device resolves to `null`. It currently has no HTTP caller. **If one is ever added it must not be an open endpoint that leaks identity**: answer a bare boolean, never a name, email or uid, and rate limit it.
 
-This is deliberately the first working piece of **web access**: once a browser is linked it holds a real, server-recognised session for a real user. See also [data-layer.md](data-layer.md).
+See also [data-layer.md](data-layer.md).
 
 ---
 

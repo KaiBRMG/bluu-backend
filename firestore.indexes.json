@@ -217,6 +217,21 @@
   ],
   "fieldOverrides": [
     {
+      "collectionGroup": "series",
+      "fieldPath": "days",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-accounts",
+      "fieldPath": "latest",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-accounts",
+      "fieldPath": "previous",
+      "indexes": []
+    },
+    {
       "collectionGroup": "posts",
       "fieldPath": "postDate",
       "indexes": [

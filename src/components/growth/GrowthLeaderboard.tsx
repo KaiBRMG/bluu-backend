@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { ArrowDownIcon, ArrowUpIcon } from 'lucide-react';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -11,6 +11,7 @@ import {
   sparklineFor,
   type DayMap,
   type GrowthDelta,
+  type SeriesPoint,
 } from '@/lib/growth/metrics';
 import { DeltaValue, PlatformIcon } from './growthUi';
 import { Sparkline } from './Sparkline';
@@ -24,9 +25,18 @@ type SortKey = 'name' | 'followers' | 'change' | 'percent';
  * trace out of the greyscale field, which is how a name gets attached to a line
  * without printing twelve swatches.
  *
- * A row is a button, not a link: it opens a detail sheet in place rather than
- * navigating. Rows are transparent on the canvas, so they take the overlay hover
- * steps rather than `brightness` (DESIGN.md § Interaction).
+ * Opening a row shows a detail sheet in place rather than navigating, so the
+ * affordance is a button — but the button is the **account name inside the first
+ * cell**, not the `<tr>`. Giving the row `role="button"` overrides `row` and
+ * orphans its cells: the column associations the sortable headers exist to
+ * provide disappear, and the whole row announces as one flat label. The row keeps
+ * its click handler for the mouse; the keyboard travels through the name button,
+ * which is also where the focus ring lives — a `box-shadow` ring on a `<tr>`
+ * is not painted at all under `border-collapse: collapse`, which Tailwind's
+ * preflight sets on every table.
+ *
+ * Rows are transparent on the canvas, so they take the overlay hover steps
+ * rather than `brightness` (DESIGN.md § Interaction).
  */
 
 interface GrowthLeaderboardProps {
@@ -84,59 +94,86 @@ export function GrowthLeaderboard({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map(({ account, delta, spark }) => {
-          const isHighlighted = account.id === highlightId;
-          return (
-            <TableRow
-              key={account.id}
-              // Hovering a row is how the chart's field resolves into one named
-              // line, so the highlight is driven from here as well as the chart.
-              onMouseEnter={() => onHighlight(account.id)}
-              onMouseLeave={() => onHighlight(null)}
-              onFocus={() => onHighlight(account.id)}
-              onBlur={() => onHighlight(null)}
-              onClick={() => onOpen(account)}
-              tabIndex={0}
-              role="button"
-              aria-label={`${account.displayName} — open details`}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(account); }
-              }}
-              className={`cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:[--tw-ring-color:#3b82f6] ${
-                isHighlighted ? 'bg-[#3b82f6]/15' : 'hover:bg-white/[0.055] active:bg-white/[0.08]'
-              }`}
-            >
-              <TableCell className="max-w-0">
-                <div className="flex items-center gap-2">
-                  <PlatformIcon platform={account.platform} />
-                  <span className={`truncate ${isHighlighted ? 'font-semibold text-white' : 'font-medium text-zinc-300'}`}>
-                    {account.displayName}
-                  </span>
-                  {!account.isActive && (
-                    <span className="shrink-0 rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[11px] font-medium text-zinc-300">
-                      Stopped
-                    </span>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell className="text-right tabular-nums text-zinc-300">
-                {delta.last === null ? <span className="text-zinc-400">—</span> : formatCount(delta.last)}
-              </TableCell>
-              <TableCell className="text-right">
-                <DeltaValue delta={delta} />
-              </TableCell>
-              <TableCell className="text-right">
-                <div className="flex justify-end">
-                  <Sparkline points={spark} highlighted={isHighlighted} />
-                </div>
-              </TableCell>
-            </TableRow>
-          );
-        })}
+        {rows.map(({ account, delta, spark }) => (
+          <LeaderboardRow
+            key={account.id}
+            account={account}
+            delta={delta}
+            spark={spark}
+            isHighlighted={account.id === highlightId}
+            onHighlight={onHighlight}
+            onOpen={onOpen}
+          />
+        ))}
       </TableBody>
     </Table>
   );
 }
+
+/**
+ * Memoised because the highlight lives on the page: a mouse sweep down the
+ * table would otherwise re-render and re-path every sparkline in the body on
+ * each row entered, when only two rows have actually changed.
+ */
+const LeaderboardRow = memo(function LeaderboardRow({
+  account, delta, spark, isHighlighted, onHighlight, onOpen,
+}: {
+  account: GrowthAccount;
+  delta: GrowthDelta;
+  spark: SeriesPoint[];
+  isHighlighted: boolean;
+  onHighlight: (id: string | null) => void;
+  onOpen: (account: GrowthAccount) => void;
+}) {
+  return (
+    <TableRow
+      // Hovering a row is how the chart's field resolves into one named line, so
+      // the highlight is driven from here as well as the chart.
+      onMouseEnter={() => onHighlight(account.id)}
+      onMouseLeave={() => onHighlight(null)}
+      onClick={() => onOpen(account)}
+      className={`cursor-pointer transition-colors ${
+        isHighlighted ? 'bg-[#3b82f6]/15' : 'hover:bg-white/[0.055] active:bg-white/[0.08]'
+      }`}
+    >
+      <TableCell className="max-w-0">
+        <div className="flex items-center gap-2">
+          <PlatformIcon platform={account.platform} />
+          <button
+            type="button"
+            // The row already handles the mouse; letting this bubble would open
+            // the sheet twice.
+            onClick={(e) => { e.stopPropagation(); onOpen(account); }}
+            onFocus={() => onHighlight(account.id)}
+            onBlur={() => onHighlight(null)}
+            aria-label={`${account.displayName} — open details`}
+            className={`truncate rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:[--tw-ring-color:#3b82f6] ${
+              isHighlighted ? 'font-semibold text-white' : 'font-medium text-zinc-300'
+            }`}
+          >
+            {account.displayName}
+          </button>
+          {!account.isActive && (
+            <span className="shrink-0 rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[11px] font-medium text-zinc-300">
+              Stopped
+            </span>
+          )}
+        </div>
+      </TableCell>
+      <TableCell className="text-right tabular-nums text-zinc-300">
+        {delta.last === null ? <span className="text-zinc-400">—</span> : formatCount(delta.last)}
+      </TableCell>
+      <TableCell className="text-right">
+        <DeltaValue delta={delta} />
+      </TableCell>
+      <TableCell className="text-right">
+        <div className="flex justify-end">
+          <Sparkline points={spark} highlighted={isHighlighted} />
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+});
 
 function SortHead({
   label, active, ascending, onClick, align = 'left',
@@ -157,9 +194,12 @@ function SortHead({
       <button
         type="button"
         onClick={onClick}
-        className={`inline-flex items-center gap-1 transition-colors hover:text-zinc-300 ${
+        // This project's TableHead inks `text-foreground`, so stepping to
+        // zinc-300 on hover and when active made both states *dimmer* than rest.
+        // Rest sits at Ink Secondary and both engaged states step up to white.
+        className={`inline-flex items-center gap-1 rounded-sm transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:[--tw-ring-color:#3b82f6] ${
           align === 'right' ? 'flex-row-reverse' : ''
-        } ${active ? 'text-zinc-300' : ''}`}
+        } ${active ? 'text-white' : 'text-zinc-400'}`}
       >
         {label}
         {active && (ascending

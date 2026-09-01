@@ -3,10 +3,12 @@
 import { useMemo, useState } from 'react';
 import { TriangleAlertIcon } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
+import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { SEGMENT_ITEM_CLASS } from '@/components/growth/growthUi';
 import { GrowthChart } from '@/components/growth/GrowthChart';
 import { GrowthSummary } from '@/components/growth/GrowthSummary';
 import { GrowthLeaderboard } from '@/components/growth/GrowthLeaderboard';
@@ -39,7 +41,7 @@ type PlatformFilter = GrowthPlatform | 'all';
  */
 export default function GrowthTrackingPage() {
   const {
-    accounts, seriesById, loading, error, addAccount, setTracking, deleteAccount,
+    accounts, seriesById, loading, error, refresh, addAccount, setTracking, deleteAccount,
   } = useGrowthTracking();
 
   const [range, setRange] = useState<GrowthRange>('30d');
@@ -76,12 +78,12 @@ export default function GrowthTrackingPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Growth Tracking</h1>
           <p className="text-sm text-zinc-400">
-            Follower counts for the managed Facebook and X pages, read once a night.
+            Follower counts for managed Facebook and X pages, updated daily at 00:00 UTC.
           </p>
         </div>
 
         {stale && (
-          <p className="flex items-center gap-2 rounded-lg bg-orange-500/10 px-3 py-2 text-sm text-orange-400">
+          <p role="status" className="flex items-center gap-2 rounded-lg bg-orange-500/10 px-3 py-2 text-sm text-orange-400">
             <TriangleAlertIcon className="size-4 shrink-0" aria-hidden />
             No new readings since{' '}
             {new Date(stale).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}. The
@@ -89,10 +91,15 @@ export default function GrowthTrackingPage() {
           </p>
         )}
 
+        {/* A failed load used to be terminal — the only way back was to navigate
+            away and return. The hook already knows how to refetch. */}
         {error && (
-          <p role="alert" className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
-            {error}
-          </p>
+          <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
+            <span>{error}</span>
+            <Button size="xs" variant="outline" onClick={() => { void refresh(); }}>
+              Try again
+            </Button>
+          </div>
         )}
 
         <Tabs defaultValue="overview">
@@ -111,55 +118,10 @@ export default function GrowthTrackingPage() {
               </p>
             ) : (
               <>
-                <GrowthSummary
-                  accounts={visible}
-                  seriesById={seriesById}
-                  from={from}
-                  range={range}
-                />
-
-                <Card className="gap-3 py-4">
-                  {/* CardHeader is a grid, not a flex row — the trailing control
-                      belongs in CardAction, which is what switches the header to
-                      `grid-cols-[1fr_auto]`. */}
-                  <CardHeader className="px-4">
-                    <CardTitle className="text-sm font-semibold">{MODE_LABEL[mode]}</CardTitle>
-                    <p className="text-[11px] text-zinc-400">
-                      {mode === 'indexed'
-                        ? 'Every account re-based to 0% at the start of the range, so pages of very different sizes are comparable.'
-                        : mode === 'net'
-                          ? 'Followers gained or lost since the start of the range.'
-                          : 'Raw follower counts. Large pages dominate the axis.'}
-                    </p>
-                    <CardAction>
-                      <ToggleGroup
-                        type="single"
-                        value={mode}
-                        onValueChange={(v) => v && setMode(v as GrowthMode)}
-                        variant="outline"
-                        size="sm"
-                        aria-label="Chart mode"
-                      >
-                        {GROWTH_MODES.map((m) => (
-                          <ToggleGroupItem key={m} value={m} className="text-xs">
-                            {MODE_LABEL[m]}
-                          </ToggleGroupItem>
-                        ))}
-                      </ToggleGroup>
-                    </CardAction>
-                  </CardHeader>
-                  <CardContent className="px-4">
-                    <GrowthChart
-                      accounts={visible}
-                      seriesById={seriesById}
-                      from={from}
-                      mode={mode}
-                      highlightId={highlightId}
-                      onHighlight={setHighlightId}
-                    />
-                  </CardContent>
-                </Card>
-
+                {/* Both controls filter the tiles, the chart and the table
+                    below them, so they sit above all three. Rendered under the
+                    chart, changing the range visibly mutated content off-screen
+                    upward. */}
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-1.5">
                     {(['all', 'facebook', 'twitter'] as const).map((p) => (
@@ -184,13 +146,56 @@ export default function GrowthTrackingPage() {
                     aria-label="Date range"
                   >
                     {(Object.keys(RANGE_DAYS) as GrowthRange[]).map((r) => (
-                      <ToggleGroupItem key={r} value={r} className="text-xs">
+                      <ToggleGroupItem key={r} value={r} className={SEGMENT_ITEM_CLASS}>
                         {r === 'all' ? 'All' : r}
                         <span className="sr-only"> — {RANGE_LABEL[r]}</span>
                       </ToggleGroupItem>
                     ))}
                   </ToggleGroup>
                 </div>
+
+                <GrowthSummary
+                  accounts={visible}
+                  seriesById={seriesById}
+                  from={from}
+                  range={range}
+                />
+
+                <Card className="gap-3 py-4">
+                  {/* CardHeader is a grid, not a flex row — the trailing control
+                      belongs in CardAction, which is what switches the header to
+                      `grid-cols-[1fr_auto]`. */}
+                  <CardHeader className="px-4">
+                    <CardTitle className="text-sm font-semibold">{MODE_LABEL[mode]}</CardTitle>
+
+                    <CardAction>
+                      <ToggleGroup
+                        type="single"
+                        value={mode}
+                        onValueChange={(v) => v && setMode(v as GrowthMode)}
+                        variant="outline"
+                        size="sm"
+                        aria-label="Chart mode"
+                      >
+                        {GROWTH_MODES.map((m) => (
+                          <ToggleGroupItem key={m} value={m} className={SEGMENT_ITEM_CLASS}>
+                            {MODE_LABEL[m]}
+                          </ToggleGroupItem>
+                        ))}
+                      </ToggleGroup>
+                    </CardAction>
+                  </CardHeader>
+                  <CardContent className="px-4">
+                    <GrowthChart
+                      accounts={visible}
+                      seriesById={seriesById}
+                      from={from}
+                      mode={mode}
+                      highlightId={highlightId}
+                      onHighlight={setHighlightId}
+                    />
+                  </CardContent>
+                </Card>
 
                 {visible.length === 0 ? (
                   <p className="text-sm text-zinc-400">
@@ -266,7 +271,11 @@ function FilterChip({
       }`}
     >
       {children}
-      <span className="tabular-nums opacity-80">{count}</span>
+      {/* No `opacity` on the count. Stacked on Ink Secondary it is double
+          de-emphasis, and on the filled chip it drops white-on-#2563eb from
+          5.17:1 to ~3.7:1 at 12px — under AA (DESIGN.md, The One De-emphasis
+          Rule). The chip's own colour already separates it from the label. */}
+      <span className="tabular-nums">{count}</span>
     </button>
   );
 }
@@ -275,14 +284,14 @@ function FilterChip({
 function OverviewSkeleton() {
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[104px] rounded-xl" />)}
-      </div>
-      <Skeleton className="h-[420px] rounded-xl" />
       <div className="flex items-center justify-between">
         <Skeleton className="h-7 w-64 rounded-full" />
         <Skeleton className="h-8 w-56 rounded-lg" />
       </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[104px] rounded-xl" />)}
+      </div>
+      <Skeleton className="h-[420px] rounded-xl" />
       <div className="space-y-2">
         {[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-11 rounded-lg" />)}
       </div>

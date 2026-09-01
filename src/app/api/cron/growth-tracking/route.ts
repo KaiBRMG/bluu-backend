@@ -56,8 +56,27 @@ export async function GET() {
   // Fail closed when CRON_SECRET is unset: an open endpoint that spends money on
   // a third-party API is not something to leave running because a variable was
   // forgotten.
+  //
+  // The 404 is deliberately opaque — it must not tell a prober whether the
+  // secret exists or merely differs. That also makes a genuine misconfiguration
+  // invisible from the outside, so the two causes are separated *in the server
+  // log*, which the caller never sees. The secret itself is never logged.
   const secret = process.env.CRON_SECRET;
-  if (!secret || authorization !== `Bearer ${secret}`) {
+  if (!secret) {
+    console.error(
+      '[cron/growth-tracking] CRON_SECRET is not set for this deployment, so the job ' +
+      'refused to run. Vercel Cron only sends its Authorization header when that variable ' +
+      'exists, so an unset secret fails both halves of the check. Set it in Project → ' +
+      'Settings → Environment Variables (Production) and redeploy — env changes do not ' +
+      'reach deployments that already exist.',
+    );
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+  if (authorization !== `Bearer ${secret}`) {
+    console.error(
+      `[cron/growth-tracking] Rejected a request whose Authorization header did not match ` +
+      `CRON_SECRET (header ${authorization ? 'present but wrong' : 'absent'}).`,
+    );
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 

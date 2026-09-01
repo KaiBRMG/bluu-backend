@@ -7,6 +7,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -29,13 +30,9 @@ import type { GrowthAccount } from '@/types/firestore';
  * stopped list and behind a confirm that names how much history it destroys —
  * months of daily readings cannot be re-collected from anywhere.
  *
- * **The cost is stated, not implied.** Someone adding their twentieth account
- * should be able to see what that does to the bill without going and reading
- * the service file.
+ * The scrape cadence is stated once, in the page header, rather than repeated
+ * here.
  */
-
-/** Matches UNIT_COST in growthTrackingService.ts — repeated here as a display estimate only. */
-const NIGHTLY_COST: Record<GrowthAccount['platform'], number> = { facebook: 0.01, twitter: 0.004 };
 
 interface ManageAccountsTabProps {
   accounts: GrowthAccount[];
@@ -52,14 +49,10 @@ export function ManageAccountsTab({
   const [pendingDelete, setPendingDelete] = useState<GrowthAccount | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const { active, stopped, monthlyCost } = useMemo(() => {
-    const activeAccounts = accounts.filter((a) => a.isActive);
-    return {
-      active: activeAccounts,
-      stopped: accounts.filter((a) => !a.isActive),
-      monthlyCost: activeAccounts.reduce((sum, a) => sum + NIGHTLY_COST[a.platform], 0) * 30,
-    };
-  }, [accounts]);
+  const { active, stopped } = useMemo(() => ({
+    active: accounts.filter((a) => a.isActive),
+    stopped: accounts.filter((a) => !a.isActive),
+  }), [accounts]);
 
   const setTracking = async (account: GrowthAccount, isActive: boolean) => {
     setBusyId(account.id);
@@ -92,17 +85,7 @@ export function ManageAccountsTab({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <p className="max-w-[65ch] text-sm text-zinc-400">
-          {active.length === 0
-            ? 'No accounts are being scraped. Add one to start collecting follower counts.'
-            : <>
-                <span className="tabular-nums text-zinc-300">{active.length}</span>
-                {' account'}{active.length === 1 ? '' : 's'}{' scraped nightly at midnight UTC · about '}
-                <span className="tabular-nums text-zinc-300">${monthlyCost.toFixed(2)}</span>
-                {' a month'}
-              </>}
-        </p>
+      <div className="flex justify-end">
         <Button onClick={() => setAddOpen(true)}>
           <PlusIcon className="size-4" aria-hidden />
           Track Account
@@ -110,7 +93,10 @@ export function ManageAccountsTab({
       </div>
 
       {loading ? (
-        <p className="text-sm text-zinc-400">Loading accounts…</p>
+        <div className="space-y-2">
+          <Skeleton className="h-10 rounded-lg" />
+          {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-12 rounded-lg" />)}
+        </div>
       ) : accounts.length === 0 ? (
         <p className="text-sm text-zinc-400">
           Nothing is tracked yet. Add a Facebook page or X account and its follower count is
@@ -124,7 +110,10 @@ export function ManageAccountsTab({
                 <TableHead>Account</TableHead>
                 <TableHead className="text-right">Followers</TableHead>
                 <TableHead className="text-right">Last read</TableHead>
-                <TableHead className="w-[7rem]" />
+                {/* Matches the stopped table's action column so the two line up. */}
+                <TableHead className="w-[13rem] text-right">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -165,6 +154,17 @@ export function ManageAccountsTab({
                 charts.
               </p>
               <Table>
+                {/* Same four columns as the active table, at the same widths, so
+                    the two read as one ledger — and named, because a table whose
+                    cells have no column headers announces as bare values. */}
+                <TableHeader className="sr-only">
+                  <TableRow>
+                    <TableHead>Account</TableHead>
+                    <TableHead>Followers</TableHead>
+                    <TableHead>Last read</TableHead>
+                    <TableHead className="w-[13rem]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
                 <TableBody>
                   {stopped.map((account) => (
                     <TableRow key={account.id} className="hover:bg-white/[0.055]">
@@ -173,6 +173,14 @@ export function ManageAccountsTab({
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-zinc-300">
                         {account.latest ? formatCount(account.latest.followers) : <span className="text-zinc-400">—</span>}
+                      </TableCell>
+                      {/* Not `ScrapeStatus`: a stopped account that was never
+                          read would claim a "First reading tonight" that is not
+                          coming. The last read it did get is still a fact. */}
+                      <TableCell className="text-right text-[11px] tabular-nums text-zinc-400">
+                        {account.lastScrapeAt
+                          ? new Date(account.lastScrapeAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+                          : 'Never read'}
                       </TableCell>
                       <TableCell className="w-[13rem] text-right">
                         <Button

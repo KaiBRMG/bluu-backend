@@ -70,12 +70,33 @@ app.on('open-url', (event, url) => {
 // Handle deep links (Windows)
 const gotTheLock = app.requestSingleInstanceLock();
 
+/** The `bluu://` URL in an argv array, if the OS launched us with one. */
+function deepLinkFromArgv(argv) {
+  if (!Array.isArray(argv)) return null;
+  return argv.find(arg => typeof arg === 'string' && arg.startsWith(`${PROTOCOL}://`)) || null;
+}
+
 if (!gotTheLock) {
   app.quit();
 } else {
+  // Windows/Linux COLD start. `second-instance` only fires when the app was
+  // ALREADY running — a link that launches the app puts the URL in *this*
+  // process's argv and fires no event at all, so without this the app opened
+  // on whatever route it last had and silently dropped the link.
+  //
+  // Stored rather than handled: there is no window yet. `did-finish-load`
+  // replays it, and `handleDeepLink` also parks the parsed route in
+  // `pendingDeepLinkRoute` for the renderer to collect once React mounts —
+  // which is what covers the first load being the local splash screen.
+  //
+  // macOS never populates argv this way (it uses `open-url`), so this is inert
+  // there. In dev, argv also carries the script path, hence the protocol test
+  // rather than a positional read.
+  deeplinkUrl = deepLinkFromArgv(process.argv);
+
   app.on('second-instance', (_event, commandLine) => {
     // Windows deep link handling
-    const url = commandLine.find(arg => arg.startsWith(`${PROTOCOL}://`));
+    const url = deepLinkFromArgv(commandLine);
     if (url) {
       handleDeepLink(url);
     }

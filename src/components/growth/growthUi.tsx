@@ -1,6 +1,6 @@
 'use client';
 
-import { IconBrandFacebook, IconBrandX } from '@tabler/icons-react';
+import { IconBrandFacebookFilled, IconBrandXFilled } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import { PLATFORM_LABEL, type GrowthPlatform } from '@/lib/growth/platform';
 import { formatDelta, formatPercent, type GrowthDelta } from '@/lib/growth/metrics';
@@ -14,10 +14,33 @@ import type { GrowthAccount } from '@/types/firestore';
  * Semantic-Only Rule bans exactly that. The glyph carries the platform; hue is
  * reserved for direction of travel (up / down) and for the one Action Blue
  * voice, which here marks the highlighted account.
+ *
+ * The `Filled` Tabler variants, not the outline ones: both platforms' real marks
+ * are solid glyphs, and the stroked versions read as a generic "f" in a box
+ * rather than as Facebook. These are still Tabler's interpretations, not the
+ * official brand assets — see DESIGN.md § Navigation for the `SVG_ICONS`
+ * escape hatch if a true brand mark is ever wanted here.
  */
 
+/**
+ * Segmented-control item styling, shared by the chart-mode and date-range groups.
+ *
+ * shadcn's `outline` toggle variant paints **both** hover and the on-state with
+ * `bg-accent`, so the selected option is indistinguishable from the hovered one
+ * and measures ~1.5:1 against the card — under the 3:1 floor WCAG 1.4.11 sets for
+ * a state indicator. Selection is therefore the filled Action Blue Deep the
+ * page's own filter chips already use: `#2563eb`, never `#3b82f6` (white on the
+ * lighter blue is 3.68:1 and fails AA at this size — DESIGN.md §2).
+ *
+ * The trailing `!` is deliberate. It beats the primitive's own `data-[state=on]`
+ * rule regardless of stylesheet order, which two same-specificity selectors
+ * otherwise decide by chance.
+ */
+export const SEGMENT_ITEM_CLASS =
+  'text-xs data-[state=on]:bg-[#2563eb]! data-[state=on]:font-medium data-[state=on]:text-white!';
+
 export function PlatformIcon({ platform, className }: { platform: GrowthPlatform; className?: string }) {
-  const Icon = platform === 'facebook' ? IconBrandFacebook : IconBrandX;
+  const Icon = platform === 'facebook' ? IconBrandFacebookFilled : IconBrandXFilled;
   return <Icon className={cn('size-3.5 shrink-0 text-zinc-400', className)} aria-hidden />;
 }
 

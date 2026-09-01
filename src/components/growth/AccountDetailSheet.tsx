@@ -9,7 +9,6 @@ import {
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
 import {
   RANGE_LABEL,
-  dataHealth,
   deltaFor,
   formatCompact,
   formatCount,
@@ -28,10 +27,6 @@ const config = { followers: { label: 'Followers', color: '#3b82f6' } } satisfies
  * scrapers produce and the only one the imported history has — but each actor
  * hands back a few more fields inside the same billed result, and this is the
  * surface with room to show them.
- *
- * It also carries the data-health line. Coverage matters here and nowhere else:
- * the imported months skip most weekends, so "44 readings over 62 days" is
- * context a reader needs before drawing conclusions from the shape of the line.
  */
 export function AccountDetailSheet({
   account,
@@ -50,7 +45,6 @@ export function AccountDetailSheet({
     if (!account) return null;
     return {
       delta: deltaFor(days, from),
-      health: dataHealth(days, from),
       rows: pointsFor(days, from, 'absolute').map((p) => ({ date: p.date, followers: p.value })),
       latest: account.latest,
     };
@@ -137,34 +131,14 @@ export function AccountDetailSheet({
 
               <ExtraMetrics platform={account.platform} snapshot={view.latest} />
 
-              <section>
-                <h3 className="mb-2 text-sm font-semibold">Data coverage</h3>
-                <p className="text-sm text-zinc-400">
-                  {view.health.captured === 0 ? (
-                    'Nothing recorded in this range.'
-                  ) : (
-                    <>
-                      <span className="tabular-nums text-zinc-300">{view.health.captured}</span>
-                      {' reading'}{view.health.captured === 1 ? '' : 's'}
-                      {view.health.missed > 0 && (
-                        <>
-                          {', '}
-                          <span className="tabular-nums text-zinc-300">{view.health.missed}</span>
-                          {' day'}{view.health.missed === 1 ? '' : 's'}{' missed'}
-                        </>
-                      )}
-                      {view.health.firstDay && (
-                        <> · from {formatDay(view.health.firstDay)} to {formatDay(view.health.lastDay!)}</>
-                      )}
-                    </>
-                  )}
+              {/* The coverage stats are gone, but the failure reason is not: it
+                  is the only place a user learns *why* an account stopped
+                  reporting, and the chart above just shows a flat tail. */}
+              {account.lastScrapeStatus === 'failed' && account.lastScrapeError && (
+                <p role="alert" className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                  {account.lastScrapeError}
                 </p>
-                {account.lastScrapeStatus === 'failed' && account.lastScrapeError && (
-                  <p className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
-                    {account.lastScrapeError}
-                  </p>
-                )}
-              </section>
+              )}
             </div>
           </>
         )}
