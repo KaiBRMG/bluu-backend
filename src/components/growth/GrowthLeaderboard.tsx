@@ -62,7 +62,7 @@ export function GrowthLeaderboard({
 
     const direction = ascending ? 1 : -1;
     return mapped.sort((a, b) => {
-      if (sort === 'name') return a.account.displayName.localeCompare(b.account.displayName) * direction;
+      if (sort === 'name') return a.account.handle.localeCompare(b.account.handle) * direction;
       // Accounts with nothing to compare sink to the bottom in either direction —
       // they are not "the worst performer", they are unmeasured.
       const value = (d: GrowthDelta) =>
@@ -146,12 +146,12 @@ const LeaderboardRow = memo(function LeaderboardRow({
             onClick={(e) => { e.stopPropagation(); onOpen(account); }}
             onFocus={() => onHighlight(account.id)}
             onBlur={() => onHighlight(null)}
-            aria-label={`${account.displayName} — open details`}
+            aria-label={`@${account.handle} — open details`}
             className={`truncate rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:[--tw-ring-color:#3b82f6] ${
               isHighlighted ? 'font-semibold text-white' : 'font-medium text-zinc-300'
             }`}
           >
-            {account.displayName}
+            {account.handle}
           </button>
           {!account.isActive && (
             <span className="shrink-0 rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[11px] font-medium text-zinc-300">

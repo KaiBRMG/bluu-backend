@@ -81,7 +81,13 @@ export function ThankYou({ name }: { name: string }) {
 
       <div className="onboard-rise mt-14" style={{ animationDelay: '360ms' }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo/bluu_long.svg" alt="Bluu Rock" className="h-5 w-auto opacity-45" />
+        <img
+          src="/logo/HQ2.png"
+          alt="Bluu Rock"
+          width={1374}
+          height={868}
+          className="h-9 w-auto opacity-45"
+        />
       </div>
     </div>
   );

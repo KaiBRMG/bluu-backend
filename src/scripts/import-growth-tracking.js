@@ -50,8 +50,8 @@
 // Document ids are deterministic (`<platform>_<lowercased handle>`, the same id
 // the app builds via growthAccountId) and every write is a merge, so a re-run
 // rewrites the same documents rather than duplicating anything. The account doc
-// is only created if absent — a re-run never clobbers a display name or an
-// isActive flag someone has since changed in the UI.
+// is only created if absent — a re-run never clobbers an isActive flag someone
+// has since changed in the UI.
 
 const fs = require('fs');
 const path = require('path');
@@ -68,25 +68,27 @@ const SHEETS = [
 ];
 
 /**
- * The twelve accounts to import, and the seed for their account documents.
+ * The twelve accounts to import, and the seed for their account documents. An
+ * account is named by its handle alone, so nothing here carries a friendly name
+ * — the sheet labels below are only how a ROW is found in the CSV.
  * `label` is the exact string in column 3 of the sheet, inside that platform's
  * section. URLs are as supplied in GROWTH_TRACKING.md — note the deliberate mix
  * of http/https, x.com/twitter.com and www., all of which normalize to one
  * canonical form (mirrored from src/lib/growth/platform.ts below).
  */
 const ACCOUNTS = [
-  { platform: 'facebook', label: 'Adam (Followers)',        name: 'Adam',            url: 'https://www.facebook.com/adamtwinkx' },
-  { platform: 'facebook', label: 'Cole (Followers)',        name: 'Cole',            url: 'https://www.facebook.com/xColeBentley' },
-  { platform: 'facebook', label: 'Connor (Followers)',      name: 'Connor',          url: 'https://www.facebook.com/connorsfacebook/' },
-  { platform: 'facebook', label: 'Leo (Followers)',         name: 'Leo',             url: 'https://www.facebook.com/LeoTwxnk/' },
-  { platform: 'facebook', label: 'Noah Ryder (Followers)',  name: 'Noah Ryder',      url: 'https://www.facebook.com/NoahRyderXX' },
-  { platform: 'twitter',  label: 'TwinkUniversity',         name: 'TwinkUniversity', url: 'https://x.com/TwinkUniversity' },
-  { platform: 'twitter',  label: 'TwinkLoad',               name: 'TwinkLoad',       url: 'http://twitter.com/TwinkLoad' },
-  { platform: 'twitter',  label: 'TwinkPublic',             name: 'TwinkPublic',     url: 'http://twitter.com/TwinkPublic' },
-  { platform: 'twitter',  label: 'TwinkKinkz',              name: 'TwinkKinkz',      url: 'http://x.com/twinkkinkz' },
-  { platform: 'twitter',  label: 'TwinkToons',              name: 'TwinkToons',      url: 'http://www.twitter.com/TwinkToons' },
-  { platform: 'twitter',  label: 'TwinkDong',               name: 'TwinkDong',       url: 'http://twitter.com/TwinkDong' },
-  { platform: 'twitter',  label: 'TwinkCheeks',             name: 'TwinkCheeks',     url: 'http://twitter.com/TwinkCheeks' },
+  { platform: 'facebook', label: 'Adam (Followers)',            url: 'https://www.facebook.com/adamtwinkx' },
+  { platform: 'facebook', label: 'Cole (Followers)',            url: 'https://www.facebook.com/xColeBentley' },
+  { platform: 'facebook', label: 'Connor (Followers)',          url: 'https://www.facebook.com/connorsfacebook/' },
+  { platform: 'facebook', label: 'Leo (Followers)',             url: 'https://www.facebook.com/LeoTwxnk/' },
+  { platform: 'facebook', label: 'Noah Ryder (Followers)',      url: 'https://www.facebook.com/NoahRyderXX' },
+  { platform: 'twitter',  label: 'TwinkUniversity', url: 'https://x.com/TwinkUniversity' },
+  { platform: 'twitter',  label: 'TwinkLoad',       url: 'http://twitter.com/TwinkLoad' },
+  { platform: 'twitter',  label: 'TwinkPublic',     url: 'http://twitter.com/TwinkPublic' },
+  { platform: 'twitter',  label: 'TwinkKinkz',      url: 'http://x.com/twinkkinkz' },
+  { platform: 'twitter',  label: 'TwinkToons',      url: 'http://www.twitter.com/TwinkToons' },
+  { platform: 'twitter',  label: 'TwinkDong',       url: 'http://twitter.com/TwinkDong' },
+  { platform: 'twitter',  label: 'TwinkCheeks',     url: 'http://twitter.com/TwinkCheeks' },
 ];
 
 const GROWTH_ACCOUNTS = 'growth-accounts';
@@ -270,7 +272,7 @@ async function main() {
   for (const account of ACCOUNTS) {
     const parsed = parseProfileUrl(account.platform, account.url);
     if (!parsed) {
-      console.error(`  ✗ ${account.name}: unparseable URL "${account.url}" — skipped`);
+      console.error(`  ✗ ${parsed.handle}: unparseable URL "${account.url}" — skipped`);
       continue;
     }
 
@@ -279,7 +281,7 @@ async function main() {
     const dayKeys = [...readings.keys()].sort();
 
     if (dayKeys.length === 0) {
-      console.warn(`  ! ${account.name} (${id}): no readings found in either sheet`);
+      console.warn(`  ! ${parsed.handle} (${id}): no readings found in either sheet`);
     }
 
     // Group by year — one series document per account per year.
@@ -293,7 +295,7 @@ async function main() {
     const previousKey = dayKeys[dayKeys.length - 2];
 
     console.log(
-      `  ${account.name.padEnd(16)} ${id.padEnd(28)} ` +
+      `  ${parsed.handle.padEnd(16)} ${id.padEnd(28)} ` +
       `${String(dayKeys.length).padStart(2)} readings` +
       (latestKey ? ` · ${dayKeys[0]} → ${latestKey} · ${readings.get(latestKey).toLocaleString('en-US')}` : ''),
     );
@@ -307,7 +309,6 @@ async function main() {
     if (!existing.exists) {
       await ref.set({
         platform: account.platform,
-        displayName: account.name,
         handle: parsed.handle,
         handleNormalized: parsed.handleNormalized,
         profileUrl: parsed.canonicalUrl,

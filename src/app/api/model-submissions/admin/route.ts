@@ -44,7 +44,7 @@ export const GET = withAuth(async (_request: NextRequest, token: DecodedIdToken)
 
     const submissions: ModelSubmissionSummary[] = await Promise.all(
       docs.map(async (d) => {
-        const photoCount = d.selfies.length + d.bodyPhotos.length + (d.earningsPhoto ? 1 : 0);
+        const photoCount = d.selfies.length + d.bodyPhotos.length + d.earningsPhotos.length;
         const thumbs = await signThumbs([...d.selfies, ...d.bodyPhotos].slice(0, CARD_THUMBS));
         return {
           id: d.id,

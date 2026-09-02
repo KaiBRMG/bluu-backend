@@ -23,16 +23,13 @@ export const PATCH = withAuth(async (
     if (denied) return denied;
 
     const { id } = await params;
-    const body = await request.json() as { isActive?: boolean; displayName?: string };
+    const body = await request.json() as { isActive?: boolean };
 
-    const updates: Record<string, unknown> = {};
-    if (typeof body.isActive === 'boolean') updates.isActive = body.isActive;
-    if (typeof body.displayName === 'string') {
-      const name = body.displayName.trim();
-      if (!name) return NextResponse.json({ error: 'A display name is required.' }, { status: 400 });
-      updates.displayName = name;
-    }
-    if (Object.keys(updates).length === 0) {
+    // `isActive` is the ONLY mutable field. An account is named by its handle
+    // and nothing else, and the handle — with the platform and profile URL — is
+    // the identity the document id is built from, so changing one would orphan
+    // the history rather than move it.
+    if (typeof body.isActive !== 'boolean') {
       return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
     }
 
@@ -41,10 +38,7 @@ export const PATCH = withAuth(async (
       return NextResponse.json({ error: 'Account not found' }, { status: 404 });
     }
 
-    // The platform, handle and profile URL are immutable: they are the identity
-    // the document id is built from, so changing one would silently orphan the
-    // history rather than move it.
-    await ref.update(updates);
+    await ref.update({ isActive: body.isActive });
     return NextResponse.json({ success: true });
   } catch (error) {
     return handleApiError(error, 'PATCH /api/smm/growth/accounts/[id]');

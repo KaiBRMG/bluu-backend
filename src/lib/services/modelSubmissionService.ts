@@ -522,6 +522,14 @@ function toPhotos(v: any): SubmissionPhoto[] {
   return Array.isArray(v) ? v.map(toPhoto).filter((p): p is SubmissionPhoto => p !== null) : [];
 }
 
+/** The earnings screenshots, from either the array field or the legacy single. */
+function toEarnings(d: any): SubmissionPhoto[] {
+  const many = toPhotos(d.earningsPhotos);
+  if (many.length > 0) return many;
+  const one = toPhoto(d.earningsPhoto);
+  return one ? [one] : [];
+}
+
 function mapDoc(doc: FirebaseFirestore.DocumentSnapshot): ModelSubmissionDocument {
   const d = doc.data() ?? {};
   return {
@@ -530,17 +538,24 @@ function mapDoc(doc: FirebaseFirestore.DocumentSnapshot): ModelSubmissionDocumen
     email: d.email ?? '',
     instagram: d.instagram ?? '',
     telegram: d.telegram ?? '',
+    whatsapp: d.whatsapp ?? '',
     hasOnlyFans: d.hasOnlyFans === true,
     age: typeof d.age === 'number' ? d.age : 0,
     country: d.country ?? '',
     city: d.city ?? '',
     sexuality: d.sexuality ?? 'other',
-    niche: d.niche ?? '',
-    trialLink: d.trialLink ?? '',
+    socialInstagram: d.socialInstagram ?? '',
+    socialTwitter: d.socialTwitter ?? '',
+    socialReddit: d.socialReddit ?? '',
+    socialOther: d.socialOther ?? '',
     socialLinks: d.socialLinks ?? '',
+    trialLink: d.trialLink ?? '',
     status: d.status === 'approved' || d.status === 'rejected' ? d.status : 'new',
     createdAt: d.createdAt?.toDate?.()?.toISOString() ?? new Date(0).toISOString(),
-    earningsPhoto: toPhoto(d.earningsPhoto),
+    // `earningsPhoto` (singular) is what records written before the second
+    // screenshot slot existed carry. Read both so an old record still shows its
+    // statement in the viewer.
+    earningsPhotos: toEarnings(d),
     selfies: toPhotos(d.selfies),
     bodyPhotos: toPhotos(d.bodyPhotos),
     reviewedBy: typeof d.reviewedBy === 'string' ? d.reviewedBy : null,

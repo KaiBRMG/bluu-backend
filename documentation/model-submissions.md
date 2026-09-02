@@ -7,7 +7,8 @@
 | File | Role |
 |---|---|
 | `src/app/model-submissions/page.tsx` | The public 3–4 step form ("the stage" skin) |
-| `src/app/model-submissions/_components/` | `Field`, `PhotoUploader`, `ThankYou`, `NoTranslate` |
+| `src/app/model-submissions/_components/` | `Field`, `PrefixedInput`, `SocialField`, `PhotoUploader`, `ThankYou`, `NoTranslate` |
+| `src/app/model-submissions/_lib/guessCountry.ts` | Pre-selects the WhatsApp dial code from the browser's own locale |
 | `src/app/model-submissions/error.tsx` | Route error boundary — the branded crash screen, with `reset()` |
 | `src/app/model-submissions/_lib/theme.ts` | **The public surface's design tokens — import, never inline** |
 | `src/app/model-submissions/_lib/prepareImage.ts` | **Browser-side HEIC→JPEG transcode** + downscale before upload |
@@ -99,7 +100,26 @@ Every rejection is logged (`console.warn` with the reason and, for quota trips, 
 
 ### Step 3 is conditional
 
-Section 3 only exists when the applicant answers **yes** to "do you already have an OnlyFans account linked to your identity?". The step list is derived from that answer, so the progress rail shows 3 or 4 segments accordingly, and the submit route **blanks** `niche` / `trialLink` / `socialLinks` / `earningsPhoto` when `hasOnlyFans` is false rather than trusting whatever the client sent.
+Section 3 only exists when the applicant answers **yes** to "do you already have an OnlyFans account linked to your identity?". The step list is derived from that answer, so the progress rail shows 3 or 4 segments accordingly, and the submit route **blanks** `trialLink` / `earningsPhotos` when `hasOnlyFans` is false rather than trusting whatever the client sent.
+
+Section 3 is therefore only ever the trial link and the earnings screenshots (**up to two**). The social pages moved to section 2 in 2026-09, because every applicant has them — gating them behind "do you have an OnlyFans account?" meant we held no way to look up the majority of applicants.
+
+### Contact: one of Telegram or WhatsApp is required
+
+Each field is optional on its own; **`requireOneContact` in the shared schema demands one of the two**, on both the step slice and the whole-form schema. Email alone is not enough: every conversation with an applicant happens on a messenger, and an application nobody can follow up on is an application nobody actions. (An earlier note here said the opposite — it described the Instagram/Telegram pair, and Instagram is no longer a contact field at all.)
+
+- **WhatsApp is stored as E.164** (`+27821234567`), composed by `composeWhatsApp(dialCode, number)` so the browser and the server build the identical string. A number typed with `+` or `00` keeps its own country code; otherwise the select's dial code is prepended and the national trunk `0` dropped. It deliberately does **not** infer a duplicated country code from digits alone — that eats a real digit off every US number starting with 1.
+- **The country is guessed, never assumed.** [`guessCountry.ts`](../src/app/model-submissions/_lib/guessCountry.ts) reads `navigator.languages` and resolves a region through `Intl.Locale` (`en-ZA` → `ZA`; a bare `pt` maximises to `BR`). No geo-IP call, no library, no request. It only ever pre-fills a visible, editable control, and returns `''` — leaving the placeholder — rather than a confidently wrong country.
+- Legacy `instagram` on the document is a **read-only** field now: records written before 2026-09 kept Instagram as a contact detail, and the review dialog still renders it for them. Nothing writes it.
+
+### Social pages are per-platform, and stored as URLs
+
+"List all your social media pages" is four controls — Instagram, Twitter, Reddit, and a free-text *Anything else* — not one textarea. A single box produced answers we then had to guess at: bare handles with no platform, half-typed URLs, three accounts on one line.
+
+The applicant types **only the username** (the `@` / `u/` is field chrome, supplied by `PrefixedInput`), and the shared schema transforms it into the full profile URL that is stored — `https://www.instagram.com/…`, `https://x.com/…`, `https://www.reddit.com/user/…`. `normaliseHandle` accepts a pasted URL too, so someone who ignores the affix still lands on the same value.
+
+- **`requireOneSocial` demands at least one** of the four, reported on the synthetic `socials` path so the message sits under the group rather than under whichever box happens to be first.
+- **`socialLinks` is composed by the submit route**, never sent by the client: the four values, newline-joined. It is both the one-block value the reviewer copies and the field older records already kept their answer in, which is what lets the review dialog render both eras from the same place.
 
 ### Browser translation is disabled on this route — it used to crash the form
 
@@ -135,6 +155,8 @@ Two things about that draft are load-bearing:
 
 Every field is defined once in the `F` object, so a step's error message is byte-identical to the server's. **Never add a field to the form without adding it to `F`** — a field the schema doesn't know about is a field the server silently drops.
 
+The two cross-field rules (`requireOneContact`, `requireOneSocial`) are plain functions passed to `.superRefine` by **both** the step slice and the whole-form schema, for the same reason: a step must never pass something the server would reject. They raise their issue on a synthetic path (`contact`, `socials`) because they are about a *set* of inputs — `fieldErrors` keys on that path, and the page renders it as the group's message.
+
 ---
 
 ## Abuse & security model
@@ -147,7 +169,7 @@ The public endpoints are the only unauthenticated write path in the project. Def
 | **Single-use session** | `consumeSession` (transaction) | Replays, double-taps, retry storms creating duplicate applications. |
 | **Session TTL** | `SESSION_TTL_MS` (2h) | Tokens harvested once and reused indefinitely. |
 | **Per-IP rate limits** | `consumeRate` (transaction, rolling 24h) | Volume: 40 sessions, 5 submissions, 250 uploads per IP per day. Sized for shared IPs — see [Rate limits](#rate-limits-are-sized-for-shared-ips). |
-| **Per-session live cap** | `reserveUploadSlot` (transaction) | Parallel uploads racing past `MAX_FILES_PER_SESSION` (13) — a **live** count, released on removal. |
+| **Per-session live cap** | `reserveUploadSlot` (transaction) | Parallel uploads racing past `MAX_FILES_PER_SESSION` (14) — a **live** count, released on removal. |
 | **Per-session attempt ceiling** | `MAX_UPLOAD_ATTEMPTS_PER_SESSION` (40) | Cycling upload/remove forever now that the live cap can be released. Monotonic; never goes down. |
 | **Byte cap** | `MAX_UPLOAD_BYTES` (12MB), checked before *and* after `formData()` | Memory exhaustion. |
 | **`sharp` decode** | `ingestImage` | Renamed archives, SVG payloads, polyglot files, decompression bombs (`limitInputPixels`). Format is **proven**, never taken from `Content-Type`. |
@@ -177,7 +199,7 @@ Product register, console house style. Cards, not a table, because the decision 
 - **Filter tabs** — New / Approved / Rejected / All, each with a count badge and its status dot. Defaults to **New**: the queue's purpose is the unreviewed pile.
 - **The card is a fixed 9:16 frame** (phone-portrait, matching how these photos are almost always shot). `aspect-ratio` alone only sets a *preferred* size — it does not clamp content, so a tall in-flow image stretches the box and the card resizes as the reviewer pages through photos. Everything inside the frame is therefore `absolute inset-0` (out of flow, so it contributes no height) with `object-cover` doing the crop, and the images carry no intrinsic `width`/`height`. The decision row is pinned to `h-8` in both states so reviewed and unreviewed cards are the same height and grid rows stay level. Anything wider than 9:16 is cropped at the sides here; the uncropped image is one click away in the detail viewer. The same `absolute inset-0` rule applies to the public form's upload tiles.
 - **The card pages photos in place.** Every selfie and body thumbnail travels with the summary, so the common decision ("do the photos work?") never needs the detail view. Approve / Reject sit on the card. Reviewed cards swap the buttons for the reviewer's name and an **Undo** that returns the record to `new` and clears the review trail.
-- **Detail dialog** — full record beside a viewer with arrow-key paging and a thumbnail rail. This is the only place the earnings screenshot and contact details appear.
+- **Detail dialog** — full record beside a viewer with arrow-key paging and a thumbnail rail. This is the only place the earnings screenshots and contact details appear. Social pages render as one link per platform (stored URLs, so nothing is reconstructed), with a single copy control on the section heading that hands over `socialLinks` as a block; a record from before the per-platform fields falls back to rendering that block as text.
 - **Image strategy** — thumbnails are 480px **WebP**, `loading="lazy"`, `decoding="async"`, with intrinsic `width`/`height` so the grid never shifts. Full-size renders load **only** for the photo being looked at. Opening a record costs one large image, not thirteen.
 - **Copy controls** — every handle and link in the detail view carries a copy button. Handles copy the **resolved URL** (`https://t.me/…`), not the bare handle, so it pastes straight into a browser or a message; social links copy as one block. The icon confirms in place for ~1.6s as well as toasting, so the feedback is where the eye already is.
 - **Status writes are optimistic** — the card flips immediately and rolls back with an error toast if the server refuses. A reviewer moving through a queue should never wait on a round trip.
@@ -221,4 +243,5 @@ The public form is a **third Bluu surface**, alongside the internal console (DES
   firebase deploy --only firestore:rules
   ```
 - **Storage cleanup.** Photos from abandoned sessions (uploaded, never submitted) are orphaned under `model-submissions/{sessionId}/`. There is no sweeper yet; if this becomes material, a scheduled function deleting folders whose session doc is gone is the shape to build.
-- **The public link** must be built from `PUBLIC_APP_ORIGIN` (`src/lib/publicOrigin.ts`), never `window.location.origin` — see [electron.md](electron.md#two-domains-one-deployment).
+- **The public link** must be built from `PUBLIC_APP_ORIGIN` (`src/lib/publicOrigin.ts`), never `window.location.origin` — see [electron.md](electron.md#two-domains-one-deployment). The review page's subtext links "public form" that way, with `target="_blank"` so `setWindowOpenHandler` → `shell.openExternal` hands it to the system browser instead of navigating the app shell.
+- **Legacy document fields.** `instagram`, `niche` and the singular `earningsPhoto` are still present on records written before 2026-09. `mapDoc` reads the first and coalesces the last into `earningsPhotos`; `niche` is no longer collected, read, or displayed anywhere. Nothing is backfilled — the old values simply stay where they are.

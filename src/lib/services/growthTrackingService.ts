@@ -85,7 +85,6 @@ export interface ScrapeResult {
   snapshot: GrowthSnapshot;
   profilePictureUrl: string | null;
   isVerified: boolean;
-  displayName: string | null;
 }
 
 function apifyToken(): string {
@@ -174,7 +173,6 @@ export async function runFacebookScrape(
       snapshot,
       profilePictureUrl: str(item.profilePictureUrl),
       isVerified: false, // the actor does not report page verification
-      displayName: str(item.title) ?? str(item.pageName),
     });
   }
 
@@ -237,7 +235,6 @@ export async function runTwitterScrape(
       snapshot,
       profilePictureUrl: str(item.profilePicture),
       isVerified: item.isBlueVerified === true || item.isVerified === true,
-      displayName: str(item.name),
     });
   }
 
@@ -330,7 +327,6 @@ export function serializeGrowthAccount(doc: DocumentSnapshot): GrowthAccount {
   return {
     id: doc.id,
     platform: (d.platform as GrowthPlatform) ?? 'twitter',
-    displayName: (d.displayName as string) ?? '',
     handle: (d.handle as string) ?? '',
     handleNormalized: (d.handleNormalized as string) ?? '',
     profileUrl: (d.profileUrl as string) ?? '',
@@ -352,7 +348,7 @@ export async function listGrowthAccounts(): Promise<GrowthAccount[]> {
   const snap = await adminDb.collection(GROWTH_ACCOUNTS).get();
   return snap.docs
     .map(serializeGrowthAccount)
-    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+    .sort((a, b) => a.handle.localeCompare(b.handle));
 }
 
 /**

@@ -741,7 +741,11 @@ export interface GrowthSnapshot {
 export interface GrowthAccount {
   id: string;
   platform: 'facebook' | 'twitter';
-  displayName: string;
+  /**
+   * The account's own handle, as the platform spells it. This is the only name
+   * the subsystem has — there is no separate display name, so every surface
+   * refers to an account by this, and it is the seed for the avatar fallback.
+   */
   handle: string;
   handleNormalized: string;
   profileUrl: string;

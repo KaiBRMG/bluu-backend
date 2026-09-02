@@ -10,6 +10,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useModelSubmissions, useSubmissionDetail } from '@/hooks/useModelSubmissions';
 import { SUBMISSION_STATUS_META } from '@/lib/modelSubmissions';
+import { PUBLIC_APP_ORIGIN } from '@/lib/publicOrigin';
 import type { SubmissionStatus } from '@/types/modelSubmission';
 import { SubmissionCard } from './components/SubmissionCard';
 import { SubmissionDetail } from './components/SubmissionDetail';
@@ -71,8 +72,23 @@ export default function ModelSubmissionsAdminPage() {
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="mb-1 text-2xl font-bold tracking-tight">Model Submissions</h1>
-            <p className="text-sm text-muted-foreground">
-              Applications from the public form. Page through the photos, then approve or reject.
+            <p className="text-sm text-zinc-400">
+              Applications from the{' '}
+              {/* Built from PUBLIC_APP_ORIGIN, never window.location.origin —
+                  inside Electron that resolves to the vercel.app shell host.
+                  `target="_blank"` is what hands it to the system browser:
+                  main.js denies the popup and calls shell.openExternal. */}
+              <a
+                href={`${PUBLIC_APP_ORIGIN}/model-submissions`}
+                target="_blank"
+                rel="noopener noreferrer"
+                // Inked in-component like the detail dialog's links: shadcn's
+                // `--primary` resolves to near-white here (DESIGN §2).
+                className="font-medium text-[#3b82f6] underline-offset-2 hover:text-white hover:underline"
+              >
+                public form
+              </a>
+              . Page through the photos, then approve or reject.
             </p>
           </div>
           <div className="relative w-full sm:w-64">
@@ -135,7 +151,7 @@ export default function ModelSubmissionsAdminPage() {
             ))}
           </div>
         ) : visible.length === 0 ? (
-          <p className="py-10 text-sm text-muted-foreground">
+          <p className="py-10 text-sm text-zinc-400">
             {debouncedQuery.trim()
               ? `No submissions match “${debouncedQuery.trim()}”.`
               : EMPTY_COPY[filter]}

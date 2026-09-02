@@ -11,7 +11,7 @@ import {
   type DayMap,
   type GrowthRange,
 } from '@/lib/growth/metrics';
-import { AccountIdentity } from './growthUi';
+import { AccountIdentity, DeltaValue } from './growthUi';
 import type { GrowthAccount } from '@/types/firestore';
 
 /**
@@ -23,6 +23,15 @@ import type { GrowthAccount } from '@/types/firestore';
  * show a number. Reach is summed from every account's most recent reading and
  * says how many accounts it could not include; the movers say "not enough
  * readings yet" instead of ranking a single data point against nothing.
+ *
+ * **Fastest Growing and Slowest are the same metric, read from both ends** —
+ * `ranked` sorted by followers gained, so they are `[0]` and `[last]` of one
+ * list. The tile previously called this "Biggest Mover", which named neither
+ * end and invited the reading that it ranked by follower *count*. It never did.
+ *
+ * The ranking is by **absolute** followers gained, so in a period where every
+ * account shrank, "fastest growing" is the one that shrank least and its figure
+ * renders red and negative. The number carries that; the label cannot.
  */
 
 interface GrowthSummaryProps {
@@ -70,7 +79,7 @@ export const GrowthSummary = memo(function GrowthSummary({
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <Card className="gap-3 py-4">
         <CardHeader className="px-4">
-          <CardDescription>Total reach</CardDescription>
+          <CardDescription>Total Followers</CardDescription>
           <CardTitle className="text-2xl font-semibold tabular-nums">
             {formatCount(summary.reach)}
           </CardTitle>
@@ -86,7 +95,7 @@ export const GrowthSummary = memo(function GrowthSummary({
 
       <Card className="gap-3 py-4">
         <CardHeader className="px-4">
-          <CardDescription>Net growth · {RANGE_LABEL[range].toLowerCase()}</CardDescription>
+          <CardDescription>Net Growth · {RANGE_LABEL[range].toLowerCase()}</CardDescription>
           <CardTitle
             className={`text-2xl font-semibold tabular-nums ${
               summary.netChange === null ? 'text-zinc-400'
@@ -108,25 +117,45 @@ export const GrowthSummary = memo(function GrowthSummary({
 
       <Card className="gap-3 py-4">
         <CardHeader className="px-4">
-          <CardDescription>Biggest mover</CardDescription>
+          <CardDescription>Fastest Growing · {RANGE_LABEL[range].toLowerCase()}</CardDescription>
           {summary.top ? (
             <>
-              <CardTitle className="flex items-center gap-2 truncate text-2xl font-semibold">
-                <AccountIdentity account={summary.top.account} avatarClassName="size-5" />
-                <span className="truncate">{summary.top.account.displayName}</span>
+              {/* The Display step is the NUMBER, as in both sibling tiles — a
+                  name at text-2xl would be the only prose on the Display step
+                  (DESIGN.md §3: "never carrying prose") and would leave this the
+                  one tile in the row without a figure to scan. The account is
+                  the label under it. */}
+              <CardTitle className="text-2xl font-semibold">
+                <DeltaValue delta={summary.top.delta} showPercent={false} />
               </CardTitle>
-              <p className="text-[11px] text-zinc-400">
-                <span className={summary.top.delta.change! >= 0 ? 'text-green-400' : 'text-red-400'}>
-                  {formatDelta(summary.top.delta.change!)}
+              <div className="flex items-center gap-2 text-[11px]">
+                <AccountIdentity
+                  account={summary.top.account}
+                  avatarClassName="size-4"
+                  iconClassName="size-3"
+                />
+                <span className="min-w-0 flex-1 truncate text-zinc-300">
+                  {summary.top.account.handle}
                 </span>
-                {summary.bottom && summary.bottom.account.id !== summary.top.account.id && (
-                  <> · slowest {summary.bottom.account.displayName}{' '}
-                    <span className={summary.bottom.delta.change! >= 0 ? 'text-green-400' : 'text-red-400'}>
-                      {formatDelta(summary.bottom.delta.change!)}
-                    </span>
-                  </>
-                )}
-              </p>
+              </div>
+              {summary.bottom && summary.bottom.account.id !== summary.top.account.id ? (
+                <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+                  <span className="shrink-0">Slowest</span>
+                  <AccountIdentity
+                    account={summary.bottom.account}
+                    avatarClassName="size-4"
+                    iconClassName="size-3"
+                  />
+                  <span className="min-w-0 flex-1 truncate text-zinc-300">
+                    {summary.bottom.account.handle}
+                  </span>
+                  <DeltaValue delta={summary.bottom.delta} showPercent={false} className="shrink-0" />
+                </div>
+              ) : (
+                // One comparable account is not a ranking. Saying so beats an
+                // empty second line, which reads as a value that failed to load.
+                <p className="text-[11px] text-zinc-400">Only one account has enough readings to rank</p>
+              )}
             </>
           ) : (
             <>

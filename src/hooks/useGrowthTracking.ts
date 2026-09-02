@@ -20,7 +20,6 @@ interface GrowthPayload {
 export interface AddGrowthAccountPayload {
   platform: GrowthPlatform;
   profileUrl: string;
-  displayName?: string;
 }
 
 /**

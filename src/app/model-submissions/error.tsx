@@ -42,7 +42,13 @@ export default function ModelSubmissionsError({
     >
       <div className="flex w-full max-w-md flex-col items-start gap-6 py-16">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo/bluu_long.svg" alt="Bluu Rock" className="h-6 w-auto" />
+        <img
+          src="/logo/HQ2.png"
+          alt="Bluu Rock"
+          width={1374}
+          height={868}
+          className="h-11 w-auto"
+        />
 
         <div className={cn(PANEL, 'flex w-full flex-col gap-5 rounded-2xl px-6 py-7')}>
           <span

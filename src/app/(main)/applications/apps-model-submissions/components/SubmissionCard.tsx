@@ -163,7 +163,7 @@ export function SubmissionCard({ submission, onOpen, onSetStatus }: SubmissionCa
               Has OF
             </Badge>
           )}
-          <span className="ml-auto text-xs text-zinc-500 tabular-nums">
+          <span className="ml-auto text-xs text-zinc-400 tabular-nums">
             {submission.photoCount} photo{submission.photoCount === 1 ? '' : 's'}
           </span>
         </div>
@@ -195,7 +195,7 @@ export function SubmissionCard({ submission, onOpen, onSetStatus }: SubmissionCa
           </div>
         ) : (
           <div className="flex w-full items-center justify-between gap-2">
-            <span className="truncate text-xs text-zinc-500">
+            <span className="truncate text-xs text-zinc-400">
               {submission.reviewedByName ? `by ${submission.reviewedByName}` : 'Reviewed'}
             </span>
             <Button

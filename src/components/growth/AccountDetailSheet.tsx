@@ -17,6 +17,7 @@ import {
   type GrowthRange,
 } from '@/lib/growth/metrics';
 import { AccountAvatar, DeltaValue, PlatformChip } from './growthUi';
+import { PLATFORM_LABEL } from '@/lib/growth/platform';
 import type { GrowthAccount, GrowthSnapshot } from '@/types/firestore';
 
 const config = { followers: { label: 'Followers', color: '#3b82f6' } } satisfies ChartConfig;
@@ -69,7 +70,9 @@ export function AccountDetailSheet({
               <div className="flex items-center gap-3">
                 <AccountAvatar account={account} className="size-10" />
                 <div className="min-w-0">
-                  <SheetTitle className="truncate text-lg">{account.displayName}</SheetTitle>
+                  <SheetTitle className="truncate text-lg">@{account.handle}</SheetTitle>
+                  {/* The title is now the handle, so the link cannot also be the
+                      handle — it says what it does instead of repeating it. */}
                   <SheetDescription asChild>
                     <a
                       href={account.profileUrl}
@@ -77,7 +80,7 @@ export function AccountDetailSheet({
                       rel="noopener noreferrer"
                       className="inline-flex w-fit items-center gap-1 text-sm text-zinc-400 underline-offset-2 transition-colors hover:text-white hover:underline"
                     >
-                      @{account.handle}
+                      View on {PLATFORM_LABEL[account.platform]}
                       <ExternalLinkIcon className="size-3" aria-hidden />
                     </a>
                   </SheetDescription>

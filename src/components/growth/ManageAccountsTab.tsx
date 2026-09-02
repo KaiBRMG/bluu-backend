@@ -59,8 +59,8 @@ export function ManageAccountsTab({
     try {
       await onSetTracking(account.id, isActive);
       toast.success(isActive
-        ? `Tracking ${account.displayName} again`
-        : `Stopped tracking ${account.displayName}. Its history is kept.`);
+        ? `Tracking @${account.handle} again`
+        : `Stopped tracking @${account.handle}. Its history is kept.`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not update that account.');
     } finally {
@@ -75,7 +75,7 @@ export function ManageAccountsTab({
     setBusyId(account.id);
     try {
       await onDelete(account.id);
-      toast.success(`Deleted ${account.displayName} and all of its history`);
+      toast.success(`Deleted @${account.handle} and all of its history`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not delete that account.');
     } finally {
@@ -213,7 +213,7 @@ export function ManageAccountsTab({
       <AlertDialog open={pendingDelete !== null} onOpenChange={(o) => { if (!o) setPendingDelete(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete {pendingDelete?.displayName}?</AlertDialogTitle>
+            <AlertDialogTitle>Delete @{pendingDelete?.handle}?</AlertDialogTitle>
             <AlertDialogDescription>
               This removes the account and every follower reading recorded for it. Those readings
               cannot be collected again — the scrapers only ever return today’s number. If you
@@ -237,23 +237,19 @@ export function ManageAccountsTab({
 
 function AccountCell({ account }: { account: GrowthAccount }) {
   return (
-    // The marks sit beside the two-line block rather than on its first line, so
-    // the avatar is centred against the pair and the handle lines up under the
-    // name instead of under the picture.
+    // One line, not two: the handle is now the account's only name, so a second
+    // line under it would have repeated the first.
     <div className="flex min-w-0 items-center gap-2">
       <AccountIdentity account={account} />
-      <div className="min-w-0">
-        <p className="truncate font-medium text-zinc-300">{account.displayName}</p>
-        <a
-          href={account.profileUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-[11px] text-zinc-400 underline-offset-2 transition-colors hover:text-white hover:underline"
-        >
-          @{account.handle}
-          <ExternalLinkIcon className="size-2.5" aria-hidden />
-        </a>
-      </div>
+      <a
+        href={account.profileUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex min-w-0 items-center gap-1 font-medium text-zinc-300 underline-offset-2 transition-colors hover:text-white hover:underline"
+      >
+        <span className="truncate">{account.handle}</span>
+        <ExternalLinkIcon className="size-2.5 shrink-0" aria-hidden />
+      </a>
     </div>
   );
 }

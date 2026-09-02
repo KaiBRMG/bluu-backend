@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   IconBrandInstagram,
+  IconBrandReddit,
   IconBrandTelegram,
+  IconBrandWhatsapp,
+  IconBrandX,
   IconCheck,
   IconChevronLeft,
   IconChevronRight,
@@ -117,6 +120,11 @@ function Detail({
   );
 }
 
+/** `https://www.instagram.com/bluurock` → `instagram.com/bluurock`. */
+function prettyUrl(url: string): string {
+  return url.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+}
+
 function ExternalLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <a
@@ -153,7 +161,7 @@ export function SubmissionDetail({
     return [
       ...detail.selfies.map((p) => ({ ...p, label: 'Selfie' })),
       ...detail.bodyPhotos.map((p) => ({ ...p, label: 'Body' })),
-      ...(detail.earningsPhoto ? [{ ...detail.earningsPhoto, label: 'Earnings' }] : []),
+      ...detail.earningsPhotos.map((p) => ({ ...p, label: 'Earnings' })),
     ];
   }, [detail]);
 
@@ -210,6 +218,20 @@ export function SubmissionDetail({
 
   const current = photos[index];
   const meta = detail ? SUBMISSION_STATUS_META[detail.status] : null;
+
+  // The per-platform pages that were actually filled in. Stored as full URLs,
+  // so nothing is reconstructed here — a row is a link or it does not exist.
+  const socialRows = useMemo(
+    () =>
+      (
+        [
+          { key: 'instagram', Icon: IconBrandInstagram, url: detail?.socialInstagram },
+          { key: 'twitter', Icon: IconBrandX, url: detail?.socialTwitter },
+          { key: 'reddit', Icon: IconBrandReddit, url: detail?.socialReddit },
+        ] as const
+      ).filter((row): row is typeof row & { url: string } => !!row.url),
+    [detail],
+  );
 
   // Applicants rarely type the scheme. Resolved once so the anchor and the copy
   // button can never disagree about where the link points.
@@ -305,7 +327,7 @@ export function SubmissionDetail({
                   )}
                 </>
               ) : (
-                <p className="text-sm text-muted-foreground">No photos on this submission.</p>
+                <p className="text-sm text-zinc-400">No photos on this submission.</p>
               )}
             </div>
 
@@ -374,6 +396,19 @@ export function SubmissionDetail({
                     </Detail>
                   )}
 
+                  {detail.whatsapp && (
+                    <Detail label="WhatsApp" copy={detail.whatsapp} copyLabel="WhatsApp number">
+                      {/* wa.me takes the number without its `+`. Stored E.164,
+                          so the link and the copied value never disagree. */}
+                      <ExternalLink href={`https://wa.me/${detail.whatsapp.replace(/\D/g, '')}`}>
+                        <IconBrandWhatsapp className="size-3.5" />
+                        {detail.whatsapp}
+                      </ExternalLink>
+                    </Detail>
+                  )}
+
+                  {/* Legacy: Instagram was a contact field before the social
+                      section existed. Only older records still carry it. */}
                   {detail.instagram && (
                     <Detail
                       label="Instagram"
@@ -409,12 +444,42 @@ export function SubmissionDetail({
                     </Detail>
                   </div>
 
+                  <Separator className="bg-white/[0.07]" />
+
+                  {/* Social pages. Stored as full profile URLs, one field per
+                      platform, so each row is a link the reviewer can open —
+                      while the row's copy button still hands over the whole set
+                      as one block, which is what gets pasted elsewhere. */}
+                  <Detail
+                    label="Social media"
+                    copy={detail.socialLinks || undefined}
+                    copyLabel="Social links"
+                  >
+                    {detail.socialLinks ? (
+                      <span className="flex flex-col items-start gap-2">
+                        {socialRows.map(({ key, Icon, url }) => (
+                          <ExternalLink key={key} href={url}>
+                            <Icon className="size-3.5 shrink-0" />
+                            <span className="break-all">{prettyUrl(url)}</span>
+                          </ExternalLink>
+                        ))}
+                        {/* `socialOther` is free text, and a record predating
+                            the per-platform fields keeps everything in the
+                            joined block — both render as plain lines. */}
+                        {(detail.socialOther || socialRows.length === 0) && (
+                          <span className="whitespace-pre-line">
+                            {detail.socialOther || detail.socialLinks}
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="text-zinc-400">Not given</span>
+                    )}
+                  </Detail>
+
                   {detail.hasOnlyFans && (
                     <>
                       <Separator className="bg-white/[0.07]" />
-                      <Detail label="Niche">
-                        {detail.niche || <span className="text-zinc-500">Not given</span>}
-                      </Detail>
                       <Detail
                         label="Free trial link"
                         copy={trialHref || undefined}
@@ -423,22 +488,8 @@ export function SubmissionDetail({
                         {trialHref ? (
                           <ExternalLink href={trialHref}>{detail.trialLink}</ExternalLink>
                         ) : (
-                          <span className="text-zinc-500">Not given</span>
+                          <span className="text-zinc-400">Not given</span>
                         )}
-                      </Detail>
-                      <Detail
-                        label="Social media"
-                        // Applicants paste a list, so the whole block is the
-                        // useful unit; per-line buttons would out-number the
-                        // content on a four-line answer.
-                        copy={detail.socialLinks || undefined}
-                        copyLabel="Social links"
-                      >
-                        <span className="whitespace-pre-line">
-                          {detail.socialLinks || (
-                            <span className="text-zinc-500">Not given</span>
-                          )}
-                        </span>
                       </Detail>
                     </>
                   )}

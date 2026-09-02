@@ -3,7 +3,12 @@ import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
-import { MIN_FILL_SECONDS, fieldErrors, submissionSchema } from '@/lib/modelSubmissions';
+import {
+  MIN_FILL_SECONDS,
+  fieldErrors,
+  joinSocialLinks,
+  submissionSchema,
+} from '@/lib/modelSubmissions';
 import {
   SUBMISSIONS_COLLECTION,
   clientIp,
@@ -73,7 +78,7 @@ export async function POST(request: NextRequest) {
     const [selfies, bodyPhotos, earnings] = await Promise.all([
       resolvePhotos(sessionId, f.selfieIds, 'selfie'),
       resolvePhotos(sessionId, f.bodyPhotoIds, 'body'),
-      resolvePhotos(sessionId, f.earningsPhotoId ? [f.earningsPhotoId] : [], 'earnings'),
+      resolvePhotos(sessionId, f.earningsPhotoIds, 'earnings'),
     ]);
 
     if (selfies.length < f.selfieIds.length || bodyPhotos.length < f.bodyPhotoIds.length) {
@@ -91,18 +96,24 @@ export async function POST(request: NextRequest) {
     batch.set(adminDb.collection(SUBMISSIONS_COLLECTION).doc(sessionId), {
       name: f.name,
       email: f.email.toLowerCase(),
-      instagram: f.instagram,
       telegram: f.telegram,
+      whatsapp: f.whatsapp,
       hasOnlyFans: f.hasOnlyFans,
       age: f.age,
       country: f.country,
       city: f.city,
       sexuality: f.sexuality,
+      // Section 2 — already normalised to full profile URLs by the schema.
+      socialInstagram: f.socialInstagram,
+      socialTwitter: f.socialTwitter,
+      socialReddit: f.socialReddit,
+      socialOther: f.socialOther,
+      // Composed here, not sent by the client, so the one-block form a reviewer
+      // copies can never disagree with the per-platform fields beside it.
+      socialLinks: joinSocialLinks(f),
       // Section 3 is only meaningful when the applicant has an account.
-      niche: f.hasOnlyFans ? f.niche : '',
       trialLink: f.hasOnlyFans ? f.trialLink : '',
-      socialLinks: f.hasOnlyFans ? f.socialLinks : '',
-      earningsPhoto: f.hasOnlyFans ? (earnings[0] ?? null) : null,
+      earningsPhotos: f.hasOnlyFans ? earnings : [],
       selfies,
       bodyPhotos,
       status: 'new',

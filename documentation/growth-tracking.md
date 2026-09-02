@@ -51,6 +51,8 @@ Both denied in `firestore.rules` (the subcollection match is explicit — rules 
 
 **The document id is deterministic** (`facebook_adamtwinkx`), which is what makes the duplicate check a single `get()` instead of a query and the importer idempotent for free. It is built from `parseProfileUrl` output, so **changing that function changes the identity of every account** — history would be written under ids the app never looks up, and the import would silently appear to do nothing.
 
+**An account is named by its `handle` and nothing else.** There is no display name: every surface renders the handle, sorting is by handle, and the avatar fallback is seeded from it. DESIGN.md's Avatar Seed Rule names `displayName` because that is the field on a `users` doc; what it protects is that one account hashes to one colour everywhere, and here the handle is the stable identity. Consequently `PATCH` accepts **only `isActive`** — platform, handle and profile URL are the document id, so changing one would orphan the history rather than move it. Documents created before this may still carry a stray `displayName` field; nothing reads it.
+
 ### Why a day-keyed map and not a document per day
 
 A full page load is **one collection query plus one `adminDb.getAll()`** — about 24 reads at the seed list, and *flat* as history deepens because a year is a single document. A document per day would be thousands of reads for the same chart (rule 9).
@@ -99,7 +101,7 @@ Two tabs: **Overview** and **Manage Accounts**.
 - **`TwinkUniversity` appears twice** — an empty Facebook page row and the real Twitter row. Rows are matched inside their platform section (delimited by the `FACEBOOK` / `INSTAGRAM` / `TWITTER` markers in column 0), not by label alone.
 - **Blanks and literal zeros are skipped, never written as 0.** They mean "not recorded"; a zero would draw a cliff to the axis.
 - **The Facebook `(Engagement)` rows are not imported.** The Apify actor cannot produce that metric, so the series would stop dead the day automation took over and appear to show engagement collapsing. Followers is the only metric that survives the handover.
-- **Idempotent**, and a re-run **never clobbers** a `displayName` or `isActive` changed in the UI since — only the history is authoritative. `--wipe` `recursiveDelete`s every account first.
+- **Idempotent**, and a re-run **never clobbers** an `isActive` flag changed in the UI since — only the history is authoritative. `--wipe` `recursiveDelete`s every account first.
 - It carries a **hand-copied mirror of `parseProfileUrl`** (a `.js` script cannot import the TS module). **Keep the two in lockstep.**
 
 Current seed: 453 readings across 12 accounts, 2026-07-03 → 2026-08-31 (Facebook 50 readings each; X 29 each, its section only starting 29 July).

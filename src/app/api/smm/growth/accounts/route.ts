@@ -58,7 +58,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     const denied = await checkGrowthAccess(token.uid);
     if (denied) return denied;
 
-    const body = await request.json() as { platform?: string; profileUrl?: string; displayName?: string };
+    const body = await request.json() as { platform?: string; profileUrl?: string };
 
     const platform = body.platform as GrowthPlatform;
     if (!GROWTH_PLATFORMS.includes(platform)) {
@@ -83,8 +83,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       const account = serializeGrowthAccount(existing);
       return NextResponse.json({
         error: account.isActive
-          ? `${account.displayName} is already being tracked.`
-          : `${account.displayName} was tracked before. Resume it from the stopped list instead of adding it again — its history is still there.`,
+          ? `@${account.handle} is already being tracked.`
+          : `@${account.handle} was tracked before. Resume it from the stopped list instead of adding it again — its history is still there.`,
         existingId: id,
         isActive: account.isActive,
       }, { status: 409 });
@@ -116,7 +116,6 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       platform,
       // The sheet's short label ("Adam", "Noah Ryder") is more useful in a
       // legend than the page's own long title, so a typed name wins.
-      displayName: body.displayName?.trim() || result.displayName || parsed.handle,
       handle: parsed.handle,
       handleNormalized: parsed.handleNormalized,
       profileUrl: parsed.canonicalUrl,

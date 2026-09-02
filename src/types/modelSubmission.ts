@@ -32,17 +32,36 @@ export interface SubmissionPhotoUrls {
 export interface ModelSubmissionFields {
   name: string;
   email: string;
-  instagram: string;
   telegram: string;
+  /** E.164, e.g. `+27821234567`. One of this and `telegram` is always present. */
+  whatsapp: string;
   hasOnlyFans: boolean;
   age: number;
   country: string;
   city: string;
   sexuality: Sexuality;
-  /** Section 3 — only meaningful when `hasOnlyFans` is true. */
-  niche: string;
-  trialLink: string;
+  /**
+   * Section 2 — the applicant's social pages, stored as full profile URLs
+   * (`https://www.instagram.com/…`). `socialOther` is free text.
+   */
+  socialInstagram: string;
+  socialTwitter: string;
+  socialReddit: string;
+  socialOther: string;
+  /**
+   * Every social answer as one block, newline separated — composed by the
+   * submit route. It is also where records predating the per-platform fields
+   * keep their answer, so it stays the thing to render as a fallback.
+   */
   socialLinks: string;
+  /** Section 3 — only meaningful when `hasOnlyFans` is true. */
+  trialLink: string;
+  /**
+   * Legacy. Instagram was collected in section 1 until the per-platform social
+   * fields replaced it; still read so older records render intact, never
+   * written by new submissions.
+   */
+  instagram: string;
 }
 
 /** The Firestore document at `model-submissions/{id}`. */
@@ -50,7 +69,7 @@ export interface ModelSubmissionDocument extends ModelSubmissionFields {
   id: string;
   status: SubmissionStatus;
   createdAt: string;
-  earningsPhoto: SubmissionPhoto | null;
+  earningsPhotos: SubmissionPhoto[];
   selfies: SubmissionPhoto[];
   bodyPhotos: SubmissionPhoto[];
   reviewedBy: string | null;
@@ -80,7 +99,7 @@ export interface ModelSubmissionDetail extends ModelSubmissionFields {
   id: string;
   status: SubmissionStatus;
   createdAt: string;
-  earningsPhoto: SubmissionPhotoUrls | null;
+  earningsPhotos: SubmissionPhotoUrls[];
   selfies: SubmissionPhotoUrls[];
   bodyPhotos: SubmissionPhotoUrls[];
   reviewedByName: string | null;

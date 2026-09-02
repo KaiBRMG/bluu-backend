@@ -45,7 +45,6 @@ export function AddAccountDialog({
 }) {
   const [platform, setPlatform] = useState<GrowthPlatform>('twitter');
   const [profileUrl, setProfileUrl] = useState('');
-  const [displayName, setDisplayName] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,11 +60,10 @@ export function AddAccountDialog({
     setSaving(true);
     setError(null);
     try {
-      await onAdd({ platform, profileUrl: profileUrl.trim(), displayName: displayName.trim() || undefined });
-      toast.success(`Now tracking ${displayName.trim() || parsed.handle}`);
+      await onAdd({ platform, profileUrl: profileUrl.trim() });
+      toast.success(`Now tracking @${parsed.handle}`);
       onOpenChange(false);
       setProfileUrl('');
-      setDisplayName('');
     } catch (err) {
       // Stays open with the draft intact — the message usually asks for a
       // correction to the very field they just filled in.
@@ -121,21 +119,6 @@ export function AddAccountDialog({
             </p>
           </div>
 
-          <div>
-            <Label htmlFor="growth-name" className="mb-1 text-xs text-zinc-400">
-              Display name <span className="text-zinc-400">(optional)</span>
-            </Label>
-            <Input
-              id="growth-name"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder={parsed?.handle ?? 'Adam'}
-              autoComplete="off"
-            />
-            <p className="mt-1 text-[11px] text-zinc-400">
-              What it is called on this page. Defaults to the handle.
-            </p>
-          </div>
 
           {error && (
             <p role="alert" className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">

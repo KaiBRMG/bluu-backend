@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { countryCodes } from '@/lib/countryData';
+import { countryCodes, getFlagEmoji } from '@/lib/countryData';
 import {
   MAX_BODY_PHOTOS,
   MAX_EARNINGS_PHOTOS,
@@ -30,6 +30,7 @@ import {
   MIN_BODY_PHOTOS,
   MIN_SELFIES,
   SEXUALITY_OPTIONS,
+  composeWhatsApp,
   fieldErrors,
   stepSchemas,
   submissionSchema,
@@ -39,7 +40,10 @@ import { cn } from '@/lib/utils';
 import type { Sexuality } from '@/types/modelSubmission';
 import { Field } from './_components/Field';
 import { PhotoUploader, type PhotoSlot } from './_components/PhotoUploader';
+import { PrefixedInput } from './_components/PrefixedInput';
+import { SocialField } from './_components/SocialField';
 import { ThankYou } from './_components/ThankYou';
+import { guessCountryCode } from './_lib/guessCountry';
 import { AZURE, AZURE_INK, FIELD, PANEL, STAGE_GROUND } from './_lib/theme';
 
 // ─── Step definitions ────────────────────────────────────────────────────────
@@ -51,7 +55,7 @@ const STEP_COPY: Record<StepId, { heading: string; blurb: string }> = {
   },
   about: {
     heading: 'A bit more about you',
-    blurb: 'This helps us understand where you are and what you’re working with.',
+    blurb: 'Where you are, and where people can already find you.',
   },
   onlyfans: {
     heading: 'Your OnlyFans account',
@@ -68,31 +72,57 @@ const countryNames = countryCodes.map((c) => c.name);
 interface FormState {
   name: string;
   email: string;
-  instagram: string;
   telegram: string;
+  /** ISO country code — the dial code is derived, never stored on its own. */
+  whatsappCountry: string;
+  whatsappNumber: string;
   hasOnlyFans: boolean | null;
   age: string;
   country: string;
   city: string;
   sexuality: Sexuality | '';
-  niche: string;
+  /** Bare usernames. The schema turns each into a full profile URL. */
+  socialInstagram: string;
+  socialTwitter: string;
+  socialReddit: string;
+  socialOther: string;
   trialLink: string;
-  socialLinks: string;
 }
 
 const EMPTY_FORM: FormState = {
   name: '',
   email: '',
-  instagram: '',
   telegram: '',
+  whatsappCountry: '',
+  whatsappNumber: '',
   hasOnlyFans: null,
   age: '',
   country: '',
   city: '',
   sexuality: '',
-  niche: '',
+  socialInstagram: '',
+  socialTwitter: '',
+  socialReddit: '',
+  socialOther: '',
   trialLink: '',
-  socialLinks: '',
+};
+
+/**
+ * Which error messages a given control clears as it is edited.
+ *
+ * Most fields clear their own, but the two cross-field rules ("one contact
+ * method", "at least one social page") are reported on synthetic keys that no
+ * single input owns. Without this map, a `contact` error would sit under the
+ * fields the applicant is actively fixing until they pressed Continue again.
+ */
+const CLEARS_ERRORS: Partial<Record<keyof FormState, readonly string[]>> = {
+  telegram: ['telegram', 'contact'],
+  whatsappCountry: ['whatsapp', 'contact'],
+  whatsappNumber: ['whatsapp', 'contact'],
+  socialInstagram: ['socialInstagram', 'socials'],
+  socialTwitter: ['socialTwitter', 'socials'],
+  socialReddit: ['socialReddit', 'socials'],
+  socialOther: ['socialOther', 'socials'],
 };
 
 // ─── Crash recovery ──────────────────────────────────────────────────────────
@@ -157,7 +187,24 @@ export default function ModelSubmissionsPage() {
   const set = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
     // Clear the error the moment they start fixing it, not on the next submit.
-    setErrors((prev) => (prev[key] ? { ...prev, [key]: '' } : prev));
+    setErrors((prev) => {
+      const keys = CLEARS_ERRORS[key] ?? [key];
+      if (!keys.some((k) => prev[k])) return prev;
+      const next = { ...prev };
+      for (const k of keys) next[k] = '';
+      return next;
+    });
+  }, []);
+
+  // Pre-select the WhatsApp country from the browser's own locale — no request,
+  // no library. Runs in an effect, not during render: it reads `navigator`, and
+  // it must not fight a draft recovered from a crash or a choice already made.
+  useEffect(() => {
+    setForm((prev) => {
+      if (prev.whatsappCountry) return prev;
+      const guess = guessCountryCode();
+      return guess ? { ...prev, whatsappCountry: guess } : prev;
+    });
   }, []);
 
   // Open a submission session up front, so photos can start uploading the
@@ -215,12 +262,19 @@ export default function ModelSubmissionsPage() {
   const doneIds = (slots: PhotoSlot[]) =>
     slots.filter((s) => s.status === 'done' && s.id).map((s) => s.id as string);
 
+  const whatsappDialCode = useMemo(
+    () => countryCodes.find((c) => c.code === form.whatsappCountry)?.dialCode ?? '',
+    [form.whatsappCountry],
+  );
+
   const payload = useMemo(
     () => ({
       name: form.name,
       email: form.email,
-      instagram: form.instagram,
       telegram: form.telegram,
+      // Composed by the shared module, so the value validated here is the exact
+      // string the server will validate and store.
+      whatsapp: composeWhatsApp(whatsappDialCode, form.whatsappNumber),
       // Left as null / undefined when unanswered so zod reports "choose an
       // option" rather than silently validating a made-up default.
       hasOnlyFans: form.hasOnlyFans,
@@ -228,14 +282,16 @@ export default function ModelSubmissionsPage() {
       country: form.country,
       city: form.city,
       sexuality: form.sexuality as Sexuality,
-      niche: form.niche,
+      socialInstagram: form.socialInstagram,
+      socialTwitter: form.socialTwitter,
+      socialReddit: form.socialReddit,
+      socialOther: form.socialOther,
       trialLink: form.trialLink,
-      socialLinks: form.socialLinks,
       selfieIds: doneIds(selfies),
       bodyPhotoIds: doneIds(bodyPhotos),
-      earningsPhotoId: doneIds(earnings)[0] ?? null,
+      earningsPhotoIds: doneIds(earnings),
     }),
-    [form, selfies, bodyPhotos, earnings],
+    [form, whatsappDialCode, selfies, bodyPhotos, earnings],
   );
 
   // Move focus to the new step's heading so keyboard and screen-reader users
@@ -335,8 +391,17 @@ export default function ModelSubmissionsPage() {
       <div className="mx-auto flex min-h-dvh w-full max-w-xl flex-col px-5 sm:px-8">
         {/* ── Masthead ─────────────────────────────────────────────────── */}
         <header className="flex flex-col gap-5 pt-10 pb-8 sm:pt-14">
+          {/* Intrinsic size given so the ratio is known before the bytes land —
+              a raster logo with only a height would reserve no width and shift
+              the masthead as it decodes. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo/bluu_long.svg" alt="Bluu Rock" className="h-6 w-auto self-start" />
+          <img
+            src="/logo/HQ2.png"
+            alt="Bluu Rock"
+            width={1374}
+            height={868}
+            className="h-11 w-auto self-start"
+          />
           <p className="flex items-start gap-2 text-sm leading-snug text-white/55">
             <IconLock className="mt-0.5 size-4 shrink-0" aria-hidden />
             All information is confidential and is never shared externally.
@@ -402,46 +467,83 @@ export default function ModelSubmissionsPage() {
                 </Field>
 
                 <Field
-                  label="Instagram"
-                  optional
-                  error={errors.instagram}
-                  hint="If you have a public account, please share it. Just the username is fine."
+                  label="Telegram"
+                  error={errors.telegram}
+                  hint="Telegram or WhatsApp — give us at least one. This is where we’ll contact you."
                 >
                   {(a) => (
-                    <div className="flex items-stretch">
-                      <span className="grid place-items-center rounded-l-xl border border-r-0 border-white/[0.10] bg-white/[0.06] px-3.5 text-base text-white/45">
-                        @
-                      </span>
-                      <input
-                        {...a}
-                        className={cn(FIELD, 'rounded-l-none')}
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                        value={form.instagram}
-                        onChange={(e) => set('instagram', e.target.value)}
-                      />
-                    </div>
+                    <PrefixedInput
+                      {...a}
+                      prefix="@"
+                      value={form.telegram}
+                      onChange={(e) => set('telegram', e.target.value)}
+                    />
                   )}
                 </Field>
 
-                <Field
-                  label="Telegram"
-                  optional
-                  error={errors.telegram}
-                  hint="This is where we’ll contact you."
-                >
+                {/* The "one of the two" rule surfaces here rather than on
+                    Telegram: it can only fire when both boxes are empty, so the
+                    message belongs under the second of the pair, where the eye
+                    already is when Continue is pressed. */}
+                <Field label="WhatsApp" error={errors.whatsapp || errors.contact}>
                   {(a) => (
-                    <div className="flex items-stretch">
-                      <span className="grid place-items-center rounded-l-xl border border-r-0 border-white/[0.10] bg-white/[0.06] px-3.5 text-base text-white/45">
-                        @
-                      </span>
+                    <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-2">
+                      <Select
+                        value={form.whatsappCountry}
+                        onValueChange={(v) => set('whatsappCountry', v)}
+                      >
+                        <SelectTrigger
+                          aria-label="Country calling code"
+                          aria-invalid={!!(errors.whatsapp || errors.contact)}
+                          className={cn(FIELD, 'h-auto justify-between')}
+                        >
+                          {/* The trigger shows the flag and the dial code only —
+                              the country name is what you search the open list
+                              by, not what you need once it is chosen. */}
+                          {whatsappDialCode ? (
+                            <span className="flex items-center gap-1.5 tabular-nums">
+                              <span aria-hidden>{getFlagEmoji(form.whatsappCountry)}</span>
+                              {whatsappDialCode}
+                            </span>
+                          ) : (
+                            <span className="text-white/50">Code</span>
+                          )}
+                        </SelectTrigger>
+                        <SelectContent className="max-h-72">
+                          {countryCodes.map((c) => (
+                            // `textValue` is what Radix's type-ahead matches on.
+                            // Without it the flag emoji leads the item's text
+                            // content and typing "sou" finds nothing — the only
+                            // way through an 80-country list with a keyboard.
+                            <SelectItem key={c.code} value={c.code} textValue={c.name}>
+                              <span className="flex w-full items-center gap-2">
+                                <span aria-hidden>{getFlagEmoji(c.code)}</span>
+                                <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                                <span className="text-muted-foreground tabular-nums">
+                                  {c.dialCode}
+                                </span>
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <input
                         {...a}
-                        className={cn(FIELD, 'rounded-l-none')}
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                        value={form.telegram}
-                        onChange={(e) => set('telegram', e.target.value)}
+                        type="tel"
+                        inputMode="tel"
+                        autoComplete="tel-national"
+                        placeholder="82 123 4567"
+                        className={cn(FIELD, 'tabular-nums')}
+                        value={form.whatsappNumber}
+                        // Digits, spaces and the punctuation people type into a
+                        // phone number. Everything else is dropped as they type
+                        // rather than failed at the end of the step.
+                        onChange={(e) =>
+                          set(
+                            'whatsappNumber',
+                            e.target.value.replace(/[^\d\s()+-]/g, '').slice(0, 24),
+                          )
+                        }
                       />
                     </div>
                   )}
@@ -567,27 +669,80 @@ export default function ModelSubmissionsPage() {
                     </RadioGroup>
                   )}
                 </Field>
+
+                {/* Social pages. Asked for as usernames, one box per platform,
+                    because a single free-text box produced answers we then had
+                    to guess at — bare handles with no platform, half-typed URLs,
+                    three accounts on one line. The schema turns each username
+                    into the full profile URL that gets stored. */}
+                <Field
+                  label="List all your social media pages"
+                  group
+                  error={errors.socials}
+                  hint="At least one. Just the username — we’ll build the link."
+                >
+                  {/* Each row owns its own label and error; the group above
+                      carries the question, the hint, and the "at least one"
+                      message. */}
+                  {(a) => (
+                    <div className="flex flex-col gap-4">
+                      <SocialField
+                        label="Instagram"
+                        prefix="@"
+                        placeholder="bluurock"
+                        value={form.socialInstagram}
+                        onChange={(v) => set('socialInstagram', v)}
+                        error={errors.socialInstagram}
+                      />
+                      <SocialField
+                        label="Twitter"
+                        prefix="@"
+                        placeholder="bluurock"
+                        value={form.socialTwitter}
+                        onChange={(v) => set('socialTwitter', v)}
+                        error={errors.socialTwitter}
+                      />
+                      <SocialField
+                        label="Reddit"
+                        prefix="u/"
+                        placeholder="bluurock"
+                        value={form.socialReddit}
+                        onChange={(v) => set('socialReddit', v)}
+                        error={errors.socialReddit}
+                      />
+
+                      <div className="flex flex-col gap-1.5">
+                        <Label
+                          htmlFor={`${a.id}-other`}
+                          className="text-xs font-medium text-white/55"
+                        >
+                          Anything else
+                        </Label>
+                        <Textarea
+                          id={`${a.id}-other`}
+                          rows={3}
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          placeholder="TikTok, Threads, a personal site — one per line"
+                          aria-invalid={!!errors.socialOther}
+                          className={cn(FIELD, 'resize-y')}
+                          value={form.socialOther}
+                          onChange={(e) => set('socialOther', e.target.value)}
+                        />
+                        {errors.socialOther && (
+                          <p role="alert" className="text-sm font-medium text-red-300">
+                            {errors.socialOther}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </Field>
               </>
             )}
 
             {step === 'onlyfans' && session && (
               <>
-                <Field
-                  label="What is the niche of your account?"
-                  optional
-                  error={errors.niche}
-                  hint="Femboy, twink, hunk, solo, couple, etc."
-                >
-                  {(a) => (
-                    <input
-                      {...a}
-                      className={FIELD}
-                      value={form.niche}
-                      onChange={(e) => set('niche', e.target.value)}
-                    />
-                  )}
-                </Field>
-
                 <Field
                   label="1-month free trial link"
                   optional
@@ -614,7 +769,7 @@ export default function ModelSubmissionsPage() {
                     label="Last 4 months of earnings"
                     optional
                     group
-                    hint="A screenshot from your OnlyFans statements page."
+                    hint={`Up to ${MAX_EARNINGS_PHOTOS} screenshots from your OnlyFans statements page.`}
                   >
                     {() => (
                       <PhotoUploader
@@ -657,23 +812,6 @@ export default function ModelSubmissionsPage() {
                   </Dialog>
                 </div>
 
-                <Field
-                  label="Links to all your social media pages"
-                  error={errors.socialLinks}
-                  hint="Instagram, Twitter, Reddit, etc. One per line is easiest."
-                >
-                  {(a) => (
-                    <Textarea
-                      {...a}
-                      rows={4}
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      className={cn(FIELD, 'resize-y')}
-                      value={form.socialLinks}
-                      onChange={(e) => set('socialLinks', e.target.value)}
-                    />
-                  )}
-                </Field>
               </>
             )}
 

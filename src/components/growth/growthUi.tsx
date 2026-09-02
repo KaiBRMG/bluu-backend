@@ -82,18 +82,21 @@ export function PlatformIcon({ platform, className }: { platform: GrowthPlatform
  *    (the spreadsheets had no images), and
  *  - an expired or 404ing URL falls through to the same place.
  *
- * So the fallback is seeded from `displayName` per DESIGN.md's Avatar Seed Rule
- * — `getAvatarColor` hashes the string it is given, so seeding from the handle
- * or the id instead would render the same account differently across screens.
+ * The fallback is seeded from `handle`, which is the ONLY name this subsystem
+ * has — there is no separate display name. DESIGN.md's Avatar Seed Rule names
+ * `displayName` because that is the field on a `users` doc; what the rule is
+ * actually protecting is that one account hashes to one colour everywhere, and
+ * the handle is the stable identity here (the document id is built from it).
+ * Seed from anything else and the same account renders differently per screen.
  */
 export function AccountAvatar({
   account,
   className,
 }: {
-  account: Pick<GrowthAccount, 'displayName' | 'handle' | 'profilePictureUrl'>;
+  account: Pick<GrowthAccount, 'handle' | 'profilePictureUrl'>;
   className?: string;
 }) {
-  const seed = account.displayName || account.handle || 'Account';
+  const seed = account.handle || 'Account';
   return (
     <Avatar className={cn('size-6 shrink-0', className)}>
       {account.profilePictureUrl && (
@@ -119,13 +122,15 @@ export function AccountAvatar({
 export function AccountIdentity({
   account,
   avatarClassName,
+  iconClassName,
 }: {
-  account: Pick<GrowthAccount, 'platform' | 'displayName' | 'handle' | 'profilePictureUrl'>;
+  account: Pick<GrowthAccount, 'platform' | 'handle' | 'profilePictureUrl'>;
   avatarClassName?: string;
+  iconClassName?: string;
 }) {
   return (
     <>
-      <PlatformIcon platform={account.platform} />
+      <PlatformIcon platform={account.platform} className={iconClassName} />
       <AccountAvatar account={account} className={avatarClassName} />
     </>
   );

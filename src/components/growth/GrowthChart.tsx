@@ -71,7 +71,7 @@ export const GrowthChart = memo(function GrowthChart({
   // ChartContainer needs a config to render, but every series shares one ink —
   // the per-account colour is decided per-Line below, not by the config.
   const config = useMemo<ChartConfig>(
-    () => Object.fromEntries(accounts.map((a) => [a.id, { label: a.displayName, color: FIELD }])),
+    () => Object.fromEntries(accounts.map((a) => [a.id, { label: a.handle, color: FIELD }])),
     [accounts],
   );
 
@@ -134,7 +134,7 @@ export const GrowthChart = memo(function GrowthChart({
               <Line
                 key={account.id}
                 dataKey={account.id}
-                name={account.displayName}
+                name={account.handle}
                 type="monotone"
                 // A gap is a day nobody recorded, not a fall to zero. Bridging it
                 // keeps the trend honest; dropping to the axis would invent a
@@ -227,7 +227,7 @@ function GrowthTooltip({
           return (
             <li key={entry.id} className="flex items-baseline justify-between gap-4 text-xs">
               <span className={isHighlighted ? 'font-semibold text-white' : 'text-zinc-300'}>
-                {account.displayName}
+                {account.handle}
               </span>
               <span className={`tabular-nums ${isHighlighted ? 'text-white' : 'text-zinc-400'}`}>
                 {render(entry.value)}

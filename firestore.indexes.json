@@ -294,6 +294,12 @@
     { "collectionGroup": "messages", "fieldPath": "text", "indexes": [] },
     { "collectionGroup": "messages", "fieldPath": "attachments", "indexes": [] },
 
+    { "collectionGroup": "model-submissions", "fieldPath": "whatsapp", "indexes": [] },
+    { "collectionGroup": "model-submissions", "fieldPath": "socialInstagram", "indexes": [] },
+    { "collectionGroup": "model-submissions", "fieldPath": "socialTwitter", "indexes": [] },
+    { "collectionGroup": "model-submissions", "fieldPath": "socialReddit", "indexes": [] },
+    { "collectionGroup": "model-submissions", "fieldPath": "socialOther", "indexes": [] },
+    { "collectionGroup": "model-submissions", "fieldPath": "earningsPhotos", "indexes": [] },
     { "collectionGroup": "model-submission-sessions", "fieldPath": "expiresAt", "indexes": [] },
     { "collectionGroup": "model-submission-rate", "fieldPath": "expiresAt", "indexes": [] },
 
