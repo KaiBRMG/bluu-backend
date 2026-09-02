@@ -20,6 +20,21 @@ export interface CreateBatchPayload {
   userIds: string[];
   groupIds: string[];
   actionUrl?: string | null;
+  /** Also push this notification to Telegram. The in-app notification is sent either way. */
+  sendTelegram?: boolean;
+}
+
+/** Telegram delivery outcome for a send, or `null` when Telegram was not requested. */
+export interface TelegramDeliveryResult {
+  sent: number;
+  failed: number;
+  skipped: boolean;
+  error?: string;
+}
+
+export interface CreateBatchResult {
+  batchId: string;
+  telegram: TelegramDeliveryResult | null;
 }
 
 const CACHE_KEY = 'bluu_admin_notifications_v1';
@@ -79,7 +94,7 @@ export function useAdminNotifications() {
   }, [fetchBatches]);
 
   const createBatch = useCallback(
-    async (payload: CreateBatchPayload): Promise<string> => {
+    async (payload: CreateBatchPayload): Promise<CreateBatchResult> => {
       if (!user) throw new Error('Not authenticated');
       const idToken = await user.getIdToken();
 
@@ -100,7 +115,10 @@ export function useAdminNotifications() {
       const data = await res.json();
       invalidateCache(CACHE_KEY);
       await fetchBatches(true);
-      return data.batchId as string;
+      return {
+        batchId: data.batchId as string,
+        telegram: (data.telegram ?? null) as TelegramDeliveryResult | null,
+      };
     },
     [user, fetchBatches]
   );

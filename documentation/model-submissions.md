@@ -8,7 +8,9 @@
 |---|---|
 | `src/app/model-submissions/page.tsx` | The public 3–4 step form ("the stage" skin) |
 | `src/app/model-submissions/_components/` | `Field`, `PrefixedInput`, `SocialField`, `PhotoUploader`, `ThankYou`, `NoTranslate` |
-| `src/app/model-submissions/_lib/guessCountry.ts` | Pre-selects the WhatsApp dial code from the browser's own locale |
+| `src/app/model-submissions/_lib/guessCountry.ts` | Pre-selects the WhatsApp dial code from the browser's time zone |
+| `src/app/model-submissions/_lib/timezoneCountries.ts` | IANA zone → ISO country, the table that guess reads |
+| `src/lib/countryData.ts` | Countries + dial codes, shared with onboarding and settings |
 | `src/app/model-submissions/error.tsx` | Route error boundary — the branded crash screen, with `reset()` |
 | `src/app/model-submissions/_lib/theme.ts` | **The public surface's design tokens — import, never inline** |
 | `src/app/model-submissions/_lib/prepareImage.ts` | **Browser-side HEIC→JPEG transcode** + downscale before upload |
@@ -109,7 +111,9 @@ Section 3 is therefore only ever the trial link and the earnings screenshots (**
 Each field is optional on its own; **`requireOneContact` in the shared schema demands one of the two**, on both the step slice and the whole-form schema. Email alone is not enough: every conversation with an applicant happens on a messenger, and an application nobody can follow up on is an application nobody actions. (An earlier note here said the opposite — it described the Instagram/Telegram pair, and Instagram is no longer a contact field at all.)
 
 - **WhatsApp is stored as E.164** (`+27821234567`), composed by `composeWhatsApp(dialCode, number)` so the browser and the server build the identical string. A number typed with `+` or `00` keeps its own country code; otherwise the select's dial code is prepended and the national trunk `0` dropped. It deliberately does **not** infer a duplicated country code from digits alone — that eats a real digit off every US number starting with 1.
-- **The country is guessed, never assumed.** [`guessCountry.ts`](../src/app/model-submissions/_lib/guessCountry.ts) reads `navigator.languages` and resolves a region through `Intl.Locale` (`en-ZA` → `ZA`; a bare `pt` maximises to `BR`). No geo-IP call, no library, no request. It only ever pre-fills a visible, editable control, and returns `''` — leaving the placeholder — rather than a confidently wrong country.
+- **The country is guessed from the time zone, never from the language.** [`guessCountry.ts`](../src/app/model-submissions/_lib/guessCountry.ts) maps `Intl.DateTimeFormat().resolvedOptions().timeZone` through [`timezoneCountries.ts`](../src/app/model-submissions/_lib/timezoneCountries.ts) (`Africa/Johannesburg` → `ZA`). No geo-IP call, no library, no request.
+
+  **Language is the fallback, not the signal**, and that ordering is the fix for a real defect: an applicant in Johannesburg on an `en-GB` Windows install was offered `+44`, because a language tag's region subtag describes a *locale*, not a *location*. The zone tracks where the machine is. Either way it only pre-fills a visible, editable control, and returns `''` — leaving the placeholder — rather than a confidently wrong country.
 - Legacy `instagram` on the document is a **read-only** field now: records written before 2026-09 kept Instagram as a contact detail, and the review dialog still renders it for them. Nothing writes it.
 
 ### Social pages are per-platform, and stored as URLs

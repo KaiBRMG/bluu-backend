@@ -196,6 +196,8 @@ export interface AdminNotificationBatch {
   recipientUserIds: string[];
   recipientGroupIds: string[];
   recipientCount: number;
+  /** True when the admin also pushed this batch to Telegram. Absent on pre-Telegram batches. */
+  sentViaTelegram?: boolean;
 }
 
 // ─── Leave Requests ───────────────────────────────────────────────────

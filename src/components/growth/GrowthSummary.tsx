@@ -32,6 +32,11 @@ import type { GrowthAccount } from '@/types/firestore';
  * The ranking is by **absolute** followers gained, so in a period where every
  * account shrank, "fastest growing" is the one that shrank least and its figure
  * renders red and negative. The number carries that; the label cannot.
+ *
+ * **This tile's Display step is an account, not a figure** — the deliberate
+ * exception to the row. Its two siblings answer "how many"; this one answers
+ * "who", and promoting the delta to match their shape buries the only thing it
+ * exists to name. The figures stay subordinate on both rows.
  */
 
 interface GrowthSummaryProps {
@@ -120,26 +125,22 @@ export const GrowthSummary = memo(function GrowthSummary({
           <CardDescription>Fastest Growing · {RANGE_LABEL[range].toLowerCase()}</CardDescription>
           {summary.top ? (
             <>
-              {/* The Display step is the NUMBER, as in both sibling tiles — a
-                  name at text-2xl would be the only prose on the Display step
-                  (DESIGN.md §3: "never carrying prose") and would leave this the
-                  one tile in the row without a figure to scan. The account is
-                  the label under it. */}
-              <CardTitle className="text-2xl font-semibold">
-                <DeltaValue delta={summary.top.delta} showPercent={false} />
-              </CardTitle>
-              <div className="flex items-center gap-2 text-[11px]">
-                <AccountIdentity
-                  account={summary.top.account}
-                  avatarClassName="size-4"
-                  iconClassName="size-3"
+              {/* The ACCOUNT is the Display step here, not the number. This tile
+                  answers "who", where its two siblings answer "how many" — so
+                  matching their shape by promoting the delta buries the one
+                  thing the tile exists to name. The figure rides along after it,
+                  small enough not to compete. */}
+              <CardTitle className="flex items-center gap-2 text-2xl font-semibold">
+                <AccountIdentity account={summary.top.account} avatarClassName="size-5" />
+                <span className="min-w-0 flex-1 truncate">{summary.top.account.handle}</span>
+                <DeltaValue
+                  delta={summary.top.delta}
+                  showPercent={false}
+                  className="shrink-0 text-sm font-medium"
                 />
-                <span className="min-w-0 flex-1 truncate text-zinc-300">
-                  {summary.top.account.handle}
-                </span>
-              </div>
+              </CardTitle>
               {summary.bottom && summary.bottom.account.id !== summary.top.account.id ? (
-                <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+                <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
                   <span className="shrink-0">Slowest</span>
                   <AccountIdentity
                     account={summary.bottom.account}

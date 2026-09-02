@@ -43,3 +43,21 @@ export const FIELD =
   'placeholder:text-white/50 transition-colors outline-none ' +
   'focus-visible:border-[#00b8f5] focus-visible:ring-2 focus-visible:ring-[#00b8f5]/25 ' +
   'aria-[invalid=true]:border-red-400/70';
+
+/**
+ * A `Select`'s dropdown on this surface.
+ *
+ * shadcn's `SelectContent`/`SelectItem` are sized for the **console** — 14px
+ * rows about 30px tall — which is wrong twice over here: this form is 16px
+ * throughout (see `FIELD`), and a 30px row is well under the 44px touch target
+ * a phone needs. `FIELD_MENU_ITEM` puts a row at 44px and its text at 16px.
+ *
+ * `FIELD_MENU` also fixes the width. In `popper` mode the panel inherits
+ * `min-width` from its trigger, so a narrow trigger — the dial-code picker is
+ * 7.5rem — yields a 120px menu with every country name truncated. This gives it
+ * a readable width that still fits a 320px viewport.
+ */
+export const FIELD_MENU =
+  'max-h-[min(20rem,60vh)] w-[min(22rem,calc(100vw-2.5rem))] rounded-xl';
+
+export const FIELD_MENU_ITEM = 'rounded-lg py-2.5 pr-9 pl-3 text-base';

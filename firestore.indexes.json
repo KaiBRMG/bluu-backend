@@ -307,6 +307,8 @@
     { "collectionGroup": "prompt-shares", "fieldPath": "promptId", "indexes": [] },
     { "collectionGroup": "prompt-shares", "fieldPath": "createdBy", "indexes": [] },
     { "collectionGroup": "device-sessions", "fieldPath": "kind", "indexes": [] },
-    { "collectionGroup": "device-sessions", "fieldPath": "label", "indexes": [] }
+    { "collectionGroup": "device-sessions", "fieldPath": "label", "indexes": [] },
+
+    { "collectionGroup": "admin_notification_batches", "fieldPath": "sentViaTelegram", "indexes": [] }
   ]
 }

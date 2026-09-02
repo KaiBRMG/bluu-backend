@@ -15,6 +15,7 @@
 | `src/lib/services/onlyfansOpsAlerts.ts` | `sendOpsAlertOnce` + the single-maintainer recipient uid, for the two OF Manager diagnostics |
 | `src/lib/notificationTypeBadge.ts` | Two maps, one per ground. `notificationTypeBadge(type)` — badge label/colour for the three **admin** surfaces (light chips, `-600` inks). `notificationTypeDot(type)` — the `-400` semantic hue for the **tray's** leading dot on the near-black panel. Import the one that matches the surface; never re-map a type to a hex inline. |
 | `src/components/admin/notifications/AutomatedNotificationsList.tsx` | Renders the catalogue on the **Automated** tab of `/admin-portal/notifications` |
+| `src/lib/services/telegramService.ts` | **Server-only** Telegram Bot API delivery + recipient resolution. Owns formatting, never copy. See "Telegram alerts" below. |
 | `src/lib/notificationNavigation.ts` | `navigateToNotificationAction(router, actionUrl)` — the **only** place an `actionUrl` is followed. External vs internal branch + arms `NavigationWatchdog`. See RULE 3. |
 | API: `src/app/api/notifications/*` | `create`, `dismiss`, `mark-read` |
 | API: `src/app/api/admin/notifications/*` | admin send + `[batchId]/recipients` (GET) + `[batchId]` (DELETE = "unsend": removes every per-user notification doc for the batch + the batch record) |
@@ -118,8 +119,25 @@ The one notification whose recipient list is decided by **what version of the de
 
 `/admin-portal/notifications` has two tabs:
 
-- **Sent** — history of manual admin broadcasts (`notifications-batches`), click a row for per-recipient read/dismiss state and to unsend.
+- **Sent** — history of manual admin broadcasts (`notifications-batches`), click a row for per-recipient read/dismiss state and to unsend. Batches that were also pushed to Telegram carry a "Telegram" chip next to the title.
 - **Automated** — a **read-only** catalogue of the table above, grouped by category, from `src/lib/automatedNotifications.ts`. Expanding an entry shows the message template (interpolated values render as `{token}` chips), what fires it, who receives it, the `actionUrl`, and the source route. Nothing on this tab is sendable, editable or unsendable — it exists so admins can see what the system sends on its own.
+
+## Telegram alerts (one-time admin sends only)
+
+A second delivery channel, **additive to the in-app notification, never a replacement**. The Create Notification dialog has a "Also send as a Telegram alert" checkbox; unchecked, the send behaves exactly as it always did.
+
+- **Only manual admin sends use it today.** Automated notifications (the table above) are untouched — no factory knows about Telegram.
+- **Delivery lives in [`src/lib/services/telegramService.ts`](../src/lib/services/telegramService.ts)** and is **server-only**: `TELEGRAM_BOT_TOKEN` must never reach the client. Nothing in `src/components` or `src/hooks` may import it.
+- **Order matters.** `POST /api/admin/notifications` commits the Firestore batch **first**, then attempts Telegram. `sendTelegramNotification` never throws — it returns `{ sent, failed, skipped, error }`, the route echoes it as `telegram` on the response, and the dialog toasts a *warning* on a partial failure. A Telegram outage must never lose an in-app notification that is already written.
+- **Copy is still the caller's.** The service formats (`<b>Title</b>`, blank line, message) and escapes `& < >` for HTML parse mode. It does not author text — rule 1 is unchanged.
+- **`actionUrl`: only absolute `http(s)` URLs are linked.** An internal app path is dropped on purpose — `src/middleware.ts` rewrites non-Electron page traffic to `/desktop-only`, so an in-app link opened from a phone is a dead end. The in-app notification carries that action.
+- **`sentViaTelegram: boolean` is written on the batch doc** (`admin_notification_batches`) and shown as a chip on the Sent tab. Nothing queries it, so it is exempted from indexing in `firestore.indexes.json` (rule 9).
+
+### TEMPORARY: recipient resolution
+
+No user has linked a Telegram account yet. `resolveChatIds(uids)` **ignores the uids** and returns the single chat in `TG_BOT_TEST_ID` — one message per send, not per recipient, and zero extra Firestore reads. When account linking lands, **only that function changes**: read the linked chat id off each user doc and return the distinct set. Call sites and the API contract already pass the full recipient list.
+
+Env vars (both server-only, no `NEXT_PUBLIC_` prefix): `TELEGRAM_BOT_TOKEN`, `TG_BOT_TEST_ID`. Missing either → the send is `skipped` and the in-app notification still goes out.
 
 ## Adding a new notification event
 

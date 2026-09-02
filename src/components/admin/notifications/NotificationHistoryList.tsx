@@ -1,6 +1,7 @@
 'use client';
 
 import { formatDistanceToNow } from 'date-fns';
+import { SendHorizontal } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -75,7 +76,20 @@ export default function NotificationHistoryList({
                 className="cursor-pointer hover:bg-accent/50 transition-colors"
                 onClick={() => onSelectBatch(batch)}
               >
-                <TableCell className="font-medium">{batch.title}</TableCell>
+                <TableCell className="font-medium">
+                  <span className="flex items-center gap-2">
+                    {batch.title}
+                    {batch.sentViaTelegram && (
+                      <span
+                        className="inline-flex items-center gap-1 text-xs font-normal text-muted-foreground"
+                        title="Also sent as a Telegram alert"
+                      >
+                        <SendHorizontal className="h-3 w-3" />
+                        Telegram
+                      </span>
+                    )}
+                  </span>
+                </TableCell>
                 <TableCell>
                   <Badge variant="outline" className={typeMeta.className}>
                     {typeMeta.label}

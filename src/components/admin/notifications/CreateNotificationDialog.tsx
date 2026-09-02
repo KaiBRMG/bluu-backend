@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Check, ChevronDown, X, Users, Layers, Link, ExternalLink } from 'lucide-react';
+import { Check, ChevronDown, X, Users, Layers, Link, ExternalLink, SendHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import {
   Popover,
@@ -40,7 +41,7 @@ import { PAGES } from '@/lib/definitions';
 import type { BasicUser } from '@/hooks/useBasicUsers';
 import type { AdminGroup } from '@/hooks/useAdminUsers';
 import type { NotificationType } from '@/types/firestore';
-import type { CreateBatchPayload } from '@/hooks/useAdminNotifications';
+import type { CreateBatchPayload, CreateBatchResult } from '@/hooks/useAdminNotifications';
 
 type ActionUrlMode = 'none' | 'internal' | 'external';
 
@@ -50,7 +51,7 @@ interface CreateNotificationDialogProps {
   users: BasicUser[];
   groups: AdminGroup[];
   onCreated: () => void;
-  onCreate: (payload: CreateBatchPayload) => Promise<string>;
+  onCreate: (payload: CreateBatchPayload) => Promise<CreateBatchResult>;
 }
 
 type RecipientType = 'user' | 'group';
@@ -84,6 +85,7 @@ export default function CreateNotificationDialog({
   const [actionUrlMode, setActionUrlMode] = useState<ActionUrlMode>('none');
   const [internalPage, setInternalPage] = useState('');
   const [externalUrl, setExternalUrl] = useState('');
+  const [sendTelegram, setSendTelegram] = useState(false);
 
   function resetForm() {
     setRecipients([]);
@@ -93,6 +95,7 @@ export default function CreateNotificationDialog({
     setActionUrlMode('none');
     setInternalPage('');
     setExternalUrl('');
+    setSendTelegram(false);
   }
 
   function resolvedActionUrl(): string | null {
@@ -126,8 +129,29 @@ export default function CreateNotificationDialog({
 
     setSubmitting(true);
     try {
-      await onCreate({ title: title.trim(), message: message.trim(), type, userIds, groupIds, actionUrl: resolvedActionUrl() });
-      toast.success('Notification sent successfully');
+      const result = await onCreate({
+        title: title.trim(),
+        message: message.trim(),
+        type,
+        userIds,
+        groupIds,
+        actionUrl: resolvedActionUrl(),
+        sendTelegram,
+      });
+
+      // The in-app notification is committed before Telegram is attempted, so a
+      // Telegram problem is a warning on a successful send — not a failure.
+      const telegram = result.telegram;
+      if (telegram && (telegram.skipped || telegram.failed > 0)) {
+        toast.warning('Notification sent, but Telegram delivery failed', {
+          description: telegram.error,
+        });
+      } else if (telegram) {
+        toast.success('Notification sent via app and Telegram');
+      } else {
+        toast.success('Notification sent successfully');
+      }
+
       resetForm();
       setOpen(false);
       onCreated();
@@ -145,7 +169,7 @@ export default function CreateNotificationDialog({
       <Button onClick={() => setOpen(true)}>Create new notification</Button>
 
       <Dialog open={open} onOpenChange={open => { setOpen(open); if (!open) resetForm(); }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Create Notification</DialogTitle>
           </DialogHeader>
@@ -357,6 +381,32 @@ export default function CreateNotificationDialog({
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Telegram */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Delivery</label>
+              <label
+                htmlFor="send-telegram"
+                className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-accent"
+              >
+                <Checkbox
+                  id="send-telegram"
+                  checked={sendTelegram}
+                  onCheckedChange={checked => setSendTelegram(checked === true)}
+                  className="mt-0.5"
+                />
+                <span className="space-y-0.5">
+                  <span className="flex items-center gap-1.5 text-sm font-medium">
+                    <SendHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
+                    Also send as a Telegram alert
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    The in-app notification is sent either way. Telegram alerts currently
+                    go to the test chat until accounts are linked.
+                  </span>
+                </span>
+              </label>
             </div>
           </div>
 

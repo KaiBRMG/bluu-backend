@@ -3,6 +3,7 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById } from '@/lib/services/userService';
+import { sendTelegramNotification } from '@/lib/services/telegramService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { NotificationType } from '@/types/firestore';
 
@@ -54,13 +55,22 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     }
 
     const body = await request.json();
-    const { title, message, type, userIds = [], groupIds = [], actionUrl = null } = body as {
+    const {
+      title,
+      message,
+      type,
+      userIds = [],
+      groupIds = [],
+      actionUrl = null,
+      sendTelegram = false,
+    } = body as {
       title: string;
       message: string;
       type: NotificationType;
       userIds: string[];
       groupIds: string[];
       actionUrl?: string | null;
+      sendTelegram?: boolean;
     };
 
     if (!title?.trim() || !message?.trim()) {
@@ -108,6 +118,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       recipientUserIds: userIds,
       recipientGroupIds: groupIds,
       recipientCount: allRecipientUids.size,
+      sentViaTelegram: sendTelegram === true,
       batchId,
     });
 
@@ -129,7 +140,22 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
 
     await writeBatch.commit();
 
-    return NextResponse.json({ success: true, batchId });
+    // Telegram is a secondary channel: the in-app notification above is already
+    // committed, so a Telegram failure is reported, never thrown. The client
+    // surfaces it as a warning on an otherwise successful send.
+    let telegram: { sent: number; failed: number; skipped: boolean; error?: string } | null = null;
+    if (sendTelegram === true) {
+      telegram = await sendTelegramNotification([...allRecipientUids], {
+        title,
+        message,
+        actionUrl,
+      });
+      if (telegram.failed > 0 || telegram.skipped) {
+        console.error('[admin/notifications POST] telegram delivery issue:', telegram);
+      }
+    }
+
+    return NextResponse.json({ success: true, batchId, telegram });
   } catch (error: unknown) {
     console.error('[admin/notifications POST] error:', error);
     return NextResponse.json({ error: 'Failed to send notification' }, { status: 500 });

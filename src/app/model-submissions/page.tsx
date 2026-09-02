@@ -44,7 +44,15 @@ import { PrefixedInput } from './_components/PrefixedInput';
 import { SocialField } from './_components/SocialField';
 import { ThankYou } from './_components/ThankYou';
 import { guessCountryCode } from './_lib/guessCountry';
-import { AZURE, AZURE_INK, FIELD, PANEL, STAGE_GROUND } from './_lib/theme';
+import {
+  AZURE,
+  AZURE_INK,
+  FIELD,
+  FIELD_MENU,
+  FIELD_MENU_ITEM,
+  PANEL,
+  STAGE_GROUND,
+} from './_lib/theme';
 
 // ─── Step definitions ────────────────────────────────────────────────────────
 
@@ -196,9 +204,10 @@ export default function ModelSubmissionsPage() {
     });
   }, []);
 
-  // Pre-select the WhatsApp country from the browser's own locale — no request,
-  // no library. Runs in an effect, not during render: it reads `navigator`, and
-  // it must not fight a draft recovered from a crash or a choice already made.
+  // Pre-select the WhatsApp country from the browser's own time zone — no
+  // request, no library. Runs in an effect, not during render: it reads browser
+  // globals, and it must not fight a draft recovered from a crash or a choice
+  // the applicant has already made.
   useEffect(() => {
     setForm((prev) => {
       if (prev.whatsappCountry) return prev;
@@ -466,11 +475,7 @@ export default function ModelSubmissionsPage() {
                   )}
                 </Field>
 
-                <Field
-                  label="Telegram"
-                  error={errors.telegram}
-                  hint="Telegram or WhatsApp — give us at least one. This is where we’ll contact you."
-                >
+                <Field label="Telegram" error={errors.telegram}>
                   {(a) => (
                     <PrefixedInput
                       {...a}
@@ -480,6 +485,16 @@ export default function ModelSubmissionsPage() {
                     />
                   )}
                 </Field>
+
+                {/* The pair is an either/or, and this is the only thing that
+                    says so before the applicant presses Continue. Hairlines
+                    rather than a bare word, so it reads as a relationship
+                    between the two fields instead of stray text between them. */}
+                <div className="-my-2 flex items-center gap-3">
+                  <span className="h-px flex-1 bg-white/[0.08]" aria-hidden />
+                  <span className="text-xs font-medium text-white/55">Or</span>
+                  <span className="h-px flex-1 bg-white/[0.08]" aria-hidden />
+                </div>
 
                 {/* The "one of the two" rule surfaces here rather than on
                     Telegram: it can only fire when both boxes are empty, so the
@@ -495,33 +510,46 @@ export default function ModelSubmissionsPage() {
                         <SelectTrigger
                           aria-label="Country calling code"
                           aria-invalid={!!(errors.whatsapp || errors.contact)}
+                          aria-describedby={a['aria-describedby']}
                           className={cn(FIELD, 'h-auto justify-between')}
                         >
-                          {/* The trigger shows the flag and the dial code only —
-                              the country name is what you search the open list
-                              by, not what you need once it is chosen. */}
-                          {whatsappDialCode ? (
-                            <span className="flex items-center gap-1.5 tabular-nums">
-                              <span aria-hidden>{getFlagEmoji(form.whatsappCountry)}</span>
-                              {whatsappDialCode}
-                            </span>
-                          ) : (
-                            <span className="text-white/50">Code</span>
-                          )}
+                          {/* A `SelectValue` is REQUIRED, even though its
+                              content is overridden here. `SelectContent`
+                              defaults to `position="item-aligned"`, which
+                              positions the panel by measuring the value node —
+                              with no value node it bails out before marking
+                              itself positioned and the dropdown never appears.
+                              This trigger rendered raw spans and did exactly
+                              that: clicking it did nothing at all. */}
+                          <SelectValue>
+                            {whatsappDialCode ? (
+                              <span className="flex items-center gap-1.5 tabular-nums">
+                                <span aria-hidden>{getFlagEmoji(form.whatsappCountry)}</span>
+                                {whatsappDialCode}
+                              </span>
+                            ) : (
+                              <span className="text-white/50">Code</span>
+                            )}
+                          </SelectValue>
                         </SelectTrigger>
-                        <SelectContent className="max-h-72">
+                        {/* `popper`, so a 7.5rem trigger can drop a full-width
+                            list of country names beneath it. */}
+                        <SelectContent position="popper" align="start" className={FIELD_MENU}>
                           {countryCodes.map((c) => (
                             // `textValue` is what Radix's type-ahead matches on.
                             // Without it the flag emoji leads the item's text
                             // content and typing "sou" finds nothing — the only
-                            // way through an 80-country list with a keyboard.
-                            <SelectItem key={c.code} value={c.code} textValue={c.name}>
+                            // way through 200-odd countries with a keyboard.
+                            <SelectItem
+                              key={c.code}
+                              value={c.code}
+                              textValue={c.name}
+                              className={FIELD_MENU_ITEM}
+                            >
                               <span className="flex w-full items-center gap-2">
                                 <span aria-hidden>{getFlagEmoji(c.code)}</span>
                                 <span className="min-w-0 flex-1 truncate">{c.name}</span>
-                                <span className="text-muted-foreground tabular-nums">
-                                  {c.dialCode}
-                                </span>
+                                <span className="tabular-nums text-white/55">{c.dialCode}</span>
                               </span>
                             </SelectItem>
                           ))}
@@ -617,13 +645,19 @@ export default function ModelSubmissionsPage() {
                         <SelectTrigger
                           id={a.id}
                           aria-invalid={!!errors.country}
+                          // Without this the error is announced only for the
+                          // city input beside it — a screen-reader user landing
+                          // on the invalid control hears nothing.
+                          aria-describedby={a['aria-describedby']}
                           className={cn(FIELD, 'h-auto justify-between')}
                         >
                           <SelectValue placeholder="Country" />
                         </SelectTrigger>
-                        <SelectContent className="max-h-72">
+                        {/* Same sizing rules as the dial-code list — console
+                            row heights are too small for a phone form. */}
+                        <SelectContent position="popper" align="start" className={FIELD_MENU}>
                           {countryNames.map((name) => (
-                            <SelectItem key={name} value={name}>
+                            <SelectItem key={name} value={name} className={FIELD_MENU_ITEM}>
                               {name}
                             </SelectItem>
                           ))}
@@ -679,7 +713,7 @@ export default function ModelSubmissionsPage() {
                   label="List all your social media pages"
                   group
                   error={errors.socials}
-                  hint="At least one. Just the username — we’ll build the link."
+                  hint="At least one."
                 >
                   {/* Each row owns its own label and error; the group above
                       carries the question, the hint, and the "at least one"
@@ -689,7 +723,7 @@ export default function ModelSubmissionsPage() {
                       <SocialField
                         label="Instagram"
                         prefix="@"
-                        placeholder="bluurock"
+                        placeholder="username"
                         value={form.socialInstagram}
                         onChange={(v) => set('socialInstagram', v)}
                         error={errors.socialInstagram}
@@ -697,7 +731,7 @@ export default function ModelSubmissionsPage() {
                       <SocialField
                         label="Twitter"
                         prefix="@"
-                        placeholder="bluurock"
+                        placeholder="username"
                         value={form.socialTwitter}
                         onChange={(v) => set('socialTwitter', v)}
                         error={errors.socialTwitter}
@@ -705,7 +739,7 @@ export default function ModelSubmissionsPage() {
                       <SocialField
                         label="Reddit"
                         prefix="u/"
-                        placeholder="bluurock"
+                        placeholder="username"
                         value={form.socialReddit}
                         onChange={(v) => set('socialReddit', v)}
                         error={errors.socialReddit}
