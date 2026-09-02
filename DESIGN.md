@@ -413,12 +413,46 @@ Everything above describes the **internal console** — the Electron app interna
   - **Content planning (routine):** quick one-tap complete with an **Undo** `toast` that reverts to *Outstanding* (the content-planning `creator-complete` endpoint mirrors the campaign one's `revert` flag), so the card returns cleanly.
 - **Lists, not carousels.** Outstanding items render as responsive grids / vertical lists (`repeat(auto-fit, …)` / stacked cards), so a creator sees everything at once — no horizontal paging.
 
+### Mobile is the design target (and the portal is installable)
+
+Creators read this surface almost entirely on a phone, so — as with §8 — mobile is the target, not a breakpoint.
+
+- **Primary navigation lives in the thumb zone.** [`CreatorBottomNav`](src/app/creator/components/CreatorBottomNav.tsx) is a fixed four-tab bar below `md`; the shadcn `Sidebar` (and every page's `SidebarTrigger`, now `hidden md:inline-flex`) is **desktop-only**. A hamburger in the top-left corner is the hardest target to reach one-handed and cost two taps per destination. The four destinations are declared once in [`nav.ts`](src/app/creator/nav.ts) — `title` for the sidebar, `shortTitle` for the tab bar — and both navs read from it. The bar's surface is `TABBAR_STYLE` in `theme.ts` (rule 1 applies), and `SidebarInset` carries `pb-[calc(4rem+env(safe-area-inset-bottom))]` so the bar never covers the last card.
+- **`min-h-dvh`, never `min-h-screen`.** `100vh` on a mobile browser excludes the collapsing URL bar, so a `min-h-screen` page is taller than the viewport it is measured against. Every portal page ground uses `dvh`.
+- **16px field text.** Same rule and the same reason as §8: below 16px, iOS Safari zooms the viewport on focus and the form scrolls out from under the user. The login form's two inputs also set `inputMode` / `autoCapitalize="none"` / `autoCorrect="off"` — an email address is not a sentence.
+- **Zoom is never blocked.** No `maximumScale: 1`, no `userScalable: false` in the segment's `viewport` export. It fails WCAG 1.4.4, iOS Safari has ignored it since iOS 10, and 16px inputs solve the problem it was reaching for.
+
+**Installed app (PWA).** The portal ships a manifest — [`public/creator/manifest.webmanifest`](src/public/creator/manifest.webmanifest), scoped to `/creator/` — so a creator can add it to their home screen and get a full-screen app with no address bar. It is declared in [`src/app/creator/layout.tsx`](src/app/creator/layout.tsx), which is a **server** component for exactly this reason (the client logic moved to `CreatorPortalShell`); the metadata and viewport are scoped to the `/creator` segment so the internal Electron console never inherits them. [`InstallPrompt`](src/app/creator/components/InstallPrompt.tsx) on the dashboard is what makes any of it reachable — it replays `beforeinstallprompt` on Android/Chromium and gives Share → Add to Home Screen instructions on iOS Safari (which fires no such event), once per device.
+
+**Failure is a state, never an empty list.** [`LoadError`](src/app/creator/components/LoadError.tsx) is what a failed Firestore listener renders, and every one of the portal's four listeners branches to it *before* the empty branch. This is load-bearing: previously a failed query fell through to "No custom requests found." and told a creator they had no outstanding work — a permission change, an index rebuild or a dropped connection was indistinguishable from being caught up. **An empty state must be reachable only from a successful snapshot with zero documents.** `onRetry` re-subscribes the listener (a `retryKey` in the effect deps) rather than reloading, so a transient failure costs one tap and no scroll position.
+
+**The tab bar's active state is a shape, not a hue.** Active `sky-300` against inactive `zinc-500` measures 2.90:1 — under the 3:1 WCAG 1.4.11 requires of a state indicator — and raising inactive to the AA-legal `zinc-400` collapses the two to 1.54:1. So `zinc-400` carries text contrast and a 2px `sky-400` top rail carries the state. Do not simplify it back to a colour swap; the note in `CreatorBottomNav` says so at the point someone would.
+
+**`text-zinc-500` is not a text colour on this surface** (4.12:1 on the ground, 3.92:1 on a card — DESIGN.md §2 already says so). `zinc-400` is the portal's de-emphasis step at 7.76:1. Likewise `COMPLETE_BTN` is `emerald-700`, not `emerald-600`: white on 600 reads 3.77:1 for the 14px/500 label it carries.
+
+**Tab-bar clearance is padded on each page's own content wrapper**, never on `SidebarInset`. Padding the container while every page ground is `min-h-dvh` inside it makes the minimum document height `100dvh + 4rem`, so even an empty page scrolls 64px into flat ground.
+
+**There is deliberately no service worker.** Every screen in the portal is a live Firestore subscription, so offline caching would serve a creator a stale view of their own outstanding work — worse than an honest network error. The manifest alone buys the home-screen install; a service worker only buys offline. Do not add `next-pwa` or Workbox here: it would also mean a webpack plugin in a Turbopack project.
+
 ### Portal rules (in addition to everything in §1–6)
 1. **Import the skin from `theme.ts`.** No inline portal hexes, gradients, or surface recipes. New portal color → add it to `theme.ts` **and** the `creator-*` palette entries in this file's frontmatter.
 2. **Bluu azure is the portal's one voice**, exactly as Action Blue is the console's. It marks brand/interactive accent only — never decoration beyond the one signature page glow.
 3. **Solid fills only** — no gradient or glow buttons/cards. `PRIMARY_BTN` / `COMPLETE_BTN` / `ACCENT_BTN` are the three action treatments, and they are a hierarchy, not a palette: **`PRIMARY_BTN` appears at most once per screen** — the azure is only loud because it is rare. Anything else that merely *can* be clicked takes `ACCENT_BTN`. Its ink is a brand-tinted near-black by necessity, not taste: white on `ACCENT.hex` measures 2.3:1 and fails AA outright, the near-black reads 7.2:1. Never re-ink it white.
 4. **Detail & confirm = shadcn `Dialog`** through `CreatorDialog`. No bespoke overlays.
 5. **"Mark Completed", never "Completed"**, and every completion is undoable via the `revert` flag.
+6. **A new destination goes in [`nav.ts`](src/app/creator/nav.ts)**, with a `shortTitle` that fits a quarter of a phone's width — never in one nav only. Past four tabs the bar needs rethinking, not a fifth squeeze.
+7. **A listener error branches to `LoadError` before the empty branch.** No new Firestore subscription on this surface ships without one.
+8. **≥44px on every control**, not just the nav. Where a glyph must stay small, expand the hit area with `after:absolute after:-inset-N` (the established trick here) rather than shrinking the target.
+
+### Known deferrals (deliberate, not drift)
+
+Found by `/impeccable critique` on 2026-09-02 (`.impeccable/critique/`), left unfixed on purpose because each is a **product** decision rather than a visual/technical one:
+
+- **`content-requests` completion is one-way.** Portal rule 5 says every completion is undoable, and this page sends no `{revert:true}` and offers no `Completed → Mark as Incomplete`. The dashboard's identical action is fully undoable. The endpoint supports the flag; only the UI is missing.
+- **"Mark Completed" names an outcome the system does not produce** — completion routes the record to *Awaiting Approval*. "Submit for review" is both accurate and more reassuring.
+- **Red means two things in one scroll.** `CustomCard` paints every due date `text-rose-300` unconditionally (and has no overdue calculation at all); `CPCard` uses red to mean *late*. `contentStatusBadge` also paints "Outstanding" red, where §2 assigns orange to awaiting/pending. `text-rose-300` is additionally an inline hue outside `theme.ts` (rule 1).
+- **Due dates are timezone-naive** — `isCPOverdue` compares against `T23:59:59Z`, UTC for every creator.
+- **The login card is glassmorphic over a photo** (`bg-zinc-900/80 backdrop-blur-md`), which §5 forbids for exactly this construction. Its a11y was fixed (heading, landmark, 16px inputs); its skin was left alone as an aesthetic call.
 
 ## 8. Public model application form (external skin)
 

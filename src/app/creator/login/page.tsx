@@ -50,8 +50,8 @@ export default function CreatorLoginPage() {
   };
 
   return (
-    <div
-      className="flex items-center justify-center min-h-screen bg-black px-4 relative"
+    <main
+      className="flex items-center justify-center min-h-dvh bg-black px-4 relative"
       style={{
         backgroundImage: "url('/backgrounds/2_blur.png')",
         backgroundSize: "cover",
@@ -71,6 +71,9 @@ export default function CreatorLoginPage() {
               className="h-12 w-auto"
             />
           </div>
+          {/* The page had no heading of any kind — a screen reader landed on a
+              logo, a paragraph and two inputs with nothing naming the page. */}
+          <h1 className="sr-only">Sign in to the Bluu Rock Creator Portal</h1>
           <p className="text-zinc-400">Sign in to your workspace</p>
         </div>
 
@@ -86,7 +89,14 @@ export default function CreatorLoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-sky-500/60"
+              inputMode="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              // text-base is 16px on purpose: below that, iOS Safari zooms the
+              // viewport the moment the field takes focus and the form is left
+              // scrolled off-screen. Same rule as the model application form.
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-base text-white placeholder-zinc-400 focus:outline-none focus:border-sky-500/60"
               placeholder="you@example.com"
             />
           </div>
@@ -102,7 +112,10 @@ export default function CreatorLoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete="current-password"
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-sky-500/60"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-base text-white placeholder-zinc-400 focus:outline-none focus:border-sky-500/60"
               placeholder="••••••••"
             />
           </div>
@@ -127,6 +140,6 @@ export default function CreatorLoginPage() {
           </button>
         </form>
       </div>
-    </div>
+    </main>
   );
 }

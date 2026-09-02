@@ -18,12 +18,14 @@
  * arrives: only `resolveChatIds` has to learn about `users/{uid}.telegramChatId`.
  */
 
+import { classifyNotificationAction } from '@/lib/notificationActionUrl';
+
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
 
 export interface TelegramMessagePayload {
   title: string;
   message: string;
-  /** Relative app path or absolute URL. Only absolute http(s) URLs are linked — see below. */
+  /** App path or external URL. Only external ones are linked — see `resolveLink`. */
   actionUrl?: string | null;
 }
 
@@ -71,17 +73,14 @@ function escapeHtml(text: string): string {
 /**
  * The link to put in the message, or null for none.
  *
- * Only absolute http(s) URLs are linked. An internal app path is deliberately
+ * Only external URLs are linked. An internal app path is deliberately
  * dropped: `src/middleware.ts` rewrites non-Electron page traffic to
  * `/desktop-only`, so a link to an in-app page opened from a phone is a dead end.
  * The in-app notification carries that action; Telegram just announces it.
  */
 function resolveLink(actionUrl?: string | null): string | null {
-  if (!actionUrl) return null;
-  const trimmed = actionUrl.trim();
-  if (!trimmed) return null;
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  return null;
+  const target = classifyNotificationAction(actionUrl);
+  return target.kind === 'external' ? target.href : null;
 }
 
 function buildMessageHtml({ title, message, actionUrl }: TelegramMessagePayload): string {

@@ -38,6 +38,17 @@ export const PAGE_GROUND_STYLE = {
   color: "white",
 } as const;
 
+/** The mobile bottom tab bar (`CreatorBottomNav`) — the same translucent recipe
+ *  as HEADER_STYLE, mirrored so the hairline sits on top. The padding keeps the
+ *  tabs clear of the iOS home indicator; `env()` resolves to 0 everywhere else. */
+export const TABBAR_STYLE = {
+  background: "rgba(9,9,11,0.85)",
+  backdropFilter: "blur(12px)",
+  WebkitBackdropFilter: "blur(12px)",
+  borderTop: "1px solid rgba(255,255,255,0.06)",
+  paddingBottom: "env(safe-area-inset-bottom)",
+} as const;
+
 /** The shared sticky top-bar surface used by every portal page header — one
  *  translucent recipe with a hairline underline. Import it; never re-inline the
  *  header background per page (that drift is how the opacity fell out of sync). */
@@ -65,8 +76,10 @@ export const SURFACE = {
 /** The one "mark complete" success action. A subtle tactile press marks the
  *  portal's key moment (completing a task); gated `motion-safe` so reduced-motion
  *  users get no scale. Smooth via the shadcn Button's own `transition-all`. */
+// emerald-700, not emerald-600: white on `emerald-600` measures 3.77:1 and fails
+// AA for the 14px/500 label it carries. emerald-700 reads 5.48:1.
 export const COMPLETE_BTN =
-  "bg-emerald-600 hover:bg-emerald-700 text-white motion-safe:active:scale-[0.98]";
+  "bg-emerald-700 hover:bg-emerald-800 text-white motion-safe:active:scale-[0.98]";
 /** Soft accent action (open drive, upload, external links styled as buttons). */
 export const ACCENT_BTN =
   "bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 border border-sky-500/30";

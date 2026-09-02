@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useCreatorAuth } from "@/components/CreatorAuthProvider";
 import { db } from "@/firebase-config";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
@@ -25,6 +26,7 @@ import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
 import { PAGE_GROUND_STYLE, HEADER_STYLE, SURFACE } from "../../theme";
 import { CustomRequestDialog } from "../../components/CustomRequestDialog";
+import { LoadError } from "../../components/LoadError";
 
 const PAGE_SIZE = 20;
 
@@ -35,6 +37,9 @@ export default function AllCustomsPage() {
   const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [loadError, setLoadError] = useState(false);
+  // Bumping this re-runs the effect, which re-subscribes the listener.
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     if (!creatorUser) return;
@@ -52,13 +57,17 @@ export default function AllCustomsPage() {
         return new Date(b.createdTime).getTime() - new Date(a.createdTime).getTime();
       });
       setEntries(docs);
+      setLoadError(false);
       setLoading(false);
     }, (error) => {
       console.error("[all-customs] campaign-tracking listener error:", error);
+      // Must be set before `loading` clears: without it this falls through to
+      // the empty branch and tells the creator they have no custom requests.
+      setLoadError(true);
       setLoading(false);
     });
     return unsub;
-  }, [creatorUser?.creatorID]);
+  }, [creatorUser?.creatorID, retryKey]);
 
   const handleStatusChange = async (entry: CampaignEntry, revert: boolean) => {
     setBusy(entry.id);
@@ -82,31 +91,38 @@ export default function AllCustomsPage() {
   const goTo = (p: number) => setCurrentPage(Math.max(1, Math.min(p, totalPages)));
 
   return (
-    <div className="min-h-screen" style={PAGE_GROUND_STYLE}>
+    <div className="min-h-dvh" style={PAGE_GROUND_STYLE}>
       {/* Top bar */}
       <header
         className="sticky top-0 z-40 flex h-14 items-center gap-2 px-3 sm:px-6"
         style={HEADER_STYLE}
       >
-        <SidebarTrigger className="text-zinc-400 hover:bg-white/5 hover:text-zinc-100 relative after:absolute after:-inset-3 after:content-['']" />
-        <img
-          src="/logo/bluu_long.svg"
-          alt="Bluu Rock"
-          className="pointer-events-none absolute left-1/2 top-1/2 h-6 -translate-x-1/2 -translate-y-1/2"
-        />
+        <SidebarTrigger className="hidden md:inline-flex text-zinc-400 hover:bg-white/5 hover:text-zinc-100 relative after:absolute after:-inset-3 after:content-['']" />
+        <Link
+          href="/creator/dashboard"
+          aria-label="Creator Portal home"
+          className="absolute left-1/2 top-1/2 flex h-11 -translate-x-1/2 -translate-y-1/2 items-center px-4"
+        >
+          <img src="/logo/bluu_long.svg" alt="Bluu Rock" className="h-6" />
+        </Link>
       </header>
 
-      <main className="mx-auto max-w-5xl px-3 py-6 sm:px-6 sm:py-8">
+      <div className="mx-auto max-w-5xl px-3 py-6 sm:px-6 sm:py-8 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
         <h1 className="mb-4 text-2xl font-semibold sm:mb-6">All Custom Requests</h1>
 
         {loading ? (
           <div className="flex flex-col gap-2">
             {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-14 rounded-xl" />)}
           </div>
+        ) : loadError ? (
+          <LoadError
+            message="Couldn't load your custom requests."
+            onRetry={() => { setLoading(true); setLoadError(false); setRetryKey(k => k + 1); }}
+          />
         ) : entries.length === 0 ? (
-          <div className={`rounded-2xl p-12 text-center ${SURFACE.panel}`}>
-            <p className="text-sm text-zinc-400">No custom requests found.</p>
-          </div>
+          // Reachable only from a successful snapshot with zero docs — the error
+          // branch above is what stops a failure reading as "you have nothing".
+          <p className="py-12 text-center text-sm text-zinc-400">No custom requests found.</p>
         ) : (
           <>
             {/* Desktop table */}
@@ -139,7 +155,7 @@ export default function AllCustomsPage() {
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Row actions">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
@@ -180,10 +196,10 @@ export default function AllCustomsPage() {
                   </div>
                   <div className="flex flex-col gap-0.5">
                     <p className="truncate text-sm font-medium text-zinc-100">{entry.fanName}</p>
-                    <p className="text-[11px] text-zinc-500">{TYPE_LABELS[entry.type]}</p>
+                    <p className="text-[11px] text-zinc-400">{TYPE_LABELS[entry.type]}</p>
                   </div>
                   {entry.dueDate && (
-                    <p className="text-[11px] text-zinc-500">
+                    <p className="text-[11px] text-zinc-400">
                       Due {formatDueDate(entry.dueDate)}
                       {entry.dueDateTimezone ? ` (${entry.dueDateTimezone})` : ""}
                     </p>
@@ -200,7 +216,7 @@ export default function AllCustomsPage() {
                       href="#"
                       onClick={e => { e.preventDefault(); goTo(page - 1); }}
                       aria-disabled={page === 1}
-                      className={page === 1 ? "pointer-events-none opacity-40" : ""}
+                      className={`h-11 min-w-11 ${page === 1 ? "pointer-events-none opacity-40" : ""}`}
                     />
                   </PaginationItem>
 
@@ -219,6 +235,7 @@ export default function AllCustomsPage() {
                       ) : (
                         <PaginationItem key={item}>
                           <PaginationLink
+                            className="h-11 min-w-11"
                             href="#"
                             isActive={item === page}
                             onClick={e => { e.preventDefault(); goTo(item); }}
@@ -234,7 +251,7 @@ export default function AllCustomsPage() {
                       href="#"
                       onClick={e => { e.preventDefault(); goTo(page + 1); }}
                       aria-disabled={page === totalPages}
-                      className={page === totalPages ? "pointer-events-none opacity-40" : ""}
+                      className={`h-11 min-w-11 ${page === totalPages ? "pointer-events-none opacity-40" : ""}`}
                     />
                   </PaginationItem>
                 </PaginationContent>
@@ -242,7 +259,7 @@ export default function AllCustomsPage() {
             )}
           </>
         )}
-      </main>
+      </div>
 
       {viewEntry && (
         <CustomRequestDialog

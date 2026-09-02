@@ -3,29 +3,32 @@ import {
   FolderOpen, Rocket, ExternalLink,
 } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import Link from "next/link";
 import { PAGE_GROUND_STYLE, HEADER_STYLE, SURFACE, ACCENT_BTN, HUES } from "../../theme";
 
 export default function WelcomePage() {
   return (
-    <div className="min-h-screen" style={PAGE_GROUND_STYLE}>
+    <div className="min-h-dvh" style={PAGE_GROUND_STYLE}>
       {/* Top bar */}
       <header
         className="sticky top-0 z-40 flex h-14 items-center gap-2 px-3 sm:px-6"
         style={HEADER_STYLE}
       >
-        <SidebarTrigger className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5 relative after:absolute after:-inset-3 after:content-['']" />
-        <img
-          src="/logo/bluu_long.svg"
-          alt="Bluu Rock"
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-6 pointer-events-none"
-        />
+        <SidebarTrigger className="hidden md:inline-flex text-zinc-400 hover:text-zinc-100 hover:bg-white/5 relative after:absolute after:-inset-3 after:content-['']" />
+        <Link
+          href="/creator/dashboard"
+          aria-label="Creator Portal home"
+          className="absolute left-1/2 top-1/2 flex h-11 -translate-x-1/2 -translate-y-1/2 items-center px-4"
+        >
+          <img src="/logo/bluu_long.svg" alt="Bluu Rock" className="h-6" />
+        </Link>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12 flex flex-col gap-8 sm:gap-10">
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12 flex flex-col gap-8 sm:gap-10 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
 
         {/* Hero */}
         <div className="flex flex-col gap-2">
-          <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Creator Portal</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-zinc-400">Creator Portal</p>
           <h1 className="text-2xl font-semibold text-zinc-100">Welcome to Bluu Rock MGMT</h1>
           <p className="text-sm text-zinc-400 italic mt-0.5">shape. develop. impact.</p>
         </div>
@@ -82,7 +85,7 @@ export default function WelcomePage() {
               href="https://drive.google.com/drive/folders/1vR1GwiJ9VV_312ZJpdol6MhRcodJ9XIR?usp=drive_link"
               target="_blank"
               rel="noreferrer"
-              className={`flex items-center gap-1.5 self-start rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${ACCENT_BTN}`}
+              className={`flex items-center gap-1.5 min-h-11 self-start rounded-lg px-3 py-3 text-xs font-semibold transition-colors ${ACCENT_BTN}`}
             >
               Open Folder <ExternalLink className="w-3.5 h-3.5" />
             </a>
@@ -99,7 +102,7 @@ export default function WelcomePage() {
           </p>
         </Section>
 
-      </main>
+      </div>
     </div>
   );
 }

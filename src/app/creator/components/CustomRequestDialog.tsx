@@ -46,6 +46,7 @@ export function CustomRequestDialog({
 
   return (
     <CreatorDialog
+      description="Custom request details, including the fan, amount, due date and the option to mark it completed."
       open={open}
       onOpenChange={onOpenChange}
       title={
@@ -79,7 +80,7 @@ export function CustomRequestDialog({
               href={driveLink!}
               target="_blank"
               rel="noreferrer"
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${ACCENT_BTN}`}
+              className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-3 text-xs font-semibold transition-colors ${ACCENT_BTN}`}
             >
               <ExternalLink className="h-3.5 w-3.5" /> Upload
             </a>
@@ -99,7 +100,7 @@ export function CustomRequestDialog({
             <Button
               disabled={busy}
               onClick={onComplete}
-              className={`group flex-1 gap-1.5 ${COMPLETE_BTN}`}
+              className={`group h-11 flex-1 gap-1.5 ${COMPLETE_BTN}`}
             >
               <CheckCircle2 className="h-3.5 w-3.5 transition-transform motion-safe:group-hover:scale-110" />
               {busy ? "Saving…" : "Mark Completed"}
@@ -109,7 +110,7 @@ export function CustomRequestDialog({
       }
     >
       <div className="flex flex-col gap-4">
-        <p className="text-xs text-zinc-500">{TYPE_LABELS[entry.type]}</p>
+        <p className="text-xs text-zinc-400">{TYPE_LABELS[entry.type]}</p>
 
         <Field label="Fan">
           <p className="font-medium text-zinc-100">{entry.fanName}</p>

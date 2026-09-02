@@ -19,7 +19,9 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
  (employees only)   └───────────────────────────────────────────────┘
                     ┌───────────────────────────────────────────────┐
  System browser  ─►│  Creator portal    /creator                   │─► CreatorAuthProvider + withCreatorAuth
- (creators)         └───────────────────────────────────────────────┘
+ (creators, phone)  └───────────────────────────────────────────────┘   installable PWA (manifest only,
+                                                                        no service worker); mobile nav is
+                                                                        a bottom tab bar — see DESIGN.md §7
                     ┌───────────────────────────────────────────────┐
  System browser  ─►│  Model application /model-submissions         │─► UNAUTHENTICATED (session token
  (public)           └───────────────────────────────────────────────┘   + rate limit + sharp validation)

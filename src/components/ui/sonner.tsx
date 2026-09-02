@@ -17,6 +17,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
+      // Sonner's mobile default is `bottom: 16px`, which lands a toast squarely
+      // on top of the creator portal's fixed bottom tab bar (h-16 + safe area) —
+      // covering the nav and putting the Undo action under the thumb that just
+      // completed the item. Only applies below sonner's 600px breakpoint, so the
+      // desktop console is unaffected.
+      mobileOffset={{ bottom: "calc(5rem + env(safe-area-inset-bottom))" }}
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,

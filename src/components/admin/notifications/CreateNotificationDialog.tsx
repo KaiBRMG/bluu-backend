@@ -41,6 +41,7 @@ import { PAGES } from '@/lib/definitions';
 import type { BasicUser } from '@/hooks/useBasicUsers';
 import type { AdminGroup } from '@/hooks/useAdminUsers';
 import type { NotificationType } from '@/types/firestore';
+import { classifyNotificationAction } from '@/lib/notificationActionUrl';
 import type { CreateBatchPayload, CreateBatchResult } from '@/hooks/useAdminNotifications';
 
 type ActionUrlMode = 'none' | 'internal' | 'external';
@@ -98,9 +99,24 @@ export default function CreateNotificationDialog({
     setSendTelegram(false);
   }
 
+  /**
+   * The external URL as it will actually be stored, or null while it is not a
+   * usable external link. Classified with the same function the server and every
+   * click surface use, so `example.com` resolves to `https://example.com` here
+   * rather than being mistaken for an app route when the notification is
+   * clicked. Anything that does not resolve to an *external* target is rejected
+   * — this field is not a way to enter an app path.
+   */
+  const externalPreview = (() => {
+    const target = classifyNotificationAction(externalUrl);
+    return target.kind === 'external' ? target.href : null;
+  })();
+  const externalIsInvalid =
+    actionUrlMode === 'external' && externalUrl.trim().length > 0 && externalPreview === null;
+
   function resolvedActionUrl(): string | null {
     if (actionUrlMode === 'internal') return internalPage || null;
-    if (actionUrlMode === 'external') return externalUrl.trim() || null;
+    if (actionUrlMode === 'external') return externalPreview;
     return null;
   }
 
@@ -122,7 +138,7 @@ export default function CreateNotificationDialog({
   }
 
   async function handleSubmit() {
-    if (!title.trim() || !message.trim() || recipients.length === 0) return;
+    if (!title.trim() || !message.trim() || recipients.length === 0 || externalIsInvalid) return;
 
     const userIds = recipients.filter(r => r.type === 'user').map(r => r.id);
     const groupIds = recipients.filter(r => r.type === 'group').map(r => r.id);
@@ -162,7 +178,11 @@ export default function CreateNotificationDialog({
     }
   }
 
-  const canSubmit = title.trim().length > 0 && message.trim().length > 0 && recipients.length > 0;
+  const canSubmit =
+    title.trim().length > 0 &&
+    message.trim().length > 0 &&
+    recipients.length > 0 &&
+    !externalIsInvalid;
 
   return (
     <>
@@ -348,14 +368,33 @@ export default function CreateNotificationDialog({
               )}
 
               {actionUrlMode === 'external' && (
-                <div className="relative">
-                  <ExternalLink className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input
-                    className="pl-8"
-                    placeholder="https://example.com"
-                    value={externalUrl}
-                    onChange={e => setExternalUrl(e.target.value)}
-                  />
+                <div className="space-y-1.5">
+                  <div className="relative">
+                    <ExternalLink className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      className="pl-8"
+                      placeholder="https://example.com"
+                      value={externalUrl}
+                      onChange={e => setExternalUrl(e.target.value)}
+                      aria-invalid={externalIsInvalid}
+                    />
+                  </div>
+                  {externalIsInvalid ? (
+                    <p className="text-xs text-destructive">
+                      Not a valid external link. Enter a web address such as
+                      {' '}<span className="font-mono">example.com/page</span>.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Opens in the user&rsquo;s browser
+                      {externalPreview && externalPreview !== externalUrl.trim() && (
+                        <>
+                          {' '}as <span className="font-mono">{externalPreview}</span>
+                        </>
+                      )}
+                      .
+                    </p>
+                  )}
                 </div>
               )}
             </div>

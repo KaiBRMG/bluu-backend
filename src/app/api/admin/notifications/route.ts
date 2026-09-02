@@ -4,6 +4,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById } from '@/lib/services/userService';
 import { sendTelegramNotification } from '@/lib/services/telegramService';
+import { normalizeActionUrl } from '@/lib/notificationActionUrl';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { NotificationType } from '@/types/firestore';
 
@@ -83,6 +84,12 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'userIds and groupIds must be arrays' }, { status: 400 });
     }
 
+    // Store the canonical form, so no surface has to guess later whether a
+    // stored value is an app route or a host. An admin typing `example.com`
+    // gets `https://example.com`; an unsafe scheme is dropped to null rather
+    // than persisted for a client to act on.
+    const resolvedActionUrl = normalizeActionUrl(actionUrl);
+
     // Expand group members server-side
     const allRecipientUids = new Set<string>(userIds);
 
@@ -131,7 +138,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         read: false,
         dismissedByUser: false,
         createdAt: FieldValue.serverTimestamp(),
-        actionUrl: actionUrl ?? null,
+        actionUrl: resolvedActionUrl,
         announcement: false,
         announcementExpiry: null,
         batchId,
@@ -148,7 +155,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       telegram = await sendTelegramNotification([...allRecipientUids], {
         title,
         message,
-        actionUrl,
+        actionUrl: resolvedActionUrl,
       });
       if (telegram.failed > 0 || telegram.skipped) {
         console.error('[admin/notifications POST] telegram delivery issue:', telegram);

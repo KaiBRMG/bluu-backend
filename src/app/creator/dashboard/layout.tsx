@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { House, HeartHandshake, ImagePlay, CalendarCheck } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -16,13 +15,8 @@ import {
   SidebarProvider,
   useSidebar,
 } from "@/components/ui/sidebar";
-
-const navItems = [
-  { title: "Dashboard", href: "/creator/dashboard", icon: House },
-  { title: "Welcome to Bluu Rock", href: "/creator/dashboard/welcome", icon: HeartHandshake },
-  { title: "Custom Requests", href: "/creator/dashboard/all-customs", icon: ImagePlay },
-  { title: "Content Planning", href: "/creator/dashboard/content-requests", icon: CalendarCheck },
-];
+import { CREATOR_NAV_ITEMS } from "../nav";
+import { CreatorBottomNav } from "../components/CreatorBottomNav";
 
 function CreatorSidebar() {
   const pathname = usePathname();
@@ -44,14 +38,14 @@ function CreatorSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map(({ title, href, icon: Icon }) => (
+              {CREATOR_NAV_ITEMS.map(({ title, href, icon: Icon }) => (
                 <SidebarMenuItem key={href}>
                   <SidebarMenuButton
                     asChild
                     isActive={pathname === href}
                     className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5 data-[active=true]:bg-sky-500/15 data-[active=true]:text-sky-100 data-[active=true]:font-medium rounded-lg h-11"
                   >
-                    <Link href={href} onClick={handleNavClick}>
+                    <Link href={href} onClick={handleNavClick} aria-current={pathname === href ? "page" : undefined}>
                       <Icon className="w-4 h-4 shrink-0" />
                       <span className="text-sm">{title}</span>
                     </Link>
@@ -79,9 +73,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       } as React.CSSProperties}
     >
       <CreatorSidebar />
+      {/* The tab bar's clearance is padded on each page's own content wrapper,
+          NOT here. Padding this container while every page ground is `min-h-dvh`
+          inside it makes the minimum document height `100dvh + 4rem`, so even an
+          empty page scrolls 64px into flat ground. */}
       <SidebarInset className="bg-[#09090b]">
         {children}
       </SidebarInset>
+      <CreatorBottomNav />
     </SidebarProvider>
   );
 }

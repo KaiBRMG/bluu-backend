@@ -23,6 +23,8 @@ import {
 } from "../theme";
 import { CustomRequestDialog } from "../components/CustomRequestDialog";
 import { CreatorDialog } from "../components/CreatorDialog";
+import { InstallPrompt } from "../components/InstallPrompt";
+import { LoadError } from "../components/LoadError";
 
 // ─── Content Planning types ───────────────────────────────────────────────────
 
@@ -111,10 +113,10 @@ function CPCard({ entry, onComplete, completing }: {
       )}
 
       {entry.comment && (
-        <p className="line-clamp-2 text-xs leading-relaxed text-zinc-500">{entry.comment}</p>
+        <p className="line-clamp-2 text-xs leading-relaxed text-zinc-400">{entry.comment}</p>
       )}
 
-      <p className={`mt-auto text-xs ${overdue ? "font-medium text-red-300" : "text-zinc-500"}`}>
+      <p className={`mt-auto text-xs ${overdue ? "font-medium text-red-300" : "text-zinc-400"}`}>
         {overdue ? "Overdue · " : "Due "}{formatCPDate(entry.dueDate)}
       </p>
 
@@ -123,7 +125,7 @@ function CPCard({ entry, onComplete, completing }: {
           onClick={() => onComplete(entry.id)}
           disabled={completing}
           size="sm"
-          className={`group w-full gap-1.5 ${COMPLETE_BTN}`}
+          className={`group h-11 w-full gap-1.5 ${COMPLETE_BTN}`}
         >
           <CheckCircle2 className="h-3.5 w-3.5 transition-transform motion-safe:group-hover:scale-110" />
           {completing ? "Saving…" : "Mark Completed"}
@@ -146,7 +148,7 @@ function CustomCard({ entry, accentHex, onOpen }: {
   return (
     <button
       onClick={onOpen}
-      className={`flex flex-col gap-2 rounded-xl p-3 text-left transition-all ${SURFACE.card} ${SURFACE.cardHover} active:scale-[0.98]`}
+      className={`flex flex-col gap-2 rounded-xl p-3 text-left transition-all focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-400 focus-visible:outline-none ${SURFACE.card} ${SURFACE.cardHover} motion-safe:active:scale-[0.98]`}
     >
       <div className="flex items-start justify-between gap-2">
         <span
@@ -163,7 +165,7 @@ function CustomCard({ entry, accentHex, onOpen }: {
       </div>
 
       <div>
-        <p className="text-[11px] uppercase tracking-wider text-zinc-500">Fan</p>
+        <p className="text-[11px] uppercase tracking-wider text-zinc-400">Fan</p>
         <p className="truncate text-sm font-medium text-zinc-100">{entry.fanName}</p>
       </div>
 
@@ -192,11 +194,11 @@ function TypeTile({ type, entries, onOpen }: {
       <div className="flex items-center gap-2">
         <span className="h-2 w-2 rounded-full" style={{ background: meta.hex }} />
         <h3 className="text-sm font-semibold text-zinc-200">{meta.label}</h3>
-        <span className="text-xs tabular-nums text-zinc-500">({entries.length})</span>
+        <span className="text-xs tabular-nums text-zinc-400">({entries.length})</span>
         {meta.infoText && (
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="ghost" size="icon" className="relative h-5 w-5 text-zinc-500 hover:text-zinc-300 after:absolute after:-inset-3 after:content-['']">
+              <Button variant="ghost" size="icon" className="relative h-5 w-5 text-zinc-400 hover:text-zinc-300 after:absolute after:-inset-3 after:content-['']">
                 <Info className="h-3.5 w-3.5" />
               </Button>
             </PopoverTrigger>
@@ -235,7 +237,7 @@ function ProfileMenu({ stageName, email, photoURL }: {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" className="h-auto items-center gap-2.5 rounded-xl px-2 py-1.5 hover:bg-white/5">
+        <Button variant="ghost" className="h-11 items-center gap-2.5 rounded-xl px-2 hover:bg-white/5">
           <Avatar size="sm" className="ring-1 ring-white/10">
             {photoURL && <AvatarImage src={photoURL} alt="" />}
             <AvatarFallback className="bg-sky-500/25 text-sky-100">
@@ -248,15 +250,15 @@ function ProfileMenu({ stageName, email, photoURL }: {
       <PopoverContent align="end" className={`w-56 overflow-hidden rounded-xl p-0 ${SURFACE.overlay}`}>
         <div className="border-b border-white/[0.07] px-4 py-3">
           <p className="text-sm font-semibold text-zinc-100">{stageName}</p>
-          <p className="mt-0.5 truncate text-xs text-zinc-500">{email}</p>
+          <p className="mt-0.5 truncate text-xs text-zinc-400">{email}</p>
         </div>
         <div className="p-1.5">
           <Button
             variant="ghost"
-            className="h-auto w-full justify-start gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-white"
+            className="h-11 w-full justify-start gap-2.5 rounded-lg px-3 text-sm text-zinc-300 hover:bg-white/5 hover:text-white"
             onClick={() => auth.signOut()}
           >
-            <LogOut className="h-4 w-4 text-zinc-500" />
+            <LogOut className="h-4 w-4 text-zinc-400" />
             Sign Out
           </Button>
         </div>
@@ -273,7 +275,7 @@ function SectionHeader({ title, info }: { title: string; info: string }) {
       <h2 className="text-lg font-semibold text-zinc-100">{title}</h2>
       <Popover>
         <PopoverTrigger asChild>
-          <Button variant="ghost" size="icon" className="relative h-6 w-6 shrink-0 text-zinc-500 hover:text-zinc-300 after:absolute after:-inset-3 after:content-['']">
+          <Button variant="ghost" size="icon" className="relative h-6 w-6 shrink-0 text-zinc-400 hover:text-zinc-300 after:absolute after:-inset-3 after:content-['']">
             <Info className="h-4 w-4" />
           </Button>
         </PopoverTrigger>
@@ -298,7 +300,19 @@ export default function CreatorDashboardPage() {
   const [cpLoaded, setCpLoaded] = useState(false);
   const [detailEntry, setDetailEntry] = useState<CampaignEntry | null>(null);
   const [linkedError, setLinkedError] = useState<string | null>(null);
+  const [entriesError, setEntriesError] = useState(false);
+  const [cpError, setCpError] = useState(false);
+  // Bumping this re-runs both listener effects, which re-subscribes them.
+  const [retryKey, setRetryKey] = useState(0);
   const linkedResolvedRef = useRef(false);
+
+  const retry = () => {
+    setEntriesLoaded(false);
+    setCpLoaded(false);
+    setEntriesError(false);
+    setCpError(false);
+    setRetryKey(k => k + 1);
+  };
 
   useEffect(() => {
     if (!creatorUser) return;
@@ -312,12 +326,16 @@ export default function CreatorDashboardPage() {
         .map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>))
         .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type) && e.status !== "Archived")
       );
+      setEntriesError(false);
       setEntriesLoaded(true);
     }, (error) => {
       console.error("[dashboard] campaign-tracking listener error:", error);
+      // Without these the skeletons spin forever with no message and no retry.
+      setEntriesError(true);
+      setEntriesLoaded(true);
     });
     return unsub;
-  }, [creatorUser?.creatorID]);
+  }, [creatorUser?.creatorID, retryKey]);
 
   // Resolve deep-linked CR from ?crId= query param
   useEffect(() => {
@@ -360,12 +378,16 @@ export default function CreatorDashboardPage() {
     );
     const unsub = onSnapshot(q, snap => {
       setCpEntries(sortCP(snap.docs.map(d => firestoreToCP(d.id, d.data() as Record<string, unknown>))));
+      setCpError(false);
       setCpLoaded(true);
     }, (error) => {
       console.error("[dashboard] content-planning listener error:", error);
+      // Without these the skeletons spin forever with no message and no retry.
+      setCpError(true);
+      setCpLoaded(true);
     });
     return unsub;
-  }, [creatorUser?.creatorID]);
+  }, [creatorUser?.creatorID, retryKey]);
 
   // ── Content-planning: optimistic complete with clean Undo (revert → Outstanding) ──
   const handleCpComplete = async (id: string) => {
@@ -446,40 +468,47 @@ export default function CreatorDashboardPage() {
 
   if (!creatorUser) {
     return (
-      <div className="flex min-h-screen items-center justify-center" style={{ background: "#09090b" }}>
+      <div className="flex min-h-dvh items-center justify-center" style={{ background: "#09090b" }}>
         <div className="h-6 w-6 animate-spin rounded-full border-2 border-sky-500/30 border-t-sky-500" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen" style={PAGE_GROUND_STYLE}>
+    <div className="min-h-dvh" style={PAGE_GROUND_STYLE}>
       {/* Top bar */}
       <header
         className="sticky top-0 z-40 flex h-14 items-center justify-between gap-2 px-3 sm:px-6"
         style={HEADER_STYLE}
       >
-        <SidebarTrigger className="text-zinc-400 hover:bg-white/5 hover:text-zinc-100 relative after:absolute after:-inset-3 after:content-['']" />
+        <SidebarTrigger className="hidden md:inline-flex text-zinc-400 hover:bg-white/5 hover:text-zinc-100 relative after:absolute after:-inset-3 after:content-['']" />
         <img
           src="/logo/bluu_long.svg"
           alt="Bluu Rock"
           className="pointer-events-none absolute left-1/2 top-1/2 h-6 -translate-x-1/2 -translate-y-1/2"
         />
-        <ProfileMenu
-          stageName={creatorUser.stageName || creatorUser.displayName}
-          email={creatorUser.userEmail}
-          photoURL={creatorUser.photoURL}
-        />
+        {/* ml-auto, not the header's justify-between: the sidebar trigger to the
+            left is desktop-only, so on mobile this is the only flex child. */}
+        <div className="ml-auto">
+          <ProfileMenu
+            stageName={creatorUser.stageName || creatorUser.displayName}
+            email={creatorUser.userEmail}
+            photoURL={creatorUser.photoURL}
+          />
+        </div>
       </header>
 
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-3 py-6 sm:gap-8 sm:px-6 sm:py-12">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-3 py-6 sm:gap-8 sm:px-6 sm:py-12 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
         {/* Welcome */}
         <div>
-          <p className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">Creator Portal</p>
+          <p className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-400">Creator Portal</p>
           <h1 className="text-2xl font-semibold text-zinc-100">
             Hey, {creatorUser.stageName || creatorUser.displayName} 👋
           </h1>
         </div>
+
+        {/* Renders nothing unless the portal can actually be installed here. */}
+        <InstallPrompt />
 
         {/* Section 1: Custom Requests */}
         <section className="flex flex-col gap-4">
@@ -492,6 +521,8 @@ export default function CreatorDashboardPage() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {[0, 1, 2].map(i => <Skeleton key={i} className="h-48 rounded-2xl" />)}
             </div>
+          ) : entriesError ? (
+            <LoadError message="Couldn't load your custom requests." onRetry={retry} />
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {(["CR", "Call", "Item"] as CustomType[]).map(type => (
@@ -513,6 +544,8 @@ export default function CreatorDashboardPage() {
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {[0, 1].map(i => <Skeleton key={i} className="h-40 rounded-xl" />)}
               </div>
+            ) : cpError ? (
+              <LoadError message="Couldn't load your content plan." onRetry={retry} />
             ) : cpEntries.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-center">
                 <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/15 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-90 motion-safe:duration-500">
@@ -539,7 +572,7 @@ export default function CreatorDashboardPage() {
         <section className={`flex flex-col gap-3 rounded-2xl px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5 ${SURFACE.panel}`}>
           <div className="flex min-w-0 flex-col gap-0.5">
             <h3 className="text-sm font-semibold text-zinc-200">Google Drive Upload Link</h3>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-400">
               Your content folder. Please upload content in{" "}
               <span className="font-mono text-zinc-400"># Unsorted</span>.
             </p>
@@ -549,15 +582,15 @@ export default function CreatorDashboardPage() {
               href={creatorUser.driveLink}
               target="_blank"
               rel="noreferrer"
-              className={`flex items-center justify-center gap-1.5 self-stretch whitespace-nowrap rounded-xl px-4 py-2 text-xs font-semibold transition-colors sm:self-auto ${ACCENT_BTN}`}
+              className={`flex items-center justify-center gap-1.5 min-h-11 self-stretch whitespace-nowrap rounded-xl px-4 py-3 text-xs font-semibold transition-colors sm:self-auto ${ACCENT_BTN}`}
             >
               Open Drive <ExternalLink className="h-3.5 w-3.5" />
             </a>
           ) : (
-            <span className="text-xs text-zinc-500">No link configured.</span>
+            <span className="text-xs text-zinc-400">No link configured.</span>
           )}
         </section>
-      </main>
+      </div>
 
       {/* Custom request detail (shared dialog; also handles deep-linked CR) */}
       {detailEntry && (
