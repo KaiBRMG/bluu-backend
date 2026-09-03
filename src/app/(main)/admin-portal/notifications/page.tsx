@@ -41,7 +41,7 @@ export default function AdminNotificationsPage() {
 
         <Tabs defaultValue="sent">
           <TabsList>
-            <TabsTrigger value="sent">Sent</TabsTrigger>
+            <TabsTrigger value="sent">One-Time Notifications</TabsTrigger>
             <TabsTrigger value="automated">
               Automated
               <span className="text-xs text-zinc-400 tabular-nums">

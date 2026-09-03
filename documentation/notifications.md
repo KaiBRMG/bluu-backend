@@ -122,8 +122,8 @@ The one notification whose recipient list is decided by **what version of the de
 
 `/admin-portal/notifications` has two tabs:
 
-- **Sent** — history of manual admin broadcasts (`notifications-batches`), click a row for per-recipient read/dismiss state and to unsend. Batches that were also pushed to Telegram carry a "Telegram" chip next to the title.
-- **Automated** — a **read-only** catalogue of the table above, grouped by category, from `src/lib/automatedNotifications.ts`. Expanding an entry shows the message template (interpolated values render as `{token}` chips), what fires it, who receives it, the `actionUrl`, and the source route. An entry with `telegramEnabled: true` carries the same "Telegram" chip as the Sent tab. Nothing on this tab is sendable, editable or unsendable — it exists so admins can see what the system sends on its own.
+- **One-Time Notifications** — history of manual admin broadcasts (`notifications-batches`), click a row for per-recipient read/dismiss state and to unsend. Batches that were also pushed to Telegram carry a "Telegram" chip next to the title.
+- **Automated** — a **read-only** catalogue of the table above, grouped by category, from `src/lib/automatedNotifications.ts`. Expanding an entry shows the message template (interpolated values render as `{token}` chips), what fires it, who receives it, the `actionUrl`, and the source route. An entry with `telegramEnabled: true` carries the same "Telegram" chip as the One-Time Notifications tab. Nothing on this tab is sendable, editable or unsendable — it exists so admins can see what the system sends on its own.
 
   **A separate Creators section sits below the categories**, from `AUTOMATED_CREATOR_NOTIFICATIONS` — see [Creator notifications](#creator-notifications-telegram-only) below.
 
@@ -152,7 +152,7 @@ A second delivery channel, **additive to the in-app notification, never a replac
 - **Delivery lives in [`src/lib/services/telegramService.ts`](../src/lib/services/telegramService.ts)** and is **server-only**: `TELEGRAM_BOT_TOKEN` must never reach the client. Nothing in `src/components` or `src/hooks` may import it.
 - **Order matters.** `POST /api/admin/notifications` commits the Firestore batch **first**, then attempts Telegram. `sendTelegramNotification` never throws — it returns `{ sent, failed, skipped, error }`, the route echoes it as `telegram` on the response, and the dialog toasts a *warning* on a partial failure. A Telegram outage must never lose an in-app notification that is already written.
 - **Copy is still the caller's.** The service formats (`<b>Title</b>`, blank line, message) and escapes `& < >` for HTML parse mode. It does not author text — rule 1 is unchanged.
-- **`sentViaTelegram: boolean` is written on the batch doc** (`admin_notification_batches`) and shown as a chip on the Sent tab. It is `true` whenever the checkbox was checked **or** any creator was a recipient — Telegram genuinely gets used either way. Nothing queries it, so it is exempted from indexing in `firestore.indexes.json` (rule 9).
+- **`sentViaTelegram: boolean` is written on the batch doc** (`admin_notification_batches`) and shown as a chip on the One-Time Notifications tab. It is `true` whenever the checkbox was checked **or** any creator was a recipient — Telegram genuinely gets used either way. Nothing queries it, so it is exempted from indexing in `firestore.indexes.json` (rule 9).
 
 ### Creator recipients in a manual send
 
@@ -160,7 +160,7 @@ The Create Notification dialog's recipient picker also lists every creator indiv
 
 The recipient list is a narrow, `admin-notifications`-gated projection (`GET /api/admin/notifications/creators`, `uid` + `stageName` only) — deliberately not `/api/admin/creators`, which requires the separate `admin-creator-management` permission and returns far more than a recipient picker needs.
 
-The Sent tab's recipients dialog only ever reads `notifications` docs (in-app only), so a creator recipient never appears in its per-row read/dismiss table; it shows the gap as "+N creators notified via Telegram" instead, computed from `batch.recipientCount` minus the fetched row count.
+The One-Time Notifications tab's recipients dialog only ever reads `notifications` docs (in-app only), so a creator recipient never appears in its per-row read/dismiss table; it shows the gap as "+N creators notified via Telegram" instead, computed from `batch.recipientCount` minus the fetched row count.
 
 **Automated notifications.** Every event in the table above **except Onboarding and OF Manager** also calls `sendTelegramNotification` with the same recipients and the same `NotificationContent`, right after the in-app batch commits — same order-matters rule, same never-throws contract. The Automated tab marks each wired entry with a Telegram chip (`AutomatedNotification.telegramEnabled`). Onboarding is excluded because a user who has never used the app has nothing to have linked yet; OF Manager's two alerts are excluded because they already have one named recipient and no fan-out to widen.
 

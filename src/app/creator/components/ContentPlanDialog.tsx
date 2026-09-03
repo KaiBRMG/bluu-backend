@@ -38,16 +38,21 @@ export function ContentPlanDialog({
 
   return (
     <CreatorDialog
-      description="Content plan details, including what is required, the due date and the option to submit it for review."
+      description="Content plan details, including what is required, the due date and the option to mark it done."
       open={open}
       onOpenChange={onOpenChange}
       title={entry.contentSummary || "Content"}
       headerExtra={
-        <span
-          className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-4 font-medium ${contentTypeBadge(entry.contentType)}`}
-        >
-          {entry.contentType}
-        </span>
+        <>
+          <span className="text-sm" style={{ color: COLOR.ink2 }}>
+            Content Request
+          </span>
+          <span
+            className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-4 font-medium ${contentTypeBadge(entry.contentType)}`}
+          >
+            {entry.contentType}
+          </span>
+        </>
       }
       footer={
         onComplete ? (
@@ -60,7 +65,7 @@ export function ContentPlanDialog({
               className="size-4 transition-transform motion-safe:group-hover:scale-110"
               aria-hidden="true"
             />
-            {busy ? "Submitting…" : "Submit for review"}
+            {busy ? "Saving…" : "Done"}
           </Button>
         ) : undefined
       }

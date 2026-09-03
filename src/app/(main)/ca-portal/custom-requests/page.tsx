@@ -600,6 +600,12 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
     setStep(s => s + 1);
   };
 
+  const canAdvanceStep2 =
+    !!form.fanName.trim() &&
+    !!form.profileLink.trim() &&
+    !!form.description.trim() &&
+    Number(form.totalAmount) > 0;
+
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
@@ -766,7 +772,7 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setStep(s => s - 1)}>Back</Button>
               <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={handleNext}>Next</Button>
+              <Button onClick={handleNext} disabled={!canAdvanceStep2}>Next</Button>
             </div>
           </div>
         )}

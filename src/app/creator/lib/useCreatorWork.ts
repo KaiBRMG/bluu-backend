@@ -233,7 +233,7 @@ export function useCreatorWork(): CreatorWork {
         });
         if (!res.ok) throw new Error(String(res.status));
         toast.success(
-          item.kind === "custom" ? "Sent back — no longer submitted" : "Restored to your schedule",
+          item.kind === "custom" ? "Sent back — no longer marked done" : "Restored to your schedule",
         );
       } catch {
         // The revert failed, so the record really is still completed. Put the
@@ -267,7 +267,7 @@ export function useCreatorWork(): CreatorWork {
         });
         if (!res.ok) throw new Error(String(res.status));
         successFeedback();
-        toast.success("Submitted for review", {
+        toast.success("Done", {
           description: "Your manager will check it over.",
           action: { label: "Undo", onClick: () => void undo(item) },
         });
@@ -275,7 +275,7 @@ export function useCreatorWork(): CreatorWork {
         window.clearTimeout(t);
         restore(item.key);
         errorFeedback();
-        toast.error("Couldn't submit that", {
+        toast.error("Couldn't mark that done", {
           description: "Check your connection and try again.",
         });
       } finally {

@@ -446,9 +446,10 @@ The portal's dashboard and both list pages are organised around **one continuous
 ### Components & interaction (portal-specific)
 
 - **One dialog vocabulary.** Every detail view uses shadcn `Dialog` via [`components/CreatorDialog.tsx`](src/app/creator/components/CreatorDialog.tsx) — Esc-to-close, a focus trap, `role="dialog"` for free, a sticky footer so a long record's primary action never scrolls out of reach. **Never hand-roll an overlay.** `CustomRequestDialog` and `ContentPlanDialog` both take an `AgendaItem`, not a raw Firestore record, so both dialogs and every list row read the same shape.
-- **The button reads "Submit for review", never "Mark Completed".** Completion routes a record to *Awaiting Approval* (customs) or *Completed pending review*, not to a finished state the creator controls — the old label named an outcome the system does not produce. Two safety models, by stakes, unchanged in substance:
-  - **Customs (high-ticket):** a **deliberate two-step** — open the detail dialog, then confirm — so a stray tap in a dense list can't submit one. Undo reverts to *Awaiting Approval*.
+- **The button reads "Done", never "Mark Completed" or "Submit for review".** Completion still routes a record to *Awaiting Approval* (customs) or a pending-review state (content) server-side — that workflow detail is deliberately not surfaced in the label. "Done" is the creator's own point of view: she has finished her part. Two safety models, by stakes, unchanged in substance:
+  - **Customs (high-ticket):** a **deliberate two-step** — open the detail dialog, then confirm — so a stray tap in a dense list can't complete one. Undo reverts to *Awaiting Approval*.
   - **Content planning (routine):** one tap from the row itself (a dedicated 44px tick target, separate from the row's own open-detail tap target), with the same Undo toast.
+- **Every content-planning row also names its kind.** A merged agenda item carries `typeLabel` — `"Custom"` / `"Call"` / `"Item"` for a custom request, `"Content Request"` for content planning, always present — so a creator scanning the spine can tell the two record types apart at a glance; the record's own content type (`SFW`/`PPV`/…) rides alongside it as a separate `contentTypeBadge` chip. See `lib/agenda.ts`.
 - **The stream, not a grid.** Outstanding items render down the spine in due-date order; the all-customs page groups the same items by type (customs are a ledger question — "how much" — as well as a schedule question). Neither uses horizontal paging.
 
 ### Mobile is the design target (and the portal runs inside Telegram)
@@ -478,7 +479,7 @@ Creators read this surface almost entirely on a phone, so — as with §8 — mo
 4. **Solid fills only** — no gradient or glow buttons/cards. `PRIMARY_BTN` / `COMPLETE_BTN` / `ACCENT_BTN` / `QUIET_BTN` are a hierarchy, not a palette: **`PRIMARY_BTN` appears at most once per screen.**
 5. **Every state cue is a shape plus a hue, never hue alone.** This is not a preference — it is measured (§ Colour, above) and it governs every future addition to the spine, the tab bar, and the sidebar.
 6. **Detail & confirm = shadcn `Dialog`** through `CreatorDialog`. No bespoke overlays.
-7. **"Submit for review", never "Mark Completed" or "Completed"**, and every completion is undoable via the `revert` flag, for both record types, from every surface that offers completion.
+7. **"Done", never "Mark Completed", "Submit for review" or "Completed"**, and every completion is undoable via the `revert` flag, for both record types, from every surface that offers completion.
 8. **A new destination goes in [`nav.ts`](src/app/creator/nav.ts)**, with a `shortTitle` that fits a quarter of a phone's width — never in one nav only. Past four tabs the bar needs rethinking, not a fifth squeeze.
 9. **A listener error branches to `LoadError` before the empty branch.** No new Firestore subscription on this surface ships without one.
 10. **≥44px on every control**, not just the nav. Where a glyph must stay small, expand the hit area with `after:absolute after:-inset-N` rather than shrinking the target.
@@ -489,7 +490,9 @@ Creators read this surface almost entirely on a phone, so — as with §8 — mo
 The prior version of this section documented four deferrals left open by that critique. This redesign addresses all four as part of the same change, rather than carrying them forward again:
 
 - **Content-planning completion is now undoable**, via the shared `useCreatorWork.complete()`/`undo()` pair — no longer one-way while the dashboard's was reversible.
-- **The button reads "Submit for review"**, not "Mark Completed" — see Components & interaction, above.
+- **The button reads "Done"**, not "Mark Completed" and not "Submit for review" — see Components & interaction, above. ("Submit for review" was this redesign's own first pass, replaced again after the client asked for plainer language.)
+- **Content-planning rows now name their kind.** A merged agenda used to leave a content item's `SFW`/`PPV` sub-type as its only label, with nothing saying "this is a content request" the way a custom shows "Custom"/"Call"/"Item" — fixed via the `typeLabel`/`contentTypeLabel` split in `agenda.ts`.
+- **The "your payments are governed by your signed management agreement" line is gone** from every surface that carried it (the dashboard ledger, both detail dialogs, the welcome guide) — a client copy decision, not an accuracy fix; the underlying figures are still internal tracking numbers, that fact alone is what remains stated.
 - **Customs now compute a real overdue state**, through the same timezone-aware helper content planning already used.
 - **Red means exactly one thing.** The closed `URGENCY` vocabulary replaces both the unconditional rose due-date colour and the separate red-means-late convention with a single definition, in one file.
 

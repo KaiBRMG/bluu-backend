@@ -36,7 +36,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         length?: string;
       };
 
-      if (!fanName || !totalAmount) {
+      if (!fanName || !profileLink || !description || !(Number(totalAmount) > 0)) {
         return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
       }
 
@@ -100,7 +100,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       dueDateTimezone?: string | null;
     };
 
-    if (!fanName || !description) {
+    if (!fanName || !profileLink || !description || !(Number(totalAmount) > 0)) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 

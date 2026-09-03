@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   CalendarCheck,
   ExternalLink,
@@ -8,7 +7,6 @@ import {
   ImagePlay,
   Rocket,
   ShieldCheck,
-  Sun,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -54,27 +52,6 @@ export default function WelcomePage() {
           </P>
         </Section>
 
-        <Section icon={Sun} title="Reading your Today screen">
-          <P>
-            Everything you owe us sits on one line running down the{" "}
-            <Link
-              href="/creator/dashboard"
-              className={`rounded underline underline-offset-2 ${FOCUS_RING}`}
-              style={{ color: COLOR.azureText }}
-            >
-              Today
-            </Link>{" "}
-            screen, in the order it comes due. Anything overdue sits at the top; today is
-            marked in blue; the days ahead follow below it.
-          </P>
-          <P>
-            Each item shows a small bar underneath it. That bar fills up as its deadline gets
-            closer, so you can see what is about to become urgent without reading a single
-            date.
-          </P>
-          <Legend />
-        </Section>
-
         <Section icon={ImagePlay} title="Custom requests">
           <P>
             These are unique, custom goods your fans request at a much higher rate than
@@ -82,9 +59,9 @@ export default function WelcomePage() {
             pay for one usually comes back for more, getting them out quickly matters.
           </P>
           <P>
-            Open a custom to see everything the fan asked for, then use{" "}
-            <Strong>Submit for review</Strong> when it is done. It goes to your manager to
-            check, and disappears from your list.
+            Open a custom to see everything the fan asked for, then tap{" "}
+            <Strong>Done</Strong> once you&rsquo;ve finished it. It goes to your manager to check,
+            and disappears from your list.
           </P>
         </Section>
 
@@ -95,7 +72,7 @@ export default function WelcomePage() {
             by the due date so our team can release content as scheduled.
           </P>
           <P>
-            Content items can be sent for review straight from the list: tap the tick on the
+            Content requests can be marked done straight from the list: tap the tick on the
             right of the row. Tapped one by mistake? The confirmation that appears has an{" "}
             <Strong>Undo</Strong> on it.
           </P>
@@ -144,8 +121,7 @@ export default function WelcomePage() {
             it, and how to ask for a copy or a deletion.
           </P>
           <P>
-            Amounts shown in this portal are internal tracking figures for coordination —
-            your payments are governed by your signed management agreement.
+            Amounts shown in this portal are internal tracking figures for coordination.
           </P>
           <ExternalAction href="/terms">Read the Terms &amp; Privacy Policy</ExternalAction>
         </Section>
@@ -222,42 +198,5 @@ function Section({
       </div>
       <div className="flex flex-col gap-3">{children}</div>
     </section>
-  );
-}
-
-/**
- * The one place the portal explains its own notation.
- *
- * Every state here is named in words as well as drawn, which is also what makes
- * the legend usable by someone who cannot tell the two hues apart — the same
- * reason the interface itself never carries state in colour alone.
- */
-function Legend() {
-  const rows: { hex: string; filled: boolean; label: string; body: string }[] = [
-    { hex: "#f9746d", filled: true, label: "Overdue", body: "past its due date — do these first" },
-    { hex: COLOR.azure, filled: true, label: "Due today", body: "needs to be with us today" },
-    { hex: COLOR.line, filled: false, label: "Coming up", body: "scheduled for a later day" },
-  ];
-  return (
-    <ul className={`m-0 mt-1 flex list-none flex-col gap-3 rounded-xl px-4 py-4 ${SURFACE.card}`}>
-      {rows.map((r) => (
-        <li key={r.label} className="flex items-baseline gap-3">
-          <span
-            aria-hidden="true"
-            className="mt-1.5 size-2.5 shrink-0 rounded-full"
-            style={{
-              background: r.filled ? r.hex : COLOR.void,
-              boxShadow: r.filled ? "none" : `inset 0 0 0 1.5px ${COLOR.line}`,
-            }}
-          />
-          <p className="text-sm" style={{ color: COLOR.ink2 }}>
-            <span className="font-medium" style={{ color: COLOR.ink }}>
-              {r.label}
-            </span>{" "}
-            — {r.body}
-          </p>
-        </li>
-      ))}
-    </ul>
   );
 }

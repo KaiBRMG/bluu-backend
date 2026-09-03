@@ -67,8 +67,8 @@ export default function ContentPlanPage() {
               : count === 0
                 ? "This is the content we need to keep your page running. Nothing is outstanding right now."
                 : lateCount > 0
-                  ? `${count} outstanding, ${lateCount} of them past due. Tap the tick to send one for review.`
-                  : `${count} outstanding. Tap the tick to send one for review.`}
+                  ? `${count} outstanding, ${lateCount} of them past due. Tap the tick to mark one done.`
+                  : `${count} outstanding. Tap the tick to mark one done.`}
           </p>
         </header>
 

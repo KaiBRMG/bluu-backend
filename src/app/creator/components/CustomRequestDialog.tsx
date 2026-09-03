@@ -20,14 +20,13 @@ import { CreatorDialog, Field } from "./CreatorDialog";
  * Detail view for a custom request (customs / calls / items).
  *
  * **Completion here is a deliberate two-step and that is the point.** Customs
- * are high-ticket; a stray tap in a list must not be able to submit one. Routine
- * content planning completes in one tap from the stream — the difference in
- * stakes is what the difference in ceremony encodes.
+ * are high-ticket; a stray tap in a list must not be able to complete one.
+ * Routine content planning completes in one tap from the stream — the
+ * difference in stakes is what the difference in ceremony encodes.
  *
- * The button says **"Submit for review"**, not "Mark Completed". Completing
- * routes the record to *Awaiting Approval*, so the old label named an outcome
- * the system does not produce — it told a creator she was finished when a
- * manager still had to look. This was a documented DESIGN.md defect.
+ * The button reads **"Done"** — simple, from the creator's point of view: she
+ * has finished her part. The record still routes to *Awaiting Approval*
+ * server-side; that workflow detail is deliberately not surfaced in the label.
  */
 export function CustomRequestDialog({
   item,
@@ -57,7 +56,7 @@ export function CustomRequestDialog({
 
   return (
     <CreatorDialog
-      description="Custom request details, including the fan, amount, due date and the option to submit it for review."
+      description="Custom request details, including the fan, amount, due date and the option to mark it done."
       open={open}
       onOpenChange={onOpenChange}
       title={
@@ -101,7 +100,7 @@ export function CustomRequestDialog({
                 className="size-4 transition-transform motion-safe:group-hover:scale-110"
                 aria-hidden="true"
               />
-              {busy ? "Submitting…" : "Submit for review"}
+              {busy ? "Saving…" : "Done"}
             </Button>
           )}
         </div>
@@ -187,8 +186,7 @@ export function CustomRequestDialog({
         )}
 
         <p className="text-[11px] leading-relaxed" style={{ color: COLOR.ink3 }}>
-          Amounts here are internal tracking figures for coordination. Your payments are
-          governed by your signed management agreement.
+          Amounts here are internal tracking figures for coordination.
         </p>
       </div>
     </CreatorDialog>

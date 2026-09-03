@@ -308,7 +308,10 @@ function DetailDialog({ entry, creatorName, creators, onClose, onSaved, onDelete
     setFields(prev => ({ ...prev, [k]: v }));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={e => { if (e.target === e.currentTarget && !hasChanged) onClose(); }}
+    >
       <Card className="w-full max-w-lg mx-4 flex flex-col max-h-[90vh]">
         <CardHeader className="shrink-0 pb-3">
           <div className="flex items-center justify-between gap-2">
@@ -400,7 +403,8 @@ function DetailDialog({ entry, creatorName, creators, onClose, onSaved, onDelete
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            {hasChanged && <span className="text-xs text-amber-400">Unsaved changes</span>}
             <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
             <Button size="sm" onClick={handleSave} disabled={saving || !hasChanged}>
               {saving ? "Saving..." : "Update"}

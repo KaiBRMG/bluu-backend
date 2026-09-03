@@ -93,12 +93,12 @@ export const ANNOUNCEMENTS: AnnouncementDefinition[] = [
     // DISARMED. Ships inert. To test on yourself: enabled: true + your uid in
     // `uids`. To roll out: a group at a time, then `allUsers`.
     enabled: true,
-    allUsers: false,
-    uids: ['VoRCp0wmgvSgKG8yzxOyMyZ4cSv1','frSjvEHILmZ0rnDhVpGwh0wjP4d2'],
+    allUsers: true,
+    uids: [],
     groups: [],
 
     title: 'Bluu Backend has integrated with Telegram',
-    body: 'Important updates and system alerts can now be sent straight to you on Telegram, so you can receive important updates without needing to open the app.',
+    body: 'Important updates and system alerts can now be sent straight to you on Telegram, so you can receive important updates without needing to open the app!',
 
     primaryLabel: 'Link Account',
     action: { kind: 'telegram-link' },

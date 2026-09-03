@@ -145,8 +145,14 @@ export interface AgendaItem {
   title: string;
   /** `CR0042`. Customs only. */
   code?: string;
-  /** `Custom` / `Call` / `Item`, or the content type (`SFW`, `PPV`, …). */
+  /** The record's kind, in the customer-facing vocabulary a creator scans for:
+   *  `Custom` / `Call` / `Item` for a custom request, `Content Request` for
+   *  content planning. Always present, so a merged stream never leaves it
+   *  ambiguous which list an item came from. */
   typeLabel: string;
+  /** The content type (`SFW`, `PPV`, …). Content items only — customs carry
+   *  their type in `typeLabel` directly, since a custom has no second axis. */
+  contentTypeLabel?: string;
   amount?: number;
   dueDate: string | null;
   dueDayKey: string | null;
@@ -224,7 +230,8 @@ function contentToAgenda(e: ContentEntry, tz: string | undefined, now: number, t
     kind: "content",
     id: e.id,
     title: e.contentSummary || "Untitled content",
-    typeLabel: e.contentType,
+    typeLabel: "Content Request",
+    contentTypeLabel: e.contentType,
     dueDate: e.dueDate,
     dueDayKey: dayKey,
     dueLabel: e.dueDate ? formatDueDate(e.dueDate) : null,

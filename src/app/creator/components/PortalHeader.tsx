@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ExternalLink, FolderOpen, LogOut } from "lucide-react";
-import { auth } from "@/firebase-config";
+import { ExternalLink, FolderOpen } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -135,15 +134,6 @@ export function PortalHeader({ title }: { title?: string }) {
                   <ExternalLink className="ml-auto size-3.5" aria-hidden="true" />
                 </a>
               )}
-              <Button
-                variant="ghost"
-                className={`h-11 w-full justify-start gap-2.5 rounded-lg px-3 text-sm hover:bg-[#1e2934] ${FOCUS_RING}`}
-                style={{ color: COLOR.ink2 }}
-                onClick={() => auth.signOut()}
-              >
-                <LogOut className="size-4" aria-hidden="true" />
-                Sign out
-              </Button>
             </div>
           </PopoverContent>
         </Popover>

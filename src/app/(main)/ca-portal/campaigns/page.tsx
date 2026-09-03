@@ -301,7 +301,12 @@ function NewCampaignWizard({ creators, defaultCreatorID, onClose }: WizardProps)
     setForm(prev => ({ ...prev, [k]: e.target.value }));
   const setVal = (k: string) => (v: string) => setForm(prev => ({ ...prev, [k]: v }));
 
-  const canAdvanceStep2 = !!form.creatorID && !!form.fanName && !!form.totalAmount;
+  const canAdvanceStep2 =
+    !!form.creatorID &&
+    !!form.fanName.trim() &&
+    !!form.profileLink.trim() &&
+    !!form.description.trim() &&
+    Number(form.totalAmount) > 0;
 
   const handleSubmit = async () => {
     setSubmitting(true);

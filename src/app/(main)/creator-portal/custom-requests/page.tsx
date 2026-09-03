@@ -26,7 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
 import { Label as RechartsLabel, Pie, PieChart } from "recharts";
-import { Plus, MoreHorizontal, Check, Info, Search, CalendarIcon, Link2 } from "lucide-react";
+import { Plus, MoreHorizontal, Check, Info, Search, CalendarIcon } from "lucide-react";
 import { resolveUserName } from "@/components/DeletedUser";
 import { useUserName } from "@/hooks/useUserName";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
@@ -39,7 +39,6 @@ import {
 import { useUserData } from "@/hooks/useUserData";
 import { useBasicUsers } from "@/hooks/useBasicUsers";
 import { apiRequest } from "@/lib/clientApi";
-import { PUBLIC_APP_ORIGIN } from "@/lib/publicOrigin";
 import { toast } from "sonner";
 import { TransferDialog, ConfirmDialog, ARCHIVE_CR_TEXT, UNARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
 
@@ -336,28 +335,15 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
   const inputClass = "w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={e => { if (e.target === e.currentTarget && !hasChanged) onClose(); }}
+    >
       <Card className="w-full max-w-lg mx-4 flex flex-col max-h-[90vh]">
         <CardHeader className="shrink-0 pb-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <CardTitle className="text-lg">{entry.CR}</CardTitle>
-              <button
-                type="button"
-                title="Copy creator link"
-                onClick={() => {
-                  const typeLabel = entry.type === "Item" ? "Item Request" : TYPE_LABELS[entry.type] ?? entry.type;
-                  // Public domain, not window.location.origin — staff copy this
-                  // from Electron, whose origin is the vercel.app host.
-                  const url = `${PUBLIC_APP_ORIGIN}/creator/dashboard?crId=${entry.id}`;
-                  const message = `💸 You have a new ${typeLabel} from ${entry.fanName} for ${formatAmount(entry.totalAmount)}! \nCheck your Portal for the details: ${url}\n`;
-                  navigator.clipboard.writeText(message);
-                  toast.success("Link copied");
-                }}
-                className="text-zinc-500 hover:text-zinc-300 transition-colors"
-              >
-                <Link2 className="w-3.5 h-3.5" />
-              </button>
             </div>
             <StatusBadge status={entry.status} />
           </div>
@@ -546,6 +532,7 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          {hasChanged && <span className="text-xs text-amber-400 mr-auto">Unsaved changes</span>}
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={handleSave} disabled={saving || !hasChanged}>{saving ? "Saving..." : "Save"}</Button>
         </CardFooter>

@@ -3,7 +3,15 @@
 import { Check, ChevronRight } from "lucide-react";
 import { formatAmount } from "@/lib/campaignTracking";
 import { countdownLabel, type AgendaItem } from "../lib/agenda";
-import { COLOR, DONE_HEX, FOCUS_RING, PRIORITY_CHIP, SPINE, URGENCY } from "../theme";
+import {
+  COLOR,
+  contentTypeBadge,
+  DONE_HEX,
+  FOCUS_RING,
+  PRIORITY_CHIP,
+  SPINE,
+  URGENCY,
+} from "../theme";
 import { SpineNode } from "./Spine";
 
 /**
@@ -98,6 +106,13 @@ export function WorkRow({
             <span className="text-[11px]" style={{ color: COLOR.ink2 }}>
               {item.typeLabel}
             </span>
+            {item.contentTypeLabel && (
+              <span
+                className={`rounded px-1.5 py-px text-[10px] leading-4 ${contentTypeBadge(item.contentTypeLabel)}`}
+              >
+                {item.contentTypeLabel}
+              </span>
+            )}
             <span aria-hidden="true" style={{ color: COLOR.ink3 }}>
               ·
             </span>
@@ -133,7 +148,7 @@ export function WorkRow({
             type="button"
             onClick={onComplete}
             disabled={busy || sealing}
-            aria-label={`Submit ${item.title} for review`}
+            aria-label={`Mark ${item.title} done`}
             className={`mt-1 grid size-11 shrink-0 place-items-center rounded-xl border transition-colors ${FOCUS_RING} disabled:opacity-60`}
             style={{
               borderColor: sealing ? DONE_HEX : COLOR.line,

@@ -335,8 +335,7 @@ export default function CreatorTodayPage() {
             </div>
 
             <p className="mt-2 px-1 text-[11px] leading-relaxed" style={{ color: COLOR.ink3 }}>
-              Internal tracking figures for coordination — your payments are governed by your
-              signed management agreement.
+              Internal tracking figures for coordination.
             </p>
           </section>
         )}

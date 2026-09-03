@@ -17,5 +17,5 @@ export const CREATOR_NAV_ITEMS = [
   { title: "Today", shortTitle: "Today", href: "/creator/dashboard", icon: Sun },
   { title: "Custom Requests", shortTitle: "Customs", href: "/creator/dashboard/all-customs", icon: ImagePlay },
   { title: "Content Plan", shortTitle: "Content", href: "/creator/dashboard/content-requests", icon: CalendarCheck },
-  { title: "Welcome Guide", shortTitle: "Guide", href: "/creator/dashboard/welcome", icon: HeartHandshake },
+  { title: "Welcome Guide", shortTitle: "Welcome", href: "/creator/dashboard/welcome", icon: HeartHandshake },
 ] as const;
