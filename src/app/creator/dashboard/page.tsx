@@ -16,6 +16,7 @@ import {
   PRIORITY_COLORS, formatAmount, formatDueDate, firestoreToEntry, sortByPriority, CAMPAIGN_TYPES,
 } from "@/lib/campaignTracking";
 import { apiRequest } from "@/lib/clientApi";
+import { isOverdue } from "@/lib/timezone";
 import { toast } from "sonner";
 import {
   TYPE_META, SURFACE, ACCENT_BTN, COMPLETE_BTN, PAGE_GROUND_STYLE, HEADER_STYLE, contentTypeBadge,
@@ -23,7 +24,6 @@ import {
 } from "../theme";
 import { CustomRequestDialog } from "../components/CustomRequestDialog";
 import { CreatorDialog } from "../components/CreatorDialog";
-import { InstallPrompt } from "../components/InstallPrompt";
 import { LoadError } from "../components/LoadError";
 
 // ─── Content Planning types ───────────────────────────────────────────────────
@@ -56,11 +56,6 @@ function firestoreToCP(id: string, data: Record<string, unknown>): CPEntry {
   };
 }
 
-function isCPOverdue(dueDate: string | null): boolean {
-  if (!dueDate) return false;
-  return new Date(dueDate + "T23:59:59Z") < new Date();
-}
-
 function formatCPDate(dateStr: string | null): string {
   if (!dateStr) return "—";
   try {
@@ -81,12 +76,14 @@ function sortCP(list: CPEntry[]): CPEntry[] {
 
 // ─── Content Planning Card ────────────────────────────────────────────────────
 
-function CPCard({ entry, onComplete, completing }: {
+function CPCard({ entry, onComplete, completing, timezone }: {
   entry: CPEntry;
   onComplete: (id: string) => void;
   completing: boolean;
+  /** The creator's own timezone — a deadline is late in their day, not UTC's. */
+  timezone?: string;
 }) {
-  const overdue = isCPOverdue(entry.dueDate);
+  const overdue = isOverdue(entry.dueDate, timezone);
   const rows = entry.description.filter(r => r.qty || r.content);
   return (
     <div
@@ -209,20 +206,15 @@ function TypeTile({ type, entries, onOpen }: {
         )}
       </div>
 
-      {entries.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-8 text-center">
-          <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-full motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-90 motion-safe:duration-500" style={{ background: `${meta.hex}15` }}>
-            <CheckCircle2 className="h-4 w-4" style={{ color: meta.hex }} />
-          </div>
-          <p className="text-xs text-zinc-400">All caught up!</p>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {entries.map(e => (
-            <CustomCard key={e.id} entry={e} accentHex={meta.hex} onOpen={() => onOpen(e)} />
-          ))}
-        </div>
-      )}
+      {/* No empty branch: an empty type is not rendered at all (see
+          `visibleTypes`), so a creator never scrolls past a panel that only
+          says "nothing here". When every type is empty the section shows one
+          combined message instead of three. */}
+      <div className="flex flex-col gap-2">
+        {entries.map(e => (
+          <CustomCard key={e.id} entry={e} accentHex={meta.hex} onOpen={() => onOpen(e)} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -466,6 +458,22 @@ export default function CreatorDashboardPage() {
     Item: sortByPriority(entries.filter(e => e.type === "Item")),
   }), [entries]);
 
+  // Only types with work in them get a panel. Calls and Items are usually empty,
+  // and on a phone the tiles stack — so rendering all three put two full "All
+  // caught up!" panels between the creator and their actual custom requests.
+  const visibleTypes = useMemo(
+    () => (["CR", "Call", "Item"] as CustomType[]).filter(t => entriesByType[t].length > 0),
+    [entriesByType],
+  );
+
+  // Static strings so Tailwind's scanner sees them; the grid tracks the number
+  // of panels actually rendered rather than always reserving three.
+  const TYPE_GRID_COLS: Record<number, string> = {
+    1: "grid-cols-1",
+    2: "grid-cols-1 sm:grid-cols-2",
+    3: "grid-cols-1 sm:grid-cols-3",
+  };
+
   if (!creatorUser) {
     return (
       <div className="flex min-h-dvh items-center justify-center" style={{ background: "#09090b" }}>
@@ -507,9 +515,6 @@ export default function CreatorDashboardPage() {
           </h1>
         </div>
 
-        {/* Renders nothing unless the portal can actually be installed here. */}
-        <InstallPrompt />
-
         {/* Section 1: Custom Requests */}
         <section className="flex flex-col gap-4">
           <SectionHeader
@@ -523,9 +528,16 @@ export default function CreatorDashboardPage() {
             </div>
           ) : entriesError ? (
             <LoadError message="Couldn't load your custom requests." onRetry={retry} />
+          ) : visibleTypes.length === 0 ? (
+            <div className={`flex flex-col items-center justify-center rounded-2xl py-10 text-center ${SURFACE.panel}`}>
+              <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/15 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-90 motion-safe:duration-500">
+                <CheckCircle2 className="h-4 w-4 text-sky-400" />
+              </div>
+              <p className="text-xs text-zinc-400">All caught up — no customs, calls or items right now!</p>
+            </div>
           ) : (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              {(["CR", "Call", "Item"] as CustomType[]).map(type => (
+            <div className={`grid gap-4 ${TYPE_GRID_COLS[visibleTypes.length]}`}>
+              {visibleTypes.map(type => (
                 <TypeTile key={type} type={type} entries={entriesByType[type]} onOpen={setDetailEntry} />
               ))}
             </div>
@@ -561,6 +573,7 @@ export default function CreatorDashboardPage() {
                     entry={e}
                     onComplete={handleCpComplete}
                     completing={cpCompleting === e.id}
+                    timezone={creatorUser.defaultTimezone}
                   />
                 ))}
               </div>

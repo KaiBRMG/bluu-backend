@@ -106,6 +106,10 @@ Section 3 only exists when the applicant answers **yes** to "do you already have
 
 Section 3 is therefore only ever the trial link and the earnings screenshots (**up to two**). The social pages moved to section 2 in 2026-09, because every applicant has them — gating them behind "do you have an OnlyFans account?" meant we held no way to look up the majority of applicants.
 
+### The collection notice on the last step is load-bearing
+
+Under the submit button on the **final** step only, the form carries *"By submitting you confirm you are 18 or over and agree to our Terms of Use & Privacy Policy"*, linking `/terms` in a new tab. This is the **only** place an applicant is ever given notice: the form is the product's one unauthenticated write path, it collects photographs of a person, and Part D of `/terms` claims to cover applicants — a policy nobody is shown is not notice. Do not remove it, and keep it on the step that actually submits. See [onboarding.md](onboarding.md#step-0--welcome-terms-of-use) for the document's structure.
+
 ### Contact: one of Telegram or WhatsApp is required
 
 Each field is optional on its own; **`requireOneContact` in the shared schema demands one of the two**, on both the step slice and the whole-form schema. Email alone is not enough: every conversation with an applicant happens on a messenger, and an application nobody can follow up on is an application nobody actions. (An earlier note here said the opposite — it described the Instagram/Telegram pair, and Instagram is no longer a contact field at all.)

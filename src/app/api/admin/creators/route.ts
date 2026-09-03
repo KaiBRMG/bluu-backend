@@ -19,11 +19,22 @@ async function fetchCreators() {
 
   const snapshot = await adminDb.collection('creators').get();
   const creators = snapshot.docs.map(doc => {
-    const data = doc.data();
+    // `telegramLinkTokenHash` is pulled out rather than sent: it is only a hash,
+    // but it is a pointer to a live invite and the admin table has no use for
+    // it. `telegram` is projected down to what the table renders — the raw field
+    // carries a Firestore Timestamp, which does not survive JSON as anything
+    // usable, and a chat id the client has no business holding.
+    const { telegramLinkTokenHash: _hash, telegram, ...data } = doc.data();
     return {
       ...data,
       createdAt: data.createdAt?.toDate?.()?.toISOString() ?? null,
       updatedAt: data.updatedAt?.toDate?.()?.toISOString() ?? null,
+      telegram: telegram
+        ? {
+            username: telegram.username ?? null,
+            linkedAt: telegram.linkedAt?.toDate?.()?.toISOString() ?? null,
+          }
+        : null,
     };
   });
 

@@ -136,11 +136,15 @@ A second delivery channel, **additive to the in-app notification, never a replac
 - **`actionUrl`: only absolute `http(s)` URLs are linked.** An internal app path is dropped on purpose — `src/middleware.ts` rewrites non-Electron page traffic to `/desktop-only`, so an in-app link opened from a phone is a dead end. The in-app notification carries that action.
 - **`sentViaTelegram: boolean` is written on the batch doc** (`admin_notification_batches`) and shown as a chip on the Sent tab. Nothing queries it, so it is exempted from indexing in `firestore.indexes.json` (rule 9).
 
-### TEMPORARY: recipient resolution
+### Recipient resolution
 
-No user has linked a Telegram account yet. `resolveChatIds(uids)` **ignores the uids** and returns the single chat in `TG_BOT_TEST_ID` — one message per send, not per recipient, and zero extra Firestore reads. When account linking lands, **only that function changes**: read the linked chat id off each user doc and return the distinct set. Call sites and the API contract already pass the full recipient list.
+`resolveChatIds(uids)` maps recipient uids onto the chat ids on their user docs, in a single batched `getAll` with a field mask — one read per recipient, no N+1, and only `telegram.chatId` comes back (cross-cutting rule 9). Users who have not linked Telegram simply drop out; **that is the opt-out**, and it is why "Disconnect" in App Settings genuinely stops delivery rather than just hiding a badge.
 
-Env vars (both server-only, no `NEXT_PUBLIC_` prefix): `TELEGRAM_BOT_TOKEN`, `TG_BOT_TEST_ID`. Missing either → the send is `skipped` and the in-app notification still goes out.
+There is deliberately **no `TG_BOT_TEST_ID` fallback any more.** It existed while nobody had linked an account, and it sent every Telegram-flagged broadcast to one test chat. Keeping it after real linking would mean a send whose recipients happen to be unlinked lands in that chat instead of nowhere — misdelivery dressed up as success. An unresolvable send returns `skipped`, and the in-app notification still goes out.
+
+Env vars (server-only, no `NEXT_PUBLIC_` prefix): `TELEGRAM_BOT_TOKEN`, plus `TELEGRAM_WEBHOOK_SECRET` for the bot webhook. Missing the token → the send is `skipped`.
+
+Account linking, the bot webhook and the creator Mini App are all documented in [telegram.md](telegram.md). **Bot copy (`telegramMessages.*`) also lives in `notificationContent.ts`** — rule 1 is about copy, not storage — but it is **not** catalogued in `automatedNotifications.ts`: rule 15 governs in-app notifications, and a bot message on the Automated tab would misdescribe what that tab is.
 
 ## Adding a new notification event
 

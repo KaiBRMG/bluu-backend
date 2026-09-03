@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@telegram-apps/sdk-react": "^3.3.9"
+  }
+}

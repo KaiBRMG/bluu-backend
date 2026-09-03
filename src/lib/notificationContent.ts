@@ -193,3 +193,60 @@ export const notifications = {
     actionUrl: null,
   }),
 };
+
+/**
+ * ── Telegram bot copy ────────────────────────────────────────────────────────
+ *
+ * Messages the **bot** sends into a Telegram chat. They are not `notifications/`
+ * documents — nothing renders them in the tray, and nothing catalogues them on
+ * the Automated tab (cross-cutting rule 15 governs in-app notifications; these
+ * are a different channel and listing them would misdescribe that tab).
+ *
+ * They live here anyway because rule 1 is about *copy*, not about storage: a
+ * title typed into `telegramLinkService` or a webhook route is exactly the
+ * scattering that rule exists to prevent.
+ *
+ * **These strings are Telegram HTML**, not plain text — the `<b>`/`<i>` tags are
+ * intentional and are handed to `parse_mode: 'HTML'`. Anything interpolated must
+ * be escaped by the caller (`escapeHtml` in `telegramService.ts`); the tokens
+ * below are all names, which a user can control.
+ */
+export const telegramMessages = {
+  /**
+   * Sent to a creator the moment their Telegram account is bound. The trailing
+   * "👇" points at the menu button the same handler installs — keep the two
+   * together, or the message points at nothing.
+   */
+  creatorWelcome: (creatorName: string): string =>
+    `🎉 <b>Welcome ${creatorName}!</b>\n\n` +
+    'The Creator Portal can now easily be accessed via Telegram! ' +
+    'See your custom requests, scheduled calls, and content requirements here 👇',
+
+  /** Sent to an employee the moment their Telegram account is bound. */
+  employeeWelcome: (): string =>
+    '✅ <b>System Alerts Connected!</b>\n\n' +
+    'Your Telegram account is now linked to your Bluu Backend account.\n\n' +
+    'You will begin receiving real-time system alerts, status updates, and critical notifications in this chat.\n\n' +
+    '<i>Note: This is an automated channel. Can be disabled in Bluu Backend settings.</i>',
+
+  /**
+   * The three ways `/start` can fail. Deliberately vague about *why* a token is
+   * unusable — expired, spent and never-existed are one message, so a stranger
+   * who guesses at the link cannot learn which tokens are real.
+   */
+  linkInvalid: (): string =>
+    '⚠️ <b>This link is no longer valid.</b>\n\n' +
+    'It may have expired or already been used. Ask your Bluu Rock contact for a new one.',
+
+  linkConflict: (): string =>
+    '⚠️ <b>This Telegram account is already linked to another Bluu Rock account.</b>\n\n' +
+    'Disconnect it there first, or contact your Bluu Rock contact for help.',
+
+  linkInactive: (): string =>
+    '⚠️ <b>That account is not active.</b>\n\nPlease contact your Bluu Rock contact.',
+
+  /** Any `/start` with no payload — someone who found the bot on their own. */
+  startWithoutToken: (): string =>
+    '👋 <b>Bluu Rock</b>\n\n' +
+    'This bot delivers alerts from Bluu Backend. To connect, use the personal link you were sent.',
+};

@@ -34,6 +34,7 @@ import { useUserData } from "@/hooks/useUserData";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
 import type { Creator } from "@/lib/campaignTracking";
+import { isOverdue } from "@/lib/timezone";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -91,10 +92,9 @@ function formatDate(isoOrDateStr: string | null, userTz?: string): string {
   } catch { return isoOrDateStr; }
 }
 
-function isOverdue(dueDate: string | null): boolean {
-  if (!dueDate) return false;
-  const due = new Date(dueDate.includes("T") ? dueDate : dueDate + "T23:59:59Z");
-  return due < new Date();
+/** A deadline is late in the CREATOR's day, not the staff viewer's. */
+function creatorTz(creators: Creator[], creatorID: string): string | undefined {
+  return creators.find(c => c.creatorID === creatorID)?.defaultTimezone;
 }
 
 function StatusBadge({ status }: { status: "Outstanding" | "Completed" }) {
@@ -353,7 +353,7 @@ function DetailDialog({ entry, creatorName, creators, onClose, onSaved, onDelete
           <div>
             <div className="flex items-center gap-2 mb-1">
               <p className="text-xs text-zinc-400">Due Date</p>
-              {isOverdue(entry.dueDate) && entry.status === "Outstanding" && (
+              {isOverdue(entry.dueDate, creatorTz(creators, entry.creatorID)) && entry.status === "Outstanding" && (
                 <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-red-500/10 text-red-400">
                   <span className="size-1.5 rounded-full bg-red-400" />
                   Overdue
@@ -719,7 +719,7 @@ function CreatorContentTable({ creatorID, creatorName, creators, isActive }: {
             </TableHeader>
             <TableBody>
               {pageEntries.map(entry => {
-                const overdue = isOverdue(entry.dueDate) && entry.status === "Outstanding";
+                const overdue = isOverdue(entry.dueDate, creatorTz(creators, entry.creatorID)) && entry.status === "Outstanding";
                 return (
                   <TableRow key={entry.id}>
                     <TableCell className="text-sm font-medium max-w-[200px] truncate">{entry.contentSummary}</TableCell>
@@ -1051,7 +1051,7 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
                   <span className="text-xs text-zinc-500 shrink-0">{byCreator[creator.creatorID].length}</span>
                 </div>
                 {byCreator[creator.creatorID].map(entry => {
-                  const overdue = isOverdue(entry.dueDate);
+                  const overdue = isOverdue(entry.dueDate, creator.defaultTimezone);
                   return (
                     <button
                       key={entry.id}

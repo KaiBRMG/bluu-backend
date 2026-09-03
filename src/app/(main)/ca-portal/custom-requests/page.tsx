@@ -575,7 +575,11 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
     callType: "",
     dueDate: "",
     dueTime: "",
-    dueDateTimezone: userData?.timezone ?? "",
+    // Filled from the selected creator below: a due date belongs to the
+
+    // creator's day, so the staff viewer's zone is never the right default.
+
+    dueDateTimezone: "",
   });
   const [submitting, setSubmitting] = useState(false);
 

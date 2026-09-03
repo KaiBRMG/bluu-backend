@@ -21,7 +21,7 @@
 | `src/app/(main)/onboarding/permission/notifications/page.tsx` | Step 4 — OS notification permission |
 | `src/app/(main)/onboarding/profile/page.tsx` | Step 5 — personal details form; **this is the step that completes onboarding** |
 | `src/app/(main)/onboarding/done/page.tsx` | Step 6 — terminal confirmation; explains the unassigned-group wait |
-| `src/app/terms/page.tsx` | The terms of use document (single source) — opened in the **system browser**, not in-app |
+| `src/app/terms/page.tsx` | The Terms of Use **& Privacy Policy** (single source, all surfaces — staff, creators, applicants) — opened in the **system browser**, not in-app |
 | `src/middleware.ts` | `/terms` is in `BROWSER_ALLOWED_PREFIXES` so the external browser can reach it |
 | `src/app/api/user/onboarding/route.ts` | The only write path for `hasAcceptedTerms` / `hasCompletedOnboarding` — one-way (true only) |
 | `src/app/api/user/update/route.ts` | Writes the profile-step payload (same allowlisted route Settings uses) |
@@ -186,9 +186,28 @@ Sets `identity="none"` and renders identity itself, as the heading **"Welcome to
 
 The terms link points at **`/terms`** with `target="_blank"`. In Electron that goes through `setWindowOpenHandler` → `openExternalSafe` → `shell.openExternal`, i.e. **it opens in the user's system browser, not in the app**. That is why `/terms` must stay in `BROWSER_ALLOWED_PREFIXES` — the external browser sends no `Electron/` user agent, so without the allowlist entry it would be rewritten to `/desktop-only`.
 
-[`src/app/terms/page.tsx`](../src/app/terms/page.tsx) is the **single source** of the terms text. (This spoke previously named a `TOU.md` at the repo root as the master copy — no such file exists, so there is nothing to keep in sync.) Clause 1 covers the access model: admin registration, personal Google sign-in, and what Google does and does not share with us. Keep it accurate when the auth model changes — see [auth.md](auth.md#the-allowlist-the-authorisation-gate).
+[`src/app/terms/page.tsx`](../src/app/terms/page.tsx) is the **single source** of the legal text, and since v2.0 it is **one document for every surface, not just this one**. `src/app/terms/terms.md` used to hold a second, drifting copy; it is now only a pointer at the page.
 
-**Note — editing the terms deliberately does not re-prompt anyone.** `hasAcceptedTerms` is a one-way flag ([§5](#5-write-path-guarantees)) with no version attached, so a user who has already accepted never sees the onboarding step again. **This is by design, not a gap:** `Login` carries *"By signing in you agree with Bluu Backend Terms of Use"* directly above the sign-in button, and every user passes that screen on every login — so agreement is re-affirmed continuously against whatever the current text says. The explicit onboarding step exists to make a new user read it once; it is not the only point of acceptance.
+Its four parts and their audiences:
+
+| Part | Covers | Binds |
+|---|---|---|
+| **A — Terms of Use** | acceptance/changes, accounts, acceptable use, IP & confidentiality, warranties, **liability cap**, indemnity, governing law (England & Wales), general | everyone |
+| **B — Staff & Bluu Backend** | "Clocked In", the **monitoring disclosure** (what is captured, what is explicitly *not*, lawful basis, deletion requests), Google sign-in scope, devices/sessions, offboarding | employees + contractors |
+| **C — Creator Portal** | the portal is *not* the management agreement (signed agreement prevails), displayed amounts are tracking figures only, **18+ and content warranties**, the content licence, Drive uploads, acting on the creator's behalf | creators/clients |
+| **D — Privacy Policy** | controller + contact, collection by audience, lawful-basis table, sharing, named subprocessors, international transfers, security, data-subject rights | everyone |
+
+> **No retention periods are published, deliberately.** The policy states no schedule and no per-category periods; do not add any without checking first — a published period the system does not actually enforce is worse than silence.
+
+Clause 2 (Part A) and clause 12 (Part B) cover the access model: admin registration, personal Google sign-in, and what Google does and does not share with us. Keep them accurate when the auth model changes — see [auth.md](auth.md#the-allowlist-the-authorisation-gate). Clause 26's provider table must be kept in step with the actual stack.
+
+**RULE — bump `VERSION` *and* `EFFECTIVE_DATE` at the top of `page.tsx` on any substantive edit.** They are printed in the header and the footer, and they are the only record of what a user agreed to (see the note below). Clause 1 also commits us to notifying users in-app or by email before a material change takes effect.
+
+**Note — editing the terms deliberately does not re-prompt anyone.** `hasAcceptedTerms` is a one-way flag ([§5](#5-write-path-guarantees)) with no version attached, so a user who has already accepted never sees the onboarding step again. **This is by design, not a gap:** `Login` carries *"By signing in you agree to our Terms of Use & Privacy Policy"* directly above the sign-in button, and every user passes that screen on every login — so agreement is re-affirmed continuously against whatever the current text says. The explicit onboarding step exists to make a new user read it once; it is not the only point of acceptance. (The known weakness: nothing records *which version* was accepted. Storing `acceptedTermsVersion` alongside the boolean would fix it and is the prerequisite for ever forcing re-acceptance.)
+
+**The creator portal has no acceptance step at all** — creators are given notice, not a gate. `/creator/dashboard/welcome` ends with a Terms & Privacy section linking out, and it is load-bearing for the same reason `Login`'s notice is; keep it if you touch that page.
+
+⚠️ **One notice was lost when Telegram sign-in replaced the login screen.** `/creator/login` used to carry a by-signing-in notice under its button, seen at *every* sign-in; the portal now signs creators in silently from Telegram's `initData`, so the welcome page is the only surface left carrying it — and a returning creator never sees that page. If the point-of-sign-in notice matters, it needs a new home (a persistent Terms link in the portal chrome is the obvious candidate).
 
 **RULE — that notice on `Login` is load-bearing.** It is what makes updating the terms possible without a re-acceptance flow. Do not remove it, and keep it linked to `/terms`.
 

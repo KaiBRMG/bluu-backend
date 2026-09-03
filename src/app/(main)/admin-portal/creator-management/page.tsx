@@ -22,7 +22,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { MoreHorizontal, UserCircle, Copy, Check, Info } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { getAvatarColor, getInitials } from "@/lib/utils/avatar";
-import { TimezoneCombobox } from "@/components/ui/timezone-combobox";
+import { timezoneLabel } from "@/lib/timezone";
+import { toast } from "sonner";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,10 @@ interface Creator {
   updatedAt: string | null;
   driveLink?: string;
   defaultTimezone?: string;
+  /** Null until the creator spends their one-time link in Telegram. Since
+   *  Telegram is the only way into the creator portal, this doubles as "can
+   *  this creator actually sign in yet?". */
+  telegram?: { username: string | null; linkedAt: string | null } | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -86,7 +91,11 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
   const [OFID, setOFID] = useState(initial?.OFID ?? '');
   const [userEmail, setUserEmail] = useState(initial?.userEmail ?? '');
   const [driveLink, setDriveLink] = useState(initial?.driveLink ?? '');
-  const [defaultTimezone, setDefaultTimezone] = useState(initial?.defaultTimezone ?? '');
+  // Read-only: `defaultTimezone` is detected from the creator's own device when
+  // they sign in (POST /api/creator/timezone) and is the basis of every due-date
+  // calculation. An admin value here would be silently overwritten at their next
+  // sign-in, so the field reports rather than edits.
+  const detectedTimezone = initial?.defaultTimezone ?? '';
   const [password, setPassword] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(initial?.photoURL ?? null);
@@ -117,7 +126,7 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
     try {
       if (isEdit && initial) {
         // Update existing
-        const updateBody: Record<string, unknown> = { stageName, OFID, driveLink, defaultTimezone };
+        const updateBody: Record<string, unknown> = { stageName, OFID, driveLink };
         if (password) updateBody.newPassword = password;
         const res = await apiRequest(`/api/admin/creators/${initial.uid}`, {
           method: 'PUT',
@@ -141,7 +150,7 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
         // Create new
         const res = await apiRequest('/api/admin/creators', {
           method: 'POST',
-          body: JSON.stringify({ stageName, userEmail, password, OFID, driveLink, defaultTimezone }),
+          body: JSON.stringify({ stageName, userEmail, password, OFID, driveLink }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? 'Create failed');
@@ -240,10 +249,17 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
               />
             </div>
 
-            {/* Default Timezone */}
+            {/* Timezone — reported, not set. See `detectedTimezone` above. */}
             <div>
-              <label className="block text-sm text-zinc-400 mb-1">Default Timezone</label>
-              <TimezoneCombobox value={defaultTimezone} onChange={setDefaultTimezone} />
+              <label className="block text-sm text-zinc-400 mb-1">Timezone</label>
+              <p className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-300">
+                {detectedTimezone ? timezoneLabel(detectedTimezone) : 'Not detected yet'}
+              </p>
+              <p className="mt-1 text-xs text-zinc-400">
+                {detectedTimezone
+                  ? "Detected from this creator's device. Due dates are judged against it."
+                  : 'Detected automatically the first time this creator signs in.'}
+              </p>
             </div>
 
             {/* Email */}
@@ -310,9 +326,14 @@ interface CreatorTableProps {
   onArchive: (creator: Creator) => void;
   onRestore: (creator: Creator) => void;
   onDelete: (creator: Creator) => void;
+  onTelegramLink: (creator: Creator) => void;
+  onTelegramDisconnect: (creator: Creator) => void;
 }
 
-function CreatorTable({ list, onEdit, onToggleActive, onArchive, onRestore, onDelete }: CreatorTableProps) {
+function CreatorTable({
+  list, onEdit, onToggleActive, onArchive, onRestore, onDelete,
+  onTelegramLink, onTelegramDisconnect,
+}: CreatorTableProps) {
   if (list.length === 0) {
     return (
       <div className="rounded-lg p-8 text-center mt-4" style={{ background: 'var(--sidebar-background)', border: '1px solid var(--border-subtle)' }}>
@@ -348,6 +369,21 @@ function CreatorTable({ list, onEdit, onToggleActive, onArchive, onRestore, onDe
                 </Tooltip>
               </span>
             </TableHead>
+            <TableHead>
+              <span className="inline-flex items-center gap-1.5">
+                Telegram
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button type="button" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+                      <Info className="w-3.5 h-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <p>Telegram is the only way into the Creator Portal. A creator who has not connected cannot sign in — send them a connection link from the row menu.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </span>
+            </TableHead>
             <TableHead className="w-12"></TableHead>
           </TableRow>
         </TableHeader>
@@ -378,6 +414,20 @@ function CreatorTable({ list, onEdit, onToggleActive, onArchive, onRestore, onDe
                 </span>
               </TableCell>
               <TableCell>
+                {creator.telegram ? (
+                  <span className="inline-flex items-center rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-400">
+                    {creator.telegram.username ? `@${creator.telegram.username}` : 'Connected'}
+                  </span>
+                ) : (
+                  // Orange, not zinc: for a creator this is "awaiting action",
+                  // not a neutral resting state — they cannot get in until it
+                  // changes. STATUS_COLORS' warning triad.
+                  <span className="inline-flex items-center rounded-full bg-orange-500/10 px-2 py-0.5 text-xs font-medium text-orange-400">
+                    Not connected
+                  </span>
+                )}
+              </TableCell>
+              <TableCell>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -388,6 +438,14 @@ function CreatorTable({ list, onEdit, onToggleActive, onArchive, onRestore, onDe
                     <DropdownMenuItem onClick={() => onEdit(creator)}>
                       Edit
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onTelegramLink(creator)}>
+                      {creator.telegram ? 'Copy new Telegram link' : 'Copy Telegram link'}
+                    </DropdownMenuItem>
+                    {creator.telegram && (
+                      <DropdownMenuItem onClick={() => onTelegramDisconnect(creator)}>
+                        Disconnect Telegram
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem onClick={() => onToggleActive(creator)}>
                       {creator.isActive ? 'Deactivate' : 'Reactivate'}
                     </DropdownMenuItem>
@@ -500,6 +558,55 @@ export default function CreatorManagementPage() {
     }
   };
 
+  /**
+   * Mint a one-time connection link and put it on the clipboard for the admin to
+   * send. Minting voids any previous outstanding link for this creator, which is
+   * why the menu item reads "Copy **new** Telegram link" once one has been
+   * issued — pressing it again is not idempotent, it revokes.
+   *
+   * The link is never stored anywhere readable, so there is no "show it again":
+   * lose it, mint another.
+   */
+  const handleTelegramLink = async (creator: Creator) => {
+    setActionLoading(true);
+    try {
+      const res = await apiRequest(`/api/admin/creators/${creator.uid}/telegram-link`, {
+        method: 'POST',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { url } = (await res.json()) as { url: string };
+      await navigator.clipboard.writeText(url);
+      toast.success(`Connection link copied — send it to ${creator.stageName}.`, {
+        description: 'Single use, expires in 7 days.',
+      });
+      await fetchCreators();
+    } catch (err: unknown) {
+      console.error('[creator-management] telegram link failed:', err);
+      toast.error('Could not generate a connection link.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleTelegramDisconnect = async (creator: Creator) => {
+    setActionLoading(true);
+    try {
+      const res = await apiRequest(`/api/admin/creators/${creator.uid}/telegram-link`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      toast.success(`${creator.stageName} disconnected from Telegram.`, {
+        description: 'They cannot open the portal until they use a new link.',
+      });
+      await fetchCreators();
+    } catch (err: unknown) {
+      console.error('[creator-management] telegram disconnect failed:', err);
+      toast.error('Could not disconnect Telegram.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleDelete = async (creator: Creator) => {
     setActionLoading(true);
     try {
@@ -539,6 +646,8 @@ export default function CreatorManagementPage() {
                 onArchive={setArchiveTarget}
                 onRestore={handleRestore}
                 onDelete={setDeleteTarget}
+                onTelegramLink={handleTelegramLink}
+                onTelegramDisconnect={handleTelegramDisconnect}
               />
             </TabsContent>
             <TabsContent value="archived">
@@ -549,6 +658,8 @@ export default function CreatorManagementPage() {
                 onArchive={setArchiveTarget}
                 onRestore={handleRestore}
                 onDelete={setDeleteTarget}
+                onTelegramLink={handleTelegramLink}
+                onTelegramDisconnect={handleTelegramDisconnect}
               />
             </TabsContent>
           </Tabs>

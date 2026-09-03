@@ -3,6 +3,7 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminAuth, adminDb, adminStorage } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
 import { invalidateAdminCreatorsCache } from '@/app/api/admin/creators/route';
+import { releaseTelegramIndexEntries } from '@/lib/services/telegramLinkService';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -77,9 +78,21 @@ export const DELETE = withAuth(async (request: NextRequest, token: DecodedIdToke
     // Read doc first to get storage path
     const docSnap = await adminDb.collection('creators').doc(creatorId).get();
     const photoStoragePath = docSnap.data()?.photoStoragePath ?? null;
+    // Read the Telegram ids before the doc goes: `telegram-accounts` is keyed by
+    // Telegram id, and a leftover entry would keep resolving a deleted creator's
+    // Telegram account to their old uid. Same reason the employee cascade
+    // releases the device-session index.
+    const telegramUserId: string | undefined = docSnap.get('telegram.userId');
+    const telegramTokenHash: string | undefined = docSnap.get('telegramLinkTokenHash');
 
     // Delete in parallel where possible
     await Promise.all([
+      releaseTelegramIndexEntries({
+        telegramUserId,
+        pendingTokenHash: telegramTokenHash,
+      }).catch((err) => {
+        console.error(`[DeleteCreator] Failed to release Telegram link for ${creatorId}:`, err);
+      }),
       adminDb.collection('creators').doc(creatorId).delete(),
       adminAuth.deleteUser(creatorId),
       photoStoragePath

@@ -2,38 +2,25 @@ import type { Metadata, Viewport } from 'next';
 import { CreatorPortalShell } from './CreatorPortalShell';
 
 /**
- * The creator portal is the one surface read almost entirely on a phone, and the
- * only one a user can install to their home screen. Everything below is scoped to
- * the `/creator` segment on purpose — the root layout is shared with the internal
- * Electron console, which must not inherit a manifest or a mobile viewport.
+ * The creator portal is the one surface read almost entirely on a phone, and it
+ * now runs **inside Telegram** as a Mini App. Everything below is scoped to the
+ * `/creator` segment on purpose — the root layout is shared with the internal
+ * Electron console, which must not inherit a mobile viewport.
  *
- * The manifest is a static file (`public/creator/manifest.webmanifest`), not a
- * service worker: an installed home-screen app is the whole benefit here, and
- * offline caching would actively hurt a portal whose every screen is a live
- * Firestore subscription. See DESIGN.md § Creator Portal — Installed app.
+ * **The PWA install path is gone.** The portal used to ship a web manifest and
+ * an install prompt so a creator could add it to their home screen; with
+ * Telegram as the only way in, an installed copy would open outside Telegram
+ * with no `initData` and therefore no session — an icon that leads to a dead
+ * end. Telegram's own "add to home screen" covers the same need and launches
+ * back through the bot. `InstallPrompt` and `manifest.webmanifest` were removed
+ * with it; the icons are kept as ordinary favicons for the webview.
  */
 export const metadata: Metadata = {
   title: 'Bluu Creator Portal',
   description: 'Your custom requests, content plan and upload links.',
-  manifest: '/creator/manifest.webmanifest',
-  applicationName: 'Bluu Creator',
-  appleWebApp: {
-    capable: true,
-    title: 'Bluu Creator',
-    // `black` keeps the iOS status bar opaque so page content starts below it.
-    // `black-translucent` would slide the sticky headers under the clock and
-    // require a safe-area inset on every one of them.
-    statusBarStyle: 'black',
-  },
   icons: {
     apple: '/creator/apple-touch-icon.png',
     icon: '/creator/icon-192.png',
-  },
-  other: {
-    // Next emits only the standard `mobile-web-app-capable`. iOS honours the
-    // manifest's `display: standalone` from 16.4 on, but anything older still
-    // needs this legacy name to launch full screen instead of inside Safari.
-    'apple-mobile-web-app-capable': 'yes',
   },
 };
 

@@ -43,7 +43,14 @@ async function fetchUsersAndGroups() {
     getAllGroups(),
   ]);
 
-  const users = usersSnapshot.docs.map(doc => serializeTimestamps(doc.data()));
+  const users = usersSnapshot.docs.map(doc => {
+    // The outstanding Telegram invite pointer is dropped before the payload
+    // leaves the server. It is only a hash, and this route is already gated on
+    // the user-management page permission — but it points at a live,
+    // account-binding token, and no admin screen has any use for it.
+    const { telegramLinkTokenHash: _hash, ...data } = doc.data();
+    return serializeTimestamps(data);
+  });
   const serializedGroups = groups.map(g => serializeTimestamps(g as Record<string, unknown>));
 
   const data = { users, groups: serializedGroups };

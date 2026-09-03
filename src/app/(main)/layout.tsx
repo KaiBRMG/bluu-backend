@@ -9,6 +9,7 @@ import AppVersionReporter from "@/components/AppVersionReporter";
 import UpdateBanner from "@/components/UpdateBanner";
 import UpdateAvailableBanner from "@/components/UpdateAvailableBanner";
 import EmailMigrationDialog from "@/components/migration/EmailMigrationDialog";
+import AnnouncementCard from "@/components/announcements/AnnouncementCard";
 import DeploymentRefresher from "@/components/DeploymentRefresher";
 import NavigationWatchdog from "@/components/NavigationWatchdog";
 import NavigationProgress from "@/components/NavigationProgress";
@@ -60,6 +61,12 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 never interrupt a shift. Renders nothing unless the user's cohort
                 is armed in emailMigrationConfig.ts. */}
             <EmailMigrationDialog />
+            {/* Inside LazyProviders because it reads clock state — a clock-out
+                is what re-arms a "remind me later". Mounted on the layout, not
+                in AppLayout, so the card persists across navigations instead of
+                being torn down with the page. Renders nothing unless an entry
+                in announcementConfig.ts is armed for this user. */}
+            <AnnouncementCard />
             {/* Also inside LazyProviders, and for the same reason: it reads
                 clock state to make sure a forced reload never lands mid-shift.
                 Main window only — a satellite must not reload under an

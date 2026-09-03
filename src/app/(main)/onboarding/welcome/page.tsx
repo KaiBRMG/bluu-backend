@@ -59,7 +59,8 @@ export default function WelcomePage() {
 
       <p className="mx-auto mt-6 max-w-[60ch] text-center text-sm leading-relaxed text-pretty text-zinc-400">
         Bluu Backend is the internal management platform for Bluu Rock MGMT. Before you
-        start, please review and accept the terms of use.
+        start, please review and accept the terms of use. Part B explains exactly what the
+        app records while you are clocked in, and Part D is our privacy policy.
       </p>
 
       <div className="mt-7 flex items-start justify-center gap-3">
@@ -80,7 +81,7 @@ export default function WelcomePage() {
             rel="noopener noreferrer"
             className="text-white underline underline-offset-2 transition-colors hover:text-zinc-300"
           >
-            terms of use
+            terms of use &amp; privacy policy
           </a>
         </label>
       </div>

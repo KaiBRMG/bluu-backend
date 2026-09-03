@@ -57,6 +57,19 @@ export interface AdminFullUser {
   permittedPageIds?: string[];
   appVersion?: string | null;
   appPlatform?: string | null;
+  /**
+   * The bound Telegram account, or absent. Distinct from
+   * `contactInfo.telegramHandle`, which is free text somebody typed into their
+   * profile and proves nothing — this is written by the bot webhook and is what
+   * actually decides whether alerts reach them.
+   */
+  telegram?: {
+    userId: string;
+    chatId: string;
+    username?: string | null;
+    firstName?: string | null;
+    linkedAt: string | null;
+  };
 }
 
 export interface AdminGroup {

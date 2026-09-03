@@ -50,6 +50,13 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
   const [timerWidgetEnabled, setTimerWidgetEnabled] = useState(true);
   const originalTimerWidgetRef = useRef(true);
 
+  // Telegram. Read straight off the live user snapshot, so pressing Start in
+  // Telegram flips this row to "Connected" without a refresh — the webhook
+  // writes `telegram` on the user doc and `useUserData` is an onSnapshot.
+  const telegramLinked = !!userData?.telegram?.userId;
+  const telegramUsername = userData?.telegram?.username ?? null;
+  const [telegramBusy, setTelegramBusy] = useState(false);
+
   const [selectedTimezone, setSelectedTimezone] = useState('');
   const originalTimezoneRef = useRef<string>('');
   const [additionalTimezones, setAdditionalTimezones] = useState<string[]>([]);
@@ -184,6 +191,58 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
 
   // TEMPORARY (see CLAUDE.md): wipes the stale macOS Screen Recording (TCC)
   // record so the next capture re-prompts against the app's signed identity.
+  /**
+   * Mint a one-time link and open Telegram. The link is fetched at click time
+   * rather than held in state because it is single-use and expiring — a stale
+   * one in a long-lived renderer would just fail.
+   *
+   * Nothing is written here: the *user doc* changes only when the webhook sees
+   * them press Start, which is why the row keeps saying "Connect" until they
+   * actually finish. Half-connected is not a state worth inventing.
+   */
+  const handleTelegramConnect = async () => {
+    if (!user) return;
+    setTelegramBusy(true);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/user/telegram-link', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { url } = (await res.json()) as { url?: string };
+      if (!url) throw new Error('No link returned');
+      // `setWindowOpenHandler` in the shell turns this into `shell.openExternal`,
+      // so it lands in the user's Telegram app rather than in the Electron window.
+      window.open(url, '_blank', 'noopener,noreferrer');
+      toast.success('Opening Telegram — press Start to finish connecting.');
+    } catch (error: unknown) {
+      console.error('[AppSettingsForm] telegram connect failed:', error);
+      toast.error('Could not generate your Telegram link. Please try again.');
+    } finally {
+      setTelegramBusy(false);
+    }
+  };
+
+  const handleTelegramDisconnect = async () => {
+    if (!user) return;
+    setTelegramBusy(true);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/user/telegram-link', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      toast.success('Telegram disconnected. You will no longer receive alerts there.');
+    } catch (error: unknown) {
+      console.error('[AppSettingsForm] telegram disconnect failed:', error);
+      toast.error('Could not disconnect Telegram. Please try again.');
+    } finally {
+      setTelegramBusy(false);
+    }
+  };
+
   const handleResetScreenPermissions = async () => {
     const reset = window.electronAPI?.permissions?.resetScreenCapture;
     if (!reset) {
@@ -477,6 +536,43 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
             checked={screenshotNotifications}
             onCheckedChange={setScreenshotNotifications}
           />
+        </div>
+
+        {/* Telegram.
+            Deliberately outside the form's dirty/Save model, like the screenshot
+            permission reset below: connecting is a round trip through another
+            app, and disconnecting takes effect server-side immediately. There is
+            nothing here that "Save Changes" could meaningfully commit.
+
+            Disconnecting is the real opt-out promised by the linking message —
+            `resolveChatIds` reads the chat id off this field, so removing it
+            genuinely stops delivery rather than just hiding a badge. */}
+        <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <label className="form-label">Telegram Alerts</label>
+              <p className="text-xs italic mt-1" style={{ color: 'var(--foreground-secondary)' }}>
+                {telegramUsername
+                  ? `Connected as @${telegramUsername}. Important alerts are also sent to you on Telegram.`
+                  : telegramLinked
+                    ? 'Connected. Important alerts are also sent to you on Telegram.'
+                    : 'Get important alerts sent straight to you on Telegram. Connecting opens Telegram — press Start there to finish.'}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={telegramLinked ? handleTelegramDisconnect : handleTelegramConnect}
+              disabled={telegramBusy}
+              className="flex-shrink-0"
+            >
+              {telegramBusy
+                ? 'Working...'
+                : telegramLinked
+                  ? 'Disconnect'
+                  : 'Connect Telegram'}
+            </Button>
+          </div>
         </div>
       </div>
 

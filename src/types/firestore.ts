@@ -123,6 +123,31 @@ export interface UserDocument {
   // Denormalized: page IDs this user can access (kept in sync by server on group/permission changes)
   permittedPageIds?: string[];
 
+  // ── Telegram ──────────────────────────────────────────────────────────
+  // The bound Telegram account, written only by the bot webhook once the user
+  // spends their one-time link. Absent = not connected, which is also the
+  // opt-out: notification delivery resolves chat ids off this field, so
+  // disconnecting in Settings genuinely stops Telegram messages.
+  // The reverse direction (Telegram id → uid) lives in `telegram-accounts`;
+  // nothing queries this field, so it is exempt from indexing (rule 9).
+  telegram?: {
+    userId: string;
+    chatId: string;
+    username?: string | null;
+    firstName?: string | null;
+    linkedAt: Timestamp;
+  };
+  // SHA-256 of the outstanding one-time link, or absent. Points at the
+  // `telegram-links` doc so minting a new invite can void the previous one
+  // without a query. Never the token itself.
+  telegramLinkTokenHash?: string;
+  telegramLinkCreatedAt?: Timestamp;
+
+  // Announcement ids the user has dismissed permanently (the card's "×").
+  // Keyed on AnnouncementDefinition.id — see announcementConfig.ts. Nothing
+  // queries it; index-exempt (rule 9).
+  dismissedAnnouncements?: string[];
+
   // Installed desktop app build, reported once per app start by the renderer
   // (see AppVersionReporter) and only written when it actually changes.
   appVersion?: string | null;

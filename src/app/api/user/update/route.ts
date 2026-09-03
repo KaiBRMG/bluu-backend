@@ -32,6 +32,10 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       // TEMPORARY (see CLAUDE.md): marks the stale-TCC screen-recording repair as
       // applied for this user, so the automatic reset never runs a second time.
       'screenshotBugFixed',
+      // Announcement ids the user has permanently dismissed (the card's "×").
+      // APPEND-ONLY — written with arrayUnion below, never assigned. See the
+      // validation block for why.
+      'dismissedAnnouncements',
     ];
 
     // screenshotBugFixed is a one-way latch: clients may only ever set it true.
@@ -73,6 +77,36 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       }
     }
 
+    // Announcement dismissals are APPEND-ONLY, and the client sends only the id
+    // it just dismissed rather than the whole array. Two reasons: the app can
+    // have more than one window open, and a read-modify-write of the full list
+    // from each would let one silently drop the other's dismissal; and an
+    // assignable list would make "un-dismiss everything" a thing a client can
+    // do, which is not a product behaviour anyone asked for.
+    const MAX_DISMISSALS_PER_CALL = 10;
+    const MAX_ANNOUNCEMENT_ID_LENGTH = 80;
+    if (updates.dismissedAnnouncements !== undefined) {
+      const ids = updates.dismissedAnnouncements;
+      if (
+        !Array.isArray(ids) ||
+        ids.some(
+          (id: unknown) =>
+            typeof id !== 'string' || id.length === 0 || id.length > MAX_ANNOUNCEMENT_ID_LENGTH,
+        )
+      ) {
+        return NextResponse.json(
+          { error: 'dismissedAnnouncements must be an array of non-empty id strings' },
+          { status: 400 }
+        );
+      }
+      if (ids.length > MAX_DISMISSALS_PER_CALL) {
+        return NextResponse.json(
+          { error: `dismissedAnnouncements is limited to ${MAX_DISMISSALS_PER_CALL} ids per call` },
+          { status: 400 }
+        );
+      }
+    }
+
     // Maximum byte lengths for free-text string fields
     const STRING_MAX_LENGTHS: Record<string, number> = {
       displayName: 100,
@@ -105,6 +139,12 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
           sanitizedUpdates[field] = Timestamp.fromDate(new Date(updates[field]));
         } else if (field === 'DOB' && !updates[field]) {
           sanitizedUpdates[field] = null;
+        } else if (field === 'dismissedAnnouncements') {
+          // Append, never replace — see the validation block above. An empty
+          // array is a no-op, not an error: arrayUnion() with no arguments
+          // throws, and "dismiss nothing" is a reasonable thing to send.
+          const ids = updates[field] as string[];
+          if (ids.length > 0) sanitizedUpdates[field] = FieldValue.arrayUnion(...ids);
         } else {
           sanitizedUpdates[field] = updates[field];
         }

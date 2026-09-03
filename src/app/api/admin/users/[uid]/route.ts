@@ -3,6 +3,7 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb, adminStorage, adminAuth } from '@/lib/firebase-admin';
 import { getUserById, invalidateUserCache, releaseEmailClaim } from '@/lib/services/userService';
 import { releaseAllDeviceSessions } from '@/lib/services/sessionService';
+import { releaseTelegramIndexEntries } from '@/lib/services/telegramLinkService';
 import { invalidateAdminUsersCache } from '@/app/api/admin/users/route';
 import { invalidateDisplayNamesCache } from '@/app/api/users/display-names/route';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
@@ -161,6 +162,10 @@ export const DELETE = withAuth(async (
     // login attempt would resolve to a uid whose doc no longer exists.
     const targetSnap = await adminDb.collection('users').doc(targetUid).get();
     const targetEmail: string | undefined = targetSnap.data()?.workEmail;
+    // Same reason, for the Telegram index: it is keyed by Telegram id, so the
+    // ids have to be read here, before the doc that holds them is deleted below.
+    const targetTelegramUserId: string | undefined = targetSnap.get('telegram.userId');
+    const targetTelegramTokenHash: string | undefined = targetSnap.get('telegramLinkTokenHash');
 
     membershipBatch.delete(adminDb.collection('users').doc(targetUid));
 
@@ -231,6 +236,16 @@ export const DELETE = withAuth(async (
     // page uses to decide whether a visitor is staff.
     await releaseAllDeviceSessions(targetUid).catch((err) => {
       console.error(`[DeleteUser] Failed to release device sessions for ${targetUid}:`, err);
+    });
+
+    // ─── 7. Telegram link index ─────────────────────────────────────────
+    // Same story one collection over: `telegram-accounts` maps a Telegram id to
+    // a uid, and a leftover entry would keep resolving a deleted employee.
+    await releaseTelegramIndexEntries({
+      telegramUserId: targetTelegramUserId,
+      pendingTokenHash: targetTelegramTokenHash,
+    }).catch((err) => {
+      console.error(`[DeleteUser] Failed to release Telegram link for ${targetUid}:`, err);
     });
 
     invalidateUserCache(targetUid);

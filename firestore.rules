@@ -327,6 +327,26 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 25b. Telegram linking.
+    //
+    // `telegram-links` holds one-time invite tokens (keyed by the token's
+    // SHA-256) and `telegram-accounts` maps a Telegram user id to a Bluu uid.
+    // Together they are the account-binding mechanism for the bot and for the
+    // creator portal's only sign-in path, so both are Admin-SDK-only:
+    //   - a client-READABLE `telegram-accounts` turns a Telegram id into a real
+    //     uid, exactly the leak `device-sessions` is denied for;
+    //   - a client-WRITABLE one is an authentication bypass — write yourself an
+    //     entry pointing at any uid and the Mini App mints you their session.
+    // The invite docs are hashed, but a writable one would let anyone plant a
+    // token for a uid of their choosing. Deny both, both directions.
+    match /telegram-links/{tokenHash} {
+      allow read, write: if false;
+    }
+
+    match /telegram-accounts/{telegramUserId} {
+      allow read, write: if false;
+    }
+
     // 25. Device-session index: doc id = a client-minted device id, body =
     // { uid, kind }. The reverse lookup behind per-device session enforcement
     // and behind "is this browser one of ours" on the public share page.

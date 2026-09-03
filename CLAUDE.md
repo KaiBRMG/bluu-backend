@@ -18,10 +18,12 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
  Electron desktop ─►│  Internal portals /admin-portal /ca-portal ..│─► AuthProvider + withAuth
  (employees only)   └───────────────────────────────────────────────┘
                     ┌───────────────────────────────────────────────┐
- System browser  ─►│  Creator portal    /creator                   │─► CreatorAuthProvider + withCreatorAuth
- (creators, phone)  └───────────────────────────────────────────────┘   installable PWA (manifest only,
-                                                                        no service worker); mobile nav is
-                                                                        a bottom tab bar — see DESIGN.md §7
+ Telegram Mini App ►│  Creator portal    /creator                   │─► initData → custom token →
+ (creators, phone)  └───────────────────────────────────────────────┘   CreatorAuthProvider + withCreatorAuth
+                                                                        TELEGRAM IS THE ONLY WAY IN — there
+                                                                        is no /creator/login and no PWA
+                                                                        install; mobile nav is a bottom tab
+                                                                        bar — see DESIGN.md §7
                     ┌───────────────────────────────────────────────┐
  System browser  ─►│  Model application /model-submissions         │─► UNAUTHENTICATED (session token
  (public)           └───────────────────────────────────────────────┘   + rate limit + sharp validation)
@@ -38,6 +40,8 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
  (main.js only)     └───────────────────────────────────────────────┘   win: docked HUD
 
  src/middleware.ts  → rewrites all non-Electron, non-allowlisted page traffic to /desktop-only
+ Telegram bot @BluuRockBot → one bot, two audiences: employee alerts + the creator
+              Mini App. Webhook at /api/telegram/webhook — see telegram.md
  Firestore + Storage (Firebase Admin SDK) ← services (src/lib/services) ← API routes (src/app/api)
  Client hooks (src/hooks) ← contexts (src/contexts) ← React 19 / Next 16 App Router UI
  functions/ → generateThumbnail (Storage trigger) + daily stale-session cleanup
@@ -52,6 +56,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 - **Monorepo:** `src/` (Next.js 16 web app, primary), `electron/` (desktop wrapper), `src/app/creator/` (creator interface), `functions/` (Cloud Functions).
 - **Two domains, one Vercel deployment:** the Electron shell is pinned to `bluu-backend.vercel.app` (`BASE_URL`); browser-facing pages use `app.bluurock.com` (`PUBLIC_APP_ORIGIN` in [`src/lib/publicOrigin.ts`](src/lib/publicOrigin.ts)). Build every user-facing link from that constant — **never `window.location.origin`**, which is the vercel.app host inside Electron. See [electron.md](documentation/electron.md#two-domains-one-deployment).
 - **Sessions are per-DEVICE, not per user.** `users/{uid}.sessions[deviceId]` plus the `device-sessions/{deviceId} → uid` index replaced the single `sessionToken`. A desktop login still evicts other **desktop** sessions (nobody is clocked in on two machines); web sessions run concurrently. The legacy `sessionToken` is still written on desktop logins and is still the fallback comparison — **a web login must never rotate it** (rule 9c). This is the groundwork for web access; no surface exercises it yet. See [auth.md](documentation/auth.md#device-identity--session-enforcement).
+- **Two identity systems, deliberately separate.** Employees sign in with Google OAuth against the `users` allowlist (below). **Creators sign in with Telegram** — the portal is a Mini App, `initData` is the credential, and `/creator/login` no longer exists. The two must never share a uid; see [telegram.md](documentation/telegram.md) and [auth.md](documentation/auth.md).
 - **Auth:** Google OAuth only, with **personal** Google accounts — there is no company-domain restriction. **Google authenticates; Firestore authorises:** an admin must register someone in the Employee Registry before they can log in, and `/api/auth/exchange-code` refuses any address without a `users` doc. It **never creates one**. Admin status is a JWT custom claim (`token.admin`), not a Firestore read.
 - Full repo layout, commands, and env vars: [architecture-overview.md](documentation/architecture-overview.md).
 
@@ -152,6 +157,7 @@ Three things about it are load-bearing and were each a real failure:
 | [data-layer.md](documentation/data-layer.md) | Server services, client hooks, Firestore collections, read-optimization rules, session token |
 | [time-tracking.md](documentation/time-tracking.md) | Event-log sessions, `sessionCloseMs`, crash robustness, activity percent, **analytics rollups** |
 | [notifications.md](documentation/notifications.md) | `notificationContent.ts`, `addNotificationToBatch`, event → factory table |
+| [telegram.md](documentation/telegram.md) | **Telegram** — account linking + the one-time link tokens, the bot webhook, the creator portal Mini App sign-in, employee alerts, and the in-app **announcement card** module |
 | [smm-portal.md](documentation/smm-portal.md) | **SMM Portal** — Twitter/X accounts, the content schedule, the bonus rounds/submissions engine, Viral Accounts + page suggestions |
 | [growth-tracking.md](documentation/growth-tracking.md) | **Growth Tracking** — nightly Apify follower scrape, `growth-accounts` + its year-keyed series, the Apify cost rules. **Unrelated to `twitterx-accounts` by design** |
 | [campaign-tracking.md](documentation/campaign-tracking.md) | Custom requests vs campaigns, the two archive mechanisms, transfer |

@@ -20,6 +20,7 @@ import {
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { MoreHorizontal } from "lucide-react";
 import { apiRequest } from "@/lib/clientApi";
+import { isOverdue } from "@/lib/timezone";
 import { toast } from "sonner";
 import { PAGE_GROUND_STYLE, HEADER_STYLE, SURFACE, contentTypeBadge, contentStatusBadge, type ContentType } from "../../theme";
 import { ContentPlanDialog, type ContentPlanEntry } from "../../components/ContentPlanDialog";
@@ -52,11 +53,6 @@ function firestoreToCP(id: string, data: Record<string, unknown>): CPEntry {
     status: (data.status as "Outstanding" | "Completed") ?? "Outstanding",
     isArchived: (data.isArchived as boolean) ?? false,
   };
-}
-
-function isOverdue(dueDate: string | null): boolean {
-  if (!dueDate) return false;
-  return new Date(dueDate + "T23:59:59Z") < new Date();
 }
 
 function formatDate(dateStr: string | null | undefined): string {
@@ -169,7 +165,7 @@ export default function AllContentRequestsPage() {
                 </TableHeader>
                 <TableBody>
                   {pageEntries.map(entry => {
-                    const overdue = isOverdue(entry.dueDate) && entry.status === "Outstanding";
+                    const overdue = isOverdue(entry.dueDate, creatorUser?.defaultTimezone) && entry.status === "Outstanding";
                     return (
                       <TableRow key={entry.id}>
                         <TableCell className="max-w-[200px] truncate text-sm font-medium">{entry.contentSummary}</TableCell>
@@ -214,7 +210,7 @@ export default function AllContentRequestsPage() {
             {/* Mobile card list */}
             <div className="flex flex-col gap-2 md:hidden">
               {pageEntries.map(entry => {
-                const overdue = isOverdue(entry.dueDate) && entry.status === "Outstanding";
+                const overdue = isOverdue(entry.dueDate, creatorUser?.defaultTimezone) && entry.status === "Outstanding";
                 return (
                   <button
                     key={entry.id}
@@ -298,7 +294,7 @@ export default function AllContentRequestsPage() {
           open={!!viewEntry}
           onOpenChange={(o) => { if (!o) setViewEntry(null); }}
           formatDate={formatDate}
-          overdue={isOverdue(viewEntry.dueDate) && viewEntry.status === "Outstanding"}
+          overdue={isOverdue(viewEntry.dueDate, creatorUser?.defaultTimezone) && viewEntry.status === "Outstanding"}
           onComplete={viewEntry.status === "Outstanding" ? () => { handleMarkComplete(viewEntry); setViewEntry(null); } : undefined}
           busy={busy === viewEntry.id}
         />

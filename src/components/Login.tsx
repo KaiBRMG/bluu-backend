@@ -226,14 +226,14 @@ function Login() {
         </button>
 
         <p className="mt-4 text-center text-xs text-zinc-500">
-          By signing in you agree with{' '}
+          By signing in you agree to our{' '}
           <a
             href="/terms"
             target="_blank"
             rel="noopener noreferrer"
             className="underline hover:text-zinc-300"
           >
-            Bluu Backend Terms of Use
+            Terms of Use &amp; Privacy Policy
           </a>
         </p>
       </div>

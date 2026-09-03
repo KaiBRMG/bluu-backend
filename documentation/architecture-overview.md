@@ -60,12 +60,12 @@ FIREBASE_SERVICE_ACCOUNT   # JSON string of service account key
 ONLYFANSAPI_API_KEY        # OnlyFans provider bearer token — see onlyfans-crm.md
 ONLYFANSAPI_WEBHOOK_SECRET # path secret + HMAC key for /api/onlyfans/webhook/[secret]
 ONLYFANS_ACCOUNT_ID        # optional; pins the operated account (required once a 2nd is linked)
-TELEGRAM_BOT_TOKEN         # notification bot — see notifications.md
-TG_BOT_TEST_ID             # TEMPORARY: chat id every Telegram alert goes to until accounts are linked
+TELEGRAM_BOT_TOKEN         # the bot: employee alerts, the creator Mini App — see telegram.md
+TELEGRAM_WEBHOOK_SECRET    # authenticates every /api/telegram/webhook delivery; unset = refuse all
 ```
 
 - `NEXT_PUBLIC_*` are client-exposed by Next convention. Everything else is **server-only**.
-- The `TELEGRAM_BOT_TOKEN` / `TG_BOT_TEST_ID` pair is read **only** by `src/lib/services/telegramService.ts` (server). Never import it from a client component.
+- The `TELEGRAM_*` pair is read **only** by `src/lib/services/telegramService.ts` and `telegramLinkService.ts` (server). Never import either from a client component — `src/lib/telegramConfig.ts` holds the public names a component may need. `TG_BOT_TEST_ID` was retired when real account linking landed; see [telegram.md](telegram.md).
 - The `ONLYFANS*` keys are read **only** under `src/lib/onlyfans/` (server). Importing that folder from a client component would leak the key into the bundle — see [onlyfans-crm.md](onlyfans-crm.md).
 - Resources are served from the Firestore `app-resources` collection (no external integration) — see [resources.md](resources.md).
 

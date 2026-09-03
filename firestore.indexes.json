@@ -309,6 +309,28 @@
     { "collectionGroup": "device-sessions", "fieldPath": "kind", "indexes": [] },
     { "collectionGroup": "device-sessions", "fieldPath": "label", "indexes": [] },
 
-    { "collectionGroup": "admin_notification_batches", "fieldPath": "sentViaTelegram", "indexes": [] }
+    { "collectionGroup": "admin_notification_batches", "fieldPath": "sentViaTelegram", "indexes": [] },
+
+    { "collectionGroup": "users", "fieldPath": "telegram", "indexes": [] },
+    { "collectionGroup": "users", "fieldPath": "telegramLinkTokenHash", "indexes": [] },
+    { "collectionGroup": "users", "fieldPath": "telegramLinkCreatedAt", "indexes": [] },
+    { "collectionGroup": "users", "fieldPath": "dismissedAnnouncements", "indexes": [] },
+    { "collectionGroup": "creators", "fieldPath": "telegram", "indexes": [] },
+    { "collectionGroup": "creators", "fieldPath": "telegramLinkTokenHash", "indexes": [] },
+    { "collectionGroup": "creators", "fieldPath": "telegramLinkCreatedAt", "indexes": [] },
+
+    { "collectionGroup": "telegram-links", "fieldPath": "subjectKind", "indexes": [] },
+    { "collectionGroup": "telegram-links", "fieldPath": "subjectUid", "indexes": [] },
+    { "collectionGroup": "telegram-links", "fieldPath": "createdBy", "indexes": [] },
+    { "collectionGroup": "telegram-links", "fieldPath": "createdAt", "indexes": [] },
+    { "collectionGroup": "telegram-links", "fieldPath": "expiresAt", "indexes": [] },
+    { "collectionGroup": "telegram-links", "fieldPath": "usedAt", "indexes": [] },
+    { "collectionGroup": "telegram-links", "fieldPath": "telegramUserId", "indexes": [] },
+
+    { "collectionGroup": "telegram-accounts", "fieldPath": "subjectKind", "indexes": [] },
+    { "collectionGroup": "telegram-accounts", "fieldPath": "subjectUid", "indexes": [] },
+    { "collectionGroup": "telegram-accounts", "fieldPath": "chatId", "indexes": [] },
+    { "collectionGroup": "telegram-accounts", "fieldPath": "username", "indexes": [] },
+    { "collectionGroup": "telegram-accounts", "fieldPath": "linkedAt", "indexes": [] }
   ]
 }

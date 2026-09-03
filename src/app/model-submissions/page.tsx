@@ -970,6 +970,26 @@ export default function ModelSubmissionsPage() {
                 )}
               </Button>
             </div>
+
+            {/* Collection notice. This form is the only unauthenticated write
+                path in the product and it takes photographs of a person, so the
+                privacy policy has to be reachable at the point of collection —
+                a policy nobody is shown is not notice. Only rendered on the
+                final step, where the submit button is. */}
+            {isLast && (
+              <p className="mt-4 text-center text-xs leading-relaxed text-white/50">
+                By submitting you confirm you are 18 or over and agree to our{' '}
+                <a
+                  href="/terms"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-white/80 underline underline-offset-2 transition-colors hover:text-white"
+                >
+                  Terms of Use &amp; Privacy Policy
+                </a>
+                .
+              </p>
+            )}
           </div>
         </div>
       </div>

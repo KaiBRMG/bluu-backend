@@ -1,6 +1,6 @@
 import {
   Users, LayoutDashboard, ImagePlay, CalendarCheck,
-  FolderOpen, Rocket, ExternalLink,
+  FolderOpen, Rocket, ExternalLink, ShieldCheck,
 } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import Link from "next/link";
@@ -100,6 +100,29 @@ export default function WelcomePage() {
           <p className="text-sm text-zinc-400 leading-relaxed">
             Upcoming updates may include new campaign formats, enhanced reporting, and additional growth opportunities.
           </p>
+        </Section>
+
+        {/* Terms & Privacy */}
+        <Section icon={ShieldCheck} iconColor={HUES.blue} title="Terms & Privacy">
+          <p className="text-sm text-zinc-400 leading-relaxed">
+            Your use of this portal is governed by our Terms of Use &amp; Privacy Policy. Part C
+            covers creators specifically — what the portal is (and is not), your content and the
+            licence you give us, and the confirmations you make about the content you upload.
+            Part D explains what personal data we hold, how long we keep it, and how to ask for a
+            copy or a deletion.
+          </p>
+          <p className="text-sm text-zinc-400 leading-relaxed">
+            Amounts shown in this portal are internal tracking figures for coordination — your
+            payments are governed by your signed management agreement.
+          </p>
+          <a
+            href="/terms"
+            target="_blank"
+            rel="noreferrer"
+            className={`flex items-center gap-1.5 min-h-11 self-start rounded-lg px-3 py-3 text-xs font-semibold transition-colors ${ACCENT_BTN}`}
+          >
+            Read the Terms &amp; Privacy Policy <ExternalLink className="w-3.5 h-3.5" />
+          </a>
         </Section>
 
       </div>

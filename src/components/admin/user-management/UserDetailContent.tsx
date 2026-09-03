@@ -989,6 +989,25 @@ export default function UserDetailContent({
                         placeholder="@username"
                         {...fieldProps('telegramHandle')}
                       />
+                      {/* The handle above is free text somebody typed and proves
+                          nothing. This line is the actual bot connection —
+                          written by the Telegram webhook when the user spends
+                          their link — and it is what decides whether alerts
+                          reach them. Read-only here on purpose: an admin cannot
+                          connect on someone's behalf (only the user's own
+                          `/api/user/telegram-link` can mint their link), and
+                          disconnecting for them is not a case that has come up. */}
+                      <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-zinc-400">
+                        <span
+                          aria-hidden
+                          className={`inline-block size-2 rounded-full ${
+                            user.telegram ? 'bg-green-400' : 'bg-zinc-500'
+                          }`}
+                        />
+                        {user.telegram
+                          ? `Bot connected${user.telegram.username ? ` as @${user.telegram.username}` : ''}`
+                          : 'Bot not connected — no Telegram alerts'}
+                      </p>
                     </div>
                   </div>
                 </AccordionContent>

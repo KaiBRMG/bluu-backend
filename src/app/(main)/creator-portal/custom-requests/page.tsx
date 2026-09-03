@@ -1332,13 +1332,25 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
     creatorID: "", fanName: "", profileLink: "", description: "",
     length: "", totalAmount: "", amountPaid: "",
     address: "", socialUsername: "", socialPlatform: "", callType: "", dueDate: "", dueTime: "",
-    dueDateTimezone: userData?.timezone ?? "",
+    // Filled from the selected creator below: a due date belongs to the
+
+    // creator's day, so the staff viewer's zone is never the right default.
+
+    dueDateTimezone: "",
   });
   const [submitting, setSubmitting] = useState(false);
 
   const setField = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }));
   const setVal = (k: string) => (v: string) => setForm(prev => ({ ...prev, [k]: v }));
+  const setCreator = (creatorID: string) => {
+    const creator = creators.find(c => c.creatorID === creatorID);
+    setForm(prev => ({
+      ...prev,
+      creatorID,
+      dueDateTimezone: creator?.defaultTimezone ?? prev.dueDateTimezone,
+    }));
+  };
 
   const handleSubmit = async () => {
     setSubmitting(true);
@@ -1392,7 +1404,7 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
           <div className="flex flex-col gap-3 py-4 max-h-[60vh] overflow-y-auto">
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Creator</label>
-              <Select value={form.creatorID} onValueChange={setVal("creatorID")}>
+              <Select value={form.creatorID} onValueChange={setCreator}>
                 <SelectTrigger className="bg-zinc-800 border-zinc-700">
                   <SelectValue placeholder="Select creator..." />
                 </SelectTrigger>

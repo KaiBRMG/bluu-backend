@@ -23,6 +23,7 @@
 | `src/components/AuthWrapper.tsx` | Gates the app during auth resolution (boot phase `'auth'`) |
 | `src/lib/middleware/withAuth.ts` | API guard: verifies Firebase Bearer token |
 | `src/lib/middleware/withCreatorAuth.ts` | API guard: token + creator doc existence + `isActive` |
+| `src/app/api/creator/telegram/session/route.ts` | **The creator portal's sign-in**: Mini App `initData` → Firebase custom token. See [telegram.md](telegram.md) |
 | `src/lib/middleware/apiHelpers.ts` | `checkPageAccess`, notification batching helpers |
 | `src/lib/firebase-admin.ts` | Admin SDK (`adminDb`, `adminAuth`) |
 
@@ -41,7 +42,7 @@
 
 **`BROWSER_ALLOWED_PREFIXES` (currently):**
 - `/auth` — OAuth flow pages run in the system browser during login; must be reachable without Electron.
-- `/creator` — external creator interface, browser-accessible by design.
+- `/creator` — external creator interface. It runs inside **Telegram's webview**, whose user agent is not Electron, so the allowlist entry is what makes the Mini App resolve at all. Note that reaching the page is not the same as getting in: without a valid `initData` the shell renders "Open in Telegram" and no session is minted.
 - `/desktop-only` — the "use the desktop app" landing page itself.
 - `/download` — public installer/download page; users need it before they have the desktop app.
 - `/p` — **shared prompts.** The whole point of the link is that it resolves for someone without the desktop app; a recipient rewritten to `/desktop-only` would make sharing useless. Read-only, and reachable only with the 160-bit share token in the path. See [prompt-library.md](prompt-library.md#sharing-a-prompt).
@@ -155,7 +156,11 @@ The invariant that makes it **once-off** is the *pairing*, not the uid: the entr
   - **The employee/creator discriminator is `users/{uid}` existing**, not the email domain — staff use personal addresses now, so a domain test would sign out every employee. The provider already read that doc for `isActive`, so this costs zero extra reads.
   - **A doc that is genuinely absent now denies** (it means "not an internal user"). A read that *threw* still fails open — "we couldn't ask" is not "the answer is no", and failing open there only grants an empty shell, since every API route re-authorises server-side.
   - Creators have a `creators` doc and no `users` doc. They are **ignored, not signed out** — the creator portal owns that session.
-- **`CreatorAuthProvider`** — external creator accounts, used only in the creator portal. Creators sign in with **email/password** (`/creator/login`) and are managed at `/admin-portal/creator-management` — a completely separate path that the Google/allowlist flow above does not touch. The one place they interact: an email can only belong to one Auth account, so **creator registration refuses an address already held by an employee, and employee registration refuses one held by a creator.** Never merge the two onto one uid — that would give a single identity both a `users` and a `creators` doc, i.e. two auth contexts. The portal has no landing page: `src/app/creator/page.tsx` server-redirects `/creator` → `/creator/dashboard`, and `CreatorAuthWrapper` in the portal layout bounces signed-out visitors to `/creator/login?redirect=…` (relative redirects only, to block open redirects).
+- **`CreatorAuthProvider`** — external creator accounts, used only in the creator portal. **Creators sign in with Telegram, not with a password.** The portal is a Telegram Mini App: `CreatorPortalShell` exchanges Telegram's signed `initData` for a Firebase custom token at `POST /api/creator/telegram/session`, and `/creator/login` has been deleted. `CreatorAuthProvider` itself and every `withCreatorAuth` route are unchanged — only how the Firebase session starts moved. The full mechanism, including why persistence is in-memory, is in [telegram.md](telegram.md#creators-the-mini-app-is-the-whole-front-door).
+
+  Creators are still managed at `/admin-portal/creator-management`, a completely separate path that the Google/allowlist flow above does not touch. The one place the two identity systems interact: an email can only belong to one Auth account, so **creator registration refuses an address already held by an employee, and employee registration refuses one held by a creator.** Never merge the two onto one uid — that would give a single identity both a `users` and a `creators` doc, i.e. two auth contexts. The portal has no landing page: `src/app/creator/page.tsx` server-redirects `/creator` → `/creator/dashboard`, and there is nowhere to bounce a signed-out visitor to any more — the shell signs them in from `initData` or explains in place why it could not.
+
+  **Creator Auth accounts still carry their old email/password credential.** Nothing in the product uses it, but the Firebase web config is public, so a leaked creator password remains a usable sign-in against the project. Clearing those credentials is a deliberate open decision, not an oversight.
 
 ### Device identity & session enforcement
 
