@@ -62,9 +62,18 @@ export default function AnnouncementCard() {
   const [snoozed, setSnoozed] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
+  // The endpoint is `withAuth`-gated (the cohort match runs server-side so uid
+  // and group lists never reach a renderer), so the token has to go with it.
   const load = useCallback(() => {
-    void fetchAnnouncements().then(setAnnouncements);
-  }, []);
+    if (!user) return;
+    void user
+      .getIdToken()
+      .then(fetchAnnouncements)
+      .then(setAnnouncements)
+      .catch((error: unknown) => {
+        console.error('[AnnouncementCard] load failed:', error);
+      });
+  }, [user]);
 
   useEffect(() => {
     if (!userData) return;

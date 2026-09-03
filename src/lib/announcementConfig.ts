@@ -170,11 +170,26 @@ export function selectAnnouncements(
  * unreachable endpoint should show nothing, not a stale card the server may
  * have retired. (`fetchAppUpdateConfig` falls back the other way because there
  * the failure mode — not prompting an update — is the dangerous one.)
+ *
+ * **`idToken` is required**, unlike `fetchAppUpdateConfig`'s endpoint, which is
+ * open. `/api/announcements` runs the cohort match server-side so uid and group
+ * lists never reach a renderer, which means it must know who is asking — it is
+ * wrapped in `withAuth` and 401s without a Bearer token. Calling this without
+ * one returns an empty list *silently*, which looks exactly like "no
+ * announcement is armed"; that is the failure this parameter exists to prevent.
  */
-export async function fetchAnnouncements(): Promise<ClientAnnouncement[]> {
+export async function fetchAnnouncements(idToken: string): Promise<ClientAnnouncement[]> {
   try {
-    const res = await fetch('/api/announcements', { cache: 'no-store' });
-    if (!res.ok) return [];
+    const res = await fetch('/api/announcements', {
+      cache: 'no-store',
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
+    if (!res.ok) {
+      // A 401 here is a bug, not a state — the caller holds a signed-in user.
+      // Say so, rather than letting it read as "nothing is armed".
+      if (res.status === 401) console.error('[announcements] unauthorized — token not sent?');
+      return [];
+    }
     const data: unknown = await res.json();
     const list = (data as { announcements?: unknown })?.announcements;
     if (!Array.isArray(list)) return [];
