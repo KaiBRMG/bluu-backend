@@ -201,13 +201,22 @@ function CreatorAuthWrapper({ children }: { children: React.ReactNode }) {
       });
 
       if (!res.ok) {
-        const { error } = (await res.json().catch(() => ({}))) as { error?: string };
-        console.warn('[CreatorPortalShell] session refused:', res.status, error);
+        const { error, reason } = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          reason?: string;
+        };
+        console.warn('[CreatorPortalShell] session refused:', res.status, error, reason);
+        // Every refusal carries a diagnostic, not just the "no payload" one.
+        // That is what makes a MISSING line meaningful: it can then only mean
+        // this bundle predates the diagnostic, i.e. Telegram is serving a
+        // cached copy of the app.
+        setDiagnostic(`server ${res.status} ${error ?? '?'}${reason ? ` (${reason})` : ''}`);
         if (error === 'NOT_LINKED') setStatus('not-linked');
         else if (error === 'NOT_A_CREATOR') setStatus('not-a-creator');
         else if (error === 'INVALID_INIT_DATA') {
-          // Expired or malformed. Drop the cached copy so a reload re-reads the
-          // URL instead of replaying a payload that will never verify again.
+          // Malformed, expired, or failing the HMAC. Drop the cached copy so a
+          // reload re-reads the URL rather than replaying a payload that will
+          // never verify.
           clearTelegramInitData();
           setStatus('no-telegram');
         } else setStatus('error');
@@ -285,6 +294,7 @@ function CreatorAuthWrapper({ children }: { children: React.ReactNode }) {
         <Screen
           title="Account not connected"
           body="This Telegram account isn't connected to a Bluu Rock creator profile yet. Ask your Bluu Rock contact to send you your personal connection link."
+          detail={diagnostic}
         />
       );
     case 'not-a-creator':
@@ -292,6 +302,7 @@ function CreatorAuthWrapper({ children }: { children: React.ReactNode }) {
         <Screen
           title="Staff account"
           body="This Telegram account is connected to a Bluu Backend staff account. The Creator Portal is for creator profiles only."
+          detail={diagnostic}
         />
       );
     default:
@@ -300,6 +311,7 @@ function CreatorAuthWrapper({ children }: { children: React.ReactNode }) {
           title="Something went wrong"
           body="We couldn't sign you in just now. Check your connection and try again."
           action={{ label: 'Try again', onClick: () => window.location.reload() }}
+          detail={diagnostic}
         />
       );
   }

@@ -60,10 +60,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'INVALID_INIT_DATA' }, { status: 401 });
   }
 
-  const telegramUser = verifyTelegramInitData(initData);
-  if (!telegramUser) {
-    return NextResponse.json({ error: 'INVALID_INIT_DATA' }, { status: 401 });
+  const verified = verifyTelegramInitData(initData);
+  if (!verified.ok) {
+    // The `reason` is echoed so the portal can say what actually happened. A
+    // creator cannot open devtools inside Telegram, and "Open in Telegram"
+    // shown *from inside Telegram* is otherwise undebuggable. It is coarse
+    // enough not to narrate the check: 'bad-signature' says nothing an attacker
+    // did not already know from the 401.
+    console.warn('[creator/telegram/session] rejected:', verified.reason);
+    return NextResponse.json(
+      { error: 'INVALID_INIT_DATA', reason: verified.reason },
+      { status: 401 },
+    );
   }
+  const telegramUser = verified.user;
 
   if (rateLimited(telegramUser.id)) {
     return NextResponse.json({ error: 'RATE_LIMITED' }, { status: 429 });

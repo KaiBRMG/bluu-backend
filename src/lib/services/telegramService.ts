@@ -221,9 +221,28 @@ export async function clearChatMenuButton(
  * session is minted against.
  *
  * The scheme (from core.telegram.org/bots/webapps): build a newline-joined,
- * key-sorted `k=v` string of every field except `hash`, then compare
+ * key-sorted `k=v` string of the received fields, then compare
  * `HMAC(HMAC("WebAppData", bot_token), data_check_string)`. Note the two-level
  * keying — the *secret* is itself an HMAC of the token, not the token.
+ *
+ * ── Why the `signature` field is tried BOTH ways ─────────────────────────────
+ *
+ * Telegram later added a `signature` parameter (an Ed25519 signature, so that
+ * third parties who do not hold the bot token can validate a launch). Whether it
+ * participates in the *HMAC* data-check-string is genuinely ambiguous: the spec
+ * says "all received fields except `hash`", which reads as including it, while
+ * several official-adjacent client libraries exclude it — and clients that
+ * predate the field send no `signature` at all, so both readings agree there.
+ *
+ * Getting it wrong is total: every launch from a client that sends `signature`
+ * fails to verify, and the symptom is a creator who is correctly linked being
+ * told to open the app in Telegram — from inside Telegram.
+ *
+ * So both candidate strings are computed and either match is accepted. They are
+ * local HMACs over a few hundred bytes; the cost is nothing, and it removes a
+ * documentation ambiguity from the critical path of the portal's only sign-in.
+ * **This does not weaken the check** — an attacker must still produce a valid
+ * HMAC under the bot token for one of two well-defined strings.
  *
  * `auth_date` is checked because the HMAC alone never expires: a blob captured
  * once would otherwise mint sessions forever. The window is generous
@@ -240,42 +259,70 @@ export interface TelegramWebAppUser {
   lastName: string | null;
 }
 
-export function verifyTelegramInitData(initData: string): TelegramWebAppUser | null {
+/**
+ * Why a launch payload was refused. Coarse on purpose — enough to tell a
+ * configuration problem from an expiry from a forgery when debugging a creator
+ * who cannot get in, without narrating the check to an attacker.
+ */
+export type InitDataFailure =
+  | 'not-configured'
+  | 'empty'
+  | 'no-hash'
+  | 'bad-signature'
+  | 'stale'
+  | 'no-user';
+
+export type InitDataResult =
+  | { ok: true; user: TelegramWebAppUser }
+  | { ok: false; reason: InitDataFailure };
+
+/** Constant-time hex compare that tolerates a length mismatch (timingSafeEqual
+ *  throws on one rather than returning false). */
+function hexEquals(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'utf8');
+  const right = Buffer.from(b, 'utf8');
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+}
+
+export function verifyTelegramInitData(initData: string): InitDataResult {
   const token = botToken();
-  if (!token || !initData) return null;
+  if (!token) return { ok: false, reason: 'not-configured' };
+  if (!initData) return { ok: false, reason: 'empty' };
 
   let params: URLSearchParams;
   try {
     params = new URLSearchParams(initData);
   } catch {
-    return null;
+    return { ok: false, reason: 'empty' };
   }
 
   const hash = params.get('hash');
-  if (!hash) return null;
+  if (!hash) return { ok: false, reason: 'no-hash' };
 
-  const dataCheckString = [...params.entries()]
-    .filter(([key]) => key !== 'hash' && key !== 'signature')
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([key, value]) => `${key}=${value}`)
-    .join('\n');
+  const build = (excludeSignature: boolean) =>
+    [...params.entries()]
+      .filter(([key]) => key !== 'hash' && !(excludeSignature && key === 'signature'))
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, value]) => `${key}=${value}`)
+      .join('\n');
 
   const secret = crypto.createHmac('sha256', 'WebAppData').update(token).digest();
-  const computed = crypto.createHmac('sha256', secret).update(dataCheckString).digest('hex');
+  const sign = (data: string) =>
+    crypto.createHmac('sha256', secret).update(data).digest('hex');
 
-  // Constant-time, and length-guarded because timingSafeEqual throws on a
-  // length mismatch rather than returning false.
-  const provided = Buffer.from(hash, 'utf8');
-  const expected = Buffer.from(computed, 'utf8');
-  if (provided.length !== expected.length) return null;
-  if (!crypto.timingSafeEqual(provided, expected)) return null;
+  // Both readings of the spec — see the header. Identical when the client sends
+  // no `signature`, which is the majority of launches.
+  const matched =
+    hexEquals(hash, sign(build(true))) || hexEquals(hash, sign(build(false)));
+  if (!matched) return { ok: false, reason: 'bad-signature' };
 
   const authDate = Number(params.get('auth_date'));
-  if (!Number.isFinite(authDate)) return null;
-  if (Date.now() - authDate * 1000 > MAX_INIT_DATA_AGE_MS) return null;
+  if (!Number.isFinite(authDate)) return { ok: false, reason: 'stale' };
+  if (Date.now() - authDate * 1000 > MAX_INIT_DATA_AGE_MS) return { ok: false, reason: 'stale' };
 
   const rawUser = params.get('user');
-  if (!rawUser) return null;
+  if (!rawUser) return { ok: false, reason: 'no-user' };
   try {
     const user = JSON.parse(rawUser) as {
       id?: number | string;
@@ -283,15 +330,18 @@ export function verifyTelegramInitData(initData: string): TelegramWebAppUser | n
       first_name?: string;
       last_name?: string;
     };
-    if (user.id === undefined || user.id === null) return null;
+    if (user.id === undefined || user.id === null) return { ok: false, reason: 'no-user' };
     return {
-      id: String(user.id),
-      username: user.username ?? null,
-      firstName: user.first_name ?? null,
-      lastName: user.last_name ?? null,
+      ok: true,
+      user: {
+        id: String(user.id),
+        username: user.username ?? null,
+        firstName: user.first_name ?? null,
+        lastName: user.last_name ?? null,
+      },
     };
   } catch {
-    return null;
+    return { ok: false, reason: 'no-user' };
   }
 }
 
