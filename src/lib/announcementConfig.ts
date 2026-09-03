@@ -94,7 +94,7 @@ export const ANNOUNCEMENTS: AnnouncementDefinition[] = [
     // `uids`. To roll out: a group at a time, then `allUsers`.
     enabled: true,
     allUsers: false,
-    uids: ['VoRCp0wmgvSgKG8yzxOyMyZ4cSv1'],
+    uids: ['VoRCp0wmgvSgKG8yzxOyMyZ4cSv1','frSjvEHILmZ0rnDhVpGwh0wjP4d2'],
     groups: [],
 
     title: 'Bluu Backend has integrated with Telegram',

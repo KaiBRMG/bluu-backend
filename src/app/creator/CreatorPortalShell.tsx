@@ -123,8 +123,14 @@ const loader = (
   </div>
 );
 
+/** How long to wait for the auth provider to resolve the creator doc after a
+ *  successful sign-in before treating it as a fault. Generous: it is one
+ *  Firestore document read over a phone connection, and the cost of being wrong
+ *  is throwing a working session away. */
+const PROVIDER_SETTLE_TIMEOUT_MS = 15_000;
+
 function CreatorAuthWrapper({ children }: { children: React.ReactNode }) {
-  const { creatorUser, loading } = useCreatorAuth();
+  const { creatorUser } = useCreatorAuth();
   const [status, setStatus] = useState<Status>('booting');
   /**
    * True only once THIS mount has exchanged a verified Telegram launch for a
@@ -144,6 +150,12 @@ function CreatorAuthWrapper({ children }: { children: React.ReactNode }) {
   // open, so a retry with the same blob would fail identically — retrying is an
   // explicit user action (the button on the error screen reloads).
   const attempted = useRef(false);
+  // Latest `creatorUser`, readable from the settle timeout without making that
+  // timeout depend on (and be rescheduled by) every render.
+  const creatorRef = useRef(creatorUser);
+  useEffect(() => {
+    creatorRef.current = creatorUser;
+  }, [creatorUser]);
 
   // Every `setStatus` below sits after an await on purpose: the effect that
   // calls this must not set state synchronously (cascading renders), and
@@ -236,6 +248,25 @@ function CreatorAuthWrapper({ children }: { children: React.ReactNode }) {
       // what licenses rendering the portal: a `creatorUser` this shell did not
       // just mint is never trusted (see the render branch below).
       setEstablished(true);
+
+      // The provider still has to read `creators/{uid}` before `creatorUser`
+      // appears, and until it does the shell shows the loader — NOT a failure
+      // screen. Inferring "no account" from that gap is exactly the flicker
+      // this used to produce: the provider's first callback (with no user)
+      // already set `loading` false, so "signed in, not loading, no creator"
+      // was briefly true for every successful launch.
+      //
+      // It is also the wrong inference to draw. The session route verified the
+      // creator is active before minting this token, so a `creatorUser` that
+      // never arrives means the client's own read failed — a fault, not a
+      // deactivated account. Time-box it and offer a retry.
+      window.setTimeout(() => {
+        if (!creatorRef.current) {
+          console.warn('[CreatorPortalShell] signed in but no creator record resolved');
+          setDiagnostic('signed in; creator record did not resolve');
+          setStatus('error');
+        }
+      }, PROVIDER_SETTLE_TIMEOUT_MS);
     } catch (error: unknown) {
       console.error('[CreatorPortalShell] sign-in failed:', error);
       setStatus('error');
@@ -261,20 +292,10 @@ function CreatorAuthWrapper({ children }: { children: React.ReactNode }) {
   // a verified Telegram launch in this very mount.
   if (established && creatorUser) return <>{children}</>;
 
-  // Signed in, but the provider found no active creator record for the uid and
-  // signed the user straight back out — otherwise the shell would wait forever
-  // on a `creatorUser` that is never coming. Derived rather than held in state:
-  // it is a function of what we already know, and an effect that set it would
-  // just be a synchronous re-render.
-  if (established && !loading && !creatorUser) {
-    return (
-      <Screen
-        title="Account unavailable"
-        body="Your creator profile is not active at the moment. Please contact your Bluu Rock contact."
-      />
-    );
-  }
-
+  // `booting` covers the whole happy path, including the window after sign-in
+  // while the provider reads the creator doc. Nothing but the loader is shown
+  // in that window — a failure screen there is a lie that resolves itself,
+  // which is worse than a spinner. Only the timeout above can move us off it.
   if (status === 'booting') return loader;
 
   const openInTelegram = () => window.open(TELEGRAM_MINI_APP_URL, '_blank', 'noopener,noreferrer');
