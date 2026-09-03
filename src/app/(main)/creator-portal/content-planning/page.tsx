@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useId, useRef, useState, useCallback } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useCreators } from "@/hooks/useCreators";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -125,7 +125,13 @@ function ContentTypeBadge({ type }: { type: "SFW" | "NSFW" | "OF TL" | "PPV" | "
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div><p className="text-xs text-zinc-400 mb-1">{label}</p>{children}</div>;
+  const labelId = useId();
+  return (
+    <div>
+      <p id={labelId} className="text-xs text-zinc-400 mb-1">{label}</p>
+      <div role="group" aria-labelledby={labelId}>{children}</div>
+    </div>
+  );
 }
 
 // ─── Date Picker ──────────────────────────────────────────────────────────────
@@ -308,11 +314,13 @@ function DetailDialog({ entry, creatorName, creators, onClose, onSaved, onDelete
     setFields(prev => ({ ...prev, [k]: v }));
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onClick={e => { if (e.target === e.currentTarget && !hasChanged) onClose(); }}
-    >
-      <Card className="w-full max-w-lg mx-4 flex flex-col max-h-[90vh]">
+    <Dialog open onOpenChange={open => { if (!open && !hasChanged) onClose(); }}>
+      <DialogContent
+        showCloseButton={false}
+        className="p-0 gap-0 border-0 shadow-none bg-transparent max-h-[90vh] overflow-hidden"
+      >
+        <DialogTitle className="sr-only">{entry.contentSummary || "Content Request"}</DialogTitle>
+      <Card className="w-full flex flex-col max-h-[90vh]">
         <CardHeader className="shrink-0 pb-3">
           <div className="flex items-center justify-between gap-2">
             <CardTitle className="text-lg truncate">{entry.contentSummary || "Content Request"}</CardTitle>
@@ -446,7 +454,8 @@ function DetailDialog({ entry, creatorName, creators, onClose, onSaved, onDelete
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -502,17 +511,15 @@ function NewEntryWizard({ creators, onClose, onCreated }: {
 
         {step === 1 && (
           <div className="flex flex-col gap-4 py-2 max-h-[65vh] overflow-y-auto pr-1">
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">Summary of the required content</label>
+            <Field label="Summary of the required content">
               <Input
                 value={form.contentSummary}
                 onChange={e => setField("contentSummary")(e.target.value)}
                 placeholder="Instagram Content"
                 className="bg-zinc-800 border-zinc-700 text-white"
               />
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">Content Type</label>
+            </Field>
+            <Field label="Content Type">
               <Select value={form.contentType} onValueChange={v => setField("contentType")(v as "SFW" | "NSFW" | "OF TL" | "PPV" | "Dripfeed")}>
                 <SelectTrigger className="bg-zinc-800 border-zinc-700"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -523,26 +530,22 @@ function NewEntryWizard({ creators, onClose, onCreated }: {
                   <SelectItem value="Dripfeed">Dripfeed</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">Creator</label>
+            </Field>
+            <Field label="Creator">
               <Select value={form.creatorID} onValueChange={v => setField("creatorID")(v)}>
                 <SelectTrigger className="bg-zinc-800 border-zinc-700"><SelectValue placeholder="Select creator..." /></SelectTrigger>
                 <SelectContent>
                   {creators.map(c => <SelectItem key={c.creatorID} value={c.creatorID}>{c.stageName}</SelectItem>)}
                 </SelectContent>
               </Select>
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">Due Date</label>
+            </Field>
+            <Field label="Due Date">
               <DatePickerInput value={form.dueDate} onChange={v => setField("dueDate")(v)} />
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">Description</label>
+            </Field>
+            <Field label="Description">
               <DescriptionEditor rows={form.description} onChange={v => setField("description")(v)} />
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">Comment</label>
+            </Field>
+            <Field label="Comment">
               <textarea
                 value={form.comment}
                 onChange={e => setField("comment")(e.target.value)}
@@ -550,7 +553,7 @@ function NewEntryWizard({ creators, onClose, onCreated }: {
                 placeholder="Additional instructions, e.g. wear sunglasses and smile."
                 className={`${inputClass} resize-none`}
               />
-            </div>
+            </Field>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={onClose}>Cancel</Button>
               <Button onClick={() => setStep(2)} disabled={!canNext}>Next</Button>
@@ -704,11 +707,9 @@ function CreatorContentTable({ creatorID, creatorName, creators, isActive }: {
           ))}
         </div>
       ) : entries.length === 0 ? (
-        <div className="rounded-lg p-8 text-center" style={{ background: "var(--sidebar-background)", border: "1px solid var(--border-subtle)" }}>
-          <p className="text-sm text-muted-foreground">
-            {showCompleted ? "No content requests yet." : "Nothing outstanding."}
-          </p>
-        </div>
+        <p className="text-sm text-zinc-400">
+          {showCompleted ? "No content requests yet." : "Nothing outstanding."}
+        </p>
       ) : (
         <div className="rounded-lg border overflow-hidden" style={{ borderColor: "var(--border-subtle)" }}>
           <Table>
@@ -736,7 +737,7 @@ function CreatorContentTable({ creatorID, creatorName, creators, isActive }: {
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Row actions">
                             <MoreHorizontal className="w-4 h-4" />
                           </Button>
                         </DropdownMenuTrigger>
@@ -980,7 +981,7 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
           )}
         </div>
         {visibleCompleted.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No completed content to review.</p>
+          <p className="text-sm text-zinc-400">No completed content to review.</p>
         ) : (
           <div style={{ columnWidth: "13rem", columnCount: 4, columnGap: "0.75rem" }}>
             {completedKanbanCreators.map(creator => (
@@ -1032,7 +1033,7 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
       <div className="rounded-xl p-4 border border-zinc-700/50 bg-zinc-900/30">
         <h3 className="text-sm font-semibold text-zinc-300 mb-4">Pending Content</h3>
         {kanbanCreators.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No outstanding content requests.</p>
+          <p className="text-sm text-zinc-400">No outstanding content requests.</p>
         ) : (
           <div style={{ columnWidth: "13rem", columnCount: 4, columnGap: "0.75rem" }}>
             {kanbanCreators.map(creator => (
@@ -1137,7 +1138,7 @@ export default function ContentPlanningPage() {
       <div className="max-w-7xl min-w-0">
         <h1 className="text-2xl font-bold tracking-tight mb-2">Content Planning</h1>
 
-        <div className="mt-6 flex items-center gap-3">
+        <div className="mt-6 flex flex-wrap items-center gap-3">
           <label htmlFor="creator-select" className="text-sm font-medium text-zinc-300 shrink-0">
             Select a Creator
           </label>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useCallback } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useCreators } from "@/hooks/useCreators";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -88,7 +88,13 @@ function StatusDot({ status }: { status: CRStatus }) {
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div><p className="text-xs text-zinc-400 mb-1">{label}</p>{children}</div>;
+  const labelId = useId();
+  return (
+    <div>
+      <p id={labelId} className="text-xs text-zinc-400 mb-1">{label}</p>
+      <div role="group" aria-labelledby={labelId}>{children}</div>
+    </div>
+  );
 }
 
 // ─── Reject Dialog ────────────────────────────────────────────────────────────
@@ -122,8 +128,10 @@ function RejectDialog({ entry, onClose, onRejected }: RejectDialogProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60">
-      <Card className="w-full max-w-sm mx-4">
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent showCloseButton={false} className="p-0 gap-0 border-0 shadow-none bg-transparent max-w-sm">
+        <DialogTitle className="sr-only">Reject {entry.CR}</DialogTitle>
+      <Card className="w-full">
         <CardHeader>
           <CardTitle>Reject {entry.CR}</CardTitle>
         </CardHeader>
@@ -148,7 +156,8 @@ function RejectDialog({ entry, onClose, onRejected }: RejectDialogProps) {
           </Button>
         </CardFooter>
       </Card>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -335,11 +344,13 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
   const inputClass = "w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500";
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onClick={e => { if (e.target === e.currentTarget && !hasChanged) onClose(); }}
-    >
-      <Card className="w-full max-w-lg mx-4 flex flex-col max-h-[90vh]">
+    <Dialog open onOpenChange={open => { if (!open && !hasChanged) onClose(); }}>
+      <DialogContent
+        showCloseButton={false}
+        className="p-0 gap-0 border-0 shadow-none bg-transparent max-h-[90vh] overflow-hidden"
+      >
+        <DialogTitle className="sr-only">{entry.CR}</DialogTitle>
+      <Card className="w-full flex flex-col max-h-[90vh]">
         <CardHeader className="shrink-0 pb-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -354,7 +365,7 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
                 <span className="text-xs font-medium text-zinc-300">Approve this custom request?</span>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <button type="button" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+                    <button type="button" aria-label="More info" className="text-zinc-500 hover:text-zinc-300 transition-colors">
                       <Info className="w-3.5 h-3.5" />
                     </button>
                   </PopoverTrigger>
@@ -405,7 +416,7 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
                   <p className="text-xs text-zinc-400">Amount Paid</p>
                   <Popover>
                     <PopoverTrigger asChild>
-                      <button type="button" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+                      <button type="button" aria-label="More info" className="text-zinc-500 hover:text-zinc-300 transition-colors">
                         <Info className="w-3 h-3" />
                       </button>
                     </PopoverTrigger>
@@ -598,7 +609,8 @@ function ManagerViewCard({ entry, creatorName, userNames, onClose, onSaved, onDe
           loading={archiveSaving}
         />
       )}
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1018,7 +1030,7 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
                 </PieChart>
               </ChartContainer>
             ) : (
-              <p className="text-sm text-muted-foreground">Nothing outstanding.</p>
+              <p className="text-sm text-zinc-400">Nothing outstanding.</p>
             )}
           </CardContent>
         </Card>
@@ -1081,7 +1093,7 @@ function OverviewTab({ creators, userNames, isActive }: OverviewProps) {
                 </PieChart>
               </ChartContainer>
             ) : (
-              <p className="text-sm text-muted-foreground">Nothing pending.</p>
+              <p className="text-sm text-zinc-400">Nothing pending.</p>
             )}
           </CardContent>
         </Card>
@@ -1282,7 +1294,7 @@ function CreatorCountCard({ title, creators, counts }: {
       <CardContent className="flex flex-col gap-1.5 px-4">
         {top.map(c => (
           <div key={c.creatorID} className="flex items-center justify-between gap-2 text-sm">
-            <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+            <span className="flex min-w-0 items-center gap-1.5 text-zinc-400">
               <Avatar className="size-4 shrink-0">
                 <AvatarImage src={c.photoURL ?? undefined} />
                 <AvatarFallback className="text-[8px]">{c.stageName.charAt(0)}</AvatarFallback>
@@ -1293,11 +1305,11 @@ function CreatorCountCard({ title, creators, counts }: {
           </div>
         ))}
         {rest.length > 0 && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-zinc-400">
             +{rest.reduce((sum, c) => sum + c.count, 0)} more on {rest.length} other creator{rest.length === 1 ? "" : "s"}
           </p>
         )}
-        {top.length === 0 && <p className="text-sm text-muted-foreground">None</p>}
+        {top.length === 0 && <p className="text-sm text-zinc-400">None</p>}
       </CardContent>
     </Card>
   );
@@ -1389,8 +1401,7 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
         )}
         {step === 2 && type && (
           <div className="flex flex-col gap-3 py-4 max-h-[60vh] overflow-y-auto">
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">Creator</label>
+            <Field label="Creator">
               <Select value={form.creatorID} onValueChange={setCreator}>
                 <SelectTrigger className="bg-zinc-800 border-zinc-700">
                   <SelectValue placeholder="Select creator..." />
@@ -1399,14 +1410,13 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
                   {creators.map(c => <SelectItem key={c.creatorID} value={c.creatorID}>{c.stageName}</SelectItem>)}
                 </SelectContent>
               </Select>
-            </div>
-            <div><label className="block text-xs text-zinc-400 mb-1">Fan Name</label><input value={form.fanName} onChange={setField("fanName")} required className={inputClass} /></div>
-            <div><label className="block text-xs text-zinc-400 mb-1">Profile Link</label><input value={form.profileLink} onChange={setField("profileLink")} className={inputClass} /></div>
-            <div><label className="block text-xs text-zinc-400 mb-1">Description</label><textarea value={form.description} onChange={setField("description")} rows={3} required className={`${inputClass} resize-none`} /></div>
-            {(type === "CR" || type === "Call") && <div><label className="block text-xs text-zinc-400 mb-1">Length</label><input value={form.length} onChange={setField("length")} className={inputClass} /></div>}
-            {type === "Item" && <div><label className="block text-xs text-zinc-400 mb-1">Address</label><input value={form.address} onChange={setField("address")} className={inputClass} /></div>}
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">{type === "Call" ? "Call Time" : "Due Date"}</label>
+            </Field>
+            <Field label="Fan Name"><input value={form.fanName} onChange={setField("fanName")} required className={inputClass} /></Field>
+            <Field label="Profile Link"><input value={form.profileLink} onChange={setField("profileLink")} className={inputClass} /></Field>
+            <Field label="Description"><textarea value={form.description} onChange={setField("description")} rows={3} required className={`${inputClass} resize-none`} /></Field>
+            {(type === "CR" || type === "Call") && <Field label="Length"><input value={form.length} onChange={setField("length")} className={inputClass} /></Field>}
+            {type === "Item" && <Field label="Address"><input value={form.address} onChange={setField("address")} className={inputClass} /></Field>}
+            <Field label={type === "Call" ? "Call Time" : "Due Date"}>
               {type === "Call" ? (
                 <div className="flex gap-2">
                   <DatePickerInput
@@ -1428,19 +1438,17 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
                   className={inputClass}
                 />
               )}
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">Due Date Timezone</label>
+            </Field>
+            <Field label="Due Date Timezone">
               <Select value={form.dueDateTimezone} onValueChange={setVal("dueDateTimezone")}>
                 <SelectTrigger className="bg-zinc-800 border-zinc-700"><SelectValue placeholder="Select timezone..." /></SelectTrigger>
                 <SelectContent>
                   {COMMON_TIMEZONES.map(tz => <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>)}
                 </SelectContent>
               </Select>
-            </div>
+            </Field>
             {type === "Call" && <>
-              <div>
-                <label className="block text-xs text-zinc-400 mb-1">Call Type</label>
+              <Field label="Call Type">
                 <Select value={form.callType} onValueChange={setVal("callType")}>
                   <SelectTrigger className="bg-zinc-800 border-zinc-700">
                     <SelectValue placeholder="Select..." />
@@ -1449,13 +1457,13 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
                     {(["Clean Video", "Clean Voice", "NSFW Video", "NSFW Voice"] as CallType[]).map(ct => <SelectItem key={ct} value={ct}>{ct}</SelectItem>)}
                   </SelectContent>
                 </Select>
-              </div>
-              <div><label className="block text-xs text-zinc-400 mb-1">Social Platform</label><input value={form.socialPlatform} onChange={setField("socialPlatform")} className={inputClass} /></div>
-              <div><label className="block text-xs text-zinc-400 mb-1">Social Username</label><input value={form.socialUsername} onChange={setField("socialUsername")} className={inputClass} /></div>
+              </Field>
+              <Field label="Social Platform"><input value={form.socialPlatform} onChange={setField("socialPlatform")} className={inputClass} /></Field>
+              <Field label="Social Username"><input value={form.socialUsername} onChange={setField("socialUsername")} className={inputClass} /></Field>
             </>}
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-xs text-zinc-400 mb-1">Total Amount</label><input type="number" value={form.totalAmount} onChange={setField("totalAmount")} required className={inputClass} /></div>
-              <div><label className="block text-xs text-zinc-400 mb-1">Amount Paid</label><input type="number" value={form.amountPaid} onChange={setField("amountPaid")} className={inputClass} /></div>
+              <Field label="Total Amount"><input type="number" value={form.totalAmount} onChange={setField("totalAmount")} required className={inputClass} /></Field>
+              <Field label="Amount Paid"><input type="number" value={form.amountPaid} onChange={setField("amountPaid")} className={inputClass} /></Field>
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setStep(s => s - 1)}>Back</Button>
@@ -1630,6 +1638,13 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
               key={t}
               variant={!archivedOnly && typeFilter.has(t) ? "default" : "outline"}
               onClick={() => { if (!archivedOnly) toggleType(t); }}
+              role="button"
+              tabIndex={archivedOnly ? -1 : 0}
+              aria-pressed={!archivedOnly && typeFilter.has(t)}
+              onKeyDown={e => {
+                if (archivedOnly) return;
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleType(t); }
+              }}
               className={archivedOnly ? "opacity-40 pointer-events-none select-none" : "cursor-pointer select-none"}
             >
               {TYPE_LABELS[t]}
@@ -1638,6 +1653,12 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
           <Badge
             variant={archivedOnly ? "destructive" : "outline"}
             onClick={() => setArchivedOnly(v => !v)}
+            role="button"
+            tabIndex={0}
+            aria-pressed={archivedOnly}
+            onKeyDown={e => {
+              if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setArchivedOnly(v => !v); }
+            }}
             className="cursor-pointer select-none"
           >
             Archived
@@ -1654,15 +1675,13 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
         </div>
         <div className="flex items-center gap-2 ml-auto">
           <Switch checked={showCompleted} onCheckedChange={setShowCompleted} id={`mgr-show-completed-${creatorID}`} disabled={archivedOnly} />
-          <label htmlFor={`mgr-show-completed-${creatorID}`} className={archivedOnly ? "text-sm text-zinc-600 cursor-not-allowed" : "text-sm text-zinc-400 cursor-pointer"}>Show Completed</label>
+          <label htmlFor={`mgr-show-completed-${creatorID}`} className={archivedOnly ? "text-sm text-zinc-400 cursor-not-allowed" : "text-sm text-zinc-400 cursor-pointer"}>Show Completed</label>
           <Button size="sm" onClick={() => setShowNew(true)}><Plus className="w-4 h-4 mr-1" /> New</Button>
         </div>
       </div>
 
       {displayed.length === 0 ? (
-        <div className="rounded-lg p-8 text-center" style={{ background: "var(--sidebar-background)", border: "1px solid var(--border-subtle)" }}>
-          <p className="text-sm text-muted-foreground">No custom requests found.</p>
-        </div>
+        <p className="text-sm text-zinc-400">No custom requests found.</p>
       ) : (
         <div className="rounded-lg border overflow-hidden" style={{ borderColor: "var(--border-subtle)" }}>
           <Table>
@@ -1691,7 +1710,7 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_COLORS[entry.priority]}`}>
                         {entry.priority}
                       </span>
-                    ) : <span className="text-zinc-600 text-xs">—</span>}
+                    ) : <span className="text-zinc-400 text-xs">—</span>}
                   </TableCell>
                   <TableCell className="text-sm text-zinc-400">
                     {formatDueDate(entry.dueDate)}
@@ -1703,7 +1722,7 @@ function ManagerCreatorTable({ creatorID, creatorName, creators, userNames, isAc
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="w-4 h-4" /></Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Row actions"><MoreHorizontal className="w-4 h-4" /></Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem onClick={() => setViewEntry(entry)}>View</DropdownMenuItem>
@@ -1959,6 +1978,13 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
               key={t}
               variant={!archivedOnly && typeFilter.has(t) ? "default" : "outline"}
               onClick={() => { if (!archivedOnly) toggleType(t); }}
+              role="button"
+              tabIndex={archivedOnly ? -1 : 0}
+              aria-pressed={!archivedOnly && typeFilter.has(t)}
+              onKeyDown={e => {
+                if (archivedOnly) return;
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleType(t); }
+              }}
               className={archivedOnly ? "opacity-40 pointer-events-none select-none" : "cursor-pointer select-none"}
             >
               {TYPE_LABELS[t]}
@@ -1967,6 +1993,12 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
           <Badge
             variant={archivedOnly ? "destructive" : "outline"}
             onClick={() => setArchivedOnly(v => !v)}
+            role="button"
+            tabIndex={0}
+            aria-pressed={archivedOnly}
+            onKeyDown={e => {
+              if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setArchivedOnly(v => !v); }
+            }}
             className="cursor-pointer select-none"
           >
             Archived
@@ -1983,14 +2015,12 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
         </div>
         <div className="flex items-center gap-2 ml-auto">
           <Switch checked={showCompleted} onCheckedChange={setShowCompleted} id={`agent-show-completed-${agentUid}`} disabled={archivedOnly} />
-          <label htmlFor={`agent-show-completed-${agentUid}`} className={archivedOnly ? "text-sm text-zinc-600 cursor-not-allowed" : "text-sm text-zinc-400 cursor-pointer"}>Show Completed</label>
+          <label htmlFor={`agent-show-completed-${agentUid}`} className={archivedOnly ? "text-sm text-zinc-400 cursor-not-allowed" : "text-sm text-zinc-400 cursor-pointer"}>Show Completed</label>
         </div>
       </div>
 
       {displayed.length === 0 ? (
-        <div className="rounded-lg p-8 text-center" style={{ background: "var(--sidebar-background)", border: "1px solid var(--border-subtle)" }}>
-          <p className="text-sm text-muted-foreground">No custom requests found for {agentName}.</p>
-        </div>
+        <p className="text-sm text-zinc-400">No custom requests found for {agentName}.</p>
       ) : (
         <div className="rounded-lg border overflow-hidden" style={{ borderColor: "var(--border-subtle)" }}>
           <Table>
@@ -2019,7 +2049,7 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_COLORS[entry.priority]}`}>
                         {entry.priority}
                       </span>
-                    ) : <span className="text-zinc-600 text-xs">—</span>}
+                    ) : <span className="text-zinc-400 text-xs">—</span>}
                   </TableCell>
                   <TableCell className="text-sm text-zinc-400">
                     {formatDueDate(entry.dueDate)}
@@ -2039,7 +2069,7 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="w-4 h-4" /></Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Row actions"><MoreHorizontal className="w-4 h-4" /></Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem onClick={() => setViewEntry(entry)}>View</DropdownMenuItem>
