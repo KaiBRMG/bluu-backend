@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronDownIcon, Plus, ShieldCheck } from 'lucide-react';
+import { Check, ChevronDownIcon, Loader2, Plus, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '@/components/AuthProvider';
@@ -39,7 +39,6 @@ const initialFormState: PersonalInfoFormData = {
   emergencyContactName: '',
   emergencyContactNumber: '',
   emergencyContactEmail: '',
-  telegramHandle: '',
   paymentMethod: '',
   paymentInfo: '',
   userComments: '',
@@ -133,6 +132,12 @@ export default function ProfilePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLFormElement>(null);
 
+  // Link Telegram — same one-time-link flow as the announcement card and
+  // Settings → App Settings, duplicated here rather than shared because this
+  // one lives inside a form and is never blocking (see the "Skip for now").
+  const [telegramBusy, setTelegramBusy] = useState(false);
+  const [telegramSkipped, setTelegramSkipped] = useState(false);
+
   // Submitting is gated on having actually scrolled the form — we're asking for
   // records the user is accountable for, so they should have seen every field.
   const [scrollProgress, setScrollProgress] = useState(0);
@@ -195,7 +200,6 @@ export default function ProfilePage() {
       emergencyContactName: userData.contactInfo?.emergencyContactName || '',
       emergencyContactNumber: userData.contactInfo?.emergencyContactNumber || '',
       emergencyContactEmail: userData.contactInfo?.emergencyContactEmail || '',
-      telegramHandle: userData.contactInfo?.telegramHandle || '',
       paymentMethod: userData.paymentMethod || '',
       paymentInfo: userData.paymentInfo || '',
       userComments: userData.userComments || '',
@@ -264,6 +268,37 @@ export default function ProfilePage() {
     }
   };
 
+  /**
+   * Mint a one-time link and open Telegram. Duplicated from `AnnouncementCard`
+   * / `AppSettingsForm` rather than shared: the link is fetched at click time
+   * because it is single-use and expiring, and nothing is written locally —
+   * the user doc only changes once the webhook sees the user press Start,
+   * which is why `userData?.telegram` (not local state) is what flips this
+   * section to its connected state.
+   */
+  const handleTelegramConnect = async () => {
+    if (!user) return;
+    setTelegramBusy(true);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/user/telegram-link', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { url } = (await res.json()) as { url?: string };
+      if (!url) throw new Error('No link returned');
+      // `setWindowOpenHandler` in the shell turns this into `shell.openExternal`.
+      window.open(url, '_blank', 'noopener,noreferrer');
+      toast.success('Opening Telegram — press Start to finish connecting.');
+    } catch (error: unknown) {
+      console.error('[ProfilePage] telegram connect failed:', error);
+      toast.error('Could not generate your Telegram link. Please try again.');
+    } finally {
+      setTelegramBusy(false);
+    }
+  };
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (isSubmitting || !user) return;
@@ -316,7 +351,6 @@ export default function ProfilePage() {
             phoneNumber: formData.phoneNumber,
             countryCode: formData.countryCode,
             personalEmail: formData.personalEmail,
-            telegramHandle: formData.telegramHandle,
             emergencyContactName: formData.emergencyContactName,
             emergencyContactNumber: formData.emergencyContactNumber,
             emergencyContactEmail: formData.emergencyContactEmail,
@@ -333,10 +367,14 @@ export default function ProfilePage() {
       }
 
       // Only now is onboarding complete — the details are the last thing we need.
+      // `telegramPromptedAtOnboarding` is set unconditionally here (linked or
+      // skipped): either way the user has just been asked, so the in-app
+      // announcement that asks the same thing must not repeat it — see
+      // `announcementConditionMet` in announcementConfig.ts.
       const flagRes = await fetch('/api/user/onboarding', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({ hasCompletedOnboarding: true }),
+        body: JSON.stringify({ hasCompletedOnboarding: true, telegramPromptedAtOnboarding: true }),
       });
       if (!flagRes.ok) throw new Error('Failed to complete onboarding');
 
@@ -349,6 +387,12 @@ export default function ProfilePage() {
   };
 
   const selectedCountry = countryCodes.find((c) => c.dialCode === formData.countryCode);
+
+  // Read straight off the live user snapshot, so pressing Start in Telegram
+  // flips this section to "Connected" without a refresh — the webhook writes
+  // `telegram` on the user doc and `useUserData` is an onSnapshot.
+  const telegramLinked = !!userData?.telegram?.userId;
+  const telegramUsername = userData?.telegram?.username ?? null;
 
   return (
     <OnboardingCard
@@ -643,14 +687,60 @@ export default function ProfilePage() {
             </div>
           </Field>
 
-          <Field id="telegramHandle" label="Telegram handle" error={errors.telegramHandle}>
-            <Input
-              id="telegramHandle"
-              value={formData.telegramHandle}
-              onChange={(e) => setField('telegramHandle', e.target.value)}
-              placeholder="@username"
-            />
-          </Field>
+        </Section>
+
+        <Section
+          title="Link Telegram"
+          description="Get important updates and system alerts sent straight to you on Telegram, so you don't need to keep the app open to catch them."
+        >
+          {telegramLinked ? (
+            <div
+              className="flex items-center gap-3 rounded-lg border p-3"
+              style={{ borderColor: 'rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.04)' }}
+            >
+              <span
+                aria-hidden="true"
+                className="flex size-8 shrink-0 items-center justify-center rounded-full bg-green-500/10 text-green-400"
+              >
+                <Check className="size-4" strokeWidth={2.5} />
+              </span>
+              <p className="text-sm text-zinc-300">
+                {telegramUsername ? `Connected as @${telegramUsername}.` : 'Connected.'}
+              </p>
+            </div>
+          ) : telegramSkipped ? (
+            <div
+              className="flex items-center justify-between gap-3 rounded-lg border p-3"
+              style={{ borderColor: 'rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.04)' }}
+            >
+              <p className="text-sm text-zinc-400">
+                Skipped for now — you can link Telegram any time from Settings.
+              </p>
+              <Button type="button" variant="outline" size="sm" onClick={() => setTelegramSkipped(false)}>
+                Link now
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleTelegramConnect}
+                disabled={telegramBusy}
+              >
+                {telegramBusy && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
+                {telegramBusy ? 'Working…' : 'Link Telegram'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setTelegramSkipped(true)}
+                className="text-zinc-400"
+              >
+                Skip for now
+              </Button>
+            </div>
+          )}
         </Section>
 
         <Section

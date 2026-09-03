@@ -33,6 +33,7 @@ export const GET = withAuth(async (_request: NextRequest, token: DecodedIdToken)
       groups: user?.groups ?? [],
       dismissedAnnouncements: user?.dismissedAnnouncements ?? [],
       telegram: user?.telegram ?? null,
+      telegramPromptedAtOnboarding: user?.telegramPromptedAtOnboarding ?? false,
     }).map((a) => ({
       // Cohort fields are the server's business and name other people — the
       // client needs only what it renders and what it acts on.

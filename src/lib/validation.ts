@@ -78,7 +78,6 @@ export interface PersonalInfoFormData {
   emergencyContactName: string;
   emergencyContactNumber: string;
   emergencyContactEmail: string;
-  telegramHandle: string;
   paymentMethod: string;
   paymentInfo: string;
   userComments: string;
@@ -131,8 +130,11 @@ export function validatePersonalInfoForm(
  * onboarding step collects the compliance core on top of it.
  *
  * Deliberately excluded (collected, format-validated, but never blocking):
- * gender, telegram handle, payment method/info, comments, and the emergency
- * contact's phone number — email is the required channel for that contact.
+ * gender, payment method/info, comments, and the emergency contact's phone
+ * number — email is the required channel for that contact. Telegram is asked
+ * for separately, in its own dedicated Link Telegram section — see
+ * `onboarding/profile/page.tsx` — and is never blocking either: it has its
+ * own "Skip for now".
  */
 const ONBOARDING_REQUIRED_FIELDS: ReadonlyArray<{
   key: keyof Omit<PersonalInfoFormData, 'address'>;

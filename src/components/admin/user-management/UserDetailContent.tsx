@@ -67,7 +67,6 @@ interface FormData {
   countryCode: string;
   phoneNumber: string;
   personalEmail: string;
-  telegramHandle: string;
   emergencyContactName: string;
   emergencyContactNumber: string;
   emergencyContactEmail: string;
@@ -137,7 +136,6 @@ function buildFormData(user: AdminFullUser): FormData {
     countryCode: user.contactInfo?.countryCode || '+1',
     phoneNumber: user.contactInfo?.phoneNumber || '',
     personalEmail: user.contactInfo?.personalEmail || '',
-    telegramHandle: user.contactInfo?.telegramHandle || '',
     emergencyContactName: user.contactInfo?.emergencyContactName || '',
     emergencyContactNumber: user.contactInfo?.emergencyContactNumber || '',
     emergencyContactEmail: user.contactInfo?.emergencyContactEmail || '',
@@ -403,7 +401,6 @@ export default function UserDetailContent({
           countryCode: formData.countryCode,
           phoneNumber: formData.phoneNumber,
           personalEmail: formData.personalEmail,
-          telegramHandle: formData.telegramHandle,
           emergencyContactName: formData.emergencyContactName,
           emergencyContactNumber: formData.emergencyContactNumber,
           emergencyContactEmail: formData.emergencyContactEmail,
@@ -978,26 +975,14 @@ export default function UserDetailContent({
                     </div>
 
                     <div>
-                      <Label htmlFor={fid('telegramHandle')} className="mb-1 block text-xs text-zinc-400">
-                        Telegram Handle
-                      </Label>
-                      <Input
-                        type="text"
-                        className="form-input w-full"
-                        value={formData.telegramHandle}
-                        onChange={(e) => handleChange('telegramHandle', e.target.value)}
-                        placeholder="@username"
-                        {...fieldProps('telegramHandle')}
-                      />
-                      {/* The handle above is free text somebody typed and proves
-                          nothing. This line is the actual bot connection —
-                          written by the Telegram webhook when the user spends
-                          their link — and it is what decides whether alerts
-                          reach them. Read-only here on purpose: an admin cannot
-                          connect on someone's behalf (only the user's own
-                          `/api/user/telegram-link` can mint their link), and
-                          disconnecting for them is not a case that has come up. */}
-                      <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-zinc-400">
+                      {/* Read-only: this is the verified bot connection, written
+                          by the Telegram webhook when the user spends their own
+                          link (self-service, either during onboarding's
+                          dedicated Link Telegram step or from their own Settings
+                          → App Settings). An admin cannot connect or disconnect
+                          on someone's behalf — that has not come up as a need. */}
+                      <span className="mb-1 block text-xs text-zinc-400">Telegram</span>
+                      <p className="flex items-center gap-1.5 text-sm">
                         <span
                           aria-hidden
                           className={`inline-block size-2 rounded-full ${

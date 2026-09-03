@@ -12,6 +12,9 @@ export const PATCH = withAuth(async (request: NextRequest, token: DecodedIdToken
     // Only allow setting these flags to true — never allow reverting to false
     if (body.hasAcceptedTerms === true) updates.hasAcceptedTerms = true;
     if (body.hasCompletedOnboarding === true) updates.hasCompletedOnboarding = true;
+    // Set once, alongside onboarding completion — see the field's comment in
+    // types/firestore.ts for what it gates.
+    if (body.telegramPromptedAtOnboarding === true) updates.telegramPromptedAtOnboarding = true;
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });

@@ -38,7 +38,6 @@ export interface AdminFullUser {
     phoneNumber?: string;
     countryCode?: string;
     personalEmail?: string;
-    telegramHandle?: string;
     emergencyContactName?: string;
     emergencyContactNumber?: string;
     emergencyContactEmail?: string;
@@ -58,10 +57,9 @@ export interface AdminFullUser {
   appVersion?: string | null;
   appPlatform?: string | null;
   /**
-   * The bound Telegram account, or absent. Distinct from
-   * `contactInfo.telegramHandle`, which is free text somebody typed into their
-   * profile and proves nothing — this is written by the bot webhook and is what
-   * actually decides whether alerts reach them.
+   * The bound Telegram account, or absent — written by the bot webhook once
+   * the user spends their one-time link, and what actually decides whether
+   * alerts reach them.
    */
   telegram?: {
     userId: string;

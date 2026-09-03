@@ -1,5 +1,6 @@
 "use client";
 
+import { IconBrandTelegram } from '@tabler/icons-react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
 import { getGroupBadgeStyle } from './groupColors';
@@ -27,6 +28,11 @@ export default function UserCard({ user, groups, onClick }: UserCardProps) {
     : isActive
       ? { label: 'Active', color: '#22c55e', tint: 'rgba(34,197,94,0.10)' }
       : { label: 'Disabled', color: '#ef4444', tint: 'rgba(239,68,68,0.10)' };
+  // The verified bot connection (`telegram.userId`), not `contactInfo.telegramHandle`.
+  const telegramLinked = !!user.telegram?.userId;
+  const telegramStatus = telegramLinked
+    ? { label: 'Linked', color: '#60a5fa', tint: 'rgba(59,130,246,0.10)' }
+    : { label: 'Not linked', color: '#a1a1aa', tint: 'rgba(161,161,170,0.10)' };
   const userGroups = (user.groups || [])
     .map((id) => groups.find((g) => g.id === id))
     .filter(Boolean) as AdminGroup[];
@@ -37,16 +43,26 @@ export default function UserCard({ user, groups, onClick }: UserCardProps) {
       onClick={onClick}
       className="relative w-full rounded-lg p-4 text-left transition-colors bg-container-bg border border-border-subtle hover:bg-hover-bg hover:border-foreground-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
     >
-      <span
-        className="absolute top-3 right-3 flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium"
-        style={{ color: status.color, background: status.tint }}
-      >
+      <div className="absolute top-3 right-3 flex flex-col items-end gap-1">
         <span
-          className="inline-block size-1.5 rounded-full"
-          style={{ background: status.color }}
-        />
-        {status.label}
-      </span>
+          className="flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium"
+          style={{ color: status.color, background: status.tint }}
+        >
+          <span
+            className="inline-block size-1.5 rounded-full"
+            style={{ background: status.color }}
+          />
+          {status.label}
+        </span>
+
+        <span
+          className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+          style={{ color: telegramStatus.color, background: telegramStatus.tint }}
+        >
+          <IconBrandTelegram size={11} stroke={2} aria-hidden="true" />
+          {telegramStatus.label}
+        </span>
+      </div>
 
       <div className="flex items-start gap-3">
         <Avatar style={{ background: getAvatarColor((user.displayName || fullName) || 'User') }}>
@@ -56,7 +72,7 @@ export default function UserCard({ user, groups, onClick }: UserCardProps) {
           </AvatarFallback>
         </Avatar>
 
-        <div className="flex-1 min-w-0 pr-16">
+        <div className="flex-1 min-w-0 pr-20">
           <span className="block truncate text-sm font-medium text-foreground">
             {fullName}
           </span>

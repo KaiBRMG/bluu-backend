@@ -118,6 +118,8 @@ export interface AnnouncementAudience {
   groups?: string[];
   dismissedAnnouncements?: string[];
   telegram?: { userId?: string } | null;
+  /** Set once at onboarding completion — see the field's comment in types/firestore.ts. */
+  telegramPromptedAtOnboarding?: boolean;
 }
 
 /** Is this user in the announcement's cohort? Cohort only — no dismissal or
@@ -139,7 +141,13 @@ export function announcementConditionMet(
   user: AnnouncementAudience | null | undefined,
 ): boolean {
   if (!announcement.hideWhen) return false;
-  if (announcement.hideWhen === 'telegram-linked') return !!user?.telegram?.userId;
+  if (announcement.hideWhen === 'telegram-linked') {
+    // Also retired by having already been asked at onboarding — the dedicated
+    // Link Telegram section there (with its own "Skip for now") is the same
+    // ask this card would otherwise repeat, so re-showing it here would be
+    // redundant rather than a useful reminder.
+    return !!user?.telegram?.userId || !!user?.telegramPromptedAtOnboarding;
+  }
   return false;
 }
 

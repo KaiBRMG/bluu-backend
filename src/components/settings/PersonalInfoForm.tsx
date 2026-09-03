@@ -37,7 +37,6 @@ const initialFormState: PersonalInfoFormData = {
   emergencyContactName: '',
   emergencyContactNumber: '',
   emergencyContactEmail: '',
-  telegramHandle: '',
   paymentMethod: '',
   paymentInfo: '',
   userComments: '',
@@ -86,7 +85,6 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
         emergencyContactName: userData.contactInfo?.emergencyContactName || '',
         emergencyContactNumber: userData.contactInfo?.emergencyContactNumber || '',
         emergencyContactEmail: userData.contactInfo?.emergencyContactEmail || '',
-        telegramHandle: userData.contactInfo?.telegramHandle || '',
         paymentMethod: userData.paymentMethod || '',
         paymentInfo: userData.paymentInfo || '',
         userComments: userData.userComments || '',
@@ -159,7 +157,6 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
           phoneNumber: formData.phoneNumber,
           countryCode: formData.countryCode,
           personalEmail: formData.personalEmail,
-          telegramHandle: formData.telegramHandle,
           emergencyContactName: formData.emergencyContactName,
           emergencyContactNumber: formData.emergencyContactNumber,
           emergencyContactEmail: formData.emergencyContactEmail,
@@ -637,18 +634,6 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
             />
             {errors.emergencyContactEmail && <p className="form-error">{errors.emergencyContactEmail}</p>}
           </div>
-        </div>
-
-        {/* Telegram Handle */}
-        <div className="mb-6">
-          <label className="form-label block mb-2">Telegram Handle</label>
-          <Input
-            type="text"
-            className="form-input"
-            value={formData.telegramHandle}
-            onChange={(e) => handleInputChange('telegramHandle', e.target.value)}
-            placeholder="@username"
-          />
         </div>
 
         {/* Payment Method */}

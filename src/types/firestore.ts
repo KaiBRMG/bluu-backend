@@ -86,7 +86,6 @@ export interface UserDocument {
     phoneNumber?: string;
     countryCode?: string;
     personalEmail?: string;
-    telegramHandle?: string;
     emergencyContactName?: string;
     emergencyContactNumber?: string;
     emergencyContactEmail?: string;
@@ -142,6 +141,12 @@ export interface UserDocument {
   // without a query. Never the token itself.
   telegramLinkTokenHash?: string;
   telegramLinkCreatedAt?: Timestamp;
+  // Set once, at onboarding completion (`/api/user/onboarding`), regardless of
+  // whether the user actually linked or pressed "Skip for now" on the
+  // dedicated Link Telegram section. Lets `announcementConfig.ts` retire the
+  // telegram-integration announcement for anyone who was already asked here —
+  // re-showing the same ask in a card would be redundant, not a reminder.
+  telegramPromptedAtOnboarding?: boolean;
 
   // Announcement ids the user has dismissed permanently (the card's "×").
   // Keyed on AnnouncementDefinition.id — see announcementConfig.ts. Nothing

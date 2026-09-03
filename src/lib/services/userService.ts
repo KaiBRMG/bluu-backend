@@ -287,7 +287,6 @@ export function buildNewUserDoc(record: NewUserRecord): Record<string, unknown> 
       phoneNumber: '',
       countryCode: '',
       personalEmail: '',
-      telegramHandle: '',
       emergencyContactName: '',
       emergencyContactNumber: '',
       emergencyContactEmail: '',
@@ -309,6 +308,7 @@ export function buildNewUserDoc(record: NewUserRecord): Record<string, unknown> 
     sessionToken: randomUUID(),
     hasAcceptedTerms: false,
     hasCompletedOnboarding: false,
+    telegramPromptedAtOnboarding: false,
     // TEMPORARY (see CLAUDE.md): new users are born with a correct signed-
     // identity TCC record, so they must never trigger the one-time stale-
     // permission reset. Existing users lack this field (falsy) and do.
