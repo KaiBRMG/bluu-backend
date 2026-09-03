@@ -266,17 +266,24 @@ export async function consumeTelegramLinkToken(
  * the two surfaces that call this (Settings, admin) can both be clicked twice.
  * Any outstanding invite is torn down too: "disconnect" must not leave a live
  * link that silently reconnects the account.
+ *
+ * Returns the chat id it just released so the caller can clear that chat's menu
+ * button. It is returned rather than acted on here because this file is the
+ * Firestore half of linking and deliberately makes no Bot API calls — but a
+ * disconnected creator who keeps a "Creator Portal" button keeps a shortcut into
+ * a portal that will now refuse them, so the caller must not skip it.
  */
 export async function unlinkTelegramAccount(
   subjectKind: TelegramSubjectKind,
   subjectUid: string,
-): Promise<{ unlinked: boolean }> {
+): Promise<{ unlinked: boolean; chatId: string | null }> {
   const subjectRef = adminDb.collection(COLLECTION_FOR[subjectKind]).doc(subjectUid);
   const snap = await subjectRef.get();
-  if (!snap.exists) return { unlinked: false };
+  if (!snap.exists) return { unlinked: false, chatId: null };
 
   const telegramUserId: unknown = snap.get('telegram.userId');
   const pendingHash: unknown = snap.get('telegramLinkTokenHash');
+  const chatIdValue: unknown = snap.get('telegram.chatId');
 
   const batch = adminDb.batch();
   if (typeof telegramUserId === 'string' && telegramUserId) {
@@ -294,7 +301,10 @@ export async function unlinkTelegramAccount(
 
   if (subjectKind === 'user') invalidateUserCache(subjectUid);
 
-  return { unlinked: typeof telegramUserId === 'string' && !!telegramUserId };
+  return {
+    unlinked: typeof telegramUserId === 'string' && !!telegramUserId,
+    chatId: typeof chatIdValue === 'string' && chatIdValue ? chatIdValue : null,
+  };
 }
 
 /**

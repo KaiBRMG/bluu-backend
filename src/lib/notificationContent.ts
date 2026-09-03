@@ -245,8 +245,38 @@ export const telegramMessages = {
   linkInactive: (): string =>
     '⚠️ <b>That account is not active.</b>\n\nPlease contact your Bluu Rock contact.',
 
-  /** Any `/start` with no payload — someone who found the bot on their own. */
+  /**
+   * `/start` with no payload from a Telegram account bound to **no** principal.
+   *
+   * It answers both audiences because at this point the bot genuinely cannot
+   * tell which it is talking to — an unlinked chat has, by definition, nothing
+   * on it identifying the sender. Saying "use your link" alone would strand
+   * every employee, whose route in is the app rather than a link someone sends
+   * them.
+   *
+   * A *linked* user pressing Start gets one of the two messages below instead;
+   * telling a connected creator they are not connected is the failure this
+   * split exists to prevent.
+   */
   startWithoutToken: (): string =>
-    '👋 <b>Bluu Rock</b>\n\n' +
-    'This bot delivers alerts from Bluu Backend. To connect, use the personal link you were sent.',
+    '👋 <b>Welcome to Bluu Rock!</b>\n\n' +
+    '⚠️ <i>It looks like you started this bot directly, so it is not currently linked to your profile.</i>\n\n' +
+    '🎨 <b>If you are a Creator:</b>\n' +
+    'Please use the personal link you were sent, or ask your Account Manager to generate a new one for you.\n\n' +
+    '🏢 <b>If you are an Employee:</b>\n' +
+    'Connect your Telegram account directly inside the Bluu Backend app settings, or ask your Team Leader for assistance.\n\n' +
+    '📧 <b>Need Help?</b>\n' +
+    'Send us an email at hello@bluurock.com',
+
+  /** `/start` from a connected creator — reopening the chat, or tapping Start
+   *  again. The 👇 points at the menu button the same branch re-installs. */
+  startAlreadyLinkedCreator: (): string =>
+    '✅ <b>You are connected.</b>\n\n' +
+    'Open the Creator Portal below to see your custom requests, scheduled calls, and content requirements 👇',
+
+  /** `/start` from a connected employee. No portal, so nothing to point at. */
+  startAlreadyLinkedEmployee: (): string =>
+    '✅ <b>You are connected.</b>\n\n' +
+    'Your Bluu Backend alerts will arrive in this chat.\n\n' +
+    '<i>You can disconnect at any time in Bluu Backend app settings.</i>',
 };

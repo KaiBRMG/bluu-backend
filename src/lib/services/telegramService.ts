@@ -185,6 +185,32 @@ export async function setCreatorPortalMenuButton(
 }
 
 /**
+ * Put a chat's menu button back to Telegram's default.
+ *
+ * **This is not the inverse of a call we made — it is a correction of one we
+ * did not.** A menu button configured globally in BotFather appears in *every*
+ * chat with the bot, including a stranger who just pressed Start and an
+ * employee who has no portal to open. A per-chat override is the only thing
+ * that can suppress it, so the bot has to set this deliberately rather than
+ * simply declining to offer a button.
+ *
+ * The consequence of not doing it is a "Creator Portal" button in the chat of
+ * someone with no creator account, which opens a Mini App that can only refuse
+ * them — an invitation to a dead end.
+ *
+ * Idempotent, and safe on a chat that never had a button.
+ */
+export async function clearChatMenuButton(
+  chatId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await callTelegram('setChatMenuButton', {
+    chat_id: chatId,
+    menu_button: { type: 'default' },
+  });
+  return { ok: res.ok, error: res.error };
+}
+
+/**
  * ── Mini App `initData` verification ─────────────────────────────────────────
  *
  * The creator portal's entire authentication rests on this function. Telegram

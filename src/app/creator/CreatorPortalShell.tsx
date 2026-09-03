@@ -12,6 +12,7 @@ import { CreatorAuthProvider, useCreatorAuth } from '@/components/CreatorAuthPro
 import { Loader } from '@/components/ui/loader';
 import {
   clearTelegramInitData,
+  describeTelegramLaunch,
   loadTelegramWebApp,
   readTelegramInitData,
 } from '@/lib/telegramWebApp';
@@ -82,10 +83,14 @@ function Screen({
   title,
   body,
   action,
+  detail,
 }: {
   title: string;
   body: string;
   action?: { label: string; onClick: () => void };
+  /** Technical cause, for the person the creator forwards this screenshot to.
+   *  Muted and last so it never competes with the instruction above it. */
+  detail?: string | null;
 }) {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-black px-6">
@@ -101,6 +106,11 @@ function Screen({
           >
             {action.label}
           </button>
+        )}
+        {detail && (
+          <p className="mt-6 border-t border-white/10 pt-4 font-mono text-[10px] leading-relaxed break-all text-zinc-500">
+            {detail}
+          </p>
         )}
       </div>
     </main>
@@ -127,6 +137,9 @@ function CreatorAuthWrapper({ children }: { children: React.ReactNode }) {
    * UI from showing a shell that every request behind it would refuse.
    */
   const [established, setEstablished] = useState(false);
+  /** Why the launch payload was not found. Rendered on the refusal screen — see
+   *  `describeTelegramLaunch`. */
+  const [diagnostic, setDiagnostic] = useState<string | null>(null);
   // One attempt per mount. `initData` does not change while the Mini App is
   // open, so a retry with the same blob would fail identically — retrying is an
   // explicit user action (the button on the error screen reloads).
@@ -159,17 +172,24 @@ function CreatorAuthWrapper({ children }: { children: React.ReactNode }) {
       // telegramWebApp.ts for why depending on the script is fragile. Read it
       // FIRST and synchronously, before anything can navigate and drop the
       // fragment it lives in.
-      const initData = readTelegramInitData();
+      let initData = readTelegramInitData();
 
-      // The SDK is loaded only for ready()/expand(), and its failure is not
-      // ours: a webview that never chromes correctly still signs the user in.
-      void loadTelegramWebApp().then((webApp) => {
-        webApp?.ready();
-        webApp?.expand();
-      });
+      // The SDK is awaited (with its own internal timeout) rather than fired and
+      // forgotten. Two reasons: `ready()`/`expand()` need it, and if the URL gave
+      // us nothing it is worth asking the SDK before giving up — it is the one
+      // source that might see a launch this code does not understand.
+      const webApp = await loadTelegramWebApp();
+      webApp?.ready();
+      webApp?.expand();
+      if (!initData && webApp?.initData) initData = webApp.initData;
 
       if (!initData) {
-        console.warn('[CreatorPortalShell] no tgWebAppData in URL, cache or SDK');
+        // Capture WHY before rendering the refusal. This screen has five
+        // possible causes and looks identical for all of them, and nobody can
+        // open devtools inside Telegram — so the reason goes on the screen.
+        const detail = describeTelegramLaunch();
+        console.warn('[CreatorPortalShell] no launch payload —', detail);
+        setDiagnostic(detail);
         setStatus('no-telegram');
         return;
       }
@@ -257,6 +277,7 @@ function CreatorAuthWrapper({ children }: { children: React.ReactNode }) {
           title="Open in Telegram"
           body="The Creator Portal now runs inside Telegram. Open it from the Bluu Rock bot — or tap the Creator Portal button in your chat with the bot."
           action={{ label: 'Open in Telegram', onClick: openInTelegram }}
+          detail={diagnostic}
         />
       );
     case 'not-linked':

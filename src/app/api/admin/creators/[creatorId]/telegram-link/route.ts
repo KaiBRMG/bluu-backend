@@ -23,6 +23,7 @@ import {
   mintTelegramLinkToken,
   unlinkTelegramAccount,
 } from '@/lib/services/telegramLinkService';
+import { clearChatMenuButton } from '@/lib/services/telegramService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 async function checkPermission(uid: string): Promise<boolean> {
@@ -67,7 +68,17 @@ export const DELETE = withAuth(
       }
 
       const { creatorId } = await params;
-      const { unlinked } = await unlinkTelegramAccount('creator', creatorId);
+      const { unlinked, chatId } = await unlinkTelegramAccount('creator', creatorId);
+
+      // Take the portal shortcut away with the access. Best-effort: the unlink
+      // itself has already committed, and a stale button is a nuisance rather
+      // than a hole — the portal refuses them either way.
+      if (chatId) {
+        await clearChatMenuButton(chatId).catch((err) => {
+          console.error(`[creator telegram unlink] menu button not cleared for ${creatorId}:`, err);
+        });
+      }
+
       invalidateAdminCreatorsCache();
 
       return NextResponse.json({ success: true, unlinked });

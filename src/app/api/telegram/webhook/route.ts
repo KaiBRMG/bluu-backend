@@ -35,8 +35,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { consumeTelegramLinkToken } from '@/lib/services/telegramLinkService';
 import {
+  consumeTelegramLinkToken,
+  lookupTelegramSubject,
+} from '@/lib/services/telegramLinkService';
+import {
+  clearChatMenuButton,
   isTelegramConfigured,
   sendTelegramMessage,
   setCreatorPortalMenuButton,
@@ -120,10 +124,34 @@ export async function POST(request: NextRequest) {
   // it to [A-Za-z0-9_-]{1,64}; anything else was not produced by us.
   const payload = text.slice('/start'.length).trim();
   if (!payload) {
-    await sendTelegramMessage(chatId, telegramMessages.startWithoutToken());
+    // `/start` with no token is not one situation but three, and they need
+    // opposite handling. Costs one indexed doc read, bounded by the rate limit
+    // above.
+    //
+    // Treating them all as "you are not connected" would strip a connected
+    // creator's portal button and tell them they are not linked — the people
+    // this matters most for, punished for tapping Start twice.
+    const subject = await lookupTelegramSubject(telegramUserId);
+
+    if (subject?.subjectKind === 'creator') {
+      // Also the self-serve repair for a stale menu button: a creator linked
+      // before the URL was corrected fixes their own by pressing Start.
+      await setCreatorPortalMenuButton(chatId, `${PUBLIC_APP_ORIGIN}/creator/dashboard`);
+      await sendTelegramMessage(chatId, telegramMessages.startAlreadyLinkedCreator());
+    } else if (subject?.subjectKind === 'user') {
+      await clearChatMenuButton(chatId);
+      await sendTelegramMessage(chatId, telegramMessages.startAlreadyLinkedEmployee());
+    } else {
+      // Genuinely unlinked — a stranger, or someone whose account was
+      // disconnected. Offering them a portal that can only refuse them is worse
+      // than offering nothing, so any leftover button goes.
+      await clearChatMenuButton(chatId);
+      await sendTelegramMessage(chatId, telegramMessages.startWithoutToken());
+    }
     return NextResponse.json({ ok: true });
   }
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(payload)) {
+    await clearChatMenuButton(chatId);
     await sendTelegramMessage(chatId, telegramMessages.linkInvalid());
     return NextResponse.json({ ok: true });
   }
@@ -143,14 +171,20 @@ export async function POST(request: NextRequest) {
       firstName: from.first_name ?? null,
     });
 
+    // Every non-`linked` outcome leaves this chat with no portal button, for the
+    // same reason as the no-token branch above: nobody who failed to link has a
+    // portal to open.
     switch (result.status) {
       case 'invalid':
+        await clearChatMenuButton(chatId);
         await sendTelegramMessage(chatId, telegramMessages.linkInvalid());
         break;
       case 'conflict':
+        await clearChatMenuButton(chatId);
         await sendTelegramMessage(chatId, telegramMessages.linkConflict());
         break;
       case 'inactive':
+        await clearChatMenuButton(chatId);
         await sendTelegramMessage(chatId, telegramMessages.linkInactive());
         break;
       case 'linked': {
@@ -169,6 +203,10 @@ export async function POST(request: NextRequest) {
             telegramMessages.creatorWelcome(escapeHtml(result.displayName)),
           );
         } else {
+          // An employee has no creator portal, so the button is cleared for
+          // them too — a global BotFather menu button would otherwise put
+          // "Creator Portal" in every staff member's chat.
+          await clearChatMenuButton(chatId);
           await sendTelegramMessage(chatId, telegramMessages.employeeWelcome());
         }
         break;

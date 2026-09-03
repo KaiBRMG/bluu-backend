@@ -108,6 +108,44 @@ export function readTelegramInitData(): string | null {
   return fromSdk || null;
 }
 
+/**
+ * A one-line summary of where the launch payload was (and was not) found.
+ *
+ * Shown on the "Open in Telegram" screen, and it earns its place: that screen
+ * is indistinguishable between *five* causes — opened in a real browser, the
+ * menu button pointing at a URL that redirects and drops the fragment, a
+ * client-side navigation having replaced it, the SDK blocked, or Telegram
+ * simply not passing it. A creator cannot open devtools inside Telegram, and
+ * neither can whoever they report it to, so without this the only debugging
+ * available is guessing.
+ *
+ * **It reveals nothing sensitive** — presence flags and lengths, never the
+ * payload, which is a signed credential.
+ */
+export function describeTelegramLaunch(): string {
+  if (typeof window === 'undefined') return 'ssr';
+
+  const hash = window.location.hash.replace(/^#/, '');
+  const search = window.location.search.replace(/^\?/, '');
+  const has = (source: string) => {
+    if (!source) return 'empty';
+    return new URLSearchParams(source).get('tgWebAppData') ? 'yes' : `no(${source.length}c)`;
+  };
+
+  let cached = 'no';
+  try {
+    cached = window.sessionStorage.getItem(CACHE_KEY) ? 'yes' : 'no';
+  } catch {
+    cached = 'blocked';
+  }
+
+  const sdk = window.Telegram?.WebApp
+    ? `loaded(initData ${window.Telegram.WebApp.initData ? 'yes' : 'empty'})`
+    : 'absent';
+
+  return `hash:${has(hash)} query:${has(search)} cache:${cached} sdk:${sdk} path:${window.location.pathname}`;
+}
+
 /** Clear the cached blob. Called when the server rejects it, so a stale or
  *  expired payload cannot be retried forever on every reload. */
 export function clearTelegramInitData(): void {
