@@ -44,7 +44,9 @@ All of these are index-exempt in `firestore.indexes.json` (cross-cutting rule 9)
 
 ## RULE 1 — Bot copy lives in `notificationContent.ts`
 
-`telegramMessages.*`, next to the in-app notification factories. These are **not** `notifications/` documents and are **not** catalogued in `automatedNotifications.ts` — cross-cutting rule 15 governs in-app notifications, and listing a bot message on the Automated tab would misdescribe what that tab is. The strings are Telegram HTML (`<b>`, `<i>`); anything interpolated must go through `escapeHtml`.
+`telegramMessages.*`, next to the in-app notification factories. These are **not** `notifications/` documents and, with one carve-out, are **not** catalogued in `automatedNotifications.ts` — cross-cutting rule 15 governs in-app notifications, and listing a bot message on the Automated tab would normally misdescribe what that tab is. The strings are Telegram HTML (`<b>`, `<i>`); anything interpolated must go through `escapeHtml`.
+
+**The carve-out is the four `creatorNew*` messages.** Creators have no in-app tray to be confused with, so their automated Telegram notifications *are* catalogued, in their own Creators section on the Automated tab (rendered as plain text via `stripTelegramFormatting`, never `dangerouslySetInnerHTML`). Every other `telegramMessages.*` entry (linking, welcome, `/start` replies) stays uncatalogued — those are session/account-state messages, not automated *events*.
 
 ## RULE 2 — Never import `telegramService` or `telegramLinkService` from the client
 
@@ -126,6 +128,10 @@ It is the only unauthenticated write path besides the public model-application f
 
   Creators connected before the menu-button URL was corrected still hold the old one — `cd src && node scripts/fix-creator-menu-buttons.js` re-points them. Idempotent.
 
+- **The `signature` field is tried both ways, deliberately.** Telegram later added a `signature` parameter (Ed25519, for third parties without the bot token). Whether it belongs in the *HMAC* data-check-string is genuinely ambiguous — the spec says "all received fields except `hash`", several client libraries exclude it, and clients predating the field send none at all. Getting it wrong is total: every launch from a newer client fails, and the symptom is a linked creator being told to "Open in Telegram" *from inside Telegram*. Both candidate strings are computed and either match is accepted. It does not weaken anything — a forger still needs a valid HMAC under the bot token for one of two well-defined strings.
+
+- **Every refusal carries an on-screen diagnostic**, because a creator cannot open devtools inside Telegram and neither can whoever they send the screenshot to. `describeTelegramLaunch()` reports where the payload was looked for (`hash:… query:… cache:… sdk:… path:…`); a server refusal reports `server <status> <error> (<reason>)`. Presence flags and lengths only — never the payload, which is a signed credential. **A refusal screen with no diagnostic line at all means the client is running a bundle that predates this**, i.e. Telegram is serving a cached copy — reload the Mini App from its ⋮ menu.
+
 - **`verifyTelegramInitData` is the entire gate.** HMAC-SHA256 with the two-level key the spec requires (`HMAC(HMAC("WebAppData", bot_token), data_check_string)`), plus an `auth_date` freshness window — the HMAC alone never expires, so a captured blob would otherwise mint sessions forever. The window is 24h because Telegram issues `initData` at launch and does not refresh it while the Mini App stays open.
 - **`initDataUnsafe` is never trusted.** It is the same content without the signature check. Read it for cosmetics or not at all.
 - **Downstream is unchanged.** `CreatorAuthProvider` and the timezone sync work exactly as before; only how the Firebase session starts changed.
@@ -157,10 +163,32 @@ cd src && node scripts/revoke-creator-sessions.js
 ```
 
 Run it **once, before sending the links out**. It does not touch passwords or disable accounts — a creator regains access the moment they use their Telegram link.
+- **The window after sign-in shows the loader, never a failure screen.** `signInWithCustomToken` resolves before `CreatorAuthProvider` has read `creators/{uid}`, so for a few hundred milliseconds the session exists and `creatorUser` does not. Deriving "no account" from that gap produced a real bug — an "Account unavailable" card flickering on *every successful launch*, because the provider's first callback (with no user) had already set `loading` false. It is also the wrong inference: the session route verified the creator is active before minting the token, so a `creatorUser` that never arrives means the client's own read failed, not that the account is off. The gap is time-boxed (`PROVIDER_SETTLE_TIMEOUT_MS`) and falls through to a retryable error.
+
 - **Three refusal screens, deliberately distinguishable** — not in Telegram at all / not yet linked / linked as a staff account. Unlike the employee login allowlist (which returns one generic 403 so staff cannot be enumerated), the audience here is a creator who has been handed a link and cannot get in, and the caller has already proven ownership of the Telegram account being described.
 - **The PWA install path was removed with it.** An installed home-screen copy would open outside Telegram with no `initData` and therefore no session — an icon leading to a dead end. Telegram's own "add to home screen" covers the same need and launches back through the bot. `InstallPrompt.tsx` and `public/creator/manifest.webmanifest` are gone; the icons stay as ordinary favicons.
 
-**`setChatMenuButton` is per-chat, not global** — the same bot serves employees, for whom a "Creator Portal" button is meaningless. Its `web_app` URL must be on a domain registered for the bot in BotFather, which must match `PUBLIC_APP_ORIGIN` (`publicOrigin.ts`), **not** the vercel.app host the Electron shell is pinned to if those two ever diverge.
+### The menu button is managed on every `/start`, in both directions
+
+A chat menu button is **per-chat and persistent**: once set it stays until something changes it, which makes "we only ever add one" a leak. A creator who is later disconnected keeps a shortcut into a portal that now refuses them.
+
+So the webhook decides the button on every outcome:
+
+| Outcome | Button |
+|---|---|
+| Creator linked | `web_app` → `/creator/dashboard` |
+| Employee linked | cleared (`type: 'default'`) |
+| `/start`, no token, **bound to a creator** | re-set to `web_app` |
+| `/start`, no token, **bound to an employee** | cleared |
+| `/start`, no token, **not bound** | cleared |
+| Invalid / conflict / inactive token | cleared |
+| Creator disconnected (admin) | cleared |
+
+**A bare `/start` is three situations, not one.** It costs one indexed read (`lookupTelegramSubject`) to tell them apart, and skipping that read is a real bug: a connected creator tapping Start twice would have their portal button stripped and be told they are not linked. It is also the **self-serve repair for a stale menu-button URL** — a creator linked before the URL was corrected fixes their own by pressing Start.
+
+**Also do not configure a menu button globally in BotFather** (Bot Settings → Menu Button). A global one appears in every chat with the bot and can only be suppressed by a per-chat override, so it turns the table above into a fight. Leave it Disabled and let the webhook own it.
+
+Its `web_app` URL must be on a domain registered for the bot in BotFather, which must match `PUBLIC_APP_ORIGIN` (`publicOrigin.ts`) — **not** the vercel.app host the Electron shell is pinned to, if those two ever diverge.
 
 ### Admin surface
 
@@ -182,7 +210,14 @@ Two surfaces reach it:
 
 ### What actually gets delivered
 
-**Manual admin broadcasts only, today.** The Create Notification dialog's "Also send as a Telegram alert" checkbox is the one thing that pushes to Telegram; no automated notification factory knows about Telegram. See [notifications.md](notifications.md#telegram-alerts). Wiring the automated events up is a deliberate later decision, not an oversight.
+Two paths push to Telegram: **manual admin broadcasts** (the Create Notification dialog's "Also send as a Telegram alert" checkbox) and **automated notifications** — every event in the table in [notifications.md](notifications.md#notification-events--factory-functions) except Onboarding and OF Manager also pushes to Telegram, for whichever recipients have linked their account. The Automated tab of `/admin-portal/notifications` marks each wired entry with a Telegram chip. See [notifications.md](notifications.md#telegram-alerts).
+
+**Creators are a separate case, in both automated and manual sends.** They have no in-app notification tray at all, so Telegram is not an *additional* channel for them — it is the only one.
+
+- **Automated:** the four events that concern creators (a custom/item/call request approved, a content request created) are catalogued in their own **Creators** section on the same Automated tab, a deliberate carve-out from the rule below (RULE 1's "not catalogued" applies to bot copy that has an in-app counterpart to be confused with; these have none). Delivery is `sendTelegramToCreator(creatorUid, html)` — one recipient at a time, read off `creators/{uid}.telegram.chatId`.
+- **Manual:** the Create Notification dialog's recipient picker lists every creator individually plus an "All Creators" pseudo-group. A creator recipient is delivered via `sendTelegramNotificationToCreators(creatorUids, payload)` — the batched, `creators`-collection analogue of `sendTelegramNotification` — **unconditionally**, never gated on the dialog's "Also send as a Telegram alert" checkbox (that checkbox only governs employee recipients). See [notifications.md](notifications.md#creator-recipients-in-a-manual-send).
+
+Both paths are deliberately separate from `resolveChatIds`/`sendTelegramNotification`, which are `users`-collection only and would silently resolve a creator uid to nothing.
 
 ---
 

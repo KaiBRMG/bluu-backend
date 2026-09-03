@@ -1,143 +1,161 @@
 "use client";
 
-import { ExternalLink, CheckCircle2, Undo2 } from "lucide-react";
+import { CheckCircle2, ExternalLink, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { formatAmount, TYPE_LABELS } from "@/lib/campaignTracking";
+import { countdownLabel, type AgendaItem } from "../lib/agenda";
 import {
-  type CampaignEntry,
-  type CRPriority,
-  STATUS_COLORS,
-  PRIORITY_COLORS,
-  TYPE_LABELS,
-  formatAmount,
-  formatDueDate,
-} from "@/lib/campaignTracking";
+  ACCENT_BTN,
+  COLOR,
+  COMPLETE_BTN,
+  FOCUS_RING,
+  PRIORITY_CHIP,
+  TYPE_META,
+  URGENCY,
+  type CustomType,
+} from "../theme";
 import { CreatorDialog, Field } from "./CreatorDialog";
-import { TYPE_META, COMPLETE_BTN, ACCENT_BTN, type CustomType } from "../theme";
 
 /**
- * Single detail view for a custom request (customs / calls / items). Replaces
- * the two hand-rolled overlays (dashboard `CRDetailOverlay`, all-customs
- * `DetailCard`). Used by both the dashboard and the All Custom Requests page.
+ * Detail view for a custom request (customs / calls / items).
+ *
+ * **Completion here is a deliberate two-step and that is the point.** Customs
+ * are high-ticket; a stray tap in a list must not be able to submit one. Routine
+ * content planning completes in one tap from the stream — the difference in
+ * stakes is what the difference in ceremony encodes.
+ *
+ * The button says **"Submit for review"**, not "Mark Completed". Completing
+ * routes the record to *Awaiting Approval*, so the old label named an outcome
+ * the system does not produce — it told a creator she was finished when a
+ * manager still had to look. This was a documented DESIGN.md defect.
  */
 export function CustomRequestDialog({
-  entry,
+  item,
   open,
   onOpenChange,
   driveLink,
   onComplete,
-  onIncomplete,
   busy = false,
+  todayKey,
 }: {
-  entry: CampaignEntry;
+  item: AgendaItem;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   driveLink?: string | null;
-  /** Provided when the entry can be marked complete. */
+  /** Provided when the entry can be submitted. */
   onComplete?: () => void;
-  /** Provided when a completed entry can be reverted. */
-  onIncomplete?: () => void;
   busy?: boolean;
+  todayKey: string;
 }) {
-  const accentHex = TYPE_META[entry.type as CustomType]?.hex ?? TYPE_META.CR.hex;
-  const dueLabel = entry.dueDate
-    ? `${formatDueDate(entry.dueDate)}${entry.dueDateTimezone ? ` (${entry.dueDateTimezone})` : ""}`
-    : null;
+  const entry = item.custom;
+  if (!entry) return null;
+
+  const meta = TYPE_META[entry.type as CustomType];
   const showUpload = entry.type === "CR" && !!driveLink;
+  const urgencyHex = URGENCY[item.urgency].hex;
+  const isLate = item.urgency === "late";
 
   return (
     <CreatorDialog
-      description="Custom request details, including the fan, amount, due date and the option to mark it completed."
+      description="Custom request details, including the fan, amount, due date and the option to submit it for review."
       open={open}
       onOpenChange={onOpenChange}
       title={
-        <span
-          className="rounded-md px-2 py-0.5 font-mono text-xs font-semibold tracking-widest"
-          style={{ background: `${accentHex}25`, color: accentHex }}
-        >
+        <span className="pf-mono text-sm font-medium" style={{ color: COLOR.azure }}>
           {entry.CR}
         </span>
       }
       headerExtra={
         <>
-          <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[entry.status]}`}
-          >
-            {entry.status}
+          <span className="text-sm" style={{ color: COLOR.ink2 }}>
+            {meta?.label ?? TYPE_LABELS[entry.type]}
           </span>
           {entry.priority && (
             <span
-              className={`rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_COLORS[entry.priority as CRPriority]}`}
+              className={`ml-auto rounded px-1.5 py-0.5 text-[10px] leading-4 ${PRIORITY_CHIP[entry.priority]}`}
             >
-              {entry.priority} Priority
+              {entry.priority} priority
             </span>
           )}
         </>
       }
       footer={
-        <div className="flex w-full flex-wrap gap-2">
+        <div className="flex w-full flex-col gap-2">
           {showUpload && (
             <a
               href={driveLink!}
               target="_blank"
               rel="noreferrer"
-              className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-3 text-xs font-semibold transition-colors ${ACCENT_BTN}`}
+              className={`flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-semibold transition-colors ${ACCENT_BTN} ${FOCUS_RING}`}
             >
-              <ExternalLink className="h-3.5 w-3.5" /> Upload
+              <ExternalLink className="size-3.5" aria-hidden="true" /> Upload to Drive
             </a>
-          )}
-          {onIncomplete && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              onClick={onIncomplete}
-              className="flex-1 gap-1.5"
-            >
-              <Undo2 className="h-3.5 w-3.5" /> Mark Incomplete
-            </Button>
           )}
           {onComplete && (
             <Button
               disabled={busy}
               onClick={onComplete}
-              className={`group h-11 flex-1 gap-1.5 ${COMPLETE_BTN}`}
+              className={`group h-12 w-full gap-1.5 rounded-xl text-sm font-semibold ${COMPLETE_BTN}`}
             >
-              <CheckCircle2 className="h-3.5 w-3.5 transition-transform motion-safe:group-hover:scale-110" />
-              {busy ? "Saving…" : "Mark Completed"}
+              <CheckCircle2
+                className="size-4 transition-transform motion-safe:group-hover:scale-110"
+                aria-hidden="true"
+              />
+              {busy ? "Submitting…" : "Submit for review"}
             </Button>
           )}
         </div>
       }
     >
-      <div className="flex flex-col gap-4">
-        <p className="text-xs text-zinc-400">{TYPE_LABELS[entry.type]}</p>
+      <div className="flex flex-col gap-5">
+        {/* The deadline leads, because it is the fact that decides what she does
+            next. It carries the urgency hue AND the word, never hue alone. */}
+        {item.dueLabel && (
+          <div
+            className="flex items-baseline justify-between gap-3 rounded-xl px-3 py-2.5"
+            style={{ background: isLate ? `${urgencyHex}1a` : COLOR.raised }}
+          >
+            <span className="text-xs" style={{ color: COLOR.ink2 }}>
+              {entry.type === "Call" ? "Call time" : "Due"}
+            </span>
+            <span className="flex items-baseline gap-2 text-right">
+              <span className="text-sm font-medium" style={{ color: COLOR.ink }}>
+                {item.dueLabel}
+              </span>
+              <span
+                className="pf-mono shrink-0 text-[11px] font-medium"
+                style={{ color: isLate ? urgencyHex : COLOR.ink2 }}
+              >
+                {countdownLabel(item, todayKey)}
+              </span>
+            </span>
+          </div>
+        )}
 
         <Field label="Fan">
-          <p className="font-medium text-zinc-100">{entry.fanName}</p>
+          <p className="font-medium">{entry.fanName}</p>
           {entry.profileLink && (
             <a
               href={entry.profileLink}
               target="_blank"
               rel="noreferrer"
-              className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-sky-300 transition-colors hover:text-sky-200"
+              className={`mt-1 inline-flex min-h-9 items-center gap-1 rounded text-xs transition-colors ${FOCUS_RING}`}
+              style={{ color: COLOR.azureText }}
             >
-              View Profile <ExternalLink className="h-3 w-3" />
+              View profile <ExternalLink className="size-3" aria-hidden="true" />
             </a>
           )}
         </Field>
 
         {entry.description && (
-          <Field label="Description">
-            <p className="leading-relaxed text-zinc-300">{entry.description}</p>
+          <Field label="What they asked for">
+            <p className="leading-relaxed" style={{ color: COLOR.ink2 }}>
+              {entry.description}
+            </p>
           </Field>
         )}
 
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-          {dueLabel && (
-            <Field label={entry.type === "Call" ? "Call Time" : "Due Date"}>
-              <span className="text-rose-300">{dueLabel}</span>
-            </Field>
-          )}
+        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
           {entry.length && <Field label="Length">{entry.length}</Field>}
           {entry.socialPlatform && <Field label="Platform">{entry.socialPlatform}</Field>}
           {entry.socialUsername && <Field label="Username">@{entry.socialUsername}</Field>}
@@ -146,15 +164,32 @@ export function CustomRequestDialog({
               {entry.address}
             </Field>
           )}
-          <Field label="Total Amount">
-            <span className="font-semibold tabular-nums text-zinc-100">
-              {formatAmount(entry.totalAmount)}
+          <Field label="Total">
+            <span className="pf-mono font-medium">{formatAmount(entry.totalAmount)}</span>
+          </Field>
+          <Field label="Paid so far">
+            <span className="pf-mono" style={{ color: COLOR.ink2 }}>
+              {formatAmount(entry.amountPaid)}
             </span>
           </Field>
-          <Field label="Amount Paid">
-            <span className="tabular-nums">{formatAmount(entry.amountPaid)}</span>
-          </Field>
         </div>
+
+        {meta?.infoText && (
+          <div
+            className="flex gap-2.5 rounded-xl px-3 py-3"
+            style={{ background: COLOR.raised }}
+          >
+            <Info className="mt-0.5 size-4 shrink-0" style={{ color: COLOR.azure }} aria-hidden="true" />
+            <p className="text-xs leading-relaxed" style={{ color: COLOR.ink2 }}>
+              {meta.infoText}
+            </p>
+          </div>
+        )}
+
+        <p className="text-[11px] leading-relaxed" style={{ color: COLOR.ink3 }}>
+          Amounts here are internal tracking figures for coordination. Your payments are
+          governed by your signed management agreement.
+        </p>
       </div>
     </CreatorDialog>
   );

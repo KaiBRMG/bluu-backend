@@ -220,6 +220,10 @@ export interface AdminNotificationBatch {
   sentAt: Timestamp;
   recipientUserIds: string[];
   recipientGroupIds: string[];
+  /** Individually-picked creator uids. Absent on batches sent before creators were wired up. */
+  recipientCreatorIds?: string[];
+  /** True when the "All Creators" pseudo-group was selected. */
+  recipientAllCreators?: boolean;
   recipientCount: number;
   /** True when the admin also pushed this batch to Telegram. Absent on pre-Telegram batches. */
   sentViaTelegram?: boolean;

@@ -3,7 +3,7 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById } from '@/lib/services/userService';
-import { sendTelegramNotification } from '@/lib/services/telegramService';
+import { sendTelegramNotification, sendTelegramNotificationToCreators } from '@/lib/services/telegramService';
 import { normalizeActionUrl } from '@/lib/notificationActionUrl';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { NotificationType } from '@/types/firestore';
@@ -45,8 +45,11 @@ export const GET = withAuth(async (_request: NextRequest, token: DecodedIdToken)
 
 /**
  * POST /api/admin/notifications
- * Creates a notification batch and individual notification docs for each recipient.
- * Body: { title, message, type, userIds: string[], groupIds: string[] }
+ * Creates a notification batch and individual notification docs for each
+ * employee recipient. `creatorIds`/`allCreators` name creator recipients
+ * separately — they get no `notifications` doc (no in-app tray) and are
+ * always delivered over Telegram instead, regardless of `sendTelegram`.
+ * Body: { title, message, type, userIds, groupIds, creatorIds, allCreators, sendTelegram }
  */
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
@@ -62,6 +65,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       type,
       userIds = [],
       groupIds = [],
+      creatorIds = [],
+      allCreators = false,
       actionUrl = null,
       sendTelegram = false,
     } = body as {
@@ -70,6 +75,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       type: NotificationType;
       userIds: string[];
       groupIds: string[];
+      creatorIds?: string[];
+      allCreators?: boolean;
       actionUrl?: string | null;
       sendTelegram?: boolean;
     };
@@ -80,8 +87,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     if (!ADMIN_NOTIF_TYPES.includes(type)) {
       return NextResponse.json({ error: 'Invalid notification type' }, { status: 400 });
     }
-    if (!Array.isArray(userIds) || !Array.isArray(groupIds)) {
-      return NextResponse.json({ error: 'userIds and groupIds must be arrays' }, { status: 400 });
+    if (!Array.isArray(userIds) || !Array.isArray(groupIds) || !Array.isArray(creatorIds)) {
+      return NextResponse.json({ error: 'userIds, groupIds and creatorIds must be arrays' }, { status: 400 });
     }
 
     // Store the canonical form, so no surface has to guess later whether a
@@ -104,7 +111,19 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       }
     }
 
-    if (allRecipientUids.size === 0) {
+    // Creators are a separate identity space with no in-app tray (telegram.md)
+    // — they never join `allRecipientUids`, which drives the `notifications`
+    // collection writes below. "All Creators" expands server-side, the same
+    // way an employee group does, filtering out archived creators (rule 6).
+    const allCreatorUids = new Set<string>(creatorIds);
+    if (allCreators === true) {
+      const creatorsSnap = await adminDb.collection('creators').get();
+      for (const doc of creatorsSnap.docs) {
+        if (doc.data().isArchived !== true) allCreatorUids.add(doc.id);
+      }
+    }
+
+    if (allRecipientUids.size === 0 && allCreatorUids.size === 0) {
       return NextResponse.json({ error: 'No recipients selected' }, { status: 400 });
     }
 
@@ -124,8 +143,12 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       sentAt: FieldValue.serverTimestamp(),
       recipientUserIds: userIds,
       recipientGroupIds: groupIds,
-      recipientCount: allRecipientUids.size,
-      sentViaTelegram: sendTelegram === true,
+      recipientCreatorIds: creatorIds,
+      recipientAllCreators: allCreators === true,
+      recipientCount: allRecipientUids.size + allCreatorUids.size,
+      // Telegram genuinely gets used whenever a creator is a recipient, even
+      // if the admin never checked the box — it's their only channel.
+      sentViaTelegram: sendTelegram === true || allCreatorUids.size > 0,
       batchId,
     });
 
@@ -147,16 +170,39 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
 
     await writeBatch.commit();
 
-    // Telegram is a secondary channel: the in-app notification above is already
-    // committed, so a Telegram failure is reported, never thrown. The client
-    // surfaces it as a warning on an otherwise successful send.
+    // Telegram is a secondary channel for employees (the in-app notification
+    // above is already committed, so a failure here is reported, never
+    // thrown) but the *only* channel for creators — their send is
+    // unconditional, not gated on `sendTelegram`. Both results are merged so
+    // the client shows one outcome regardless of which recipients were mixed in.
+    const telegramParts: { sent: number; failed: number; skipped: boolean; error?: string }[] = [];
+    if (sendTelegram === true && allRecipientUids.size > 0) {
+      telegramParts.push(
+        await sendTelegramNotification([...allRecipientUids], {
+          title,
+          message,
+          actionUrl: resolvedActionUrl,
+        }),
+      );
+    }
+    if (allCreatorUids.size > 0) {
+      telegramParts.push(
+        await sendTelegramNotificationToCreators([...allCreatorUids], {
+          title,
+          message,
+          actionUrl: resolvedActionUrl,
+        }),
+      );
+    }
+
     let telegram: { sent: number; failed: number; skipped: boolean; error?: string } | null = null;
-    if (sendTelegram === true) {
-      telegram = await sendTelegramNotification([...allRecipientUids], {
-        title,
-        message,
-        actionUrl: resolvedActionUrl,
-      });
+    if (telegramParts.length > 0) {
+      telegram = telegramParts.reduce((acc, part) => ({
+        sent: acc.sent + part.sent,
+        failed: acc.failed + part.failed,
+        skipped: acc.skipped || part.skipped,
+        error: acc.error ?? part.error,
+      }));
       if (telegram.failed > 0 || telegram.skipped) {
         console.error('[admin/notifications POST] telegram delivery issue:', telegram);
       }

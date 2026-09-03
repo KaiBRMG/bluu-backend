@@ -230,6 +230,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // The renderer mounts after the check resolves, so it polls this rather
     // than relying on catching 'updater:available'.
     getPending: () => ipcRenderer.invoke('updater:getPending'),
+    // Re-run the GitHub check on demand ('Check again'). Resolves once the
+    // check finishes; the caller re-reads getPending() for the answer.
+    check: () => ipcRenderer.invoke('updater:check'),
     onAvailable: (callback) => {
       ipcRenderer.on('updater:available', (_event, data) => callback(data));
     },

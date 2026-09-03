@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/sidebar";
 import { CREATOR_NAV_ITEMS } from "../nav";
 import { CreatorBottomNav } from "../components/CreatorBottomNav";
+import { COLOR } from "../theme";
 
 function CreatorSidebar() {
   const pathname = usePathname();
@@ -28,30 +29,39 @@ function CreatorSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader
-        className="px-5 py-4 border-b"
-        style={{ borderColor: "rgba(255,255,255,0.06)" }}
-      >
-        <img src="/logo/bluu_long.svg" alt="Bluu Rock" className="h-5" />
+      <SidebarHeader className="border-b px-5 py-4" style={{ borderColor: COLOR.line }}>
+        {/* The logo is the one non-Avatar image in the portal. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo/bluu_long.svg" alt="Bluu Rock" className="h-5 w-auto" />
       </SidebarHeader>
       <SidebarContent className="px-2 py-3">
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {CREATOR_NAV_ITEMS.map(({ title, href, icon: Icon }) => (
-                <SidebarMenuItem key={href}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={pathname === href}
-                    className="text-zinc-400 hover:text-zinc-100 hover:bg-white/5 data-[active=true]:bg-sky-500/15 data-[active=true]:text-sky-100 data-[active=true]:font-medium rounded-lg h-11"
-                  >
-                    <Link href={href} onClick={handleNavClick} aria-current={pathname === href ? "page" : undefined}>
-                      <Icon className="w-4 h-4 shrink-0" />
-                      <span className="text-sm">{title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {CREATOR_NAV_ITEMS.map(({ title, href, icon: Icon }) => {
+                const active = pathname === href;
+                return (
+                  <SidebarMenuItem key={href}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={active}
+                      // Selection is a fill plus weight, never hue alone — the
+                      // same rule the tab bar's rail exists for.
+                      className="h-11 rounded-lg data-[active=true]:bg-[#00b8f5]/15 data-[active=true]:font-semibold data-[active=true]:text-[#f4f7fa] hover:bg-[#1e2934]"
+                      style={{ color: active ? COLOR.ink : COLOR.ink2 }}
+                    >
+                      <Link
+                        href={href}
+                        onClick={handleNavClick}
+                        aria-current={active ? "page" : undefined}
+                      >
+                        <Icon className="size-4 shrink-0" aria-hidden="true" />
+                        <span className="text-sm">{title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -63,23 +73,23 @@ function CreatorSidebar() {
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <SidebarProvider
-      style={{
-        ["--sidebar" as string]: "#111113",
-        ["--sidebar-foreground" as string]: "#fafafa",
-        ["--sidebar-border" as string]: "rgba(255,255,255,0.06)",
-        ["--sidebar-accent" as string]: "rgba(255,255,255,0.05)",
-        ["--sidebar-accent-foreground" as string]: "#fafafa",
-        ["--sidebar-ring" as string]: "rgba(0,184,245,0.5)",
-      } as React.CSSProperties}
+      style={
+        {
+          ["--sidebar" as string]: COLOR.ground,
+          ["--sidebar-foreground" as string]: COLOR.ink,
+          ["--sidebar-border" as string]: COLOR.line,
+          ["--sidebar-accent" as string]: COLOR.raised,
+          ["--sidebar-accent-foreground" as string]: COLOR.ink,
+          ["--sidebar-ring" as string]: COLOR.azure,
+        } as React.CSSProperties
+      }
     >
       <CreatorSidebar />
       {/* The tab bar's clearance is padded on each page's own content wrapper,
           NOT here. Padding this container while every page ground is `min-h-dvh`
           inside it makes the minimum document height `100dvh + 4rem`, so even an
           empty page scrolls 64px into flat ground. */}
-      <SidebarInset className="bg-[#09090b]">
-        {children}
-      </SidebarInset>
+      <SidebarInset style={{ background: COLOR.void }}>{children}</SidebarInset>
       <CreatorBottomNav />
     </SidebarProvider>
   );

@@ -3,6 +3,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
+import { sendTelegramNotification } from '@/lib/services/telegramService';
 import {
   MIN_FILL_SECONDS,
   fieldErrors,
@@ -132,11 +133,13 @@ export async function POST(request: NextRequest) {
       .select()
       .get();
     const content = notifications.modelSubmissionReceived(f.name, `${f.city}, ${f.country}`);
-    for (const doc of reviewers.docs) {
-      addNotificationToBatch(batch, doc.id, content);
+    const reviewerUids = reviewers.docs.map(doc => doc.id);
+    for (const uid of reviewerUids) {
+      addNotificationToBatch(batch, uid, content);
     }
 
     await batch.commit();
+    if (reviewerUids.length > 0) await sendTelegramNotification(reviewerUids, content);
 
     return NextResponse.json({ ok: true, name: f.name });
   } catch (error) {

@@ -5,6 +5,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById } from '@/lib/services/userService';
 import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
+import { sendTelegramNotification } from '@/lib/services/telegramService';
 import { CAMPAIGN_TYPES } from '@/lib/campaignTracking';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -66,6 +67,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken,
     const batch = adminDb.batch();
     addNotificationToBatch(batch, toUid, content);
     await batch.commit();
+    await sendTelegramNotification([toUid], content);
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

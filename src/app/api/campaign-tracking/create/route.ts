@@ -6,6 +6,7 @@ import { getUserById } from '@/lib/services/userService';
 import { getOFAMUids } from '@/lib/services/campaignTrackingService';
 import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
+import { sendTelegramNotification } from '@/lib/services/telegramService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { CRType, CallType } from '@/lib/campaignTracking';
 import { formatCR, CAMPAIGN_TYPES } from '@/lib/campaignTracking';
@@ -158,11 +159,13 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     // Notify OFAM
     const ofamUids = await getOFAMUids();
     if (ofamUids.length > 0) {
+      const content = notifications.crCreated(caller.displayName ?? token.uid, result.stageName);
       const notifBatch = adminDb.batch();
       for (const uid of ofamUids) {
-        addNotificationToBatch(notifBatch, uid, notifications.crCreated(caller.displayName ?? token.uid, result.stageName));
+        addNotificationToBatch(notifBatch, uid, content);
       }
       await notifBatch.commit();
+      await sendTelegramNotification(ofamUids, content);
     }
 
     return NextResponse.json({ success: true, id: result.id, CR: result.CR });

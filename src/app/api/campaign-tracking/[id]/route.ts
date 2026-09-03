@@ -5,7 +5,9 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById } from '@/lib/services/userService';
 import { getOFAMUids } from '@/lib/services/campaignTrackingService';
 import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
-import { notifications } from '@/lib/notificationContent';
+import { notifications, telegramMessages } from '@/lib/notificationContent';
+import { sendTelegramNotification, sendTelegramToCreator, escapeHtml } from '@/lib/services/telegramService';
+import { formatAmount, formatDueDate } from '@/lib/campaignTracking';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { CRStatus } from '@/lib/campaignTracking';
 
@@ -61,20 +63,50 @@ export const PATCH = withAuth(async (request: NextRequest, token: DecodedIdToken
       const editorName = caller?.displayName ?? token.uid;
 
       if (newStatus === 'Rejected') {
+        const content = notifications.crRejected(editorName, current.CR, stageName);
         const notifBatch = adminDb.batch();
-        addNotificationToBatch(notifBatch, current.createdBy, notifications.crRejected(editorName, current.CR, stageName));
+        addNotificationToBatch(notifBatch, current.createdBy, content);
         await notifBatch.commit();
+        await sendTelegramNotification([current.createdBy], content);
       }
 
       if (newStatus === 'Completed') {
         const ofamUids = await getOFAMUids();
         if (ofamUids.length > 0) {
+          const content = notifications.crCompleted(current.CR, stageName);
           const notifBatch = adminDb.batch();
           for (const uid of ofamUids) {
-            addNotificationToBatch(notifBatch, uid, notifications.crCompleted(current.CR, stageName));
+            addNotificationToBatch(notifBatch, uid, content);
           }
           await notifBatch.commit();
+          await sendTelegramNotification(ofamUids, content);
         }
+      }
+
+      // A CR/Item/Call entry approved (Awaiting Approval → In Progress) — tell
+      // the creator. Telegram only: creators have no in-app tray. Guarded to
+      // the genuine approval transition so re-approving after an unarchive
+      // (also a move into 'In Progress', see creator-portal/custom-requests)
+      // does not look like a brand-new request to the creator.
+      if (
+        newStatus === 'In Progress' &&
+        prevStatus === 'Awaiting Approval' &&
+        (current.type === 'CR' || current.type === 'Item' || current.type === 'Call')
+      ) {
+        const fanName = escapeHtml(current.fanName ?? 'A fan');
+        const totalAmount = formatAmount(Number(current.totalAmount) || 0);
+        const html =
+          current.type === 'CR'
+            ? telegramMessages.creatorNewCustomRequest(fanName, totalAmount)
+            : current.type === 'Item'
+              ? telegramMessages.creatorNewItemRequest(fanName, totalAmount)
+              : telegramMessages.creatorNewScheduledCall(
+                  escapeHtml(current.callType ?? 'call'),
+                  fanName,
+                  formatDueDate(current.dueDate),
+                  totalAmount,
+                );
+        await sendTelegramToCreator(current.creatorID, html);
       }
     }
 

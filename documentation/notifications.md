@@ -123,18 +123,50 @@ The one notification whose recipient list is decided by **what version of the de
 `/admin-portal/notifications` has two tabs:
 
 - **Sent** — history of manual admin broadcasts (`notifications-batches`), click a row for per-recipient read/dismiss state and to unsend. Batches that were also pushed to Telegram carry a "Telegram" chip next to the title.
-- **Automated** — a **read-only** catalogue of the table above, grouped by category, from `src/lib/automatedNotifications.ts`. Expanding an entry shows the message template (interpolated values render as `{token}` chips), what fires it, who receives it, the `actionUrl`, and the source route. Nothing on this tab is sendable, editable or unsendable — it exists so admins can see what the system sends on its own.
+- **Automated** — a **read-only** catalogue of the table above, grouped by category, from `src/lib/automatedNotifications.ts`. Expanding an entry shows the message template (interpolated values render as `{token}` chips), what fires it, who receives it, the `actionUrl`, and the source route. An entry with `telegramEnabled: true` carries the same "Telegram" chip as the Sent tab. Nothing on this tab is sendable, editable or unsendable — it exists so admins can see what the system sends on its own.
 
-## Telegram alerts (one-time admin sends only)
+  **A separate Creators section sits below the categories**, from `AUTOMATED_CREATOR_NOTIFICATIONS` — see [Creator notifications](#creator-notifications-telegram-only) below.
 
-A second delivery channel, **additive to the in-app notification, never a replacement**. The Create Notification dialog has a "Also send as a Telegram alert" checkbox; unchecked, the send behaves exactly as it always did.
+## Creator notifications (Telegram only)
 
-- **Only manual admin sends use it today.** Automated notifications (the table above) are untouched — no factory knows about Telegram.
+Creators have no in-app notification surface — no `notifications/{docId}` documents, no tray. Four automated events notify them anyway, entirely over Telegram:
+
+| Event | Factory (`telegramMessages.*`) | Recipient | Sent by |
+|---|---|---|---|
+| Custom request approved (Awaiting Approval → In Progress, `type: 'CR'`) | `creatorNewCustomRequest(fanName, totalAmount)` | The creator | `campaign-tracking/[id]` (PATCH) |
+| Item request approved (same transition, `type: 'Item'`) | `creatorNewItemRequest(fanName, totalAmount)` | The creator | `campaign-tracking/[id]` (PATCH) |
+| Call approved (same transition, `type: 'Call'`) | `creatorNewScheduledCall(callType, fanName, date, totalAmount)` | The creator | `campaign-tracking/[id]` (PATCH) |
+| Content request created | `creatorNewContentRequest()` | The creator | `content-planning` (POST) |
+
+- **Guarded to the genuine approval transition.** The three campaign-tracking events fire only when `prevStatus === 'Awaiting Approval' && newStatus === 'In Progress'` **and** the entry's `type` is `CR`/`Item`/`Call` — never on the BFE/Hubby/VIP campaign types (created directly `In Progress` as a sentinel, never "approved") and never on the unarchive action (also a move into `In Progress`, but not a new request the creator hasn't seen).
+- **Delivery is one recipient at a time**, via `sendTelegramToCreator(creatorUid, html)` in `telegramService.ts` — `resolveCreatorChatId` reads `creators/{uid}.telegram.chatId` directly. This is deliberately **not** `resolveChatIds`/`sendTelegramNotification`, which resolve against the `users` collection only (see [telegram.md](telegram.md)).
+- **Never throws**, same as every other Telegram send here — a creator who has not linked Telegram (or any Telegram outage) must not fail the staff action that triggered the message.
+- **Catalogued despite RULE 1's "bot copy is not catalogued"** — see [telegram.md](telegram.md#rule-1--bot-copy-lives-in-notificationcontentts) for why this is a deliberate, narrow carve-out.
+
+## Telegram alerts
+
+A second delivery channel, **additive to the in-app notification, never a replacement** — two paths use it.
+
+**Manual admin sends.** The Create Notification dialog has an "Also send as a Telegram alert" checkbox; unchecked, the send behaves exactly as it always did **for employee recipients**. Creator recipients are unaffected by the checkbox — see below.
+
 - **Delivery lives in [`src/lib/services/telegramService.ts`](../src/lib/services/telegramService.ts)** and is **server-only**: `TELEGRAM_BOT_TOKEN` must never reach the client. Nothing in `src/components` or `src/hooks` may import it.
 - **Order matters.** `POST /api/admin/notifications` commits the Firestore batch **first**, then attempts Telegram. `sendTelegramNotification` never throws — it returns `{ sent, failed, skipped, error }`, the route echoes it as `telegram` on the response, and the dialog toasts a *warning* on a partial failure. A Telegram outage must never lose an in-app notification that is already written.
 - **Copy is still the caller's.** The service formats (`<b>Title</b>`, blank line, message) and escapes `& < >` for HTML parse mode. It does not author text — rule 1 is unchanged.
-- **`actionUrl`: only absolute `http(s)` URLs are linked.** An internal app path is dropped on purpose — `src/middleware.ts` rewrites non-Electron page traffic to `/desktop-only`, so an in-app link opened from a phone is a dead end. The in-app notification carries that action.
-- **`sentViaTelegram: boolean` is written on the batch doc** (`admin_notification_batches`) and shown as a chip on the Sent tab. Nothing queries it, so it is exempted from indexing in `firestore.indexes.json` (rule 9).
+- **`sentViaTelegram: boolean` is written on the batch doc** (`admin_notification_batches`) and shown as a chip on the Sent tab. It is `true` whenever the checkbox was checked **or** any creator was a recipient — Telegram genuinely gets used either way. Nothing queries it, so it is exempted from indexing in `firestore.indexes.json` (rule 9).
+
+### Creator recipients in a manual send
+
+The Create Notification dialog's recipient picker also lists every creator individually, plus an "All Creators" pseudo-group (not a real `groups/{id}` doc — expanded server-side from the `creators` collection, filtering archived, the same way a real group expands from `members`). Creator uids never enter `allRecipientUids` (the set that drives `notifications` doc writes) — they go through the separate `creatorIds`/`allCreators` body fields, get no in-app notification, and are sent via `sendTelegramNotificationToCreators` **unconditionally**, regardless of the "Also send as a Telegram alert" checkbox: Telegram is not an *additional* channel for a creator, it is their only one. The route merges the employee-Telegram result and the creator-Telegram result into one `telegram` object before responding, so the client shows a single outcome. See [telegram.md](telegram.md) for the delivery mechanics and [creator notifications](#creator-notifications-telegram-only) above for the parallel automated case.
+
+The recipient list is a narrow, `admin-notifications`-gated projection (`GET /api/admin/notifications/creators`, `uid` + `stageName` only) — deliberately not `/api/admin/creators`, which requires the separate `admin-creator-management` permission and returns far more than a recipient picker needs.
+
+The Sent tab's recipients dialog only ever reads `notifications` docs (in-app only), so a creator recipient never appears in its per-row read/dismiss table; it shows the gap as "+N creators notified via Telegram" instead, computed from `batch.recipientCount` minus the fetched row count.
+
+**Automated notifications.** Every event in the table above **except Onboarding and OF Manager** also calls `sendTelegramNotification` with the same recipients and the same `NotificationContent`, right after the in-app batch commits — same order-matters rule, same never-throws contract. The Automated tab marks each wired entry with a Telegram chip (`AutomatedNotification.telegramEnabled`). Onboarding is excluded because a user who has never used the app has nothing to have linked yet; OF Manager's two alerts are excluded because they already have one named recipient and no fan-out to widen.
+
+**`actionUrl` handling is shared by both paths**, in `resolveActionLine()` inside `telegramService.ts`:
+- An **external** URL (per `classifyNotificationAction`, [`notificationActionUrl.ts`](../src/lib/notificationActionUrl.ts)) is linked directly: `<a href="…">Open link</a>`.
+- An **internal** app route is *not* linked — `src/middleware.ts` rewrites non-Electron page traffic to `/desktop-only`, so a link to an in-app page opened from a phone is a dead end — but it is not silently dropped either. It is resolved against `PAGES` in [`definitions.ts`](../src/lib/definitions.ts) and named instead: `View on Bluu Backend > Disputes`. A route with no matching `PageDef` resolves to nothing (should not happen — every `actionUrl` this app produces is one of `PAGES`' hrefs).
 
 ### Recipient resolution
 
@@ -151,4 +183,7 @@ Account linking, the bot webhook and the creator Mini App are all documented in 
 1. Add a factory function to `src/lib/notificationContent.ts`.
 2. Call `addNotificationToBatch(batch, uid, notifications.yourNew(...))` in the relevant handler; `await batch.commit()`.
 3. For admin fan-out, iterate `groups/admin.members` — **never hardcode a uid**.
-4. Add an entry to `AUTOMATED_NOTIFICATIONS` in `src/lib/automatedNotifications.ts` (call your factory with `{token}` placeholders — **never retype the copy**) and a row to the table above, so the Automated tab and these docs stay complete.
+4. Immediately after the commit, call `await sendTelegramNotification(uids, content)` with the same recipients and the same content object — unless the event is Onboarding or an OF Manager diagnostic, which stay in-app only (see "Automated notifications" under Telegram alerts, above).
+5. Add an entry to `AUTOMATED_NOTIFICATIONS` in `src/lib/automatedNotifications.ts` (call your factory with `{token}` placeholders — **never retype the copy** — and set `telegramEnabled: true` if you did step 4) and a row to the table above, so the Automated tab and these docs stay complete.
+
+A creator-facing event (no in-app tray) is different: add the copy to `telegramMessages.*` instead, send with `sendTelegramToCreator`, and add the entry to `AUTOMATED_CREATOR_NOTIFICATIONS` — see [Creator notifications](#creator-notifications-telegram-only) above.

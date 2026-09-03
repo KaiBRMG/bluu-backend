@@ -128,6 +128,12 @@ export default function NotificationRecipientsDialog({
   const dismissedCount = recipients.filter(r => r.dismissedByUser).length;
   const typeMeta = batch ? notificationTypeBadge(batch.type) : null;
 
+  // Creators have no in-app tray (telegram.md), so they never appear in
+  // `recipients` above — that list is `notifications` docs only. Any gap
+  // between the batch's total and the fetched rows is exactly the creators
+  // it went to, notified over Telegram instead.
+  const creatorRecipientCount = batch ? Math.max(0, batch.recipientCount - recipients.length) : 0;
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
@@ -159,6 +165,12 @@ export default function NotificationRecipientsDialog({
             {recipients.length > 0 && (
               <p className="text-xs text-muted-foreground">
                 {readCount}/{recipients.length} opened &middot; {dismissedCount} dismissed
+              </p>
+            )}
+            {creatorRecipientCount > 0 && (
+              <p className="text-xs text-muted-foreground">
+                +{creatorRecipientCount} creator{creatorRecipientCount !== 1 ? 's' : ''} notified via
+                Telegram — creators have no in-app tray, so they aren&rsquo;t listed below.
               </p>
             )}
 

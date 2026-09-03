@@ -97,11 +97,11 @@ export interface AppUpdateConfig {
 export const APP_UPDATE: AppUpdateConfig = {
 
 
-  mac: { latestVersion: '0.10.1', compulsory: true },
+  mac: { latestVersion: '0.10.2', compulsory: false },
   // mac: null,
 
-  // win: null,
-  win: { latestVersion: '0.10.1', compulsory: true },
+  win: null,
+  // win: { latestVersion: '0.10.1', compulsory: true },
 
   downloadUrl: `${PUBLIC_APP_ORIGIN}/download`,
 

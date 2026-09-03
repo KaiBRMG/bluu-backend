@@ -58,6 +58,12 @@ import {
  * even for an optional update: the app is about to restart itself, so the user
  * must not be able to clock in and start working underneath it.
  *
+ * **That applies to a dismissed optional card too.** `dismissed` is app-session
+ * state, so on an app that is never quit one X click used to silence the prompt
+ * forever. Every transition into `clocked-out` now clears it AND re-opens the
+ * decision, so the card returns at the next clock-out — re-decided against the
+ * live config, not replayed. Dismissing means "not right now", never "never".
+ *
  * Three ways a user used to escape the prompt entirely, all closed here:
  *
  *  1. **Clocked in during the check.** The decision ran a couple of `await`s
@@ -146,6 +152,13 @@ export default function UpdateAvailableBanner() {
   const evaluatingRef = useRef(false);
   // Bumped when the shell reports an update *after* we already looked.
   const [availableTick, setAvailableTick] = useState(0);
+  // Bumped on each transition INTO clocked-out. Every clock-out is a prompt
+  // opportunity, including for an optional update the user already waved away —
+  // see the re-arm effect below. `decidedTickRef` records which tick the current
+  // decision was made for, so the decision effect re-runs exactly once per
+  // clock-out instead of looping.
+  const [clockOutTick, setClockOutTick] = useState(0);
+  const decidedTickRef = useRef(0);
 
   // Restart path only. `checkError` is the shell's own check failure (the main
   // process merely console.errors it, so this is the only place it surfaces);
@@ -184,6 +197,31 @@ export default function UpdateAvailableBanner() {
     window.electronAPI?.updater?.onAvailable?.(() => setAvailableTick(t => t + 1));
   }, []);
 
+  // Every clock-out re-arms the prompt — including a dismissed *optional* card.
+  //
+  // `dismissed` is deliberately per-app-session state, and on a desktop app that
+  // is never quit that used to mean "once, ever": one X click and the user was
+  // never asked again for the life of the renderer, however many shifts later.
+  // Clock-out is the one moment we have already established as safe to
+  // interrupt, so it is also the right moment to ask again. A dismissal now
+  // means "not during this shift-gap", not "never".
+  //
+  // This fires only on the TRANSITION into clocked-out, never on an unrelated
+  // re-render, and never while an auto update is mid-download (that dialog owns
+  // the screen and re-deciding underneath it would be a mess).
+  const prevDisplayStateRef = useRef(displayState);
+  useEffect(() => {
+    const prev = prevDisplayStateRef.current;
+    prevDisplayStateRef.current = displayState;
+    if (displayState !== 'clocked-out' || prev === 'clocked-out') return;
+    if (delivery === 'auto' && phase !== 'prompt') return;
+    setDismissed(false);
+    // A download that failed last shift shouldn't come back as an error modal;
+    // re-offer it as a plain card.
+    setPhase(p => (p === 'error' ? 'prompt' : p));
+    setClockOutTick(t => t + 1);
+  }, [displayState, delivery, phase]);
+
   // Decide whenever the user is clocked OUT and we have not already decided.
   // This is re-checked for the whole app session rather than latched at boot:
   // "don't interrupt a shift" is enforced by the clocked-out condition itself,
@@ -195,11 +233,19 @@ export default function UpdateAvailableBanner() {
     // re-evaluate is what makes the `updater:available` listener above worth
     // anything: without this, the late answer arrived, bumped `availableTick`,
     // and was thrown away right here.
-    if (mode !== 'none' && delivery !== 'restart') return;
+    //
+    // A clock-out also re-opens the decision (`clockOutTick`), so a card the
+    // user dismissed last shift is re-decided against the LIVE config rather
+    // than replayed: a bumped `latestVersion` refreshes the target, and a
+    // disarmed platform entry clears the prompt instead of leaving a stale one
+    // on screen.
+    const revalidating = clockOutTick !== decidedTickRef.current;
+    if (mode !== 'none' && delivery !== 'restart' && !revalidating) return;
     if (isHydrating) return;              // clock state not settled yet
     if (displayState !== 'clocked-out') return; // never interrupt a shift
     if (evaluatingRef.current) return;    // a decision is already in flight
     evaluatingRef.current = true;
+    decidedTickRef.current = clockOutTick;
 
     (async () => {
       try {
@@ -261,7 +307,7 @@ export default function UpdateAvailableBanner() {
         evaluatingRef.current = false;
       }
     })();
-  }, [mode, delivery, isHydrating, displayState, availableTick]);
+  }, [mode, delivery, isHydrating, displayState, availableTick, clockOutTick]);
 
   /**
    * Re-read the shell's start-up check. Returns true once it has an answer, and
@@ -408,7 +454,11 @@ export default function UpdateAvailableBanner() {
   const restartLine = checkError
     ? `Bluu Backend couldn’t reach the update server (${checkError}). Check your connection, then press Check again.`
     : pollExhausted
-      ? 'Bluu Backend hasn’t been able to reach the update server. Check your connection and press Check again — if it keeps failing, quit and reopen the app.'
+      // Used to say "quit and reopen the app" as a last resort — no longer
+      // correct advice. On macOS the X button doesn't quit any more
+      // (HIDE_ON_CLOSE), and even a real quit does the same thing this button
+      // does: re-asks the update server. "Check again" IS the escalation now.
+      ? 'Bluu Backend hasn’t been able to reach the update server. Check your connection and press Check again.'
       : 'Bluu Backend is contacting the update server. This can take a moment on a slow connection.';
 
   if (mode === 'blocking' || inProgress) {

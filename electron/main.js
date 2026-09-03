@@ -102,10 +102,7 @@ if (!gotTheLock) {
     }
 
     // Focus the window
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
+    revealMainWindow();
   });
 }
 
@@ -119,8 +116,7 @@ function handleDeepLink(url) {
 
   // Focus the app window
   if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
+    revealMainWindow();
     if (app.dock && process.platform === 'darwin') {
       app.dock.show();
     }
@@ -422,14 +418,22 @@ function positionTimerWidget() {
   });
 }
 
-// What a click on the widget does, on either platform: surface the app. The
-// widget is the one piece of the app that stays visible while it is buried, so
-// it is also the fastest way back into it.
-function focusMainWindowFromWidget() {
+// Bring the main window back regardless of how it was put away. On macOS the X
+// button HIDES the window rather than destroying it (see the `close` handler in
+// createWindow), so every "surface the app" path must `show()` — `focus()` alone
+// is a no-op on a hidden window and the user sees nothing happen.
+function revealMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+}
+
+// What a click on the widget does, on either platform: surface the app. The
+// widget is the one piece of the app that stays visible while it is buried, so
+// it is also the fastest way back into it.
+function focusMainWindowFromWidget() {
+  revealMainWindow();
 }
 
 function ensureTimerWidgetSurface(state) {
@@ -1319,6 +1323,15 @@ const RELOAD_MAX = 3;
 // Max time to hold the window close while the renderer clocks out and flushes.
 const QUIT_FLUSH_TIMEOUT_MS = 4000;
 
+// macOS convention: closing the window hides it, the app stays running in the
+// dock, and only an explicit quit ends the process. Windows/Linux keep the
+// close-means-quit behaviour their users expect.
+const HIDE_ON_CLOSE = process.platform === 'darwin';
+// Set by `before-quit` — the one thing that tells a real quit apart from the X
+// button. Read by the main window's `close` handler and by `window-all-closed`.
+let isQuitting = false;
+app.on('before-quit', () => { isQuitting = true; });
+
 // ─── Right-click menu + spellcheck ───────────────────────────────────
 // Chromium's spellchecker is on by default, but Electron renders NO suggestion UI
 // unless the main process builds the menu — and without a context menu there is no
@@ -1763,15 +1776,38 @@ function createWindow() {
 
   // ─── Flush time-tracking before the window closes ──────────────────
   // The window `close` event is the single choke-point that fires for BOTH the
-  // X button (window-all-closed → quit) and Cmd/Ctrl-Q. Hold the close until the
-  // renderer clocks out and acks ('app:closing-flushed'), or a hard timeout
-  // elapses — otherwise the async clock-out POST is killed mid-flight.
+  // X button (Windows: window-all-closed → quit) and Cmd/Ctrl-Q. Hold the close
+  // until the renderer clocks out and acks ('app:closing-flushed'), or a hard
+  // timeout elapses — otherwise the async clock-out POST is killed mid-flight.
+  //
+  // On macOS the X button does NOT reach that flush at all: it hides the window
+  // and the app keeps running (standard mac behaviour — the dock icon, Cmd+Tab
+  // and the tray widget all bring it back). That is deliberate for time
+  // tracking too: hiding a window is not clocking out, so an open session must
+  // survive it untouched. Only a real quit (Cmd+Q, "Quit" menu, restart for an
+  // update) sets `isQuitting`, and that is the path that flushes.
   let closeFlushed = false;
   mainWindow.on('close', (e) => {
     if (closeFlushed) return; // second pass — allow the close to proceed
     // The auto-update path already flushed via 'updater:before-install'. Vetoing
     // this close would flush twice and can abort the pending Squirrel install.
     if (updateInstallStarted) return;
+
+    if (HIDE_ON_CLOSE && !isQuitting) {
+      e.preventDefault();
+      // Hiding a full-screen window leaves an empty black Space behind on
+      // macOS, so drop out of full screen first and hide once that lands.
+      if (mainWindow.isFullScreen()) {
+        mainWindow.once('leave-full-screen', () => {
+          if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+        });
+        mainWindow.setFullScreen(false);
+      } else {
+        mainWindow.hide();
+      }
+      return;
+    }
+
     const wc = mainWindow.webContents;
     if (!wc || wc.isDestroyed()) return;
 
@@ -1781,6 +1817,10 @@ function createWindow() {
     const finish = () => {
       closeFlushed = true;
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+      // Vetoing the close above also cancelled the `app.quit()` that triggered
+      // it, and on macOS `window-all-closed` no longer quits — so a real quit
+      // has to be re-issued here or the app would linger with no windows.
+      if (isQuitting) app.quit();
     };
     const timer = setTimeout(finish, QUIT_FLUSH_TIMEOUT_MS);
     ipcMain.once('app:closing-flushed', () => {
@@ -1812,11 +1852,27 @@ function createWindow() {
 // users keep updating manually via the version-gated renderer banner (it
 // compares app:getVersion against APP_UPDATE.latestVersion).
 //
-// The check runs ONCE, at app start. There is deliberately no polling interval:
-// an update found mid-session could only ever interrupt work in progress. A user
-// who leaves the app open for a week simply picks the update up on next launch.
+// The check used to run ONCE, at app start, on the reasoning that a user who
+// leaves the app open for a week picks up the update on their next launch.
+// HIDE_ON_CLOSE removed that launch: on macOS the X button now hides the main
+// window instead of quitting, so a user who never explicitly hits Cmd+Q or
+// "Quit" may never relaunch at all — and a start-up-only check would then never
+// re-run for them, no matter how long an armed release has been waiting.
+//
+// So the check now also re-runs on a slow interval, and on demand via
+// 'updater:check' (the renderer's "Check again" button). Finding an update is
+// not the same as interrupting one: a check only sets `pendingUpdate` and emits
+// 'updater:available'; `autoDownload` stays false and `UpdateAvailableBanner`
+// only renders while `clocked-out`, so nothing reaches a working user — the
+// original "no polling" note conflated discovering an update with delivering
+// one.
 const AUTO_UPDATE_SUPPORTED = process.platform === 'darwin';
 const INSTALL_FLUSH_TIMEOUT_MS = 10000;
+// Slow on purpose — the release cadence is weeks, and all this buys is that a
+// hidden, never-relaunched app still discovers a release within the interval
+// instead of never. Skipped entirely once an update is already known pending
+// (see `runUpdateCheck`), so this never turns into a poll loop against GitHub.
+const UPDATE_RECHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 let updateInstallStarted = false;
 // Set when the start-up check finds an update. The renderer mounts after this
@@ -1888,7 +1944,31 @@ function registerAutoUpdater() {
     });
   });
 
-  autoUpdater.checkForUpdates().catch((err) => console.error('Update check failed:', err));
+  // Coalesced so the interval, the start-up call and a renderer-initiated
+  // 'updater:check' can never have two checks racing each other — and skipped
+  // once an update is already known, so a fleet stuck behind a compulsory
+  // prompt doesn't also hammer GitHub every 4 hours asking again.
+  let checkInFlight = null;
+  function runUpdateCheck() {
+    if (updateInstallStarted || pendingUpdate) return Promise.resolve();
+    if (checkInFlight) return checkInFlight;
+    checkInFlight = autoUpdater.checkForUpdates()
+      .catch((err) => {
+        console.error('Update check failed:', err);
+        sendToRenderer('updater:status', { status: 'error', message: err && err.message });
+      })
+      .finally(() => { checkInFlight = null; });
+    return checkInFlight;
+  }
+
+  // The renderer's "Check again" button — previously typed but unimplemented,
+  // so it silently fell back to re-reading a `getPending()` that could never
+  // change. Real now: it re-asks GitHub, and the renderer polls `getPending()`
+  // afterwards to pick up the answer.
+  ipcMain.handle('updater:check', () => runUpdateCheck());
+
+  runUpdateCheck();
+  setInterval(runUpdateCheck, UPDATE_RECHECK_INTERVAL_MS);
 }
 
 // Forward native power/session transitions to the renderer so time-tracking can
@@ -1938,8 +2018,16 @@ app.whenReady().then(() => {
   registerAutoUpdater();
   registerDisplayListeners();
   createWindow();
+  // Dock-icon click / Cmd+Tab. On macOS the main window is usually only hidden,
+  // not gone, so reveal it rather than testing for zero windows — a live
+  // satellite (OF Manager) would otherwise make this a no-op and leave the user
+  // with no way back to the app.
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      createWindow();
+      return;
+    }
+    revealMainWindow();
   });
 });
 
@@ -1960,9 +2048,12 @@ process.on('unhandledRejection', (reason) => {
   forwardErrorToRenderer('electron:main:unhandledRejection', message, stack);
 });
 
-// Quit on all windows closed (including macOS). The time-tracking flush happens
-// in the window `close` handler (createWindow), which is the single choke-point
-// for both the X button and Cmd/Ctrl-Q.
+// Quit when the last window closes — except on macOS, where the X button only
+// hides the main window and the app is expected to stay alive in the dock until
+// the user quits it explicitly. The time-tracking flush happens in the window
+// `close` handler (createWindow), which is the single choke-point for both the
+// Windows X button and Cmd/Ctrl-Q.
 app.on('window-all-closed', () => {
+  if (HIDE_ON_CLOSE && !isQuitting) return;
   app.quit();
 });

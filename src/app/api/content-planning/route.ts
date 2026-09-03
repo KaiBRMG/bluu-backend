@@ -3,6 +3,8 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { checkPageAccess } from '@/lib/middleware/apiHelpers';
+import { telegramMessages } from '@/lib/notificationContent';
+import { sendTelegramToCreator } from '@/lib/services/telegramService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
@@ -45,6 +47,9 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       creatorID,
       isArchived: false,
     });
+
+    // Telegram only — creators have no in-app tray.
+    await sendTelegramToCreator(creatorID, telegramMessages.creatorNewContentRequest());
 
     return NextResponse.json({ success: true, id: ref.id });
   } catch (error) {

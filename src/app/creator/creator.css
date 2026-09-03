@@ -1,0 +1,160 @@
+/*
+ * Creator Portal — segment-scoped styles.
+ *
+ * Imported by `src/app/creator/layout.tsx` only, so nothing here reaches the
+ * internal Electron console. Everything is namespaced `pf-` (portal).
+ *
+ * Rule for every animation below: **the base style is the finished state.** If
+ * the animation never runs — a headless render, a hidden tab, reduced motion,
+ * a browser that ignores it — the screen is still correct. Nothing in this file
+ * gates visibility on a transition.
+ */
+
+/* ── The numeric voice ─────────────────────────────────────────────────────── */
+
+.pf-mono {
+  font-family: var(--font-portal-mono), ui-monospace, "SFMono-Regular", "Menlo",
+    "Consolas", monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ── The completion seal ───────────────────────────────────────────────────────
+ * The portal's ONE authored moment. A creator's whole reason for opening this
+ * app is to finish something, so finishing is the beat that gets the motion
+ * budget. The node on the spine fills, a ring expands out of it once, and the
+ * row recedes. ~380ms total, nothing loops, nothing bounces.
+ *
+ * Do not extend this vocabulary to other interactions — its scarcity is the
+ * point, exactly as DESIGN.md says of the onboarding completion screen.
+ */
+
+@keyframes pf-seal {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes pf-ring {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@keyframes pf-recede {
+  0% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(0.5rem);
+  }
+}
+
+.pf-seal {
+  animation: pf-seal 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pf-ring {
+  animation: pf-ring 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pf-recede {
+  animation: pf-recede 260ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+/* ── The runway ────────────────────────────────────────────────────────────────
+ * The burn-down measure under a work row.
+ *
+ * Driven by `transform: scaleX()` set inline from the item's elapsed fraction,
+ * never by `width`: this sits under every row in a live-updating list, and a
+ * width transition would relayout the row on each snapshot. `transform-origin`
+ * pins the growth to the left edge, and the fill is square-ended inside an
+ * `overflow-hidden` rounded track so scaling cannot distort a rounded cap.
+ */
+
+.pf-runway-fill {
+  transform-origin: left center;
+  will-change: transform;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 200ms ease-out;
+}
+
+/* ── Arrival ───────────────────────────────────────────────────────────────────
+ * Rows fade up on a short stagger when a day group first renders. The base
+ * style is the arrived state, and the animation runs backwards from it, so a
+ * row that never animates is simply present and correct.
+ */
+
+@keyframes pf-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(0.375rem);
+  }
+}
+
+.pf-arrive {
+  animation: pf-arrive 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ── The live "now" pulse ──────────────────────────────────────────────────────
+ * The single looping animation in the portal, on the one node that marks the
+ * present moment on the axis. It encodes state (this is *now*), which is the
+ * only licence for a loop.
+ */
+
+@keyframes pf-now {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.5);
+  }
+}
+
+.pf-now {
+  animation: pf-now 2.8s ease-in-out infinite;
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────────────
+ * Not optional. Every animation above resolves to its final state instantly;
+ * the seal keeps a crossfade because the completion still needs to register as
+ * having happened.
+ */
+
+@media (prefers-reduced-motion: reduce) {
+  .pf-arrive,
+  .pf-ring,
+  .pf-now {
+    animation: none;
+  }
+
+  .pf-seal,
+  .pf-recede {
+    animation-duration: 1ms;
+    animation-iteration-count: 1;
+  }
+
+  .pf-runway-fill {
+    transition: none;
+    will-change: auto;
+  }
+}

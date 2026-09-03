@@ -5,6 +5,7 @@ import { getUserById } from '@/lib/services/userService';
 import { FieldValue, Timestamp, DocumentData } from 'firebase-admin/firestore';
 import { checkPageAccess, serializeTimestamp, addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
+import { sendTelegramNotification } from '@/lib/services/telegramService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { DisputeDocument } from '@/types/firestore';
 
@@ -274,9 +275,11 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       const createdByUser = await getUserById(token.uid);
       const createdByName = createdByUser?.displayName ?? 'Someone';
 
-      addNotificationToBatch(batch, assignedTo, notifications.disputeAssigned(createdByName));
+      const content = notifications.disputeAssigned(createdByName);
+      addNotificationToBatch(batch, assignedTo, content);
 
       await batch.commit();
+      await sendTelegramNotification([assignedTo], content);
     } else {
       await adminDb.collection('disputes').add(disputeData);
     }

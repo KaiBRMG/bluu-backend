@@ -17,7 +17,7 @@ import {
   readTelegramInitData,
 } from '@/lib/telegramWebApp';
 import { TELEGRAM_MINI_APP_URL } from '@/lib/telegramConfig';
-import { PRIMARY_BTN } from './theme';
+import { COLOR, PRIMARY_BTN } from './theme';
 
 /**
  * The creator portal's front door.
@@ -79,6 +79,16 @@ type Status =
   /** Network or server failure. Retryable. */
   | 'error';
 
+/**
+ * A refusal screen.
+ *
+ * The card is **opaque**, not the glassmorphic `bg-zinc-900/80 backdrop-blur-md`
+ * it used to be — DESIGN.md §5 forbids that construction, and it was carried on
+ * this screen as an acknowledged deferral. It is also the wrong tool here: this
+ * is the surface a locked-out creator screenshots and forwards to someone for
+ * help, so every character on it has to survive being looked at, including the
+ * diagnostic line at the bottom.
+ */
 function Screen({
   title,
   body,
@@ -93,22 +103,37 @@ function Screen({
   detail?: string | null;
 }) {
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-black px-6">
-      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-zinc-900/80 p-8 text-center backdrop-blur-md">
-        <img src="/logo/bluu_long.svg" alt="Bluu" className="mx-auto mb-6 h-10 w-auto" />
-        <h1 className="text-lg font-semibold text-white">{title}</h1>
-        <p className="mt-3 text-sm leading-relaxed text-zinc-400">{body}</p>
+    <main
+      className="flex min-h-dvh items-center justify-center px-6"
+      style={{ background: COLOR.void }}
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl p-8 text-center"
+        style={{ background: COLOR.surface, border: `1px solid ${COLOR.line}` }}
+      >
+        {/* The logo is the one non-Avatar image in the portal. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo/bluu_long.svg" alt="Bluu Rock" className="mx-auto mb-6 h-8 w-auto" />
+        <h1 className="text-lg font-semibold" style={{ color: COLOR.ink }}>
+          {title}
+        </h1>
+        <p className="mt-3 text-sm leading-relaxed" style={{ color: COLOR.ink2 }}>
+          {body}
+        </p>
         {action && (
           <button
             type="button"
             onClick={action.onClick}
-            className={`mt-6 w-full rounded-lg px-6 py-3 font-semibold transition-colors ${PRIMARY_BTN}`}
+            className={`mt-6 min-h-12 w-full rounded-xl px-6 text-sm font-semibold transition-colors ${PRIMARY_BTN}`}
           >
             {action.label}
           </button>
         )}
         {detail && (
-          <p className="mt-6 border-t border-white/10 pt-4 font-mono text-[10px] leading-relaxed break-all text-zinc-500">
+          <p
+            className="pf-mono mt-6 pt-4 text-[10px] leading-relaxed break-all"
+            style={{ borderTop: `1px solid ${COLOR.line}`, color: COLOR.ink3 }}
+          >
             {detail}
           </p>
         )}
@@ -118,7 +143,10 @@ function Screen({
 }
 
 const loader = (
-  <div className="flex min-h-dvh items-center justify-center bg-black">
+  <div
+    className="flex min-h-dvh items-center justify-center"
+    style={{ background: COLOR.void }}
+  >
     <Loader />
   </div>
 );

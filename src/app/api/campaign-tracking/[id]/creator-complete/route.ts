@@ -5,6 +5,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { getOFAMUids } from '@/lib/services/campaignTrackingService';
 import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
+import { sendTelegramNotification } from '@/lib/services/telegramService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 export const POST = withCreatorAuth(async (_request: NextRequest, token: DecodedIdToken, params: Promise<{ id: string }>) => {
@@ -36,11 +37,13 @@ export const POST = withCreatorAuth(async (_request: NextRequest, token: Decoded
       ]);
       if (ofamUids.length > 0) {
         const stageName = creatorSnap.data()?.stageName ?? data.creatorID;
+        const content = notifications.crCompleted(data.CR, stageName);
         const notifBatch = adminDb.batch();
         for (const uid of ofamUids) {
-          addNotificationToBatch(notifBatch, uid, notifications.crCompleted(data.CR, stageName));
+          addNotificationToBatch(notifBatch, uid, content);
         }
         await notifBatch.commit();
+        await sendTelegramNotification(ofamUids, content);
       }
     }
 

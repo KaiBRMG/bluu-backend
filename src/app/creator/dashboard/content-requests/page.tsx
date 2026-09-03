@@ -1,302 +1,133 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { useCreatorAuth } from "@/components/CreatorAuthProvider";
-import { db } from "@/firebase-config";
-import { collection, query, where, onSnapshot, orderBy } from "firebase/firestore";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
-} from "@/components/ui/table";
-import {
-  Pagination, PaginationContent, PaginationItem,
-  PaginationPrevious, PaginationNext, PaginationLink, PaginationEllipsis,
-} from "@/components/ui/pagination";
-import {
-  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
-} from "@/components/ui/dropdown-menu";
-import { SidebarTrigger } from "@/components/ui/sidebar";
-import { MoreHorizontal } from "lucide-react";
-import { apiRequest } from "@/lib/clientApi";
-import { isOverdue } from "@/lib/timezone";
-import { toast } from "sonner";
-import { PAGE_GROUND_STYLE, HEADER_STYLE, SURFACE, contentTypeBadge, contentStatusBadge, type ContentType } from "../../theme";
-import { ContentPlanDialog, type ContentPlanEntry } from "../../components/ContentPlanDialog";
+import { useMemo, useState } from "react";
+import { CalendarCheck } from "lucide-react";
+import { type AgendaItem } from "../../lib/agenda";
+import { useCreatorWork } from "../../lib/useCreatorWork";
+import { COLOR, PAGE_GROUND_STYLE } from "../../theme";
+import { PortalHeader } from "../../components/PortalHeader";
+import { SpineEnd, SpineGroup } from "../../components/Spine";
+import { WorkRow, WorkRowSkeleton } from "../../components/WorkRow";
+import { ContentPlanDialog } from "../../components/ContentPlanDialog";
 import { LoadError } from "../../components/LoadError";
+import { EmptyState } from "../../components/EmptyState";
 
-const PAGE_SIZE = 20;
+/**
+ * The content plan — everything outstanding, in the order it is due.
+ *
+ * **The creator only ever sees `Outstanding` content** — the query and
+ * `selectVisibleContent` both enforce it. Submitting an item moves it to
+ * *Completed*, at which point it leaves this list and appears on the staff side
+ * under "Recently Completed".
+ *
+ * ── Completion here is undoable, and that is new ─────────────────────────────
+ * This page used to send no `revert` flag and offer no way back, while the
+ * dashboard's identical action was fully undoable — the same record behaving
+ * differently depending on which screen you tapped it from. Both now run
+ * through the one mutation in `useCreatorWork`, which carries the Undo.
+ *
+ * Because completed items are no longer listed, the undo is the toast rather
+ * than a persistent "mark as incomplete" row action. If a creator misses the
+ * toast, the record is with her manager — which is exactly what the copy on the
+ * submit action says will happen.
+ */
+export default function ContentPlanPage() {
+  const { visibleAgenda: agenda, loading, contentError, retry, sealing, complete, isBusy } =
+    useCreatorWork();
 
-interface DescriptionRow { qty: string; content: string; }
+  const [detail, setDetail] = useState<AgendaItem | null>(null);
 
-interface CPEntry extends ContentPlanEntry {
-  contentType: ContentType;
-  createdAt: string | null;
-  isArchived: boolean;
-}
-
-function firestoreToCP(id: string, data: Record<string, unknown>): CPEntry {
-  const ts = (v: unknown): string | null => {
-    if (!v) return null;
-    if (typeof (v as { toDate?: unknown }).toDate === "function") return (v as { toDate: () => Date }).toDate().toISOString();
-    return null;
-  };
-  return {
-    id,
-    contentType: (data.contentType as ContentType) ?? "SFW",
-    contentSummary: (data.contentSummary as string) ?? "",
-    description: (data.description as DescriptionRow[]) ?? [],
-    comment: (data.comment as string) ?? "",
-    dueDate: typeof data.dueDate === "string" ? data.dueDate : null,
-    createdAt: ts(data.createdAt),
-    status: (data.status as "Outstanding" | "Completed") ?? "Outstanding",
-    isArchived: (data.isArchived as boolean) ?? false,
-  };
-}
-
-function formatDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return "—";
-  try {
-    const d = dateStr.includes("T") ? new Date(dateStr) : new Date(dateStr + "T12:00:00Z");
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  } catch { return dateStr; }
-}
-
-export default function AllContentRequestsPage() {
-  const { creatorUser } = useCreatorAuth();
-  const [entries, setEntries] = useState<CPEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [viewEntry, setViewEntry] = useState<CPEntry | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [loadError, setLoadError] = useState(false);
-  // Bumping this re-runs the effect, which re-subscribes the listener.
-  const [retryKey, setRetryKey] = useState(0);
-
-  useEffect(() => {
-    if (!creatorUser) return;
-    const q = query(
-      collection(db, "content-planning"),
-      where("creatorID", "==", creatorUser.creatorID),
-      where("status", "in", ["Outstanding", "Completed"]),
-      orderBy("dueDate", "asc")
-    );
-    const unsub = onSnapshot(q, snap => {
-      setEntries(snap.docs.map(d => firestoreToCP(d.id, d.data() as Record<string, unknown>)));
-      setLoadError(false);
-      setLoading(false);
-    }, error => {
-      console.error("[content-requests] listener error:", error);
-      // Must be set before `loading` clears: without it this falls through to
-      // the empty branch and tells the creator they have no content requests.
-      setLoadError(true);
-      setLoading(false);
-    });
-    return unsub;
-    // creatorID, not the provider object: the object's identity changes on any
-    // provider re-render, which would tear down and re-establish the listener.
-  }, [creatorUser?.creatorID, retryKey]);
-
-  const handleMarkComplete = async (entry: CPEntry) => {
-    setBusy(entry.id);
-    try {
-      const res = await apiRequest(`/api/content-planning/${entry.id}/creator-complete`, { method: "POST" });
-      if (!res.ok) throw new Error();
-      toast.success("Marked as completed");
-    } catch {
-      toast.error("Failed to update status");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
-  const page = Math.min(currentPage, totalPages);
-  const pageEntries = entries.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const goTo = (p: number) => setCurrentPage(Math.max(1, Math.min(p, totalPages)));
+  // Only the content half of the agenda, keeping the day grouping the spine
+  // already computed rather than regrouping and risking a different answer.
+  const groups = useMemo(
+    () =>
+      agenda.groups
+        .map((g) => ({ ...g, items: g.items.filter((i) => i.kind === "content") }))
+        .filter((g) => g.items.length > 0),
+    [agenda],
+  );
+  const count = useMemo(() => agenda.all.filter((i) => i.kind === "content").length, [agenda]);
+  const lateCount = useMemo(
+    () => agenda.all.filter((i) => i.kind === "content" && i.urgency === "late").length,
+    [agenda],
+  );
 
   return (
     <div className="min-h-dvh" style={PAGE_GROUND_STYLE}>
-      {/* Top bar */}
-      <header
-        className="sticky top-0 z-40 flex h-14 items-center gap-2 px-3 sm:px-6"
-        style={HEADER_STYLE}
-      >
-        <SidebarTrigger className="hidden md:inline-flex text-zinc-400 hover:bg-white/5 hover:text-zinc-100 relative after:absolute after:-inset-3 after:content-['']" />
-        <Link
-          href="/creator/dashboard"
-          aria-label="Creator Portal home"
-          className="absolute left-1/2 top-1/2 flex h-11 -translate-x-1/2 -translate-y-1/2 items-center px-4"
-        >
-          <img src="/logo/bluu_long.svg" alt="Bluu Rock" className="h-6" />
-        </Link>
-      </header>
+      <PortalHeader title="Content Plan" />
 
-      <div className="mx-auto max-w-5xl px-3 py-6 sm:px-6 sm:py-8 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
-        <h1 className="mb-4 text-2xl font-semibold sm:mb-6">All Content Requests</h1>
+      <div className="mx-auto w-full max-w-3xl px-3 pt-8 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:px-6 sm:pt-10 md:pb-16">
+        <header className="mb-9">
+          <h1 className="text-2xl font-semibold tracking-tight" style={{ color: COLOR.ink }}>
+            Content plan
+          </h1>
+          <p className="mt-2 max-w-[56ch] text-sm leading-relaxed" style={{ color: COLOR.ink2 }}>
+            {loading
+              ? "Loading your content plan…"
+              : count === 0
+                ? "This is the content we need to keep your page running. Nothing is outstanding right now."
+                : lateCount > 0
+                  ? `${count} outstanding, ${lateCount} of them past due. Tap the tick to send one for review.`
+                  : `${count} outstanding. Tap the tick to send one for review.`}
+          </p>
+        </header>
 
         {loading ? (
-          <div className="flex flex-col gap-2">
-            {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-14 rounded-xl" />)}
-          </div>
-        ) : loadError ? (
-          <LoadError
-            message="Couldn't load your content requests."
-            onRetry={() => { setLoading(true); setLoadError(false); setRetryKey(k => k + 1); }}
+          <ul className="m-0 list-none p-0">
+            {[0, 1, 2].map((i) => (
+              <WorkRowSkeleton key={i} index={i} />
+            ))}
+          </ul>
+        ) : contentError ? (
+          <LoadError message="Couldn't load your content plan." onRetry={retry} />
+        ) : groups.length === 0 ? (
+          <EmptyState
+            icon={CalendarCheck}
+            tone="done"
+            title="Content plan is clear"
+            body="We follow a strict upload schedule, so new requirements appear here as soon as your manager schedules them."
           />
-        ) : entries.length === 0 ? (
-          // Reachable only from a successful snapshot with zero docs — the error
-          // branch above is what stops a failure reading as "you have nothing".
-          <p className="py-12 text-center text-sm text-zinc-400">No content requests found.</p>
         ) : (
-          <>
-            {/* Desktop table */}
-            <div className={`hidden overflow-hidden rounded-2xl md:block ${SURFACE.panel}`}>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Summary</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Due Date</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="w-12"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pageEntries.map(entry => {
-                    const overdue = isOverdue(entry.dueDate, creatorUser?.defaultTimezone) && entry.status === "Outstanding";
-                    return (
-                      <TableRow key={entry.id}>
-                        <TableCell className="max-w-[200px] truncate text-sm font-medium">{entry.contentSummary}</TableCell>
-                        <TableCell>
-                          <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium ${contentTypeBadge(entry.contentType)}`}>
-                            {entry.contentType}
-                          </span>
-                        </TableCell>
-                        <TableCell className={`text-sm ${overdue ? "font-medium text-red-300" : "text-zinc-400"}`}>
-                          {formatDate(entry.dueDate)}
-                          {overdue && <span className="ml-1 text-xs">· Overdue</span>}
-                        </TableCell>
-                        <TableCell>
-                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${contentStatusBadge(entry.status)}`}>
-                            {entry.status}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Row actions">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => setViewEntry(entry)}>View</DropdownMenuItem>
-                              {entry.status === "Outstanding" && (
-                                <DropdownMenuItem onClick={() => handleMarkComplete(entry)}>
-                                  Mark as Complete
-                                </DropdownMenuItem>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-
-            {/* Mobile card list */}
-            <div className="flex flex-col gap-2 md:hidden">
-              {pageEntries.map(entry => {
-                const overdue = isOverdue(entry.dueDate, creatorUser?.defaultTimezone) && entry.status === "Outstanding";
-                return (
-                  <button
-                    key={entry.id}
-                    onClick={() => setViewEntry(entry)}
-                    className={`flex flex-col gap-2 rounded-xl px-4 py-3 text-left transition-colors active:bg-white/[0.04] ${SURFACE.panel}`}
-                    style={overdue ? { borderColor: "rgba(239,68,68,0.2)" } : undefined}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="min-w-0 flex-1 truncate text-sm font-medium leading-tight text-zinc-100">
-                        {entry.contentSummary}
-                      </p>
-                      <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${contentTypeBadge(entry.contentType)}`}>
-                        {entry.contentType}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className={`text-[11px] ${overdue ? "font-medium text-red-300" : "text-zinc-400"}`}>
-                        {overdue ? "Overdue · " : "Due "}{formatDate(entry.dueDate)}
-                      </span>
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${contentStatusBadge(entry.status)}`}>
-                        {entry.status}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {totalPages > 1 && (
-              <Pagination className="mt-6">
-                <PaginationContent>
-                  <PaginationItem>
-                    <PaginationPrevious
-                      href="#"
-                      onClick={e => { e.preventDefault(); goTo(page - 1); }}
-                      aria-disabled={page === 1}
-                      className={`h-11 min-w-11 ${page === 1 ? "pointer-events-none opacity-40" : ""}`}
-                    />
-                  </PaginationItem>
-                  {Array.from({ length: totalPages }, (_, i) => i + 1)
-                    .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
-                    .reduce<(number | "ellipsis")[]>((acc, p, idx, arr) => {
-                      if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push("ellipsis");
-                      acc.push(p);
-                      return acc;
-                    }, [])
-                    .map((item, idx) =>
-                      item === "ellipsis" ? (
-                        <PaginationItem key={`e-${idx}`}><PaginationEllipsis /></PaginationItem>
-                      ) : (
-                        <PaginationItem key={item}>
-                          <PaginationLink
-                            className="h-11 min-w-11"
-                            href="#"
-                            isActive={item === page}
-                            onClick={e => { e.preventDefault(); goTo(item); }}
-                          >
-                            {item}
-                          </PaginationLink>
-                        </PaginationItem>
-                      )
-                    )}
-                  <PaginationItem>
-                    <PaginationNext
-                      href="#"
-                      onClick={e => { e.preventDefault(); goTo(page + 1); }}
-                      aria-disabled={page === totalPages}
-                      className={`h-11 min-w-11 ${page === totalPages ? "pointer-events-none opacity-40" : ""}`}
-                    />
-                  </PaginationItem>
-                </PaginationContent>
-              </Pagination>
-            )}
-          </>
+          <ol className="m-0 list-none p-0">
+            {groups.map((group) => (
+              <SpineGroup
+                key={group.id}
+                label={group.label}
+                sub={group.sub}
+                bucket={group.bucket}
+                count={group.items.length}
+                isToday={group.id === agenda.todayKey}
+              >
+                {group.items.map((item, i) => (
+                  <WorkRow
+                    key={item.key}
+                    item={item}
+                    index={i}
+                    todayKey={agenda.todayKey}
+                    sealing={sealing.has(item.key)}
+                    busy={isBusy(item.key)}
+                    onOpen={() => setDetail(item)}
+                    onComplete={() => void complete(item)}
+                  />
+                ))}
+              </SpineGroup>
+            ))}
+            <SpineEnd label={`${count} outstanding in total.`} />
+          </ol>
         )}
       </div>
 
-      {viewEntry && (
+      {detail && (
         <ContentPlanDialog
-          entry={viewEntry}
-          open={!!viewEntry}
-          onOpenChange={(o) => { if (!o) setViewEntry(null); }}
-          formatDate={formatDate}
-          overdue={isOverdue(viewEntry.dueDate, creatorUser?.defaultTimezone) && viewEntry.status === "Outstanding"}
-          onComplete={viewEntry.status === "Outstanding" ? () => { handleMarkComplete(viewEntry); setViewEntry(null); } : undefined}
-          busy={busy === viewEntry.id}
+          item={detail}
+          open
+          onOpenChange={(o) => !o && setDetail(null)}
+          todayKey={agenda.todayKey}
+          busy={isBusy(detail.key)}
+          onComplete={() => {
+            void complete(detail);
+            setDetail(null);
+          }}
         />
       )}
     </div>

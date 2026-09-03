@@ -1,630 +1,387 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useCreatorAuth } from "@/components/CreatorAuthProvider";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { auth, db } from "@/firebase-config";
-import { collection, doc, getDoc, query, where, onSnapshot, orderBy } from "firebase/firestore";
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { Button } from "@/components/ui/button";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Skeleton } from "@/components/ui/skeleton";
-import { SidebarTrigger } from "@/components/ui/sidebar";
-import { Info, ExternalLink, CheckCircle2, ChevronRight, LogOut } from "lucide-react";
-import {
-  type CampaignEntry, type CRPriority,
-  PRIORITY_COLORS, formatAmount, formatDueDate, firestoreToEntry, sortByPriority, CAMPAIGN_TYPES,
-} from "@/lib/campaignTracking";
-import { apiRequest } from "@/lib/clientApi";
-import { isOverdue } from "@/lib/timezone";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/firebase-config";
+import { useCreatorAuth } from "@/components/CreatorAuthProvider";
 import { toast } from "sonner";
+import { ChevronRight, Info, PartyPopper } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { formatAmount } from "@/lib/campaignTracking";
 import {
-  TYPE_META, SURFACE, ACCENT_BTN, COMPLETE_BTN, PAGE_GROUND_STYLE, HEADER_STYLE, contentTypeBadge,
-  type CustomType,
-} from "../theme";
+  buildVerdict,
+  customsByType,
+  sumAmounts,
+  type AgendaItem,
+} from "../lib/agenda";
+import { useCreatorWork } from "../lib/useCreatorWork";
+import { COLOR, FOCUS_RING, PAGE_GROUND_STYLE, SURFACE, TYPE_META, URGENCY } from "../theme";
+import { PortalHeader } from "../components/PortalHeader";
+import { SpineEnd, SpineGroup } from "../components/Spine";
+import { WorkRow, WorkRowSkeleton } from "../components/WorkRow";
 import { CustomRequestDialog } from "../components/CustomRequestDialog";
+import { ContentPlanDialog } from "../components/ContentPlanDialog";
 import { CreatorDialog } from "../components/CreatorDialog";
 import { LoadError } from "../components/LoadError";
+import { EmptyState } from "../components/EmptyState";
 
-// ─── Content Planning types ───────────────────────────────────────────────────
+/**
+ * The creator's "Today".
+ *
+ * The portal used to open with two sections grouped by record type — customs in
+ * one, content planning in another — which asks a creator to answer "what do I
+ * owe?" by reading two lists and merging them herself. This screen merges them
+ * once, on the spine, in the order the work comes due.
+ *
+ * Reading order is deliberate and matches the question being asked:
+ *   1. the verdict — one sentence, in prose, not a metric
+ *   2. the spine — overdue, today, then a graduation per upcoming day
+ *   3. the customs ledger — the money view, a different shape from the stream
+ *
+ * Everything visible here is active work. A record the creator submits leaves
+ * this screen and appears on the staff side under "Recently Completed"; see
+ * `useCreatorWork`.
+ */
 
-interface CPDescriptionRow { qty: string; content: string; }
-
-interface CPEntry {
-  id: string;
-  contentType: "SFW" | "NSFW";
-  contentSummary: string;
-  description: CPDescriptionRow[];
-  comment: string;
-  dueDate: string | null;
-  status: "Outstanding" | "Completed";
-  creatorID: string;
-  isArchived: boolean;
+function greeting(hour: number): string {
+  if (hour < 5) return "Late one";
+  if (hour < 12) return "Morning";
+  if (hour < 18) return "Afternoon";
+  return "Evening";
 }
 
-function firestoreToCP(id: string, data: Record<string, unknown>): CPEntry {
-  return {
-    id,
-    contentType: (data.contentType as "SFW" | "NSFW") ?? "SFW",
-    contentSummary: (data.contentSummary as string) ?? "",
-    description: (data.description as CPDescriptionRow[]) ?? [],
-    comment: (data.comment as string) ?? "",
-    dueDate: typeof data.dueDate === "string" ? data.dueDate : null,
-    status: (data.status as "Outstanding" | "Completed") ?? "Outstanding",
-    creatorID: (data.creatorID as string) ?? "",
-    isArchived: (data.isArchived as boolean) ?? false,
-  };
-}
-
-function formatCPDate(dateStr: string | null): string {
-  if (!dateStr) return "—";
-  try {
-    return new Date(dateStr + "T12:00:00Z").toLocaleDateString("en-US", {
-      month: "short", day: "numeric", year: "numeric",
-    });
-  } catch { return dateStr; }
-}
-
-function sortCP(list: CPEntry[]): CPEntry[] {
-  return [...list].sort((a, b) => {
-    if (!a.dueDate && !b.dueDate) return 0;
-    if (!a.dueDate) return 1;
-    if (!b.dueDate) return -1;
-    return a.dueDate.localeCompare(b.dueDate);
-  });
-}
-
-// ─── Content Planning Card ────────────────────────────────────────────────────
-
-function CPCard({ entry, onComplete, completing, timezone }: {
-  entry: CPEntry;
-  onComplete: (id: string) => void;
-  completing: boolean;
-  /** The creator's own timezone — a deadline is late in their day, not UTC's. */
-  timezone?: string;
-}) {
-  const overdue = isOverdue(entry.dueDate, timezone);
-  const rows = entry.description.filter(r => r.qty || r.content);
-  return (
-    <div
-      className={`flex h-full flex-col gap-3 rounded-xl p-4 ${SURFACE.card}`}
-      style={overdue ? { borderColor: "rgba(239,68,68,0.25)" } : undefined}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <p className="flex-1 text-sm font-semibold leading-tight text-zinc-100">{entry.contentSummary}</p>
-        <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${contentTypeBadge(entry.contentType)}`}>
-          {entry.contentType}
-        </span>
-      </div>
-
-      {rows.length > 0 && (
-        <div className="flex flex-col gap-0.5">
-          {rows.map((r, i) => (
-            <p key={i} className="text-xs text-zinc-400">
-              <span className="font-medium text-zinc-300">{r.qty}</span>
-              {r.qty && r.content ? " × " : ""}
-              {r.content}
-            </p>
-          ))}
-        </div>
-      )}
-
-      {entry.comment && (
-        <p className="line-clamp-2 text-xs leading-relaxed text-zinc-400">{entry.comment}</p>
-      )}
-
-      <p className={`mt-auto text-xs ${overdue ? "font-medium text-red-300" : "text-zinc-400"}`}>
-        {overdue ? "Overdue · " : "Due "}{formatCPDate(entry.dueDate)}
-      </p>
-
-      <div className="border-t border-white/[0.06] pt-3">
-        <Button
-          onClick={() => onComplete(entry.id)}
-          disabled={completing}
-          size="sm"
-          className={`group h-11 w-full gap-1.5 ${COMPLETE_BTN}`}
-        >
-          <CheckCircle2 className="h-3.5 w-3.5 transition-transform motion-safe:group-hover:scale-110" />
-          {completing ? "Saving…" : "Mark Completed"}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Customs Card (opens detail dialog; completion is deliberate) ─────────────
-
-function CustomCard({ entry, accentHex, onOpen }: {
-  entry: CampaignEntry;
-  accentHex: string;
-  onOpen: () => void;
-}) {
-  const dueLabel = entry.dueDate
-    ? `${formatDueDate(entry.dueDate)}${entry.dueDateTimezone ? ` (${entry.dueDateTimezone})` : ""}`
-    : null;
-  return (
-    <button
-      onClick={onOpen}
-      className={`flex flex-col gap-2 rounded-xl p-3 text-left transition-all focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-400 focus-visible:outline-none ${SURFACE.card} ${SURFACE.cardHover} motion-safe:active:scale-[0.98]`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <span
-          className="rounded-md px-2 py-0.5 font-mono text-xs font-semibold tracking-widest"
-          style={{ background: `${accentHex}25`, color: accentHex }}
-        >
-          {entry.CR}
-        </span>
-        {entry.priority && (
-          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_COLORS[entry.priority as CRPriority]}`}>
-            {entry.priority}
-          </span>
-        )}
-      </div>
-
-      <div>
-        <p className="text-[11px] uppercase tracking-wider text-zinc-400">Fan</p>
-        <p className="truncate text-sm font-medium text-zinc-100">{entry.fanName}</p>
-      </div>
-
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] text-rose-300">{dueLabel ? `Due ${dueLabel}` : ""}</span>
-        <span className="text-sm font-semibold tabular-nums text-zinc-200">{formatAmount(entry.totalAmount)}</span>
-      </div>
-
-      <span className="inline-flex items-center gap-1 text-[11px] text-sky-300">
-        View details <ChevronRight className="h-3 w-3" />
-      </span>
-    </button>
-  );
-}
-
-// ─── Type Tile ────────────────────────────────────────────────────────────────
-
-function TypeTile({ type, entries, onOpen }: {
-  type: CustomType;
-  entries: CampaignEntry[];
-  onOpen: (entry: CampaignEntry) => void;
-}) {
-  const meta = TYPE_META[type];
-  return (
-    <div className={`flex flex-col gap-4 rounded-2xl p-4 ${SURFACE.panel}`}>
-      <div className="flex items-center gap-2">
-        <span className="h-2 w-2 rounded-full" style={{ background: meta.hex }} />
-        <h3 className="text-sm font-semibold text-zinc-200">{meta.label}</h3>
-        <span className="text-xs tabular-nums text-zinc-400">({entries.length})</span>
-        {meta.infoText && (
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="ghost" size="icon" className="relative h-5 w-5 text-zinc-400 hover:text-zinc-300 after:absolute after:-inset-3 after:content-['']">
-                <Info className="h-3.5 w-3.5" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="max-w-xs text-xs leading-relaxed text-zinc-300">
-              {meta.infoText}
-            </PopoverContent>
-          </Popover>
-        )}
-      </div>
-
-      {/* No empty branch: an empty type is not rendered at all (see
-          `visibleTypes`), so a creator never scrolls past a panel that only
-          says "nothing here". When every type is empty the section shows one
-          combined message instead of three. */}
-      <div className="flex flex-col gap-2">
-        {entries.map(e => (
-          <CustomCard key={e.id} entry={e} accentHex={meta.hex} onOpen={() => onOpen(e)} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Profile Menu ─────────────────────────────────────────────────────────────
-
-function ProfileMenu({ stageName, email, photoURL }: {
-  stageName: string;
-  email: string;
-  photoURL?: string | null;
+/** A heading with an optional explanation behind an info control. The copy is
+ *  long and only needed once, so it earns a popover rather than a paragraph
+ *  that every creator scrolls past every day. */
+function SectionHeading({
+  children,
+  info,
+  action,
+}: {
+  children: React.ReactNode;
+  info?: string;
+  action?: React.ReactNode;
 }) {
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="ghost" className="h-11 items-center gap-2.5 rounded-xl px-2 hover:bg-white/5">
-          <Avatar size="sm" className="ring-1 ring-white/10">
-            {photoURL && <AvatarImage src={photoURL} alt="" />}
-            <AvatarFallback className="bg-sky-500/25 text-sky-100">
-              {stageName.charAt(0).toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
-          <span className="hidden text-sm font-medium text-zinc-200 sm:block">{stageName}</span>
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className={`w-56 overflow-hidden rounded-xl p-0 ${SURFACE.overlay}`}>
-        <div className="border-b border-white/[0.07] px-4 py-3">
-          <p className="text-sm font-semibold text-zinc-100">{stageName}</p>
-          <p className="mt-0.5 truncate text-xs text-zinc-400">{email}</p>
-        </div>
-        <div className="p-1.5">
-          <Button
-            variant="ghost"
-            className="h-11 w-full justify-start gap-2.5 rounded-lg px-3 text-sm text-zinc-300 hover:bg-white/5 hover:text-white"
-            onClick={() => auth.signOut()}
+    <div className="mb-3 flex items-center gap-2">
+      <h2 className="text-sm font-semibold" style={{ color: COLOR.ink }}>
+        {children}
+      </h2>
+      {info && (
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="What is this?"
+              className={`relative size-6 shrink-0 after:absolute after:-inset-3 after:content-[''] ${FOCUS_RING}`}
+              style={{ color: COLOR.ink2 }}
+            >
+              <Info className="size-4" aria-hidden="true" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            className={`max-w-xs rounded-xl text-xs leading-relaxed ${SURFACE.overlay}`}
+            style={{ color: COLOR.ink2 }}
           >
-            <LogOut className="h-4 w-4 text-zinc-400" />
-            Sign Out
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-// ─── Section header with info popover ─────────────────────────────────────────
-
-function SectionHeader({ title, info }: { title: string; info: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <h2 className="text-lg font-semibold text-zinc-100">{title}</h2>
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant="ghost" size="icon" className="relative h-6 w-6 shrink-0 text-zinc-400 hover:text-zinc-300 after:absolute after:-inset-3 after:content-['']">
-            <Info className="h-4 w-4" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="max-w-sm text-xs leading-relaxed text-zinc-300">{info}</PopoverContent>
-      </Popover>
+            {info}
+          </PopoverContent>
+        </Popover>
+      )}
+      {action && <div className="ml-auto">{action}</div>}
     </div>
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
-
-export default function CreatorDashboardPage() {
+export default function CreatorTodayPage() {
   const { creatorUser } = useCreatorAuth();
   const searchParams = useSearchParams();
   const crId = searchParams.get("crId");
 
-  const [entries, setEntries] = useState<CampaignEntry[]>([]);
-  const [completing, setCompleting] = useState<string | null>(null);
-  const [cpEntries, setCpEntries] = useState<CPEntry[]>([]);
-  const [cpCompleting, setCpCompleting] = useState<string | null>(null);
-  const [entriesLoaded, setEntriesLoaded] = useState(false);
-  const [cpLoaded, setCpLoaded] = useState(false);
-  const [detailEntry, setDetailEntry] = useState<CampaignEntry | null>(null);
+  const work = useCreatorWork();
+  const { visibleAgenda: agenda, loading, anyError, retry, sealing, complete, isBusy } = work;
+
+  const [detail, setDetail] = useState<AgendaItem | null>(null);
   const [linkedError, setLinkedError] = useState<string | null>(null);
-  const [entriesError, setEntriesError] = useState(false);
-  const [cpError, setCpError] = useState(false);
-  // Bumping this re-runs both listener effects, which re-subscribes them.
-  const [retryKey, setRetryKey] = useState(0);
-  const linkedResolvedRef = useRef(false);
+  const linkedResolved = useRef(false);
 
-  const retry = () => {
-    setEntriesLoaded(false);
-    setCpLoaded(false);
-    setEntriesError(false);
-    setCpError(false);
-    setRetryKey(k => k + 1);
-  };
+  const verdict = useMemo(() => buildVerdict(agenda), [agenda]);
+  const customs = useMemo(() => agenda.all.filter((i) => i.kind === "custom"), [agenda]);
+  const ledger = useMemo(() => customsByType(customs), [customs]);
 
+  // The greeting is computed once per mount rather than off the ticking clock:
+  // it is a nicety, and re-rendering "Evening" to "Late one" under someone's
+  // eyes at midnight would be a distraction, not an improvement.
+  const [hour] = useState(() => new Date().getHours());
+  const name = creatorUser?.stageName || creatorUser?.displayName || "there";
+
+  // ── Deep-linked custom request (?crId=) ───────────────────────────────────
   useEffect(() => {
-    if (!creatorUser) return;
-    const q = query(
-      collection(db, "campaign-tracking"),
-      where("creatorID", "==", creatorUser.creatorID),
-      where("status", "==", "In Progress")
-    );
-    const unsub = onSnapshot(q, snap => {
-      setEntries(snap.docs
-        .map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>))
-        .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type) && e.status !== "Archived")
-      );
-      setEntriesError(false);
-      setEntriesLoaded(true);
-    }, (error) => {
-      console.error("[dashboard] campaign-tracking listener error:", error);
-      // Without these the skeletons spin forever with no message and no retry.
-      setEntriesError(true);
-      setEntriesLoaded(true);
-    });
-    return unsub;
-  }, [creatorUser?.creatorID, retryKey]);
+    if (!crId || !creatorUser || loading || linkedResolved.current) return;
 
-  // Resolve deep-linked CR from ?crId= query param
-  useEffect(() => {
-    if (!crId || !creatorUser || !entriesLoaded || linkedResolvedRef.current) return;
-
-    const found = entries.find(e => e.id === crId);
+    const found = agenda.all.find((i) => i.kind === "custom" && i.id === crId);
     if (found) {
-      linkedResolvedRef.current = true;
-      setDetailEntry(found);
+      linkedResolved.current = true;
+      // Deferred rather than called synchronously in the effect body — same
+      // reasoning as CreatorPortalShell's bootstrap: avoids a cascading render
+      // from this render pass.
+      queueMicrotask(() => setDetail(found));
       return;
     }
 
-    const timer = setTimeout(async () => {
-      if (linkedResolvedRef.current) return;
-      linkedResolvedRef.current = true;
+    // Not in the live set. Give the listener a moment before deciding why, then
+    // say which of the three reasons it is — "nothing happened" is the one
+    // outcome a creator following a link cannot act on.
+    const timer = window.setTimeout(async () => {
+      if (linkedResolved.current) return;
+      linkedResolved.current = true;
       try {
         const snap = await getDoc(doc(db, "campaign-tracking", crId));
         if (!snap.exists()) {
-          toast.error("Custom request not found.");
+          toast.error("That custom request no longer exists.");
         } else if ((snap.data() as Record<string, unknown>).creatorID !== creatorUser.creatorID) {
           setLinkedError("This request belongs to a different account.");
         } else {
-          toast.error("This request isn't currently active.");
+          toast.info("That request isn't active right now.", {
+            description: "It may already be with your manager for review.",
+          });
         }
       } catch {
-        toast.error("This request couldn't be loaded.");
+        toast.error("That request couldn't be loaded.");
       }
     }, 2000);
 
-    return () => clearTimeout(timer);
-  }, [crId, entries, creatorUser, entriesLoaded]);
-
-  useEffect(() => {
-    if (!creatorUser) return;
-    const q = query(
-      collection(db, "content-planning"),
-      where("creatorID", "==", creatorUser.creatorID),
-      where("status", "==", "Outstanding"),
-      orderBy("dueDate", "asc")
-    );
-    const unsub = onSnapshot(q, snap => {
-      setCpEntries(sortCP(snap.docs.map(d => firestoreToCP(d.id, d.data() as Record<string, unknown>))));
-      setCpError(false);
-      setCpLoaded(true);
-    }, (error) => {
-      console.error("[dashboard] content-planning listener error:", error);
-      // Without these the skeletons spin forever with no message and no retry.
-      setCpError(true);
-      setCpLoaded(true);
-    });
-    return unsub;
-  }, [creatorUser?.creatorID, retryKey]);
-
-  // ── Content-planning: optimistic complete with clean Undo (revert → Outstanding) ──
-  const handleCpComplete = async (id: string) => {
-    const removed = cpEntries.find(e => e.id === id);
-    if (!removed) return;
-    setCpCompleting(id);
-    setCpEntries(prev => prev.filter(e => e.id !== id));
-    try {
-      const res = await apiRequest(`/api/content-planning/${id}/creator-complete`, { method: "POST" });
-      if (!res.ok) throw new Error();
-      toast.success("Marked completed", {
-        action: { label: "Undo", onClick: () => revertCp(removed) },
-      });
-    } catch {
-      setCpEntries(prev => sortCP([...prev, removed]));
-      toast.error("Failed to mark as completed");
-    } finally {
-      setCpCompleting(null);
-    }
-  };
-
-  const revertCp = async (entry: CPEntry) => {
-    setCpEntries(prev => prev.some(e => e.id === entry.id) ? prev : sortCP([...prev, entry]));
-    try {
-      const res = await apiRequest(`/api/content-planning/${entry.id}/creator-complete`, {
-        method: "POST",
-        body: JSON.stringify({ revert: true }),
-      });
-      if (!res.ok) throw new Error();
-      toast.success("Restored");
-    } catch {
-      setCpEntries(prev => prev.filter(e => e.id !== entry.id));
-      toast.error("Couldn't undo — please try again");
-    }
-  };
-
-  // ── Customs: deliberate complete (from detail dialog) + Undo (revert → Awaiting Approval) ──
-  const handleComplete = async (id: string) => {
-    const removed = entries.find(e => e.id === id);
-    if (!removed) return;
-    setCompleting(id);
-    setEntries(prev => prev.filter(e => e.id !== id));
-    try {
-      const res = await apiRequest(`/api/campaign-tracking/${id}/creator-complete`, {
-        method: "POST",
-        body: JSON.stringify({ revert: false }),
-      });
-      if (!res.ok) throw new Error();
-      toast.success("Marked completed", {
-        action: { label: "Undo", onClick: () => revertCustom(removed) },
-      });
-    } catch {
-      setEntries(prev => [...prev, removed]);
-      toast.error("Failed to mark as completed");
-    } finally {
-      setCompleting(null);
-    }
-  };
-
-  const revertCustom = async (entry: CampaignEntry) => {
-    try {
-      const res = await apiRequest(`/api/campaign-tracking/${entry.id}/creator-complete`, {
-        method: "POST",
-        body: JSON.stringify({ revert: true }),
-      });
-      if (!res.ok) throw new Error();
-      toast.success("Completion reversed — sent back for review");
-    } catch {
-      toast.error("Couldn't undo — see All Custom Requests");
-    }
-  };
-
-  const entriesByType = useMemo<Record<CustomType, CampaignEntry[]>>(() => ({
-    CR: sortByPriority(entries.filter(e => e.type === "CR")),
-    Call: sortByPriority(entries.filter(e => e.type === "Call")),
-    Item: sortByPriority(entries.filter(e => e.type === "Item")),
-  }), [entries]);
-
-  // Only types with work in them get a panel. Calls and Items are usually empty,
-  // and on a phone the tiles stack — so rendering all three put two full "All
-  // caught up!" panels between the creator and their actual custom requests.
-  const visibleTypes = useMemo(
-    () => (["CR", "Call", "Item"] as CustomType[]).filter(t => entriesByType[t].length > 0),
-    [entriesByType],
-  );
-
-  // Static strings so Tailwind's scanner sees them; the grid tracks the number
-  // of panels actually rendered rather than always reserving three.
-  const TYPE_GRID_COLS: Record<number, string> = {
-    1: "grid-cols-1",
-    2: "grid-cols-1 sm:grid-cols-2",
-    3: "grid-cols-1 sm:grid-cols-3",
-  };
+    return () => window.clearTimeout(timer);
+  }, [crId, agenda, creatorUser, loading]);
 
   if (!creatorUser) {
     return (
-      <div className="flex min-h-dvh items-center justify-center" style={{ background: "#09090b" }}>
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-sky-500/30 border-t-sky-500" />
+      <div className="flex min-h-dvh items-center justify-center" style={PAGE_GROUND_STYLE}>
+        <span
+          className="size-6 animate-spin rounded-full border-2 border-transparent"
+          style={{ borderTopColor: COLOR.azure, borderRightColor: `${COLOR.azure}40` }}
+          role="status"
+          aria-label="Loading"
+        />
       </div>
     );
   }
 
+  const verdictHex =
+    verdict.tone === "clear" ? COLOR.ink : URGENCY[verdict.tone as Exclude<typeof verdict.tone, "clear">].hex;
+
   return (
     <div className="min-h-dvh" style={PAGE_GROUND_STYLE}>
-      {/* Top bar */}
-      <header
-        className="sticky top-0 z-40 flex h-14 items-center justify-between gap-2 px-3 sm:px-6"
-        style={HEADER_STYLE}
-      >
-        <SidebarTrigger className="hidden md:inline-flex text-zinc-400 hover:bg-white/5 hover:text-zinc-100 relative after:absolute after:-inset-3 after:content-['']" />
-        <img
-          src="/logo/bluu_long.svg"
-          alt="Bluu Rock"
-          className="pointer-events-none absolute left-1/2 top-1/2 h-6 -translate-x-1/2 -translate-y-1/2"
-        />
-        {/* ml-auto, not the header's justify-between: the sidebar trigger to the
-            left is desktop-only, so on mobile this is the only flex child. */}
-        <div className="ml-auto">
-          <ProfileMenu
-            stageName={creatorUser.stageName || creatorUser.displayName}
-            email={creatorUser.userEmail}
-            photoURL={creatorUser.photoURL}
-          />
-        </div>
-      </header>
+      <PortalHeader />
 
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-3 py-6 sm:gap-8 sm:px-6 sm:py-12 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
-        {/* Welcome */}
-        <div>
-          <p className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-400">Creator Portal</p>
-          <h1 className="text-2xl font-semibold text-zinc-100">
-            Hey, {creatorUser.stageName || creatorUser.displayName} 👋
+      <div className="mx-auto w-full max-w-3xl px-3 pt-8 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:px-6 sm:pt-12 md:pb-16">
+        {/* ── The verdict ──────────────────────────────────────────────────── */}
+        <section className="mb-9">
+          <p className="text-sm" style={{ color: COLOR.ink2 }}>
+            {greeting(hour)}, {name}
+          </p>
+          <h1
+            className="mt-1.5 text-2xl font-semibold tracking-tight text-balance sm:text-3xl"
+            style={{ color: verdict.tone === "late" ? verdictHex : COLOR.ink }}
+          >
+            {loading ? " " : verdict.headline}
           </h1>
-        </div>
+          <p className="mt-2 max-w-[52ch] text-sm leading-relaxed" style={{ color: COLOR.ink2 }}>
+            {loading ? "Checking your schedule…" : verdict.sub}
+          </p>
+        </section>
 
-        {/* Section 1: Custom Requests */}
-        <section className="flex flex-col gap-4">
-          <SectionHeader
-            title="Custom Requests"
-            info="These are high-ticket custom requests your fans make. Since they are custom-made, they are sold at a significantly higher price than regular content. It is important that we get this content to them ASAP in order to maintain a good relationship. A fan who is willing to pay for one Custom Request is likely to come back for more!"
-          />
+        {/* ── The spine ────────────────────────────────────────────────────── */}
+        <section aria-labelledby="schedule-heading" className="mb-12">
+          <h2 id="schedule-heading" className="sr-only">
+            Your schedule
+          </h2>
 
-          {!entriesLoaded ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              {[0, 1, 2].map(i => <Skeleton key={i} className="h-48 rounded-2xl" />)}
-            </div>
-          ) : entriesError ? (
-            <LoadError message="Couldn't load your custom requests." onRetry={retry} />
-          ) : visibleTypes.length === 0 ? (
-            <div className={`flex flex-col items-center justify-center rounded-2xl py-10 text-center ${SURFACE.panel}`}>
-              <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/15 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-90 motion-safe:duration-500">
-                <CheckCircle2 className="h-4 w-4 text-sky-400" />
-              </div>
-              <p className="text-xs text-zinc-400">All caught up — no customs, calls or items right now!</p>
-            </div>
-          ) : (
-            <div className={`grid gap-4 ${TYPE_GRID_COLS[visibleTypes.length]}`}>
-              {visibleTypes.map(type => (
-                <TypeTile key={type} type={type} entries={entriesByType[type]} onOpen={setDetailEntry} />
+          {loading ? (
+            <ul className="m-0 list-none p-0">
+              {[0, 1, 2, 3].map((i) => (
+                <WorkRowSkeleton key={i} index={i} />
               ))}
-            </div>
-          )}
-        </section>
-
-        {/* Section 2: Content Planning */}
-        <section className="flex flex-col gap-4">
-          <SectionHeader
-            title="Content Planning"
-            info="This is the content we need to maintain your page. Please try sticking to your due dates as we follow a strict content upload schedule!"
-          />
-
-          <div className={`w-full rounded-2xl p-4 ${SURFACE.panel}`}>
-            {!cpLoaded ? (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {[0, 1].map(i => <Skeleton key={i} className="h-40 rounded-xl" />)}
-              </div>
-            ) : cpError ? (
-              <LoadError message="Couldn't load your content plan." onRetry={retry} />
-            ) : cpEntries.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/15 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-90 motion-safe:duration-500">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                </div>
-                <p className="text-xs text-zinc-400">All caught up — no pending content requests!</p>
-              </div>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {cpEntries.map(e => (
-                  <CPCard
-                    key={e.id}
-                    entry={e}
-                    onComplete={handleCpComplete}
-                    completing={cpCompleting === e.id}
-                    timezone={creatorUser.defaultTimezone}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* Section 3: Google Drive */}
-        <section className={`flex flex-col gap-3 rounded-2xl px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5 ${SURFACE.panel}`}>
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <h3 className="text-sm font-semibold text-zinc-200">Google Drive Upload Link</h3>
-            <p className="text-xs text-zinc-400">
-              Your content folder. Please upload content in{" "}
-              <span className="font-mono text-zinc-400"># Unsorted</span>.
-            </p>
-          </div>
-          {creatorUser.driveLink ? (
-            <a
-              href={creatorUser.driveLink}
-              target="_blank"
-              rel="noreferrer"
-              className={`flex items-center justify-center gap-1.5 min-h-11 self-stretch whitespace-nowrap rounded-xl px-4 py-3 text-xs font-semibold transition-colors sm:self-auto ${ACCENT_BTN}`}
-            >
-              Open Drive <ExternalLink className="h-3.5 w-3.5" />
-            </a>
+            </ul>
+          ) : anyError ? (
+            <LoadError message="Couldn't load your schedule." onRetry={retry} />
+          ) : agenda.groups.length === 0 ? (
+            <EmptyState
+              icon={PartyPopper}
+              tone="done"
+              title="Nothing on your plate"
+              body="When your manager adds a custom request or something to your content plan, it lands here."
+            />
           ) : (
-            <span className="text-xs text-zinc-400">No link configured.</span>
+            <ol className="m-0 list-none p-0">
+              {agenda.groups.map((group) => (
+                <SpineGroup
+                  key={group.id}
+                  label={group.label}
+                  sub={group.sub}
+                  bucket={group.bucket}
+                  count={group.items.length}
+                  isToday={group.id === agenda.todayKey}
+                >
+                  {group.items.map((item, i) => (
+                    <WorkRow
+                      key={item.key}
+                      item={item}
+                      index={i}
+                      todayKey={agenda.todayKey}
+                      sealing={sealing.has(item.key)}
+                      busy={isBusy(item.key)}
+                      onOpen={() => setDetail(item)}
+                      // One-tap completion for routine content planning only.
+                      // Customs are high-ticket and complete from the dialog —
+                      // the difference in ceremony encodes the difference in
+                      // stakes.
+                      onComplete={
+                        item.kind === "content" ? () => void complete(item) : undefined
+                      }
+                    />
+                  ))}
+                </SpineGroup>
+              ))}
+              <SpineEnd label="That's everything we've got for you." />
+            </ol>
           )}
         </section>
+
+        {/* ── The customs ledger ───────────────────────────────────────────────
+            A different shape from the stream on purpose: the spine answers
+            "when", this answers "how much", which is the other question a
+            creator actually has about customs. Types with nothing in them are
+            not rendered. */}
+        {!loading && !anyError && ledger.length > 0 && (
+          <section aria-labelledby="ledger-heading">
+            <SectionHeading
+              info="These are high-ticket custom requests your fans make. Because they are custom-made they sell far above regular content, and a fan willing to pay for one usually comes back for more — so getting them out quickly matters."
+              action={
+                <Link
+                  href="/creator/dashboard/all-customs"
+                  className={`inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors hover:bg-[#131d27] ${FOCUS_RING}`}
+                  style={{ color: COLOR.azureText }}
+                >
+                  View all <ChevronRight className="size-3.5" aria-hidden="true" />
+                </Link>
+              }
+            >
+              <span id="ledger-heading">Outstanding value</span>
+            </SectionHeading>
+
+            <div className={`overflow-hidden rounded-2xl ${SURFACE.panel}`}>
+              <table className="w-full border-collapse text-sm">
+                <caption className="sr-only">
+                  Outstanding custom requests by type, with total value
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col" className="sr-only">
+                      Type
+                    </th>
+                    <th scope="col" className="sr-only">
+                      Count
+                    </th>
+                    <th scope="col" className="sr-only">
+                      Value
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ledger.map(({ type, items }) => (
+                    <tr key={type} className="border-b last:border-b-0" style={{ borderColor: COLOR.line }}>
+                      <th
+                        scope="row"
+                        className="px-4 py-3 text-left text-sm font-medium"
+                        style={{ color: COLOR.ink }}
+                      >
+                        {TYPE_META[type].plural}
+                      </th>
+                      <td className="pf-mono px-2 py-3 text-right text-xs" style={{ color: COLOR.ink2 }}>
+                        {items.length}
+                      </td>
+                      <td
+                        className="pf-mono px-4 py-3 text-right text-sm font-medium"
+                        style={{ color: COLOR.ink }}
+                      >
+                        {formatAmount(sumAmounts(items))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ background: COLOR.raised }}>
+                    <th
+                      scope="row"
+                      className="px-4 py-3 text-left text-xs font-medium"
+                      style={{ color: COLOR.ink2 }}
+                    >
+                      Total outstanding
+                    </th>
+                    <td />
+                    <td
+                      className="pf-mono px-4 py-3 text-right text-sm font-semibold"
+                      style={{ color: COLOR.ink }}
+                    >
+                      {formatAmount(sumAmounts(customs))}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <p className="mt-2 px-1 text-[11px] leading-relaxed" style={{ color: COLOR.ink3 }}>
+              Internal tracking figures for coordination — your payments are governed by your
+              signed management agreement.
+            </p>
+          </section>
+        )}
       </div>
 
-      {/* Custom request detail (shared dialog; also handles deep-linked CR) */}
-      {detailEntry && (
+      {/* ── Detail dialogs ─────────────────────────────────────────────────── */}
+      {detail?.kind === "custom" && (
         <CustomRequestDialog
-          entry={detailEntry}
-          open={!!detailEntry}
-          onOpenChange={(o) => { if (!o) setDetailEntry(null); }}
+          item={detail}
+          open
+          onOpenChange={(o) => !o && setDetail(null)}
           driveLink={creatorUser.driveLink}
-          onComplete={() => { handleComplete(detailEntry.id); setDetailEntry(null); }}
-          busy={completing === detailEntry.id}
+          todayKey={agenda.todayKey}
+          busy={isBusy(detail.key)}
+          onComplete={() => {
+            void complete(detail);
+            setDetail(null);
+          }}
         />
       )}
 
-      {/* Wrong-account error */}
+      {detail?.kind === "content" && (
+        <ContentPlanDialog
+          item={detail}
+          open
+          onOpenChange={(o) => !o && setDetail(null)}
+          todayKey={agenda.todayKey}
+          busy={isBusy(detail.key)}
+          onComplete={() => {
+            void complete(detail);
+            setDetail(null);
+          }}
+        />
+      )}
+
       <CreatorDialog
         open={!!linkedError}
-        onOpenChange={(o) => { if (!o) setLinkedError(null); }}
+        onOpenChange={(o) => !o && setLinkedError(null)}
         title="Can't open this request"
+        description="This custom request cannot be shown on this account."
         className="sm:max-w-sm"
       >
-        <p className="text-sm text-zinc-300">{linkedError}</p>
+        <p className="text-sm" style={{ color: COLOR.ink2 }}>
+          {linkedError}
+        </p>
       </CreatorDialog>
     </div>
   );

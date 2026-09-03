@@ -94,7 +94,7 @@ All renderer↔main communication goes through `preload.js` → `window.electron
 | `updater.getPending()` | invoke | `updater:getPending` | result of the start-up check (`{version}` or null); **v0.8.0+ — feature-detect** |
 | `updater.download()` | send | `updater:download` | begin download; only ever from an explicit user click. **v0.8.0+** |
 | `updater.onAvailable/onProgress/onStatus/onBeforeInstall`, `readyToInstall()` | both | `updater:*` | live on macOS; inert on Windows (auto-update is darwin-gated) |
-| `updater.check()` | invoke | `updater:check` | re-run the start-up check on demand. **Typed optional; the main-process handler is NOT built yet** — it ships with the next Electron build. Until then the renderer's "Check again" button falls back to re-reading `getPending()` |
+| `updater.check()` | invoke | `updater:check` | re-run the GitHub check on demand — the renderer's "Check again" button, and what a hidden-not-quit macOS app relies on between the shell's own 4-hourly re-checks. **v0.10.3+** — feature-detect; on an older shell the renderer falls back to re-reading `getPending()`, which there really can only change on a relaunch |
 
 ## Renderer staleness: the app that is never closed
 
@@ -306,9 +306,22 @@ The renderer *is* the product, so a renderer crash must not leave a blank window
 - `unresponsive`/`responsive` and `child-process-gone` are logged/reported.
 - Main-process `uncaughtException`/`unhandledRejection` are forwarded to `/api/bugs` too.
 
-## Clock-out flush on app close
+## Closing the window vs quitting the app
 
-Time-tracking data integrity depends on the renderer completing its clock-out POST before the process dies. The **window `close` event** is the single choke-point (covers both the X button and Cmd/Ctrl-Q — `before-quit` misses the X path because the window is destroyed first). On close: `preventDefault()`, send `app-closing`, then complete the close only when the renderer calls `app.closingFlushed()` **or** a 4s hard timeout elapses. Renderer side: `TimeTrackingContext.clockOutAndFlush` runs then calls `closingFlushed()` in a `finally`. See [time-tracking.md](time-tracking.md).
+**On macOS, closing the window hides it — the app keeps running.** `HIDE_ON_CLOSE` (darwin only) makes the main window's `close` handler `preventDefault()` + `hide()`; the dock icon, Cmd+Tab and the timer widget all bring it back. Windows/Linux keep close-means-quit, which is what their users expect.
+
+- **`isQuitting`, set by `app.on('before-quit')`, is the only thing that tells a real quit from the X button.** Cmd+Q, the app menu's Quit and `quitAndInstall` all go through `before-quit`; the X button does not. Both the `close` handler and `window-all-closed` read it.
+- **`window-all-closed` no longer quits on macOS** unless `isQuitting`. That means the flush's own `mainWindow.close()` can no longer rely on it to finish a Cmd+Q, so `finish()` re-issues `app.quit()` when `isQuitting` — vetoing a close cancels the quit that caused it.
+- **`activate` reveals rather than counting windows.** It used to `createWindow()` only when zero windows existed; a hidden main window plus a live OF satellite would have left the user with no way back in. `revealMainWindow()` (restore → show → focus) is now the shared path for the dock icon, `second-instance`, deep links and the timer widget — `focus()` alone is a **no-op on a hidden window**, so any new "surface the app" path must use it.
+- **Full screen is exited before hiding** — hiding a full-screen window strands an empty black Space on macOS.
+- **Hiding is not clocking out.** A hidden window's renderer keeps running (`backgroundThrottling: false`), so the open session, its heartbeat and the timer widget all continue untouched. `app-closing` is never sent on this path.
+- **This is also why the auto-updater's start-up-only check had to become periodic.** It used to run once on the theory that a never-quits user picks up an update on their next launch — a launch that, for a user who only ever uses the X button, no longer happens. See [the 4-hour re-check](#macos-signed-notarized-auto-updating).
+
+## Clock-out flush on app quit
+
+Time-tracking data integrity depends on the renderer completing its clock-out POST before the process dies. The **window `close` event** is the choke-point (`before-quit` misses the Windows X path because the window is destroyed first). On a close that is *not* a macOS hide: `preventDefault()`, send `app-closing`, then complete the close only when the renderer calls `app.closingFlushed()` **or** a 4s hard timeout elapses. Renderer side: `TimeTrackingContext.clockOutAndFlush` runs then calls `closingFlushed()` in a `finally`. See [time-tracking.md](time-tracking.md).
+
+So the flush now runs on: the **Windows** X button, and a real quit on either platform (Cmd/Ctrl-Q, app-menu Quit, update restart). On macOS the X button reaches it only via the quit path — which is the point.
 
 ## Power events → precise session boundaries
 
@@ -349,7 +362,7 @@ APP_UPDATE = {
 | **restart** | **macOS**, targeted, nothing pending **yet** | "Bluu Backend is contacting the update server…" + a **Check again** button. **Provisional** — it polls `getPending()` and upgrades itself to `auto`. Still no download link |
 | **manual** | **Windows** | Opens the config's `downloadUrl` for a hand reinstall (no valid signing cert → no auto-update there) |
 
-The `restart` case is not an edge: the shell checks GitHub **once at start-up**, so any app that has been running since before the release shipped has nothing pending, and that is precisely the never-quits user this whole surface is trying to reach. It used to render nothing at all.
+The `restart` case is not an edge: any app that has been running since before the release shipped has nothing pending on its first look, and that is precisely the never-quits user this whole surface is trying to reach. It used to render nothing at all. It also used to be a state you could only leave by relaunching — the shell checked GitHub once at start-up and never again. Now the shell itself re-checks (4-hourly, see [macOS: signed, notarized, auto-updating](#macos-signed-notarized-auto-updating)), so this state resolves on its own even for a hidden, never-relaunched macOS app; **Check again** exists for the user who doesn't want to wait for the interval.
 
 > ### `pending === null` is a "not yet", never a verdict
 >
@@ -359,7 +372,7 @@ The `restart` case is not an edge: the shell checks GitHub **once at start-up**,
 >
 > Three things now hold, all renderer-side:
 > - **The restart path does not latch.** The decision effect's guard is `mode !== 'none' && delivery !== 'restart'`, so a late `updater:available` (or any clock-out) re-evaluates and can upgrade it.
-> - **It polls itself out of existence** — `getPending()` every 2s for 60s, upgrading to `auto` in place; the dialog turns into a working Download button under the user. After the window expires the copy says so, and **Check again** re-polls (and calls `updater.check()` when the shell exposes it).
+> - **It polls itself out of existence** — `getPending()` every 2s for 60s, upgrading to `auto` in place; the dialog turns into a working Download button under the user. After the window expires the copy says so, and **Check again** now actually re-asks GitHub via `updater.check()` (v0.10.3+) rather than only re-reading a `getPending()` that couldn't have changed — on an older shell it still falls back to that re-read.
 > - **A failed check is visible.** `updater:status` errors are registered on *every* delivery path now, not just `auto` — main only `console.error`s the check failure, so this is the only evidence a user ever gets. An app auto-launched at login before Wi-Fi is up lands here.
 >
 > Disarming the platform entry in `appUpdateConfig.ts` is the **emergency lever** for a fleet stuck behind this prompt, and it now clears a visible prompt without a relaunch (`setMode('none')` on the `!cfg` path).
@@ -368,7 +381,8 @@ The `restart` case is not an edge: the shell checks GitHub **once at start-up**,
 
 ### The never-interrupt-a-session rules
 
-- **The only trigger condition is `displayState === 'clocked-out'`**, and it is re-checked for the **whole app session** — not latched at boot. A user mid-session at launch sees nothing (compulsory or not) and is prompted the moment they clock out. `mode !== 'none'` is the latch; `evaluatingRef` stops overlapping async runs.
+- **The only trigger condition is `displayState === 'clocked-out'`**, and it is re-checked for the **whole app session** — not latched at boot. A user mid-session at launch sees nothing (compulsory or not) and is prompted the moment they clock out. `evaluatingRef` stops overlapping async runs.
+- **Every clock-out re-opens the decision, so a dismissed optional card comes back.** `mode` is the latch *within* a shift gap only: a transition into `clocked-out` clears `dismissed`, resets a failed download's `error` phase back to `prompt`, and bumps `clockOutTick`, which the decision effect treats as permission to re-run past the latch. Without this, `dismissed` was app-session state on an app that is never quit — one X click silenced an optional update forever. Re-running (rather than just un-hiding the card) is what makes the re-prompt honest: it re-reads `/api/app-update`, so a bumped `latestVersion` refreshes the target and a **disarmed** platform entry clears the prompt instead of replaying a stale one. It deliberately does **not** fire while an auto download is in flight (`delivery === 'auto' && phase !== 'prompt'`) — that dialog owns the screen.
 - **Both** delivery paths re-check live clock state (via a ref) after their `await`s, because a slow check can resolve after the user has clocked in. Bailing is cheap now — the next clock-out re-runs the decision.
 - Nothing downloads until the user clicks (`autoDownload = false`) — a background download would burn a metered connection unannounced.
 - **An in-flight auto download escalates to the modal even when optional.** The app is about to restart itself; leaving a dismissible card would let the user clock in and start working underneath it. An optional download that *errors* offers "Later" so the user isn't trapped in a modal over a non-critical update.
@@ -438,8 +452,9 @@ The reset repairs the **next** scheduled capture, not the one that just failed. 
 - **Signing/notarization** happens only in CI (`.github/workflows/build-mac.yml`), on `v*` tags. Developer ID cert via `CSC_LINK`/`CSC_KEY_PASSWORD`; notarization via the App Store Connect API key (`APPLE_API_KEY` file path + `APPLE_API_KEY_ID`/`APPLE_API_ISSUER`). `mac.notarize: true` + `hardenedRuntime: true` + the two entitlements plists in `build-assets/macos/`.
 - **Both arches build in one job.** Each electron-builder run writes a `latest-mac.yml` listing only its own artifacts; splitting arm64/x64 across matrix jobs makes the second manifest clobber the first and breaks auto-update for that arch.
 - **`zip` targets are required** alongside `dmg` — Squirrel.Mac downloads the zip. Dropping them silently disables auto-update.
-- **Update flow** (`registerAutoUpdater` in `main.js`, darwin-only, skipped in dev): `checkForUpdates()` **once at start** → `update-available` caches `pendingUpdate` + emits `updater:available` → *(user clicks Download in the dialog)* → `updater:download` → `downloadUpdate()` → `download-progress` → `update-downloaded` sends `updater:before-install` → the renderer clocks out and flushes ([`TimeTrackingContext.tsx`](../src/contexts/TimeTrackingContext.tsx)) → `updater:ready-to-install` → `quitAndInstall()`. A 10s timeout installs anyway so a wedged renderer can't strand the update; `installUpdate()` is idempotent.
-- **There is deliberately no polling interval.** An update discovered mid-session could only ever interrupt work in progress. Leave the app open for a week → you get it on next launch.
+- **Update flow** (`registerAutoUpdater` in `main.js`, darwin-only, skipped in dev): `checkForUpdates()` at start, on a **4-hour interval**, and on demand via `updater:check` → `update-available` caches `pendingUpdate` + emits `updater:available` → *(user clicks Download in the dialog)* → `updater:download` → `downloadUpdate()` → `download-progress` → `update-downloaded` sends `updater:before-install` → the renderer clocks out and flushes ([`TimeTrackingContext.tsx`](../src/contexts/TimeTrackingContext.tsx)) → `updater:ready-to-install` → `quitAndInstall()`. A 10s timeout installs anyway so a wedged renderer can't strand the update; `installUpdate()` is idempotent.
+- **The interval exists because of `HIDE_ON_CLOSE`.** This used to be a once-at-start check on the reasoning that a user who leaves the app open for a week picks up the update on next launch — true only as long as "the app open for a week" eventually ends in a relaunch. Once the macOS X button started hiding the main window instead of quitting it ([Closing the window vs quitting the app](#closing-the-window-vs-quitting-the-app)), that stopped being true: a user who only ever uses the X button might never relaunch, so a start-up-only check would never re-run for them regardless of how long a release has been armed and waiting. `runUpdateCheck()` is coalesced (one in-flight check at a time) and skips entirely once `pendingUpdate` is already set, so the interval can't turn into a poll loop against GitHub for a fleet already sitting behind a known update.
+- **Finding an update is not the same as interrupting one** — the mid-session-interruption concern the once-only check was guarding against doesn't actually apply to the *check* itself. A check only sets `pendingUpdate` and emits an event; `autoDownload` stays `false` and `UpdateAvailableBanner` only renders while `clocked-out`, so a background re-check reaching a working user's process changes nothing they can see.
 - `pendingUpdate` is cached because **the renderer mounts after the check resolves** — it reads the result via `updater:getPending` on mount rather than relying on catching the event. The event is still emitted for an already-mounted window.
 - `autoDownload = false` (user-gated) and `autoInstallOnAppQuit = false` (installing on quit would bypass the flush) — both on purpose.
 - The window `close` flush handler **bails out when an update install is in progress** (it already flushed); otherwise it would double-flush and its `preventDefault` can abort the install.

@@ -1,275 +1,126 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useMemo, useState } from "react";
+import { Inbox } from "lucide-react";
+import { formatAmount } from "@/lib/campaignTracking";
 import { useCreatorAuth } from "@/components/CreatorAuthProvider";
-import { db } from "@/firebase-config";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
-} from "@/components/ui/table";
-import {
-  Pagination, PaginationContent, PaginationItem,
-  PaginationPrevious, PaginationNext, PaginationLink, PaginationEllipsis,
-} from "@/components/ui/pagination";
-import {
-  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
-} from "@/components/ui/dropdown-menu";
-import { SidebarTrigger } from "@/components/ui/sidebar";
-import { MoreHorizontal } from "lucide-react";
-import {
-  type CampaignEntry, STATUS_COLORS, TYPE_LABELS, formatDueDate, firestoreToEntry, CAMPAIGN_TYPES,
-} from "@/lib/campaignTracking";
-import { apiRequest } from "@/lib/clientApi";
-import { toast } from "sonner";
-import { PAGE_GROUND_STYLE, HEADER_STYLE, SURFACE } from "../../theme";
+import { customsByType, sumAmounts, type AgendaItem } from "../../lib/agenda";
+import { useCreatorWork } from "../../lib/useCreatorWork";
+import { COLOR, PAGE_GROUND_STYLE, TYPE_META } from "../../theme";
+import { PortalHeader } from "../../components/PortalHeader";
+import { SpineEnd, SpineGroup } from "../../components/Spine";
+import { WorkRow, WorkRowSkeleton } from "../../components/WorkRow";
 import { CustomRequestDialog } from "../../components/CustomRequestDialog";
 import { LoadError } from "../../components/LoadError";
+import { EmptyState } from "../../components/EmptyState";
 
-const PAGE_SIZE = 20;
-
-export default function AllCustomsPage() {
+/**
+ * Every outstanding custom request, grouped by type.
+ *
+ * **The creator only ever sees `In Progress` customs** — the query and
+ * `selectVisibleCustoms` both enforce it. Submitting one moves it to *Awaiting
+ * Approval*, at which point it leaves this list and appears on the staff side
+ * under "Recently Completed". That is the intended flow: this page is her
+ * outstanding work, not an archive of everything she has ever done.
+ *
+ * It shares the spine with the dashboard rather than inventing a second row
+ * vocabulary; what differs is the **grouping** (by type, not by day) and the
+ * **money** — which is the other question a creator has about customs and the
+ * one the dashboard's time-ordered stream cannot answer.
+ *
+ * There is no pagination. With completed work excluded the set is small, and a
+ * pager on a phone costs a tap per page to hide records that would have fit in
+ * a scroll.
+ */
+export default function CustomRequestsPage() {
   const { creatorUser } = useCreatorAuth();
-  const [entries, setEntries] = useState<CampaignEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [viewEntry, setViewEntry] = useState<CampaignEntry | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [loadError, setLoadError] = useState(false);
-  // Bumping this re-runs the effect, which re-subscribes the listener.
-  const [retryKey, setRetryKey] = useState(0);
+  const { visibleAgenda: agenda, loading, customsError, retry, sealing, complete, isBusy } =
+    useCreatorWork();
 
-  useEffect(() => {
-    if (!creatorUser) return;
-    const q = query(
-      collection(db, "campaign-tracking"),
-      where("creatorID", "==", creatorUser.creatorID),
-      where("status", "in", ["In Progress", "Completed"])
-    );
-    const unsub = onSnapshot(q, snap => {
-      const docs = snap.docs
-        .map(d => firestoreToEntry(d.id, d.data() as Record<string, unknown>))
-        .filter(e => !(CAMPAIGN_TYPES as readonly string[]).includes(e.type) && e.status !== "Archived");
-      docs.sort((a, b) => {
-        if (a.status !== b.status) return a.status === "In Progress" ? -1 : 1;
-        return new Date(b.createdTime).getTime() - new Date(a.createdTime).getTime();
-      });
-      setEntries(docs);
-      setLoadError(false);
-      setLoading(false);
-    }, (error) => {
-      console.error("[all-customs] campaign-tracking listener error:", error);
-      // Must be set before `loading` clears: without it this falls through to
-      // the empty branch and tells the creator they have no custom requests.
-      setLoadError(true);
-      setLoading(false);
-    });
-    return unsub;
-  }, [creatorUser?.creatorID, retryKey]);
+  const [detail, setDetail] = useState<AgendaItem | null>(null);
 
-  const handleStatusChange = async (entry: CampaignEntry, revert: boolean) => {
-    setBusy(entry.id);
-    try {
-      const res = await apiRequest(`/api/campaign-tracking/${entry.id}/creator-complete`, {
-        method: "POST",
-        body: JSON.stringify({ revert }),
-      });
-      if (!res.ok) throw new Error();
-      toast.success(revert ? "Marked as Awaiting Approval" : "Marked as Completed");
-    } catch {
-      toast.error("Failed to update status");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const totalPages = entries.length === 0 ? 1 : Math.ceil(entries.length / PAGE_SIZE);
-  const page = Math.min(currentPage, totalPages);
-  const pageEntries = entries.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const goTo = (p: number) => setCurrentPage(Math.max(1, Math.min(p, totalPages)));
+  const customs = useMemo(() => agenda.all.filter((i) => i.kind === "custom"), [agenda]);
+  const groups = useMemo(() => customsByType(customs), [customs]);
+  const total = useMemo(() => sumAmounts(customs), [customs]);
 
   return (
     <div className="min-h-dvh" style={PAGE_GROUND_STYLE}>
-      {/* Top bar */}
-      <header
-        className="sticky top-0 z-40 flex h-14 items-center gap-2 px-3 sm:px-6"
-        style={HEADER_STYLE}
-      >
-        <SidebarTrigger className="hidden md:inline-flex text-zinc-400 hover:bg-white/5 hover:text-zinc-100 relative after:absolute after:-inset-3 after:content-['']" />
-        <Link
-          href="/creator/dashboard"
-          aria-label="Creator Portal home"
-          className="absolute left-1/2 top-1/2 flex h-11 -translate-x-1/2 -translate-y-1/2 items-center px-4"
-        >
-          <img src="/logo/bluu_long.svg" alt="Bluu Rock" className="h-6" />
-        </Link>
-      </header>
+      <PortalHeader title="Custom Requests" />
 
-      <div className="mx-auto max-w-5xl px-3 py-6 sm:px-6 sm:py-8 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
-        <h1 className="mb-4 text-2xl font-semibold sm:mb-6">All Custom Requests</h1>
+      <div className="mx-auto w-full max-w-3xl px-3 pt-8 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:px-6 sm:pt-10 md:pb-16">
+        <header className="mb-9">
+          <h1 className="text-2xl font-semibold tracking-tight" style={{ color: COLOR.ink }}>
+            Custom requests
+          </h1>
+          <p className="mt-2 max-w-[56ch] text-sm leading-relaxed" style={{ color: COLOR.ink2 }}>
+            {loading
+              ? "Loading your custom requests…"
+              : customs.length === 0
+                ? "Everything your fans have ordered will show up here."
+                : `${customs.length} outstanding, worth ${formatAmount(total)} in total.`}
+          </p>
+        </header>
 
         {loading ? (
-          <div className="flex flex-col gap-2">
-            {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-14 rounded-xl" />)}
-          </div>
-        ) : loadError ? (
-          <LoadError
-            message="Couldn't load your custom requests."
-            onRetry={() => { setLoading(true); setLoadError(false); setRetryKey(k => k + 1); }}
+          <ul className="m-0 list-none p-0">
+            {[0, 1, 2].map((i) => (
+              <WorkRowSkeleton key={i} index={i} />
+            ))}
+          </ul>
+        ) : customsError ? (
+          <LoadError message="Couldn't load your custom requests." onRetry={retry} />
+        ) : groups.length === 0 ? (
+          <EmptyState
+            icon={Inbox}
+            tone="done"
+            title="No custom requests right now"
+            body="When a fan orders a custom, a call or an item, it appears here with its deadline and value."
           />
-        ) : entries.length === 0 ? (
-          // Reachable only from a successful snapshot with zero docs — the error
-          // branch above is what stops a failure reading as "you have nothing".
-          <p className="py-12 text-center text-sm text-zinc-400">No custom requests found.</p>
         ) : (
-          <>
-            {/* Desktop table */}
-            <div className={`hidden overflow-hidden rounded-2xl md:block ${SURFACE.panel}`}>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>CR</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Fan Name</TableHead>
-                    <TableHead>Due Date</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="w-12"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pageEntries.map(entry => (
-                    <TableRow key={entry.id}>
-                      <TableCell className="font-mono text-sm text-sky-300">{entry.CR}</TableCell>
-                      <TableCell className="text-sm text-zinc-400">{TYPE_LABELS[entry.type]}</TableCell>
-                      <TableCell className="text-sm">{entry.fanName}</TableCell>
-                      <TableCell className="text-sm text-zinc-400">
-                        {entry.dueDate ? `${formatDueDate(entry.dueDate)}${entry.dueDateTimezone ? ` (${entry.dueDateTimezone})` : ""}` : "—"}
-                      </TableCell>
-                      <TableCell>
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[entry.status]}`}>
-                          {entry.status}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Row actions">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => setViewEntry(entry)}>View</DropdownMenuItem>
-                            {entry.status === "In Progress" && (
-                              <DropdownMenuItem onClick={() => handleStatusChange(entry, false)}>
-                                Mark as Complete
-                              </DropdownMenuItem>
-                            )}
-                            {entry.status === "Completed" && !entry.isArchived && (
-                              <DropdownMenuItem onClick={() => handleStatusChange(entry, true)}>
-                                Mark as Incomplete
-                              </DropdownMenuItem>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-
-            {/* Mobile card list */}
-            <div className="flex flex-col gap-2 md:hidden">
-              {pageEntries.map(entry => (
-                <button
-                  key={entry.id}
-                  onClick={() => setViewEntry(entry)}
-                  className={`flex flex-col gap-2 rounded-xl px-4 py-3 text-left transition-colors active:bg-white/[0.04] ${SURFACE.panel}`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-xs font-semibold tracking-wider text-sky-300">{entry.CR}</span>
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${STATUS_COLORS[entry.status]}`}>
-                      {entry.status}
-                    </span>
-                  </div>
-                  <div className="flex flex-col gap-0.5">
-                    <p className="truncate text-sm font-medium text-zinc-100">{entry.fanName}</p>
-                    <p className="text-[11px] text-zinc-400">{TYPE_LABELS[entry.type]}</p>
-                  </div>
-                  {entry.dueDate && (
-                    <p className="text-[11px] text-zinc-400">
-                      Due {formatDueDate(entry.dueDate)}
-                      {entry.dueDateTimezone ? ` (${entry.dueDateTimezone})` : ""}
-                    </p>
-                  )}
-                </button>
-              ))}
-            </div>
-
-            {totalPages > 1 && (
-              <Pagination className="mt-6">
-                <PaginationContent>
-                  <PaginationItem>
-                    <PaginationPrevious
-                      href="#"
-                      onClick={e => { e.preventDefault(); goTo(page - 1); }}
-                      aria-disabled={page === 1}
-                      className={`h-11 min-w-11 ${page === 1 ? "pointer-events-none opacity-40" : ""}`}
-                    />
-                  </PaginationItem>
-
-                  {Array.from({ length: totalPages }, (_, i) => i + 1)
-                    .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
-                    .reduce<(number | "ellipsis")[]>((acc, p, idx, arr) => {
-                      if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push("ellipsis");
-                      acc.push(p);
-                      return acc;
-                    }, [])
-                    .map((item, idx) =>
-                      item === "ellipsis" ? (
-                        <PaginationItem key={`ellipsis-${idx}`}>
-                          <PaginationEllipsis />
-                        </PaginationItem>
-                      ) : (
-                        <PaginationItem key={item}>
-                          <PaginationLink
-                            className="h-11 min-w-11"
-                            href="#"
-                            isActive={item === page}
-                            onClick={e => { e.preventDefault(); goTo(item); }}
-                          >
-                            {item}
-                          </PaginationLink>
-                        </PaginationItem>
-                      )
-                    )}
-
-                  <PaginationItem>
-                    <PaginationNext
-                      href="#"
-                      onClick={e => { e.preventDefault(); goTo(page + 1); }}
-                      aria-disabled={page === totalPages}
-                      className={`h-11 min-w-11 ${page === totalPages ? "pointer-events-none opacity-40" : ""}`}
-                    />
-                  </PaginationItem>
-                </PaginationContent>
-              </Pagination>
-            )}
-          </>
+          <ol className="m-0 list-none p-0">
+            {groups.map(({ type, items }) => (
+              <SpineGroup
+                key={type}
+                label={TYPE_META[type].plural}
+                // The group's own value, in the slot the dashboard's spine uses
+                // for a date — this axis is grouped by type, so its second fact
+                // is money rather than a day.
+                sub={formatAmount(sumAmounts(items))}
+                bucket="later"
+                count={items.length}
+              >
+                {items.map((item, i) => (
+                  <WorkRow
+                    key={item.key}
+                    item={item}
+                    index={i}
+                    todayKey={agenda.todayKey}
+                    sealing={sealing.has(item.key)}
+                    busy={isBusy(item.key)}
+                    onOpen={() => setDetail(item)}
+                    // No one-tap action: customs are high-ticket and are
+                    // submitted deliberately, from the dialog.
+                  />
+                ))}
+              </SpineGroup>
+            ))}
+            <SpineEnd label={`${customs.length} outstanding in total.`} />
+          </ol>
         )}
       </div>
 
-      {viewEntry && (
+      {detail && (
         <CustomRequestDialog
-          entry={viewEntry}
-          open={!!viewEntry}
-          onOpenChange={(o) => { if (!o) setViewEntry(null); }}
+          item={detail}
+          open
+          onOpenChange={(o) => !o && setDetail(null)}
           driveLink={creatorUser?.driveLink}
-          onComplete={viewEntry.status === "In Progress" ? () => { handleStatusChange(viewEntry, false); setViewEntry(null); } : undefined}
-          onIncomplete={viewEntry.status === "Completed" && !viewEntry.isArchived ? () => { handleStatusChange(viewEntry, true); setViewEntry(null); } : undefined}
-          busy={busy === viewEntry.id}
+          todayKey={agenda.todayKey}
+          busy={isBusy(detail.key)}
+          onComplete={() => {
+            void complete(detail);
+            setDetail(null);
+          }}
         />
       )}
     </div>

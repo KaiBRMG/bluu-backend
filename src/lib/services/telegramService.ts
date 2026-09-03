@@ -27,6 +27,7 @@
 
 import crypto from 'crypto';
 import { classifyNotificationAction } from '@/lib/notificationActionUrl';
+import { PAGES } from '@/lib/definitions';
 import { adminDb } from '@/lib/firebase-admin';
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
@@ -34,7 +35,7 @@ const TELEGRAM_API_BASE = 'https://api.telegram.org';
 export interface TelegramMessagePayload {
   title: string;
   message: string;
-  /** App path or external URL. Only external ones are linked — see `resolveLink`. */
+  /** App path or external URL — see `resolveActionLine` for how each is rendered. */
   actionUrl?: string | null;
 }
 
@@ -115,28 +116,102 @@ export async function resolveChatIds(recipientUids: string[]): Promise<string[]>
   return [...chatIds];
 }
 
+/**
+ * Chat id for a single creator, or null if they have not linked Telegram.
+ *
+ * Deliberately separate from `resolveChatIds`: that function's uids are
+ * `users` docs by definition (in-app notification recipients), and a creator
+ * uid handed to it would silently resolve to nothing. Every *automated*
+ * creator notification names exactly one creator, so a single field-masked
+ * read is enough there — a manual admin broadcast to many creators at once
+ * uses the batched `resolveCreatorChatIds` below instead.
+ */
+export async function resolveCreatorChatId(creatorUid: string): Promise<string | null> {
+  if (!creatorUid) return null;
+  const snap = await adminDb.collection('creators').doc(creatorUid).get();
+  const chatId = snap.get('telegram.chatId');
+  return typeof chatId === 'string' && chatId ? chatId : null;
+}
+
+/**
+ * Chat ids for a set of creators — the `creators`-collection analogue of
+ * `resolveChatIds`. Used only by the manual admin broadcast path, which is
+ * the one place many creators are notified in a single fan-out (every
+ * automated creator event names one creator and uses `resolveCreatorChatId`).
+ */
+export async function resolveCreatorChatIds(creatorUids: string[]): Promise<string[]> {
+  const uids = [...new Set(creatorUids.filter(Boolean))];
+  if (uids.length === 0) return [];
+
+  const refs = uids.map((uid) => adminDb.collection('creators').doc(uid));
+  const snaps = await adminDb.getAll(...refs, { fieldMask: ['telegram.chatId'] });
+
+  const chatIds = new Set<string>();
+  for (const snap of snaps) {
+    const chatId: unknown = snap.get('telegram.chatId');
+    if (typeof chatId === 'string' && chatId) chatIds.add(chatId);
+  }
+  return [...chatIds];
+}
+
+/**
+ * Sends pre-formatted Telegram HTML to one creator.
+ *
+ * Creators have no in-app notification tray (telegram.md), so for them
+ * Telegram is not an *additional* channel — it is the only one. Still never
+ * throws, for the same reason `sendTelegramNotification` does not: a Telegram
+ * outage must not fail the request that triggered it (approving a request,
+ * creating a content brief).
+ */
+export async function sendTelegramToCreator(
+  creatorUid: string,
+  html: string,
+): Promise<{ ok: boolean; skipped: boolean; error?: string }> {
+  if (!isTelegramConfigured()) {
+    return { ok: false, skipped: true, error: 'Telegram bot token not configured' };
+  }
+  const chatId = await resolveCreatorChatId(creatorUid);
+  if (!chatId) {
+    return { ok: false, skipped: true, error: 'Creator has not linked Telegram' };
+  }
+  const res = await sendTelegramMessage(chatId, html);
+  return { ok: res.ok, skipped: false, error: res.error };
+}
+
 /** Telegram HTML parse mode only requires these three to be escaped. */
 export function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /**
- * The link to put in the message, or null for none.
+ * The trailing line to append to the message for an `actionUrl`, or null for
+ * none.
  *
- * Only external URLs are linked. An internal app path is deliberately
- * dropped: `src/middleware.ts` rewrites non-Electron page traffic to
- * `/desktop-only`, so a link to an in-app page opened from a phone is a dead end.
- * The in-app notification carries that action; Telegram just announces it.
+ * An external URL is linked directly. An internal app path is **not**
+ * linked — `src/middleware.ts` rewrites non-Electron page traffic to
+ * `/desktop-only`, so a link to an in-app page opened from a phone is a dead
+ * end — but it is not dropped either: it is named ("View on Bluu Backend >
+ * Disputes") off `PAGES` in `definitions.ts` so the recipient at least knows
+ * where to go look inside the app. A path with no matching `PageDef` (should
+ * not happen — every `actionUrl` this app produces is one of `PAGES`' hrefs)
+ * resolves to nothing rather than a broken reference.
  */
-function resolveLink(actionUrl?: string | null): string | null {
+function resolveActionLine(actionUrl?: string | null): string | null {
   const target = classifyNotificationAction(actionUrl);
-  return target.kind === 'external' ? target.href : null;
+  if (target.kind === 'external') {
+    return `<a href="${escapeHtml(target.href)}">Open link</a>`;
+  }
+  if (target.kind === 'internal') {
+    const page = PAGES.find(p => p.href === target.href);
+    if (page) return `View on Bluu Backend &gt; ${escapeHtml(page.title)}`;
+  }
+  return null;
 }
 
 function buildMessageHtml({ title, message, actionUrl }: TelegramMessagePayload): string {
   const parts = [`<b>${escapeHtml(title)}</b>`, escapeHtml(message)];
-  const link = resolveLink(actionUrl);
-  if (link) parts.push(`<a href="${escapeHtml(link)}">Open link</a>`);
+  const actionLine = resolveActionLine(actionUrl);
+  if (actionLine) parts.push(actionLine);
   return parts.join('\n\n');
 }
 
@@ -360,6 +435,39 @@ export async function sendTelegramNotification(
   }
 
   const chatIds = await resolveChatIds(recipientUids);
+  if (chatIds.length === 0) {
+    return { sent: 0, failed: 0, skipped: true, error: 'No recipient has linked Telegram' };
+  }
+
+  const html = buildMessageHtml(payload);
+  const results = await Promise.all(chatIds.map(chatId => sendTelegramMessage(chatId, html)));
+
+  const failures = results.filter(r => !r.ok);
+  return {
+    sent: results.length - failures.length,
+    failed: failures.length,
+    skipped: false,
+    error: failures[0]?.error,
+  };
+}
+
+/**
+ * The `creators`-collection analogue of `sendTelegramNotification`, for a
+ * manual admin broadcast addressed to multiple creators (individually picked,
+ * or the "All Creators" pseudo-group). Creators have no in-app tray, so this
+ * is not gated behind the admin's "Also send as a Telegram alert" checkbox —
+ * the caller (`POST /api/admin/notifications`) sends to creators
+ * unconditionally, the same way every automated creator notification does.
+ */
+export async function sendTelegramNotificationToCreators(
+  creatorUids: string[],
+  payload: TelegramMessagePayload
+): Promise<TelegramSendResult> {
+  if (!isTelegramConfigured()) {
+    return { sent: 0, failed: 0, skipped: true, error: 'Telegram bot token not configured' };
+  }
+
+  const chatIds = await resolveCreatorChatIds(creatorUids);
   if (chatIds.length === 0) {
     return { sent: 0, failed: 0, skipped: true, error: 'No recipient has linked Telegram' };
   }

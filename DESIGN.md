@@ -17,11 +17,19 @@ colors:
   status-yellow: "#facc15"
   status-red: "#f87171"
   status-zinc: "#a1a1aa"
+  creator-void: "#050b12"
+  creator-ground: "#0a121b"
+  creator-surface: "#131d27"
+  creator-raised: "#1e2934"
+  creator-line: "#293440"
+  creator-ink: "#f4f7fa"
+  creator-ink-secondary: "#b1b8c0"
+  creator-ink-muted: "#80878e"
   creator-accent: "#00b8f5"
   creator-accent-deep: "#0090c8"
-  creator-blue: "#3b82f6"
-  creator-amber: "#f59e0b"
-  creator-emerald: "#10b981"
+  creator-urgency-late: "#f9746d"
+  creator-urgency-done: "#4bc680"
+  creator-urgency-warn: "#edb345"
 typography:
   display:
     fontFamily: "Google Sans, sans-serif"
@@ -387,76 +395,105 @@ The throughline: **the card's tint tells you the category at a glance, the kanba
 - **Don't** use a colored side-stripe as a decorative accent; the only left-border in the system is the kanban row's functional `border-l-2` overlay edge.
 - **Don't** reach for a magic `z-[9999]`; use the semantic `--z-*` layer whose name matches the role (The Named-Layer Rule).
 
-## 7. Creator Portal (external skin)
+## 7. Creator Portal (external skin) — "Deep Ink"
 
-Everything above describes the **internal console** — the Electron app internal staff live in. The **creator portal** (`src/app/creator/`) is a separate surface for **external creators** in a normal browser, and it wears a deliberately warmer, friendlier skin. This is an **authored divergence**, not drift: it trades the console's monochrome restraint for a single Bluu-azure brand voice (sampled from the company logo), because the audience and context differ (a creator marking their own work done, not an operator scanning a data console).
+Everything above describes the **internal console** — the Electron app internal staff live in. The **creator portal** (`src/app/creator/`) is a separate surface: a Telegram Mini App for **external creators**, read almost entirely on a phone, usually to answer one question — *what do I owe, and is anything late?* This is an **authored divergence**, not drift, and as of the 2026-09 redesign it is a **Committed** colour surface, not a Restrained one: the ground itself is brand-tinted, and the brand azure carries structure (the time axis, below), not just accents. The audience and the question being asked are different enough from the console's operator-scanning-a-ledger posture to earn a different design system, not just a different accent hue.
 
 **The skin is defined once, in code, in [`src/app/creator/theme.ts`](src/app/creator/theme.ts).** Import those tokens; never hardcode a portal color, gradient, badge map, or surface recipe inline. If the visual language changes, change `theme.ts` and this section together.
 
-### What carries over from the console (unchanged)
-- Near-black ground, translucent-white overlay surfaces, hairline borders. **No drop shadows** (the portal previously used `box-shadow` card lifts and glow shadows — both removed).
-- **No gradient fills** on buttons or cards. Actions are solid: `PRIMARY_BTN` (full-strength azure), `COMPLETE_BTN` (emerald) and `ACCENT_BTN` (soft azure). The old green→emerald gradient CTA with a glow is gone.
-- `tabular-nums` on every amount; `font-mono text-xs` on every CR code.
-- Only `src/components/ui` primitives; only `Avatar` for images (the profile menu uses `Avatar`, never a raw `<img>` — the logo SVG is the sole non-Avatar image).
-- `Skeleton`s shaped to the layout for loading (never a spinner mid-content); every mutation `toast`s its outcome.
+### The signature motif: the spine
 
-### What differs (the authored part)
-- **Brand voice is Bluu azure, not Action Blue.** `creator-accent` (`#00b8f5`, `ACCENT.hex`) — the bright cyan-azure sampled from the company logo, kept distinct from the console's royal Action Blue (`#3b82f6`) — marks CR codes, links, focus, the avatar fallback, and the single `PRIMARY_BTN` action — the portal's one non-semantic voice, used as sparingly as the console uses blue. In Tailwind it maps to the `sky-*` scale. Named category hues live in `HUES` (sky / blue / amber / emerald) for section icons and the customs/calls/items type accents (`TYPE_META`).
-- **One signature brand glow.** A single `radial-gradient(... rgba(0,184,245,0.08) ...)` sits behind every portal page ground (`PAGE_GROUND_STYLE`). This is the portal's *one* decorative-color exception — the analogue of the console's single backdrop-blur — and it is the only place color is spent on mood. Do not add a second.
-- **Dense badge caption size.** Content-type / status badges use `text-[10px]`, the established dense-caption step (see § Typography, Code) — legitimate here, not a new size.
-- **Friendlier empty states.** A small icon-in-circle + one line ("All caught up!") instead of the console's single quiet line — a deliberate warmth for this audience.
+The portal's dashboard and both list pages are organised around **one continuous vertical time axis** — [`components/Spine.tsx`](src/app/creator/components/Spine.tsx) — not a card grid. Work is pinned to it as nodes in the order it comes due: overdue above a lit "now" marker, then one graduation per upcoming day below. This is the structural answer to "what do I owe" — a creator reads position on the line, not a table of dates.
+
+- **Every node is a shape *and* a hue, never hue alone.** Measured on this palette, `azure` against the AA-legal `ink2` is **1.14:1**, and `late` against `ink2` is **1.35:1** — nowhere near the 3:1 WCAG 1.4.11 requires of a state indicator. So urgency is drawn as a **filled vs. hollow node**, a **halo** on overdue items, and the accompanying **countdown word** ("2d late", "due today") — colour is the fourth cue, never the only one. This governs the tab bar's active state and the sidebar's selected row too (see below).
+- **The runway.** Each work row carries a thin burn-down bar — [`components/WorkRow.tsx`](src/app/creator/components/WorkRow.tsx)'s `Runway` — showing how much of the item's window has elapsed, driven by `transform: scaleX()` (never `width`, which would relayout a live-updating list) and eased in `creator.css`'s `.pf-runway-fill`.
+- **The completion seal is the portal's one authored motion moment.** A node fills, a ring expands once, the row recedes (`.pf-seal` / `.pf-ring` / `.pf-recede`, ~380–520ms, `cubic-bezier(0.22, 1, 0.36, 1)`, never a bounce). Paired with a Telegram `HapticFeedback` pulse where available ([`lib/haptics.ts`](src/app/creator/lib/haptics.ts) — every call is optional and silently absent on an older client; a garnish may never become a failure mode). Every animation's base style is its finished state, so a headless render or `prefers-reduced-motion` (which zeroes everything except a 1ms crossfade on the seal) is never wrong, only quiet. Do not extend this vocabulary to hover states or navigation — its scarcity is the point, exactly as the console reserves its own onboarding-completion vocabulary.
+
+### Colour: Committed, not Restrained
+
+- **The ground is brand-tinted ink, not neutral black.** `COLOR.void` / `ground` / `surface` / `raised` in `theme.ts` are derived from OKLCH at a low, constant chroma toward hue 250 — visibly the portal's own ground rather than the console's neutral near-black. Every contrast figure below was measured against this ramp, not estimated.
+- **Bluu azure (`#00b8f5`, `COLOR.azure`, sampled from the logo) is still the one brand voice** — it marks the spine's "today" state, links, focus, the avatar fallback, and the single `PRIMARY_BTN` action — but it is no longer the *only* place colour appears, because urgency now has its own closed vocabulary.
+- **Urgency is a four-value closed vocabulary — `URGENCY` in `theme.ts` — and colour is spent on nothing else.** `late` (coral, `#f9746d`), `today` (azure), `soon`/`later` (neutral — a thing not yet due is not worth a hue), `undated` (neutral, dimmer). This directly replaces the old portal's split personality where a due date was unconditionally rose-tinted *and* a separate component used red to mean "actually late" — the same colour meaning two things in one scroll. There is exactly one meaning of "late" now, defined once, in one file.
+- **Content types and priority are attribute chips, not hues.** A content type (`SFW`/`PPV`/…) or a priority (`High`/`Medium`/`Low`) is a closed vocabulary the record carries, not a state it is *in* — the same distinction §5's Attribute Chip rule draws for the console — so both render greyscale (`contentTypeBadge`, `PRIORITY_CHIP`) rather than each claiming its own saturated hue. The old five-hue content-type map (blue/orange/purple/pink/teal) was a rainbow sitting next to a four-value urgency system that needs its colours to mean something; it is gone.
+- **`ink3` (the third text step) is not legal on `raised`.** Measured: 5.4:1 on `void`, 5.2:1 on `ground`, 4.7:1 on `surface` — all AA-legal — but **4.1:1 on `raised`**, which fails. Use it for meta on the page ground; step up to `ink2` inside a raised row.
+- **Fills never take white ink.** White on `azure` measures 2.29:1 and fails outright (`azureInk`, `#04222e`, reads 7.20:1); white on the `done` emerald fill would fail the same way (`#050b12`, the void ink, reads 9.11:1 on it instead). Never re-ink a filled action white to "match" the console.
+
+### What carries over from the console (unchanged)
+
+- Opaque surfaces (not the console's translucent-white-on-black recipe — see below), hairline borders. **No drop shadows.**
+- **No gradient fills** on buttons or cards. Actions are solid: `PRIMARY_BTN` (azure), `COMPLETE_BTN` (emerald), `ACCENT_BTN` (soft azure tint), `QUIET_BTN` (bordered neutral).
+- `tabular-nums` on every amount; the portal's own mono (below) on every code, date and countdown.
+- Only `src/components/ui` primitives; only `Avatar` for images (the logo SVG is the sole non-Avatar image).
+- `Skeleton`s (and the spine-shaped route `loading.tsx`) for loading, never a spinner mid-content; every mutation `toast`s its outcome.
+- **One glow rule, reinterpreted.** The console's single decorative-colour exception used to be a radial glow behind the page ground. It is gone: the spine is now the portal's one authored visual signature, and a wash behind a time axis made the axis harder to read, not more branded. The portal still spends colour on exactly one deliberate, non-semantic thing at a time — it is just the axis now, not a gradient.
+
+### What differs further (the authored part)
+
+- **Opaque surfaces, not translucent-white overlays.** The console builds depth by layering white at low alpha on a *neutral* ground; on the portal's *tinted* ground that recipe desaturates the brand out of every panel the moment something sits on top of it. `SURFACE.panel` / `card` / `raised` in `theme.ts` are flat fills instead (`COLOR.surface`, `COLOR.raised`) — this is the portal's one deliberate departure from §4's Overlay-Not-Grey Rule, and it exists specifically because the portal's ground is not neutral.
+- **A second typeface, scoped hard.** [`fonts.ts`](src/app/creator/fonts.ts) self-hosts JetBrains Mono (400/500/700, `latin`, via `next/font`) as `--font-portal-mono`, applied only on `layout.tsx`'s own wrapper so the console never inherits it. It carries the numeric column of the axis — dates, countdowns, CR codes, amounts (`.pf-mono` in `creator.css`) — where real tabular figures make the column read as an instrument. This is the one place the portal departs from §3's One-Family Rule; the departure is scoped to a single CSS variable and a single utility class, never a second ad-hoc font stack.
+- **Friendlier empty states, and two of them.** [`components/EmptyState.tsx`](src/app/creator/components/EmptyState.tsx) distinguishes *finishing* everything (`tone="done"`, an emerald mark) from *nothing being scheduled* (`tone="neutral"`) — the first is an achievement, the second a status, and they must not share copy or a mark.
+- **The verdict is prose, not a metric.** The dashboard opens with one sentence — "Two things are overdue." / "You're all caught up." — from [`lib/agenda.ts`](src/app/creator/lib/agenda.ts)'s `buildVerdict`, deliberately not the big-number-and-label hero this category defaults to. A creator opening the app at midnight wants the answer, not a number to interpret.
+
+### Data model: one merged agenda, not two sections
+
+[`lib/agenda.ts`](src/app/creator/lib/agenda.ts) and [`lib/useCreatorWork.ts`](src/app/creator/lib/useCreatorWork.ts) are the portal's data layer, shared by all three work-listing screens. Customs and content-planning records are merged into one `AgendaItem` stream ordered by urgency, rather than each screen reading its own collection and inventing its own grouping.
+
+- **The visibility gate lives in one place.** `selectVisibleCustoms` / `selectVisibleContent` in `agenda.ts` are the single definition of "a creator's active work": customs at `In Progress`, content at `Outstanding`, never archived, never a campaign type (BFE/Hubby/VIP). The Firestore queries in `useCreatorWork` already ask for the right `status`; this is the second gate that also drops anything archived, so a query change elsewhere can't silently widen what a creator sees.
+- **Completion is optimistic, sealed, and undoable — one mutation for both record types.** `useCreatorWork.complete()` plays the seal immediately, and the request runs underneath; on failure the row is restored and says so. The success toast always carries **Undo**, which calls the same endpoint with `{ revert: true }`. This is what fixed the portal's one standing inconsistency: content-planning completion used to be one-way while the dashboard's identical action was undoable — the same record behaving differently depending on which screen you tapped it from. Both now go through the one function.
+- **A submitted record leaves the creator's world and enters the staff one.** Both `creator-complete` endpoints (`/api/campaign-tracking/[id]/creator-complete`, `/api/content-planning/[id]/creator-complete`) write `status: 'Completed'` with `isArchived` left `false` — exactly the predicate the internal **Recently Completed** panels on `/creator-portal/custom-requests` and `/creator-portal/content-planning` already query. Nothing in the completion flow changed to make that true; it was already the contract, and this redesign relies on it rather than re-plumbing it.
+- **Customs now have a real overdue state**, resolved through the same `isOverdue(dueDate, creatorUser.defaultTimezone)` helper content planning already used ([`src/lib/timezone.ts`](src/lib/timezone.ts)) — previously only content planning computed one at all.
 
 ### Components & interaction (portal-specific)
-- **One dialog vocabulary.** Every detail view and confirmation uses shadcn `Dialog` via [`components/CreatorDialog.tsx`](src/app/creator/components/CreatorDialog.tsx) — which gives Esc-to-close, a focus trap, and `role="dialog"` for free. **Never hand-roll a `createPortal` overlay** (the portal used to have three; all replaced). The two typed detail views are `CustomRequestDialog` (customs/calls/items) and `ContentPlanDialog` (content planning); both are reused across the dashboard and the list pages so a record looks identical everywhere.
-- **Completion is labelled and recoverable.** The action button reads **"Mark Completed"** (a verb), never the bare status word "Completed". Two safety models, by stakes:
-  - **Customs (high-ticket):** completion is a **deliberate two-step** — open the detail dialog, then confirm — so a single stray tap can't vanish a card. A success `toast` offers **Undo**, which reverts the request to *Awaiting Approval* (`creator-complete` with `{ revert: true }`).
-  - **Content planning (routine):** quick one-tap complete with an **Undo** `toast` that reverts to *Outstanding* (the content-planning `creator-complete` endpoint mirrors the campaign one's `revert` flag), so the card returns cleanly.
-- **Lists, not carousels.** Outstanding items render as responsive grids / vertical lists (`repeat(auto-fit, …)` / stacked cards), so a creator sees everything at once — no horizontal paging.
+
+- **One dialog vocabulary.** Every detail view uses shadcn `Dialog` via [`components/CreatorDialog.tsx`](src/app/creator/components/CreatorDialog.tsx) — Esc-to-close, a focus trap, `role="dialog"` for free, a sticky footer so a long record's primary action never scrolls out of reach. **Never hand-roll an overlay.** `CustomRequestDialog` and `ContentPlanDialog` both take an `AgendaItem`, not a raw Firestore record, so both dialogs and every list row read the same shape.
+- **The button reads "Submit for review", never "Mark Completed".** Completion routes a record to *Awaiting Approval* (customs) or *Completed pending review*, not to a finished state the creator controls — the old label named an outcome the system does not produce. Two safety models, by stakes, unchanged in substance:
+  - **Customs (high-ticket):** a **deliberate two-step** — open the detail dialog, then confirm — so a stray tap in a dense list can't submit one. Undo reverts to *Awaiting Approval*.
+  - **Content planning (routine):** one tap from the row itself (a dedicated 44px tick target, separate from the row's own open-detail tap target), with the same Undo toast.
+- **The stream, not a grid.** Outstanding items render down the spine in due-date order; the all-customs page groups the same items by type (customs are a ledger question — "how much" — as well as a schedule question). Neither uses horizontal paging.
 
 ### Mobile is the design target (and the portal runs inside Telegram)
 
 Creators read this surface almost entirely on a phone, so — as with §8 — mobile is the target, not a breakpoint.
 
-- **Primary navigation lives in the thumb zone.** [`CreatorBottomNav`](src/app/creator/components/CreatorBottomNav.tsx) is a fixed four-tab bar below `md`; the shadcn `Sidebar` (and every page's `SidebarTrigger`, now `hidden md:inline-flex`) is **desktop-only**. A hamburger in the top-left corner is the hardest target to reach one-handed and cost two taps per destination. The four destinations are declared once in [`nav.ts`](src/app/creator/nav.ts) — `title` for the sidebar, `shortTitle` for the tab bar — and both navs read from it. The bar's surface is `TABBAR_STYLE` in `theme.ts` (rule 1 applies), and `SidebarInset` carries `pb-[calc(4rem+env(safe-area-inset-bottom))]` so the bar never covers the last card.
-- **`min-h-dvh`, never `min-h-screen`.** `100vh` on a mobile browser excludes the collapsing URL bar, so a `min-h-screen` page is taller than the viewport it is measured against. Every portal page ground uses `dvh`.
-- **16px field text.** Same rule and the same reason as §8: below 16px, iOS Safari zooms the viewport on focus and the form scrolls out from under the user. (The login form that used to be the reference for this is gone with Telegram sign-in; the rule still governs every input the portal renders.)
-- **Zoom is never blocked.** No `maximumScale: 1`, no `userScalable: false` in the segment's `viewport` export. It fails WCAG 1.4.4, iOS Safari has ignored it since iOS 10, and 16px inputs solve the problem it was reaching for.
+- **Primary navigation lives in the thumb zone.** [`CreatorBottomNav`](src/app/creator/components/CreatorBottomNav.tsx) is a fixed four-tab bar below `md`; the shadcn `Sidebar` (and every page's `SidebarTrigger`, `hidden md:inline-flex`) is **desktop-only**. The four destinations are declared once in [`nav.ts`](src/app/creator/nav.ts) — `title` for the sidebar, `shortTitle` for the tab bar, ordered by how often a creator actually uses them (Today, Customs, Content, then the reference-only Welcome Guide last) — and both navs read from it. The bar's surface is `TABBAR_STYLE` (rule 1 applies).
+- **Google Drive lives in the header, not a section card.** [`components/PortalHeader.tsx`](src/app/creator/components/PortalHeader.tsx) is the one top bar for all four screens and carries the Drive link as a persistent affordance — uploading is the physical act the whole portal coordinates, and a creator who has just finished filming needs the folder from whatever screen she is on, not from the bottom of one page's scroll.
+- **`min-h-dvh`, never `min-h-screen`.** `100vh` on a mobile browser excludes the collapsing URL bar. Every portal page ground uses `dvh`.
+- **16px field text; zoom is never blocked.** Same rule and reasoning as §8.
 
-**The frame is Telegram's webview, and the PWA install path is gone.** The portal is a Telegram Mini App: creators reach it from the bot's chat menu button, and `CreatorPortalShell` signs them in from Telegram's `initData` (see [telegram.md](documentation/telegram.md)). The manifest and [`InstallPrompt`](src/app/creator/components/InstallPrompt.tsx) were removed with it — an installed home-screen copy would open *outside* Telegram with no `initData` and therefore no session, an icon leading to a dead end. Telegram's own "add to home screen" covers the same need and launches back through the bot. [`src/app/creator/layout.tsx`](src/app/creator/layout.tsx) is still a **server** component (the client logic lives in `CreatorPortalShell`) and its metadata and viewport are still scoped to the `/creator` segment, so the internal Electron console never inherits them.
+**The frame is Telegram's webview, and the PWA install path is gone.** The portal is a Telegram Mini App: creators reach it from the bot's chat menu button, and `CreatorPortalShell` signs them in from Telegram's `initData` (see [telegram.md](documentation/telegram.md)) — none of that session logic changed in this redesign. [`src/app/creator/layout.tsx`](src/app/creator/layout.tsx) is still scoped to the `/creator` segment, so the internal Electron console never inherits its viewport, its stylesheet (`creator.css`), or its second typeface.
 
-**Design for a frame you do not control.** Telegram draws its own header above the webview and its own background behind it, and the theme can be light or dark. The portal keeps its own dark ground explicitly rather than inheriting; do not assume the full viewport is yours, and keep `min-h-dvh` (below) — the webview's height changes when Telegram expands it.
+**An empty type collapses; it does not announce itself.** A customs type (Customs / Calls / Items) with nothing in it renders no group at all — unchanged from before the redesign, now implemented in `customsByType` (`agenda.ts`) rather than per-page.
 
-**An empty section collapses; it does not announce itself.** On the dashboard, a customs type (Customs / Calls / Items) with nothing in it renders no panel at all, and the grid tracks the number of panels actually shown. Calls and Items are usually empty and the tiles stack below `sm`, so rendering all three put two full "All caught up!" panels between a creator and their real work. When *every* type is empty the section shows one combined message rather than three — which is also the only way the screen can distinguish "you finished everything" from "you have three separate empty things".
+**Failure is a state, never an empty list.** [`LoadError`](src/app/creator/components/LoadError.tsx) is what a failed Firestore listener renders, and `useCreatorWork` sets its error flags *before* clearing `loading` — every consumer branches to `LoadError` before its empty branch. **An empty state must be reachable only from a successful snapshot with zero documents.** `retry()` re-subscribes both listeners rather than reloading, so a transient failure costs one tap and no scroll position.
 
-**Failure is a state, never an empty list.** [`LoadError`](src/app/creator/components/LoadError.tsx) is what a failed Firestore listener renders, and every one of the portal's four listeners branches to it *before* the empty branch. This is load-bearing: previously a failed query fell through to "No custom requests found." and told a creator they had no outstanding work — a permission change, an index rebuild or a dropped connection was indistinguishable from being caught up. **An empty state must be reachable only from a successful snapshot with zero documents.** `onRetry` re-subscribes the listener (a `retryKey` in the effect deps) rather than reloading, so a transient failure costs one tap and no scroll position.
+**The tab bar's and sidebar's active states are a shape, not a hue** — see "Every node is a shape and a hue" above; the same measured failure (azure vs. the AA-legal ink step is 1.14:1) governs both. The tab bar carries a 2px azure top rail plus a label-weight step; the sidebar carries an azure tint fill plus a weight step. Neither may be simplified to a colour swap.
 
-**The tab bar's active state is a shape, not a hue.** Active `sky-300` against inactive `zinc-500` measures 2.90:1 — under the 3:1 WCAG 1.4.11 requires of a state indicator — and raising inactive to the AA-legal `zinc-400` collapses the two to 1.54:1. So `zinc-400` carries text contrast and a 2px `sky-400` top rail carries the state. Do not simplify it back to a colour swap; the note in `CreatorBottomNav` says so at the point someone would.
-
-**`text-zinc-500` is not a text colour on this surface** (4.12:1 on the ground, 3.92:1 on a card — DESIGN.md §2 already says so). `zinc-400` is the portal's de-emphasis step at 7.76:1. Likewise `COMPLETE_BTN` is `emerald-700`, not `emerald-600`: white on 600 reads 3.77:1 for the 14px/500 label it carries.
-
-**Tab-bar clearance is padded on each page's own content wrapper**, never on `SidebarInset`. Padding the container while every page ground is `min-h-dvh` inside it makes the minimum document height `100dvh + 4rem`, so even an empty page scrolls 64px into flat ground.
-
-**There is deliberately no service worker.** Every screen in the portal is a live Firestore subscription, so offline caching would serve a creator a stale view of their own outstanding work — worse than an honest network error. Do not add `next-pwa` or Workbox here: it would also mean a webpack plugin in a Turbopack project, and with the install path gone there is nothing left it could buy.
+**There is deliberately no service worker.** Unchanged: every screen is a live Firestore subscription, so offline caching would serve stale work as if it were current — worse than an honest network error.
 
 ### Portal rules (in addition to everything in §1–6)
-1. **Import the skin from `theme.ts`.** No inline portal hexes, gradients, or surface recipes. New portal color → add it to `theme.ts` **and** the `creator-*` palette entries in this file's frontmatter.
-2. **Bluu azure is the portal's one voice**, exactly as Action Blue is the console's. It marks brand/interactive accent only — never decoration beyond the one signature page glow.
-3. **Solid fills only** — no gradient or glow buttons/cards. `PRIMARY_BTN` / `COMPLETE_BTN` / `ACCENT_BTN` are the three action treatments, and they are a hierarchy, not a palette: **`PRIMARY_BTN` appears at most once per screen** — the azure is only loud because it is rare. Anything else that merely *can* be clicked takes `ACCENT_BTN`. Its ink is a brand-tinted near-black by necessity, not taste: white on `ACCENT.hex` measures 2.3:1 and fails AA outright, the near-black reads 7.2:1. Never re-ink it white.
-4. **Detail & confirm = shadcn `Dialog`** through `CreatorDialog`. No bespoke overlays.
-5. **"Mark Completed", never "Completed"**, and every completion is undoable via the `revert` flag.
-6. **A new destination goes in [`nav.ts`](src/app/creator/nav.ts)**, with a `shortTitle` that fits a quarter of a phone's width — never in one nav only. Past four tabs the bar needs rethinking, not a fifth squeeze.
-7. **A listener error branches to `LoadError` before the empty branch.** No new Firestore subscription on this surface ships without one.
-8. **≥44px on every control**, not just the nav. Where a glyph must stay small, expand the hit area with `after:absolute after:-inset-N` (the established trick here) rather than shrinking the target.
 
-### Known deferrals (deliberate, not drift)
+1. **Import the skin from `theme.ts`.** No inline portal hexes, gradients, or surface recipes. A literal hex is legal in exactly one place: `theme.ts` itself, where Tailwind's static-string scanning leaves no alternative — and even there it must be a named token's value, documented in its own comment. New portal color → add it to `theme.ts` **and** the `creator-*` palette entries in this file's frontmatter.
+2. **Bluu azure is the portal's one brand voice.** It marks brand/interactive accent and the spine's "today" state only — never decoration.
+3. **Urgency is the portal's other colour vocabulary, and it is closed at four values.** `late` / `today` / `soon` / `later` / `undated` from `URGENCY` in `theme.ts`. A hue that means something other than urgency or brand does not belong on this surface — content types and priority are greyscale for exactly this reason.
+4. **Solid fills only** — no gradient or glow buttons/cards. `PRIMARY_BTN` / `COMPLETE_BTN` / `ACCENT_BTN` / `QUIET_BTN` are a hierarchy, not a palette: **`PRIMARY_BTN` appears at most once per screen.**
+5. **Every state cue is a shape plus a hue, never hue alone.** This is not a preference — it is measured (§ Colour, above) and it governs every future addition to the spine, the tab bar, and the sidebar.
+6. **Detail & confirm = shadcn `Dialog`** through `CreatorDialog`. No bespoke overlays.
+7. **"Submit for review", never "Mark Completed" or "Completed"**, and every completion is undoable via the `revert` flag, for both record types, from every surface that offers completion.
+8. **A new destination goes in [`nav.ts`](src/app/creator/nav.ts)**, with a `shortTitle` that fits a quarter of a phone's width — never in one nav only. Past four tabs the bar needs rethinking, not a fifth squeeze.
+9. **A listener error branches to `LoadError` before the empty branch.** No new Firestore subscription on this surface ships without one.
+10. **≥44px on every control**, not just the nav. Where a glyph must stay small, expand the hit area with `after:absolute after:-inset-N` rather than shrinking the target.
+11. **The mono typeface is scoped to `.pf-mono` and the portal's own numeric content.** Never apply `--font-portal-mono` to prose, and never let it leak past `layout.tsx`'s wrapper.
 
-Found by `/impeccable critique` on 2026-09-02 (`.impeccable/critique/`), left unfixed on purpose because each is a **product** decision rather than a visual/technical one:
+### Resolved since the 2026-09-02 critique
 
-- **`content-requests` completion is one-way.** Portal rule 5 says every completion is undoable, and this page sends no `{revert:true}` and offers no `Completed → Mark as Incomplete`. The dashboard's identical action is fully undoable. The endpoint supports the flag; only the UI is missing.
-- **"Mark Completed" names an outcome the system does not produce** — completion routes the record to *Awaiting Approval*. "Submit for review" is both accurate and more reassuring.
-- **Customs still have no overdue state at all** (only content planning computes one), so the *convention* below is what remains unfixed — the timezone half is done: `isOverdue(dueDate, creatorUser.defaultTimezone)` from [`src/lib/timezone.ts`](src/lib/timezone.ts) is now the single helper. See [campaign-tracking.md](documentation/campaign-tracking.md#timezones--due-dates).
-- **Red means two things in one scroll.** `CustomCard` paints every due date `text-rose-300` unconditionally (and has no overdue calculation at all); `CPCard` uses red to mean *late*. `contentStatusBadge` also paints "Outstanding" red, where §2 assigns orange to awaiting/pending. `text-rose-300` is additionally an inline hue outside `theme.ts` (rule 1).
-- **The login card is glassmorphic over a photo** (`bg-zinc-900/80 backdrop-blur-md`), which §5 forbids for exactly this construction. Its a11y was fixed (heading, landmark, 16px inputs); its skin was left alone as an aesthetic call.
+The prior version of this section documented four deferrals left open by that critique. This redesign addresses all four as part of the same change, rather than carrying them forward again:
+
+- **Content-planning completion is now undoable**, via the shared `useCreatorWork.complete()`/`undo()` pair — no longer one-way while the dashboard's was reversible.
+- **The button reads "Submit for review"**, not "Mark Completed" — see Components & interaction, above.
+- **Customs now compute a real overdue state**, through the same timezone-aware helper content planning already used.
+- **Red means exactly one thing.** The closed `URGENCY` vocabulary replaces both the unconditional rose due-date colour and the separate red-means-late convention with a single definition, in one file.
+
+One earlier deferral from the same critique — the login/refusal card's glassmorphism — was also fixed in this pass: `CreatorPortalShell`'s `Screen` component is now an opaque `COLOR.surface` card, consistent with §5's ban on glassmorphism-as-decoration.
 
 ## 8. Public model application form (external skin)
 

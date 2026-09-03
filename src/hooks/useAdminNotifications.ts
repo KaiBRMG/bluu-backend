@@ -19,8 +19,16 @@ export interface CreateBatchPayload {
   type: NotificationType;
   userIds: string[];
   groupIds: string[];
+  /** Individually-picked creator uids. Delivered via Telegram only — see `allCreators`. */
+  creatorIds?: string[];
+  /** The "All Creators" pseudo-group. */
+  allCreators?: boolean;
   actionUrl?: string | null;
-  /** Also push this notification to Telegram. The in-app notification is sent either way. */
+  /**
+   * Also push this notification to Telegram, for the `userIds`/`groupIds`
+   * recipients. Creators are unaffected by this flag — they have no in-app
+   * tray, so any creator recipient is always sent via Telegram.
+   */
   sendTelegram?: boolean;
 }
 

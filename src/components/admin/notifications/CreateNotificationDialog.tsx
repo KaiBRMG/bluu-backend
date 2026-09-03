@@ -40,6 +40,7 @@ import { cn } from '@/lib/utils';
 import { PAGES } from '@/lib/definitions';
 import type { BasicUser } from '@/hooks/useBasicUsers';
 import type { AdminGroup } from '@/hooks/useAdminUsers';
+import type { CreatorRecipient } from '@/hooks/useCreatorRecipients';
 import type { NotificationType } from '@/types/firestore';
 import { classifyNotificationAction } from '@/lib/notificationActionUrl';
 import type { CreateBatchPayload, CreateBatchResult } from '@/hooks/useAdminNotifications';
@@ -48,14 +49,18 @@ type ActionUrlMode = 'none' | 'internal' | 'external';
 
 const INTERNAL_PAGES = PAGES.filter(p => p.href !== null);
 
+/** Sentinel id for the "All Creators" pseudo-group — not a real `groups/{id}` doc. */
+const ALL_CREATORS_ID = 'all-creators';
+
 interface CreateNotificationDialogProps {
   users: BasicUser[];
   groups: AdminGroup[];
+  creators: CreatorRecipient[];
   onCreated: () => void;
   onCreate: (payload: CreateBatchPayload) => Promise<CreateBatchResult>;
 }
 
-type RecipientType = 'user' | 'group';
+type RecipientType = 'user' | 'group' | 'creator' | 'allCreators';
 interface Recipient {
   id: string;
   type: RecipientType;
@@ -72,6 +77,7 @@ const NOTIFICATION_TYPES: { value: NotificationType; label: string; color: strin
 export default function CreateNotificationDialog({
   users,
   groups,
+  creators,
   onCreated,
   onCreate,
 }: CreateNotificationDialogProps) {
@@ -142,6 +148,8 @@ export default function CreateNotificationDialog({
 
     const userIds = recipients.filter(r => r.type === 'user').map(r => r.id);
     const groupIds = recipients.filter(r => r.type === 'group').map(r => r.id);
+    const creatorIds = recipients.filter(r => r.type === 'creator').map(r => r.id);
+    const allCreators = recipients.some(r => r.type === 'allCreators');
 
     setSubmitting(true);
     try {
@@ -151,19 +159,27 @@ export default function CreateNotificationDialog({
         type,
         userIds,
         groupIds,
+        creatorIds,
+        allCreators,
         actionUrl: resolvedActionUrl(),
         sendTelegram,
       });
 
       // The in-app notification is committed before Telegram is attempted, so a
       // Telegram problem is a warning on a successful send — not a failure.
+      // Creators have no in-app tray (telegram.md), so their share of `result.telegram`
+      // is not the same "additive" channel it is for employees — the copy below
+      // says "app" only when an employee recipient was actually selected.
+      const hasAppRecipients = userIds.length > 0 || groupIds.length > 0;
       const telegram = result.telegram;
       if (telegram && (telegram.skipped || telegram.failed > 0)) {
         toast.warning('Notification sent, but Telegram delivery failed', {
           description: telegram.error,
         });
-      } else if (telegram) {
+      } else if (telegram && hasAppRecipients) {
         toast.success('Notification sent via app and Telegram');
+      } else if (telegram) {
+        toast.success('Notification sent via Telegram');
       } else {
         toast.success('Notification sent successfully');
       }
@@ -183,6 +199,8 @@ export default function CreateNotificationDialog({
     message.trim().length > 0 &&
     recipients.length > 0 &&
     !externalIsInvalid;
+
+  const hasCreatorRecipients = recipients.some(r => r.type === 'creator' || r.type === 'allCreators');
 
   return (
     <>
@@ -206,18 +224,18 @@ export default function CreateNotificationDialog({
                     className="w-full justify-between font-normal"
                   >
                     {recipients.length === 0
-                      ? 'Select users or groups…'
+                      ? 'Select recipients…'
                       : `${recipients.length} selected`}
                     <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-[420px] p-0" align="start">
                   <Command>
-                    <CommandInput placeholder="Search users or groups…" />
+                    <CommandInput placeholder="Search users, creators or groups…" />
                     <CommandList>
                       <CommandEmpty>No results found.</CommandEmpty>
 
-                      {groups.length > 0 && (
+                      {(groups.length > 0 || creators.length > 0) && (
                         <CommandGroup heading="Groups">
                           {groups.map(group => (
                             <CommandItem
@@ -240,6 +258,27 @@ export default function CreateNotificationDialog({
                               />
                             </CommandItem>
                           ))}
+                          {creators.length > 0 && (
+                            <CommandItem
+                              key={ALL_CREATORS_ID}
+                              value={`group-${ALL_CREATORS_ID}-All Creators`}
+                              onSelect={() =>
+                                toggleRecipient({ id: ALL_CREATORS_ID, type: 'allCreators', label: 'All Creators' })
+                              }
+                            >
+                              <Layers className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                              <span className="flex-1">All Creators</span>
+                              <span className="text-xs text-muted-foreground mr-2">
+                                {creators.length} creator{creators.length !== 1 ? 's' : ''} · Telegram only
+                              </span>
+                              <Check
+                                className={cn(
+                                  'h-4 w-4',
+                                  isSelected(ALL_CREATORS_ID, 'allCreators') ? 'opacity-100' : 'opacity-0'
+                                )}
+                              />
+                            </CommandItem>
+                          )}
                         </CommandGroup>
                       )}
 
@@ -272,6 +311,36 @@ export default function CreateNotificationDialog({
                           </CommandItem>
                         ))}
                       </CommandGroup>
+
+                      {creators.length > 0 && (
+                        <>
+                          <CommandSeparator />
+                          <CommandGroup heading="Creators (Telegram only)">
+                            {creators.map(creator => (
+                              <CommandItem
+                                key={creator.uid}
+                                value={`creator-${creator.uid}-${creator.stageName}`}
+                                onSelect={() =>
+                                  toggleRecipient({
+                                    id: creator.uid,
+                                    type: 'creator',
+                                    label: creator.stageName,
+                                  })
+                                }
+                              >
+                                <SendHorizontal className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                                <span className="flex-1">{creator.stageName}</span>
+                                <Check
+                                  className={cn(
+                                    'h-4 w-4',
+                                    isSelected(creator.uid, 'creator') ? 'opacity-100' : 'opacity-0'
+                                  )}
+                                />
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </>
+                      )}
                     </CommandList>
                   </Command>
                 </PopoverContent>
@@ -286,8 +355,10 @@ export default function CreateNotificationDialog({
                       variant="secondary"
                       className="gap-1 pr-1"
                     >
-                      {r.type === 'group' ? (
+                      {r.type === 'group' || r.type === 'allCreators' ? (
                         <Layers className="h-3 w-3" />
+                      ) : r.type === 'creator' ? (
+                        <SendHorizontal className="h-3 w-3" />
                       ) : (
                         <Users className="h-3 w-3" />
                       )}
@@ -441,11 +512,17 @@ export default function CreateNotificationDialog({
                     Also send as a Telegram alert
                   </span>
                   <span className="block text-xs text-muted-foreground">
-                    The in-app notification is sent either way. Telegram alerts currently
-                    go to the test chat until accounts are linked.
+                    The in-app notification is sent either way. Only reaches a recipient
+                    who has linked their Telegram account.
                   </span>
                 </span>
               </label>
+              {hasCreatorRecipients && (
+                <p className="text-xs text-muted-foreground">
+                  Creator recipients have no in-app notification tray, so they always
+                  receive this over Telegram — regardless of the checkbox above.
+                </p>
+              )}
             </div>
           </div>
 

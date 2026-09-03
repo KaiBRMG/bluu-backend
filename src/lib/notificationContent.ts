@@ -279,4 +279,42 @@ export const telegramMessages = {
     '✅ <b>You are connected.</b>\n\n' +
     'Your Bluu Backend alerts will arrive in this chat.\n\n' +
     '<i>You can disconnect at any time in Bluu Backend app settings.</i>',
+
+  /**
+   * ── Creator automated notifications ──────────────────────────────────────
+   *
+   * Creators have no in-app notification tray — Telegram is not an
+   * *additional* channel for them, it is the only one (see telegram.md).
+   * These four are automated (fired on an event, never sent by hand) and are
+   * catalogued in `automatedNotifications.ts`'s dedicated Creators section,
+   * a deliberate carve-out from the usual "bot copy is never catalogued"
+   * rule — that rule exists because a bot message would misdescribe the
+   * in-app Automated tab, but these entries have no in-app counterpart to be
+   * confused with.
+   *
+   * Callers must pre-escape any interpolated value that is not already a
+   * closed vocabulary (fan names are free text; call types, formatted
+   * amounts and formatted dates are not) — same convention as the rest of
+   * `telegramMessages`.
+   */
+  creatorNewCustomRequest: (fanName: string, totalAmount: string): string =>
+    `📷 <b>New Custom Request</b>\n\n` +
+    `You have a new custom request from ${fanName} for ${totalAmount}.\n\n` +
+    `Don't keep them waiting! View the full details in the Creator Portal 👇`,
+
+  creatorNewItemRequest: (fanName: string, totalAmount: string): string =>
+    `👙 <b>New Item Request</b>\n\n` +
+    `You have a new item request from ${fanName} for ${totalAmount}.\n\n` +
+    `Don't keep them waiting! View the full details in the Creator Portal 👇`,
+
+  creatorNewScheduledCall: (callType: string, fanName: string, date: string, totalAmount: string): string =>
+    `📞 <b>New Scheduled Call</b>\n\n` +
+    `You have a new scheduled ${callType} call with ${fanName} on ${date} for ${totalAmount}!\n\n` +
+    `View the full details in the Creator Portal 👇`,
+
+  /** No interpolation — the copy is the same for every creator every time. */
+  creatorNewContentRequest: (): string =>
+    `📽️ <b>New Content Request</b>\n\n` +
+    `Your account manager needs more content to keep your account active.\n\n` +
+    `View the full details in the Creator Portal 👇`,
 };

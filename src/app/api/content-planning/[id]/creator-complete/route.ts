@@ -4,6 +4,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
+import { sendTelegramNotification } from '@/lib/services/telegramService';
 import { getOFAMUids } from '@/lib/services/campaignTrackingService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -56,11 +57,13 @@ export const POST = withCreatorAuth(async (
     });
 
     const ofamUids = await getOFAMUids();
+    const content = notifications.contentPlanCompleted(stageName, contentSummary);
     for (const uid of ofamUids) {
-      addNotificationToBatch(batch, uid, notifications.contentPlanCompleted(stageName, contentSummary));
+      addNotificationToBatch(batch, uid, content);
     }
 
     await batch.commit();
+    if (ofamUids.length > 0) await sendTelegramNotification(ofamUids, content);
     return NextResponse.json({ success: true, status: 'Completed' });
   } catch (error) {
     console.error('[POST /api/content-planning/:id/creator-complete]', error);

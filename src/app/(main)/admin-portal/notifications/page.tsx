@@ -5,16 +5,18 @@ import AppLayout from "@/components/AppLayout";
 import { Loader } from "@/components/ui/loader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBasicUsers } from "@/hooks/useBasicUsers";
+import { useCreatorRecipients } from "@/hooks/useCreatorRecipients";
 import { useAdminNotifications } from "@/hooks/useAdminNotifications";
 import CreateNotificationDialog from "@/components/admin/notifications/CreateNotificationDialog";
 import NotificationHistoryList from "@/components/admin/notifications/NotificationHistoryList";
 import NotificationRecipientsDialog from "@/components/admin/notifications/NotificationRecipientsDialog";
 import AutomatedNotificationsList from "@/components/admin/notifications/AutomatedNotificationsList";
-import { AUTOMATED_NOTIFICATIONS } from "@/lib/automatedNotifications";
+import { AUTOMATED_NOTIFICATIONS, AUTOMATED_CREATOR_NOTIFICATIONS } from "@/lib/automatedNotifications";
 import type { AdminNotificationBatch } from "@/types/firestore";
 
 export default function AdminNotificationsPage() {
   const { users, groups, loading: usersLoading } = useBasicUsers();
+  const { creators, loading: creatorsLoading } = useCreatorRecipients();
   const { batches, loading: batchesLoading, refetch, createBatch, deleteBatch } = useAdminNotifications();
   const [selectedBatch, setSelectedBatch] = useState<AdminNotificationBatch | null>(null);
 
@@ -24,12 +26,13 @@ export default function AdminNotificationsPage() {
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold tracking-tight">System Notifications</h1>
 
-          {usersLoading ? (
+          {usersLoading || creatorsLoading ? (
             <Loader />
           ) : (
             <CreateNotificationDialog
               users={users}
               groups={groups}
+              creators={creators}
               onCreated={refetch}
               onCreate={createBatch}
             />
@@ -42,7 +45,7 @@ export default function AdminNotificationsPage() {
             <TabsTrigger value="automated">
               Automated
               <span className="text-xs text-zinc-400 tabular-nums">
-                {AUTOMATED_NOTIFICATIONS.length}
+                {AUTOMATED_NOTIFICATIONS.length + AUTOMATED_CREATOR_NOTIFICATIONS.length}
               </span>
             </TabsTrigger>
           </TabsList>

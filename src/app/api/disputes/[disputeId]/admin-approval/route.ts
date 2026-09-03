@@ -4,6 +4,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
 import { checkPageAccess, addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
+import { sendTelegramNotification } from '@/lib/services/telegramService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { ApprovalStatus } from '@/types/firestore';
 
@@ -41,15 +42,13 @@ export const PATCH = withAuth(async (
 
     batch.update(disputeRef, { AdminApproval });
 
-    addNotificationToBatch(
-      batch,
-      dispute.createdBy,
-      AdminApproval === 'Approved'
-        ? notifications.disputeAdminApproved()
-        : notifications.disputeAdminRejected(reason),
-    );
+    const content = AdminApproval === 'Approved'
+      ? notifications.disputeAdminApproved()
+      : notifications.disputeAdminRejected(reason);
+    addNotificationToBatch(batch, dispute.createdBy, content);
 
     await batch.commit();
+    await sendTelegramNotification([dispute.createdBy], content);
 
     return NextResponse.json({ success: true });
   } catch (error) {

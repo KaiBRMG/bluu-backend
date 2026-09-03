@@ -1,4 +1,4 @@
-import { notifications, type NotificationContent } from '@/lib/notificationContent';
+import { notifications, telegramMessages, type NotificationContent } from '@/lib/notificationContent';
 
 /**
  * Read-only catalogue of every notification the system sends **automatically**
@@ -11,7 +11,32 @@ import { notifications, type NotificationContent } from '@/lib/notificationConte
  *
  * Purely for display. Adding an entry here does not send anything; sending is
  * always the API route named in `source`.
+ *
+ * ── Telegram ──────────────────────────────────────────────────────────────
+ * `telegramEnabled` marks an entry that is also pushed to Telegram (in
+ * addition to the in-app notification, for every recipient who has linked
+ * their account) — see telegram.md and notifications.md#telegram-alerts.
+ * Onboarding and OF Manager entries are deliberately left unset.
+ *
+ * ── Creators ──────────────────────────────────────────────────────────────
+ * `AUTOMATED_CREATOR_NOTIFICATIONS` below is a second, separate catalogue for
+ * creator-facing automated notifications. Creators have no in-app tray, so
+ * Telegram is their only channel — these entries have no `NotificationContent`
+ * (no `type`, no in-app `actionUrl`) and are rendered in their own section on
+ * the Automated tab. This is a deliberate carve-out from the usual rule that
+ * bot copy (`telegramMessages.*`) is never catalogued: that rule exists so a
+ * bot message doesn't get confused with an in-app one on the same tab, and
+ * these have no in-app counterpart to be confused with.
  */
+
+/** Strips the Telegram HTML these creator messages use, for plain-text display. */
+function stripTelegramFormatting(html: string): string {
+  return html
+    .replace(/<\/?b>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
 
 export type AutomatedNotificationCategory =
   | 'Onboarding'
@@ -36,6 +61,24 @@ export interface AutomatedNotification {
   sources: string[];
   /** Real content, with `{token}` placeholders for interpolated values. */
   content: NotificationContent;
+  /** Also pushed to Telegram, for any recipient who has linked their account. */
+  telegramEnabled?: boolean;
+}
+
+/** A creator-facing automated notification — Telegram only, no in-app tray. */
+export interface AutomatedCreatorNotification {
+  /** Factory name in `notificationContent.ts` (`telegramMessages.*`). */
+  id: string;
+  /** Short label for the event that fires it. */
+  event: string;
+  /** When it fires, in plain language. */
+  trigger: string;
+  /** Who receives it. Always a single creator for this catalogue. */
+  recipients: string;
+  /** Repo-relative path(s) of the handler(s) that send it. */
+  sources: string[];
+  /** Plain-text rendering of the real Telegram HTML, with `{token}` placeholders. */
+  message: string;
 }
 
 export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
@@ -70,6 +113,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     recipients: 'Every member of the OFAM group',
     sources: ['src/app/api/campaign-tracking/create/route.ts'],
     content: notifications.crCreated('{creatorName}', '{stageName}'),
+    telegramEnabled: true,
   },
   {
     id: 'crRejected',
@@ -79,6 +123,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     recipients: 'The CA who created the entry',
     sources: ['src/app/api/campaign-tracking/[id]/route.ts'],
     content: notifications.crRejected('{editorName}', '{CR}', '{stageName}'),
+    telegramEnabled: true,
   },
   {
     id: 'crCompleted',
@@ -92,6 +137,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
       'src/app/api/campaign-tracking/[id]/creator-complete/route.ts',
     ],
     content: notifications.crCompleted('{CR}', '{stageName}'),
+    telegramEnabled: true,
   },
   {
     id: 'crTransferred',
@@ -102,6 +148,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     recipients: 'The user receiving the transfer',
     sources: ['src/app/api/campaign-tracking/[id]/transfer/route.ts'],
     content: notifications.crTransferred('{transferrerName}', '{stageName}', '{campaigns | custom-requests}'),
+    telegramEnabled: true,
   },
   {
     id: 'crTransferredOnBehalf',
@@ -112,6 +159,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     recipients: 'The user receiving the transfer',
     sources: ['src/app/api/campaign-tracking/[id]/transfer/route.ts'],
     content: notifications.crTransferredOnBehalf('{previousOwnerName}', '{stageName}', '{campaigns | custom-requests}'),
+    telegramEnabled: true,
   },
 
   // ─── Leave ────────────────────────────────────────────────────────────────
@@ -123,6 +171,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     recipients: 'The user who requested the leave',
     sources: ['src/app/api/shifts/leave/[leaveId]/approve/route.ts'],
     content: notifications.leaveApproved('{paid | unpaid}', '{date}'),
+    telegramEnabled: true,
   },
   {
     id: 'leaveDenied',
@@ -132,6 +181,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     recipients: 'The user who requested the leave',
     sources: ['src/app/api/shifts/leave/[leaveId]/approve/route.ts'],
     content: notifications.leaveDenied('{paid | unpaid}', '{date}'),
+    telegramEnabled: true,
   },
 
   // ─── Disputes ─────────────────────────────────────────────────────────────
@@ -143,6 +193,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     recipients: 'The CA the dispute is assigned to',
     sources: ['src/app/api/disputes/route.ts'],
     content: notifications.disputeAssigned('{createdByName}'),
+    telegramEnabled: true,
   },
   {
     id: 'disputeCaApproved',
@@ -152,6 +203,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     recipients: 'The user who submitted the dispute',
     sources: ['src/app/api/disputes/[disputeId]/ca-approval/route.ts'],
     content: notifications.disputeCaApproved('{assignedToName}'),
+    telegramEnabled: true,
   },
   {
     id: 'disputeCaRejected',
@@ -161,6 +213,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     recipients: 'The user who submitted the dispute',
     sources: ['src/app/api/disputes/[disputeId]/ca-approval/route.ts'],
     content: notifications.disputeCaRejected('{assignedToName}', '{reason}'),
+    telegramEnabled: true,
   },
   {
     id: 'disputeAdminApproved',
@@ -170,6 +223,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     recipients: 'The user who submitted the dispute',
     sources: ['src/app/api/disputes/[disputeId]/admin-approval/route.ts'],
     content: notifications.disputeAdminApproved(),
+    telegramEnabled: true,
   },
   {
     id: 'disputeAdminRejected',
@@ -179,6 +233,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     recipients: 'The user who submitted the dispute',
     sources: ['src/app/api/disputes/[disputeId]/admin-approval/route.ts'],
     content: notifications.disputeAdminRejected('{reason}'),
+    telegramEnabled: true,
   },
 
   // ─── Content Planning ─────────────────────────────────────────────────────
@@ -190,6 +245,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     recipients: 'Every member of the OFAM group',
     sources: ['src/app/api/content-planning/[id]/creator-complete/route.ts'],
     content: notifications.contentPlanCompleted('{stageName}', '{contentSummary}'),
+    telegramEnabled: true,
   },
 
   // ─── Model Submissions ────────────────────────────────────────────────────
@@ -202,6 +258,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     recipients: 'Every user with permission for the Model Submissions page',
     sources: ['src/app/api/model-submissions/submit/route.ts'],
     content: notifications.modelSubmissionReceived('{applicantName}', '{city}, {country}'),
+    telegramEnabled: true,
   },
 
   // ─── OF Manager ───────────────────────────────────────────────────────────
@@ -255,4 +312,42 @@ export const AUTOMATED_NOTIFICATION_CATEGORIES: AutomatedNotificationCategory[] 
   'Content Planning',
   'Model Submissions',
   'OF Manager',
+];
+
+// ─── Creators (Telegram only — see the header note) ────────────────────────
+export const AUTOMATED_CREATOR_NOTIFICATIONS: AutomatedCreatorNotification[] = [
+  {
+    id: 'creatorNewCustomRequest',
+    event: 'Custom request approved',
+    trigger: 'A Custom Request entry moves from Awaiting Approval to In Progress (an OFAM approval).',
+    recipients: 'The creator',
+    sources: ['src/app/api/campaign-tracking/[id]/route.ts'],
+    message: stripTelegramFormatting(telegramMessages.creatorNewCustomRequest('{fan}', '{Total Amount}')),
+  },
+  {
+    id: 'creatorNewItemRequest',
+    event: 'Item request approved',
+    trigger: 'An Item Request entry moves from Awaiting Approval to In Progress (an OFAM approval).',
+    recipients: 'The creator',
+    sources: ['src/app/api/campaign-tracking/[id]/route.ts'],
+    message: stripTelegramFormatting(telegramMessages.creatorNewItemRequest('{fan}', '{Total Amount}')),
+  },
+  {
+    id: 'creatorNewScheduledCall',
+    event: 'Call scheduled',
+    trigger: 'A Call entry moves from Awaiting Approval to In Progress (an OFAM approval).',
+    recipients: 'The creator',
+    sources: ['src/app/api/campaign-tracking/[id]/route.ts'],
+    message: stripTelegramFormatting(
+      telegramMessages.creatorNewScheduledCall('{Call Type}', '{fan}', '{date}', '{Total Amount}'),
+    ),
+  },
+  {
+    id: 'creatorNewContentRequest',
+    event: 'Content request created',
+    trigger: 'An account manager creates a new content-planning brief for the creator.',
+    recipients: 'The creator',
+    sources: ['src/app/api/content-planning/route.ts'],
+    message: stripTelegramFormatting(telegramMessages.creatorNewContentRequest()),
+  },
 ];

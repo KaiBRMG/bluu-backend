@@ -5,6 +5,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById, invalidateUserCache } from '@/lib/services/userService';
 import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
+import { sendTelegramNotification } from '@/lib/services/telegramService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { LeaveRequestDocument } from '@/types/firestore';
 
@@ -76,15 +77,13 @@ export const POST = withAuth(async (
       });
     }
 
-    addNotificationToBatch(
-      batch,
-      leave.userId,
-      action === 'approve'
-        ? notifications.leaveApproved(leaveLabel, dateStr)
-        : notifications.leaveDenied(leaveLabel, dateStr),
-    );
+    const content = action === 'approve'
+      ? notifications.leaveApproved(leaveLabel, dateStr)
+      : notifications.leaveDenied(leaveLabel, dateStr);
+    addNotificationToBatch(batch, leave.userId, content);
 
     await batch.commit();
+    await sendTelegramNotification([leave.userId], content);
 
     // Invalidate user cache after batch commit so balance reads are fresh
     invalidateUserCache(leave.userId);
