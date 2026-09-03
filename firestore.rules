@@ -17,6 +17,21 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.admin == true;
     }
 
+    // Helper: a creator session that came from the Telegram Mini App.
+    //
+    // The `tg` claim is minted ONLY by /api/creator/telegram/session, after that
+    // route has verified Telegram's initData signature against the bot token.
+    // The creator portal reads Firestore directly (every screen is a live
+    // onSnapshot), so checking this only in `withCreatorAuth` would leave the
+    // whole data path open to a session obtained another way — a leftover
+    // email/password credential, or a refresh token predating the Telegram
+    // cutover. Both produce perfectly valid Firebase tokens with no `tg` claim.
+    //
+    // Zero reads: it is a JWT claim, exactly like isAdmin().
+    function isTelegramCreator() {
+      return isSignedIn() && request.auth.token.tg == true;
+    }
+
     // Helper: Check if the authenticated user has been granted access to a
     // specific page via the page-permissions system. Reads the user's own doc
     // (1 Firestore read) and checks the permittedPageIds array, which is kept
@@ -131,8 +146,13 @@ service cloud.firestore {
     // 11. Creators
     // Creators read their own doc on sign-in (CreatorAuthProvider).
     // All writes via Admin SDK (API routes) — no direct client writes permitted.
+    //
+    // The read requires a TELEGRAM session, not merely the right uid: the portal
+    // is reachable only from inside the Mini App, and a rule that accepted any
+    // signed-in holder of this uid would hand a leftover password session the
+    // creator's own record. See isTelegramCreator().
     match /creators/{userId} {
-      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow read: if isTelegramCreator() && request.auth.uid == userId;
       allow write: if false;
     }
 
@@ -160,7 +180,9 @@ service cloud.firestore {
         hasPagePermission('ca-custom-requests') ||
         hasPagePermission('ca-campaigns') ||
         hasPagePermission('creators-custom-requests') ||
-        resource.data.creatorID == request.auth.uid
+        // The creator branch requires a Telegram session — same reason as
+        // /creators above. Employee branches are unaffected.
+        (isTelegramCreator() && resource.data.creatorID == request.auth.uid)
       );
       allow write: if false;
     }
@@ -172,7 +194,8 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         isAdmin() ||
         hasPagePermission('creators-content-planning') ||
-        resource.data.creatorID == request.auth.uid
+        // Telegram session required for the creator branch — see /creators.
+        (isTelegramCreator() && resource.data.creatorID == request.auth.uid)
       );
       allow write: if false;
     }

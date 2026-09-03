@@ -18,6 +18,9 @@
 | `src/lib/notificationContent.ts` | `telegramMessages.*` — **all** bot copy |
 | `src/scripts/set-telegram-webhook.js` | One-off webhook registration |
 | `src/scripts/mint-creator-telegram-links.js` | Bulk-mint creator invites and print them, for sending by hand |
+| `src/scripts/fix-creator-menu-buttons.js` | Re-point already-connected creators' menu buttons (one-off repair) |
+| `src/scripts/revoke-creator-sessions.js` | One-off flush of every pre-Telegram creator session |
+| `src/lib/middleware/withCreatorAuth.ts` | Enforces the `tg` claim — the session lock — before anything else |
 
 ## Firestore
 
@@ -115,10 +118,45 @@ It is the only unauthenticated write path besides the public model-application f
 
 `t.me/BluuRockBot/BluuBackend` → the webview loads `/creator` → `CreatorPortalShell` exchanges Telegram's signed `initData` for a Firebase custom token. **There is no email/password screen; `/creator/login` was deleted.**
 
+- **The launch payload is read from the URL, not from the SDK.** Telegram opens the webview at `…#tgWebAppData=<initData>&…` and `telegram-web-app.js` merely parses that fragment, so depending on the script adds two failure modes (slow or blocked CDN) for no benefit. [`readTelegramInitData`](../src/lib/telegramWebApp.ts) reads the fragment directly, falls back to the query string, and caches the first read in `sessionStorage`; the SDK is loaded only for `ready()`/`expand()` and its failure is survivable.
+
+  **The fragment is fragile, and that is the failure to know about.** A fragment is client-side only and is re-attached across a 3xx by the browser *usually* — Telegram's in-app webviews are not reliable about it. So **the chat menu button points at `/creator/dashboard`, never `/creator`** (which 307s): one hop is one chance to lose the entire session, and the symptom is the "Open in Telegram" screen shown to a creator who is correctly linked. A client-side navigation or a reload also drops it, which is what the `sessionStorage` cache covers — it is needed because Firebase persistence is in-memory, so every reload re-runs the exchange.
+
+  **Caching it widens nothing.** `sessionStorage` dies with the webview exactly as the in-memory Firebase session does, it is origin-scoped, and the blob is re-verified server-side (signature *and* `auth_date`) on every exchange. A rejected payload is cleared so it cannot be replayed on each reload.
+
+  Creators connected before the menu-button URL was corrected still hold the old one — `cd src && node scripts/fix-creator-menu-buttons.js` re-points them. Idempotent.
+
 - **`verifyTelegramInitData` is the entire gate.** HMAC-SHA256 with the two-level key the spec requires (`HMAC(HMAC("WebAppData", bot_token), data_check_string)`), plus an `auth_date` freshness window — the HMAC alone never expires, so a captured blob would otherwise mint sessions forever. The window is 24h because Telegram issues `initData` at launch and does not refresh it while the Mini App stays open.
 - **`initDataUnsafe` is never trusted.** It is the same content without the signature check. Read it for cosmetics or not at all.
-- **Persistence is `inMemoryPersistence`, and that is the security property.** Firebase's default writes a refresh token into the webview's storage, which would keep working if the same URL were later opened in an ordinary browser on that device — a session outliving the Telegram context that authorised it. In memory, the session dies with the webview and every launch re-proves `initData`. The cost is one round trip per launch.
-- **Downstream is unchanged.** `CreatorAuthProvider`, `withCreatorAuth` and the timezone sync all work exactly as before; only how the Firebase session starts changed.
+- **Downstream is unchanged.** `CreatorAuthProvider` and the timezone sync work exactly as before; only how the Firebase session starts changed.
+
+### The session lock — three parts, one of which is the real one
+
+The requirement is that the portal is reachable **only** from inside Telegram. A client-side check cannot deliver that: anyone can call the API directly. So the enforcement is a token claim.
+
+**1. `tg: true`, minted only by the Telegram exchange (the actual lock).** `createCustomToken(uid, { tg: true, tgUserId })` embeds a developer claim in every ID token the session mints, preserved across refreshes. `POST /api/creator/telegram/session` is the only thing that can produce it, and only after verifying `initData`. Enforced in two places, because the portal talks to both:
+
+- **`withCreatorAuth`** refuses `token.tg !== true` with a 403, *before* the Firestore read — a non-Telegram token costs no read.
+- **`firestore.rules`**, via `isTelegramCreator()`. Every portal screen is a live `onSnapshot`, so checking only in the API would leave the entire data path open. The creator branches of `/creators`, `/campaign-tracking` and `/content-planning` all require the claim; employee branches are untouched.
+
+This is what makes leaving creator passwords in place survivable: the credential still exists, but a session built from it carries no `tg` claim and reaches nothing.
+
+**`checkRevoked` is deliberately not used** — it would add a round trip to Google's Identity service on every creator API call, and the sessions it would catch are exactly the ones the claim already refuses.
+
+**2. `inMemoryPersistence`, set before anything else can run.** Firebase's default writes a refresh token into the webview's storage, which would keep working if the same URL were later opened in an ordinary browser on that device. In memory, the session dies with the webview and every launch re-proves `initData`. One round trip per launch.
+
+**3. A restored session is discarded, never adopted.** `onAuthStateChanged` hands the shell any locally persisted user before it gets a say, so `established` gates the render: a `creatorUser` this mount did not itself mint is not trusted, and bootstrap calls `signOut` on it. **Gating the bootstrap on `!creatorUser` — the obvious shape — is precisely how such a session gets let through**, which is the bug this arrangement exists to avoid. `setPersistence` *migrates* the current user rather than clearing it, so the explicit `signOut` is required, not belt-and-braces.
+
+### Flushing the pre-Telegram sessions
+
+Creators signed in during the password era hold refresh tokens that never expire on their own. They are already dead by claim check, but they stay *signed in* client-side and fail every request, which reads as a broken app rather than a signed-out one.
+
+```bash
+cd src && node scripts/revoke-creator-sessions.js --dry-run
+cd src && node scripts/revoke-creator-sessions.js
+```
+
+Run it **once, before sending the links out**. It does not touch passwords or disable accounts — a creator regains access the moment they use their Telegram link.
 - **Three refusal screens, deliberately distinguishable** — not in Telegram at all / not yet linked / linked as a staff account. Unlike the employee login allowlist (which returns one generic 403 so staff cannot be enumerated), the audience here is a creator who has been handed a link and cannot get in, and the caller has already proven ownership of the Telegram account being described.
 - **The PWA install path was removed with it.** An installed home-screen copy would open outside Telegram with no `initData` and therefore no session — an icon leading to a dead end. Telegram's own "add to home screen" covers the same need and launches back through the bot. `InstallPrompt.tsx` and `public/creator/manifest.webmanifest` are gone; the icons stay as ordinary favicons.
 

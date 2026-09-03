@@ -78,7 +78,25 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const customToken = await adminAuth.createCustomToken(subject.subjectUid);
+    // ── The session lock ─────────────────────────────────────────────────
+    // `tg: true` is a developer claim, embedded in every ID token this session
+    // mints (and preserved across refreshes). It is what makes "Telegram only"
+    // enforceable rather than cosmetic: this route is the ONLY thing that can
+    // produce it, so a session obtained any other way — a leftover
+    // email/password credential, a refresh token from before the cutover —
+    // carries no `tg` claim and is refused by `withCreatorAuth` and by the
+    // Firestore rules alike.
+    //
+    // This is why creator Auth passwords being left in place is survivable: the
+    // credential still exists, but a session built from it can no longer reach
+    // anything.
+    //
+    // `tgUserId` rides along so a server-side log can say which Telegram account
+    // a request belonged to without a second lookup.
+    const customToken = await adminAuth.createCustomToken(subject.subjectUid, {
+      tg: true,
+      tgUserId: telegramUser.id,
+    });
     return NextResponse.json({ customToken });
   } catch (error: unknown) {
     console.error('[creator/telegram/session] custom token failed:', error);

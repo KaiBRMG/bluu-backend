@@ -160,7 +160,7 @@ The invariant that makes it **once-off** is the *pairing*, not the uid: the entr
 
   Creators are still managed at `/admin-portal/creator-management`, a completely separate path that the Google/allowlist flow above does not touch. The one place the two identity systems interact: an email can only belong to one Auth account, so **creator registration refuses an address already held by an employee, and employee registration refuses one held by a creator.** Never merge the two onto one uid — that would give a single identity both a `users` and a `creators` doc, i.e. two auth contexts. The portal has no landing page: `src/app/creator/page.tsx` server-redirects `/creator` → `/creator/dashboard`, and there is nowhere to bounce a signed-out visitor to any more — the shell signs them in from `initData` or explains in place why it could not.
 
-  **Creator Auth accounts still carry their old email/password credential.** Nothing in the product uses it, but the Firebase web config is public, so a leaked creator password remains a usable sign-in against the project. Clearing those credentials is a deliberate open decision, not an oversight.
+  **Creator Auth accounts still carry their old email/password credential — and that is now harmless.** A password sign-in produces a valid Firebase token with **no `tg` claim**, and both `withCreatorAuth` and the Firestore rules refuse it, so such a session reaches nothing. Clearing the credentials remains an open decision, but it is no longer load-bearing.
 
 ### Device identity & session enforcement
 
@@ -208,7 +208,9 @@ See also [data-layer.md](data-layer.md).
 Every API route wraps its handler in one of:
 
 - **`withAuth`** — verifies Firebase Bearer token, injects `DecodedIdToken` (as `token`).
-- **`withCreatorAuth`** — same, **plus** verifies the caller exists in the `creators` collection and `isActive !== false`.
+- **`withCreatorAuth`** — same, **plus** requires the token's `tg: true` claim (the Telegram session lock — checked first, so a non-Telegram token costs no Firestore read), then verifies the caller exists in the `creators` collection and `isActive !== false`.
+
+**RULE — the creator session lock is a token claim, enforced server-side in two places.** Only `POST /api/creator/telegram/session` can mint `tg: true`, and only after verifying Telegram's `initData` signature. It is checked in `withCreatorAuth` **and** in `firestore.rules` (`isTelegramCreator()`), because the portal reads Firestore directly through live `onSnapshot`s — enforcing it in one place only would leave the whole data path open. See [telegram.md](telegram.md#the-session-lock--three-parts-one-of-which-is-the-real-one).
 
 ### Authorization tiers (least → most privileged)
 

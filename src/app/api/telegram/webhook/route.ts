@@ -158,7 +158,12 @@ export async function POST(request: NextRequest) {
           // The message ends by pointing at the menu button, so install the
           // button first — otherwise the arrow points at nothing for whatever
           // time the second call takes.
-          await setCreatorPortalMenuButton(chatId, `${PUBLIC_APP_ORIGIN}/creator`);
+          // `/creator/dashboard`, NOT `/creator` — the latter 307s, and
+          // Telegram launches the webview with the signed payload in a URL
+          // *fragment*, which in-app webviews do not reliably re-attach across a
+          // redirect. One hop, one chance to lose the whole session. Point
+          // straight at the destination.
+          await setCreatorPortalMenuButton(chatId, `${PUBLIC_APP_ORIGIN}/creator/dashboard`);
           await sendTelegramMessage(
             chatId,
             telegramMessages.creatorWelcome(escapeHtml(result.displayName)),

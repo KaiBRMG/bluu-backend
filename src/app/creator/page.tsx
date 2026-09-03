@@ -5,8 +5,11 @@ import { redirect } from 'next/navigation';
 // any more: CreatorAuthWrapper in the layout signs them in from Telegram's
 // `initData`, or explains why it could not, in place.
 //
-// This is also the URL the bot's chat menu button points at (see
-// `setCreatorPortalMenuButton`), so it must keep resolving to the dashboard.
+// ⚠️ The bot's chat menu button deliberately does NOT point here — it points
+// straight at /creator/dashboard. Telegram launches a Mini App with its signed
+// `initData` in a URL *fragment*, and in-app webviews do not reliably re-attach
+// a fragment across the redirect below, which loses the whole session. This
+// route stays for anyone who types or shares the bare /creator URL.
 export default function CreatorPortalIndex() {
   redirect('/creator/dashboard');
 }
