@@ -200,13 +200,14 @@ Its `web_app` URL must be on a domain registered for the bot in BotFather, which
 
 Linking is self-service — `POST /api/user/telegram-link` mints a link for **the caller's own uid**, taken from the verified token and never from the body. There is deliberately no `uid` parameter: a route that accepted one would let any signed-in user bind their Telegram account to a colleague's identity.
 
-Two surfaces reach it:
+Three surfaces reach it, all duplicating the same mint-and-`window.open` logic rather than sharing a hook:
+- **Onboarding's dedicated Link Telegram section** — `src/app/(main)/onboarding/profile/page.tsx`, part of the "Your details" step. Never blocking: it has its own "Skip for now", independent of the step's required-field gate. Completing this step (linked or skipped) sets `users/{uid}.telegramPromptedAtOnboarding: true` alongside `hasCompletedOnboarding`.
 - **The announcement card** (see below), when armed.
 - **Settings → App Settings → Notifications → Telegram Alerts.** Connect / Disconnect, outside the form's dirty/Save model because connecting is a round trip through another app and disconnecting takes effect immediately.
 
 **Disconnecting is the real opt-out.** `resolveChatIds` reads the chat id off `users/{uid}.telegram`, so removing it genuinely stops delivery — which is what the linking message means by "can be disabled in Bluu Backend settings". There is no separate preference flag to keep in sync.
 
-`/admin-portal/user-management` shows the bound account read-only under the Contact section, next to `contactInfo.telegramHandle` — **which is free text somebody typed and proves nothing.** The line below it is the actual bot connection.
+`contactInfo.telegramHandle` — free text somebody typed into their profile, proving nothing — is **gone**. `/admin-portal/user-management` now shows only the verified bot connection (`users/{uid}.telegram`), read-only, under the Contact section.
 
 ### What actually gets delivered
 
@@ -245,5 +246,6 @@ Not Telegram-specific, but it ships here and its first entry is the Telegram one
 - **The gate is [`src/lib/announcementConfig.ts`](../src/lib/announcementConfig.ts)** — same shape and reasoning as `appUpdateConfig.ts` and `emailMigrationConfig.ts`. `enabled: false` means nobody. Test on yourself with `uids: ['<your uid>']`.
 - **It is read over HTTP** (`/api/announcements`), never from the compiled constant — cross-cutting rule 9c. The cohort match happens server-side so uid and group lists never reach a renderer.
 - **Three exits.** The primary action does not dismiss — the card retires when the action's *effect* lands (`hideWhen`, re-checked live off the `useUserData` snapshot), which is the honest signal: someone who opens the link and never presses Start has not finished. "Remind me later" lasts the app session and re-arms on the next start **or the next clock-out**. "×" is permanent, stored in `users/{uid}.dismissedAnnouncements`.
+- **The telegram entry's `hideWhen: 'telegram-linked'` also retires for anyone already asked at onboarding.** `announcementConditionMet` treats `users/{uid}.telegramPromptedAtOnboarding` as equivalent to being linked — a user who went through onboarding's dedicated Link Telegram section (linked or "Skip for now") has already seen this exact ask, so the card would only repeat it. Users who onboarded before that section existed never got the flag, so they still see the card.
 - **Dismissals are append-only**, written with `arrayUnion` in `/api/user/update`: the app can have more than one window open, and a read-modify-write of the full list from each would silently drop the other's dismissal.
 - **`id` is never reused** — dismissals are keyed on it, so recycling one hides a new announcement from everyone who dismissed the old.

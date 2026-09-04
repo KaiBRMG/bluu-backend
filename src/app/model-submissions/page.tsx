@@ -405,7 +405,7 @@ export default function ModelSubmissionsPage() {
               the masthead as it decodes. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/logo/HQ2.png"
+            src="/logo/HQ2.webp"
             alt="Bluu Rock"
             width={1374}
             height={868}

@@ -31,10 +31,13 @@ export function OpenInApp({ promptId }: { promptId: string }) {
 
   return (
     <div className="flex flex-col items-end gap-1.5">
+      {/* The near-white primary fill (DESIGN.md §2) — what shadcn's `default`
+          Button resolves to app-wide — inked near-black at 17.7:1. Azure and
+          Action Blue both fail AA under white text at this size. */}
       <a
         href={promptDeepLink(promptId)}
         onClick={() => setAttempted(true)}
-        className="inline-flex w-fit items-center gap-2 rounded-md bg-[#3b82f6] px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#2563eb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6] focus-visible:ring-offset-2 focus-visible:ring-offset-[#09090b]"
+        className="inline-flex w-fit items-center gap-2 rounded-md bg-white px-3.5 py-2 text-sm font-semibold text-[#18181b] transition-colors hover:bg-[#e4e4e7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#09090b]"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/logo/bluu_uu.svg" alt="" aria-hidden className="size-4" />

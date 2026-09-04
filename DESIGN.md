@@ -196,6 +196,22 @@ Chart hues are **validated for dark-surface contrast and CVD-safety**, not taken
 
 **The One-Grey Rule.** A surface picks **one** token for de-emphasised text and uses it throughout. Mixing `text-muted-foreground` (`#9f9fa9`) with `text-zinc-400` (`#a1a1aa`) and `text-zinc-500` (`#71717a`) inside one component — which is how the OF Manager window drifted — makes three greys for one role and hides the failing one among the passing ones.
 
+### The Highlighter Palette (the one sanctioned decorative colour)
+
+Five translucent tints, declared once in `globals.css` as `mark.hl-*` and mirrored by `HIGHLIGHT_COLORS` in [`src/lib/promptHtml.ts`](src/lib/promptHtml.ts) (that file is the source of truth — it is what the editor writes and what the sanitiser allows):
+
+| Class | Fill |
+|---|---|
+| `hl-yellow` | `rgba(250, 204, 21, 0.32)` |
+| `hl-green` | `rgba(34, 197, 94, 0.32)` |
+| `hl-blue` | `rgba(59, 130, 246, 0.32)` |
+| `hl-purple` | `rgba(168, 85, 247, 0.32)` |
+| `hl-pink` | `rgba(244, 63, 94, 0.32)` |
+
+This is the **only** place in the system where colour carries no system-assigned meaning, and it does not breach the Semantic-Only Rule: the meaning is assigned by the *author of the prompt*, the same way it is in a highlighter pen. The rule forbids the designer decorating; it does not forbid the user annotating.
+
+Three constraints hold it in place: it applies to **prompt body text only** (the Prompt Library editor, the detail card, and the public share page), one shared alpha so the five read as one family, and `color: inherit` — the UA sheet paints `<mark>` black-on-yellow, which is illegible on every surface in this app. Never reach for these hues for chrome, status or charts.
+
 ## 3. Typography
 
 **Display / Body / Label Font:** Google Sans (both `--font-sans` and `--font-mono` map to it), fallback system stack.
@@ -250,6 +266,13 @@ Stacking is a **named semantic scale**, declared in `globals.css` and consumed v
 **Only** shadcn/ui primitives from `src/components/ui/`. Never introduce another component library or hand-roll a primitive that already exists there; add new ones with `npx shadcn@latest add <name>`. Icons are **only** `@tabler/icons-react` and `lucide-react`. Images are **only** `Avatar` / `AvatarImage` / `AvatarFallback` — never a raw `<img>`. Every mutation `toast`s its outcome via `sonner` (`toast.success` / `toast.error`) — with one narrow exception: a **high-frequency mutation whose result is already visible in place** toasts failures only (see the satellite shell's message send). The rule exists because CRUD results happen off-screen; it is not a licence to fire a toast every few seconds.
 
 **The Avatar Seed Rule.** Every fallback avatar is derived from **`displayName`** (`getAvatarColor(displayName || 'User')` + `getInitials(displayName)`), exactly as `AppLayout` and `NavUser` do it. `getAvatarColor` **hashes** the string it is given, so seeding from any other value — a full name, an email, a nickname in form state — changes both the initials *and* the colour, and the same person appears as two different avatars across screens. Display a fuller name as *text* if the surface calls for it, but always seed the avatar from `displayName`. What the rule actually protects is that **one identity hashes to one colour everywhere**; on a record that has no `displayName` field at all (Growth Tracking's accounts have only `handle` — see `AccountAvatar` in [`growthUi.tsx`](src/components/growth/growthUi.tsx)), seed from that record's own stable identity instead. The failure mode to avoid is the same either way: seeding from something that can change (a caption, a form draft) makes the same entity render as two different avatars.
+
+### Brand logo
+- **The default business logo is [`/logo/HQ2.webp`](src/public/logo/HQ2.webp)** — the full lockup (cyan `uu` mark + white wordmark), 1374×868, transparent ground. Use it wherever a surface shows the business's own identity: public pages, external skins, mastheads, login and hand-off cards. **It is the master, not a derivative** — the `HQ2.png` it was converted from has been removed, because the WebP is *lossless* and 17 KB against that PNG's 38 KB. A replacement lockup ships as a lossless WebP under the same name; do not reintroduce a parallel PNG for the same artwork.
+- **It is white-inked, so it only sits on a dark ground.** There is no light-ground variant; a surface that needs one has to commission it rather than filtering this file.
+- **Always pass `width={1374} height={868}`** alongside the Tailwind height (`h-10 w-auto`). A raster logo given only a height reserves no width and shifts the header as it decodes — the ratio has to be known before the bytes land.
+- **The legacy SVGs remain valid in their existing roles, not as the default.** `bluu_uu.svg` is the compact **mark** (collapsed sidebar, button icons, favicons) — HQ2 is a lockup and does not shrink to 16–20px. `bluu_long.svg` is the older horizontal wordmark; it is still in place across the internal console and is not worth a sweeping swap, but **new** surfaces take HQ2.
+- Images are otherwise `Avatar` only (below) — the logo is the standing exception, and it is a plain `<img>` rather than `next/image` on public pages, where the optimizer buys nothing for a single fixed asset.
 
 ### Buttons
 - **Shape:** `rounded-md` / `rounded-lg`.
@@ -312,6 +335,18 @@ This is a shell, not a new visual language: colours, overlays, hairlines, radii,
 - **Sort for retrieval, and let a section carry the state.** Pinned first, then A–Z under letter rails — a known name is found by position, which a `lastEditedTime` sort never allows. This is also what makes a pin worth having: pinning **promotes the row into a Pinned section** rather than lighting an icon in a column. When a search suppresses the sections, the row must show the mark inline instead — state may not simply vanish because its container did.
 - **Row actions crossfade with the row's own trailing content**, in one lane, on `:hover` **and** `:focus-within`. The lane takes a `min-w` equal to the action cluster, so nothing shifts, no long value runs underneath it, and the lane is never dead space. Omitting `:focus-within` makes the actions keyboard-unreachable — the same rule as the satellite shell's per-message menu.
 - **Gate affordances, don't duplicate surfaces.** Readers and managers see one page; what a viewer may do is decided per row, and a row outside a manager's write scope renders a spacer so the action lane stays one column. There is no second "management" screen for the same collection.
+
+### The decision queue (Disputes)
+
+`/ca-portal/disputes` is the reference for a **queue of decisions** — a list whose task is "rule on each of these", as opposed to the faceted index's "find the one I need" or a table's "audit the column". When the reader's job on every row is *approve or reject*, build this shape rather than a table with an actions column.
+
+- **The verdict is on the row, not behind a menu.** Approve and Reject sit in the row's trailing lane, always visible on the open list. An `⋯` popover costs three interactions for the page's only job. Approve is the affirmative outline (`border-green-500/30 bg-green-500/10 text-green-400`); Reject is a ghost in `text-red-400` — the asymmetry weights the affirmative path and halves the colour mass. Never `text-green-700` / `text-red-600`: those are light-mode inks and fail on the near-black ground.
+- **A destructive verdict opens its reason in place**, in a bar on the overlay recipe directly under the row it belongs to — never a modal, never a squeezed inline input in the action lane. `Esc` cancels, `Enter` confirms, and a failed write keeps both the row and the typed reason.
+- **The argument is shown, not truncated.** The comment is the whole basis of the decision, so it renders in full at `text-sm text-zinc-400`, capped at 70ch. A 15-character preview behind a `HoverCard` hides the deciding fact and is unreachable by keyboard.
+- **Rows carry no hover fill.** Nothing about the row is clickable — the buttons are — so the row must not borrow the interactive overlay step. Separation is a `divide-white/[0.07]` hairline.
+- **The same component renders the resolved list**, with the action lane swapped for the outcome pill. Two components for one list is how the two drift apart.
+- **A multi-stage record shows one derived status, not its raw enums.** A dispute carries `CaApproval` + `AdminApproval` + an unassigned sentinel; the reader wants *where is this*. [`disputeStatus.ts`](src/components/disputes/disputeStatus.ts) collapses them into one closed vocabulary (Awaiting CA review / Awaiting admin / Declined by CA / Approved / Rejected by admin) and **borrows each hue from `STATUS_COLORS`** rather than typing a new one — orange waits on a person, blue is moving, green/red are outcomes. Any other two-stage approval record should derive its stage the same way.
+- **The paginated foot states the truth it has.** `Showing 12 of 47` beside the pagination when there is more than one page, `47 disputes` when there isn't — never a computed range that assumes the server's page size.
 
 ### Loading & Empty States
 - **Loading:** shadcn `Skeleton` shaped to the final layout (`<Skeleton className="h-64 rounded-xl" />`), never a bare spinner mid-layout. "Shaped to the layout" means the real thing — a two-line row skeletons as two bars of the right widths, and a facet rail as a stack of rail-height blocks — so nothing jumps when the data lands. Async home widgets gate boot via `useBootPhase('home-<name>', isLoading)`.
@@ -423,7 +458,7 @@ The portal's dashboard and both list pages are organised around **one continuous
 - Opaque surfaces (not the console's translucent-white-on-black recipe — see below), hairline borders. **No drop shadows.**
 - **No gradient fills** on buttons or cards. Actions are solid: `PRIMARY_BTN` (azure), `COMPLETE_BTN` (emerald), `ACCENT_BTN` (soft azure tint), `QUIET_BTN` (bordered neutral).
 - `tabular-nums` on every amount; the portal's own mono (below) on every code, date and countdown.
-- Only `src/components/ui` primitives; only `Avatar` for images (the logo SVG is the sole non-Avatar image).
+- Only `src/components/ui` primitives; only `Avatar` for images (the logo asset — see §5 Brand logo — is the sole non-Avatar image).
 - `Skeleton`s (and the spine-shaped route `loading.tsx`) for loading, never a spinner mid-content; every mutation `toast`s its outcome.
 - **One glow rule, reinterpreted.** The console's single decorative-colour exception used to be a radial glow behind the page ground. It is gone: the spine is now the portal's one authored visual signature, and a wash behind a time axis made the axis harder to read, not more branded. The portal still spends colour on exactly one deliberate, non-semantic thing at a time — it is just the axis now, not a gradient.
 

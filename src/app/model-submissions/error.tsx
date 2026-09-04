@@ -43,7 +43,7 @@ export default function ModelSubmissionsError({
       <div className="flex w-full max-w-md flex-col items-start gap-6 py-16">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/logo/HQ2.png"
+          src="/logo/HQ2.webp"
           alt="Bluu Rock"
           width={1374}
           height={868}

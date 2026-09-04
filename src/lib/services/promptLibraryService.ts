@@ -399,6 +399,99 @@ export async function addPromptVersion(
   return result;
 }
 
+/**
+ * Overwrites an EXISTING version in place, instead of appending a new one.
+ *
+ * The counterpart to `addPromptVersion`, for the edit that is a correction
+ * rather than a revision — a typo, a tightened sentence, a better edit note.
+ * Cutting a version for those is how a history becomes unreadable.
+ *
+ * Three things follow from writing over a version rather than after it:
+ *
+ * - **The edit note is replaced, not merged.** It is the note FOR this version,
+ *   so the last save wins; the client pre-fills the field with the stored note
+ *   precisely so an author revises it rather than retyping it.
+ * - **`change` is recomputed against the same `basedOn`** the version already
+ *   carried, so the stored diff still describes this version's real distance
+ *   from its parent.
+ * - **The head is only rewritten when the target IS the head.** Correcting an
+ *   older version must not resurrect its text as the current one. Either way
+ *   `lastUpdatedTime` moves: the prompt was edited, and the board says so.
+ */
+export async function updatePromptVersion(
+  id: string,
+  version: number,
+  rawText: string,
+  rawHtml: string | null | undefined,
+  rawEditNote: unknown,
+  uid: string
+): Promise<AddVersionResult | null | 'unchanged'> {
+  const headRef = adminDb.collection(PROMPTS_COLLECTION).doc(id);
+  const targetRef = headRef.collection(VERSIONS_SUBCOLLECTION).doc(String(version));
+  const { text, textHtml } = resolveBody(rawText, rawHtml);
+  const editNote = clampText(rawEditNote, MAX_EDIT_NOTE_LENGTH).trim();
+
+  const result = await adminDb.runTransaction(async tx => {
+    const [headSnap, targetSnap] = await tx.getAll(headRef, targetRef);
+    if (!headSnap.exists || !targetSnap.exists) return null;
+
+    const head = mapPrompt(headSnap as FirebaseFirestore.QueryDocumentSnapshot);
+    const target = mapVersion(targetSnap as FirebaseFirestore.QueryDocumentSnapshot);
+
+    // Unlike a new version, a note-only edit is a real change here — it is the
+    // whole point of being able to save over a version.
+    if (
+      target.text === text &&
+      (target.textHtml ?? '') === (textHtml ?? '') &&
+      target.editNote === editNote
+    ) {
+      return 'unchanged' as const;
+    }
+
+    // The parent this version was edited from is unchanged by an overwrite, so
+    // the stored diff is re-measured against the same text it always described.
+    let change = target.change;
+    if (target.basedOn != null) {
+      const baseSnap = await tx.get(
+        headRef.collection(VERSIONS_SUBCOLLECTION).doc(String(target.basedOn))
+      );
+      if (baseSnap.exists) {
+        change = summariseChange(
+          mapVersion(baseSnap as FirebaseFirestore.QueryDocumentSnapshot).text,
+          text
+        );
+      }
+    }
+
+    const now = new Date().toISOString();
+    const next: PromptVersion = { ...target, text, textHtml, change, editNote };
+    const isHead = head.version === version;
+
+    // `createdTime` / `createdBy` are deliberately untouched: this is still the
+    // same version, written by whoever first wrote it.
+    tx.update(targetRef, { text, textHtml, change, editNote });
+    tx.update(headRef, {
+      ...(isHead ? { text, textHtml, change, editNote } : {}),
+      lastUpdatedTime: now,
+      lastUpdatedBy: uid,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    return {
+      prompt: {
+        ...head,
+        ...(isHead ? { text, textHtml, change, editNote } : {}),
+        lastUpdatedTime: now,
+        lastUpdatedBy: uid,
+      },
+      version: next,
+    };
+  });
+
+  if (result && result !== 'unchanged') invalidatePromptLibraryCache();
+  return result;
+}
+
 /** Title / category / tags / models / archive state. Does not cut a version —
  *  the version history is the history of the prompt TEXT. */
 export async function updatePromptMeta(

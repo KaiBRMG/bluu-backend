@@ -82,7 +82,7 @@ export function ThankYou({ name }: { name: string }) {
       <div className="onboard-rise mt-14" style={{ animationDelay: '360ms' }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/logo/HQ2.png"
+          src="/logo/HQ2.webp"
           alt="Bluu Rock"
           width={1374}
           height={868}

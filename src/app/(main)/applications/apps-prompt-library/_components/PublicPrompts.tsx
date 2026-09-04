@@ -53,7 +53,12 @@ export function PublicPrompts({
   }
 
   return (
-    <ul className="flex flex-col gap-1.5">
+    // A container, because this list is rendered at two very different widths —
+    // full measure when it stacks under the board, and a 17rem rail beside it.
+    // What the rows can afford to show follows the LIST's width, not the
+    // window's: a `sm:` breakpoint would keep the copy button's label on a
+    // desktop window however narrow the column it sits in had become.
+    <ul className="@container/shared flex flex-col gap-1.5">
       {shared.map(({ prompt, shareId }) => (
         <li
           key={prompt.id}
@@ -122,7 +127,9 @@ function CopyLinkButton({ shareId, title }: { shareId: string; title: string }) 
       ) : (
         <Link2 className="size-3.5" aria-hidden />
       )}
-      <span className="hidden sm:inline">{copied ? 'Copied' : 'Copy link'}</span>
+      {/* Icon-only in the rail; the accessible name above carries the meaning
+          either way, so nothing is lost when the label goes. */}
+      <span className="hidden @min-[26rem]/shared:inline">{copied ? 'Copied' : 'Copy link'}</span>
     </button>
   );
 }

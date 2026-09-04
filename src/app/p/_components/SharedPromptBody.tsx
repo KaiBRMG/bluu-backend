@@ -8,9 +8,10 @@ import { Check, Copy } from 'lucide-react';
  *
  * `dangerouslySetInnerHTML` is safe here for the same reason it is safe in the
  * detail card: `sanitizePromptHtml` runs on the server at write AND again on
- * read, and the dialect strips **every attribute** — there is no `href`,
- * `style`, `src` or `on*` left for anything to hide in. Do not widen that
- * dialect to serve this page.
+ * read, and the dialect strips every attribute except one — a `<mark>`'s
+ * highlight class, which is not copied from the input but re-emitted from the
+ * five literals in `promptHtml.ts`. There is no `href`, `style`, `src` or `on*`
+ * left for anything to hide in. Do not widen that dialect to serve this page.
  *
  * Copy takes the PLAIN text, never the HTML. `text` is the canonical
  * representation (the rich layer is presentation), and a prompt pasted into a

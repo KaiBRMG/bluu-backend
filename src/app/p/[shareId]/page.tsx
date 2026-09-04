@@ -44,7 +44,7 @@ export default function SharedPromptPage({
       </Suspense>
 
       <footer className="mt-auto pt-4 text-xs text-zinc-500">
-        Shared from the Bluu Rock MGMT prompt library. This page is read-only and is not indexed.
+        Shared from the Bluu Rock MGMT prompt library.
       </footer>
     </main>
   );
@@ -64,10 +64,19 @@ async function SharedPromptContent({ params }: { params: Promise<{ shareId: stri
   return (
     <>
       {/* `items-start`, not `items-center`: the right column is two stacked
-          elements, and centring would drag the wordmark down to meet them. */}
+          elements, and centring would drag the logo down to meet them. */}
       <div className="flex flex-wrap items-start justify-between gap-4">
+        {/* Intrinsic size given so the ratio is known before the bytes land — a
+            raster logo with only a height would reserve no width and shift the
+            header as it decodes. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo/bluu_long.svg" alt="Bluu" className="h-6 w-auto" />
+        <img
+          src="/logo/HQ2.webp"
+          alt="Bluu Rock"
+          width={1374}
+          height={868}
+          className="h-10 w-auto"
+        />
 
         {/* The hand-off into the app sits under the label framing this page as
             read-only — the one thing a recipient can act on, in the corner an
@@ -130,7 +139,7 @@ function SharedPromptSkeleton() {
   return (
     <div className="flex flex-col gap-6" aria-hidden>
       <div className="flex items-start justify-between gap-4">
-        <div className="h-6 w-28 rounded-md bg-white/[0.06]" />
+        <div className="h-10 w-16 rounded-md bg-white/[0.06]" />
         <div className="flex flex-col items-end gap-2">
           <div className="h-5 w-36 rounded-full bg-white/[0.04]" />
           <div className="h-9 w-48 rounded-md bg-white/[0.06]" />

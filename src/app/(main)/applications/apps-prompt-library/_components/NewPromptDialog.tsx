@@ -10,12 +10,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { usePromptLibrary } from '@/contexts/PromptLibraryContext';
+import { hasRichFormatting, htmlToPlainText } from '@/lib/promptHtml';
 import { type LlmType } from '@/types/promptLibrary';
 import { CategoryPicker, TagPicker } from './LabelPicker';
 import { FieldError } from './FieldError';
 import { ModelPicker } from './ModelPicker';
+import { RichPromptEditor } from './RichPromptEditor';
 import { wordCount } from '../_lib/format';
 
 const inputClass =
@@ -73,14 +74,25 @@ function NewPromptForm({
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('');
   const [tags, setTags] = useState<string[]>([]);
-  const [text, setText] = useState('');
+  /**
+   * The body in storage form — the same representation the detail card edits,
+   * so a prompt can be written with formatting from the first version rather
+   * than having to be created plain and then marked up in a second save.
+   */
+  const [bodyHtml, setBodyHtml] = useState('');
   const [saving, setSaving] = useState(false);
+  const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
   const [errors, setErrors] = useState<{
     models?: string;
     title?: string;
     category?: string;
     text?: string;
   }>({});
+
+  // `text` is derived from the markup, never typed separately — the same rule
+  // the server enforces in `resolveBody`, so the two cannot disagree about what
+  // the prompt says.
+  const text = htmlToPlainText(bodyHtml);
 
   // The submit button stays enabled and the form answers on submit. A disabled
   // button that never says which field is missing is a dead end — especially
@@ -112,6 +124,9 @@ function NewPromptForm({
         title,
         tags,
         text,
+        // Plain prompts stay plain in Firestore — `textHtml` is only written
+        // once a mark has actually been applied.
+        textHtml: hasRichFormatting(bodyHtml) ? bodyHtml : null,
       });
       toast.success('Prompt created');
       onOpenChange(false);
@@ -203,26 +218,38 @@ function NewPromptForm({
       </div>
 
       <div className="flex flex-col gap-1">
-        <div className="flex items-baseline justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
           <label htmlFor="prompt-text" className="text-xs text-zinc-400">
             Prompt
           </label>
-          <span className="text-[11px] tabular-nums text-zinc-400">{wordCount(text)} words</span>
+          <div className="flex items-center gap-3">
+            {/* The editor portals its formatting toolbar in here, so the marks
+                sit on the field's own label row rather than hovering above the
+                text. A state ref, not a plain one: the editor needs a re-render
+                once the node exists. */}
+            <div ref={setToolbarHost} className="flex items-center" />
+            <span className="text-[11px] tabular-nums text-zinc-400">{wordCount(text)} words</span>
+          </div>
         </div>
-        <Textarea
+        {/* The same editor the detail card uses, so formatting is available at
+            creation and not only on the second save. */}
+        <RichPromptEditor
           id="prompt-text"
-          value={text}
-          onChange={e => {
-            setText(e.target.value);
+          initialHtml=""
+          onChange={html => {
+            setBodyHtml(html);
             if (errors.text) setErrors(prev => ({ ...prev, text: undefined }));
           }}
-          rows={12}
+          ariaLabel="Prompt text"
           placeholder="Write the prompt exactly as it should be pasted into the model…"
-          aria-invalid={errors.text ? true : undefined}
-          aria-describedby={errors.text ? 'prompt-text-error' : undefined}
-          className={`min-h-56 resize-y whitespace-pre-wrap bg-zinc-800 font-mono text-sm leading-relaxed text-white placeholder:text-zinc-400 focus-visible:border-zinc-500 ${
-            errors.text ? 'border-red-500' : 'border-zinc-700'
-          }`}
+          toolbarHost={toolbarHost}
+          invalid={Boolean(errors.text)}
+          describedBy={errors.text ? 'prompt-text-error' : undefined}
+          // Shorter than the detail card's, because this dialog carries four
+          // other fields above it — and on the same `bg-zinc-800` surface as
+          // every one of them, so the body reads as a field of this form rather
+          // than as a panel that wandered in from the detail card.
+          bodyClassName="min-h-56 border-zinc-700 bg-zinc-800"
         />
         <FieldError id="prompt-text-error" message={errors.text} />
       </div>

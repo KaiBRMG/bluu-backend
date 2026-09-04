@@ -225,12 +225,14 @@ Reads the platform via `electronAPI.app.getPlatform()`. **macOS only, TEMPORARY*
 `permissions.requestNotification()` shows a real silent OS notification, which is what triggers the macOS permission prompt on first fire. Prompting unlocks **Next** → `profile`.
 
 ### Step 4 — `profile` (personal details) — **completes onboarding**
-Collects every field the Settings → Personal Information form holds (profile photo, nickname, DOB, gender, personal email, phone + dialling code, telegram, full address, emergency contact ×3, payment method/info, comments), grouped into titled sections that scroll inside the card under a pinned footer. It opens with a short compliance rationale — the company keeps personnel records for payroll, tax, and compliance — because we are asking for more here than the app otherwise would.
+Collects every field the Settings → Personal Information form holds (profile photo, nickname, DOB, gender, personal email, phone + dialling code, full address, emergency contact ×3, payment method/info, comments), grouped into titled sections that scroll inside the card under a pinned footer. It opens with a short compliance rationale — the company keeps personnel records for payroll, tax, and compliance — because we are asking for more here than the app otherwise would.
 
 Validation is `validateOnboardingProfile` (`src/lib/validation.ts`), which layers a required-field pass over `validatePersonalInfoForm`:
 
 - **Required:** nickname, phone, DOB, full address (street/city/state/zip/country), emergency contact name + number.
-- **Optional but format-validated:** gender, telegram, **alternative email**, emergency contact email, payment method/info, comments, photo.
+- **Optional but format-validated:** gender, **alternative email**, emergency contact email, payment method/info, comments, photo.
+
+**Its own "Link Telegram" section, separate from the required-field form.** Duplicates the mint-and-`window.open` flow from `AnnouncementCard`/`AppSettingsForm` (see [telegram.md](telegram.md#employees-an-extra-channel)) rather than sharing it, and has its own "Skip for now" — it never gates the step's Submit button. On submit, `hasCompletedOnboarding` and `telegramPromptedAtOnboarding` are set together on `/api/user/onboarding`, whether the user linked or skipped: either way they've been asked, so `announcementConfig.ts`'s telegram card must not repeat the ask later — see `announcementConditionMet`.
 
 **`personalEmail` is deliberately no longer required.** Since staff sign in with personal Google accounts, `workEmail` already *is* their personal address for almost everyone — requiring it a second time was a blocking field with no information in it. It survives as an optional "Alternative email" for the minority who keep a separate contact address. The read-only login field above it is labelled **"Login email"**, not "Company email", for the same reason.
 - **DOB** additionally runs `validateDateOfBirth` (not future, age 16–100). The picker's `startMonth`/`endMonth` are bound to the same range so it cannot offer a date the form then rejects.

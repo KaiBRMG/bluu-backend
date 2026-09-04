@@ -41,6 +41,15 @@ export interface SaveVersionInput {
   basedOn: number;
 }
 
+/** The same body, aimed at a version that already exists rather than a new one. */
+export interface OverwriteVersionInput {
+  text: string;
+  textHtml: string | null;
+  editNote: string;
+  /** The version being written over — the one on screen, head or not. */
+  version: number;
+}
+
 interface PromptLibraryValue extends Snapshot {
   loading: boolean;
   error: string | null;
@@ -57,6 +66,11 @@ interface PromptLibraryValue extends Snapshot {
   saveVersion: (
     id: string,
     input: SaveVersionInput
+  ) => Promise<{ prompt: PromptDocument; version: PromptVersion }>;
+  /** Saves over an existing version instead of appending one. */
+  overwriteVersion: (
+    id: string,
+    input: OverwriteVersionInput
   ) => Promise<{ prompt: PromptDocument; version: PromptVersion }>;
   updateMeta: (id: string, input: PromptMetaInput) => Promise<PromptDocument>;
   removePrompt: (id: string) => Promise<void>;
@@ -217,6 +231,38 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
     return result;
   }, []);
 
+  /**
+   * Writes over a version that already exists. The cached history is patched in
+   * place rather than re-fetched — the response carries the version exactly as
+   * stored, so a re-read would only confirm what we already hold.
+   */
+  const overwriteVersion = useCallback(async (id: string, input: OverwriteVersionInput) => {
+    const res = await apiRequest(`/api/prompt-library/${id}/versions`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) await readError(res, 'Failed to save the version');
+    const result = (await res.json()) as { prompt: PromptDocument; version: PromptVersion };
+
+    const known = versionCache.current.get(id);
+    if (known) {
+      versionCache.current.set(
+        id,
+        known.map(v => (v.version === result.version.version ? result.version : v))
+      );
+    }
+
+    setSnapshot(prev => {
+      const next: Snapshot = {
+        ...prev,
+        prompts: prev.prompts.map(p => (p.id === id ? result.prompt : p)),
+      };
+      setCache(CACHE_KEY, next);
+      return next;
+    });
+    return result;
+  }, []);
+
   const updateMeta = useCallback(async (id: string, input: PromptMetaInput) => {
     const res = await apiRequest(`/api/prompt-library/${id}`, {
       method: 'PATCH',
@@ -345,6 +391,7 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
       getVersions,
       createPrompt,
       saveVersion,
+      overwriteVersion,
       updateMeta,
       removePrompt,
       shareLink,
@@ -362,6 +409,7 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
       getVersions,
       createPrompt,
       saveVersion,
+      overwriteVersion,
       updateMeta,
       removePrompt,
       shareLink,

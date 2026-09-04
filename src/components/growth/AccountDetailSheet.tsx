@@ -202,7 +202,7 @@ function ExtraMetrics({
         ))}
       </dl>
       <p className="mt-2 text-[11px] text-zinc-400">
-        As of {formatDay(snapshot.date)} · not part of the imported history, so not charted
+        As of {formatDay(snapshot.date)}
       </p>
     </section>
   );

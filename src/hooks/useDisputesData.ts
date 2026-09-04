@@ -40,7 +40,16 @@ const CA_USERS_KEY = 'bluu_disputes_ca_users_v1';
 
 // ─── Hook ─────────────────────────────────────────────────────────────
 
-export function useDisputesData() {
+export interface UseDisputesDataOptions {
+  /**
+   * Load the creator / CA-user pickers. Only the create form needs them, and a
+   * page mounts this hook once per feed — so a caller that just fetches or
+   * mutates passes `false` and skips two requests per instance.
+   */
+  lookups?: boolean;
+}
+
+export function useDisputesData({ lookups = true }: UseDisputesDataOptions = {}) {
   const { user } = useAuth();
   const authFetch = useAuthFetch();
 
@@ -78,10 +87,10 @@ export function useDisputesData() {
   }, [authFetch]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !lookups) return;
     loadCreators();
     loadCaUsers();
-  }, [user, loadCreators, loadCaUsers]);
+  }, [user, lookups, loadCreators, loadCaUsers]);
 
   // ── Fetch disputes (not cached — always fresh) ─────────────────────
 

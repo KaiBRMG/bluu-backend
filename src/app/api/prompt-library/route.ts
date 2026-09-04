@@ -49,6 +49,11 @@ export const POST = withAuth(async (req: NextRequest, token: DecodedIdToken) => 
         { status: 400 }
       );
     }
+    // The rich body is optional — a prompt written without a single mark stays
+    // plain in Firestore — but it must be markup or nothing when it is sent.
+    if (body?.textHtml !== undefined && body.textHtml !== null && typeof body.textHtml !== 'string') {
+      return NextResponse.json({ error: 'Malformed prompt body' }, { status: 400 });
+    }
     // A prompt may target several models, but must target at least one.
     if (
       !Array.isArray(body?.llmTypes) ||

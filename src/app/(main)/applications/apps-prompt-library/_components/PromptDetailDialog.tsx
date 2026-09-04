@@ -15,6 +15,7 @@ import {
   NotebookPen,
   Pencil,
   RotateCcw,
+  Save,
   Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -131,6 +132,7 @@ function PromptDetailBody({
     refresh,
     getVersions,
     saveVersion,
+    overwriteVersion,
     updateMeta,
     removePrompt,
     shareLink,
@@ -150,7 +152,13 @@ function PromptDetailBody({
     html: '',
   });
   const [editNote, setEditNote] = useState('');
-  const [saving, setSaving] = useState(false);
+  /**
+   * Which save is in flight, not merely whether one is. Both buttons sit side
+   * by side, so a shared boolean put "Saving…" on both of them and left the
+   * author unable to tell which act they had actually asked for.
+   */
+  const [savingKind, setSavingKind] = useState<'new' | 'current' | null>(null);
+  const saving = savingKind !== null;
   const [showDiff, setShowDiff] = useState(false);
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -162,6 +170,11 @@ function PromptDetailBody({
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
 
   const editorRef = useRef<RichPromptEditorHandle>(null);
+  // The note field is pre-filled with the version's stored note exactly once per
+  // card. Latched, because the history effect can re-run and must not overwrite
+  // what the author has typed since — including a note they deliberately
+  // cleared, which `editNote || stored` alone would silently refill.
+  const noteSeeded = useRef(false);
   // Read inside the editor's change handler, which is created before `viewing`
   // has settled on its first value.
   const viewingRef = useRef<number | null>(null);
@@ -180,7 +193,15 @@ function PromptDetailBody({
       .then(list => {
         if (cancelled) return;
         setVersions(list);
-        setViewing(current => current ?? list[0]?.version ?? headVersion);
+        const initial = list[0]?.version ?? headVersion;
+        setViewing(current => current ?? initial);
+        // The note box opens on the note this version already carries, so an
+        // edit revises the record rather than starting from a blank field and
+        // quietly replacing it with nothing.
+        if (!noteSeeded.current) {
+          noteSeeded.current = true;
+          setEditNote(list.find(v => v.version === initial)?.editNote ?? '');
+        }
       })
       .catch(err => toast.error(err instanceof Error ? err.message : 'Failed to load history'));
     return () => {
@@ -203,6 +224,10 @@ function PromptDetailBody({
   const draftText = useMemo(() => htmlToPlainText(draftHtml), [draftHtml]);
   const dirty =
     current !== null && baseline.version === current.version && draftHtml !== baseline.html;
+  /** The note alone can be edited — that is a change worth saving, but only to
+   *  the version it belongs to; a new version of unchanged text is not one. */
+  const noteDirty = current !== null && editNote.trim() !== current.editNote;
+  const unsaved = dirty || noteDirty;
 
   const isLatest = versions !== null && viewing === versions[0]?.version;
   const index = versions?.findIndex(v => v.version === viewing) ?? -1;
@@ -231,7 +256,9 @@ function PromptDetailBody({
       setViewing(version);
       viewingRef.current = version;
       setBaseline({ version: null, html: '' });
-      setEditNote('');
+      // The note follows the version, both on a switch and on a revert: it is
+      // that version's note, not a scratch field that survives the move.
+      setEditNote(target?.editNote ?? '');
       if (target) editorRef.current?.setHtml(promptBodyHtml(target.text, target.textHtml));
     },
     [versions]
@@ -239,18 +266,18 @@ function PromptDetailBody({
 
   const goToVersion = useCallback(
     (version: number) => {
-      if (dirty) {
+      if (unsaved) {
         setPendingVersion(version);
         return;
       }
       switchTo(version);
     },
-    [dirty, switchTo]
+    [unsaved, switchTo]
   );
 
   const handleSave = useCallback(async () => {
     if (!prompt || !current || !dirty || saving) return;
-    setSaving(true);
+    setSavingKind('new');
     try {
       const { version } = await saveVersion(prompt.id, {
         text: draftText,
@@ -265,15 +292,60 @@ function PromptDetailBody({
       setViewing(version.version);
       viewingRef.current = version.version;
       setBaseline({ version: null, html: '' });
-      setEditNote('');
+      setEditNote(version.editNote);
       editorRef.current?.setHtml(promptBodyHtml(version.text, version.textHtml));
       toast.success(`Saved as v${version.version}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save');
     } finally {
-      setSaving(false);
+      setSavingKind(null);
     }
   }, [prompt, current, dirty, draftText, draftHtml, editNote, saving, saveVersion]);
+
+  /**
+   * Writes the edit back into the version on screen instead of cutting a new
+   * one — the correction path, for a typo or a better-worded note.
+   *
+   * It replaces that version's note rather than adding to it, which is why the
+   * field is pre-filled: an author edits the note that is there, and a save is
+   * never a silent deletion of one.
+   */
+  const handleSaveCurrent = useCallback(async () => {
+    if (!prompt || !current || !(dirty || noteDirty) || saving) return;
+    setSavingKind('current');
+    try {
+      const { version } = await overwriteVersion(prompt.id, {
+        text: draftText,
+        textHtml: hasRichFormatting(draftHtml) ? draftHtml : null,
+        editNote: editNote.trim(),
+        version: current.version,
+      });
+      setVersions(prev =>
+        prev ? prev.map(v => (v.version === version.version ? version : v)) : [version]
+      );
+      setShowDiff(false);
+      // The version did not move, so only the baseline has to be re-taken —
+      // the editor is already showing exactly what was just stored.
+      setBaseline({ version: null, html: '' });
+      setEditNote(version.editNote);
+      editorRef.current?.setHtml(promptBodyHtml(version.text, version.textHtml));
+      toast.success(`v${version.version} updated`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSavingKind(null);
+    }
+  }, [
+    prompt,
+    current,
+    dirty,
+    noteDirty,
+    draftText,
+    draftHtml,
+    editNote,
+    saving,
+    overwriteVersion,
+  ]);
 
   // Any modal that is currently covering the editor. The shortcut below is bound
   // to the window, so without this it would cut a version behind an open dialog.
@@ -286,39 +358,42 @@ function PromptDetailBody({
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         if (blocked) return;
-        void handleSave();
+        // Ctrl+S keeps its meaning — a new version — while there is new text to
+        // put in one. With only the note touched there is no new version to
+        // cut, so it saves the note where it belongs: on this version.
+        void (dirty ? handleSave() : handleSaveCurrent());
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [handleSave, blocked]);
+  }, [handleSave, handleSaveCurrent, dirty, blocked]);
 
   // Unsaved text is only in this component; warn before the tab takes it away.
   useEffect(() => {
-    if (!dirty) return;
+    if (!unsaved) return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty]);
+  }, [unsaved]);
 
   const requestClose = useCallback(() => {
-    if (dirty) {
+    if (unsaved) {
       setPendingClose(true);
       return;
     }
     onClose();
-  }, [dirty, onClose]);
+  }, [unsaved, onClose]);
 
   // Escape and the overlay are the Dialog's to handle, so it needs to know
   // whether closing is currently safe.
   useEffect(() => {
     registerGuard(() => {
-      if (!dirty) return true;
+      if (!unsaved) return true;
       setPendingClose(true);
       return false;
     });
     return () => registerGuard(null);
-  }, [dirty, registerGuard]);
+  }, [unsaved, registerGuard]);
 
   const copy = async () => {
     try {
@@ -710,21 +785,22 @@ function PromptDetailBody({
           its first message: a live region that arrives together with its own
           text is commonly not announced at all. */}
       <p aria-live="polite" className="sr-only">
-        {dirty ? 'Unsaved changes. A save bar is available below the prompt text.' : ''}
+        {unsaved ? 'Unsaved changes. A save bar is available below the prompt text.' : ''}
       </p>
 
       {/* ── Save bar. Present only when there is something to save — which is
           also the only time the note field exists: an always-present note box
           would read as required on a card that is mostly opened to read. ── */}
-      {dirty && (
+      {unsaved && (
         <footer className="flex flex-col gap-2 border-t border-white/[0.07] px-5 py-3">
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
             <p className="flex items-center gap-2 text-xs text-zinc-300">
               <span className="inline-block size-2 rounded-full bg-orange-400" aria-hidden />
               Unsaved changes
+              {/* What changed, in three words. The buttons below name the
+                  versions, so repeating them here only doubles the reading. */}
               <span className="text-zinc-400">
-                — saving creates v{(versions?.[0]?.version ?? prompt.version) + 1} from v
-                {current?.version}
+                {dirty ? '— the prompt text' : '— the edit note'}
               </span>
             </p>
             <span className="text-[11px] tabular-nums text-zinc-400">
@@ -741,6 +817,13 @@ function PromptDetailBody({
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <label htmlFor="prompt-edit-note" className="text-xs text-zinc-400">
                 Edit note (optional)
+                {/* Says which version's note is in the box, because it opens
+                    pre-filled with one — without this, an author who does not
+                    recognise the text cannot tell whether it is theirs to
+                    change or something they are about to overwrite. */}
+                {noteOnScreen && (
+                  <span className="text-zinc-400"> — revising v{current?.version}’s note</span>
+                )}
               </label>
               <Textarea
                 id="prompt-edit-note"
@@ -761,9 +844,30 @@ function PromptDetailBody({
                 <RotateCcw className="size-3.5" aria-hidden />
                 Revert
               </Button>
-              <Button size="sm" onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving…' : 'Save as new version'}
+              {/* Two ways to keep the edit, and they are genuinely different
+                  acts: one adds to the history, the other corrects it. The
+                  destructive-of-history one is the secondary button. */}
+              <Button
+                variant={dirty ? 'outline' : 'default'}
+                size="sm"
+                onClick={handleSaveCurrent}
+                disabled={saving}
+              >
+                <Save className="size-3.5" aria-hidden />
+                {savingKind === 'current' ? 'Saving…' : `Save to v${current?.version}`}
               </Button>
+              {/* Absent, not disabled, when only the note changed: a new
+                  version of identical text is not a thing the server will cut
+                  (it answers 409), so offering it would be offering a dead end.
+                  With nothing to choose between, the remaining save takes the
+                  primary role. */}
+              {dirty && (
+                <Button size="sm" onClick={handleSave} disabled={saving}>
+                  {savingKind === 'new'
+                    ? 'Saving…'
+                    : `Save as v${(versions?.[0]?.version ?? prompt.version) + 1}`}
+                </Button>
+              )}
             </div>
           </div>
         </footer>

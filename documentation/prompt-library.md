@@ -13,7 +13,7 @@
 | `src/lib/services/promptLibraryService.ts` | Server-only Firestore read/write; 60s in-process cache |
 | `src/app/api/prompt-library/route.ts` | GET the whole library + taxonomy · POST create |
 | `src/app/api/prompt-library/[id]/route.ts` | PATCH metadata/archive · DELETE (**admin claim**) |
-| `src/app/api/prompt-library/[id]/versions/route.ts` | GET history · POST a new version |
+| `src/app/api/prompt-library/[id]/versions/route.ts` | GET history · POST a new version · PATCH one in place |
 | `src/app/api/prompt-library/[id]/share/route.ts` | POST mint/return the public share link · DELETE revoke it |
 | `src/lib/promptShareUrl.ts` | `promptShareUrl` (public URL) and `promptDeepLink` (`bluu://prompt?id=`) |
 | `src/app/p/[shareId]/` | The **public, unauthenticated** read-only page + its `_components` |
@@ -96,13 +96,28 @@ The body is stored twice, on both the head and every version document:
 | `text` | The plain-text projection. **Canonical.** | Copy to clipboard, the search index, the version diff, every pre-formatting prompt |
 | `textHtml` | The presentation layer, or `null` | The detail card's editor and viewer |
 
-The dialect is **four marks and two lists** — `b/strong`, `i/em`, `u`, `ul/ol/li`, plus the `p/div/br` the browser emits — and **no attributes at all survive sanitisation**. That total attribute strip is what makes rendering it with `dangerouslySetInnerHTML` safe: there is no `href`, `style`, `src` or `on*` for anything to hide in. `sanitizePromptHtml` runs on the **server at write** and again in the **renderer at read**, from the same isomorphic function, so neither the client nor the database is trusted.
+The dialect is **five marks and two lists** — `b/strong`, `i/em`, `u`, `mark`, `ul/ol/li`, plus the `p/div/br` the browser emits — and **exactly one attribute survives sanitisation**: the `class` on a `<mark>`, carrying the highlight colour. It is never copied from the input — the tag is re-emitted from the allowlist and the class is re-emitted from `HIGHLIGHT_COLORS`, so the only five strings that can ever appear are the ones that file defines. Everything else is stripped wholesale, which is what makes rendering it with `dangerouslySetInnerHTML` safe: there is no `href`, `style`, `src` or `on*` for anything to hide in. `sanitizePromptHtml` runs on the **server at write** and again in the **renderer at read**, from the same isomorphic function, so neither the client nor the database is trusted.
 
 Three consequences worth knowing before touching `promptHtml.ts`:
 
 - **When rich markup is supplied, `text` is DERIVED from it server-side** (`resolveBody`), never taken from the client. The two can't disagree about what the prompt says.
 - **`textHtml` is only written once a mark is actually applied** (`hasRichFormatting`). Editing a plain prompt without formatting it leaves it plain in Firestore, exactly as before.
 - **`htmlToPlainText` must not collapse blank lines, and must drop the `<br>` inside an empty block.** A browser writes an empty line in `contentEditable` as `<div><br></div>` — a `<br>` *and* a block close. Counting both doubles every blank line on each save, silently re-flowing prompts already in production. The ordering in that function is load-bearing.
+
+### Highlight: two representations again, for the same reason
+
+The five highlight colours (yellow, green, blue, purple, pink — defined in `HIGHLIGHT_COLORS`, styled once as `mark.hl-*` in `globals.css`, documented in [DESIGN.md](../DESIGN.md) §2) are stored as `<mark class="hl-…">` but **edited as `<span style="background-color: …">`**:
+
+| | Form | Why |
+|---|---|---|
+| Storage / render | `<mark class="hl-blue">` | The dialect has no `style` attribute, and `<mark>` is what a highlight *is* |
+| Inside the editor | `<span style="background-color: rgba(…)">` | It is what `execCommand('hiliteColor')` produces — and what it can **split, merge and clear** correctly |
+
+`marksToStyledSpans` converts on the way in (in `setHtml` and the mount seed); `toStorageHtml` converts back on the way out, matching a span's background on the **rgb triple only** (the alpha the browser serialises back can differ in precision). A span whose colour is not one of the five — including the `transparent` that clears a highlight — is left for the sanitiser to unwrap, and **that is how clearing works**: there is no removal code.
+
+This is why the highlight is not hand-rolled with `Range.surroundContents`. The hard cases are removing a highlight from the *middle* of an existing one, splitting one when half of it is selected, and merging adjacent runs — the browser already gets all three right, and keeps every step on the native undo stack. The one cost is that `styleWithCSS` must be enabled for that single command and turned off immediately after: left on, **bold would start emitting `<span style="font-weight:bold">`**, which the dialect strips, and bold would silently stop saving.
+
+The shortcut is `Ctrl/⌘+Shift+H` (Notion's), and it **toggles** — it applies the last colour used, or removes the highlight when the caret is already inside one. The toolbar control is a `Popover` of named swatches rather than a toggle, because a colour is a choice; its trigger still reports pressed state and shows the colour it would apply as a nib along its bottom edge.
 
 The editor (`RichPromptEditor`) is `contentEditable` + `document.execCommand`. Deprecated, and chosen anyway: the four marks are exactly what it already implements correctly against a live selection, and this renderer is Chromium by construction. The consequence is that **the DOM owns the text while you type** — the body is written in once on mount, pushed in imperatively on a version switch, and read out on change. Pastes are forced to plain text.
 
@@ -116,15 +131,34 @@ The editor (`RichPromptEditor`) is `contentEditable` + `document.execCommand`. D
 
 **The body sets `font-normal` explicitly, and marks render at 900 plus a text-stroke.** `globals.css` sets `body { font-weight: 500 }` app-wide, so prompt text left to inherit reads as already bold and only 500→700 separates it from an actual `<b>`. The editor drops its base to 400 and lifts `b`/`strong` to `font-black` + white. The `-webkit-text-stroke` alongside it is not decoration: Google Sans may ship no 900 face, and a missing weight is silently served as the nearest one available — so `font-black` alone can render identically to `font-bold`. Stroking the glyph thickens it whatever faces exist. Don't remove the `font-normal` as redundant either; it is doing work.
 
-**The toolbar is one tab stop, not four.** It declares `role="toolbar"`, so it owes the interaction that role implies (APG): a **roving tabindex** — only the button at `toolbarIndex` is tabbable, `ArrowLeft`/`ArrowRight` wrap between them, `Home`/`End` jump to the ends, and `onFocus` re-seats the cursor so a click and the keyboard never disagree. Declaring the role without this is worse than omitting it, because a screen reader announces "toolbar, 4 items" and the arrow keys then do nothing. Don't "simplify" it back to four plain toggles.
+**The toolbar is one tab stop, not five.** It declares `role="toolbar"`, so it owes the interaction that role implies (APG): a **roving tabindex** — only the button at `toolbarIndex` is tabbable, `ArrowLeft`/`ArrowRight` wrap between them, `Home`/`End` jump to the ends, and `onFocus` re-seats the cursor so a click and the keyboard never disagree. Declaring the role without this is worse than omitting it, because a screen reader announces "toolbar, 5 items" and the arrow keys then do nothing. Don't "simplify" it back to five plain toggles.
 
-**The toolbar belongs to the editor but is placed by the caller.** It reads `queryCommandState` off the live selection and acts on this editor's caret, so it cannot be a separate component — but it is portalled into a `toolbarHost` node the detail card renders in the **version rail**, next to "First version" / "Edited from vN", rather than floating above the text. The host is held in `useState` (not a ref) because the editor needs a re-render once the node exists.
+**The toolbar belongs to the editor but is placed by the caller.** It reads `queryCommandState` off the live selection and acts on this editor's caret, so it cannot be a separate component — but it is portalled into a `toolbarHost` node the caller renders: the detail card puts it in the **version rail**, next to "First version" / "Edited from vN"; `NewPromptDialog` puts it on the Prompt field's own label row. The host is held in `useState` (not a ref) because the editor needs a re-render once the node exists.
+
+**The same editor writes version 1.** `NewPromptDialog` uses `RichPromptEditor` too, so a prompt can be written with formatting rather than being created plain and marked up in a second save. It differs only in the props a blank form needs — a shorter `bodyClassName`, an `invalid`/`describedBy` pair for the form's error recovery, and a `placeholder` (a `::before` on `:empty`, since `contentEditable` has none — it is gone for good once Chromium drops a `<br>` in the box, which is why the field is also labelled).
 
 ## Versioning
 
 `POST /api/prompt-library/[id]/versions` takes `{ text, textHtml, editNote, basedOn }` where **`basedOn` is the version the editor was actually looking at**, which may not be the head. The whole write runs in a transaction that reads the head and the `basedOn` version together, diffs against **that** version's text, and appends the result at `versionCount + 1`.
 
-This is what makes the lineage truthful: edit v3 and you get v4 "Edited from v3"; then reach back and edit v2 and you get v5 "Edited from v2". An unchanged save returns **409** — and "unchanged" now compares **both** layers, so applying bold and nothing else is a real version. Metadata edits (`PATCH`) never cut a version — the history is the history of the prompt *body*.
+This is what makes the lineage truthful: edit v3 and you get v4 "Edited from v3"; then reach back and edit v2 and you get v5 "Edited from v2". An unchanged save returns **409** — and "unchanged" now compares **both** layers, so applying bold and nothing else is a real version. Metadata edits (`PATCH /api/prompt-library/[id]`) never cut a version — the history is the history of the prompt *body*.
+
+### Saving over a version instead of after it
+
+`PATCH /api/prompt-library/[id]/versions` takes `{ version, text, textHtml, editNote }` and writes **over** the version on screen. It is the correction path — a typo, a tightened sentence, a better-worded note — because cutting a version for those is how a history becomes unreadable. Same tier as the POST: overwriting a version is not a more privileged act than appending one.
+
+Four things it does differently, each deliberate:
+
+- **The head document is only rewritten when the target IS the head.** Correcting an older version must not resurrect its text as the current one. `lastUpdatedTime`/`By` move either way — the prompt *was* edited, and the board says so.
+- **`change` is recomputed against the same `basedOn`** the version already carried, so the stored diff still describes that version's real distance from its parent.
+- **`createdTime`/`createdBy` are untouched.** It is still the same version, first written by whoever wrote it.
+- **A note-only edit counts as a change** (the POST path would 409 it), because that is the entire point of the button.
+
+On the card the two saves sit side by side — *Save to vN* and *Save as vN+1* — with *Save as* **absent, not disabled**, when only the note changed: the server would 409 it, so offering it would be offering a dead end. `Ctrl/⌘+S` follows the same rule; it cuts a version while there is new text to put in one, and otherwise saves the note where it belongs.
+
+### The note field opens on the note that is there
+
+The edit-note box is **pre-filled with the stored note of the version being viewed**, and follows the version on a switch or a revert. Overwriting replaces that note rather than merging, so a blank box would make every correction a silent deletion of the previous author's explanation. It is seeded exactly once per card (a `noteSeeded` latch), so a re-run of the history effect cannot refill a note the author has deliberately cleared.
 
 ### Edit notes
 
@@ -221,8 +255,10 @@ The button fires `bluu://prompt?id=<promptId>`. `main.js` does not interpret it 
 
 ### The "Public Prompts" section
 
-Below *Recently updated* on the home screen ([`PublicPrompts.tsx`](../src/app/(main)/applications/apps-prompt-library/_components/PublicPrompts.tsx)) — every prompt currently readable by anyone holding a link.
+A **right-hand rail** on the home screen ([`PublicPrompts.tsx`](../src/app/(main)/applications/apps-prompt-library/_components/PublicPrompts.tsx)) — every prompt currently readable by anyone holding a link.
 
+- **The rail is a container query, not a breakpoint** (`@container/library` + `@min-[83rem]`). Whether it fits depends on the width of the content COLUMN, which changes when the sidebar collapses; a `min-[…]` media query measures the window and would get that wrong in both directions. 83rem is the sum it needs — 64rem of board, the 2rem gap, a 17rem rail — and below it the rail drops back underneath the board, which is where it used to live. **The board keeps its full 64rem measure at every width**; the rail only ever occupies space the page was leaving empty.
+- The list is its own container too (`@container/shared`), so the copy button sheds its text label in the rail and keeps it when the list is full-width. Its accessible name is unchanged either way.
 - **A flat list, not the board.** The question it answers is "what have we put on the open internet?"; grouping by category would scatter the answer. Newest-updated first.
 - **Rendered even when empty**, unlike *Recently updated*. An absent section is indistinguishable from one you scrolled past, and a silence is not the same as an explicit "nothing is shared".
 - **Archived prompts are excluded even when they still carry a share token**, because `getSharedPrompt` refuses an archived prompt — its link already 404s, so listing it would report exposure that does not exist. The token stays on the document and comes back if the prompt is restored, which is why archiving is **not** a substitute for "Stop sharing".

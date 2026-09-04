@@ -699,3 +699,40 @@ input[type="date"].form-input {
     @apply bg-background text-foreground;
   }
 }
+
+/* ── Prompt Library: highlight palette ────────────────────────────────────────
+   The five colours of the prompt rich-text dialect, defined once for every
+   surface that renders it — the detail card, the editor after a version switch,
+   and the PUBLIC share page at /p/[shareId], which is in this same app and so
+   inherits these rules for free.
+
+   The values must stay in step with HIGHLIGHT_COLORS in src/lib/promptHtml.ts;
+   that file is the source of truth (it is what the editor writes and what the
+   sanitiser allows). `color: inherit` is load-bearing — the UA sheet paints
+   <mark> black-on-yellow, which is unreadable on this app's dark surfaces. */
+mark[class^='hl-'],
+mark:not([class]) {
+  color: inherit;
+  /* --radius is 0.625rem; the documented `sm` step (calc(--radius - 4px)) is
+     the smallest one in the scale, and the right one for an inline run. */
+  border-radius: calc(var(--radius) - 4px);
+  padding: 0 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+mark:not([class]),
+mark.hl-yellow {
+  background-color: rgba(250, 204, 21, 0.32);
+}
+mark.hl-green {
+  background-color: rgba(34, 197, 94, 0.32);
+}
+mark.hl-blue {
+  background-color: rgba(59, 130, 246, 0.32);
+}
+mark.hl-purple {
+  background-color: rgba(168, 85, 247, 0.32);
+}
+mark.hl-pink {
+  background-color: rgba(244, 63, 94, 0.32);
+}
