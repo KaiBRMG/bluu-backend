@@ -384,12 +384,7 @@ export default function GrowthTrackingPage() {
               </p>
             ) : (
               <>
-                <GrowthStatCards
-                  accounts={accounts}
-                  postCount={posts.posts.length}
-                  signalCount={signals.length}
-                  threshold={threshold}
-                />
+                <GrowthStatCards accounts={accounts} seriesById={seriesById} />
 
                 <SignalsStrip
                   signals={signals}

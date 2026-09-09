@@ -2,7 +2,9 @@
 
 import { memo } from 'react';
 import { Sparkline } from './Sparkline';
-import { AccountAvatar, CategoryDot, DeltaValue, PlatformIcon, SpikeBadge } from './growthUi';
+import {
+  AccountAvatar, CategoryDot, DeltaValue, PlatformIcon, ScrapeFailedBadge, SpikeBadge,
+} from './growthUi';
 import {
   formatCompact,
   formatCount,
@@ -32,10 +34,27 @@ import type { GrowthAccount } from '@/types/firestore';
  * where `role="button"` on a `<tr>` would have orphaned the cells. The focus
  * ring is Action Blue, the one voice that means "act here".
  *
- * Colour on this surface is rationed to three jobs, each of them a state: the
- * delta's direction (green / red), a spike (orange, *attention needed*), and the
- * category dot (a closed vocabulary — the one label DESIGN.md lets carry a hue).
- * The platform mark stays greyscale; brand colour would be decoration.
+ * Colour on this surface is rationed to four jobs, each of them a state: the
+ * delta's direction (green / red), a spike (orange, *attention needed*), a
+ * failed read (red, an error), and the category dot (a closed vocabulary — the
+ * one label DESIGN.md lets carry a hue). The platform mark stays greyscale;
+ * brand colour would be decoration.
+ *
+ * ── The failed-read mark ────────────────────────────────────────────
+ * Without it the card's failure state is *invisible in exactly the way that
+ * matters*: a scrape that failed leaves the last good reading in place, so the
+ * figure and the sparkline still look like current data and there is nothing to
+ * suggest otherwise. Only the manage table and the account page said so, and
+ * neither is where the roster is read.
+ *
+ * It is gated on `isActive`. A stopped account is not scraped at all, so its
+ * `lastScrapeStatus` is frozen at whatever it was the night tracking was turned
+ * off — rendering that as a live failure would report a job that is not running
+ * and cannot fail. Same reasoning as the stopped table's "Never read" cell.
+ *
+ * A failed read and a spike can both be true (the spike is computed from
+ * history), so the two marks stack rather than competing for one slot, error
+ * first.
  */
 export const AccountCard = memo(function AccountCard({
   account,
@@ -56,6 +75,7 @@ export const AccountCard = memo(function AccountCard({
   const points = sparklineFor(days, from);
   const rising = delta.change !== null && delta.change > 0;
   const falling = delta.change !== null && delta.change < 0;
+  const readFailed = account.isActive && account.lastScrapeStatus === 'failed';
 
   return (
     <button
@@ -77,7 +97,12 @@ export const AccountCard = memo(function AccountCard({
           </div>
           <CategoryDot category={account.category} className="mt-0.5" />
         </div>
-        {spikePercent !== null && <SpikeBadge percent={spikePercent} />}
+        {(readFailed || spikePercent !== null) && (
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            {readFailed && <ScrapeFailedBadge error={account.lastScrapeError} />}
+            {spikePercent !== null && <SpikeBadge percent={spikePercent} />}
+          </div>
+        )}
       </div>
 
       <div className="mb-2 flex items-baseline justify-between gap-2">

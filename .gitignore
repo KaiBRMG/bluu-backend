@@ -33,6 +33,7 @@ Thumbs.db
 
 # Legacy folder with committed secrets — keep untracked
 Delete/
+REDESIGN/
 
 functions/node_modules
 

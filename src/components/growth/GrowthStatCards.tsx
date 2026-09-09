@@ -2,8 +2,10 @@
 
 import { memo, useMemo } from 'react';
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { AccountAvatar, PlatformIcon } from './growthUi';
 import { PLATFORM_LABEL, type GrowthPlatform } from '@/lib/growth/platform';
-import { formatCount } from '@/lib/growth/metrics';
+import { formatCount, formatPercent, type DayMap } from '@/lib/growth/metrics';
+import { SPIKE_WINDOW_DAYS, spikePercent } from '@/lib/growth/signals';
 import type { GrowthAccount } from '@/types/firestore';
 
 /**
@@ -31,18 +33,36 @@ import type { GrowthAccount } from '@/types/firestore';
  * contributes nothing rather than a zero — the difference between "this page has
  * no followers" and "we have not looked yet" is the whole reason the tile states
  * its coverage.
+ *
+ * ── The two named tiles ─────────────────────────────────────────────
+ * The third and fourth tiles name an **account** rather than counting something,
+ * which is why each keeps the Display-step figure on the metric and puts the
+ * identity in the line beneath: the number is what the row of tiles is scanned
+ * for, and four tiles whose big text is sometimes a handle and sometimes a
+ * figure would not scan as a row at all.
+ *
+ * They answer two different questions that are easy to conflate:
+ *
+ *  - **Biggest Mover** — who is *largest*. A standing fact about the roster,
+ *    computed from the same denormalized `latest` reading the totals use, and
+ *    including stopped accounts for the same reason the totals do: their last
+ *    reading is still a fact and still counts toward the operation's reach.
+ *  - **Fastest Growing** — who is *moving*, over the fixed seven-day window
+ *    `signals.ts` owns. Active accounts only, because a stopped account's last
+ *    week is frozen history rather than news — the rule `signalsFor` already
+ *    follows, and sharing `spikePercent` is what keeps this tile and the Signals
+ *    band from ever disagreeing about who is growing.
+ *
+ * Both stay range-independent like the totals beside them: the window here is
+ * the signal window, never the page's range control.
  */
 export const GrowthStatCards = memo(function GrowthStatCards({
   accounts,
-  postCount,
-  signalCount,
-  threshold,
+  seriesById,
 }: {
   accounts: GrowthAccount[];
-  /** Tracked X posts across the whole roster. */
-  postCount: number;
-  signalCount: number;
-  threshold: number;
+  /** The follower history, for the seven-day growth reading. */
+  seriesById: ReadonlyMap<string, DayMap>;
 }) {
   const totals = useMemo(() => {
     const byPlatform: Record<GrowthPlatform, { followers: number; measured: number; total: number }> = {
@@ -62,6 +82,35 @@ export const GrowthStatCards = memo(function GrowthStatCards({
     }
     return byPlatform;
   }, [accounts]);
+
+  /** Largest by its most recent reading. Stopped accounts included — see above. */
+  const biggest = useMemo(() => {
+    let best: { account: GrowthAccount; followers: number } | null = null;
+    for (const account of accounts) {
+      if (!account.latest) continue;
+      if (!best || account.latest.followers > best.followers) {
+        best = { account, followers: account.latest.followers };
+      }
+    }
+    return best;
+  }, [accounts]);
+
+  /**
+   * Strongest seven-day growth. Only positive movement qualifies: on a week when
+   * the whole roster slipped, the least-shrinking account is not "fastest
+   * growing", and naming it as though it were is the kind of quietly false
+   * headline this subsystem writes `—` for everywhere else.
+   */
+  const fastest = useMemo(() => {
+    let best: { account: GrowthAccount; percent: number } | null = null;
+    for (const account of accounts) {
+      if (!account.isActive) continue;
+      const percent = spikePercent(seriesById.get(account.id) ?? {});
+      if (percent === null || percent <= 0) continue;
+      if (!best || percent > best.percent) best = { account, percent };
+    }
+    return best;
+  }, [accounts, seriesById]);
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -88,30 +137,58 @@ export const GrowthStatCards = memo(function GrowthStatCards({
 
       <Card className="gap-3 py-4">
         <CardHeader className="px-4">
-          <CardDescription>Posts Tracked</CardDescription>
-          <CardTitle className="text-2xl font-semibold tabular-nums">{postCount}</CardTitle>
-          <p className="text-[11px] text-zinc-400">
-            {postCount === 0
-              ? 'Paste an X post link on an account to start'
-              : 'On X — engagement read on a schedule'}
-          </p>
+          <CardDescription>Biggest Mover</CardDescription>
+          <CardTitle className="text-2xl font-semibold tabular-nums">
+            {biggest === null ? '—' : formatCount(biggest.followers)}
+          </CardTitle>
+          {biggest === null
+            ? <p className="text-[11px] text-zinc-400">No account has been read yet</p>
+            : <AccountLine account={biggest.account} />}
         </CardHeader>
       </Card>
 
       <Card className="gap-3 py-4">
         <CardHeader className="px-4">
-          <CardDescription>Active Signals</CardDescription>
-          <CardTitle className="text-2xl font-semibold tabular-nums">{signalCount}</CardTitle>
-          {/* Orange is the app's attention-needed hue, and a signal is exactly
-              that. At zero the line goes back to Ink Secondary — a permanently
-              coloured tile is a coloured tile nobody reads. */}
-          <p className={`text-[11px] ${signalCount > 0 ? 'text-orange-400' : 'text-zinc-400'}`}>
-            {signalCount > 0
-              ? `Growing over ${threshold}% this week`
-              : `Nothing over ${threshold}% this week`}
-          </p>
+          <CardDescription>Fastest Growing</CardDescription>
+          {/* Green is the app's direction-of-travel hue and the figure is a
+              measured rise, so it carries it — the same green the account card's
+              delta uses. With nothing above zero the tile goes back to Ink
+              Secondary; a permanently coloured tile is one nobody reads. */}
+          <CardTitle
+            className={`text-2xl font-semibold tabular-nums ${fastest ? 'text-green-400' : ''}`}
+          >
+            {fastest === null ? '—' : formatPercent(fastest.percent)}
+          </CardTitle>
+          {fastest === null
+            ? (
+              <p className="text-[11px] text-zinc-400">
+                Nothing grew over the last {SPIKE_WINDOW_DAYS} days
+              </p>
+            )
+            : <AccountLine account={fastest.account} suffix={`· ${SPIKE_WINDOW_DAYS}d`} />}
         </CardHeader>
       </Card>
     </div>
   );
 });
+
+/**
+ * The identity line under a named tile: the platform mark, the account's own
+ * picture and its handle, at the Meta step.
+ *
+ * The same three marks in the same order as the account card and the signal
+ * card, so the account the tile names is recognisable as the one in the grid
+ * below without reading the handle. It truncates rather than wraps — a tile that
+ * grew a line taller than its three neighbours because one handle is long would
+ * break the row.
+ */
+function AccountLine({ account, suffix }: { account: GrowthAccount; suffix?: string }) {
+  return (
+    <p className="flex min-w-0 items-center gap-1.5 text-[11px] text-zinc-400">
+      <PlatformIcon platform={account.platform} className="size-3" />
+      <AccountAvatar account={account} className="size-4" />
+      <span className="truncate">{account.handle}</span>
+      {suffix && <span className="shrink-0 tabular-nums">{suffix}</span>}
+    </p>
+  );
+}

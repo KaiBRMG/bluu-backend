@@ -1,8 +1,9 @@
 'use client';
 
 import Image from 'next/image';
-import { ArrowUpRightIcon } from 'lucide-react';
+import { ArrowUpRightIcon, CircleAlertIcon } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { cn } from '@/lib/utils';
 import { PLATFORM_LABEL, type GrowthPlatform } from '@/lib/growth/platform';
@@ -157,8 +158,17 @@ export function PlatformChip({ platform }: { platform: GrowthPlatform }) {
  * platform is already carried by its own mark, so colouring that too would be
  * decoration. The triad lives in `category.ts`; never re-map it inline.
  *
- * Square-ish like every other attribute chip, so it is never mistaken for a
- * status pill.
+ * Built on the shadcn `Badge` — the house primitive for exactly this mark
+ * (CLAUDE.md rule 13). `variant="outline"` is the closest base to the tinted
+ * triad: a transparent fill and a real border, both of which `CATEGORY_TONE`
+ * then overrides through `cn`'s tailwind-merge.
+ *
+ * Three overrides on top of it, each load-bearing rather than taste:
+ *  - `rounded-md` — Badge is a pill by default, and square-ish is what keeps
+ *    this from being read as a status pill (every attribute chip in the app is
+ *    square; every status is round).
+ *  - `text-[11px]` — the Meta step, so the chip fits a dense table row.
+ *  - `px-1.5` — Badge's `px-2` is sized for its larger text.
  */
 export function CategoryChip({
   category,
@@ -168,15 +178,12 @@ export function CategoryChip({
   className?: string;
 }) {
   return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium',
-        CATEGORY_TONE[category].chip,
-        className,
-      )}
+    <Badge
+      variant="outline"
+      className={cn('rounded-md px-1.5 py-0.5 text-[11px]', CATEGORY_TONE[category].chip, className)}
     >
       {category}
-    </span>
+    </Badge>
   );
 }
 
@@ -274,27 +281,38 @@ export function FilterChip({
 }) {
   const tone = category ? CATEGORY_TONE[category] : null;
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
+    // The chip's *appearance* is the house `Badge`; its *semantics* are a
+    // button, because this one is pressed. `asChild` is the sanctioned way to
+    // keep both — hand-rolling the chip to get a button back would be the rule 13
+    // violation, and rendering a <span> to get the Badge would lose the control.
+    <Badge
+      asChild
+      variant="outline"
+      className={cn(
+        'gap-1.5 px-2.5 py-1 transition-colors',
+        // Badge's own focus ring is `--ring` zinc at 3px and it recolours the
+        // border with it. Keyboard focus is current selection, so it takes the
+        // one Action Blue voice at the house width (DESIGN.md §5).
+        'focus-visible:border-transparent focus-visible:outline-none',
+        'focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#3b82f6]',
         tone
           ? active
-            ? `${tone.active} font-medium`
+            ? tone.active
             : `${tone.chip} hover:brightness-110`
           : active
-            ? 'border-[#2563eb] bg-[#2563eb] font-medium text-white'
-            : 'border-transparent text-zinc-400 hover:bg-white/[0.055] hover:text-zinc-300 active:bg-white/[0.08]'
-      }`}
+            ? 'border-[#2563eb] bg-[#2563eb] text-white'
+            : 'border-transparent text-zinc-400 hover:bg-white/[0.055] hover:text-zinc-300 active:bg-white/[0.08]',
+      )}
     >
-      {children}
-      {/* No `opacity` on the count. Stacked on Ink Secondary it is double
+      <button type="button" onClick={onClick} aria-pressed={active}>
+        {children}
+        {/* No `opacity` on the count. Stacked on Ink Secondary it is double
           de-emphasis, and on the filled chip it drops white-on-#2563eb from
           5.17:1 to ~3.7:1 at 12px — under AA (DESIGN.md, The One De-emphasis
           Rule). The chip's own colour already separates it from the label. */}
-      <span className="tabular-nums">{count}</span>
-    </button>
+        <span className="tabular-nums">{count}</span>
+      </button>
+    </Badge>
   );
 }
 
@@ -326,6 +344,50 @@ export function CategoryDot({
       />
       <span className="truncate text-[11px] text-zinc-400">{category ?? 'Unfiled'}</span>
     </span>
+  );
+}
+
+/**
+ * "The last scheduled read of this account failed" — the roster card's copy of
+ * what `ScrapeStatus` says in the manage table.
+ *
+ * **Red, where the card's other warning mark is orange.** A spike is *attention
+ * needed*; a failed read is an error, and the two are different alarms. They can
+ * both be true at once (the spike is computed from history, the failure happened
+ * last night), which is also why this does not reuse the manage table's
+ * `TriangleAlertIcon` — that glyph already means "posts faster than one nightly
+ * read can see" in this subsystem, and separating two warnings by hue alone is
+ * exactly the failure the colour rules exist to prevent. Different alarm,
+ * different shape.
+ *
+ * **It says "Read failed", not "Failed".** In the manage table the column header
+ * supplies the subject; on a card there is no header, and a bare "Failed" beside
+ * a follower count reads as a verdict on the account rather than on the scrape.
+ *
+ * The reason is `sr-only` as well as in `title`: a tooltip on a non-interactive
+ * mark never reaches a keyboard or a screen reader, and this card is a button —
+ * nothing inside it may become a second focus stop to carry the message.
+ */
+export function ScrapeFailedBadge({
+  error,
+  className,
+}: {
+  error: string | null;
+  className?: string;
+}) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        'gap-0.5 rounded-md border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[11px] text-red-400',
+        className,
+      )}
+      title={error ?? undefined}
+    >
+      <CircleAlertIcon aria-hidden />
+      Read failed
+      {error && <span className="sr-only">: {error}</span>}
+    </Badge>
   );
 }
 
