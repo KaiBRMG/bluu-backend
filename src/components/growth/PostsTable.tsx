@@ -23,8 +23,9 @@ export type TableMetric = PostMetric | 'engagement';
 type SortKey = 'posted' | 'value' | 'rate';
 
 /**
- * The reading surface for tracked posts, built on `GrowthLeaderboard`'s
- * construction because the lessons that shaped it were paid for once already:
+ * The reading surface for tracked posts. It carries the construction of the
+ * follower leaderboard this subsystem used to have, because the lessons that
+ * shaped it were paid for once already:
  *
  *  - A real `<table>` with sortable `<th>`s carrying `aria-sort`.
  *  - The interactive element is the **post excerpt inside the first cell**, not
@@ -39,7 +40,7 @@ type SortKey = 'posted' | 'value' | 'rate';
  *
  * The metric selector above decides what the number column, the rate column and
  * the sparkline all describe — one choice, three columns — which is the same
- * idiom as the Followers tab's chart-mode control rather than eight columns of
+ * idiom as the range control on the overview rather than eight columns of
  * numbers nobody can scan.
  */
 
@@ -179,7 +180,7 @@ const PostRow = memo(function PostRow({
               onFocus={() => onHighlight(post.id)}
               onBlur={() => onHighlight(null)}
               aria-label={`Post by @${post.authorHandle ?? 'unknown'} — open details`}
-              className={`block w-full truncate rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:[--tw-ring-color:#3b82f6] ${
+              className={`block w-full truncate rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#3b82f6] ${
                 isHighlighted ? 'font-medium text-white' : 'text-zinc-300'
               }`}
             >
@@ -235,7 +236,7 @@ function SortHead({
         // TableHead inks `text-foreground`, so stepping to zinc-300 on hover
         // would make the engaged states *dimmer* than rest. Rest sits at Ink
         // Secondary; both engaged states step up to white.
-        className={`inline-flex items-center gap-1 rounded-sm transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:[--tw-ring-color:#3b82f6] ${
+        className={`inline-flex items-center gap-1 rounded-sm transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#3b82f6] ${
           align === 'right' ? 'flex-row-reverse' : ''
         } ${active ? 'text-white' : 'text-zinc-400'}`}
       >

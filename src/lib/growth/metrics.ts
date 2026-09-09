@@ -2,6 +2,14 @@
  * Growth Tracking — chart math. Pure: no Firestore, no React, no dates beyond
  * the day keys the series already uses.
  *
+ * ── What the modes are for, now that no shared-axis chart exists ────────────
+ * The overview used to draw every account on one pair of axes and needed
+ * `indexed` / `net` to stop a 684k page flattening a 13k one into the baseline.
+ * That chart is gone — the roster is a grid of cards, each on its own scale — so
+ * `absolute` is the only mode any surface asks for today. The other two stay
+ * because they are the projection this data has always needed the moment two
+ * accounts share an axis again, and they cost nothing sitting here.
+ *
  * The governing problem this file exists to solve: the tracked accounts differ
  * by two orders of magnitude (TwinkUniversity ~684k followers, Connor ~13k). On
  * one linear axis, eleven of twelve accounts are a flat line along the bottom
@@ -21,17 +29,16 @@ import type { GrowthSnapshot } from '@/types/firestore';
 export const GROWTH_MODES = ['indexed', 'net', 'absolute'] as const;
 export type GrowthMode = (typeof GROWTH_MODES)[number];
 
-export const MODE_LABEL: Record<GrowthMode, string> = {
-  indexed: 'Growth %',
-  net: 'Net change',
-  absolute: 'Followers',
-};
-
-export const RANGE_DAYS = { '7d': 7, '30d': 30, '90d': 90, '1y': 365, all: null } as const;
+/**
+ * The selectable windows, in days of *change* — see `rangeStart`. Ordered as
+ * they are rendered.
+ */
+export const RANGE_DAYS = { '1d': 1, '3d': 3, '7d': 7, '30d': 30, '90d': 90, all: null } as const;
 export type GrowthRange = keyof typeof RANGE_DAYS;
 
 export const RANGE_LABEL: Record<GrowthRange, string> = {
-  '7d': '7 days', '30d': '30 days', '90d': '90 days', '1y': '1 year', all: 'All time',
+  '1d': '1 day', '3d': '3 days', '7d': '7 days', '30d': '30 days', '90d': '90 days',
+  all: 'All time',
 };
 
 /** One account's readings, keyed by `YYYY-MM-DD`. */
@@ -58,11 +65,22 @@ export function shiftDayKey(dayKey: string, days: number): string {
 
 /**
  * The inclusive start key for a range, or `null` for "all time".
- * `7d` means the last 7 days *including today*, so it shifts by 6.
+ *
+ * A range is **N days of change**, not N readings: `7d` starts seven days back,
+ * so the window holds the reading a week ago *and* today's, and the delta across
+ * it is genuinely a week of growth.
+ *
+ * This is what makes `1d` a usable option at all. Under the old
+ * "N days including today" reading it would have contained exactly one reading,
+ * every delta on the page would have been `—` (a change needs two readings), and
+ * the range would have looked broken rather than empty. The cost is that each
+ * window reaches one calendar day further back than its label's narrowest
+ * reading — which is the interpretation the labels were always given anyway
+ * ("net growth · 7 days").
  */
 export function rangeStart(range: GrowthRange, today: string = todayKey()): string | null {
   const days = RANGE_DAYS[range];
-  return days === null ? null : shiftDayKey(today, -(days - 1));
+  return days === null ? null : shiftDayKey(today, -days);
 }
 
 // ─── Slicing ─────────────────────────────────────────────────────────
@@ -71,17 +89,6 @@ export function rangeStart(range: GrowthRange, today: string = todayKey()): stri
 export function dayKeysIn(days: DayMap, from: string | null): string[] {
   const keys = Object.keys(days).sort();
   return from ? keys.filter((k) => k >= from) : keys;
-}
-
-/**
- * The union of day keys across every account in the range, sorted. This is the
- * chart's x-axis: recharts needs one row per date with a column per account,
- * and a date no account has a reading for should simply not be a row.
- */
-export function axisDays(series: Iterable<DayMap>, from: string | null): string[] {
-  const all = new Set<string>();
-  for (const days of series) for (const key of dayKeysIn(days, from)) all.add(key);
-  return [...all].sort();
 }
 
 // ─── Deltas ──────────────────────────────────────────────────────────
@@ -146,32 +153,6 @@ export function pointsFor(days: DayMap, from: string | null, mode: GrowthMode): 
     // indexed — undefined against a zero baseline, so fall back to flat rather
     // than emitting Infinity and blanking the whole chart.
     return { date, value: base > 0 ? ((followers - base) / base) * 100 : 0 };
-  });
-}
-
-/**
- * Recharts wants one row per x value with a key per line. Days an account has
- * no reading for are left **undefined** (not 0) so `connectNulls` bridges the
- * gap instead of drawing a spike to the axis.
- */
-export function toChartRows(
-  seriesByAccount: Map<string, DayMap>,
-  from: string | null,
-  mode: GrowthMode,
-): Array<Record<string, string | number>> {
-  const dates = axisDays(seriesByAccount.values(), from);
-  const projected = new Map<string, Map<string, number>>();
-  for (const [id, days] of seriesByAccount) {
-    projected.set(id, new Map(pointsFor(days, from, mode).map((p) => [p.date, p.value])));
-  }
-
-  return dates.map((date) => {
-    const row: Record<string, string | number> = { date };
-    for (const [id, byDate] of projected) {
-      const value = byDate.get(date);
-      if (value !== undefined) row[id] = value;
-    }
-    return row;
   });
 }
 

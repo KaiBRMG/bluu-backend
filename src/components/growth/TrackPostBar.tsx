@@ -80,7 +80,7 @@ export function TrackPostBar({
         <Button type="submit" disabled={!looksValid || pending || disabled} className="h-10 shrink-0">
           {pending ? (
             <>
-              <Loader2Icon className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
+              <Loader2Icon className="activity-spinner size-4 animate-spin" aria-hidden />
               Tracking post…
             </>
           ) : (

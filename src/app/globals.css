@@ -643,8 +643,12 @@ input[type="date"].form-input {
      tray, hover/press nudges) has its FINAL state as its base style, so snapping
      to the end — rather than mid-animation — always leaves the UI correct.
      Activity spinners are exempt: a frozen spinner reads as a hung app, so they
-     keep looping to signal "busy". */
-  *:not(.loader):not(.network-modal-spinner),
+     keep looping to signal "busy". `.loader` and `.network-modal-spinner` are
+     whole spinner components; `.activity-spinner` is a bare marker for the
+     lucide `Loader2Icon` used inline in buttons — it carries no styles of its
+     own and exists only to claim this exemption. Put it on any spinner that
+     covers a real wait (a live scraper call, a save), never on decoration. */
+  *:not(.loader):not(.network-modal-spinner):not(.activity-spinner),
   *::before,
   *::after {
     animation-duration: 0.01ms !important;

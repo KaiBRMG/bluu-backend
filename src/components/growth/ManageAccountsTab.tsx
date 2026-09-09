@@ -13,9 +13,14 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import { formatCount } from '@/lib/growth/metrics';
-import { AccountIdentity, ScrapeStatus } from './growthUi';
+import { CATEGORIES_BY_PLATFORM, type GrowthCategory } from '@/lib/growth/category';
+import { AccountIdentity, CategoryChip, ScrapeStatus } from './growthUi';
 import { AddAccountDialog } from './AddAccountDialog';
+import { useTrackPosts } from './useTrackPosts';
 import type { AddGrowthAccountPayload, TrackPostsResult } from '@/hooks/useGrowthTracking';
 import type { GrowthAccount } from '@/types/firestore';
 
@@ -41,15 +46,20 @@ interface ManageAccountsTabProps {
   onAdd: (payload: AddGrowthAccountPayload) => Promise<void>;
   onSetTracking: (id: string, isActive: boolean) => Promise<void>;
   onSetTrackPosts: (id: string, trackPosts: boolean) => Promise<TrackPostsResult>;
+  onSetCategory: (id: string, category: GrowthCategory | null) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }
 
 export function ManageAccountsTab({
-  accounts, loading, onAdd, onSetTracking, onSetTrackPosts, onDelete,
+  accounts, loading, onAdd, onSetTracking, onSetTrackPosts, onSetCategory, onDelete,
 }: ManageAccountsTabProps) {
   const [addOpen, setAddOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<GrowthAccount | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // The switch and its copy are shared with the account page, which offers the
+  // same control: two copies of that wording is how one of them ends up
+  // describing a schedule the system no longer runs.
+  const { busyId: trackPostsBusyId, setTrackPosts } = useTrackPosts(onSetTrackPosts);
 
   const { active, stopped } = useMemo(() => ({
     active: accounts.filter((a) => a.isActive),
@@ -71,31 +81,18 @@ export function ManageAccountsTab({
   };
 
   /**
-   * Post tracking is a second, separate cost per account: the nightly discovery
-   * search pays the scraper's 20-result floor for each opted-in handle. The
-   * toast says what was armed rather than confirming silently — the discipline
-   * this feature runs on is that the person switching it on sees the price.
+   * Re-filing an account is a label change, not an identity change: the document
+   * id is platform + handle, so nothing moves and no history is touched. It is
+   * editable here — rather than only at add time — because the bulk import files
+   * a whole roster at once and a mis-filed account otherwise needs a script.
    */
-  const setTrackPosts = async (account: GrowthAccount, trackPosts: boolean) => {
+  const setCategory = async (account: GrowthAccount, category: GrowthCategory | null) => {
     setBusyId(account.id);
     try {
-      const discovery = await onSetTrackPosts(account.id, trackPosts);
-
-      if (!trackPosts) {
-        toast.success(`Stopped finding new posts for @${account.handle}. Posts already tracked keep refreshing.`);
-      } else if (discovery?.error) {
-        // The toggle saved; only the immediate search came up short. A warning,
-        // not an error — nothing needs redoing and the nightly pass retries.
-        toast.warning(discovery.error);
-      } else if (discovery && discovery.created + discovery.refreshed > 0) {
-        const found = discovery.created + discovery.refreshed;
-        toast.success(
-          `Tracking ${found} post${found === 1 ? '' : 's'} from @${account.handle}`,
-          { description: 'New posts are picked up automatically from now on. See the Posts tab.' },
-        );
-      } else {
-        toast.success(`Finding new posts from @${account.handle} from tonight.`);
-      }
+      await onSetCategory(account.id, category);
+      toast.success(category
+        ? `@${account.handle} is now filed under ${category}`
+        : `Removed @${account.handle} from its category`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not update that account.');
     } finally {
@@ -143,6 +140,7 @@ export function ManageAccountsTab({
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead>Account</TableHead>
+                <TableHead className="w-[10.5rem]">Category</TableHead>
                 <TableHead className="text-right">Followers</TableHead>
                 <TableHead className="text-right">Last read</TableHead>
                 <TableHead className="w-[8.5rem] text-right">Track posts</TableHead>
@@ -158,6 +156,13 @@ export function ManageAccountsTab({
                   <TableCell className="max-w-0">
                     <AccountCell account={account} />
                   </TableCell>
+                  <TableCell className="w-[10.5rem]">
+                    <CategorySelect
+                      account={account}
+                      busy={busyId === account.id}
+                      onChange={(next) => setCategory(account, next)}
+                    />
+                  </TableCell>
                   <TableCell className="text-right tabular-nums text-zinc-300">
                     {account.latest ? formatCount(account.latest.followers) : <span className="text-zinc-400">—</span>}
                   </TableCell>
@@ -167,14 +172,14 @@ export function ManageAccountsTab({
                   <TableCell className="text-right">
                     <TrackPostsCell
                       account={account}
-                      busy={busyId === account.id}
+                      busy={trackPostsBusyId === account.id}
                       onChange={(next) => setTrackPosts(account, next)}
                     />
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
                       variant="ghost" size="sm" className="h-7 text-xs"
-                      disabled={busyId === account.id}
+                      disabled={busyId === account.id || trackPostsBusyId === account.id}
                       onClick={() => setTracking(account, false)}
                     >
                       Stop tracking
@@ -188,7 +193,7 @@ export function ManageAccountsTab({
           {stopped.length > 0 && (
             <section>
               <div className="mb-2 flex items-center gap-3">
-                <h2 className="font-mono text-xs font-semibold text-zinc-400">Not tracked</h2>
+                <h2 className="text-xs font-semibold text-zinc-400">Not tracked</h2>
                 <div className="h-px flex-1 bg-white/[0.07]" />
                 <span className="text-xs tabular-nums text-zinc-400">{stopped.length}</span>
               </div>
@@ -203,6 +208,7 @@ export function ManageAccountsTab({
                 <TableHeader className="sr-only">
                   <TableRow>
                     <TableHead>Account</TableHead>
+                    <TableHead>Category</TableHead>
                     <TableHead>Followers</TableHead>
                     <TableHead>Last read</TableHead>
                     <TableHead className="w-[8.5rem]">Track posts</TableHead>
@@ -214,6 +220,13 @@ export function ManageAccountsTab({
                     <TableRow key={account.id} className="hover:bg-white/[0.055]">
                       <TableCell className="max-w-0">
                         <AccountCell account={account} />
+                      </TableCell>
+                      {/* A stopped account keeps its filing — it still appears
+                          on the charts, so it still belongs to a group. */}
+                      <TableCell className="w-[10.5rem]">
+                        {account.category
+                          ? <CategoryChip category={account.category} />
+                          : <span className="text-[11px] text-zinc-400">—</span>}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-zinc-300">
                         {account.latest ? formatCount(account.latest.followers) : <span className="text-zinc-400">—</span>}
@@ -280,6 +293,49 @@ export function ManageAccountsTab({
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+/**
+ * The account's category, editable in place.
+ *
+ * **The options are the account's own platform's**, not the whole vocabulary:
+ * TWXNK / BONUS / SFW REPOST describe how the X roster is run and mean nothing
+ * on a Facebook page, which is GENERAL or CREATOR. The server checks the same
+ * thing against the stored platform — this list is the affordance, not the
+ * validation.
+ *
+ * Radix reserves the empty string as "no value", so "no category" travels as a
+ * sentinel and is mapped back to `null` — the same trick the add dialog uses.
+ * The chip's hue is not repeated in the trigger: a coloured `Select` would read
+ * as a status control rather than a picker, and the overview is where the
+ * colour does its work.
+ */
+const NO_CATEGORY = 'none';
+
+function CategorySelect({
+  account, busy, onChange,
+}: {
+  account: GrowthAccount;
+  busy: boolean;
+  onChange: (next: GrowthCategory | null) => void;
+}) {
+  return (
+    <Select
+      value={account.category ?? NO_CATEGORY}
+      disabled={busy}
+      onValueChange={(v) => onChange(v === NO_CATEGORY ? null : (v as GrowthCategory))}
+    >
+      <SelectTrigger size="sm" className="w-full text-xs" aria-label={`Category for @${account.handle}`}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={NO_CATEGORY}>No category</SelectItem>
+        {CATEGORIES_BY_PLATFORM[account.platform].map((c) => (
+          <SelectItem key={c} value={c}>{c}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

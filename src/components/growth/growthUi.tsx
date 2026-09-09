@@ -1,10 +1,12 @@
 'use client';
 
 import Image from 'next/image';
+import { ArrowUpRightIcon } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { cn } from '@/lib/utils';
 import { PLATFORM_LABEL, type GrowthPlatform } from '@/lib/growth/platform';
+import { CATEGORY_TONE, type GrowthCategory } from '@/lib/growth/category';
 import { formatDelta, formatPercent, type GrowthDelta } from '@/lib/growth/metrics';
 import type { GrowthAccount } from '@/types/firestore';
 
@@ -147,6 +149,38 @@ export function PlatformChip({ platform }: { platform: GrowthPlatform }) {
 }
 
 /**
+ * The account's category, as a chip it carries.
+ *
+ * Coloured, where the platform chip beside it is not, and the difference is the
+ * rule rather than a preference: a category is a **closed vocabulary with a
+ * meaning per value**, which is the one thing DESIGN.md says earns a hue — the
+ * platform is already carried by its own mark, so colouring that too would be
+ * decoration. The triad lives in `category.ts`; never re-map it inline.
+ *
+ * Square-ish like every other attribute chip, so it is never mistaken for a
+ * status pill.
+ */
+export function CategoryChip({
+  category,
+  className,
+}: {
+  category: GrowthCategory;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        'inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium',
+        CATEGORY_TONE[category].chip,
+        className,
+      )}
+    >
+      {category}
+    </span>
+  );
+}
+
+/**
  * A change, rendered with the sign doing the work.
  *
  * Green up / red down is a genuine closed vocabulary (the `-400` semantic steps),
@@ -200,6 +234,10 @@ export function ScrapeStatus({ account }: { account: GrowthAccount }) {
         title={account.lastScrapeError ?? undefined}
       >
         Failed
+        {/* The reason is the whole actionable content, and `title` alone never
+            reaches a keyboard or a screen reader. The tooltip stays for the
+            mouse; this is what everyone else gets. */}
+        {account.lastScrapeError && <span className="sr-only">: {account.lastScrapeError}</span>}
       </span>
     );
   }
@@ -211,29 +249,43 @@ export function ScrapeStatus({ account }: { account: GrowthAccount }) {
 }
 
 /**
- * A filter chip carrying its own count. Shared by the Followers and Posts tabs so
+ * A filter chip carrying its own count. Shared by the overview and the
+ * tracked-posts view so
  * the two filter rows are the same control, not two that merely resemble it.
  *
  * Selected is the filled Action Blue Deep (`#2563eb`), never `#3b82f6` — white
  * on the lighter blue measures 3.68:1 and fails AA at this size (DESIGN.md §2).
  */
 export function FilterChip({
-  active, onClick, count, children,
+  active, onClick, count, category, children,
 }: {
   active: boolean;
   onClick: () => void;
   count: number;
+  /**
+   * When this chip filters by category, the category it filters by — the chip
+   * then wears that category's hue in both states rather than the page's Action
+   * Blue. That is the only way the colour coding survives the filter row: a
+   * category chip that turned blue when picked would teach the hue and then take
+   * it away at the exact moment it is being used.
+   */
+  category?: GrowthCategory;
   children: React.ReactNode;
 }) {
+  const tone = category ? CATEGORY_TONE[category] : null;
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors ${
-        active
-          ? 'bg-[#2563eb] font-medium text-white'
-          : 'text-zinc-400 hover:bg-white/[0.055] hover:text-zinc-300 active:bg-white/[0.08]'
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
+        tone
+          ? active
+            ? `${tone.active} font-medium`
+            : `${tone.chip} hover:brightness-110`
+          : active
+            ? 'border-[#2563eb] bg-[#2563eb] font-medium text-white'
+            : 'border-transparent text-zinc-400 hover:bg-white/[0.055] hover:text-zinc-300 active:bg-white/[0.08]'
       }`}
     >
       {children}
@@ -243,5 +295,62 @@ export function FilterChip({
           Rule). The chip's own colour already separates it from the label. */}
       <span className="tabular-nums">{count}</span>
     </button>
+  );
+}
+
+/**
+ * The category as a bare dot plus its label — the compact form, for the account
+ * card and the signal card where a bordered chip would be the loudest thing in
+ * a 250px box.
+ *
+ * An account with no category still renders a line, in the neutral step: an
+ * unfiled account is a real state the manage tab can fix, and a card that simply
+ * omitted the row would jump a few pixels shorter than its neighbours for a
+ * reason the reader cannot see.
+ */
+export function CategoryDot({
+  category,
+  className,
+}: {
+  category: GrowthCategory | null;
+  className?: string;
+}) {
+  return (
+    <span className={cn('flex min-w-0 items-center gap-1.5', className)}>
+      <span
+        aria-hidden
+        className={cn(
+          'size-1.5 shrink-0 rounded-full',
+          category ? CATEGORY_TONE[category].dot : 'bg-zinc-500',
+        )}
+      />
+      <span className="truncate text-[11px] text-zinc-400">{category ?? 'Unfiled'}</span>
+    </span>
+  );
+}
+
+/**
+ * "This account grew unusually fast this week."
+ *
+ * Orange because that is the app's *attention needed* hue (DESIGN.md §2) and a
+ * signal is exactly that — something to go and look at — not a success ("green")
+ * and not a failure. It is a derived state, never a stored field; see
+ * `src/lib/growth/signals.ts` for why the window is fixed at seven days while
+ * everything around it follows the range control.
+ */
+export function SpikeBadge({ percent, className }: { percent: number; className?: string }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex shrink-0 items-center gap-0.5 rounded-md bg-orange-500/10 px-1.5 py-0.5',
+        'text-[11px] font-medium text-orange-400 tabular-nums',
+        className,
+      )}
+      title={`Followers up ${formatPercent(percent)} over the last 7 days`}
+    >
+      <ArrowUpRightIcon className="size-3" aria-hidden />
+      {formatPercent(percent)}
+      <span className="sr-only"> over 7 days</span>
+    </span>
   );
 }

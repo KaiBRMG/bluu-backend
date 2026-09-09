@@ -40,6 +40,7 @@ import {
   utcDayKey,
   type GrowthPlatform,
 } from '@/lib/growth/platform';
+import { normalizeCategory } from '@/lib/growth/category';
 import type { GrowthAccount, GrowthSeries, GrowthSnapshot } from '@/types/firestore';
 import type { DocumentSnapshot } from 'firebase-admin/firestore';
 
@@ -53,8 +54,15 @@ export const GROWTH_SERIES_SUB = 'series';
  * runaway import or a scripted bulk-add could quietly multiply it. Past this the
  * cron refuses to run and logs loudly rather than spending the money and telling
  * nobody. Raise it deliberately, with the cost in mind — not to clear an error.
+ *
+ * Raised 60 → 100 to admit the full managed roster (60 X accounts + 12 Facebook
+ * pages, imported by `scripts/import-growth-accounts.js`). That roster reads
+ * ~$0.36/night, ~$10.90/month — about five times the seed list, and the reason
+ * the number moved is that the accounts were counted, not that a limit was in
+ * the way. The headroom above 72 is for hand-added accounts, not for another
+ * bulk import: the next one should re-do this arithmetic first.
  */
-export const MAX_TRACKED_ACCOUNTS = 60;
+export const MAX_TRACKED_ACCOUNTS = 100;
 
 const FACEBOOK_ACTOR = 'apify~facebook-pages-scraper';
 const TWITTER_ACTOR = 'apidojo~twitter-user-scraper';
@@ -87,6 +95,13 @@ export interface ScrapeResult {
   snapshot: GrowthSnapshot;
   profilePictureUrl: string | null;
   isVerified: boolean;
+  /**
+   * The platform's own account id, when the actor reports one. Free inside the
+   * already-billed result. The field spelling is unverified against a live
+   * payload — calling the API to look is banned (rule 9d) — so `pickId` probes
+   * the plausible spellings and the value stays optional everywhere downstream.
+   */
+  platformAccountId: string | null;
 }
 
 function apifyToken(): string {
@@ -141,6 +156,24 @@ function str(value: unknown): string | null {
 }
 
 /**
+ * The platform's own account id out of whichever field the actor populated.
+ *
+ * Written as a probe rather than a single field read because the payload shape
+ * cannot be checked against the live API (rule 9d — every call is billed), and
+ * these scrapers demonstrably vary between `id` / `id_str` / `rest_id`. An id
+ * that arrives as a number is kept as a string: it is an opaque key that is only
+ * ever compared and searched, and X ids are past 2^53.
+ */
+function pickId(item: Record<string, unknown>, keys: readonly string[]): string | null {
+  for (const key of keys) {
+    const value = item[key];
+    if (typeof value === 'string' && /^[0-9]+$/.test(value.trim())) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+/**
  * Scrape Facebook pages. ONE run for every URL — `startUrls` is the actor's only
  * documented input, and it bills per page either way.
  */
@@ -179,6 +212,7 @@ export async function runFacebookScrape(
       snapshot,
       profilePictureUrl: str(item.profilePictureUrl),
       isVerified: false, // the actor does not report page verification
+      platformAccountId: pickId(item, ['pageId', 'facebookId', 'id', 'pageID']),
     });
   }
 
@@ -245,6 +279,8 @@ export async function runTwitterScrape(
       snapshot,
       profilePictureUrl: str(item.profilePicture),
       isVerified: item.isBlueVerified === true || item.isVerified === true,
+      // `apidojo/twitter-user-scraper` reports the account's rest id as `id`.
+      platformAccountId: pickId(item, ['id', 'id_str', 'rest_id', 'userId']),
     });
   }
 
@@ -291,6 +327,9 @@ export async function recordSnapshots(
       // Re-recording today must not push yesterday out of `previous`.
       ...(sameDay ? {} : { previous: current?.latest ?? null }),
       ...(result.profilePictureUrl ? { profilePictureUrl: result.profilePictureUrl } : {}),
+      // Written only when the actor reported one: a night whose payload omitted
+      // the id must leave the stored id alone rather than blanking it.
+      ...(result.platformAccountId ? { platformAccountId: result.platformAccountId } : {}),
       isVerified: result.isVerified,
       lastScrapeAt: now,
       lastScrapeStatus: 'ok',
@@ -340,6 +379,11 @@ export function serializeGrowthAccount(doc: DocumentSnapshot): GrowthAccount {
     handle: (d.handle as string) ?? '',
     handleNormalized: (d.handleNormalized as string) ?? '',
     profileUrl: (d.profileUrl as string) ?? '',
+    // Normalised on the way out, so a category written by the import script, by
+    // hand in the console, or by an older shape all resolve to the closed set —
+    // and anything outside it reads as "unfiled" rather than as a sixth colour.
+    category: normalizeCategory(d.category),
+    platformAccountId: (d.platformAccountId as string) ?? null,
     isActive: d.isActive !== false,
     profilePictureUrl: (d.profilePictureUrl as string) ?? null,
     isVerified: d.isVerified === true,

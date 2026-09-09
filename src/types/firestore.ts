@@ -798,6 +798,21 @@ export interface GrowthAccount {
   handle: string;
   handleNormalized: string;
   profileUrl: string;
+  /**
+   * The operational grouping this account belongs to (TWXNK, BONUS, CREATOR,
+   * SFW REPOST, FACEBOOK) — a closed vocabulary, see `src/lib/growth/category.ts`.
+   * `null` for an account nobody has filed yet. NOT part of the identity: the
+   * document id is platform + handle, so a category can be corrected freely.
+   */
+  category: import('@/lib/growth/category').GrowthCategory | null;
+  /**
+   * The platform's own numeric account id, when the scraper reports one — X's
+   * `id` (rest id) and, where present, the Facebook page id. It rides inside the
+   * already-billed profile result, so storing it costs nothing extra, and it is
+   * the one handle-independent way to search for an account: a renamed account
+   * keeps this and loses its handle.
+   */
+  platformAccountId: string | null;
   /** false = tracking stopped. History is retained; the account can be resumed. */
   isActive: boolean;
   profilePictureUrl: string | null;

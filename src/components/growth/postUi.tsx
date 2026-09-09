@@ -314,6 +314,8 @@ export function ReadFreshness({
         title={post.lastReadError ?? undefined}
       >
         Refresh failed
+        {/* As with `ScrapeStatus`: the reason cannot live in `title` alone. */}
+        {post.lastReadError && <span className="sr-only">: {post.lastReadError}</span>}
       </span>
     );
   }

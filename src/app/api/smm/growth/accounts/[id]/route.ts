@@ -11,6 +11,7 @@ import {
   checkSpendCeiling,
   discoverPostsForAccounts,
 } from '@/lib/services/growthPostsService';
+import { categoryListFor, normalizeCategoryFor } from '@/lib/growth/category';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
@@ -38,15 +39,22 @@ export const PATCH = withAuth(async (
     if (denied) return denied;
 
     const { id } = await params;
-    const body = await request.json() as { isActive?: boolean; trackPosts?: boolean };
+    const body = await request.json() as {
+      isActive?: boolean;
+      trackPosts?: boolean;
+      category?: string | null;
+    };
 
-    // `isActive` and `trackPosts` are the ONLY mutable fields. An account is
-    // named by its handle and nothing else, and the handle — with the platform
-    // and profile URL — is the identity the document id is built from, so
-    // changing one would orphan the history rather than move it.
+    // `isActive`, `trackPosts` and `category` are the ONLY mutable fields. An
+    // account is named by its handle and nothing else, and the handle — with the
+    // platform and profile URL — is the identity the document id is built from,
+    // so changing one would orphan the history rather than move it. A category
+    // is a label the account carries, not part of that identity, which is
+    // precisely why it may be corrected here.
     const hasIsActive = typeof body.isActive === 'boolean';
     const hasTrackPosts = typeof body.trackPosts === 'boolean';
-    if (!hasIsActive && !hasTrackPosts) {
+    const hasCategory = 'category' in body;
+    if (!hasIsActive && !hasTrackPosts && !hasCategory) {
       return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
     }
 
@@ -56,11 +64,26 @@ export const PATCH = withAuth(async (
       return NextResponse.json({ error: 'Account not found' }, { status: 404 });
     }
 
+    const account = serializeGrowthAccount(snap);
+
+    // `null` (or an empty string) clears the category; anything else is checked
+    // against **this account's platform**, not just against the vocabulary.
+    // The category sets are platform-scoped (TWXNK/BONUS/SFW REPOST are X
+    // groupings; a Facebook page is GENERAL or CREATOR), and a picker that only
+    // offers the right options is an affordance, not a validation — so the read
+    // of the document has to happen before this check rather than after it.
+    const clearing = !hasCategory || body.category == null || body.category === '';
+    const category = clearing ? null : normalizeCategoryFor(account.platform, body.category);
+    if (hasCategory && !clearing && category === null) {
+      return NextResponse.json({
+        error: `A ${account.platform === 'facebook' ? 'Facebook' : 'X'} account can be filed under ${categoryListFor(account.platform)}.`,
+      }, { status: 400 });
+    }
+
     // Post tracking is an X-only feature: the tweet scraper takes X handles, and
     // there is no equivalent actor for Facebook page posts in this subsystem.
     // Refused rather than silently ignored, so a caller is never told a toggle
     // took effect when nothing will ever read that account's posts.
-    const account = serializeGrowthAccount(snap);
     if (hasTrackPosts && account.platform !== 'twitter') {
       return NextResponse.json({
         error: 'Post tracking is only available for X accounts.',
@@ -70,6 +93,7 @@ export const PATCH = withAuth(async (
     await ref.update({
       ...(hasIsActive ? { isActive: body.isActive } : {}),
       ...(hasTrackPosts ? { trackPosts: body.trackPosts } : {}),
+      ...(hasCategory ? { category } : {}),
     });
 
     // ── Switching post tracking ON searches straight away ────────────────────

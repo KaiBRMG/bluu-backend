@@ -15,6 +15,7 @@ import {
   runTwitterScrape,
   serializeGrowthAccount,
 } from '@/lib/services/growthTrackingService';
+import { categoryListFor, normalizeCategoryFor } from '@/lib/growth/category';
 import {
   GROWTH_PLATFORMS,
   PLATFORM_LABEL,
@@ -58,11 +59,27 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     const denied = await checkGrowthAccess(token.uid);
     if (denied) return denied;
 
-    const body = await request.json() as { platform?: string; profileUrl?: string };
+    const body = await request.json() as {
+      platform?: string;
+      profileUrl?: string;
+      category?: string | null;
+    };
 
     const platform = body.platform as GrowthPlatform;
     if (!GROWTH_PLATFORMS.includes(platform)) {
       return NextResponse.json({ error: 'Choose a platform.' }, { status: 400 });
+    }
+
+    // Optional, and validated against **this platform's** categories rather than
+    // accepted as typed: the vocabulary is closed and platform-scoped (that is
+    // what makes its colours mean anything), so an unrecognised one — or an X
+    // grouping on a Facebook page — is refused here instead of being stored and
+    // rendering as an unfiled account the user believes they filed.
+    const category = normalizeCategoryFor(platform, body.category);
+    if (body.category != null && body.category !== '' && category === null) {
+      return NextResponse.json({
+        error: `A ${PLATFORM_LABEL[platform]} account can be filed under ${categoryListFor(platform)}.`,
+      }, { status: 400 });
     }
 
     const parsed = parseProfileUrl(platform, body.profileUrl ?? '');
@@ -119,6 +136,10 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       handle: parsed.handle,
       handleNormalized: parsed.handleNormalized,
       profileUrl: parsed.canonicalUrl,
+      category,
+      // Free inside the result we just paid for. Null when the actor did not
+      // report one — it is a bonus search key, never a requirement.
+      platformAccountId: result.platformAccountId,
       isActive: true,
       profilePictureUrl: result.profilePictureUrl,
       isVerified: result.isVerified,

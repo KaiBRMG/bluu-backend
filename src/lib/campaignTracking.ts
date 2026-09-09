@@ -59,6 +59,24 @@ export const STATUS_DOT: Record<CRStatus, string> = {
   'Archived': 'bg-zinc-400',
 };
 
+/**
+ * The same semantic hues as raw hexes, for the places a Tailwind class cannot
+ * reach: an SVG `stroke`/`fill` attribute, a canvas, a chart library prop.
+ *
+ * These are the `-400` steps `STATUS_COLORS` and `STATUS_DOT` name — one source,
+ * three spellings, so a palette change lands everywhere at once. Reach for a
+ * class first; this map exists so nobody re-types `#4ade80` into a component
+ * (DESIGN.md §2, The Semantic-Only Rule: import them, never re-map inline).
+ */
+export const STATUS_HEX = {
+  green: '#4ade80',
+  blue: '#60a5fa',
+  orange: '#fb923c',
+  yellow: '#facc15',
+  red: '#f87171',
+  zinc: '#a1a1aa',
+} as const;
+
 export const STATUS_SORT: Record<CRStatus, number> = {
   'Rejected': 0,
   'Awaiting Approval': 1,

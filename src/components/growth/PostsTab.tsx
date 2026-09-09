@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -8,7 +9,6 @@ import { FilterChip, SEGMENT_ITEM_CLASS } from './growthUi';
 import { RefreshCountdown } from './postUi';
 import { TrackPostBar } from './TrackPostBar';
 import { PostsTable, type TableMetric } from './PostsTable';
-import { PostDetailSheet } from './PostDetailSheet';
 import {
   METRIC_LABEL,
   ageHoursOf,
@@ -16,6 +16,18 @@ import {
   soonestRefresh,
 } from '@/lib/growth/postMetrics';
 import type { GrowthPost, GrowthSpendLedger } from '@/types/firestore';
+
+/**
+ * Mounted only after a post has been opened, and dynamically imported: the sheet
+ * carries the page's second recharts chart, which nobody who never opens a post
+ * should pay to parse. The latch (rather than `openPost !== null`) is what keeps
+ * the close animation — unmounting on close would make the sheet vanish instead
+ * of sliding out.
+ */
+const PostDetailSheet = dynamic(
+  () => import('./PostDetailSheet').then((m) => m.PostDetailSheet),
+  { ssr: false },
+);
 
 type PostFilter = 'all' | 'live' | 'stopped';
 
@@ -28,7 +40,7 @@ const FILTER_LABEL: Record<PostFilter, string> = {
 const TABLE_METRICS: TableMetric[] = ['engagement', 'likes', 'reposts', 'replies', 'views'];
 
 /**
- * The Posts tab: paste a link, watch what it does.
+ * Tracked posts, roster-wide: paste a link, watch what it does.
  *
  * ── How this feels live without lying ───────────────────────────────────────
  * Readings land every 6, 12 or 24 hours depending on a post's age, so nothing on
@@ -70,6 +82,21 @@ export function PostsTab({
   const [metric, setMetric] = useState<TableMetric>('engagement');
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [everOpened, setEverOpened] = useState(false);
+
+  /**
+   * Stable, so `PostRow`'s `memo` actually holds. Passed inline it was a new
+   * function on every render — and since the highlight lives here, a mouse
+   * sweep re-rendered every row in the body, which is the exact cost the memo
+   * was added to avoid.
+   */
+  const openPostDetail = useCallback((post: GrowthPost) => {
+    setOpenId(post.id);
+    setEverOpened(true);
+    // The sheet opens immediately on the trimmed series it already has; the
+    // untrimmed one arrives a read later and replaces it.
+    void onLoadFullHistory(post.id);
+  }, [onLoadFullHistory]);
 
   const counts = useMemo(() => ({
     all: posts.length,
@@ -148,7 +175,7 @@ export function PostsTab({
           </dl>
 
           {/* Both controls filter or re-key everything below them, so they sit
-              above the table — the same placement rule the Followers tab follows. */}
+              above the table — the same placement rule the overview follows. */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-1.5">
               {(['all', 'live', 'stopped'] as const).map((f) => (
@@ -199,12 +226,7 @@ export function PostsTab({
               metricLabel={metric === 'engagement' ? 'Engagement' : METRIC_LABEL[metric]}
               highlightId={highlightId}
               onHighlight={setHighlightId}
-              onOpen={(post) => {
-                setOpenId(post.id);
-                // The sheet opens immediately on the trimmed series it already
-                // has; the untrimmed one arrives a read later and replaces it.
-                void onLoadFullHistory(post.id);
-              }}
+              onOpen={openPostDetail}
             />
           )}
 
@@ -216,13 +238,15 @@ export function PostsTab({
         </>
       )}
 
-      <PostDetailSheet
-        post={openPost}
-        onOpenChange={(open) => { if (!open) setOpenId(null); }}
-        onSync={onSync}
-        onSetTracking={onSetTracking}
-        onDelete={onDelete}
-      />
+      {everOpened && (
+        <PostDetailSheet
+          post={openPost}
+          onOpenChange={(open) => { if (!open) setOpenId(null); }}
+          onSync={onSync}
+          onSetTracking={onSetTracking}
+          onDelete={onDelete}
+        />
+      )}
     </div>
   );
 }
@@ -233,13 +257,16 @@ export function PostsTab({
  * find its own posts.
  */
 function EmptyState() {
+  // Two quiet lines, no box: a container drawn around a sentence implies there
+  // is content in it (DESIGN.md §5). The copy teaches both routes in; the frame
+  // was never doing any of that work.
   return (
-    <div className="rounded-xl bg-white/[0.04] px-4 py-8 text-center">
+    <div className="max-w-[62ch] space-y-1.5">
       <p className="text-sm font-medium text-zinc-200">No posts are tracked yet.</p>
-      <p className="mx-auto mt-1.5 max-w-[52ch] text-sm text-zinc-400">
+      <p className="text-sm text-zinc-400">
         Paste an X post link above to start tracking one — it is refreshed straight away. Or turn
-        on <span className="text-zinc-300">Track posts</span> for an X account under Manage
-        Accounts and its posts are picked up automatically each night.
+        on <span className="text-zinc-300">Find new posts automatically</span> for an X account —
+        on its own page, or under Manage accounts — and its posts are picked up each night.
       </p>
     </div>
   );

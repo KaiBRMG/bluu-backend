@@ -49,7 +49,7 @@ const config = {
 } satisfies ChartConfig;
 
 /**
- * One post, in full — built on `AccountDetailSheet`'s construction.
+ * One post, in full — built on the account view's construction.
  *
  * This is where the free extras earn their place. The table shows one metric at
  * a time because eight columns of numbers cannot be scanned; here there is room
@@ -250,7 +250,7 @@ export function PostDetailSheet({
                       : 'Refresh this post now, along with the 19 that have waited longest'}
                   >
                     {syncing
-                      ? <Loader2Icon className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
+                      ? <Loader2Icon className="activity-spinner size-3.5 animate-spin" aria-hidden />
                       : <RefreshCwIcon className="size-3.5" aria-hidden />}
                     {syncing ? 'Refreshing…' : onCooldown ? `Wait ${Math.ceil(cooldownLeft / 60_000)}m` : 'Refresh now'}
                   </Button>
@@ -269,7 +269,7 @@ export function PostDetailSheet({
                   ))}
                   <Stat
                     label="Author followers"
-                    hint="Captured alongside this post, inside the same billed result, and written through to the account's follower history on the Followers tab."
+                    hint="Captured alongside this post, inside the same billed result, and written through to the account's follower history."
                   >
                     <AnimatedCount value={post.latest?.authorFollowers ?? null} subject="authorFollowers" />
                   </Stat>
@@ -343,7 +343,7 @@ export function PostDetailSheet({
                       </LineChart>
                     </ChartContainer>
                   ) : (
-                    <p className="rounded-lg bg-white/[0.04] px-3 py-6 text-center text-sm text-zinc-400">
+                    <p className="text-sm text-zinc-400">
                       {view.rows.length === 1
                         ? 'One refresh so far. A line needs two — the next one is on the way.'
                         : 'No data for this metric yet. X does not report every metric on every post.'}

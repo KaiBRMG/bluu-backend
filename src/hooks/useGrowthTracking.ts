@@ -7,6 +7,7 @@ import { getCache, invalidateCacheByPrefix, setCache } from '@/lib/queryCache';
 import type { DayMap } from '@/lib/growth/metrics';
 import type { GrowthAccount, GrowthSeries } from '@/types/firestore';
 import type { GrowthPlatform } from '@/lib/growth/platform';
+import type { GrowthCategory } from '@/lib/growth/category';
 
 const CACHE_PREFIX = 'bluu_growth_';
 const CACHE_KEY = `${CACHE_PREFIX}series_v1`;
@@ -20,6 +21,8 @@ interface GrowthPayload {
 export interface AddGrowthAccountPayload {
   platform: GrowthPlatform;
   profileUrl: string;
+  /** Optional: the grouping the account is filed under. */
+  category: GrowthCategory | null;
 }
 
 /**
@@ -137,6 +140,23 @@ export function useGrowthTracking() {
     return response.discovery ?? null;
   }, [authFetch]);
 
+  /**
+   * Re-file an account under a different category.
+   *
+   * The category is a label, not identity — the document id is platform +
+   * handle — so this is a plain field write with no history consequences, and
+   * the row is patched in place rather than refetching the whole payload: the
+   * series a refetch would re-read is tens of KB that did not change (rule 9).
+   */
+  const setCategory = useCallback(async (id: string, category: GrowthCategory | null) => {
+    await authFetch(`/api/smm/growth/accounts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ category }),
+    });
+    setAccounts((current) => current.map((a) => (a.id === id ? { ...a, category } : a)));
+    invalidateCacheByPrefix(CACHE_PREFIX);
+  }, [authFetch]);
+
   const deleteAccount = useCallback(async (id: string) => {
     await authFetch(`/api/smm/growth/accounts/${id}`, { method: 'DELETE' });
     await refresh();
@@ -158,6 +178,7 @@ export function useGrowthTracking() {
     addAccount,
     setTracking,
     setTrackPosts,
+    setCategory,
     deleteAccount,
-  }), [accounts, seriesById, loading, error, refresh, addAccount, setTracking, setTrackPosts, deleteAccount]);
+  }), [accounts, seriesById, loading, error, refresh, addAccount, setTracking, setTrackPosts, setCategory, deleteAccount]);
 }
