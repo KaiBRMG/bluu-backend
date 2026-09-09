@@ -1,5 +1,7 @@
 /**
- * Growth Tracking — the only module that talks to Apify.
+ * Growth Tracking — the follower scrape. Owns the two profile actors below;
+ * the tweet actor for post analytics lives in `growthPostsService.ts`, which
+ * borrows this file's Apify runner and nothing else.
  *
  * ═══ COST IS THE GOVERNING CONSTRAINT — read this before changing anything ═══
  *
@@ -160,7 +162,11 @@ export async function runFacebookScrape(
     const followers = num(item.followers) ?? num(item.likes);
     if (!handle || followers === undefined) continue;
 
-    const snapshot: GrowthSnapshot = { followers };
+    // Stamped at the source so the series stays auditable. Without it a later
+    // post-derived write would leave `src: 'post'` in place on this document
+    // forever — Firestore's `merge` deep-merges maps, so a field this path
+    // never sets is a field this path never clears.
+    const snapshot: GrowthSnapshot = { followers, src: 'profile' };
     const likes = num(item.likes);
     const rating = num(item.rating);
     const ratingCount = num(item.ratingCount);
@@ -220,7 +226,11 @@ export async function runTwitterScrape(
     const followers = num(item.followers);
     if (!handle || followers === undefined) continue;
 
-    const snapshot: GrowthSnapshot = { followers };
+    // Stamped at the source so the series stays auditable. Without it a later
+    // post-derived write would leave `src: 'post'` in place on this document
+    // forever — Firestore's `merge` deep-merges maps, so a field this path
+    // never sets is a field this path never clears.
+    const snapshot: GrowthSnapshot = { followers, src: 'profile' };
     const following = num(item.following);
     const posts = num(item.statusesCount);
     const media = num(item.mediaCount);
@@ -338,6 +348,11 @@ export function serializeGrowthAccount(doc: DocumentSnapshot): GrowthAccount {
     lastScrapeAt: serializeTimestamp(d.lastScrapeAt as Timestamp | null),
     lastScrapeStatus: (d.lastScrapeStatus as GrowthAccount['lastScrapeStatus']) ?? null,
     lastScrapeError: (d.lastScrapeError as string) ?? null,
+    trackPosts: d.trackPosts === true,
+    lastPostDiscoveryAt: serializeTimestamp(d.lastPostDiscoveryAt as Timestamp | null),
+    lastPostDiscoveryStatus: (d.lastPostDiscoveryStatus as GrowthAccount['lastPostDiscoveryStatus']) ?? null,
+    lastPostDiscoveryError: (d.lastPostDiscoveryError as string) ?? null,
+    postsWindowSaturated: d.postsWindowSaturated === true,
     addedBy: (d.addedBy as string) ?? '',
     addedTime: serializeTimestamp(d.addedTime as Timestamp | null),
   };
@@ -403,3 +418,13 @@ export function currentDayKey(): string {
 }
 
 export { growthAccountId };
+
+/**
+ * Shared with `growthPostsService.ts`, which owns the tweet actor.
+ *
+ * The raw runner and the two field probes are re-exported rather than copied so
+ * the two Growth Tracking actors cannot drift on error handling or on the
+ * "a number may arrive as a string" assumption. Everything else stays private:
+ * the follower actors, their inputs and their cost rules live only in this file.
+ */
+export { runActor as runApifyActor, num as apifyNum, str as apifyStr };

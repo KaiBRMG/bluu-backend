@@ -82,7 +82,16 @@ export interface AdminGroup {
 interface AdminUsersState {
   users: AdminFullUser[];
   groups: AdminGroup[];
+  /** Cold load only — the page swaps to skeletons on this and nothing else. */
   loading: boolean;
+  /**
+   * A refetch behind a mutation. Deliberately separate from `loading`: every
+   * mutation here awaits `fetchData(true)`, and while that flag was the same
+   * one the page gated its whole tree on, a save unmounted the open drawer,
+   * cleared the search and all three filters, and flashed a spinner over the
+   * roster. Nothing that follows a write may blank the page.
+   */
+  refreshing: boolean;
   error: string | null;
 }
 
@@ -101,9 +110,9 @@ export function useAdminUsers() {
   const [state, setState] = useState<AdminUsersState>(() => {
     const cached = getCache<AdminUsersCacheData>(CACHE_KEY, CACHE_TTL_MS);
     if (cached) {
-      return { users: cached.users, groups: cached.groups, loading: false, error: null };
+      return { users: cached.users, groups: cached.groups, loading: false, refreshing: false, error: null };
     }
-    return { users: [], groups: [], loading: true, error: null };
+    return { users: [], groups: [], loading: true, refreshing: false, error: null };
   });
 
   const fetchData = useCallback(async (forceRefresh = false) => {
@@ -112,13 +121,20 @@ export function useAdminUsers() {
     if (!forceRefresh) {
       const cached = getCache<AdminUsersCacheData>(CACHE_KEY, CACHE_TTL_MS);
       if (cached) {
-        setState({ users: cached.users, groups: cached.groups, loading: false, error: null });
+        setState({ users: cached.users, groups: cached.groups, loading: false, refreshing: false, error: null });
         return;
       }
     }
 
     try {
-      setState(prev => ({ ...prev, loading: true, error: null }));
+      // A refresh over data we already hold re-renders in place; only a cold
+      // fetch is allowed to put the page into its loading state.
+      setState(prev => ({
+        ...prev,
+        loading: prev.users.length === 0,
+        refreshing: prev.users.length > 0,
+        error: null,
+      }));
       const idToken = await user.getIdToken();
 
       const res = await fetch('/api/admin/users', {
@@ -134,12 +150,13 @@ export function useAdminUsers() {
       const users: AdminFullUser[] = data.users || [];
       const groups: AdminGroup[] = data.groups || [];
       setCache<AdminUsersCacheData>(CACHE_KEY, { users, groups });
-      setState({ users, groups, loading: false, error: null });
+      setState({ users, groups, loading: false, refreshing: false, error: null });
     } catch (err) {
       console.error('Error fetching admin users:', err);
       setState(prev => ({
         ...prev,
         loading: false,
+        refreshing: false,
         error: err instanceof Error ? err.message : 'Unknown error',
       }));
     }

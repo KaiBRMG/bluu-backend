@@ -31,7 +31,11 @@
 
   /* Text colors */
   --foreground-secondary: #9ca3af;
-  --foreground-muted: #6b7280;
+  /* Ink Secondary. Was #6b7280, which measured 4.12:1 on the canvas and
+     3.71:1 on a card surface — a fail on every ground in the app, and the
+     same failure DESIGN.md §2 already condemns in text-zinc-500. There is one
+     de-emphasis step for text and this is it. */
+  --foreground-muted: #a1a1aa;
 
   /* Interactive states */
   --hover-background: rgba(255, 255, 255, 0.055);

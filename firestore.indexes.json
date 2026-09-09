@@ -213,9 +213,62 @@
         { "fieldPath": "accountId", "order": "ASCENDING" },
         { "fieldPath": "lastMessageAtMs", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "growth-posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "nextRefreshAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [
+    {
+      "collectionGroup": "growth-posts",
+      "fieldPath": "history",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-posts",
+      "fieldPath": "latest",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-posts",
+      "fieldPath": "previous",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-posts",
+      "fieldPath": "media",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-posts",
+      "fieldPath": "text",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-posts",
+      "fieldPath": "lastReadError",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-spend",
+      "fieldPath": "results",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-spend",
+      "fieldPath": "usd",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-spend",
+      "fieldPath": "runs",
+      "indexes": []
+    },
     {
       "collectionGroup": "series",
       "fieldPath": "days",

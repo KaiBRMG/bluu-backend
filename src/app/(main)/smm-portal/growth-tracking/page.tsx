@@ -8,13 +8,15 @@ import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/componen
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { SEGMENT_ITEM_CLASS } from '@/components/growth/growthUi';
+import { FilterChip, SEGMENT_ITEM_CLASS } from '@/components/growth/growthUi';
 import { GrowthChart } from '@/components/growth/GrowthChart';
 import { GrowthSummary } from '@/components/growth/GrowthSummary';
 import { GrowthLeaderboard } from '@/components/growth/GrowthLeaderboard';
 import { AccountDetailSheet } from '@/components/growth/AccountDetailSheet';
 import { ManageAccountsTab } from '@/components/growth/ManageAccountsTab';
+import { PostsTab } from '@/components/growth/PostsTab';
 import { useGrowthTracking } from '@/hooks/useGrowthTracking';
+import { useGrowthPosts } from '@/hooks/useGrowthPosts';
 import {
   GROWTH_MODES, MODE_LABEL, RANGE_DAYS, RANGE_LABEL,
   isStale, rangeStart, type GrowthMode, type GrowthRange,
@@ -41,8 +43,15 @@ type PlatformFilter = GrowthPlatform | 'all';
  */
 export default function GrowthTrackingPage() {
   const {
-    accounts, seriesById, loading, error, refresh, addAccount, setTracking, deleteAccount,
+    accounts, seriesById, loading, error, refresh,
+    addAccount, setTracking, setTrackPosts, deleteAccount,
   } = useGrowthTracking();
+
+  // A separate collection on a separate cadence, so a separate hook and a
+  // separate cache entry: the follower series changes once a night, tracked
+  // posts change several times a day, and one payload would make each of them
+  // pay the other's refresh rate.
+  const posts = useGrowthPosts();
 
   const [range, setRange] = useState<GrowthRange>('30d');
   const [mode, setMode] = useState<GrowthMode>('indexed');
@@ -78,7 +87,8 @@ export default function GrowthTrackingPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Growth Tracking</h1>
           <p className="text-sm text-zinc-400">
-            Follower counts for managed Facebook and X pages, updated daily at 00:00 UTC.
+            Follower counts for managed Facebook and X pages, read nightly. Individual X posts
+            are read more often while they are new — see the Posts tab.
           </p>
         </div>
 
@@ -102,15 +112,16 @@ export default function GrowthTrackingPage() {
           </div>
         )}
 
-        <Tabs defaultValue="overview">
+        <Tabs defaultValue="followers">
           <TabsList>
-            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="followers">Followers</TabsTrigger>
+            <TabsTrigger value="posts">Posts</TabsTrigger>
             <TabsTrigger value="manage">Manage Accounts</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="overview" className="space-y-4">
+          <TabsContent value="followers" className="space-y-4">
             {loading ? (
-              <OverviewSkeleton />
+              <FollowersSkeleton />
             ) : accounts.length === 0 ? (
               <p className="text-sm text-zinc-400">
                 No accounts are tracked yet. Add one under Manage Accounts and its follower count
@@ -223,12 +234,28 @@ export default function GrowthTrackingPage() {
             )}
           </TabsContent>
 
+          <TabsContent value="posts">
+            <PostsTab
+              posts={posts.posts}
+              spend={posts.spend}
+              loading={posts.loading}
+              error={posts.error}
+              onRetry={() => { void posts.refresh(); }}
+              onTrack={posts.trackPost}
+              onSync={posts.syncPost}
+              onSetTracking={posts.setPostTracking}
+              onDelete={posts.deletePost}
+              onLoadFullHistory={posts.loadFullHistory}
+            />
+          </TabsContent>
+
           <TabsContent value="manage">
             <ManageAccountsTab
               accounts={accounts}
               loading={loading}
               onAdd={addAccount}
               onSetTracking={setTracking}
+              onSetTrackPosts={setTrackPosts}
               onDelete={deleteAccount}
             />
           </TabsContent>
@@ -246,42 +273,8 @@ export default function GrowthTrackingPage() {
   );
 }
 
-/**
- * A filter chip carrying its own count. Selected is the filled Action Blue Deep
- * (`#2563eb`), never `#3b82f6` — white on the lighter blue measures 3.68:1 and
- * fails AA at this size (DESIGN.md §2).
- */
-function FilterChip({
-  active, onClick, count, children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  count: number;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors ${
-        active
-          ? 'bg-[#2563eb] font-medium text-white'
-          : 'text-zinc-400 hover:bg-white/[0.055] hover:text-zinc-300 active:bg-white/[0.08]'
-      }`}
-    >
-      {children}
-      {/* No `opacity` on the count. Stacked on Ink Secondary it is double
-          de-emphasis, and on the filled chip it drops white-on-#2563eb from
-          5.17:1 to ~3.7:1 at 12px — under AA (DESIGN.md, The One De-emphasis
-          Rule). The chip's own colour already separates it from the label. */}
-      <span className="tabular-nums">{count}</span>
-    </button>
-  );
-}
-
 /** Shaped to the real layout so nothing jumps when the data lands. */
-function OverviewSkeleton() {
+function FollowersSkeleton() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">

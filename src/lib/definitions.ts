@@ -92,6 +92,10 @@ export const PAGES: PageDef[] = [
   { pageId: 'apps-ofmanager', title: 'OF Manager', teamspaceId: 'apps', href: null, icon: 'OnlyFans', order: 4 },
   { pageId: 'apps-model-submissions', title: 'Model Submissions', teamspaceId: 'apps', href: '/applications/apps-model-submissions', icon: 'FileUser', order: 3 },
   { pageId: 'apps-prompt-library', title: 'Prompt Library', teamspaceId: 'apps', href: '/applications/apps-prompt-library', icon: 'Astroid', order: 5 },
+  // GoLogin opens in its own Electron window (like OF Manager), so it has no
+  // href — the sidebar special-cases it via SATELLITE_PAGES. Its icon is the
+  // brand SVG at /Icons/gologin.svg (no lucide equivalent).
+  { pageId: 'apps-gologin', title: 'GoLogin', teamspaceId: 'apps', href: null, icon: 'GoLogin', order: 6 },
 
 ];
 

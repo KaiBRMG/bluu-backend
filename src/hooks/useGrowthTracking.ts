@@ -94,6 +94,26 @@ export function useGrowthTracking() {
     await refresh();
   }, [authFetch, refresh]);
 
+  /**
+   * Opt an X account into post-level tracking.
+   *
+   * Updated in place rather than by refetching the whole payload: this is one
+   * boolean, and the series it would re-read is tens of KB that did not change
+   * (rule 9). `setTracking` above still refetches because stopping an account
+   * changes what the charts show.
+   */
+  const setTrackPosts = useCallback(async (id: string, trackPosts: boolean) => {
+    await authFetch(`/api/smm/growth/accounts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ trackPosts }),
+    });
+    setAccounts((current) => current.map((a) => (a.id === id ? { ...a, trackPosts } : a)));
+    // The session cache holds the pre-flip copy; drop it rather than write
+    // through, since the next mount should read the server's own view of a
+    // change that starts a nightly job.
+    invalidateCacheByPrefix(CACHE_PREFIX);
+  }, [authFetch]);
+
   const deleteAccount = useCallback(async (id: string) => {
     await authFetch(`/api/smm/growth/accounts/${id}`, { method: 'DELETE' });
     await refresh();
@@ -114,6 +134,7 @@ export function useGrowthTracking() {
     refresh,
     addAccount,
     setTracking,
+    setTrackPosts,
     deleteAccount,
-  }), [accounts, seriesById, loading, error, refresh, addAccount, setTracking, deleteAccount]);
+  }), [accounts, seriesById, loading, error, refresh, addAccount, setTracking, setTrackPosts, deleteAccount]);
 }

@@ -63,7 +63,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
 
     // ─── Satellite windows ───────────────────────────────────────────
-    // `path` must be under an allowlisted prefix (currently /of-manager);
+    // `path` must be under an allowlisted prefix (/of-manager, /gologin);
     // main validates it and re-checks the page permission server-side before
     // the window is created. One window per `key`; a repeat call focuses it.
     openSatellite: (idToken, options = {}) =>
@@ -79,6 +79,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onlyfans: {
     openWindow: (idToken, options = {}) =>
       ipcRenderer.invoke('onlyfans:open-window', { idToken, ...options }),
+  },
+
+  // GoLogin — launches a profile's Orbita browser on THIS machine. The browser
+  // is its own OS window, not an Electron one; these calls drive the session,
+  // and /gologin/session/<id> is its console. The API token never crosses this
+  // bridge: main fetches it per launch and keeps it in its own memory.
+  gologin: {
+    launch: (idToken, profileId) => ipcRenderer.invoke('gologin:launch', { idToken, profileId }),
+    stop: (profileId) => ipcRenderer.invoke('gologin:stop', profileId),
+    getSession: (profileId) => ipcRenderer.invoke('gologin:get-session', profileId),
+    listSessions: () => ipcRenderer.invoke('gologin:list-sessions'),
+    onSessionChanged: (callback) =>
+      ipcRenderer.on('gologin:session-changed', (_event, session) => callback(session)),
+    removeSessionChangedListeners: () =>
+      ipcRenderer.removeAllListeners('gologin:session-changed'),
   },
 
   // Time tracking

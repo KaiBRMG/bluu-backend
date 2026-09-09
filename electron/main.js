@@ -1332,6 +1332,20 @@ const HIDE_ON_CLOSE = process.platform === 'darwin';
 let isQuitting = false;
 app.on('before-quit', () => { isQuitting = true; });
 
+// A running GoLogin profile must be stopped, not orphaned: `stop()` syncs the
+// profile back to the provider, and killing the process instead loses whatever
+// the session did. Registered AFTER the listener above so `isQuitting` is
+// already true, and latched so the re-quit below cannot loop. Bounded inside
+// `stopAllGoLoginSessions` — a quit may be delayed a few seconds, never hung.
+let gologinQuitHandled = false;
+app.on('before-quit', (event) => {
+  if (gologinQuitHandled) return;
+  if (![...gologinSessions.values()].some(s => s.gl)) return;
+  event.preventDefault();
+  gologinQuitHandled = true;
+  stopAllGoLoginSessions().finally(() => app.quit());
+});
+
 // ─── Right-click menu + spellcheck ───────────────────────────────────
 // Chromium's spellchecker is on by default, but Electron renders NO suggestion UI
 // unless the main process builds the menu — and without a context menu there is no
@@ -1574,6 +1588,7 @@ function attachWindowBehaviour(win, { isMain, appUrl, minWidth, minHeight, satel
 // thing that needs one, because each prefix names the access route that guards it.
 const SATELLITE_PREFIXES = [
   { prefix: '/of-manager', accessPath: '/api/onlyfans/access', title: 'OF Manager' },
+  { prefix: '/gologin', accessPath: '/api/gologin/access', title: 'GoLogin' },
 ];
 const SATELLITE_MAX = 8;
 const SATELLITE_MIN_DIMENSION = 360;
@@ -1717,6 +1732,193 @@ ipcMain.handle('window:list-satellites', () => (
     .filter(([, win]) => win && !win.isDestroyed())
     .map(([key, win]) => ({ key, focused: win.isFocused(), title: win.getTitle() }))
 ));
+
+// ─── GoLogin sessions (local Orbita launches) ────────────────────────
+// The GoLogin Node SDK downloads and runs **Orbita** — a separate Chromium
+// binary — on this machine. Three consequences shape everything below:
+//
+//   • **The browser is not an Electron window.** Orbita owns its own OS window;
+//     `attachWindowBehaviour` never touches it and we cannot restyle, embed or
+//     position it. The satellite at /gologin/session/<id> is the *console* for a
+//     session (status, stop, errors), not the browser itself.
+//   • **Only main can do this.** It is the sole Node context on the user's
+//     machine; nothing on Vercel can launch a browser on someone's desk.
+//   • **The API token lives here and only here.** It is fetched per launch from
+//     /api/gologin/launch-token (which enforces the page permission server-side),
+//     held in memory for the life of the session, never written to disk and never
+//     handed back to a renderer. See that route's header for the full trade.
+//
+// The SDK is **ESM-only**, so it is loaded with a dynamic `import()` — and lazily,
+// because it drags in puppeteer-core and a native sqlite3 binding that must not
+// cost anything at app start for the users who never open GoLogin.
+const GOLOGIN_MAX_SESSIONS = 5;          // ~300–500MB of RAM each, per GoLogin's own docs
+const GOLOGIN_LAUNCH_TIMEOUT_MS = 300000; // first launch downloads Orbita (hundreds of MB)
+
+/** profileId -> { status, gl, wsUrl, error, startedAtMs, uid } */
+const gologinSessions = new Map();
+
+/** Renderer-supplied, so validated as untrusted input before it reaches the SDK. */
+function isValidProfileId(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{6,64}$/.test(value);
+}
+
+/**
+ * What a renderer is allowed to see. Deliberately omits the `gl` instance (not
+ * serialisable, and a handle to the whole session) and the token entirely.
+ */
+function gologinSnapshot(profileId) {
+  const session = gologinSessions.get(profileId);
+  if (!session) return { profileId, status: 'idle' };
+  return {
+    profileId,
+    status: session.status,
+    error: session.error ?? null,
+    startedAtMs: session.startedAtMs ?? null,
+    // Present only so the console can say "automation endpoint ready"; it is a
+    // localhost CDP socket, not a credential.
+    wsUrl: session.wsUrl ?? null,
+  };
+}
+
+function broadcastGoLoginSession(profileId) {
+  const payload = gologinSnapshot(profileId);
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('gologin:session-changed', payload);
+  }
+}
+
+function setGoLoginStatus(profileId, patch) {
+  const current = gologinSessions.get(profileId) ?? { profileId };
+  gologinSessions.set(profileId, { ...current, ...patch });
+  broadcastGoLoginSession(profileId);
+}
+
+/**
+ * The token is fetched fresh per launch rather than cached: the page permission
+ * is re-checked server-side on every call, so access revoked mid-shift stops the
+ * next launch instead of the next app start.
+ */
+async function fetchGoLoginToken(idToken) {
+  const response = await fetch(`${BASE_URL}/api/gologin/launch-token`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!response.ok) {
+    const error = response.status === 403 ? 'forbidden'
+      : response.status === 503 ? 'not-configured'
+      : 'unauthenticated';
+    throw Object.assign(new Error(`launch-token ${response.status}`), { code: error });
+  }
+  const body = await response.json();
+  if (!body?.token) throw Object.assign(new Error('no token'), { code: 'not-configured' });
+  return body.token;
+}
+
+ipcMain.handle('gologin:launch', async (_event, args = {}) => {
+  const { idToken, profileId } = args;
+  if (!isValidProfileId(profileId)) return { success: false, error: 'invalid-profile' };
+  if (!idToken || typeof idToken !== 'string') return { success: false, error: 'unauthenticated' };
+
+  const existing = gologinSessions.get(profileId);
+  if (existing && (existing.status === 'starting' || existing.status === 'running')) {
+    // Idempotent: a second Launch (or a reopened console window) adopts the
+    // session that is already up rather than spawning a second Orbita on the
+    // same profile, which GoLogin treats as a conflict.
+    return { success: true, session: gologinSnapshot(profileId) };
+  }
+
+  const live = [...gologinSessions.values()].filter(
+    s => s.status === 'starting' || s.status === 'running',
+  ).length;
+  if (live >= GOLOGIN_MAX_SESSIONS) return { success: false, error: 'too-many-sessions' };
+
+  setGoLoginStatus(profileId, { status: 'starting', error: null, wsUrl: null, startedAtMs: Date.now() });
+
+  let gl;
+  try {
+    const token = await fetchGoLoginToken(idToken);
+    const { GoLogin } = await import('gologin');
+    gl = new GoLogin({
+      token,
+      profile_id: profileId,
+      // Cookies stay on this machine unless GoLogin already has them: uploading
+      // a fan/creator session's cookies on every stop is a data movement nobody
+      // asked for. Flip it only deliberately.
+      uploadCookiesToServer: false,
+    });
+    gologinSessions.set(profileId, { ...gologinSessions.get(profileId), gl });
+
+    const started = await Promise.race([
+      gl.start(),
+      new Promise((_, reject) => setTimeout(
+        () => reject(Object.assign(new Error('timeout'), { code: 'timeout' })),
+        GOLOGIN_LAUNCH_TIMEOUT_MS,
+      )),
+    ]);
+
+    setGoLoginStatus(profileId, { status: 'running', wsUrl: started?.wsUrl ?? null, error: null });
+    return { success: true, session: gologinSnapshot(profileId) };
+  } catch (err) {
+    console.error('[main] gologin launch failed:', err);
+    // The SDK may have got far enough to spawn something before throwing, so the
+    // failure path still tries to tear down rather than leaving a stray Orbita.
+    if (gl) { try { await gl.stop(); } catch { /* nothing to clean up */ } }
+    const code = err?.code === 'forbidden' ? 'forbidden'
+      : err?.code === 'not-configured' ? 'not-configured'
+      : err?.code === 'timeout' ? 'timeout'
+      : err?.code === 'unauthenticated' ? 'unauthenticated'
+      : 'launch-failed';
+    setGoLoginStatus(profileId, { status: 'failed', error: code, gl: null, wsUrl: null });
+    return { success: false, error: code, session: gologinSnapshot(profileId) };
+  }
+});
+
+ipcMain.handle('gologin:stop', async (_event, profileId) => {
+  if (!isValidProfileId(profileId)) return { success: false, error: 'invalid-profile' };
+  const session = gologinSessions.get(profileId);
+  if (!session?.gl) {
+    gologinSessions.delete(profileId);
+    broadcastGoLoginSession(profileId);
+    return { success: true };
+  }
+
+  setGoLoginStatus(profileId, { status: 'stopping' });
+  try {
+    // `stop()` syncs the profile back to GoLogin before closing — that sync is
+    // the point of stopping properly rather than killing the process.
+    await session.gl.stop();
+    gologinSessions.delete(profileId);
+    broadcastGoLoginSession(profileId);
+    return { success: true };
+  } catch (err) {
+    console.error('[main] gologin stop failed:', err);
+    setGoLoginStatus(profileId, { status: 'failed', error: 'stop-failed' });
+    return { success: false, error: 'stop-failed' };
+  }
+});
+
+ipcMain.handle('gologin:get-session', (_event, profileId) => (
+  isValidProfileId(profileId) ? gologinSnapshot(profileId) : { profileId: null, status: 'idle' }
+));
+
+ipcMain.handle('gologin:list-sessions', () => (
+  [...gologinSessions.keys()].map(gologinSnapshot)
+));
+
+/**
+ * Quitting with profiles running would orphan Orbita processes **and** skip the
+ * profile sync `stop()` performs, which is how a profile's session data is lost.
+ * Best-effort and bounded — a quit must not hang on a provider round trip.
+ */
+async function stopAllGoLoginSessions() {
+  const running = [...gologinSessions.entries()].filter(([, s]) => s.gl);
+  if (!running.length) return;
+  await Promise.race([
+    Promise.allSettled(running.map(([, s]) => s.gl.stop())),
+    new Promise(resolve => setTimeout(resolve, 8000)),
+  ]);
+  gologinSessions.clear();
+}
 
 // ─── Main window ─────────────────────────────────────────────────────
 function createWindow() {

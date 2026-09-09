@@ -39,20 +39,43 @@ import { toast } from "sonner";
 let savedScrollTop = 0;
 
 /**
- * OF Manager does not navigate — it spawns its own Electron window (main.js
- * re-checks the page permission server-side before creating it). On a build
- * that predates that IPC, fall back to opening the route in this window so the
- * feature still works while the fleet updates.
+ * Pages that do **not** navigate: each spawns its own Electron window, and
+ * `main.js` re-checks the page permission server-side (against `accessPath` for
+ * that prefix) before the window is created.
+ *
+ * `route` doubles as the in-window fallback. Two things can send us down it, and
+ * both mean "this installed build is older than the feature": the IPC is absent
+ * entirely, or main rejects the path because its `SATELLITE_PREFIXES` predates
+ * this entry. Either way the surface still works — just inside the main window,
+ * with the sidebar rendered around it — while the fleet updates.
  */
-const OF_MANAGER_PAGE_ID = "apps-ofmanager";
+const SATELLITE_PAGES: Record<string, { route: string; key: string }> = {
+  "apps-ofmanager": { route: "/of-manager", key: "of-manager" },
+  "apps-gologin": { route: "/gologin", key: "gologin" },
+};
 
-function OfManagerButton({ title, icon }: { title: string; icon?: string | null }) {
+function SatelliteButton({
+  pageId,
+  title,
+  icon,
+}: {
+  pageId: string;
+  title: string;
+  icon?: string | null;
+}) {
   const router = useRouter();
+  const target = SATELLITE_PAGES[pageId];
 
   const open = useCallback(async () => {
-    const openWindow = window.electronAPI?.onlyfans?.openWindow;
-    if (!openWindow) {
-      router.push("/of-manager");
+    if (!target) return;
+    const api = window.electronAPI?.window;
+    // `onlyfans.openWindow` is the legacy channel, kept for builds that predate
+    // the generalised one. It reaches the same handler in main.js.
+    const openSatellite =
+      api?.openSatellite ??
+      (pageId === "apps-ofmanager" ? window.electronAPI?.onlyfans?.openWindow : undefined);
+    if (!openSatellite) {
+      router.push(target.route);
       return;
     }
     try {
@@ -61,20 +84,26 @@ function OfManagerButton({ title, icon }: { title: string; icon?: string | null 
         toast.error("Session expired — sign in again.");
         return;
       }
-      const result = await openWindow(idToken);
+      const result = await openSatellite(idToken, { path: target.route, key: target.key, title });
+      // An older shell doesn't know this prefix — open it in-window instead of
+      // telling the user the feature is broken.
+      if (result?.error === "invalid-path") {
+        router.push(target.route);
+        return;
+      }
       // 'already-opening' is a double-click while the access check is in flight —
       // the window is on its way, so saying "could not open" would be wrong.
       if (!result?.success && result?.error !== "already-opening") {
         toast.error(
           result?.error === "forbidden"
-            ? "You do not have access to OF Manager."
-            : "Could not open OF Manager.",
+            ? `You do not have access to ${title}.`
+            : `Could not open ${title}.`,
         );
       }
     } catch {
-      toast.error("Could not open OF Manager.");
+      toast.error(`Could not open ${title}.`);
     }
-  }, [router]);
+  }, [pageId, router, target, title]);
 
   return (
     <SidebarMenuButton onClick={open} tooltip={title}>
@@ -218,8 +247,12 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
                     <SidebarMenu>
                       {pages.map((page) => (
                         <SidebarMenuItem key={page.pageId}>
-                          {page.pageId === OF_MANAGER_PAGE_ID ? (
-                            <OfManagerButton title={page.title} icon={page.icon} />
+                          {SATELLITE_PAGES[page.pageId] ? (
+                            <SatelliteButton
+                              pageId={page.pageId}
+                              title={page.title}
+                              icon={page.icon}
+                            />
                           ) : (
                             <SidebarMenuButton
                               asChild

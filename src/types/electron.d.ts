@@ -19,6 +19,25 @@ export interface SatelliteResult {
   error?: string;
 }
 
+/** A local GoLogin/Orbita launch, as the main process reports it. */
+export interface GoLoginSession {
+  profileId: string | null;
+  /** 'idle' | 'starting' | 'running' | 'stopping' | 'stopped' | 'failed' */
+  status: string;
+  /** 'forbidden' | 'not-configured' | 'timeout' | 'launch-failed' | 'stop-failed' */
+  error?: string | null;
+  startedAtMs?: number | null;
+  /** Orbita's local CDP endpoint once running. Not a credential. */
+  wsUrl?: string | null;
+}
+
+export interface GoLoginLaunchResult {
+  success: boolean;
+  /** Adds 'invalid-profile' | 'unauthenticated' | 'too-many-sessions' to the above. */
+  error?: string;
+  session?: GoLoginSession;
+}
+
 /** Options for opening a satellite window. All geometry is clamped in main. */
 export interface SatelliteOptions {
   /**
@@ -167,6 +186,20 @@ interface ElectronAPI {
   // by pre-multi-window builds, which always open `/of-manager`.
   onlyfans?: {
     openWindow: (idToken: string, options?: SatelliteOptions) => Promise<SatelliteResult>;
+  };
+  /**
+   * GoLogin profile launching. Optional — absent on every build before v0.11.0,
+   * so feature-detect: without it the session console says the app needs
+   * updating rather than failing silently. The launched browser is **Orbita**,
+   * a separate application window this API cannot style or position.
+   */
+  gologin?: {
+    launch: (idToken: string, profileId: string) => Promise<GoLoginLaunchResult>;
+    stop: (profileId: string) => Promise<{ success: boolean; error?: string }>;
+    getSession: (profileId: string) => Promise<GoLoginSession>;
+    listSessions: () => Promise<GoLoginSession[]>;
+    onSessionChanged: (callback: (session: GoLoginSession) => void) => void;
+    removeSessionChangedListeners: () => void;
   };
   timeTracking: {
     getIdleTime: () => Promise<number>;

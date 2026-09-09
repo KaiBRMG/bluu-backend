@@ -68,6 +68,10 @@ All renderer↔main communication goes through `preload.js` → `window.electron
 | `window.onFocusChange(cb)` | main→renderer | `window:focus-changed` | focus/blur of *this* window — decide whether a message deserves a notification (v0.10.0+) |
 | `window.openSatellite(idToken, opts)` | invoke | `window:open-satellite` | the generalised spawner (v0.10.0+). `closeSatellite(key)` / `listSatellites()` alongside it |
 | `onlyfans.openWindow(idToken, opts?)` | invoke | `onlyfans:open-window` | Same handler, legacy name. Spawns an OF satellite; **verifies the page permission server-side first**; one window per `key`; **not** an Electron child window. Optional — feature-detect. See [Multi-window](#multi-window-the-main-window-and-its-satellites) and [onlyfans-crm.md](onlyfans-crm.md#the-window) |
+| `gologin.launch(idToken, profileId)` | invoke | `gologin:launch` | Runs the GoLogin SDK **in main** to open a profile in **Orbita — a separate application window, not an Electron one**. Fetches the API token per launch from `/api/gologin/launch-token` (page permission enforced there); idempotent per profile; capped at 5 live sessions. v0.11.0+ |
+| `gologin.stop(profileId)` | invoke | `gologin:stop` | `stop()` **syncs the profile back to GoLogin** — killing the browser instead loses the session. Also run for every live session on quit |
+| `gologin.getSession(id)` / `listSessions()` | invoke | `gologin:get-session` · `gologin:list-sessions` | Serialisable snapshot only — never the SDK instance, never the token |
+| `gologin.onSessionChanged(cb)` | main→renderer | `gologin:session-changed` | Broadcast to every window. Its remover is `removeAllListeners`, so **one subscriber per window** (see [gologin.md](gologin.md)) |
 | `timeTracking.getIdleTime()` | invoke | `timeTracking:getIdleTime` | `powerMonitor.getSystemIdleTime()` |
 | `timeTracking.getActivitySince(sinceMs)` | invoke | `timeTracking:getActivitySince` | 5s idle-time samples (45-min rolling buffer) for accurate activity % |
 | `timeTracking.captureScreenshot()` | invoke | `timeTracking:captureScreenshot` | `desktopCapturer`, all screens → base64 PNGs |
@@ -137,6 +141,7 @@ The shell owns **one main window and zero or more satellites**. A satellite is a
 ```js
 const SATELLITE_PREFIXES = [
   { prefix: '/of-manager', accessPath: '/api/onlyfans/access', title: 'OF Manager' },
+  { prefix: '/gologin',    accessPath: '/api/gologin/access',  title: 'GoLogin' },
 ];
 ```
 

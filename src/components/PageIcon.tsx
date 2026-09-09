@@ -70,6 +70,7 @@ export const ICON_MAP: Record<string, LucideIcon> = {
 // ICON_MAP so the icon set remains lucide-only.
 export const SVG_ICONS: Record<string, string> = {
   OnlyFans: "/Icons/onlyfans.svg",
+  GoLogin: "/Icons/gologin.svg",
 };
 
 /** Renders a page/teamspace icon by its definition name. Nothing if unmapped. */

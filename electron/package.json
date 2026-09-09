@@ -1,6 +1,6 @@
 {
   "name": "bluu-backend",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "description": "Bluu Rock MGMT SaaS",
   "author": "BluuRockMGMT",
   "private": true,
@@ -16,8 +16,9 @@
   },
   "dependencies": {
     "electron-updater": "^6.6.2",
-    "glob": "^13.0.6"
-  }, 
+    "glob": "^13.0.6",
+    "gologin": "^3.0.3"
+  },
   "devDependencies": {
     "cross-env": "^10.1.0",
     "electron": "^39.2.6",
@@ -39,6 +40,11 @@
       "public/mixkit-message-pop-alert-2354.mp3",
       "package.json"
     ],
+    "asarUnpack": [
+      "node_modules/gologin/**",
+      "node_modules/sqlite3/**",
+      "**/*.node"
+    ],
     "directories": {
       "output": "dist",
       "buildResources": "public/logo"
@@ -50,16 +56,43 @@
       "entitlements": "build-assets/macos/entitlements.mac.plist",
       "entitlementsInherit": "build-assets/macos/entitlements.mac.inherit.plist",
       "target": [
-        { "target": "dmg", "arch": ["arm64"] },
-        { "target": "dmg", "arch": ["x64"] },
-        { "target": "zip", "arch": ["arm64"] },
-        { "target": "zip", "arch": ["x64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "dmg",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "public/logo/icon.icns",
       "category": "public.app-category.productivity"
     },
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "public/logo/icon.ico",
       "signtoolOptions": {
         "publisherName": "BluuRockMGMT"

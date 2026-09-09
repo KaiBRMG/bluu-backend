@@ -2,12 +2,13 @@
 
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { ExternalLinkIcon, PlusIcon } from 'lucide-react';
+import { ExternalLinkIcon, PlusIcon, TriangleAlertIcon } from 'lucide-react';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -39,11 +40,12 @@ interface ManageAccountsTabProps {
   loading: boolean;
   onAdd: (payload: AddGrowthAccountPayload) => Promise<void>;
   onSetTracking: (id: string, isActive: boolean) => Promise<void>;
+  onSetTrackPosts: (id: string, trackPosts: boolean) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }
 
 export function ManageAccountsTab({
-  accounts, loading, onAdd, onSetTracking, onDelete,
+  accounts, loading, onAdd, onSetTracking, onSetTrackPosts, onDelete,
 }: ManageAccountsTabProps) {
   const [addOpen, setAddOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<GrowthAccount | null>(null);
@@ -61,6 +63,26 @@ export function ManageAccountsTab({
       toast.success(isActive
         ? `Tracking @${account.handle} again`
         : `Stopped tracking @${account.handle}. Its history is kept.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not update that account.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  /**
+   * Post tracking is a second, separate cost per account: the nightly discovery
+   * search pays the scraper's 20-result floor for each opted-in handle. The
+   * toast says what was armed rather than confirming silently — the discipline
+   * this feature runs on is that the person switching it on sees the price.
+   */
+  const setTrackPosts = async (account: GrowthAccount, trackPosts: boolean) => {
+    setBusyId(account.id);
+    try {
+      await onSetTrackPosts(account.id, trackPosts);
+      toast.success(trackPosts
+        ? `Finding new posts from @${account.handle} from tonight.`
+        : `Stopped finding new posts for @${account.handle}. Posts already tracked keep refreshing.`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not update that account.');
     } finally {
@@ -110,6 +132,7 @@ export function ManageAccountsTab({
                 <TableHead>Account</TableHead>
                 <TableHead className="text-right">Followers</TableHead>
                 <TableHead className="text-right">Last read</TableHead>
+                <TableHead className="w-[8.5rem] text-right">Track posts</TableHead>
                 {/* Matches the stopped table's action column so the two line up. */}
                 <TableHead className="w-[13rem] text-right">
                   <span className="sr-only">Actions</span>
@@ -127,6 +150,13 @@ export function ManageAccountsTab({
                   </TableCell>
                   <TableCell className="text-right">
                     <ScrapeStatus account={account} />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <TrackPostsCell
+                      account={account}
+                      busy={busyId === account.id}
+                      onChange={(next) => setTrackPosts(account, next)}
+                    />
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
@@ -162,6 +192,7 @@ export function ManageAccountsTab({
                     <TableHead>Account</TableHead>
                     <TableHead>Followers</TableHead>
                     <TableHead>Last read</TableHead>
+                    <TableHead className="w-[8.5rem]">Track posts</TableHead>
                     <TableHead className="w-[13rem]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -182,6 +213,10 @@ export function ManageAccountsTab({
                           ? new Date(account.lastScrapeAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
                           : 'Never read'}
                       </TableCell>
+                      {/* No toggle on a stopped account: nothing is scraped
+                          for it at all, so offering post tracking here would
+                          arm a job that cannot run. */}
+                      <TableCell className="w-[8.5rem]" />
                       <TableCell className="w-[13rem] text-right">
                         <Button
                           variant="ghost" size="sm" className="h-7 text-xs"
@@ -231,6 +266,55 @@ export function ManageAccountsTab({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+/**
+ * The post-tracking opt-in, and the one warning that belongs beside it.
+ *
+ * Facebook accounts get a dash rather than a disabled switch: the tweet scraper
+ * takes X handles and there is no equivalent actor for page posts here, so this
+ * is a capability the platform does not have, not a permission the user lacks.
+ * A greyed-out control would suggest it could be turned on.
+ *
+ * `postsWindowSaturated` means the last discovery came back full of posts under
+ * a day old — this account posts faster than one nightly read can see, so posts
+ * are being missed. Surfaced here because this is where someone can act on it,
+ * and silently missing posts is the problem, not missing them.
+ */
+function TrackPostsCell({
+  account, busy, onChange,
+}: {
+  account: GrowthAccount;
+  busy: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  if (account.platform !== 'twitter') {
+    return (
+      <span className="text-[11px] text-zinc-400" title="Post tracking is only available for X accounts">
+        —
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-end gap-2">
+      {account.trackPosts && account.postsWindowSaturated && (
+        <span
+          role="img"
+          aria-label={`@${account.handle} posts faster than one nightly read can see, so some posts are being missed`}
+          title="Posts faster than one nightly read can see — some posts are being missed"
+        >
+          <TriangleAlertIcon className="size-3.5 shrink-0 text-orange-400" aria-hidden />
+        </span>
+      )}
+      <Switch
+        checked={account.trackPosts}
+        disabled={busy}
+        onCheckedChange={onChange}
+        aria-label={`Track posts for @${account.handle}`}
+      />
     </div>
   );
 }

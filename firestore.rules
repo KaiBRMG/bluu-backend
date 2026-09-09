@@ -245,6 +245,19 @@ service cloud.firestore {
       }
     }
 
+    // 18d. Growth Tracking post analytics. Individual X post engagement,
+    // written by /api/cron/growth-posts and read through /api/smm/growth/posts.
+    // Readings live in a map on the document itself, so there is no
+    // subcollection to match here. `growth-spend` is the rolling monthly cost
+    // ledger the refresh breaker reads.
+    match /growth-posts/{tweetId} {
+      allow read, write: if false;
+    }
+
+    match /growth-spend/{month} {
+      allow read, write: if false;
+    }
+
     // 19. App resources
     // Group/user-filtered reads happen server-side in /api/resources; management
     // writes go through /api/admin/resources. All access via Admin SDK, so no

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from 'react';
-import type { AdminFullUser } from '@/hooks/useAdminUsers';
+import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
 import UserDetailContent from './UserDetailContent';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -27,19 +27,25 @@ import {
 interface UserDetailDrawerProps {
   userId: string | null;
   users: AdminFullUser[];
+  groups: AdminGroup[];
   onClose: () => void;
   onUpdateUser: (uid: string, updates: Record<string, unknown>) => Promise<void>;
   onRefetch: () => Promise<void>;
   onDeleteUser?: () => Promise<void>;
+  onAddGroupMembers?: (groupId: string, uids: string[]) => Promise<void>;
+  onRemoveGroupMember?: (groupId: string, uid: string) => Promise<void>;
 }
 
 export default function UserDetailDrawer({
   userId,
   users,
+  groups,
   onClose,
   onUpdateUser,
   onRefetch,
   onDeleteUser,
+  onAddGroupMembers,
+  onRemoveGroupMember,
 }: UserDetailDrawerProps) {
   const user = userId ? users.find((u) => u.uid === userId) ?? null : null;
   const [isDirty, setIsDirty] = useState(false);
@@ -77,7 +83,11 @@ export default function UserDetailDrawer({
       <Sheet open={!!userId} onOpenChange={handleOpenChange}>
         <SheetContent
           side="right"
-          className="dark flex w-[500px] max-w-full flex-col gap-0 p-0 sm:max-w-[500px]"
+          /* 560px, not 500: the record is 25 fields behind seven accordion
+             sections, and this window is a desktop app that always has the
+             room. Still a Sheet rather than a second pane — the panel owns a
+             dirty-state guard that a pane would have to reinvent. */
+          className="dark flex w-[560px] max-w-full flex-col gap-0 p-0 sm:max-w-[560px]"
         >
           {/* pr-12 clears the Sheet's built-in close button at top-4 right-4. */}
           <SheetHeader className="flex-row items-center gap-3 border-b border-border-subtle py-4 pr-12 pl-6">
@@ -115,6 +125,9 @@ export default function UserDetailDrawer({
             <UserDetailContent
               key={user.uid}
               user={user}
+              groups={groups}
+              onAddGroupMembers={onAddGroupMembers}
+              onRemoveGroupMember={onRemoveGroupMember}
               onUpdateUser={onUpdateUser}
               onRefetch={onRefetch}
               onDeleteUser={onDeleteUser}

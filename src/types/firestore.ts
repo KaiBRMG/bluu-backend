@@ -762,6 +762,19 @@ export interface SmmPageSuggestion {
 /** One day's reading for one account. Only `followers` is guaranteed. */
 export interface GrowthSnapshot {
   followers: number;
+  /**
+   * Which scraper produced this reading.
+   *
+   * `profile` = the nightly `apidojo/twitter-user-scraper` or
+   * `apify/facebook-pages-scraper` run. `post` = the follower count that rode
+   * along inside a tweet result (see growthPostsService). Absent on the two
+   * months of hand-collected history, which predate both.
+   *
+   * This exists so a day's number can be traced to its source after the fact.
+   * Without it the two feeds are indistinguishable once written, and mixing
+   * sources into one series becomes irreversible.
+   */
+  src?: 'profile' | 'post';
   // Facebook extras — returned inside the same billed result, so free.
   likes?: number;
   rating?: number;
@@ -796,6 +809,22 @@ export interface GrowthAccount {
   lastScrapeAt: string | null;
   lastScrapeStatus: 'ok' | 'failed' | null;
   lastScrapeError: string | null;
+  /**
+   * Post-level tracking opt-in. When true the nightly discovery pass asks the
+   * tweet scraper for this account's ~20 newest posts and starts tracking them.
+   * Off by default: it is a separate, per-account line on the bill.
+   */
+  trackPosts: boolean;
+  /** Last time the discovery pass ran for this account. */
+  lastPostDiscoveryAt: string | null;
+  lastPostDiscoveryStatus: 'ok' | 'failed' | null;
+  lastPostDiscoveryError: string | null;
+  /**
+   * True when the last discovery filled its ~20-result window entirely with
+   * posts under a day old — meaning this account posts faster than one nightly
+   * read can see, and posts are being missed. Surfaced in the manage tab.
+   */
+  postsWindowSaturated: boolean;
   addedBy: string;
   addedTime: string | null;
 }
@@ -805,6 +834,107 @@ export interface GrowthSeries {
   accountId: string;
   /** Day key (`YYYY-MM-DD`) → reading, merged across every year document. */
   days: Record<string, GrowthSnapshot>;
+}
+
+// ─── Growth Tracking: post analytics ─────────────────────────────────
+//
+// Individual X post engagement, collected by /api/cron/growth-posts. Separate
+// from GrowthSnapshot because the two answer different questions and are read
+// on different cadences: an account is read once a night, a fresh post several
+// times a day. See documentation/growth-tracking.md.
+
+/**
+ * One reading of one post. Every field arrives inside the same billed scraper
+ * result, so storing all of them costs exactly what storing one would.
+ *
+ * A metric the scraper omitted is **absent, never 0** — X does not report views
+ * or bookmarks consistently, and a zero would draw a cliff to the axis and read
+ * as "engagement collapsed".
+ */
+export interface GrowthPostSnapshot {
+  likes?: number;
+  reposts?: number;
+  replies?: number;
+  quotes?: number;
+  views?: number;
+  bookmarks?: number;
+  /**
+   * The author's follower count at the moment this post was read — free inside
+   * the same result.
+   *
+   * ═══ NEVER WRITTEN INTO THE FOLLOWER SERIES ═══
+   * `growth-accounts/{id}/series` is fed exclusively by the nightly profile
+   * scrape. This number comes from a different actor on a different cadence and
+   * may be cached by the search index; mixing the two sources would corrupt two
+   * months of hand-collected history with values nobody can audit afterwards.
+   * It is shown on the post, and that is all it is for.
+   */
+  authorFollowers?: number;
+}
+
+/** Where a tracked post came from — decides what stopping it means. */
+export type GrowthPostSource = 'manual' | 'account';
+
+/** Serialised growth-posts/{tweetId} doc. */
+export interface GrowthPost {
+  /** The tweet id — also the document id, and the value sent as `tweetIDs`. */
+  id: string;
+  url: string;
+  /** Author handle as the scraper spells it, or null before the first read. */
+  authorHandle: string | null;
+  authorHandleNormalized: string | null;
+  authorName: string | null;
+  authorProfilePictureUrl: string | null;
+  authorIsVerified: boolean;
+  /** Post text, truncated on write — the link is the source of truth. */
+  text: string;
+  lang: string | null;
+  /** When the post was published (ISO), which drives the whole refresh ladder. */
+  postedAt: string | null;
+  isReply: boolean;
+  isQuote: boolean;
+  isRetweet: boolean;
+  conversationId: string | null;
+  /** Image/video URLs carried in the same result. */
+  media: GrowthPostMedia[];
+  /** 'manual' = pasted by someone; 'account' = found by the discovery pass. */
+  source: GrowthPostSource;
+  /** The tracked account that discovered it, when source is 'account'. */
+  accountId: string | null;
+  /** false = refreshing stopped. History is kept and the post can be resumed. */
+  isActive: boolean;
+  /** Most recent reading, denormalized so a list renders without extra reads. */
+  latest: (GrowthPostSnapshot & { at: string }) | null;
+  /** The reading before `latest`, so a velocity needs no history scan. */
+  previous: (GrowthPostSnapshot & { at: string }) | null;
+  /** Reading key (`YYYY-MM-DDTHH:mm`, UTC) → the metrics read at that moment. */
+  history: Record<string, GrowthPostSnapshot>;
+  /** When the next scheduled read is due (ISO). Far-future once frozen. */
+  nextRefreshAt: string | null;
+  lastReadAt: string | null;
+  lastReadStatus: 'ok' | 'failed' | null;
+  lastReadError: string | null;
+  /** Server-enforced manual-sync cooldown — see RULE 4 in the service. */
+  lastManualSyncAt: string | null;
+  /** How many billed readings this post has cost so far. */
+  readCount: number;
+  addedBy: string;
+  addedTime: string | null;
+}
+
+export interface GrowthPostMedia {
+  type: string;
+  url: string;
+}
+
+/** Serialised growth-spend/{YYYY-MM} — the rolling cost breaker's ledger. */
+export interface GrowthSpendLedger {
+  month: string;
+  /** Billed scraper results this month, across every call shape. */
+  results: number;
+  usd: number;
+  runs: number;
+  updatedAt: string | null;
 }
 
 // ─── Resolved access (returned to client after permission resolution) ─

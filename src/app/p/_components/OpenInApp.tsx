@@ -39,8 +39,18 @@ export function OpenInApp({ promptId }: { promptId: string }) {
         onClick={() => setAttempted(true)}
         className="inline-flex w-fit items-center gap-2 rounded-md bg-white px-3.5 py-2 text-sm font-semibold text-[#18181b] transition-colors hover:bg-[#e4e4e7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#09090b]"
       >
+        {/* The app icon, not the wordmark — it is an opaque near-square tile, so
+            it gets the same slight rounding the OS gives it rather than sitting
+            as a hard-cornered block inside the white pill. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo/bluu_uu.svg" alt="" aria-hidden className="size-4" />
+        <img
+          src="/logo/bluu-logo.webp"
+          alt=""
+          aria-hidden
+          width={256}
+          height={256}
+          className="size-4 rounded-[3px]"
+        />
         Open in Bluu Backend
       </a>
 

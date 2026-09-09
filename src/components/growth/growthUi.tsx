@@ -209,3 +209,39 @@ export function ScrapeStatus({ account }: { account: GrowthAccount }) {
     </span>
   );
 }
+
+/**
+ * A filter chip carrying its own count. Shared by the Followers and Posts tabs so
+ * the two filter rows are the same control, not two that merely resemble it.
+ *
+ * Selected is the filled Action Blue Deep (`#2563eb`), never `#3b82f6` — white
+ * on the lighter blue measures 3.68:1 and fails AA at this size (DESIGN.md §2).
+ */
+export function FilterChip({
+  active, onClick, count, children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  count: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors ${
+        active
+          ? 'bg-[#2563eb] font-medium text-white'
+          : 'text-zinc-400 hover:bg-white/[0.055] hover:text-zinc-300 active:bg-white/[0.08]'
+      }`}
+    >
+      {children}
+      {/* No `opacity` on the count. Stacked on Ink Secondary it is double
+          de-emphasis, and on the filled chip it drops white-on-#2563eb from
+          5.17:1 to ~3.7:1 at 12px — under AA (DESIGN.md, The One De-emphasis
+          Rule). The chip's own colour already separates it from the label. */}
+      <span className="tabular-nums">{count}</span>
+    </button>
+  );
+}

@@ -6,7 +6,9 @@
 
 ## 0. Registering Users (the only way an account is created)
 
-`POST /api/admin/users`, from **Employee Registry → New**. Fields: full name, nickname (`displayName`), **login email**, and optionally a group.
+`POST /api/admin/users`, from the **Add employee** button on the user-management page header. Fields: full name, nickname (`displayName`), **login email**, and a group.
+
+The group **defaults to the org's default group** (`AdminGroup.isDefault`), not to `unassigned`. Assigning a group is half of what the action exists for, and a `Select` reading "Unassigned — decide later" presents as a deliberate choice rather than a skipped step — which quietly shipped hires who signed in to an empty sidebar. `unassigned` is still selectable; it is just not the default.
 
 Since the personal-email migration, **login is an allowlist check against the docs this creates** ([auth.md](auth.md#the-allowlist-the-authorisation-gate)) — nothing else provisions accounts. Someone not registered here cannot sign in at all.
 
@@ -16,7 +18,7 @@ Since the personal-email migration, **login is an allowlist check against the do
 - **Collisions:** an orphaned Auth account (no Firestore doc) is *adopted* under its existing uid; an address belonging to a **creator** is refused. Creator registration refuses employee addresses symmetrically. Never merge the two — one uid owning both a `users` and a `creators` doc means one identity in two auth contexts.
 ### "Invited" — registered but not yet set up
 
-`isInvitedUser` ([`userStatus.ts`](../src/components/admin/user-management/userStatus.ts)) is the single definition, used by the badge, the filter and the tab count:
+`isInvitedUser` ([`userStatus.ts`](../src/components/admin/user-management/userStatus.ts)) is the single definition, used by the row mark, the Status facet and the promoted section:
 
 ```ts
 !user.lastLoginAt || user.hasCompletedOnboarding === false
@@ -26,12 +28,32 @@ Since the personal-email migration, **login is an allowlist check against the do
 
 **RULE — the second test must be `=== false`, never a falsy check.** Users created before the onboarding flow shipped have no `hasCompletedOnboarding` field at all, so it arrives as `undefined`; a falsy test would relabel every long-standing employee as "Invited".
 
-Surfaced in three places:
-- **Orange badge** on `UserCard`, shown *instead of* Active/Disabled — it is the more useful fact. A second line (`invitedStageLabel`) says whether they never signed in or stalled during onboarding, which is what decides between chasing the person and checking the email for a typo.
-- **Invited Users tab** on the user-management page. Counts **overlap** with Employee Registry by design — an invited user is a real employee record, just an unfinished one — so the tabs are not a partition (unlike Archived).
-- **Status filter** (`invited`) in `RegistryFilters`, for narrowing within the main registry.
+`isInvitedUser` feeds `userStage()` in the same file — the derived, closed four-value vocabulary (`invited` / `active` / `no-access` / `archived`) the whole page reads. Three raw fields (`isArchived`, `isActive`, and the two onboarding signals) collapse into one answer to "where is this person?", and each stage **borrows its hue from `STATUS_COLORS`** rather than re-typing a hex — the same shape [`disputeStatus.ts`](../src/components/disputes/disputeStatus.ts) uses. Precedence is `archived` → `invited` → `no-access` → `active`: archived wins outright, and "not set up" beats "no access" because a record that was never completed is the more useful fact about it.
 
-Invitations do not expire; the tab is the chase mechanism.
+Surfaced in three places, all from that one definition:
+- The **`NOT SET UP` section** at the top of the index — the chase queue is promoted into the list rather than living behind a tab, so "what needs my attention" is answered without a click. A second meta line (`invitedStageLabel`) says whether they never signed in or stalled during onboarding, which is what decides between chasing the person and checking the email for a typo.
+- The **Status facet** in the rail, with a faceted count.
+- The row's **stage dot and pill**.
+
+Invitations do not expire; the promoted section is the chase mechanism.
+
+## 0b. The page shape
+
+`/admin-portal/user-management` is **one faceted index of people** — the browse-and-open shape DESIGN.md §5 documents, and the same one `apps-resources` uses. It replaced a four-tab layout in which three tabs rendered the same component with booleans that collapsed to predicates already available as filters inside it.
+
+| Piece | File | Note |
+|---|---|---|
+| Page shell, filtering, faceted counts, URL state | [`page.tsx`](../src/app/(main)/admin-portal/user-management/page.tsx) | Filters live in the query string (`stage`, `group`, `type`, `q`) via `replaceState`, so a view is linkable and survives a reload |
+| Facet rail (Status / Group / Employment) | `RegistryRail.tsx` | Counts are computed with that one facet cleared, so a count is what clicking will produce |
+| Sectioned two-line index + bulk selection | `EmployeeIndex.tsx` | Sections are the `userStage` vocabulary |
+| Group multi-select (record field + bulk add) | `GroupPicker.tsx` | shadcn `Popover` + `Command` |
+| Registration dialog | `NewUserDialog.tsx` | The page's primary action, on the `<h1>` row |
+| Record panel | `UserDetailDrawer.tsx` → `UserDetailContent.tsx` | 560px `Sheet` with a dirty-state guard |
+
+**RULES for this surface:**
+- **Archived is opt-in, never implicit.** An empty `stage` filter means every stage *except* archived. Nothing may surface archived users without the facet being selected.
+- **Group membership is edited on the person**, from the record's Access & Permissions block — it writes immediately and toasts with an Undo. There is no separate group-membership screen; "who is in Ops?" is the Group facet. Bulk assignment is row selection in the index plus **Add to group**.
+- **Group names are greyscale attribute chips.** The old `groupColors.ts` hashed the name into ten saturated hues; DESIGN.md §6 bans that by name. Deleted — do not reintroduce it.
 
 ## Dependencies / Interacting Files
 
@@ -63,7 +85,7 @@ Invitations do not expire; the tab is the chase mechanism.
 | `/api/users/display-names` (`useBasicUsers`) | Returns `isArchived` on each `BasicUser`; does **NOT** filter server-side | Some pages (`creators/custom-requests`, `ca-portal/campaigns`) resolve historical editor names by UID via `useUserName`, including archived users. **Filter at the consumer** when building a picker (see `AdminTimesheets`, `CreateNotificationDialog`) |
 | `/api/disputes/users` (`useDisputesData`) | **Filters archived server-side** | Only feeds CA assignee/filter pickers; dispute display names resolved separately in `/api/disputes`, so historical display is unaffected |
 | `/api/shifts/week` | Excludes archived from its `userMap` | Removes them from the shift grid + shift-assignment picker |
-| `/api/admin/users` (`useAdminUsers`) | Returns archived **intact** | User-management is the surface that manages them (Employee Registry has a `showArchived` toggle). Filter archived only in action lists drawing from it (`AdminLeave`, `AddMembersDropdown`) |
+| `/api/admin/users` (`useAdminUsers`) | Returns archived **intact** | User-management is the surface that manages them (the index's **Archived** status facet). Filter archived only in action lists drawing from it (`AdminLeave`) |
 
 ### Intentional exceptions (keep archived users)
 - **Screenshots tab** (`AdminScreenshots`) — archived users' screenshots still exist in storage and must remain viewable/deletable.
@@ -75,7 +97,7 @@ Invitations do not expire; the tab is the chase mechanism.
 
 ## 2. Deleting Users (hard — destructive cascade)
 
-`DELETE /api/admin/users/[uid]` (from the Employee Registry detail card) is the **destructive counterpart to archiving** — permanently removes the user **and all their personal data**. (The Delete dialog says so; the Archive dialog explicitly states data is *not* deleted.)
+`DELETE /api/admin/users/[uid]` (from the record panel's Actions menu) is the **destructive counterpart to archiving** — permanently removes the user **and all their personal data**. (The Delete dialog says so; the Archive dialog explicitly states data is *not* deleted.)
 
 ### Removed by the handler
 - `users/{uid}`, group membership (`groups/*.members`), page-permission entries (`page-permissions/*.users.{uid}`), `active_sessions/{uid}`.
@@ -112,7 +134,7 @@ Internal names live on `users/{uid}` as `displayName` (+ `firstName` / `lastName
 | **Server (uid → name)** | `getUserById` (single, cached) or `adminDb.getAll(...)` over `users` refs (batch). Return an **empty string** for an unresolved (deleted) user — that empty value is the signal the client renders as *Deleted User*. See `/api/disputes`, `/api/shifts/week`, `/api/admin/notifications/[batchId]/recipients` |
 
 - **Creator names** (`stageName`) are a **separate** path via `useCreators` / `creatorMap`; that fallback still shows the **raw creator ID**, not "Deleted User".
-- **Intentional inconsistency:** name-composition precedence differs in a couple places (`UserCard`: `firstName lastName || displayName`; `AdminTimesheets`: `displayName || firstName lastName`) — deliberate presentation choices, **not** a bug to unify.
+- **Intentional inconsistency:** name-composition precedence differs in a couple places (the registry row: `firstName lastName || displayName`; `AdminTimesheets`: `displayName || firstName lastName`) — deliberate presentation choices, **not** a bug to unify. The **avatar seed** is not part of that latitude: every surface seeds from `displayName` alone (DESIGN.md §5, the Avatar Seed Rule), so one identity hashes to one colour everywhere.
 
 ---
 

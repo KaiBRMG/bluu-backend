@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useId, useRef } from 'react';
 import { toast } from 'sonner';
-import type { AdminFullUser } from '@/hooks/useAdminUsers';
+import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
+import { GroupChips } from './GroupPicker';
 import { validateEmail, validatePhoneNumber, validateRequired } from '@/lib/validation';
 import { cn } from '@/lib/utils';
 import { Button } from "@/components/ui/button";
@@ -44,7 +45,11 @@ import { useAdminData } from '@/hooks/useAdminData';
 
 interface UserDetailContentProps {
   user: AdminFullUser;
+  /** Every group in the org — the Groups field needs names, not just ids. */
+  groups: AdminGroup[];
   onUpdateUser: (uid: string, updates: Record<string, unknown>) => Promise<void>;
+  onAddGroupMembers?: (groupId: string, uids: string[]) => Promise<void>;
+  onRemoveGroupMember?: (groupId: string, uid: string) => Promise<void>;
   onRefetch?: () => Promise<void>;
   onDeleteUser?: () => Promise<void>;
   onClose?: () => void;
@@ -164,7 +169,10 @@ function errorMessage(err: unknown, fallback: string): string {
 
 export default function UserDetailContent({
   user,
+  groups,
   onUpdateUser,
+  onAddGroupMembers,
+  onRemoveGroupMember,
   onRefetch,
   onDeleteUser,
   onClose,
@@ -194,6 +202,52 @@ export default function UserDetailContent({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [isActionSubmitting, setIsActionSubmitting] = useState(false);
+  const [groupBusyId, setGroupBusyId] = useState<string | null>(null);
+
+  /**
+   * Group membership, edited from the person's own record.
+   *
+   * It used to live only on the User Groups tab, so moving somebody between
+   * groups meant closing this panel, switching tab, finding them in one list,
+   * removing them, finding another list and re-typing their name — two
+   * mutations across three screens, with the name carried in the operator's
+   * head. Group *is* page access, so the most consequential field on an
+   * employee record was the one the record did not have.
+   *
+   * It writes immediately, like the switches beside it, and every outcome
+   * toasts with an Undo — the same shape the Sharing page uses for a revoke.
+   */
+  const handleToggleGroup = async (groupId: string, nextSelected: boolean, silent = false) => {
+    const group = groups.find((g) => g.id === groupId);
+    if (!group || !onAddGroupMembers || !onRemoveGroupMember) return;
+    setGroupBusyId(groupId);
+    try {
+      if (nextSelected) await onAddGroupMembers(groupId, [user.uid]);
+      else await onRemoveGroupMember(groupId, user.uid);
+      if (silent) return;
+      toast.success(
+        nextSelected ? `Added to ${group.name}` : `Removed from ${group.name}`,
+        {
+          description: nextSelected
+            ? 'They can now reach every page this group grants.'
+            : 'They can no longer reach the pages this group grants.',
+          action: {
+            label: 'Undo',
+            onClick: () => {
+              void handleToggleGroup(groupId, !nextSelected, true);
+            },
+          },
+        },
+      );
+    } catch (err) {
+      toast.error(
+        nextSelected ? `Could not add to ${group.name}` : `Could not remove from ${group.name}`,
+        { description: errorMessage(err, 'Please try again.') },
+      );
+    } finally {
+      setGroupBusyId(null);
+    }
+  };
 
   const timeTrackingPermDoc = pagePermissions.find((p) => p.pageId === 'time-tracking');
   const enableTimeTracking =
@@ -502,6 +556,29 @@ export default function UserDetailContent({
               <p className="mt-2 text-xs text-zinc-400">
                 Restore this user from the archive to change their access.
               </p>
+            )}
+
+            {onAddGroupMembers && onRemoveGroupMember && (
+              <div className="mt-4">
+                <p className="text-sm font-medium">User groups</p>
+                <p className="mt-0.5 mb-2 text-xs text-zinc-400">
+                  Decides which pages they can reach.
+                </p>
+                <GroupChips
+                  groups={groups}
+                  selectedIds={user.groups || []}
+                  onToggle={(groupId, next) => {
+                    void handleToggleGroup(groupId, next);
+                  }}
+                  disabled={isArchived || groupBusyId !== null}
+                  busyId={groupBusyId}
+                />
+                {isArchived && (
+                  <p className="mt-2 text-xs text-zinc-400">
+                    Restore this user from the archive to change their groups.
+                  </p>
+                )}
+              </div>
             )}
 
             <div className="mt-4 flex items-start justify-between gap-4">
