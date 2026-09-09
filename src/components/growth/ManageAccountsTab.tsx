@@ -16,7 +16,7 @@ import {
 import { formatCount } from '@/lib/growth/metrics';
 import { AccountIdentity, ScrapeStatus } from './growthUi';
 import { AddAccountDialog } from './AddAccountDialog';
-import type { AddGrowthAccountPayload } from '@/hooks/useGrowthTracking';
+import type { AddGrowthAccountPayload, TrackPostsResult } from '@/hooks/useGrowthTracking';
 import type { GrowthAccount } from '@/types/firestore';
 
 /**
@@ -40,7 +40,7 @@ interface ManageAccountsTabProps {
   loading: boolean;
   onAdd: (payload: AddGrowthAccountPayload) => Promise<void>;
   onSetTracking: (id: string, isActive: boolean) => Promise<void>;
-  onSetTrackPosts: (id: string, trackPosts: boolean) => Promise<void>;
+  onSetTrackPosts: (id: string, trackPosts: boolean) => Promise<TrackPostsResult>;
   onDelete: (id: string) => Promise<void>;
 }
 
@@ -79,10 +79,23 @@ export function ManageAccountsTab({
   const setTrackPosts = async (account: GrowthAccount, trackPosts: boolean) => {
     setBusyId(account.id);
     try {
-      await onSetTrackPosts(account.id, trackPosts);
-      toast.success(trackPosts
-        ? `Finding new posts from @${account.handle} from tonight.`
-        : `Stopped finding new posts for @${account.handle}. Posts already tracked keep refreshing.`);
+      const discovery = await onSetTrackPosts(account.id, trackPosts);
+
+      if (!trackPosts) {
+        toast.success(`Stopped finding new posts for @${account.handle}. Posts already tracked keep refreshing.`);
+      } else if (discovery?.error) {
+        // The toggle saved; only the immediate search came up short. A warning,
+        // not an error — nothing needs redoing and the nightly pass retries.
+        toast.warning(discovery.error);
+      } else if (discovery && discovery.created + discovery.refreshed > 0) {
+        const found = discovery.created + discovery.refreshed;
+        toast.success(
+          `Tracking ${found} post${found === 1 ? '' : 's'} from @${account.handle}`,
+          { description: 'New posts are picked up automatically from now on. See the Posts tab.' },
+        );
+      } else {
+        toast.success(`Finding new posts from @${account.handle} from tonight.`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not update that account.');
     } finally {

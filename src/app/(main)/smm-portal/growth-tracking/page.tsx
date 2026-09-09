@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { TriangleAlertIcon } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
@@ -60,6 +60,19 @@ export default function GrowthTrackingPage() {
   const [openAccount, setOpenAccount] = useState<GrowthAccount | null>(null);
 
   const from = useMemo(() => rangeStart(range), [range]);
+
+  /**
+   * Switching post tracking on searches the account's timeline immediately, so
+   * posts can exist the moment the toggle settles. The two hooks are deliberately
+   * independent, which means neither knows about the other's data — this is the
+   * one seam where they meet, and refetching only when something was actually
+   * found keeps a plain toggle-off from re-reading the roster for nothing.
+   */
+  const handleSetTrackPosts = useCallback(async (id: string, trackPosts: boolean) => {
+    const discovery = await setTrackPosts(id, trackPosts);
+    if (discovery && discovery.created + discovery.refreshed > 0) await posts.refresh();
+    return discovery;
+  }, [setTrackPosts, posts]);
 
   const visible = useMemo(
     () => accounts.filter((a) => platform === 'all' || a.platform === platform),
@@ -255,7 +268,7 @@ export default function GrowthTrackingPage() {
               loading={loading}
               onAdd={addAccount}
               onSetTracking={setTracking}
-              onSetTrackPosts={setTrackPosts}
+              onSetTrackPosts={handleSetTrackPosts}
               onDelete={deleteAccount}
             />
           </TabsContent>

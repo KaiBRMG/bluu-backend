@@ -23,6 +23,18 @@ export interface AddGrowthAccountPayload {
 }
 
 /**
+ * What the immediate timeline search found when post tracking was switched on.
+ * `null` when nothing was searched — switching it off, or an account that was
+ * already opted in.
+ */
+export type TrackPostsResult = {
+  created: number;
+  refreshed: number;
+  /** Set when the toggle saved but the search did not produce anything usable. */
+  error: string | null;
+} | null;
+
+/**
  * Growth Tracking data: every tracked account plus its full history.
  *
  * The whole history is fetched once and sliced client-side. That is deliberate:
@@ -97,21 +109,32 @@ export function useGrowthTracking() {
   /**
    * Opt an X account into post-level tracking.
    *
-   * Updated in place rather than by refetching the whole payload: this is one
-   * boolean, and the series it would re-read is tens of KB that did not change
-   * (rule 9). `setTracking` above still refetches because stopping an account
-   * changes what the charts show.
+   * Switching it **on** searches that account's timeline straight away rather
+   * than waiting up to six hours for the nightly pass, so this call can take
+   * 10–30s — the same wait as adding an account, and for the same reason. The
+   * server returns what that search found; the caller reports it.
+   *
+   * The account row is updated in place rather than by refetching the whole
+   * payload: this is one boolean, and the series a refetch would re-read is tens
+   * of KB that did not change (rule 9). `setTracking` above still refetches,
+   * because stopping an account changes what the charts show.
    */
-  const setTrackPosts = useCallback(async (id: string, trackPosts: boolean) => {
-    await authFetch(`/api/smm/growth/accounts/${id}`, {
+  const setTrackPosts = useCallback(async (
+    id: string,
+    trackPosts: boolean,
+  ): Promise<TrackPostsResult> => {
+    const response = await authFetch(`/api/smm/growth/accounts/${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ trackPosts }),
-    });
+    }) as { discovery: TrackPostsResult };
+
     setAccounts((current) => current.map((a) => (a.id === id ? { ...a, trackPosts } : a)));
     // The session cache holds the pre-flip copy; drop it rather than write
-    // through, since the next mount should read the server's own view of a
-    // change that starts a nightly job.
+    // through, since the next mount should read the server's own view — the
+    // discovery pass just stamped `lastPostDiscoveryAt` and possibly
+    // `postsWindowSaturated` on this document.
     invalidateCacheByPrefix(CACHE_PREFIX);
+    return response.discovery ?? null;
   }, [authFetch]);
 
   const deleteAccount = useCallback(async (id: string) => {

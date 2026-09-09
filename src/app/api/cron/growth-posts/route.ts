@@ -3,17 +3,12 @@ import { headers } from 'next/headers';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
 import { listGrowthAccounts } from '@/lib/services/growthTrackingService';
 import {
-  DISCOVERY_MAX_ITEMS,
-  MAX_TRACKED_POSTS,
   checkSpendCeiling,
-  countGrowthPosts,
+  discoverPostsForAccounts,
   estimatePostCost,
-  getGrowthPostsByIds,
-  recordDiscoveryOutcome,
   recordPostFailures,
   recordPostReadings,
   recordSpend,
-  runPostDiscovery,
   runTweetLookup,
   selectPostsForRefresh,
   type PostReading,
@@ -130,73 +125,14 @@ export async function GET() {
       })
       .slice(0, MAX_DISCOVERY_ACCOUNTS);
 
-    const discoveredIds = new Set<string>();
-    let created = 0;
-    let discoveryReadings = 0;
-
-    if (dueForDiscovery.length > 0) {
-      try {
-        const call = await runPostDiscovery(dueForDiscovery.map((a) => a.handle));
-        await recordSpend(call.billedResults);
-        billedResults += call.billedResults;
-
-        // One batched read tells us which of these are already tracked. New ones
-        // are created, known ones simply take the reading they came with.
-        const allPosts = [...call.results.values()].flat();
-        const existingById = await getGrowthPostsByIds(allPosts.map((p) => p.tweetId));
-        let roster = await countGrowthPosts();
-
-        const readings: PostReading[] = [];
-        for (const account of dueForDiscovery) {
-          const found = call.results.get(account.handleNormalized) ?? [];
-
-          if (found.length === 0) {
-            // Not necessarily a failure — an account can simply not have posted
-            // in a while and still return older posts. An empty result set after
-            // reconciliation means the run told us nothing about this account.
-            await recordDiscoveryOutcome(account.id, {
-              status: 'failed',
-              error: 'The search returned no posts for this account. It may have been renamed, made private, or removed.',
-            });
-            continue;
-          }
-
-          for (const post of found) {
-            discoveredIds.add(post.tweetId);
-            const existing = existingById.get(post.tweetId) ?? null;
-            if (existing) {
-              readings.push({ post, existing });
-              discoveryReadings++;
-              continue;
-            }
-            // The roster breaker applies to automatic creation exactly as it does
-            // to a manual add — the account toggle must not be able to walk past
-            // a ceiling a person would be refused at.
-            if (roster >= MAX_TRACKED_POSTS) continue;
-            roster++;
-            created++;
-            readings.push({
-              post,
-              existing: null,
-              create: { source: 'account', accountId: account.id, addedBy: `account:${account.id}` },
-            });
-          }
-
-          await recordDiscoveryOutcome(account.id, {
-            status: 'ok',
-            saturated: isWindowSaturated(found, now),
-          });
-        }
-
-        await recordPostReadings(readings, now);
-      } catch (error) {
-        // A discovery failure must not cost the refresh pass its readings.
-        const message = error instanceof Error ? error.message : String(error);
-        console.error('[cron/growth-posts] discovery pass failed:', message);
-        for (const account of dueForDiscovery) {
-          await recordDiscoveryOutcome(account.id, { status: 'failed', error: message });
-        }
-      }
+    // The search itself lives in the service, shared with the Track-posts
+    // toggle. A discovery failure is contained there and every account is
+    // stamped either way, so the refresh pass below still runs — it must not
+    // lose readings it is about to pay for because a search failed.
+    const discovery = await discoverPostsForAccounts(dueForDiscovery, now);
+    billedResults += discovery.billedResults;
+    if (discovery.error) {
+      console.error('[cron/growth-posts] discovery pass failed:', discovery.error);
     }
 
     // ── Pass 2: refresh ─────────────────────────────────────────────────────
@@ -204,7 +140,7 @@ export async function GET() {
     // and `nextRefreshAt` already advanced, so re-requesting them would be paying
     // twice for the same number (rule 4).
     const { batch, due, padded } = await selectPostsForRefresh();
-    const toRefresh = batch.filter((p) => !discoveredIds.has(p.id));
+    const toRefresh = batch.filter((p) => !discovery.discoveredIds.has(p.id));
 
     let refreshed = 0;
     let failed = 0;
@@ -239,16 +175,16 @@ export async function GET() {
 
     const cost = estimatePostCost(billedResults);
     console.log(
-      `[cron/growth-posts] discovery ${dueForDiscovery.length} account(s) → ${created} new, ` +
-      `${discoveryReadings} free reading(s); refresh ${due.length} due + ${padded.length} padded → ` +
+      `[cron/growth-posts] discovery ${dueForDiscovery.length} account(s) → ${discovery.created} new, ` +
+      `${discovery.refreshed} free reading(s); refresh ${due.length} due + ${padded.length} padded → ` +
       `${refreshed} read, ${failed} failed; billed ${billedResults} result(s), ` +
       `est. cost $${cost.toFixed(4)}`,
     );
 
     return NextResponse.json({
       discoveredAccounts: dueForDiscovery.length,
-      postsCreated: created,
-      freeReadings: discoveryReadings,
+      postsCreated: discovery.created,
+      freeReadings: discovery.refreshed,
       due: due.length,
       padded: padded.length,
       refreshed,
@@ -259,22 +195,4 @@ export async function GET() {
   } catch (error) {
     return handleApiError(error, 'GET /api/cron/growth-posts');
   }
-}
-
-/**
- * Whether a discovery window came back full of posts under a day old.
- *
- * A query returns roughly 20 posts and the actor documents pagination as
- * unreliable, so an account posting faster than that cannot be fully seen by one
- * daily read — and *silently* missing posts is the problem, not missing them.
- * Recorded on the account so the manage tab can say so, rather than quietly
- * raising the cadence for the whole roster to fix one account.
- */
-function isWindowSaturated(posts: ScrapedPost[], now: Date): boolean {
-  if (posts.length < DISCOVERY_MAX_ITEMS) return false;
-  const oldest = posts
-    .map((p) => p.postedAt?.getTime())
-    .filter((t): t is number => typeof t === 'number')
-    .sort((a, b) => a - b)[0];
-  return oldest !== undefined && now.getTime() - oldest < 24 * 3_600_000;
 }

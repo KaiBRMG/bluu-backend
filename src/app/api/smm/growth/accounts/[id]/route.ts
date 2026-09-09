@@ -7,7 +7,17 @@ import {
   checkGrowthAccess,
   serializeGrowthAccount,
 } from '@/lib/services/growthTrackingService';
+import {
+  checkSpendCeiling,
+  discoverPostsForAccounts,
+} from '@/lib/services/growthPostsService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
+
+/**
+ * Switching post tracking on fires an immediate timeline search (10–30s), so
+ * this route needs more than a default lambda's ten seconds.
+ */
+export const maxDuration = 60;
 
 /**
  * PATCH /api/smm/growth/accounts/[id] — stop or resume tracking, or opt the
@@ -61,7 +71,46 @@ export const PATCH = withAuth(async (
       ...(hasIsActive ? { isActive: body.isActive } : {}),
       ...(hasTrackPosts ? { trackPosts: body.trackPosts } : {}),
     });
-    return NextResponse.json({ success: true });
+
+    // ── Switching post tracking ON searches straight away ────────────────────
+    // Otherwise the toggle looks like it did nothing: the nightly pass would not
+    // run for up to six hours, and the Posts tab would stay empty in the
+    // meantime. This mirrors the account-add route, which also scrapes on the
+    // spot rather than promising something for later.
+    //
+    // The toggle is saved FIRST and is never rolled back by a failed search. The
+    // user's intent is "track this account", and a scraper hiccup should not
+    // refuse it — the nightly pass retries on its own. The outcome is reported so
+    // the UI can say what actually happened rather than claiming success.
+    let discovery: { created: number; refreshed: number; error: string | null } | null = null;
+
+    if (hasTrackPosts && body.trackPosts === true && !account.trackPosts && account.isActive) {
+      // The money breaker still applies to a user-triggered search.
+      const { blocked } = await checkSpendCeiling();
+      if (blocked) {
+        discovery = {
+          created: 0,
+          refreshed: 0,
+          error: 'Post tracking is on, but the monthly budget has been reached — the first search will run once it resets.',
+        };
+      } else {
+        const result = await discoverPostsForAccounts([{
+          id,
+          handle: account.handle,
+          handleNormalized: account.handleNormalized,
+        }]);
+        discovery = {
+          created: result.created,
+          refreshed: result.refreshed,
+          error: result.error
+            ?? (result.emptyHandles.length > 0
+              ? 'Post tracking is on, but the search found no posts for this account just now. The nightly pass will try again.'
+              : null),
+        };
+      }
+    }
+
+    return NextResponse.json({ success: true, discovery });
   } catch (error) {
     return handleApiError(error, 'PATCH /api/smm/growth/accounts/[id]');
   }

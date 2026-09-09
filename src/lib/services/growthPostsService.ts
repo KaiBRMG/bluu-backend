@@ -879,14 +879,183 @@ export async function getGrowthPostsByIds(ids: string[]): Promise<Map<string, Gr
  * posts are being missed. Recorded rather than silently tolerated — the manage
  * tab surfaces it so someone can decide whether to act.
  */
-export async function recordDiscoveryOutcome(
-  accountId: string,
-  outcome: { status: 'ok' | 'failed'; error?: string; saturated?: boolean },
+export async function recordDiscoveryOutcomes(
+  outcomes: Array<{
+    accountId: string;
+    status: 'ok' | 'failed';
+    error?: string;
+    saturated?: boolean;
+  }>,
 ): Promise<void> {
-  await adminDb.collection(GROWTH_ACCOUNTS).doc(accountId).set({
-    lastPostDiscoveryAt: FieldValue.serverTimestamp(),
-    lastPostDiscoveryStatus: outcome.status,
-    lastPostDiscoveryError: outcome.error ? outcome.error.slice(0, 500) : null,
-    postsWindowSaturated: outcome.saturated === true,
-  }, { merge: true });
+  if (outcomes.length === 0) return;
+  // One batch, not a write per account: a run covers up to
+  // MAX_DISCOVERY_ACCOUNTS handles and a sequential `set()` each would be that
+  // many round trips for four fields apiece (rule 9).
+  const batch = adminDb.batch();
+  for (const outcome of outcomes) {
+    batch.set(adminDb.collection(GROWTH_ACCOUNTS).doc(outcome.accountId), {
+      lastPostDiscoveryAt: FieldValue.serverTimestamp(),
+      lastPostDiscoveryStatus: outcome.status,
+      lastPostDiscoveryError: outcome.error ? outcome.error.slice(0, 500) : null,
+      postsWindowSaturated: outcome.saturated === true,
+    }, { merge: true });
+  }
+  await batch.commit();
+}
+
+// ─── Discovery ───────────────────────────────────────────────────────
+
+/** The minimum an account needs to be searched for. */
+export interface DiscoveryAccount {
+  id: string;
+  handle: string;
+  handleNormalized: string;
+}
+
+export interface DiscoveryOutcome {
+  /** Posts newly added to the roster. */
+  created: number;
+  /** Already-tracked posts that took a free reading out of the same result. */
+  refreshed: number;
+  /**
+   * Tweet ids this pass touched. The id refresh batch **must** skip these — their
+   * readings are already recorded and `nextRefreshAt` already advanced, so
+   * re-requesting them is paying twice for the same number (RULE 2, rule 4).
+   */
+  discoveredIds: Set<string>;
+  billedResults: number;
+  costUsd: number;
+  /** Handles the search returned nothing usable for. */
+  emptyHandles: string[];
+  /** Set when the whole call failed; every account is stamped failed. */
+  error: string | null;
+}
+
+/**
+ * Search these accounts' timelines, track what is new, and record a reading for
+ * everything returned.
+ *
+ * ONE search run covers every account passed — `searchTerms` takes a `from:`
+ * term each and `maxItems` applies per term, so this is `accounts.length × 20`
+ * results in a single run rather than a run per account. The caller decides
+ * *who* is due; this decides nothing about scheduling.
+ *
+ * Shared by the nightly cron and by the Track-posts toggle, deliberately: the
+ * mock-data reconciliation, the roster breaker and the saturation check are all
+ * things a second copy would drift on, and each of them is load-bearing.
+ *
+ * Failure is contained rather than thrown. Every account is stamped either way,
+ * so a caller that also has other work to do (the cron's refresh pass) keeps it.
+ */
+export async function discoverPostsForAccounts(
+  accounts: DiscoveryAccount[],
+  now: Date = new Date(),
+): Promise<DiscoveryOutcome> {
+  const base: DiscoveryOutcome = {
+    created: 0,
+    refreshed: 0,
+    discoveredIds: new Set(),
+    billedResults: 0,
+    costUsd: 0,
+    emptyHandles: [],
+    error: null,
+  };
+  if (accounts.length === 0) return base;
+
+  let call: BilledCall<Map<string, ScrapedPost[]>>;
+  try {
+    call = await runPostDiscovery(accounts.map((a) => a.handle));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await recordDiscoveryOutcomes(
+      accounts.map((a) => ({ accountId: a.id, status: 'failed' as const, error: message })),
+    );
+    return { ...base, error: message };
+  }
+
+  await recordSpend(call.billedResults);
+
+  // One batched read says which of these are already tracked. New ones are
+  // created; known ones simply take the reading they arrived with.
+  const allPosts = [...call.results.values()].flat();
+  const existingById = await getGrowthPostsByIds(allPosts.map((p) => p.tweetId));
+  let roster = await countGrowthPosts();
+
+  const discoveredIds = new Set<string>();
+  const emptyHandles: string[] = [];
+  const readings: PostReading[] = [];
+  const outcomes: Array<{ accountId: string; status: 'ok' | 'failed'; error?: string; saturated?: boolean }> = [];
+  let created = 0;
+  let refreshed = 0;
+
+  for (const account of accounts) {
+    const found = call.results.get(account.handleNormalized) ?? [];
+
+    if (found.length === 0) {
+      // Not necessarily "this account has been quiet" — a `from:` search returns
+      // older posts too. Nothing surviving reconciliation means the run told us
+      // nothing about this account at all.
+      emptyHandles.push(account.handle);
+      outcomes.push({
+        accountId: account.id,
+        status: 'failed',
+        error: 'The search returned no posts for this account. It may have been renamed, made private, or removed.',
+      });
+      continue;
+    }
+
+    for (const post of found) {
+      discoveredIds.add(post.tweetId);
+      const existing = existingById.get(post.tweetId) ?? null;
+      if (existing) {
+        readings.push({ post, existing });
+        refreshed++;
+        continue;
+      }
+      // The roster breaker applies to automatic creation exactly as it does to a
+      // manual add — a toggle must not be able to walk past a ceiling a person
+      // would be refused at.
+      if (roster >= MAX_TRACKED_POSTS) continue;
+      roster++;
+      created++;
+      readings.push({
+        post,
+        existing: null,
+        create: { source: 'account', accountId: account.id, addedBy: `account:${account.id}` },
+      });
+    }
+
+    outcomes.push({ accountId: account.id, status: 'ok', saturated: isWindowSaturated(found, now) });
+  }
+
+  await recordPostReadings(readings, now);
+  await recordDiscoveryOutcomes(outcomes);
+
+  return {
+    created,
+    refreshed,
+    discoveredIds,
+    billedResults: call.billedResults,
+    costUsd: call.costUsd,
+    emptyHandles,
+    error: null,
+  };
+}
+
+/**
+ * Whether a discovery window came back full of posts under a day old.
+ *
+ * A search returns roughly 20 posts and the vendor documents pagination as
+ * unreliable, so an account posting faster than that cannot be fully seen by one
+ * daily read — and *silently* missing posts is the problem, not missing them.
+ * Recorded on the account so the manage tab can say so, rather than quietly
+ * raising the cadence for the whole roster to fix one account.
+ */
+function isWindowSaturated(posts: ScrapedPost[], now: Date): boolean {
+  if (posts.length < DISCOVERY_MAX_ITEMS) return false;
+  const oldest = posts
+    .map((p) => p.postedAt?.getTime())
+    .filter((t): t is number => typeof t === 'number')
+    .sort((a, b) => a - b)[0];
+  return oldest !== undefined && now.getTime() - oldest < 24 * 3_600_000;
 }

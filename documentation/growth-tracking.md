@@ -126,6 +126,39 @@ Posts tab and that post is tracked from that moment. The per-account **Track
 posts** toggle is the secondary path: it turns on a nightly discovery pass that
 finds that account's newest posts and starts tracking them automatically.
 
+### What switching Track posts on actually does
+
+It is **not** limited to posts published after the toggle. Discovery runs a
+`from:handle` search and takes the account's **~20 most recent posts, whenever
+they were published**, dropping replies and retweets. So the toggle is a one-off
+catch-up *plus* an ongoing feed.
+
+- Posts **under 30 days old** join the refresh ladder normally.
+- Posts **over 30 days old** are frozen straight after their first refresh — one
+  data point, no curve. There is no backfill (see below), so that single figure
+  is all that post will ever have from before it was tracked.
+
+**The search fires immediately on the toggle**, not on the next cron run.
+`PATCH /api/smm/growth/accounts/[id]` calls the same
+`discoverPostsForAccounts` the cron does, so flipping the switch shows posts
+within the same interaction instead of appearing to do nothing for up to six
+hours — the same reasoning as the account-add route, which also scrapes on the
+spot. Three things about that path:
+
+- **The toggle is saved first and is never rolled back by a failed search.** The
+  intent is "track this account"; a scraper hiccup must not refuse it, and the
+  nightly pass retries on its own. The route reports the outcome so the UI can
+  say what actually happened rather than claiming success.
+- **The spend breaker still applies.** Over the ceiling, the toggle saves and the
+  search is skipped with an explanation.
+- **It only fires on `false → true`, and only for an active X account.** Toggling
+  an already-opted-in account, or switching off, searches nothing.
+
+`discoverPostsForAccounts` is shared between the cron and this route
+deliberately: the mock-data reconciliation, the roster breaker and the saturation
+check are each load-bearing, and a second copy would drift on all three. The
+caller decides *who* is due; the function decides nothing about scheduling.
+
 ### RULE 1 — `maxItems` does NOT cap this actor's bill
 
 `kaitoeasyapi/twitter-x-data-tweet-scraper-pay-per-result-cheapest` bills **per
