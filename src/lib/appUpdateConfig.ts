@@ -188,8 +188,8 @@ export const APP_UPDATE: AppUpdateConfig = {
   // set `allUsers: false` and list uids or group slugs instead — see
   // `UpdateCohort`. `allUsers: false` with both lists empty prompts nobody.
 
-  // mac: { latestVersion: '0.12.0', compulsory: false, allUsers: true, uids: [], groups: ['admin'] },
-  mac: null,
+  mac: { latestVersion: '0.12.0', compulsory: false, allUsers: true, uids: [], groups: ['admin'] },
+  // mac: null,
 
   win: null,
   // win: { latestVersion: '0.10.1', compulsory: true, allUsers: true, uids: [], groups: [] },
