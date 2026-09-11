@@ -38,8 +38,12 @@ export default function AppVersionReporter() {
 
       const versionChanged =
         appVersion !== userData.appVersion || (platform ?? null) !== (userData.appPlatform ?? null);
+      // The cohort is evaluated against this user's own uid and groups, which
+      // is only a pre-check to avoid a pointless POST — `/api/user/app-version`
+      // re-runs it against the server's copy and is the real gate. Failing it
+      // here is what stops a non-targeted user re-posting on every app start.
       const releaseNoteOwed =
-        releaseNoteAppliesTo(appVersion) &&
+        releaseNoteAppliesTo(appVersion, { uid: user.uid, groups: userData.groups ?? [] }) &&
         userData.releaseNoteNotifiedVersion !== APP_UPDATE.releaseNote?.version;
 
       if (!versionChanged && !releaseNoteOwed) return;

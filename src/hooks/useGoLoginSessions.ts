@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { auth } from '@/firebase-config';
+import { getDeviceId } from '@/lib/deviceId';
 import { sessionErrorMessage } from '@/app/gologin/_lib/session';
 import type { GoLoginSession } from '@/types/electron';
 
@@ -60,15 +61,24 @@ export function useGoLoginSessions() {
         toast.error(sessionErrorMessage('unauthenticated'));
         return false;
       }
-      const result = await api.launch(idToken, profileId);
+      // The device id distinguishes the same person on two machines, which is
+      // still a session conflict. Null when storage is blocked; main falls back
+      // to an id of its own rather than refusing to launch.
+      const result = await api.launch(idToken, profileId, getDeviceId());
       if (result?.session) {
         setSessions((prev) => ({ ...prev, [profileId]: result.session as GoLoginSession }));
       }
       if (!result?.success) {
         // A launch is a slow, occasional action whose failure is otherwise only
         // a small badge on one row — this is exactly the mutation the toast rule
-        // exists for.
-        toast.error(sessionErrorMessage(result?.error));
+        // exists for. "Someone else has it" names them, because the operator's
+        // next move is to go and ask that person.
+        const holder = result?.holder?.displayName;
+        toast.error(
+          result?.error === 'in-use' && holder
+            ? `${holder} has this profile open.`
+            : sessionErrorMessage(result?.error),
+        );
         return false;
       }
       return true;

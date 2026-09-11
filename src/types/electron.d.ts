@@ -19,23 +19,70 @@ export interface SatelliteResult {
   error?: string;
 }
 
+/** Whoever is holding a profile's session lock, when a launch is refused. */
+export interface GoLoginLockHolder {
+  uid: string;
+  displayName: string;
+  heartbeatAtMs: number;
+}
+
 /** A local GoLogin/Orbita launch, as the main process reports it. */
 export interface GoLoginSession {
   profileId: string | null;
   /** 'idle' | 'starting' | 'running' | 'stopping' | 'stopped' | 'failed' */
   status: string;
-  /** 'forbidden' | 'not-configured' | 'timeout' | 'launch-failed' | 'stop-failed' */
+  /**
+   * 'forbidden' | 'not-configured' | 'not-linked' | 'in-use' | 'timeout'
+   * | 'lock-failed' | 'proxy-error' | 'launch-failed' | 'stop-failed'
+   *
+   * `proxy-error` is the common one: the SDK tests the profile's proxy before
+   * spawning anything, so a dead proxy fails the launch outright.
+   */
   error?: string | null;
   startedAtMs?: number | null;
+  /** Set with `error: 'in-use'` — who already has this profile open. */
+  holder?: GoLoginLockHolder | null;
   /** Orbita's local CDP endpoint once running. Not a credential. */
   wsUrl?: string | null;
+}
+
+/**
+ * A session that makes closing the window a bad idea.
+ *
+ * Two situations with different remedies: `stopping` is mid-upload and must not
+ * be interrupted, while `starting`/`running` means an Orbita browser is open
+ * that closing the window would *not* close.
+ */
+export interface GoLoginBusyProfile {
+  profileId: string;
+  /** 'starting' | 'running' | 'stopping' */
+  status: string;
 }
 
 export interface GoLoginLaunchResult {
   success: boolean;
   /** Adds 'invalid-profile' | 'unauthenticated' | 'too-many-sessions' to the above. */
   error?: string;
+  holder?: GoLoginLockHolder | null;
   session?: GoLoginSession;
+}
+
+/**
+ * Orbita's install state. Reported from the main process, which owns the
+ * download — including one that starts in the middle of a launch, because the
+ * version a profile needs comes from its own user agent rather than a global
+ * "latest". `downloading` and `installing` are the two phases the window must
+ * block on.
+ */
+export interface GoLoginOrbitaState {
+  phase: 'idle' | 'checking' | 'downloading' | 'installing' | 'ready' | 'failed';
+  version: number | string | null;
+  receivedBytes: number;
+  /** 0 when the CDN sends no content-length; render an indeterminate bar then. */
+  totalBytes: number;
+  error?: string | null;
+  /** Only on the `orbitaStatus()` reply, not on change events. */
+  installedVersions?: number[];
 }
 
 /** Options for opening a satellite window. All geometry is clamped in main. */
@@ -194,12 +241,41 @@ interface ElectronAPI {
    * a separate application window this API cannot style or position.
    */
   gologin?: {
-    launch: (idToken: string, profileId: string) => Promise<GoLoginLaunchResult>;
+    launch: (
+      idToken: string,
+      profileId: string,
+      deviceId?: string | null,
+    ) => Promise<GoLoginLaunchResult>;
     stop: (profileId: string) => Promise<{ success: boolean; error?: string }>;
     getSession: (profileId: string) => Promise<GoLoginSession>;
     listSessions: () => Promise<GoLoginSession[]>;
     onSessionChanged: (callback: (session: GoLoginSession) => void) => void;
     removeSessionChangedListeners: () => void;
+    /**
+     * Profiles that are open (`starting`/`running`) or still committing their
+     * session (`stopping`). Closing the window while any are listed is guarded
+     * in main — see `onCloseBlocked`.
+     */
+    busyProfiles?: () => Promise<{ profiles: GoLoginBusyProfile[] }>;
+    /**
+     * The renderer's answer to the close-guard dialog.
+     *
+     * `stop-and-close` is "Save & quit": close every open browser, commit each
+     * profile, then let the window close itself once the last one lands.
+     */
+    closeDecision?: (
+      decision: 'cancel' | 'force' | 'after-completion' | 'stop-and-close',
+    ) => Promise<{ success: boolean }>;
+    /** Main held the window open because sessions are live. Show the dialog. */
+    onCloseBlocked?: (callback: (payload: { profiles: GoLoginBusyProfile[] }) => void) => void;
+    removeCloseBlockedListeners?: () => void;
+    /** Absent on builds before v0.12.0 — feature-detect before calling. */
+    orbitaStatus?: () => Promise<GoLoginOrbitaState>;
+    ensureOrbita?: (
+      version?: number,
+    ) => Promise<{ success: boolean; version?: number | string; error?: string }>;
+    onOrbitaChanged?: (callback: (state: GoLoginOrbitaState) => void) => void;
+    removeOrbitaChangedListeners?: () => void;
   };
   timeTracking: {
     getIdleTime: () => Promise<number>;

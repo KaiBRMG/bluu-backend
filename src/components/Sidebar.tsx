@@ -49,10 +49,42 @@ let savedScrollTop = 0;
  * this entry. Either way the surface still works — just inside the main window,
  * with the sidebar rendered around it — while the fleet updates.
  */
-const SATELLITE_PAGES: Record<string, { route: string; key: string }> = {
+const SATELLITE_PAGES: Record<string, { route: string; key: string; minVersion?: string }> = {
   "apps-ofmanager": { route: "/of-manager", key: "of-manager" },
-  "apps-gologin": { route: "/gologin", key: "gologin" },
+  // GoLogin has no in-window fallback: it needs main-process code that no
+  // earlier build has — the Orbita downloader and the session lock's lease. A
+  // pre-0.12.0 shell renders the page fine and then cannot launch anything,
+  // which is worse than a clean refusal. See `minVersion` below.
+  "apps-gologin": { route: "/gologin", key: "gologin", minVersion: "0.12.0" },
 };
+
+/** `1.2.3` -> comparable tuple. Ignores any pre-release suffix. */
+function parseVersion(value: string): number[] {
+  return String(value)
+    .split("-")[0]
+    .split(".")
+    .map((part) => Number.parseInt(part, 10) || 0);
+}
+
+/**
+ * True when `version` is at least `minimum`.
+ *
+ * Returns **false when the version is unknown** — no IPC, no answer, an
+ * unparseable string. A satellite gated on a version is gated because the build
+ * has to carry specific main-process code, and "I could not tell" is not
+ * evidence that it does.
+ */
+function meetsMinVersion(version: string | null | undefined, minimum: string): boolean {
+  if (!version) return false;
+  const actual = parseVersion(version);
+  const required = parseVersion(minimum);
+  for (let i = 0; i < Math.max(actual.length, required.length); i++) {
+    const a = actual[i] ?? 0;
+    const b = required[i] ?? 0;
+    if (a !== b) return a > b;
+  }
+  return true;
+}
 
 function SatelliteButton({
   pageId,
@@ -69,6 +101,19 @@ function SatelliteButton({
   const open = useCallback(async () => {
     if (!target) return;
     const api = window.electronAPI?.window;
+
+    // A build too old to run this satellite is refused outright — before the
+    // permission check, because it is not a permission problem and there is
+    // nothing on the other side of it to show. The page can be granted to
+    // someone who has not updated yet; this is what they see.
+    if (target.minVersion) {
+      const version = await window.electronAPI?.app?.getVersion?.().catch(() => null);
+      if (!meetsMinVersion(version, target.minVersion)) {
+        toast.error("Access denied");
+        return;
+      }
+    }
+
     // `onlyfans.openWindow` is the legacy channel, kept for builds that predate
     // the generalised one. It reaches the same handler in main.js.
     const openSatellite =
@@ -85,10 +130,13 @@ function SatelliteButton({
         return;
       }
       const result = await openSatellite(idToken, { path: target.route, key: target.key, title });
-      // An older shell doesn't know this prefix — open it in-window instead of
-      // telling the user the feature is broken.
+      // An older shell doesn't know this prefix. For a satellite with no version
+      // floor that is harmless — open it in-window rather than claiming the
+      // feature is broken. For one with a floor, the in-window copy would be
+      // just as unusable, so it is refused the same way.
       if (result?.error === "invalid-path") {
-        router.push(target.route);
+        if (target.minVersion) toast.error("Access denied");
+        else router.push(target.route);
         return;
       }
       // 'already-opening' is a double-click while the access check is in flight —

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { X, Loader2 } from 'lucide-react';
 import { IconBrandTelegram } from '@tabler/icons-react';
 import { toast } from 'sonner';
@@ -51,12 +51,28 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
  * running the bundle it launched with, so a compiled-in read could never reach
  * the users an announcement most needs to reach (cross-cutting rule 9c). It
  * fetches on mount and again on each clock-out — twice a shift, not on a timer.
+ *
+ * ── Never during onboarding ──────────────────────────────────────────────────
+ * It is mounted on `(main)/layout.tsx`, which is above the onboarding steps too,
+ * so it would otherwise float over a first-run screen. A user still walking the
+ * flow has not reached the app yet, and the Telegram ask in particular is the
+ * *same* ask onboarding's own Link Telegram section makes a step later. The gate
+ * is `hasCompletedOnboarding` (plus the route, for the window between submitting
+ * the form and the flag landing in the snapshot), and it also suppresses the
+ * fetch — no point asking the server who to interrupt when nobody may be.
  */
 export default function AnnouncementCard() {
   const { user } = useAuth();
   const { userData } = useUserData();
   const { displayState } = useTimeTrackingContext();
   const router = useRouter();
+  const pathname = usePathname();
+
+  // Onboarding is an authenticated surface under the same layout, so the card
+  // has to exclude itself. Unknown (`userData` not loaded) counts as onboarding:
+  // showing nothing for a moment is the cheap mistake here.
+  const isOnboarding =
+    pathname?.startsWith('/onboarding') === true || userData?.hasCompletedOnboarding !== true;
 
   const [announcements, setAnnouncements] = useState<ClientAnnouncement[]>([]);
   const [snoozed, setSnoozed] = useState<string[]>([]);
@@ -76,9 +92,9 @@ export default function AnnouncementCard() {
   }, [user]);
 
   useEffect(() => {
-    if (!userData) return;
+    if (!userData || isOnboarding) return;
     load();
-  }, [userData, load]);
+  }, [userData, isOnboarding, load]);
 
   // Re-arm on the clock-out *transition*, not on the state — otherwise every
   // render while clocked out would clear a snooze the user just asked for.
@@ -86,11 +102,12 @@ export default function AnnouncementCard() {
   useEffect(() => {
     const wasClockedOut = previousState.current === 'clocked-out';
     previousState.current = displayState;
+    if (isOnboarding) return;
     if (displayState === 'clocked-out' && !wasClockedOut) {
       setSnoozed([]);
       load();
     }
-  }, [displayState, load]);
+  }, [displayState, isOnboarding, load]);
 
   const dismissed = userData?.dismissedAnnouncements ?? [];
   const announcement = announcements.find(
@@ -158,7 +175,7 @@ export default function AnnouncementCard() {
     }
   }, [announcement, user]);
 
-  if (!announcement) return null;
+  if (!announcement || isOnboarding) return null;
 
   const isTelegram = announcement.action.kind === 'telegram-link';
 

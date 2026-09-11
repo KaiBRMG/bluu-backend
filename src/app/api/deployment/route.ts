@@ -15,8 +15,10 @@ import { NextResponse } from 'next/server';
  * "don't know, don't reload" rather than "changed". A value that varied per
  * request would put every client into a reload loop.
  *
- * Unauthenticated, like `/api/app-update`: an opaque deployment id is not user
- * data, and it must answer for a client whose session is not the point.
+ * Unauthenticated: an opaque deployment id is not user data, and this must
+ * answer for a client whose session is not the point. (`/api/app-update` answers
+ * for the same reason but now reads an *optional* token, because its payload is
+ * resolved per-cohort. There is nothing here to resolve.)
  *
  * No `export const dynamic`: the project runs with `cacheComponents`, which
  * rejects that segment config outright (build error) because the model is

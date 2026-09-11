@@ -3,6 +3,7 @@
 import { useAuth } from '@/components/AuthProvider';
 import { useUserData } from '@/hooks/useUserData';
 import { Skeleton } from '@/components/ui/skeleton';
+import Notice from './Notice';
 
 /**
  * Client-side gate for the GoLogin window.
@@ -40,13 +41,4 @@ export default function GoLoginGuard({ children }: { children: React.ReactNode }
   }
 
   return <>{children}</>;
-}
-
-function Notice({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-background px-8 text-center">
-      <h1 className="text-lg font-semibold">{title}</h1>
-      <p className="text-sm text-zinc-400">{body}</p>
-    </div>
-  );
 }

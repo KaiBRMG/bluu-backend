@@ -69,6 +69,19 @@ export interface UserDocument {
   isArchived?: boolean;
   role?: 'admin' | 'member';
 
+  /**
+   * The address of the user's own GoLogin account, set when they link a personal
+   * API key. Present == "GoLogin onboarding is done", which is the whole reason
+   * it is mirrored here: the window reads it off the existing `useUserData`
+   * snapshot and needs no extra round trip to decide what to render.
+   *
+   * The **key itself is not here** and must never be — this document is streamed
+   * to the renderer. It lives encrypted in `gologin-accounts/{uid}`, which no
+   * client can read. See `lib/services/gologinAccountService.ts`.
+   */
+  gologinEmail?: string;
+  gologinLinkedAt?: Timestamp;
+
   address?: {
     street?: string;
     city?: string;

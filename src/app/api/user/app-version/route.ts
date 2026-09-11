@@ -6,7 +6,11 @@ import { invalidateAdminUsersCache } from '@/app/api/admin/users/route';
 import { FieldValue } from 'firebase-admin/firestore';
 import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
-import { APP_UPDATE, releaseNoteAppliesTo } from '@/lib/appUpdateConfig';
+import {
+  APP_UPDATE,
+  matchesUpdateCohort,
+  releaseNoteVersionQualifies,
+} from '@/lib/appUpdateConfig';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
@@ -57,16 +61,40 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     const batch = adminDb.batch();
     let sendingNote = false;
 
-    if (note && releaseNoteAppliesTo(rawVersion)) {
+    if (note && releaseNoteVersionQualifies(rawVersion)) {
       const snap = await userRef.get();
-      if (snap.exists && snap.data()?.releaseNoteNotifiedVersion !== note.version) {
-        sendingNote = true;
+      const data = snap.data();
+      // The cohort half of the gate, checked against the SERVER's copy of the
+      // user's groups — the client never gets a say in which release note it is
+      // eligible for. Read off the snapshot this branch already fetched, so
+      // staging a note costs no extra I/O (rule 9).
+      //
+      // A user outside the cohort is deliberately left unmarked rather than
+      // marked-and-skipped: widening the cohort later must still reach them.
+      // (Contrast the onboarding case below, where marking IS the intent.)
+      const inCohort = matchesUpdateCohort(note, {
+        uid: token.uid,
+        groups: Array.isArray(data?.groups) ? data.groups : [],
+      });
+      if (snap.exists && inCohort && data?.releaseNoteNotifiedVersion !== note.version) {
+        // A user still in first-run onboarding has no "before" to compare the
+        // release against — every feature in it is new to them — so a "what's
+        // new" note is noise, and it would land in the tray before they have
+        // even finished setting the app up. They are marked as notified rather
+        // than skipped, so the note never arrives late once they finish. This
+        // suppresses only the note armed right now; the next release reaches
+        // them normally. `hasCompletedOnboarding` is read off the snapshot this
+        // branch already fetched, so the check is free (rule 9).
+        const stillOnboarding = data?.hasCompletedOnboarding !== true;
         update.releaseNoteNotifiedVersion = note.version;
-        // Deterministic id: two app starts racing each other can only produce
-        // this one document, never a duplicate "what's new" in the tray.
-        addNotificationToBatch(batch, token.uid, notifications.releaseNote(note.version), {
-          docId: `${token.uid}__release-${note.version}`,
-        });
+        if (!stillOnboarding) {
+          sendingNote = true;
+          // Deterministic id: two app starts racing each other can only produce
+          // this one document, never a duplicate "what's new" in the tray.
+          addNotificationToBatch(batch, token.uid, notifications.releaseNote(note.version), {
+            docId: `${token.uid}__release-${note.version}`,
+          });
+        }
       }
     }
 

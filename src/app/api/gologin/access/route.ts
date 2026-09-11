@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
-import { requireGoLoginAccess } from '@/lib/services/gologinService';
+import { requireGoLogin } from '@/lib/services/gologinService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
@@ -14,7 +14,10 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
  * `/api/onlyfans/access`.
  */
 export const GET = withAuth(async (_req, token: DecodedIdToken) => {
-  const denied = await requireGoLoginAccess(token.uid);
+  // Both gates: the page permission, and a GoLogin workspace seat. The second
+  // is not optional — without a seat they cannot generate an API token, so the
+  // window would open on an onboarding screen they cannot complete.
+  const denied = await requireGoLogin(token.uid);
   if (denied) return denied;
   return NextResponse.json({ ok: true });
 });

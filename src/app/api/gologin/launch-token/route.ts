@@ -1,44 +1,45 @@
 import { NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
-import { requireGoLoginAccess } from '@/lib/services/gologinService';
+import { requireGoLogin } from '@/lib/services/gologinService';
+import { getGoLoginUserToken } from '@/lib/services/gologinAccountService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
- * POST /api/gologin/launch-token — hands the GoLogin API token to the Electron
- * **main process** so it can launch a profile locally.
+ * POST /api/gologin/launch-token — hands **the caller's own** GoLogin API token
+ * to the Electron main process so it can launch a profile locally.
  *
- * ⚠ **Read this before touching it.** This is the one place the provider token
- * leaves the server, and that is a deliberate, load-bearing trade rather than an
- * oversight:
+ * ⚠ **Read this before touching it.**
  *
  * - The GoLogin Node SDK launches **Orbita on the user's own machine**. Nothing
- *   running on Vercel can do that, so the token has to reach the desktop for the
+ *   running on Vercel can do that, so a token has to reach the desktop for the
  *   feature to exist at all.
+ * - **It is the caller's personal token, never the master `GL_API_TOKEN`.** That
+ *   is the whole point of the per-user model: what leaves the server is a
+ *   credential to *one operator's own free GoLogin account*, which can see only
+ *   what has been shared into it. The workspace key stays server-side, used only
+ *   for folder administration. Do not "simplify" this back to a shared token.
  * - It is **never written to disk and never sent to a renderer.** Main fetches it
  *   at launch time, holds it in memory for the life of the session, and the
  *   preload bridge exposes no way to read it back.
- * - It is **not compiled into the app**, which is the alternative and a strictly
- *   worse one: a bundled key is extractable from the asar by anyone with a copy
- *   of the installer, forever, including ex-staff. This route hands it only to a
- *   caller holding a valid Firebase ID token **and** the `apps-gologin` page
- *   permission, so revoking that permission revokes the token's reach.
- * - **Residual risk, stated plainly:** a user who legitimately holds the page
- *   permission can recover the token from their own machine (an intercepting
- *   proxy would do it). That population is exactly the set of people already
- *   trusted to operate every profile in the workspace, so the token grants them
- *   nothing they could not already do — but rotate `GL_API_TOKEN` when someone
- *   in it leaves, the same way any shared credential is rotated.
+ * - It is **fetched per launch, not cached**, so both gates — the `apps-gologin`
+ *   page permission and the existence of the account row — are re-checked
+ *   server-side every time. Revoking either stops the next launch rather than
+ *   the next app start.
  *
  * POST rather than GET so it is never cached, never replayed from history, and
  * never sits in a URL that could be logged.
  */
 export const POST = withAuth(async (_req, token: DecodedIdToken) => {
-  const denied = await requireGoLoginAccess(token.uid);
+  const denied = await requireGoLogin(token.uid);
   if (denied) return denied;
 
-  const apiToken = process.env.GL_API_TOKEN;
+  const apiToken = await getGoLoginUserToken(token.uid);
   if (!apiToken) {
-    return NextResponse.json({ error: 'GL_API_TOKEN is not configured.' }, { status: 503 });
+    // 428, matching the profiles route: the remedy is onboarding, not access.
+    return NextResponse.json(
+      { error: 'No GoLogin account is linked to this user.', code: 'not-linked' },
+      { status: 428 },
+    );
   }
 
   return NextResponse.json({ token: apiToken }, { headers: { 'Cache-Control': 'no-store' } });

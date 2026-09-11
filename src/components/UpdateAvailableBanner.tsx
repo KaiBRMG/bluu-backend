@@ -7,6 +7,7 @@ import { compareSemver } from '@/lib/semver';
 import { APP_UPDATE, fetchAppUpdateConfig, resolvePlatformUpdate } from '@/lib/appUpdateConfig';
 import { setUpdateInFlight } from '@/lib/updateInFlight';
 import { useTimeTrackingContext } from '@/contexts/TimeTrackingContext';
+import { useAuth } from '@/components/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -139,6 +140,11 @@ const RESTART_POLL_WINDOW_MS = 60_000;
 
 export default function UpdateAvailableBanner() {
   const { displayState, isHydrating } = useTimeTrackingContext();
+  // Only so the policy fetch can say who is asking — a release can now be aimed
+  // at a cohort (see `UpdateCohort`), and the match runs server-side. Without a
+  // token the route answers with `allUsers` entries only, which is safe but
+  // would silently skip a pilot user.
+  const { user } = useAuth();
   const [mode, setMode] = useState<Mode>('none');
   const [delivery, setDelivery] = useState<Delivery>('manual');
   const [current, setCurrent] = useState<string | null>(null);
@@ -256,9 +262,15 @@ export default function UpdateAvailableBanner() {
 
         // The live policy, not the copy compiled into this bundle — a renderer
         // that has been up for a week has never seen the config we armed since.
-        const config = await fetchAppUpdateConfig();
+        // The token is what lets the server resolve a cohort to this user; a
+        // failure to mint one is not fatal (the route falls back to the
+        // fleet-wide entries), so it must not take the whole decision down.
+        const idToken = user ? await user.getIdToken().catch(() => null) : null;
+        const config = await fetchAppUpdateConfig(idToken);
 
-        // The one gate: no config entry → this release isn't aimed at this OS.
+        // The one gate: no config entry → this release isn't aimed at this OS
+        // **or not at this user** — the client cannot tell those apart, and has
+        // no reason to.
         // Clearing `mode` matters on the provisional restart path: disarming the
         // config is the emergency lever for a fleet stuck behind a compulsory
         // prompt, and it has to release them without a relaunch (a stuck user is
@@ -307,7 +319,7 @@ export default function UpdateAvailableBanner() {
         evaluatingRef.current = false;
       }
     })();
-  }, [mode, delivery, isHydrating, displayState, availableTick, clockOutTick]);
+  }, [mode, delivery, isHydrating, displayState, availableTick, clockOutTick, user]);
 
   /**
    * Re-read the shell's start-up check. Returns true once it has an answer, and
