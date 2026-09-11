@@ -4,284 +4,567 @@
       "collectionGroup": "time-entries",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "userId", "order": "ASCENDING" },
-        { "fieldPath": "createdTime", "order": "DESCENDING" }
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdTime",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "time-entries",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "userId", "order": "ASCENDING" },
-        { "fieldPath": "createdTime", "order": "ASCENDING" }
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdTime",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "time-entries",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "userClockOut", "order": "ASCENDING" },
-        { "fieldPath": "lastTime", "order": "ASCENDING" }
+        {
+          "fieldPath": "userClockOut",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lastTime",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "screenshots",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "userId", "order": "ASCENDING" },
-        { "fieldPath": "timestampUTC", "order": "ASCENDING" }
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "timestampUTC",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "analytics_daily",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "userId", "order": "ASCENDING" },
-        { "fieldPath": "date", "order": "ASCENDING" }
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "date",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "active_sessions",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "userClockOut", "order": "ASCENDING" },
-        { "fieldPath": "lastUpdated", "order": "ASCENDING" }
+        {
+          "fieldPath": "userClockOut",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lastUpdated",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "time_entries",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "userId", "order": "ASCENDING" },
-        { "fieldPath": "startTime", "order": "ASCENDING" }
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startTime",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "time_entries",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "userId", "order": "ASCENDING" },
-        { "fieldPath": "startTime", "order": "DESCENDING" }
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startTime",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "shifts",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "userId", "order": "ASCENDING" },
-        { "fieldPath": "startTime", "order": "ASCENDING" }
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startTime",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "shifts",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "isRecurring", "order": "ASCENDING" },
-        { "fieldPath": "seriesId", "order": "ASCENDING" },
-        { "fieldPath": "startTime", "order": "ASCENDING" }
+        {
+          "fieldPath": "isRecurring",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "seriesId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startTime",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "shifts",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "userId", "order": "ASCENDING" },
-        { "fieldPath": "isRecurring", "order": "ASCENDING" },
-        { "fieldPath": "seriesId", "order": "ASCENDING" },
-        { "fieldPath": "startTime", "order": "ASCENDING" }
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isRecurring",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "seriesId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startTime",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "notifications",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "userId", "order": "ASCENDING" },
-        { "fieldPath": "dismissedByUser", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dismissedByUser",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "campaign-tracking",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "creatorID", "order": "ASCENDING" },
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "createdTime", "order": "DESCENDING" }
+        {
+          "fieldPath": "creatorID",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdTime",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "campaign-tracking",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "creatorID", "order": "ASCENDING" },
-        { "fieldPath": "type", "order": "ASCENDING" },
-        { "fieldPath": "status", "order": "ASCENDING" }
+        {
+          "fieldPath": "creatorID",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "campaign-tracking",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "createdBy", "order": "ASCENDING" },
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "createdTime", "order": "DESCENDING" }
+        {
+          "fieldPath": "createdBy",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdTime",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "campaign-tracking",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "isArchived", "order": "ASCENDING" },
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "lastEditedTime", "order": "DESCENDING" }
+        {
+          "fieldPath": "isArchived",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lastEditedTime",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "campaign-tracking",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "type", "order": "ASCENDING" },
-        { "fieldPath": "isArchived", "order": "ASCENDING" },
-        { "fieldPath": "createdTime", "order": "DESCENDING" }
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isArchived",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdTime",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "campaign-tracking",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "createdBy", "order": "ASCENDING" },
-        { "fieldPath": "type", "order": "ASCENDING" },
-        { "fieldPath": "isArchived", "order": "ASCENDING" }
+        {
+          "fieldPath": "createdBy",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isArchived",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "content-planning",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "creatorID", "order": "ASCENDING" },
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "dueDate", "order": "ASCENDING" }
+        {
+          "fieldPath": "creatorID",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dueDate",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "content-planning",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "isArchived", "order": "ASCENDING" },
-        { "fieldPath": "dueDate", "order": "ASCENDING" }
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isArchived",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dueDate",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "content-planning",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "creatorID", "order": "ASCENDING" },
-        { "fieldPath": "isArchived", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "creatorID",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isArchived",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "content-planning",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "isArchived", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isArchived",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "posts",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
-        { "fieldPath": "postedBy", "order": "ASCENDING" },
-        { "fieldPath": "postDate", "order": "ASCENDING" }
+        {
+          "fieldPath": "postedBy",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "postDate",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "posts",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
-        { "fieldPath": "postedBy", "order": "ASCENDING" },
-        { "fieldPath": "postDate", "order": "DESCENDING" }
+        {
+          "fieldPath": "postedBy",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "postDate",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "onlyfans-chats",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "accountId", "order": "ASCENDING" },
-        { "fieldPath": "lastMessageAtMs", "order": "DESCENDING" }
+        {
+          "fieldPath": "accountId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lastMessageAtMs",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "growth-posts",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "isActive", "order": "ASCENDING" },
-        { "fieldPath": "nextRefreshAt", "order": "ASCENDING" }
+        {
+          "fieldPath": "isActive",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nextRefreshAt",
+          "order": "ASCENDING"
+        }
       ]
     }
   ],
   "fieldOverrides": [
     {
-      "collectionGroup": "growth-posts",
-      "fieldPath": "history",
+      "collectionGroup": "admin_notification_batches",
+      "fieldPath": "sentViaTelegram",
       "indexes": []
     },
     {
-      "collectionGroup": "growth-posts",
-      "fieldPath": "latest",
+      "collectionGroup": "analytics_daily",
+      "fieldPath": "groupsSnapshot",
       "indexes": []
     },
     {
-      "collectionGroup": "growth-posts",
-      "fieldPath": "previous",
+      "collectionGroup": "analytics_daily",
+      "fieldPath": "hourBuckets",
       "indexes": []
     },
     {
-      "collectionGroup": "growth-posts",
-      "fieldPath": "media",
+      "collectionGroup": "analytics_daily",
+      "fieldPath": "segments",
       "indexes": []
     },
     {
-      "collectionGroup": "growth-posts",
-      "fieldPath": "text",
+      "collectionGroup": "analytics_daily",
+      "fieldPath": "sessionBounds",
       "indexes": []
     },
     {
-      "collectionGroup": "growth-posts",
-      "fieldPath": "lastReadError",
+      "collectionGroup": "analytics_daily",
+      "fieldPath": "sessionIds",
       "indexes": []
     },
     {
-      "collectionGroup": "growth-spend",
-      "fieldPath": "results",
+      "collectionGroup": "creators",
+      "fieldPath": "telegram",
       "indexes": []
     },
     {
-      "collectionGroup": "growth-spend",
-      "fieldPath": "usd",
+      "collectionGroup": "creators",
+      "fieldPath": "telegramLinkCreatedAt",
       "indexes": []
     },
     {
-      "collectionGroup": "growth-spend",
-      "fieldPath": "runs",
+      "collectionGroup": "creators",
+      "fieldPath": "telegramLinkTokenHash",
       "indexes": []
     },
     {
-      "collectionGroup": "series",
-      "fieldPath": "days",
+      "collectionGroup": "device-sessions",
+      "fieldPath": "kind",
       "indexes": []
     },
     {
-      "collectionGroup": "growth-accounts",
-      "fieldPath": "latest",
+      "collectionGroup": "device-sessions",
+      "fieldPath": "label",
       "indexes": []
     },
     {
-      "collectionGroup": "growth-accounts",
-      "fieldPath": "previous",
+      "collectionGroup": "gologin-accounts",
+      "fieldPath": "addedByUid",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-accounts",
+      "fieldPath": "folderId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-accounts",
+      "fieldPath": "folderName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-accounts",
+      "fieldPath": "glEmail",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-accounts",
+      "fieldPath": "glUserId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-accounts",
+      "fieldPath": "memberAddedAtMs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-accounts",
+      "fieldPath": "planName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-accounts",
+      "fieldPath": "sharedAtMs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-accounts",
+      "fieldPath": "tokenAddedAtMs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-accounts",
+      "fieldPath": "tokenCipher",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-accounts",
+      "fieldPath": "uid",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-sessions",
+      "fieldPath": "claimedAtMs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-sessions",
+      "fieldPath": "deviceId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-sessions",
+      "fieldPath": "displayName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-sessions",
+      "fieldPath": "heartbeatAtMs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-sessions",
+      "fieldPath": "profileId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-sessions",
+      "fieldPath": "secretHash",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "gologin-sessions",
+      "fieldPath": "uid",
       "indexes": []
     },
     {
@@ -291,109 +574,356 @@
     },
     {
       "collectionGroup": "growth-accounts",
+      "fieldPath": "latest",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-accounts",
       "fieldPath": "platformAccountId",
       "indexes": []
+    },
+    {
+      "collectionGroup": "growth-accounts",
+      "fieldPath": "previous",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-posts",
+      "fieldPath": "history",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-posts",
+      "fieldPath": "lastReadError",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-posts",
+      "fieldPath": "latest",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-posts",
+      "fieldPath": "media",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-posts",
+      "fieldPath": "previous",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-posts",
+      "fieldPath": "text",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-spend",
+      "fieldPath": "results",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-spend",
+      "fieldPath": "runs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-spend",
+      "fieldPath": "usd",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "messages",
+      "fieldPath": "attachments",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "messages",
+      "fieldPath": "text",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "model-submission-rate",
+      "fieldPath": "expiresAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "model-submission-sessions",
+      "fieldPath": "expiresAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "model-submissions",
+      "fieldPath": "earningsPhotos",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "model-submissions",
+      "fieldPath": "socialInstagram",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "model-submissions",
+      "fieldPath": "socialOther",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "model-submissions",
+      "fieldPath": "socialReddit",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "model-submissions",
+      "fieldPath": "socialTwitter",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "model-submissions",
+      "fieldPath": "whatsapp",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlyfans-chats",
+      "fieldPath": "fan",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlyfans-chats",
+      "fieldPath": "lastMessageText",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlyfans-chats",
+      "fieldPath": "profile",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "posts",
+      "fieldPath": "originalLinkNormalized",
+      "indexes": [
+        {
+          "queryScope": "COLLECTION",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "DESCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
+        }
+      ]
     },
     {
       "collectionGroup": "posts",
       "fieldPath": "postDate",
       "indexes": [
-        { "queryScope": "COLLECTION", "order": "ASCENDING" },
-        { "queryScope": "COLLECTION", "order": "DESCENDING" },
-        { "queryScope": "COLLECTION_GROUP", "order": "ASCENDING" },
-        { "queryScope": "COLLECTION_GROUP", "order": "DESCENDING" }
+        {
+          "queryScope": "COLLECTION",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "DESCENDING"
+        },
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "posts",
       "fieldPath": "postLinkNormalized",
       "indexes": [
-        { "queryScope": "COLLECTION", "order": "ASCENDING" },
-        { "queryScope": "COLLECTION", "order": "DESCENDING" },
-        { "queryScope": "COLLECTION", "arrayConfig": "CONTAINS" },
-        { "queryScope": "COLLECTION_GROUP", "order": "ASCENDING" }
+        {
+          "queryScope": "COLLECTION",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "DESCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
-      "collectionGroup": "posts",
-      "fieldPath": "originalLinkNormalized",
-      "indexes": [
-        { "queryScope": "COLLECTION", "order": "ASCENDING" },
-        { "queryScope": "COLLECTION", "order": "DESCENDING" },
-        { "queryScope": "COLLECTION", "arrayConfig": "CONTAINS" },
-        { "queryScope": "COLLECTION_GROUP", "order": "ASCENDING" }
-      ]
+      "collectionGroup": "prompt-library",
+      "fieldPath": "share",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "prompt-library",
+      "fieldPath": "text",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "prompt-library",
+      "fieldPath": "textHtml",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "prompt-shares",
+      "fieldPath": "createdBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "prompt-shares",
+      "fieldPath": "promptId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "series",
+      "fieldPath": "days",
+      "indexes": []
     },
     {
       "collectionGroup": "submissions",
       "fieldPath": "originalLinkNormalized",
       "indexes": [
-        { "queryScope": "COLLECTION", "order": "ASCENDING" },
-        { "queryScope": "COLLECTION", "order": "DESCENDING" },
-        { "queryScope": "COLLECTION", "arrayConfig": "CONTAINS" },
-        { "queryScope": "COLLECTION_GROUP", "order": "ASCENDING" }
+        {
+          "queryScope": "COLLECTION",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "DESCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
+        }
       ]
     },
-
-    { "collectionGroup": "time_entries", "fieldPath": "eventLog", "indexes": [] },
-    { "collectionGroup": "time_entries", "fieldPath": "modifications", "indexes": [] },
-    { "collectionGroup": "time_entries", "fieldPath": "originalData", "indexes": [] },
-
-    { "collectionGroup": "prompt-library", "fieldPath": "text", "indexes": [] },
-    { "collectionGroup": "prompt-library", "fieldPath": "textHtml", "indexes": [] },
-    { "collectionGroup": "prompt-library", "fieldPath": "share", "indexes": [] },
-    { "collectionGroup": "versions", "fieldPath": "text", "indexes": [] },
-    { "collectionGroup": "versions", "fieldPath": "textHtml", "indexes": [] },
-
-    { "collectionGroup": "analytics_daily", "fieldPath": "segments", "indexes": [] },
-    { "collectionGroup": "analytics_daily", "fieldPath": "sessionBounds", "indexes": [] },
-    { "collectionGroup": "analytics_daily", "fieldPath": "hourBuckets", "indexes": [] },
-    { "collectionGroup": "analytics_daily", "fieldPath": "sessionIds", "indexes": [] },
-    { "collectionGroup": "analytics_daily", "fieldPath": "groupsSnapshot", "indexes": [] },
-
-    { "collectionGroup": "onlyfans-chats", "fieldPath": "lastMessageText", "indexes": [] },
-    { "collectionGroup": "onlyfans-chats", "fieldPath": "fan", "indexes": [] },
-    { "collectionGroup": "onlyfans-chats", "fieldPath": "profile", "indexes": [] },
-    { "collectionGroup": "messages", "fieldPath": "text", "indexes": [] },
-    { "collectionGroup": "messages", "fieldPath": "attachments", "indexes": [] },
-
-    { "collectionGroup": "model-submissions", "fieldPath": "whatsapp", "indexes": [] },
-    { "collectionGroup": "model-submissions", "fieldPath": "socialInstagram", "indexes": [] },
-    { "collectionGroup": "model-submissions", "fieldPath": "socialTwitter", "indexes": [] },
-    { "collectionGroup": "model-submissions", "fieldPath": "socialReddit", "indexes": [] },
-    { "collectionGroup": "model-submissions", "fieldPath": "socialOther", "indexes": [] },
-    { "collectionGroup": "model-submissions", "fieldPath": "earningsPhotos", "indexes": [] },
-    { "collectionGroup": "model-submission-sessions", "fieldPath": "expiresAt", "indexes": [] },
-    { "collectionGroup": "model-submission-rate", "fieldPath": "expiresAt", "indexes": [] },
-
-    { "collectionGroup": "users", "fieldPath": "sessions", "indexes": [] },
-    { "collectionGroup": "prompt-shares", "fieldPath": "promptId", "indexes": [] },
-    { "collectionGroup": "prompt-shares", "fieldPath": "createdBy", "indexes": [] },
-    { "collectionGroup": "device-sessions", "fieldPath": "kind", "indexes": [] },
-    { "collectionGroup": "device-sessions", "fieldPath": "label", "indexes": [] },
-
-    { "collectionGroup": "admin_notification_batches", "fieldPath": "sentViaTelegram", "indexes": [] },
-
-    { "collectionGroup": "users", "fieldPath": "telegram", "indexes": [] },
-    { "collectionGroup": "users", "fieldPath": "telegramLinkTokenHash", "indexes": [] },
-    { "collectionGroup": "users", "fieldPath": "telegramLinkCreatedAt", "indexes": [] },
-    { "collectionGroup": "users", "fieldPath": "dismissedAnnouncements", "indexes": [] },
-    { "collectionGroup": "creators", "fieldPath": "telegram", "indexes": [] },
-    { "collectionGroup": "creators", "fieldPath": "telegramLinkTokenHash", "indexes": [] },
-    { "collectionGroup": "creators", "fieldPath": "telegramLinkCreatedAt", "indexes": [] },
-
-    { "collectionGroup": "telegram-links", "fieldPath": "subjectKind", "indexes": [] },
-    { "collectionGroup": "telegram-links", "fieldPath": "subjectUid", "indexes": [] },
-    { "collectionGroup": "telegram-links", "fieldPath": "createdBy", "indexes": [] },
-    { "collectionGroup": "telegram-links", "fieldPath": "createdAt", "indexes": [] },
-    { "collectionGroup": "telegram-links", "fieldPath": "expiresAt", "indexes": [] },
-    { "collectionGroup": "telegram-links", "fieldPath": "usedAt", "indexes": [] },
-    { "collectionGroup": "telegram-links", "fieldPath": "telegramUserId", "indexes": [] },
-
-    { "collectionGroup": "telegram-accounts", "fieldPath": "subjectKind", "indexes": [] },
-    { "collectionGroup": "telegram-accounts", "fieldPath": "subjectUid", "indexes": [] },
-    { "collectionGroup": "telegram-accounts", "fieldPath": "chatId", "indexes": [] },
-    { "collectionGroup": "telegram-accounts", "fieldPath": "username", "indexes": [] },
-    { "collectionGroup": "telegram-accounts", "fieldPath": "linkedAt", "indexes": [] }
+    {
+      "collectionGroup": "telegram-accounts",
+      "fieldPath": "chatId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "telegram-accounts",
+      "fieldPath": "linkedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "telegram-accounts",
+      "fieldPath": "subjectKind",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "telegram-accounts",
+      "fieldPath": "subjectUid",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "telegram-accounts",
+      "fieldPath": "username",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "telegram-links",
+      "fieldPath": "createdAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "telegram-links",
+      "fieldPath": "createdBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "telegram-links",
+      "fieldPath": "expiresAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "telegram-links",
+      "fieldPath": "subjectKind",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "telegram-links",
+      "fieldPath": "subjectUid",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "telegram-links",
+      "fieldPath": "telegramUserId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "telegram-links",
+      "fieldPath": "usedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "time_entries",
+      "fieldPath": "eventLog",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "time_entries",
+      "fieldPath": "modifications",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "time_entries",
+      "fieldPath": "originalData",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "dismissedAnnouncements",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "sessions",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "telegram",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "telegramLinkCreatedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "telegramLinkTokenHash",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "versions",
+      "fieldPath": "text",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "versions",
+      "fieldPath": "textHtml",
+      "indexes": []
+    }
   ]
 }

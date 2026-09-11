@@ -392,5 +392,37 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 26. GoLogin: one operator's link to their own GoLogin account.
+    //
+    // Holds `tokenCipher` — their personal GoLogin API key under AES-256-GCM.
+    // Encrypted or not, this is a credential, and it is the reason the token
+    // does NOT live on `users/{uid}`: that document is streamed to the renderer
+    // by `useUserData`'s onSnapshot, so a field there is a field the client has.
+    // Admin SDK only, both directions. The non-secret half (`gologinEmail`,
+    // `gologinLinkedAt`) is mirrored onto the user doc for the onboarding gate.
+    match /gologin-accounts/{uid} {
+      allow read, write: if false;
+    }
+
+    // 27. GoLogin session locks: doc id = a GoLogin profile id, body = who has
+    // that profile open right now.
+    //
+    // READABLE by any signed-in user, and deliberately so — this is what lets a
+    // profile row say "In use · Kai" the instant someone else launches it,
+    // without polling GoLogin (a 429 there revokes the API token permanently).
+    // The payload is a profile id and a colleague's display name: internal, not
+    // secret, and useless without the `apps-gologin` permission that gates every
+    // route which can act on it.
+    //
+    // NOT writable. The lock is the only thing standing between two operators
+    // and one account open on two machines, so claiming, heart-beating and
+    // releasing all go through transactions in the Admin SDK. A client-writable
+    // lock could be deleted out from under its holder — i.e. it would not be a
+    // lock. `secretHash` is a SHA-256 of the lease and yields nothing usable.
+    match /gologin-sessions/{profileId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
   }
 }

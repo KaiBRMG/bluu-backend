@@ -62,12 +62,13 @@ ONLYFANSAPI_WEBHOOK_SECRET # path secret + HMAC key for /api/onlyfans/webhook/[s
 ONLYFANS_ACCOUNT_ID        # optional; pins the operated account (required once a 2nd is linked)
 TELEGRAM_BOT_TOKEN         # the bot: employee alerts, the creator Mini App — see telegram.md
 TELEGRAM_WEBHOOK_SECRET    # authenticates every /api/telegram/webhook delivery; unset = refuse all
-GL_API_TOKEN               # GoLogin bearer token — see gologin.md (a 429 revokes it permanently)
+GL_API_TOKEN               # GoLogin MASTER workspace token — folder/share admin only, never leaves the server
+GL_TOKEN_ENC_KEY           # 32 bytes base64 — encrypts operators' personal GoLogin keys (see gologin.md)
 ```
 
 - `NEXT_PUBLIC_*` are client-exposed by Next convention. Everything else is **server-only**.
 - The `TELEGRAM_*` pair is read **only** by `src/lib/services/telegramService.ts` and `telegramLinkService.ts` (server). Never import either from a client component — `src/lib/telegramConfig.ts` holds the public names a component may need. `TG_BOT_TEST_ID` was retired when real account linking landed; see [telegram.md](telegram.md).
-- `GL_API_TOKEN` is read **only** under `src/lib/gologin/` (server) — `types.ts` there is the client-safe half. It is also the one secret that **deliberately leaves the server**: `/api/gologin/launch-token` hands it to the Electron main process (never a renderer, never disk) so the SDK can launch a profile locally. See [gologin.md](gologin.md#the-token-has-to-reach-the-desktop-and-that-is-the-trade).
+- `GL_API_TOKEN` and `GL_TOKEN_ENC_KEY` are read **only** under `src/lib/gologin/` and `src/lib/services/gologin*` (server) — `src/lib/gologin/types.ts` is the client-safe half. The master token **never leaves the server**; what `/api/gologin/launch-token` hands to the Electron main process is the *calling operator's own* GoLogin key, decrypted per launch and never written to disk or sent to a renderer. See [gologin.md](gologin.md#the-token-still-has-to-reach-the-desktop--but-it-is-a-much-smaller-token-now).
 - The `ONLYFANS*` keys are read **only** under `src/lib/onlyfans/` (server). Importing that folder from a client component would leak the key into the bundle — see [onlyfans-crm.md](onlyfans-crm.md).
 - Resources are served from the Firestore `app-resources` collection (no external integration) — see [resources.md](resources.md).
 

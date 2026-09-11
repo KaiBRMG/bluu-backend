@@ -1711,6 +1711,10 @@ async function openSatelliteWindow(options = {}) {
     satelliteKey: key,
   });
 
+  // A GoLogin window must not be closed while a profile is still committing its
+  // session back to the provider — see guardGoLoginWindowClose.
+  if (key === 'gologin') guardGoLoginWindowClose(win);
+
   win.loadURL(`${BASE_URL}${target.relative}`);
   return { success: true, key };
 }
@@ -1744,22 +1748,55 @@ ipcMain.handle('window:list-satellites', () => (
 //   • **Only main can do this.** It is the sole Node context on the user's
 //     machine; nothing on Vercel can launch a browser on someone's desk.
 //   • **The API token lives here and only here.** It is fetched per launch from
-//     /api/gologin/launch-token (which enforces the page permission server-side),
-//     held in memory for the life of the session, never written to disk and never
-//     handed back to a renderer. See that route's header for the full trade.
+//     /api/gologin/launch-token, which hands over **the calling user's own**
+//     GoLogin key — never the shared workspace one, which no longer leaves the
+//     server. It is held in memory for the life of the session, never written to
+//     disk and never handed back to a renderer.
+//   • **A profile may only be open in one place at a time.** GoLogin enforces
+//     nothing of the sort, so the lock is ours and it is server-side (two
+//     operators are on two machines; no client can see another's sessions). Main
+//     claims it before spawning, heartbeats while running, and releases it in the
+//     same teardown that closes the browser.
 //
 // The SDK is **ESM-only**, so it is loaded with a dynamic `import()` — and lazily,
 // because it drags in puppeteer-core and a native sqlite3 binding that must not
 // cost anything at app start for the users who never open GoLogin.
 const GOLOGIN_MAX_SESSIONS = 5;          // ~300–500MB of RAM each, per GoLogin's own docs
-const GOLOGIN_LAUNCH_TIMEOUT_MS = 300000; // first launch downloads Orbita (hundreds of MB)
+const GOLOGIN_LAUNCH_TIMEOUT_MS = 900000; // an Orbita download is hundreds of MB on a slow line
 
-/** profileId -> { status, gl, wsUrl, error, startedAtMs, uid } */
+/** Must match HEARTBEAT_INTERVAL_MS in lib/services/gologinLockService.ts. */
+const GOLOGIN_HEARTBEAT_MS = 60_000;
+
+/** profileId -> { status, gl, wsUrl, error, startedAtMs, lease, heartbeat, holder } */
 const gologinSessions = new Map();
+
+/** Fallback device identity when the renderer has no localStorage. See the launch handler. */
+let mainProcessDeviceId = null;
 
 /** Renderer-supplied, so validated as untrusted input before it reaches the SDK. */
 function isValidProfileId(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{6,64}$/.test(value);
+}
+
+/**
+ * Did this launch fail because the profile's proxy did not work?
+ *
+ * The SDK checks the proxy before it spawns anything — `getTimeZone` fetches a
+ * timezone *through* the proxy and throws on failure — so this is much the most
+ * common launch failure, and it is the one with a remedy the operator can act
+ * on. Left as a generic "GoLogin could not start this profile" it sends them to
+ * an admin for something they can see and fix in GoLogin themselves.
+ *
+ * Matched on the message because that is all the SDK gives us: it throws a bare
+ * `Error('Proxy Error')` (or `'Proxy Error (Gologin)'`), and for non-SOCKS
+ * proxies it rethrows the underlying request error with `(Gologin)` appended.
+ * `waitDebuggingUrl` separately produces "Check proxy settings". The word
+ * "proxy" appears in an SDK error only when the proxy is the cause, and the
+ * worst a false positive can do is label a failure slightly wrong — it is a
+ * failure either way.
+ */
+function isProxyFailure(err) {
+  return /proxy/i.test(String(err?.message ?? ''));
 }
 
 /**
@@ -1774,7 +1811,9 @@ function gologinSnapshot(profileId) {
     status: session.status,
     error: session.error ?? null,
     startedAtMs: session.startedAtMs ?? null,
-    // Present only so the console can say "automation endpoint ready"; it is a
+    // Who blocked the launch, when the server refused the lock. Display only.
+    holder: session.holder ?? null,
+    // Present only so a console could say "automation endpoint ready"; it is a
     // localhost CDP socket, not a credential.
     wsUrl: session.wsUrl ?? null,
   };
@@ -1805,6 +1844,9 @@ async function fetchGoLoginToken(idToken) {
   });
   if (!response.ok) {
     const error = response.status === 403 ? 'forbidden'
+      // 428 is "you have not linked a GoLogin account yet", which the window
+      // answers with onboarding rather than an error badge.
+      : response.status === 428 ? 'not-linked'
       : response.status === 503 ? 'not-configured'
       : 'unauthenticated';
     throw Object.assign(new Error(`launch-token ${response.status}`), { code: error });
@@ -1814,16 +1856,382 @@ async function fetchGoLoginToken(idToken) {
   return body.token;
 }
 
+// ─── The session lock ────────────────────────────────────────────────
+// GoLogin has no concurrency control of its own, so a profile open on two
+// machines at once is entirely possible — and it is the precise failure an
+// anti-detect profile exists to prevent. The lock is server-side because the two
+// operators are on two different machines; see lib/services/gologinLockService.ts.
+//
+// A claim returns a **lease secret**, and that — not a Firebase ID token — is
+// what authenticates the heartbeat and the release. A browser session routinely
+// outlives the hour an ID token lasts, and main holds no refresh token, so an
+// authenticated heartbeat would start failing mid-session and hand a live
+// profile to the next person who asked for it.
+
+/** Claim a profile. Resolves `{ ok, secret }` or `{ ok: false, holder }`. */
+async function claimGoLoginLock(idToken, profileId, deviceId) {
+  const response = await fetch(`${BASE_URL}/api/gologin/session-lock`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'claim', profileId, deviceId }),
+  });
+  if (!response.ok) {
+    throw Object.assign(new Error(`session-lock ${response.status}`), {
+      code: response.status === 403 ? 'forbidden' : 'lock-failed',
+    });
+  }
+  return response.json();
+}
+
+/**
+ * Heartbeat / release. Never throws — a lock action failing must not take a
+ * running browser down with it, and the claim expires on its own if we really
+ * have gone away.
+ */
+async function leaseGoLoginLock(action, profileId, secret) {
+  try {
+    const response = await fetch(`${BASE_URL}/api/gologin/session-lock/lease`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, profileId, secret }),
+    });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (err) {
+    console.warn('[main] gologin lease', action, 'failed:', err?.message ?? err);
+    return null;
+  }
+}
+
+/**
+ * Keep the claim alive for as long as the browser is up.
+ *
+ * If the server says the lease is no longer held, the claim expired (this
+ * machine was offline or asleep past the stale window) and someone else may
+ * legitimately have the profile now — so the browser is torn down rather than
+ * left running against a profile we no longer own.
+ */
+function startGoLoginHeartbeat(profileId) {
+  const session = gologinSessions.get(profileId);
+  if (!session?.lease) return;
+  const timer = setInterval(async () => {
+    const current = gologinSessions.get(profileId);
+    if (!current?.lease) return;
+    const result = await leaseGoLoginLock('heartbeat', profileId, current.lease);
+    if (result && result.held === false) {
+      console.warn('[main] gologin: lost the session lock for', profileId, '— stopping');
+      void finalizeGoLoginSession(profileId, 'lock-lost');
+    }
+  }, GOLOGIN_HEARTBEAT_MS);
+  // The interval must never hold the app open at quit time.
+  if (typeof timer.unref === 'function') timer.unref();
+  session.heartbeat = timer;
+}
+
+// ─── Orbita: download and update, with progress ──────────────────────
+// Orbita is a full Chromium build (hundreds of MB) fetched from GoLogin's CDN.
+// Two things make it worth instrumenting rather than leaving to the SDK:
+//
+//   • The SDK reports progress by drawing a **CLI progress bar to stdout**. In a
+//     packaged Electron app that goes nowhere, so a first launch looks like a
+//     hang for several minutes.
+//   • The required version comes from **the profile's own user agent**
+//     (`resolveProfileBrowserVersion`), not from a global "latest". So a
+//     download can start in the middle of an ordinary launch, whenever a profile
+//     needs a major version this machine does not have yet — which is exactly
+//     when the window has to block and say so.
+//
+// Only `downloadBrowserArchive` is replaced. Extraction, the hash check and the
+// install are the SDK's own and stay that way; re-implementing them is how a
+// half-written browser directory happens.
+
+const GOLOGIN_ORBITA_PROGRESS_MS = 250;
+
+/** The one place the renderer learns what Orbita is doing. */
+const orbitaState = {
+  /** 'idle' | 'checking' | 'downloading' | 'installing' | 'ready' | 'failed' */
+  phase: 'idle',
+  version: null,
+  receivedBytes: 0,
+  totalBytes: 0,
+  error: null,
+};
+
+let orbitaLastBroadcastMs = 0;
+
+function broadcastOrbita(force = false) {
+  const now = Date.now();
+  // Byte-level progress is throttled; a phase change is not.
+  if (!force && now - orbitaLastBroadcastMs < GOLOGIN_ORBITA_PROGRESS_MS) return;
+  orbitaLastBroadcastMs = now;
+  const payload = { ...orbitaState };
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('gologin:orbita-changed', payload);
+  }
+}
+
+function setOrbitaPhase(phase, patch = {}) {
+  Object.assign(orbitaState, { phase, error: null, ...patch });
+  broadcastOrbita(true);
+}
+
+/** Orbita major versions already installed on this machine. */
+async function installedOrbitaVersions() {
+  const dir = path.join(require('os').homedir(), '.gologin', 'browser');
+  try {
+    const entries = await fsp.readdir(dir);
+    return entries
+      .map((name) => /^orbita-browser-(\d+)$/.exec(name))
+      .filter(Boolean)
+      .map((m) => Number(m[1]))
+      .sort((a, b) => b - a);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The SDK's `downloadBrowserArchive`, with byte progress and without the CLI bar.
+ * Writes to the same path the SDK's own extraction step reads from.
+ */
+function downloadOrbitaArchive(link, destination) {
+  const { get } = require('https');
+  const { createWriteStream } = require('fs');
+
+  return new Promise((resolve, reject) => {
+    const file = createWriteStream(destination);
+    let settled = false;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      file.destroy();
+      fsp.unlink(destination).catch(() => {});
+      reject(err);
+    };
+
+    file.on('error', fail);
+    file.on('finish', () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    });
+
+    const request = get(link, { timeout: 30_000 }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        fail(new Error(`Orbita download failed with ${res.statusCode}`));
+        return;
+      }
+      const total = Number.parseInt(res.headers['content-length'], 10);
+      orbitaState.totalBytes = Number.isFinite(total) ? total : 0;
+      orbitaState.receivedBytes = 0;
+      setOrbitaPhase('downloading');
+
+      res.on('data', (chunk) => {
+        orbitaState.receivedBytes += chunk.length;
+        broadcastOrbita();
+      });
+      res.on('error', fail);
+      res.pipe(file);
+    });
+
+    request.on('timeout', () => request.destroy(new Error('Orbita download timed out')));
+    request.on('error', fail);
+  });
+}
+
+/**
+ * Point a `BrowserChecker` at our download instead of the SDK's.
+ *
+ * Idempotent — the SDK memoises one checker per `GoLogin` instance, but a marker
+ * keeps this safe if that ever changes. When no download is needed, nothing here
+ * runs and no progress is reported, which is what lets the renderer treat "any
+ * progress at all" as "block the window".
+ */
+function instrumentOrbitaChecker(checker) {
+  if (!checker || checker.__bluuInstrumented) return checker;
+  checker.__bluuInstrumented = true;
+
+  checker.downloadBrowserArchive = (link, destination) =>
+    downloadOrbitaArchive(link, destination);
+
+  const extract = checker.extractBrowser?.bind(checker);
+  if (extract) {
+    checker.extractBrowser = async () => {
+      // Unpacking a few hundred MB is not instant, and a progress bar frozen at
+      // 100% reads as a hang. It gets its own phase instead.
+      setOrbitaPhase('installing');
+      return extract();
+    };
+  }
+  return checker;
+}
+
+/**
+ * Make sure a given Orbita major version is on this machine, reporting progress.
+ * `version` omitted means "whatever GoLogin currently calls latest" — the
+ * onboarding case, where there is no profile to take a version from yet.
+ */
+async function ensureOrbita(version) {
+  if (orbitaState.phase === 'downloading' || orbitaState.phase === 'installing') {
+    return { success: true, alreadyRunning: true };
+  }
+  setOrbitaPhase('checking', { version: version ?? null, receivedBytes: 0, totalBytes: 0 });
+
+  try {
+    const { GoLogin } = await import('gologin');
+    // No token needed: the download path talks to the CDN, not the API. A
+    // placeholder keeps the constructor happy during onboarding, when the
+    // operator has not pasted a key yet.
+    const gl = new GoLogin({ token: 'orbita-download' });
+    const checker = instrumentOrbitaChecker(await gl.getBrowserChecker());
+
+    const major = version ?? (await gl.getLatestBrowserVersion());
+    orbitaState.version = major;
+
+    const installed = await installedOrbitaVersions();
+    if (installed.includes(Number(major))) {
+      setOrbitaPhase('ready', { version: major });
+      return { success: true, version: major, alreadyInstalled: true };
+    }
+
+    // `autoUpdateBrowser: false` — the folder check inside `checkBrowser` is what
+    // makes this a no-op when the version is already present. Passing true would
+    // re-download every time.
+    await checker.checkBrowser({ autoUpdateBrowser: false, majorVersion: String(major) });
+    setOrbitaPhase('ready', { version: major });
+    return { success: true, version: major };
+  } catch (err) {
+    console.error('[main] gologin: Orbita download failed:', err);
+    setOrbitaPhase('failed', { error: err?.message ?? 'download-failed' });
+    return { success: false, error: 'download-failed' };
+  }
+}
+
+ipcMain.handle('gologin:orbita-status', async () => ({
+  ...orbitaState,
+  installedVersions: await installedOrbitaVersions(),
+}));
+
+ipcMain.handle('gologin:ensure-orbita', async (_event, version) => {
+  const major = Number.isFinite(Number(version)) && Number(version) > 0 ? Number(version) : undefined;
+  return ensureOrbita(major);
+});
+
+/**
+ * How long a teardown may take before we stop waiting on it. `stopAndCommit`
+ * uploads the profile to GoLogin, so it is a network call — bounded so a row
+ * can never be stuck on "Stopping" because the provider is slow.
+ */
+const GOLOGIN_TEARDOWN_TIMEOUT_MS = 30000;
+/** Grace period between asking Orbita to close and forcing it. */
+const GOLOGIN_KILL_GRACE_MS = 5000;
+
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * **`gl.stop()` does not close the browser.** It is `stopAndCommit`: sanitize
+ * the profile, upload it, wait 3s, delete the local profile files — all while
+ * Orbita is still running on those very files. Killing the process is a
+ * *separate* method the SDK never calls for you.
+ *
+ * So teardown here is explicitly two steps in this order: end the process, then
+ * commit. `killBrowser()` (SIGTERM via the stored child handle) is used rather
+ * than the SDK's `stopBrowser()`, which shells out to `fuser` — absent on both
+ * Windows and macOS. SIGTERM also lets Chromium flush its profile before it
+ * goes, which is what makes the commit that follows worth anything.
+ */
+async function closeOrbita(gl) {
+  const child = gl?.processSpawned;
+  if (!child?.pid) return;
+  if (child.exitCode !== null || child.signalCode !== null) return;
+
+  const exited = new Promise(resolve => child.once('exit', resolve));
+  try { gl.killBrowser(); } catch (err) { console.error('[main] gologin killBrowser failed:', err); }
+
+  const closed = await Promise.race([exited.then(() => true), wait(GOLOGIN_KILL_GRACE_MS).then(() => false)]);
+  if (closed) return;
+
+  // Chromium spawns a tree of renderer processes; on Windows killing the parent
+  // alone can leave them (and the profile lock) behind, so force the tree.
+  console.warn('[main] gologin: Orbita did not exit on SIGTERM, forcing');
+  if (process.platform === 'win32') {
+    try { execFile('taskkill', ['/pid', String(child.pid), '/T', '/F']); } catch { /* already gone */ }
+  } else {
+    try { process.kill(child.pid, 'SIGKILL'); } catch { /* already gone */ }
+  }
+  await Promise.race([exited, wait(3000)]);
+}
+
+/**
+ * The single teardown path, whichever way a session ends: the operator pressing
+ * Stop, or **the operator simply closing the Orbita window**. The second was
+ * previously invisible to us — nothing watched the process, so the row said
+ * "Open here" forever and the profile was never committed back to GoLogin.
+ *
+ * Re-entrant by design: the exit watcher and an explicit Stop routinely race.
+ */
+async function finalizeGoLoginSession(profileId, reason) {
+  const session = gologinSessions.get(profileId);
+  if (!session || session.finalizing) return;
+  session.finalizing = true;
+  setGoLoginStatus(profileId, { status: 'stopping' });
+
+  // Stop heart-beating before anything slow, so a teardown that takes 30s does
+  // not keep re-claiming a profile it is in the middle of giving up.
+  if (session.heartbeat) clearInterval(session.heartbeat);
+
+  try {
+    // On a user Stop the browser is still up; on 'browser-closed' this is a no-op.
+    await closeOrbita(session.gl);
+    if (session.gl) {
+      // Commit only after the process is gone — the SDK's own order deletes the
+      // profile directory out from under a live browser.
+      await Promise.race([session.gl.stop(), wait(GOLOGIN_TEARDOWN_TIMEOUT_MS)]);
+    }
+  } catch (err) {
+    console.error('[main] gologin teardown failed:', profileId, reason, err);
+  }
+
+  // Released last, and unconditionally: the profile is only free once the
+  // browser is really gone AND its state is committed. Releasing earlier would
+  // let a colleague launch into a profile still being uploaded. If this fails
+  // the claim expires on its own within the stale window.
+  if (session.lease) await leaseGoLoginLock('release', profileId, session.lease);
+
+  gologinSessions.delete(profileId);
+  broadcastGoLoginSession(profileId);
+
+  // A window waiting on "close after completion" may now be free to go.
+  resolveGoLoginPendingClose();
+}
+
+/**
+ * The missing signal. `spawnBrowser` stores the child on `gl.processSpawned`,
+ * so its `exit` is the one authoritative "this profile is no longer open" —
+ * covering a manual window close, a crash, and the OS killing it alike.
+ */
+function watchOrbitaExit(profileId, gl) {
+  const child = gl?.processSpawned;
+  if (!child?.once) {
+    console.warn('[main] gologin: no process handle to watch for', profileId);
+    return;
+  }
+  child.once('exit', () => {
+    console.log('[main] gologin: Orbita exited for', profileId);
+    void finalizeGoLoginSession(profileId, 'browser-closed');
+  });
+}
+
 ipcMain.handle('gologin:launch', async (_event, args = {}) => {
-  const { idToken, profileId } = args;
+  const { idToken, profileId, deviceId } = args;
   if (!isValidProfileId(profileId)) return { success: false, error: 'invalid-profile' };
   if (!idToken || typeof idToken !== 'string') return { success: false, error: 'unauthenticated' };
 
   const existing = gologinSessions.get(profileId);
   if (existing && (existing.status === 'starting' || existing.status === 'running')) {
-    // Idempotent: a second Launch (or a reopened console window) adopts the
-    // session that is already up rather than spawning a second Orbita on the
-    // same profile, which GoLogin treats as a conflict.
+    // Idempotent: a second Launch (or a reopened window) adopts the session that
+    // is already up rather than spawning a second Orbita on the same profile.
     return { success: true, session: gologinSnapshot(profileId) };
   }
 
@@ -1832,10 +2240,33 @@ ipcMain.handle('gologin:launch', async (_event, args = {}) => {
   ).length;
   if (live >= GOLOGIN_MAX_SESSIONS) return { success: false, error: 'too-many-sessions' };
 
-  setGoLoginStatus(profileId, { status: 'starting', error: null, wsUrl: null, startedAtMs: Date.now() });
+  // A renderer that cannot mint a device id (blocked storage) still has to be
+  // able to launch, so main falls back to an id of its own. It is stable for the
+  // life of the process, which is all the lock needs — a restart stops the
+  // heartbeat, and the claim then expires on its own.
+  const device = /^[A-Za-z0-9_:.-]{6,128}$/.test(String(deviceId ?? ''))
+    ? String(deviceId)
+    : (mainProcessDeviceId ??= `main-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+
+  setGoLoginStatus(profileId, {
+    status: 'starting', error: null, wsUrl: null, holder: null, startedAtMs: Date.now(),
+  });
 
   let gl;
+  let lease = null;
   try {
+    // 1. The lock first, before anything is spawned or downloaded. Losing the
+    //    race here has to cost nothing but a message.
+    const claim = await claimGoLoginLock(idToken, profileId, device);
+    if (!claim?.ok) {
+      const holder = claim?.holder ?? null;
+      setGoLoginStatus(profileId, { status: 'failed', error: 'in-use', holder, gl: null });
+      return { success: false, error: 'in-use', holder, session: gologinSnapshot(profileId) };
+    }
+    lease = claim.secret ?? null;
+    gologinSessions.set(profileId, { ...gologinSessions.get(profileId), lease });
+
+    // 2. This user's own GoLogin token — never the shared workspace key.
     const token = await fetchGoLoginToken(idToken);
     const { GoLogin } = await import('gologin');
     gl = new GoLogin({
@@ -1846,6 +2277,13 @@ ipcMain.handle('gologin:launch', async (_event, args = {}) => {
       // asked for. Flip it only deliberately.
       uploadCookiesToServer: false,
     });
+
+    // 3. Instrument the browser checker BEFORE start(). The required Orbita
+    //    version comes from the profile's own user agent, so `start()` may
+    //    download one mid-launch — and that is precisely when the window has to
+    //    block on a progress bar rather than look frozen.
+    instrumentOrbitaChecker(await gl.getBrowserChecker());
+
     gologinSessions.set(profileId, { ...gologinSessions.get(profileId), gl });
 
     const started = await Promise.race([
@@ -1856,19 +2294,40 @@ ipcMain.handle('gologin:launch', async (_event, args = {}) => {
       )),
     ]);
 
+    // A download that finished as part of this launch leaves the gate showing
+    // "installing" forever otherwise.
+    if (orbitaState.phase === 'downloading' || orbitaState.phase === 'installing') {
+      setOrbitaPhase('ready');
+    }
+
+    // Attach BEFORE reporting running: a browser that dies immediately must
+    // still flip the row back, not leave it claiming to be open.
+    watchOrbitaExit(profileId, gl);
     setGoLoginStatus(profileId, { status: 'running', wsUrl: started?.wsUrl ?? null, error: null });
+    startGoLoginHeartbeat(profileId);
     return { success: true, session: gologinSnapshot(profileId) };
   } catch (err) {
     console.error('[main] gologin launch failed:', err);
     // The SDK may have got far enough to spawn something before throwing, so the
     // failure path still tries to tear down rather than leaving a stray Orbita.
-    if (gl) { try { await gl.stop(); } catch { /* nothing to clean up */ } }
+    if (gl) { try { await closeOrbita(gl); await gl.stop(); } catch { /* nothing to clean up */ } }
+    // Give the lock back on every failure — a profile must not stay claimed by a
+    // launch that never happened.
+    if (lease) await leaseGoLoginLock('release', profileId, lease);
+    if (orbitaState.phase === 'downloading' || orbitaState.phase === 'installing') {
+      setOrbitaPhase('failed', { error: 'The browser download did not finish.' });
+    }
     const code = err?.code === 'forbidden' ? 'forbidden'
       : err?.code === 'not-configured' ? 'not-configured'
+      : err?.code === 'not-linked' ? 'not-linked'
       : err?.code === 'timeout' ? 'timeout'
       : err?.code === 'unauthenticated' ? 'unauthenticated'
+      : err?.code === 'lock-failed' ? 'lock-failed'
+      // Checked last among the SDK failures, so an explicit code always wins —
+      // a timeout that happens to mention a proxy is still a timeout.
+      : isProxyFailure(err) ? 'proxy-error'
       : 'launch-failed';
-    setGoLoginStatus(profileId, { status: 'failed', error: code, gl: null, wsUrl: null });
+    setGoLoginStatus(profileId, { status: 'failed', error: code, gl: null, lease: null, wsUrl: null });
     return { success: false, error: code, session: gologinSnapshot(profileId) };
   }
 });
@@ -1877,25 +2336,130 @@ ipcMain.handle('gologin:stop', async (_event, profileId) => {
   if (!isValidProfileId(profileId)) return { success: false, error: 'invalid-profile' };
   const session = gologinSessions.get(profileId);
   if (!session?.gl) {
+    // No browser, but a claim may still exist from a launch that failed after
+    // taking the lock. Hand it back rather than waiting out the stale window.
+    if (session?.heartbeat) clearInterval(session.heartbeat);
+    if (session?.lease) await leaseGoLoginLock('release', profileId, session.lease);
     gologinSessions.delete(profileId);
     broadcastGoLoginSession(profileId);
     return { success: true };
   }
 
-  setGoLoginStatus(profileId, { status: 'stopping' });
-  try {
-    // `stop()` syncs the profile back to GoLogin before closing — that sync is
-    // the point of stopping properly rather than killing the process.
-    await session.gl.stop();
-    gologinSessions.delete(profileId);
-    broadcastGoLoginSession(profileId);
-    return { success: true };
-  } catch (err) {
-    console.error('[main] gologin stop failed:', err);
-    setGoLoginStatus(profileId, { status: 'failed', error: 'stop-failed' });
-    return { success: false, error: 'stop-failed' };
-  }
+  // One teardown path for every ending — see finalizeGoLoginSession. It closes
+  // the browser first and only then commits, and it is bounded, so Stop always
+  // resolves and the row always leaves "Stopping".
+  await finalizeGoLoginSession(profileId, 'user-stop');
+  return { success: true };
 });
+
+// ─── Guarding the window while a profile is still saving ─────────────
+// `gl.stop()` uploads the profile's cookies and local state back to GoLogin.
+// Interrupt it and the operator's session work is gone — they log into an
+// account, close the browser, and are logged out again next time. The teardown
+// is bounded at 30s but routinely takes several seconds, and during that window
+// the row says "Stopping" and nothing else stops the user walking away.
+//
+// Closing the window does **not** by itself abort a teardown: sessions live in
+// this process, not the renderer, so the commit finishes regardless. The guard
+// exists because closing the window removes the only surface reporting the save,
+// and the natural next step — quitting the app — *is* destructive (quit waits
+// 12s and then gives up).
+
+/** Windows told to close as soon as the last session finishes. */
+const gologinPendingClose = new WeakSet();
+/** Windows the operator has explicitly chosen to close anyway. */
+const gologinForceClose = new WeakSet();
+
+/**
+ * Sessions that make closing the window a bad idea, and why.
+ *
+ * Two distinct situations, both worth stopping for and each with its own remedy:
+ *
+ *   • **`stopping`** — mid-upload. Interrupting loses the operator's session.
+ *   • **`starting` / `running`** — an Orbita browser is open. Closing the window
+ *     does not close it, so the operator ends up with a browser nothing in Bluu
+ *     is showing them, and the profile stays locked to their machine until they
+ *     quit the app or find the window again.
+ */
+function gologinBusyProfiles() {
+  return [...gologinSessions.entries()]
+    .filter(([, s]) => s.status === 'starting' || s.status === 'running' || s.status === 'stopping')
+    .map(([profileId, s]) => ({ profileId, status: s.status }));
+}
+
+/**
+ * Close the window once nothing is busy, if it asked to be closed.
+ * Called from every teardown completion.
+ */
+function resolveGoLoginPendingClose() {
+  // Checks *busy*, not just saving: after "Save & quit" a session is briefly
+  // still `running` before its teardown flips it to `stopping`, and closing in
+  // that gap would be exactly the early exit this whole guard exists to prevent.
+  if (gologinBusyProfiles().length) return;
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed() || !gologinPendingClose.has(win)) continue;
+    gologinPendingClose.delete(win);
+    gologinForceClose.add(win);
+    win.close();
+  }
+}
+
+function guardGoLoginWindowClose(win) {
+  win.on('close', (event) => {
+    if (gologinForceClose.has(win)) return;
+    const busy = gologinBusyProfiles();
+    if (!busy.length) return;
+
+    // Held open and handed to the renderer, which owns the dialog — main has no
+    // business drawing UI, and a native dialog here would look nothing like the
+    // window it is interrupting.
+    event.preventDefault();
+    win.webContents.send('gologin:close-blocked', { profiles: busy });
+  });
+}
+
+/** The renderer's answer to that dialog. */
+ipcMain.handle('gologin:close-decision', (event, decision) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed()) return { success: false };
+
+  if (decision === 'cancel') {
+    gologinPendingClose.delete(win);
+    return { success: true };
+  }
+  if (decision === 'force') {
+    gologinPendingClose.delete(win);
+    gologinForceClose.add(win);
+    win.close();
+    return { success: true };
+  }
+  if (decision === 'after-completion') {
+    gologinPendingClose.add(win);
+    // The last save may have landed between the click and this call.
+    resolveGoLoginPendingClose();
+    return { success: true };
+  }
+  if (decision === 'stop-and-close') {
+    // "Save & quit": close every open browser, commit each profile, then let
+    // `resolveGoLoginPendingClose` shut the window when the last one lands.
+    //
+    // Not awaited. Each teardown takes seconds and the renderer needs its
+    // `stopping` broadcasts *now* to show the operator what is happening — an
+    // awaited call would leave the dialog inert for the whole shutdown and the
+    // IPC channel blocked behind it.
+    gologinPendingClose.add(win);
+    for (const { profileId } of gologinBusyProfiles()) {
+      void finalizeGoLoginSession(profileId, 'window-close');
+    }
+    // Covers the case where nothing needed stopping after all.
+    resolveGoLoginPendingClose();
+    return { success: true };
+  }
+  return { success: false };
+});
+
+/** What is still open or saving, for a window that has just mounted. */
+ipcMain.handle('gologin:busy-profiles', () => ({ profiles: gologinBusyProfiles() }));
 
 ipcMain.handle('gologin:get-session', (_event, profileId) => (
   isValidProfileId(profileId) ? gologinSnapshot(profileId) : { profileId: null, status: 'idle' }
@@ -1907,15 +2471,16 @@ ipcMain.handle('gologin:list-sessions', () => (
 
 /**
  * Quitting with profiles running would orphan Orbita processes **and** skip the
- * profile sync `stop()` performs, which is how a profile's session data is lost.
- * Best-effort and bounded — a quit must not hang on a provider round trip.
+ * profile commit, which is how a profile's session data is lost. Runs the same
+ * two-step teardown as Stop; best-effort and bounded, so a quit is delayed a
+ * few seconds and never hung.
  */
 async function stopAllGoLoginSessions() {
   const running = [...gologinSessions.entries()].filter(([, s]) => s.gl);
   if (!running.length) return;
   await Promise.race([
-    Promise.allSettled(running.map(([, s]) => s.gl.stop())),
-    new Promise(resolve => setTimeout(resolve, 8000)),
+    Promise.allSettled(running.map(([id]) => finalizeGoLoginSession(id, 'quit'))),
+    wait(12000),
   ]);
   gologinSessions.clear();
 }

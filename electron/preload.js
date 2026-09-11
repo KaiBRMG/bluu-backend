@@ -86,7 +86,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // and /gologin/session/<id> is its console. The API token never crosses this
   // bridge: main fetches it per launch and keeps it in its own memory.
   gologin: {
-    launch: (idToken, profileId) => ipcRenderer.invoke('gologin:launch', { idToken, profileId }),
+    launch: (idToken, profileId, deviceId) =>
+      ipcRenderer.invoke('gologin:launch', { idToken, profileId, deviceId }),
     stop: (profileId) => ipcRenderer.invoke('gologin:stop', profileId),
     getSession: (profileId) => ipcRenderer.invoke('gologin:get-session', profileId),
     listSessions: () => ipcRenderer.invoke('gologin:list-sessions'),
@@ -94,6 +95,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('gologin:session-changed', (_event, session) => callback(session)),
     removeSessionChangedListeners: () =>
       ipcRenderer.removeAllListeners('gologin:session-changed'),
+
+    // Closing the window is guarded while any profile is open or still saving:
+    // `gl.stop()` uploads the session's cookies and local state, and an open
+    // Orbita outlives the window that was showing it. Main holds the window open
+    // and asks the renderer what to do. See guardGoLoginWindowClose in main.js.
+    busyProfiles: () => ipcRenderer.invoke('gologin:busy-profiles'),
+    closeDecision: (decision) => ipcRenderer.invoke('gologin:close-decision', decision),
+    onCloseBlocked: (callback) =>
+      ipcRenderer.on('gologin:close-blocked', (_event, payload) => callback(payload)),
+    removeCloseBlockedListeners: () =>
+      ipcRenderer.removeAllListeners('gologin:close-blocked'),
+
+    // Orbita, the Chromium build GoLogin profiles actually run in. It is a
+    // hundreds-of-megabytes download that can also start *during* a launch,
+    // because the version a profile needs comes from its own user agent — so the
+    // window watches this to know when to block on a progress bar.
+    orbitaStatus: () => ipcRenderer.invoke('gologin:orbita-status'),
+    ensureOrbita: (version) => ipcRenderer.invoke('gologin:ensure-orbita', version),
+    onOrbitaChanged: (callback) =>
+      ipcRenderer.on('gologin:orbita-changed', (_event, state) => callback(state)),
+    removeOrbitaChangedListeners: () =>
+      ipcRenderer.removeAllListeners('gologin:orbita-changed'),
   },
 
   // Time tracking

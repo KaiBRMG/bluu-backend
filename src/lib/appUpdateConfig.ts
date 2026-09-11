@@ -188,8 +188,8 @@ export const APP_UPDATE: AppUpdateConfig = {
   // set `allUsers: false` and list uids or group slugs instead — see
   // `UpdateCohort`. `allUsers: false` with both lists empty prompts nobody.
 
-  mac: { latestVersion: '0.10.2', compulsory: false, allUsers: true, uids: [], groups: [] },
-  // mac: null,
+  // mac: { latestVersion: '0.12.0', compulsory: false, allUsers: true, uids: [], groups: ['admin'] },
+  mac: null,
 
   win: null,
   // win: { latestVersion: '0.10.1', compulsory: true, allUsers: true, uids: [], groups: [] },
@@ -199,8 +199,8 @@ export const APP_UPDATE: AppUpdateConfig = {
   // The session timer widget. Ships armed alongside the v0.10.1 code: see above,
   // it cannot fire before that build exists, so there is nothing to stage.
   // Set notification contents in `src\lib\notificationContent.ts`
-  releaseNote: { version: '0.10.1', allUsers: true, uids: [], groups: [] },
-  // releaseNote: null,
+  // releaseNote: { version: '0.10.1', allUsers: true, uids: [], groups: [] },
+  releaseNote: null,
 };
 
 /**
