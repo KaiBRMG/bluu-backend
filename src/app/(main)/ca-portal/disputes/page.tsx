@@ -12,8 +12,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { DisputeReviewQueue, type DisputeVerdict } from '@/components/disputes/DisputeReviewQueue';
 import { DisputeLedger } from '@/components/disputes/DisputeLedger';
 import { useDisputesData } from '@/hooks/useDisputesData';
-import { useUserData } from '@/hooks/useUserData';
 import type { DisputeDocument } from '@/types/firestore';
+import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 
 // The create dialog pulls in the calendar and the selects, and is only needed
 // once someone asks for it — so it stays out of the initial bundle. The queue
@@ -168,7 +168,6 @@ function LedgerPanel({
 // ─── Page ─────────────────────────────────────────────────────────────
 
 export default function DisputesPage() {
-  const { userData } = useUserData();
   const { creators, caUsers, createDispute } = useDisputesData();
   const [createOpen, setCreateOpen] = useState(false);
   // Latches on the first open so the dialog's chunk is only fetched when the
@@ -177,8 +176,7 @@ export default function DisputesPage() {
   const [ledgerRefreshKey, setLedgerRefreshKey] = useState(0);
   const [reviewCount, setReviewCount] = useState<number | null>(null);
 
-  const userTimezone =
-    userData?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const { timezone: userTimezone } = useViewerTimezone();
 
   const handleTotalChange = useCallback((total: number) => setReviewCount(total), []);
 

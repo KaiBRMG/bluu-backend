@@ -27,6 +27,7 @@ import {
   useTempAnalyticsScreenshot,
   TEMP_ANALYTICS_HOME_UIDS,
 } from "@/lib/temp-analytics/useTempAnalyticsScreenshot";
+import { safeTimezone } from '@/lib/utils/timezone';
 
 function formatTime(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
@@ -37,7 +38,7 @@ function formatTime(totalSeconds: number): string {
 
 function formatClockTime(tz: string): string {
   return new Intl.DateTimeFormat('en-GB', {
-    timeZone: tz,
+    timeZone: safeTimezone(tz),
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
@@ -46,7 +47,7 @@ function formatClockTime(tz: string): string {
 
 function shortTzLabel(tz: string): string {
   const city = tz.split('/').pop()?.replace(/_/g, ' ') ?? tz;
-  const formatter = new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'shortOffset' });
+  const formatter = new Intl.DateTimeFormat('en-GB', { timeZone: safeTimezone(tz), timeZoneName: 'shortOffset' });
   const gmtPart = formatter.formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value ?? '';
   return `${city} ${gmtPart}`;
 }
@@ -56,7 +57,7 @@ const DEFAULT_ADDITIONAL_TZS = ['Africa/Johannesburg', 'Asia/Manila'];
 function tzOffsetMinutes(tz: string): number {
   const now = new Date();
   const utcMs = now.getTime();
-  const localMs = new Date(now.toLocaleString('en-US', { timeZone: tz })).getTime();
+  const localMs = new Date(now.toLocaleString('en-US', { timeZone: safeTimezone(tz) })).getTime();
   return Math.round((localMs - utcMs) / 60000);
 }
 

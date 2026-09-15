@@ -259,6 +259,13 @@ export interface LeaveRequestDocument {
   requestedAt: Timestamp;
   resolvedAt?: Timestamp | null;
   resolvedBy?: string | null;  // admin UID
+  /**
+   * Why the leave is being taken. Mandatory for paid leave, optional for unpaid.
+   *
+   * Exists so the reason arrives with the request instead of in a separate
+   * 1-on-1 chat message an admin has to go and find before they can decide.
+   */
+  reason?: string | null;
 }
 
 // ─── Group ──────────────────────────────────────────────────────────
@@ -407,6 +414,183 @@ export interface ShiftDocument {
   seriesId: string | null;     // points to root recurring shift (on override docs)
   overrideDate: Timestamp | null; // UTC midnight of the date being overridden
   isDeleted: boolean;          // tombstone for "delete single occurrence"
+
+  /**
+   * Creator accounts the agent works during this shift.
+   *
+   * Absent on every shift created before creator assignment existed, which is
+   * why the salary engine falls back to "distinct creators with a sale that day"
+   * and flags the result as inferred — see `salaryEngine.ts`. On a recurring
+   * root this is the assignment for the whole series; a per-occurrence override
+   * document carries its own list.
+   */
+  creatorIds?: string[];
+
+  /** True for a shift created to cover accounts released by someone else's leave. */
+  isOvertime?: boolean;
+
+  /** The coverage offer this shift was created from, when `isOvertime`. */
+  coverageOfferId?: string | null;
+
+  /**
+   * False for accounts picked up *inside* an existing shift's hours: the agent
+   * keeps the sales but earns no additional hours and the accounts do not raise
+   * the wage tier. Defaults to true when absent.
+   */
+  paysWage?: boolean;
+}
+
+// ─── Chat-agent salary ───────────────────────────────────────────────
+// The money surface for CA Portal. Every figure an agent sees is *derived* on
+// read from these collections plus `shifts` and `time_entries` — nothing here
+// stores a computed salary except `ca-salary-months`, which exists precisely to
+// freeze one. See documentation/ca-salary.md.
+
+/** `ca-sales/{saleId}` — one imported sale row. The id is a content hash; see `salesImport.ts`. */
+export interface CaSaleDocument {
+  saleId: string;
+  /** Resolved at import time from the export's `Email` column. */
+  userId: string;
+  /** `YYYY-MM-DD` in the salary timezone — the bucketing key. */
+  day: string;
+  /** `YYYY-MM`, denormalised so a month reads with one range query. */
+  month: string;
+  occurredAt: Timestamp;
+  employeeName: string;
+  /** The `@bluurock.com` address the third-party tool still uses. Audit only. */
+  sourceEmail: string;
+  creatorName: string;
+  fanName: string;
+  fanId: string;
+  grossRevenue: number;
+  netRevenue: number;
+  /** `grossRevenue`, negated for a reversal. The only column the engine sums. */
+  signedGross: number;
+  type: string;
+  rule: string;
+  assignedBy: string;
+  status: 'complete' | 'reverse';
+  importId: string;
+  createdAt: Timestamp;
+}
+
+/** `ca-sales-imports/{importId}` — the audit record for one upload. */
+export interface CaSalesImportDocument {
+  importId: string;
+  fileName: string;
+  uploadedBy: string;
+  uploadedByName: string;
+  uploadedAt: Timestamp;
+  totalRows: number;
+  imported: number;
+  duplicates: number;
+  skippedRows: number;
+  /** Grouped by reason, so an unmapped address reports once with a count. */
+  skipped: Array<{ reason: string; detail: string; rowCount: number; sampleRows: number[] }>;
+  monthsTouched: string[];
+  perUser: Array<{ userId: string; displayName: string; sourceEmail: string; gross: number; rows: number }>;
+  rejectedFinalizedMonths: string[];
+}
+
+/**
+ * `ca-salary-overrides/{userId}_{day}` — an admin's edits to one day.
+ *
+ * Sparse by design: only the fields actually edited are present, and each keeps
+ * who set it and why. The engine recomputes everything downstream of an
+ * override, so this document is an *instruction*, not a snapshot — it survives
+ * a re-import, a rate change and a corrected shift.
+ */
+export interface CaSalaryOverrideDocument {
+  userId: string;
+  day: string;
+  month: string;
+  fields: Partial<
+    Record<
+      'grossEarnings' | 'hours' | 'accountCount' | 'hourlyRate' | 'commissionPercent' | 'commission' | 'wage' | 'salary',
+      { value: number; setBy: string; setByName?: string; setAt: Timestamp; reason?: string }
+    >
+  >;
+  note?: string | null;
+  updatedAt: Timestamp;
+}
+
+/**
+ * `ca-salary-months/{userId}_{month}` — the payout record.
+ *
+ * Absent while a month is open. Written when an admin finalises: the derived
+ * figures are frozen into `days` and `totals`, and later sales for that month
+ * are refused. Reopening keeps the document and appends to `history`, so what
+ * was actually paid stays answerable.
+ */
+export interface CaSalaryMonthDocument {
+  userId: string;
+  month: string;
+  status: 'finalized' | 'reopened';
+  finalizedAt: Timestamp | null;
+  finalizedBy: string | null;
+  finalizedByName: string | null;
+  /** The frozen day rows, serialised exactly as the engine produced them. */
+  days: unknown[];
+  totals: {
+    grossEarnings: number;
+    netEarnings: number;
+    commission: number;
+    wage: number;
+    salary: number;
+    hours: number;
+    daysWorked: number;
+    saleCount: number;
+  };
+  history: Array<{ action: 'finalized' | 'reopened'; by: string; byName: string; at: Timestamp; reason?: string }>;
+  updatedAt: Timestamp;
+}
+
+/** `ca-salary-config/current` — the rate tables, editable by an admin without a deploy. */
+export interface CaSalaryConfigDocument {
+  deductionRate: number;
+  commissionTiers: Array<{ minGross: number; percent: number }>;
+  /** Account count → $/hour, keyed by the count as a string (Firestore map keys are strings). */
+  wageTiers: Record<string, number>;
+  graceMinutes: number;
+  defaultShiftHours: number;
+  wageRateBasis: 'per-shift' | 'per-day';
+  updatedBy: string | null;
+  updatedByName: string | null;
+  updatedAt: Timestamp;
+}
+
+/**
+ * `ca-coverage-offers/{offerId}` — one creator account, on one date, needing cover.
+ *
+ * Created automatically when an admin approves leave: the absent agent's shift
+ * occurrence is tombstoned and each assigned creator becomes an offer. Agents
+ * claim; an admin confirms a claim, which creates the overtime shift and moves
+ * the offer to `assigned`. One document per creator rather than per shift so two
+ * agents can split an absence.
+ */
+export interface CaCoverageOfferDocument {
+  offerId: string;
+  /** `YYYY-MM-DD` in the salary timezone. */
+  day: string;
+  creatorId: string;
+  creatorName: string;
+  /** The agent whose absence created this offer. */
+  originalUserId: string;
+  originalShiftId: string;
+  /** Window the released shift occupied, ms UTC. */
+  windowStart: number;
+  windowEnd: number;
+  status: 'available' | 'assigned' | 'cancelled';
+  /** Claims, keyed by uid. First-come order is kept by `claimedAt`. */
+  claims: Record<string, { claimedAt: Timestamp; note?: string }>;
+  assignedTo: string | null;
+  assignedShiftId: string | null;
+  /** True when the assignment sits inside the claimant's own shift — sales only, no extra wage. */
+  assignedInShift: boolean;
+  createdBy: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  leaveId: string | null;
 }
 
 // ─── Screenshots ─────────────────────────────────────────────────────

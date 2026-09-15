@@ -17,6 +17,15 @@ export interface CreateShiftInput {
   userTimezone: string;       // IANA
   createdBy: string;          // admin uid
   recurrence: ShiftRecurrence | null;
+  /**
+   * Creator accounts the agent covers. Validated by `normaliseCreatorIds`
+   * before it gets here — the count sets the hourly wage tier, so an id that
+   * does not resolve would pay for an account nobody works.
+   */
+  creatorIds?: string[];
+  isOvertime?: boolean;
+  coverageOfferId?: string | null;
+  paysWage?: boolean;
 }
 
 export interface UpdateShiftInput {
@@ -27,6 +36,40 @@ export interface UpdateShiftInput {
   wallClockEnd?: string;
   userTimezone?: string;
   recurrence?: ShiftRecurrence | null;
+  creatorIds?: string[];
+}
+
+/**
+ * Coerce `recurrence.endDate` to a Timestamp before it is stored.
+ *
+ * The shift modal sends an ISO **string**, and this used to be written straight
+ * through while `truncateSeriesAt` wrote a real `Timestamp` — two writers, two
+ * shapes, and a reader (`serialiseRecurrence`) that only handled one. The result
+ * was `r.endDate.toDate is not a function`, which 500'd the entire week view.
+ *
+ * Normalising on the way in is the half that stops new bad documents;
+ * `toIsoString` on the way out is the half that tolerates the ones already
+ * written. Both are needed, and neither is redundant.
+ */
+function toRecurrenceTimestamp(value: unknown): Timestamp | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Timestamp) return value;
+  if (typeof value === 'object' && typeof (value as { toDate?: unknown }).toDate === 'function') {
+    return Timestamp.fromDate((value as { toDate: () => Date }).toDate());
+  }
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : Timestamp.fromDate(value);
+  if (typeof value === 'number') return Number.isFinite(value) ? Timestamp.fromMillis(value) : null;
+  if (typeof value === 'string') {
+    const ms = Date.parse(value);
+    return Number.isNaN(ms) ? null : Timestamp.fromMillis(ms);
+  }
+  return null;
+}
+
+/** Normalise a whole recurrence rule for storage. */
+function normaliseRecurrence(r: ShiftRecurrence | null | undefined): ShiftRecurrence | null {
+  if (!r) return null;
+  return { ...r, endDate: toRecurrenceTimestamp(r.endDate) };
 }
 
 // ─── CRUD ────────────────────────────────────────────────────────────
@@ -53,10 +96,14 @@ export async function createShift(input: CreateShiftInput): Promise<string> {
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
     isRecurring: input.recurrence !== null,
-    recurrence: input.recurrence,
+    recurrence: normaliseRecurrence(input.recurrence),
     seriesId: null,
     overrideDate: null,
     isDeleted: false,
+    creatorIds: input.creatorIds ?? [],
+    isOvertime: input.isOvertime ?? false,
+    coverageOfferId: input.coverageOfferId ?? null,
+    paysWage: input.paysWage ?? true,
   };
 
   await ref.set(doc);
@@ -79,9 +126,12 @@ export async function updateShift(
   if (updates.startTime !== undefined)    patch.startTime    = Timestamp.fromMillis(updates.startTime);
   if (updates.endTime !== undefined)      patch.endTime      = Timestamp.fromMillis(updates.endTime);
   if ('recurrence' in updates) {
-    patch.recurrence  = updates.recurrence ?? null;
-    patch.isRecurring = updates.recurrence !== null;
+    patch.recurrence  = normaliseRecurrence(updates.recurrence);
+    patch.isRecurring = updates.recurrence != null;
   }
+  // `in` rather than `!== undefined` so an explicit empty array clears the
+  // assignment instead of being read as "leave it alone".
+  if ('creatorIds' in updates) patch.creatorIds = updates.creatorIds ?? [];
 
   await adminDb.collection(SHIFTS).doc(shiftId).update(patch);
 }
@@ -148,6 +198,10 @@ export async function createOccurrenceOverride(
     seriesId,
     overrideDate: Timestamp.fromMillis(overrideDateMs),
     isDeleted,
+    creatorIds: input.creatorIds ?? [],
+    isOvertime: input.isOvertime ?? false,
+    coverageOfferId: input.coverageOfferId ?? null,
+    paysWage: input.paysWage ?? true,
   };
 
   await ref.set(doc);

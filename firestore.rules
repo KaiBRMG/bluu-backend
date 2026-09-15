@@ -424,5 +424,46 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 28. Chat-agent salary: sales, overrides, payout records and rate config.
+    //
+    // ALL of it is Admin SDK only, in both directions, and the reason is worth
+    // stating: this is the only subsystem in the app where a client-side read
+    // would expose one employee's pay to another. Every figure an agent sees is
+    // assembled server-side by /api/ca-salary/*, which resolves the subject from
+    // the verified token and never from a query parameter — so there is no
+    // client path to widen and nothing here needs a per-uid read rule.
+    //
+    // `ca-salary-config` is the one that might look harmless enough to open up:
+    // it holds no personal data, only the rate tables. It stays closed anyway,
+    // because /api/ca-salary/config already serves it to any signed-in user and
+    // a second, unmediated path is a second thing to keep correct.
+    match /ca-sales/{saleId} {
+      allow read, write: if false;
+    }
+    match /ca-sales-imports/{importId} {
+      allow read, write: if false;
+    }
+    match /ca-salary-overrides/{overrideId} {
+      allow read, write: if false;
+    }
+    match /ca-salary-months/{monthId} {
+      allow read, write: if false;
+    }
+    match /ca-salary-config/{docId} {
+      allow read, write: if false;
+    }
+
+    // 29. Coverage offers: the overtime board.
+    //
+    // Admin SDK only, like the rest. The board is genuinely meant to be seen by
+    // every chat agent, but /api/ca-coverage/offers is what serves it — and it
+    // does something a Firestore rule cannot: it strips the other claimants'
+    // identities for non-admin readers. A direct read would hand every agent the
+    // full claim map, turning "who else wants this shift" into public
+    // information it was never meant to be.
+    match /ca-coverage-offers/{offerId} {
+      allow read, write: if false;
+    }
+
   }
 }

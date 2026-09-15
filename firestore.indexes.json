@@ -419,6 +419,66 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "month",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "occurredAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "importId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "occurredAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "ca-salary-overrides",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "month",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "ca-coverage-offers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "day",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [
@@ -450,6 +510,281 @@
     {
       "collectionGroup": "analytics_daily",
       "fieldPath": "sessionIds",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-offers",
+      "fieldPath": "assignedInShift",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-offers",
+      "fieldPath": "assignedShiftId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-offers",
+      "fieldPath": "assignedTo",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-offers",
+      "fieldPath": "claims",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-offers",
+      "fieldPath": "createdBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-offers",
+      "fieldPath": "creatorId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-offers",
+      "fieldPath": "creatorName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-offers",
+      "fieldPath": "leaveId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-offers",
+      "fieldPath": "originalShiftId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-offers",
+      "fieldPath": "originalUserId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-offers",
+      "fieldPath": "windowEnd",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-offers",
+      "fieldPath": "windowStart",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-config",
+      "fieldPath": "commissionTiers",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-config",
+      "fieldPath": "deductionRate",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-config",
+      "fieldPath": "defaultShiftHours",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-config",
+      "fieldPath": "graceMinutes",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-config",
+      "fieldPath": "updatedBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-config",
+      "fieldPath": "updatedByName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-config",
+      "fieldPath": "wageRateBasis",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-config",
+      "fieldPath": "wageTiers",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-months",
+      "fieldPath": "days",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-months",
+      "fieldPath": "finalizedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-months",
+      "fieldPath": "finalizedBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-months",
+      "fieldPath": "finalizedByName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-months",
+      "fieldPath": "history",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-months",
+      "fieldPath": "month",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-months",
+      "fieldPath": "status",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-months",
+      "fieldPath": "totals",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-months",
+      "fieldPath": "userId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-overrides",
+      "fieldPath": "day",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-overrides",
+      "fieldPath": "fields",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-overrides",
+      "fieldPath": "note",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "assignedBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "creatorName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "employeeName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "fanId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "fanName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "grossRevenue",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "netRevenue",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "rule",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "signedGross",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "sourceEmail",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "status",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "type",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-imports",
+      "fieldPath": "duplicates",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-imports",
+      "fieldPath": "fileName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-imports",
+      "fieldPath": "imported",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-imports",
+      "fieldPath": "monthsTouched",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-imports",
+      "fieldPath": "perUser",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-imports",
+      "fieldPath": "rejectedFinalizedMonths",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-imports",
+      "fieldPath": "skipped",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-imports",
+      "fieldPath": "skippedRows",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-imports",
+      "fieldPath": "totalRows",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-imports",
+      "fieldPath": "uploadedBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-imports",
+      "fieldPath": "uploadedByName",
       "indexes": []
     },
     {
@@ -633,6 +968,11 @@
       "indexes": []
     },
     {
+      "collectionGroup": "leave_requests",
+      "fieldPath": "reason",
+      "indexes": []
+    },
+    {
       "collectionGroup": "messages",
       "fieldPath": "attachments",
       "indexes": []
@@ -791,6 +1131,26 @@
     {
       "collectionGroup": "series",
       "fieldPath": "days",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "shifts",
+      "fieldPath": "coverageOfferId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "shifts",
+      "fieldPath": "creatorIds",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "shifts",
+      "fieldPath": "isOvertime",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "shifts",
+      "fieldPath": "paysWage",
       "indexes": []
     },
     {

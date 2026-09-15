@@ -34,6 +34,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { CreatorAssignmentField } from './CreatorAssignmentField';
+import { useSalaryConfig } from '@/hooks/useSalaryConfig';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -57,10 +59,10 @@ interface Props {
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-import { toLocalDateStr as toLocalDateString } from '@/lib/utils/timezone';
+import { toLocalDateStr as toLocalDateString, safeTimezone } from '@/lib/utils/timezone';
 
 function toLocalTimeString(ms: number, tz: string): string {
-  return new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(ms));
+  return new Intl.DateTimeFormat('en-GB', { timeZone: safeTimezone(tz), hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(ms));
 }
 
 /** Convert a local "YYYY-MM-DD HH:mm" in a given IANA tz to a UTC ISO string. */
@@ -110,6 +112,10 @@ export default function ShiftModal({
   const isEdit   = mode === 'edit';
   const isRecurringShift = !!shift?.isRecurring;
 
+  // Only used for the "pays $X/hour" hint under the creator picker. Absent
+  // while it loads, which the field renders around rather than blocking on.
+  const salaryConfig = useSalaryConfig();
+
   // Employee's IANA timezone — used only for storing wallClock/userTimezone in Firestore
   const getUserTz = useCallback((uid: string) =>
     users.find(u => u.uid === uid)?.timezone || 'UTC', [users]);
@@ -147,6 +153,10 @@ export default function ShiftModal({
     shift?.recurrence?.endDate ? new Date(shift.recurrence.endDate as unknown as string).toISOString().slice(0, 10) : '',
   );
   const [count,         setCount]         = useState(shift?.recurrence?.count ?? 10);
+  // Creator assignment. Absent on every shift created before this existed,
+  // which is exactly the case the salary engine's inferred-account fallback
+  // covers — see salaryEngine.ts.
+  const [creatorIds,    setCreatorIds]    = useState<string[]>(shift?.creatorIds ?? []);
 
   // ── Date picker open states ──────────────────────────────────────────
   const [startDateOpen,  setStartDateOpen]  = useState(false);
@@ -216,6 +226,7 @@ export default function ShiftModal({
       wallClockEnd,
       userTimezone:   employeeTz,
       recurrence:     recurrencePayload,
+      creatorIds,
     };
   }
 
@@ -391,6 +402,18 @@ export default function ShiftModal({
           {/* Timezone note */}
           <div style={{ marginBottom: '16px', fontSize: '11px', color: 'var(--foreground-muted)' }}>
             Times are in {viewerTimezone}
+          </div>
+
+          {/* Creator assignment. Placed after the times because the wage depends
+              on both: the rate comes from the account count, the pay from the
+              hours. Seeing them together is what makes the cost of a fourth
+              account legible at the moment of assigning it. */}
+          <div style={sectionStyle}>
+            <CreatorAssignmentField
+              value={creatorIds}
+              onChange={setCreatorIds}
+              wageTiers={salaryConfig?.wageTiers}
+            />
           </div>
 
           {/* Recurrence toggle */}

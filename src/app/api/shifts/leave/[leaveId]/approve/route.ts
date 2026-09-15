@@ -6,6 +6,7 @@ import { getUserById, invalidateUserCache } from '@/lib/services/userService';
 import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
 import { sendTelegramNotification } from '@/lib/services/telegramService';
+import { releaseOccurrenceForCoverage } from '@/lib/services/leaveCoverage';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { LeaveRequestDocument } from '@/types/firestore';
 
@@ -88,7 +89,31 @@ export const POST = withAuth(async (
     // Invalidate user cache after batch commit so balance reads are fresh
     invalidateUserCache(leave.userId);
 
-    return NextResponse.json({ success: true });
+    // Approving leave releases the shift in one step: the occurrence is
+    // tombstoned and each creator the agent was covering is posted to the
+    // Available Shifts board. Doing it here rather than as a separate admin
+    // action is what stops an approved absence sitting with nobody covering it.
+    //
+    // Deliberately after the commit and deliberately non-fatal: the leave was
+    // approved and the agent has been told, so a failure to release must not
+    // turn into a 500 that makes an admin approve it twice. The response carries
+    // the outcome so the UI can say what happened either way.
+    let coverage: Awaited<ReturnType<typeof releaseOccurrenceForCoverage>> | null = null;
+    if (action === 'approve') {
+      try {
+        coverage = await releaseOccurrenceForCoverage({
+          shiftId: leave.shiftId,
+          occurrenceStart: leave.occurrenceStart,
+          userId: leave.userId,
+          leaveId: leave.leaveId,
+          actorUid: token.uid,
+        });
+      } catch (releaseErr) {
+        console.error('[shifts/leave/approve] coverage release failed', releaseErr);
+      }
+    }
+
+    return NextResponse.json({ success: true, coverage });
   } catch (err) {
     console.error('[shifts/leave/approve POST]', err);
     return NextResponse.json({ error: 'Failed to process leave action' }, { status: 500 });

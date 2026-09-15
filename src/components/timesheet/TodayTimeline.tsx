@@ -37,11 +37,11 @@ interface TimelineSegment {
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-import { getDayBoundsUTC, todayStr as todayInTZ } from '@/lib/utils/timezone';
+import { getDayBoundsUTC, todayStr as todayInTZ, safeTimezone } from '@/lib/utils/timezone';
 
 function formatTimeInTZ(ms: number, timezone: string): string {
   return new Date(ms).toLocaleTimeString('en-US', {
-    timeZone: timezone,
+    timeZone: safeTimezone(timezone),
     hour: '2-digit',
     minute: '2-digit',
     hour12: true,
@@ -231,7 +231,7 @@ export default function TodayTimeline() {
   }
 
   const todayLabel = new Date().toLocaleDateString('en-US', {
-    timeZone: timezone,
+    timeZone: safeTimezone(timezone),
     weekday: 'short',
     month: 'short',
     day: 'numeric',

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useTodaySessions, todaySessionWorkedSeconds } from '@/hooks/useTodaySessions';
+import { safeTimezone } from '@/lib/utils/timezone';
 
 /**
  * Returns the total "time worked" seconds tracked today (in the user's timezone),
@@ -68,7 +69,7 @@ export function useDayTotal(timezone: string): number {
 function getMsUntilMidnight(timezone: string): number {
   const now = new Date();
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
+    timeZone: safeTimezone(timezone),
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

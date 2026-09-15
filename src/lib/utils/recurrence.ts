@@ -28,6 +28,12 @@ export interface RawApiShift {
   seriesId: string | null;
   overrideDate: string | null; // ISO UTC midnight of overridden date
   isDeleted: boolean;
+  // Creator assignment — carried through expansion so an occurrence knows which
+  // accounts it covers. An override document may differ from its series root.
+  creatorIds?: string[];
+  isOvertime?: boolean;
+  coverageOfferId?: string | null;
+  paysWage?: boolean;
   // Attendance / time-worked (pre-computed server-side for past shifts)
   timeWorkedSeconds: number | null;
   attendanceStatus: 'on-time' | 'late' | 'absent' | null;

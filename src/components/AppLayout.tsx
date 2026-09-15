@@ -10,6 +10,7 @@ import { useUserData } from "@/hooks/useUserData";
 import { usePermissions, getHighestGroupName } from "@/hooks/usePermissions";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { UNIVERSAL_PAGES } from "@/lib/definitions";
+import { TimezoneNotice } from '@/components/TimezoneNotice';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -81,6 +82,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
       <SidebarInset>
         <TopBar />
         <main className="flex-1 overflow-y-auto p-8">
+          {/* App-wide because the consequence is app-wide: without a timezone
+              every time in the product silently renders in UTC. Disappears the
+              moment one is saved. */}
+          <TimezoneNotice />
           {children}
         </main>
       </SidebarInset>

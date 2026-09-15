@@ -10,6 +10,7 @@
 
 import { STATUS_COLORS, STATUS_DOT, type CRStatus } from '@/lib/campaignTracking';
 import type { DisputeDocument } from '@/types/firestore';
+import { safeTimezone } from '@/lib/utils/timezone';
 
 export type DisputeStage =
   | 'awaiting-ca'
@@ -75,7 +76,7 @@ export function formatSaleDate(iso: string | null, timezone: string): string {
   if (!iso) return '—';
   try {
     return new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
+      timeZone: safeTimezone(timezone),
       dateStyle: 'medium',
       timeStyle: 'short',
     }).format(new Date(iso));

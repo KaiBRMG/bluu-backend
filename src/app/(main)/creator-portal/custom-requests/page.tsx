@@ -3,7 +3,6 @@
 import { useEffect, useId, useMemo, useRef, useState, useCallback } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useCreators } from "@/hooks/useCreators";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -41,6 +40,7 @@ import { useBasicUsers } from "@/hooks/useBasicUsers";
 import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
 import { TransferDialog, ConfirmDialog, ARCHIVE_CR_TEXT, UNARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
+import { CreatorAvatar } from '@/components/creators/CreatorChip';
 
 // ─── Date picker ─────────────────────────────────────────────────────────────
 
@@ -636,10 +636,12 @@ function KanbanColumn({ creator, count, children }: {
     >
       <div className="flex items-center justify-between mb-0.5">
         <div className="flex items-center gap-1.5 min-w-0">
-          <Avatar className="size-4 shrink-0">
-            <AvatarImage src={creator.photoURL ?? undefined} />
-            <AvatarFallback className="text-[8px]">{creator.stageName.charAt(0)}</AvatarFallback>
-          </Avatar>
+          <CreatorAvatar
+            creatorId={creator.creatorID}
+            name={creator.stageName}
+            photoURL={creator.photoURL}
+            className="size-4 text-[8px]"
+          />
           <p className="text-sm font-semibold text-zinc-300 truncate">{creator.stageName}</p>
         </div>
         <span className="text-xs text-zinc-500 shrink-0">{count}</span>
@@ -1295,10 +1297,12 @@ function CreatorCountCard({ title, creators, counts }: {
         {top.map(c => (
           <div key={c.creatorID} className="flex items-center justify-between gap-2 text-sm">
             <span className="flex min-w-0 items-center gap-1.5 text-zinc-400">
-              <Avatar className="size-4 shrink-0">
-                <AvatarImage src={c.photoURL ?? undefined} />
-                <AvatarFallback className="text-[8px]">{c.stageName.charAt(0)}</AvatarFallback>
-              </Avatar>
+              <CreatorAvatar
+                creatorId={c.creatorID}
+                name={c.stageName}
+                photoURL={c.photoURL}
+                className="size-4 text-[8px]"
+              />
               <span className="truncate">{c.stageName}</span>
             </span>
             <Badge variant="secondary" className="tabular-nums">{c.count}</Badge>
@@ -2056,10 +2060,7 @@ function ChatAgentTable({ agentUid, agentName, creators, userNames, isActive }: 
                   </TableCell>
                   <TableCell className="text-sm">
                     <span className="flex items-center gap-1.5 min-w-0">
-                      <Avatar className="size-4 shrink-0">
-                        <AvatarImage src={creators.find(c => c.creatorID === entry.creatorID)?.photoURL ?? undefined} />
-                        <AvatarFallback className="text-[8px]">{(creatorMap[entry.creatorID] ?? "?").charAt(0)}</AvatarFallback>
-                      </Avatar>
+                      <CreatorAvatar creatorId={entry.creatorID} className="size-4 text-[8px]" />
                       <span className="truncate">{creatorMap[entry.creatorID] ?? entry.creatorID}</span>
                     </span>
                   </TableCell>

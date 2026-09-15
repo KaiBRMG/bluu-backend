@@ -13,13 +13,14 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { CheckIcon, ChevronDownIcon, PlusIcon, XIcon } from "lucide-react";
 import { markScreenshotBugFixed } from "@/lib/markScreenshotBugFixed";
 import { toast } from "sonner";
+import { safeTimezone } from '@/lib/utils/timezone';
 
 const DEFAULT_ADDITIONAL_TZS = ['Africa/Johannesburg', 'Asia/Manila'];
 
 function tzOffsetMinutes(tz: string): number {
   const now = new Date();
   const utcMs = now.getTime();
-  const localMs = new Date(now.toLocaleString('en-US', { timeZone: tz })).getTime();
+  const localMs = new Date(now.toLocaleString('en-US', { timeZone: safeTimezone(tz) })).getTime();
   return Math.round((localMs - utcMs) / 60000);
 }
 

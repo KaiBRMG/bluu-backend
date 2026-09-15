@@ -63,7 +63,7 @@ function formatInUserTz(isoString: string | null, timezone: string): string {
   if (!isoString) return '—';
   try {
     return new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
+      timeZone: safeTimezone(timezone),
       dateStyle: 'medium',
       timeStyle: 'short',
     }).format(new Date(isoString));
@@ -87,6 +87,7 @@ function ApprovalBadge({ value }: { value: ApprovalStatus }) {
 // ─── UserChip — promoted to a shared component ────────────────────────
 
 import { UserChip } from '@/components/UserChip';
+import { safeTimezone } from '@/lib/utils/timezone';
 
 // ─── CommentCell — truncated trigger + hover card with full comment ───
 

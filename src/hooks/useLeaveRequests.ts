@@ -14,6 +14,8 @@ export interface LeaveRequest {
   requestedAt: string | null;
   resolvedAt: string | null;
   resolvedBy: string | null;
+  /** Why the leave was requested. Mandatory for paid leave. */
+  reason: string | null;
 }
 
 interface LeaveRequestsState {
@@ -86,17 +88,26 @@ export function useLeaveRequests() {
     shiftId: string,
     occurrenceStart: number,
     leaveType: 'paid' | 'unpaid',
+    reason?: string,
   ): Promise<void> => {
     if (!user) throw new Error('Not authenticated');
     const idToken = await user.getIdToken();
     const res = await fetch('/api/shifts/leave', {
       method: 'POST',
       headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ shiftId, occurrenceStart, leaveType }),
+      body: JSON.stringify({ shiftId, occurrenceStart, leaveType, reason }),
     });
     if (!res.ok) {
-      const data = await res.json();
-      throw new Error(data.error ?? 'Failed to request leave');
+      // The server's message names the actual rule that was hit — the notice
+      // period, the balance, a duplicate — so it must reach the caller intact.
+      let message = 'Failed to request leave';
+      try {
+        const data = await res.json();
+        if (data?.error) message = data.error;
+      } catch {
+        /* keep the generic message */
+      }
+      throw new Error(message);
     }
     invalidateCache(cacheKey(user.uid));
     await fetchData(true);

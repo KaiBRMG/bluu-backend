@@ -17,14 +17,65 @@ function serialiseLeave(doc: LeaveRequestDocument) {
     requestedAt: doc.requestedAt?.toDate?.()?.toISOString() ?? null,
     resolvedAt: doc.resolvedAt?.toDate?.()?.toISOString() ?? null,
     resolvedBy: doc.resolvedBy ?? null,
+    reason: doc.reason ?? null,
   };
 }
+
+
 
 // ─── GET /api/shifts/leave?userId=uid ─────────────────────────────────────────
 
 export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
     const { searchParams } = new URL(request.url);
+    const scope = searchParams.get('scope');
+
+    // `scope=all` is the admin approvals inbox — every user's requests, with the
+    // requester's name resolved so the queue is readable without an N+1 per row.
+    // It requires shift-management OR ca-admin: leave approval is a CA payroll
+    // concern as much as a rostering one, and the release it triggers is what
+    // puts accounts on the overtime board.
+    if (scope === 'all') {
+      const caller = await getUserById(token.uid);
+      const permitted = caller?.permittedPageIds ?? [];
+      if (!permitted.includes('shift-management') && !permitted.includes('ca-admin')) {
+        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+      }
+
+      const statusFilter = searchParams.get('status');
+      let query = adminDb.collection('leave_requests').limit(400);
+      if (statusFilter && ['pending', 'approved', 'denied'].includes(statusFilter)) {
+        query = query.where('status', '==', statusFilter).limit(400);
+      }
+
+      const snap = await query.get();
+      const rows = snap.docs.map(d => serialiseLeave(d.data() as LeaveRequestDocument));
+
+      const uids = [...new Set(rows.map(r => r.userId))];
+      const names = new Map<string, { displayName: string; photoURL: string | null }>();
+      if (uids.length > 0) {
+        const snaps = await adminDb.getAll(...uids.map(uid => adminDb.collection('users').doc(uid)));
+        for (const userSnap of snaps) {
+          if (userSnap.exists) {
+            const data = userSnap.data();
+            names.set(userSnap.id, { displayName: data?.displayName ?? userSnap.id, photoURL: data?.photoURL ?? null });
+          }
+        }
+      }
+
+      return NextResponse.json({
+        leaveRequests: rows
+          .map(row => ({
+            ...row,
+            displayName: names.get(row.userId)?.displayName ?? null,
+            photoURL: names.get(row.userId)?.photoURL ?? null,
+          }))
+          // Soonest shift first: the one about to become uncoverable is the one
+          // that needs deciding.
+          .sort((a, b) => a.occurrenceStart - b.occurrenceStart),
+      });
+    }
+
     const targetUserId = searchParams.get('userId') ?? token.uid;
 
     // Non-self requests require shift-management access
@@ -54,14 +105,37 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
     const body = await request.json();
-    const { shiftId, occurrenceStart, leaveType } = body as {
+    const { shiftId, occurrenceStart, leaveType, reason } = body as {
       shiftId: string;
       occurrenceStart: number;
       leaveType: 'paid' | 'unpaid';
+      reason?: string;
     };
 
     if (!shiftId || typeof occurrenceStart !== 'number' || !['paid', 'unpaid'].includes(leaveType)) {
       return NextResponse.json({ error: 'Missing or invalid fields' }, { status: 400 });
+    }
+
+    // The only hard boundary: a shift that has already started cannot be taken
+    // off. Everything before that is allowed.
+    //
+    // The 4-day notice period is **guidance, not a rule** — deliberately. An
+    // agent who is ill tomorrow still has to tell someone, and a system that
+    // refuses the request just moves that conversation somewhere nobody can see
+    // it. The UI states the expectation; the admin sees how much notice a
+    // request actually carries ("in 1 day") in the approvals queue and decides.
+    if (occurrenceStart <= Date.now()) {
+      return NextResponse.json({ error: 'That shift has already started.' }, { status: 400 });
+    }
+
+    // Paid leave needs a stated reason; unpaid does not. The asymmetry is the
+    // existing policy, not an invention — paid leave is approved on its merits.
+    const trimmedReason = typeof reason === 'string' ? reason.trim().slice(0, 500) : '';
+    if (leaveType === 'paid' && trimmedReason.length < 3) {
+      return NextResponse.json(
+        { error: 'Paid leave needs a short reason so it can be reviewed.' },
+        { status: 400 },
+      );
     }
 
     // Users can only request leave for themselves
@@ -114,6 +188,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       requestedAt: FieldValue.serverTimestamp(),
       resolvedAt: null,
       resolvedBy: null,
+      reason: trimmedReason || null,
     });
     batch.update(adminDb.collection('users').doc(token.uid), {
       [balanceField]: FieldValue.increment(-1),

@@ -20,10 +20,10 @@ import {
 } from "@/components/ui/card";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { MoreHorizontal, UserCircle, Copy, Check, Info } from "lucide-react";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { getAvatarColor, getInitials } from "@/lib/utils/avatar";
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { timezoneLabel } from "@/lib/timezone";
 import { toast } from "sonner";
+import { CreatorAvatar } from '@/components/creators/CreatorChip';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -391,15 +391,12 @@ function CreatorTable({
           {list.map(creator => (
             <TableRow key={creator.uid}>
               <TableCell>
-                <Avatar>
-                  {creator.photoURL && <AvatarImage src={creator.photoURL} alt={creator.stageName} />}
-                  <AvatarFallback
-                    style={{ backgroundColor: getAvatarColor(creator.stageName) }}
-                    className="text-xs font-medium text-white"
-                  >
-                    {getInitials(creator.stageName)}
-                  </AvatarFallback>
-                </Avatar>
+                <CreatorAvatar
+                  creatorId={creator.uid}
+                  name={creator.stageName}
+                  photoURL={creator.photoURL}
+                  className="size-8 text-xs"
+                />
               </TableCell>
               <TableCell className="font-medium">{creator.stageName}</TableCell>
               <TableCell className="text-muted-foreground">{creator.userEmail}</TableCell>

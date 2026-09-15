@@ -64,7 +64,6 @@ export const PAGES: PageDef[] = [
   // CA Portal
   { pageId: 'ca-admin', title: 'Admin', teamspaceId: 'ca-portal', href: '/ca-portal/admin', icon: 'Cog', order: 0 },
   { pageId: 'ca-dashboard', title: 'Dashboard', teamspaceId: 'ca-portal', href: '/ca-portal/dashboard', icon: 'LayoutDashboard', order: 1 },
-  { pageId: 'ca-shifts', title: 'Shifts', teamspaceId: 'ca-portal', href: '/ca-portal/shifts', icon: 'CalendarClock', order: 2 },
   { pageId: 'ca-disputes', title: 'Disputes', teamspaceId: 'ca-portal', href: '/ca-portal/disputes', icon: 'MessageCircleQuestionMark', order: 3 },
   { pageId: 'ca-custom-requests', title: 'Custom Requests', teamspaceId: 'ca-portal', href: '/ca-portal/custom-requests', icon: 'ImagePlay', order: 4 },
   { pageId: 'ca-campaigns', title: 'Campaigns', teamspaceId: 'ca-portal', href: '/ca-portal/campaigns', icon: 'SquareStar', order: 5 },

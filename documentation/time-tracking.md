@@ -31,6 +31,9 @@
 
 - `active_sessions/{userId}` — keyed by **uid**, so a user can only ever have **one** server-side active session. **"Two active sessions" symptoms are ALWAYS a client-side rendering/buffer issue, never two server docs.** Deleted on clock-out. Because it is keyed by uid, clocking in on a second device **displaces** the doc — see §3b for why that must never delete the old session outright.
 - `time_entries/{sessionId}` — permanent ledger written at clock-out. Keyed by uid too, so **sessions tracked on different devices all land in the same timesheet**; the doc id **is** the session id, which is what makes de-duplicating local buffers against the ledger exact (§2b).
+- `shifts/{shiftId}` — the roster. Since the salary subsystem shipped it also carries **`creatorIds`** (which creator accounts the shift covers), plus `isOvertime` / `paysWage` / `coverageOfferId` for cover created from the overtime board. **`creatorIds.length` sets the agent's hourly wage tier**, so every write path validates the ids against the live roster via `normaliseCreatorIds` — see [ca-salary.md](ca-salary.md).
+
+> **This ledger is a payroll input.** `computeTimeWorked` (in `shiftAttendance.ts`) is what the salary engine reads for an agent's hours, so a change to how worked time is measured changes what chat agents are paid. Read [ca-salary.md §2](ca-salary.md) before touching it.
 
 ---
 

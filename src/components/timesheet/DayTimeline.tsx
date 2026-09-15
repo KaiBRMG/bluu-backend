@@ -30,11 +30,11 @@ interface DayTimelineProps {
   onSessionClick?: (sessionId: string) => void;
 }
 
-import { getDayBoundsUTC } from '@/lib/utils/timezone';
+import { getDayBoundsUTC, safeTimezone } from '@/lib/utils/timezone';
 
 function formatTimeInTZ(date: Date, timezone: string): string {
   return date.toLocaleTimeString('en-US', {
-    timeZone: timezone,
+    timeZone: safeTimezone(timezone),
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,

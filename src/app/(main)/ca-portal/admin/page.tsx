@@ -1,16 +1,18 @@
 "use client";
 
 import { useState, useCallback, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import AppLayout from "@/components/AppLayout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '@/components/ui/select';
 import { DisputeTable, type ColumnKey } from '@/components/disputes/DisputeTable';
 import { useDisputesData, type AdminFilters } from '@/hooks/useDisputesData';
-import { useUserData } from '@/hooks/useUserData';
 import type { DisputeDocument, ApprovalStatus } from '@/types/firestore';
 import { DeletedUser } from '@/components/DeletedUser';
+import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 
 // ─── Column set ───────────────────────────────────────────────────────
 
@@ -179,15 +181,52 @@ function AdminPanel({
   );
 }
 
+// ─── Lazily-loaded tab panels ─────────────────────────────────────────
+// Each panel is a substantial tree with its own data fetching, and an admin
+// opens one of them at a time. Loading all four on every visit to this page
+// would be the single heaviest route in the portal.
+
+function PanelSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-8 w-48 rounded-md" />
+        <Skeleton className="h-8 w-40 rounded-md" />
+      </div>
+      <Skeleton className="h-[480px] w-full rounded-xl" />
+    </div>
+  );
+}
+
+const AdminSalaries = dynamic(() => import('@/components/ca-admin/AdminSalaries'), {
+  loading: () => <PanelSkeleton />,
+});
+const AdminSalesData = dynamic(() => import('@/components/ca-admin/AdminSalesData'), {
+  loading: () => <PanelSkeleton />,
+});
+const AdminCoverage = dynamic(() => import('@/components/ca-admin/AdminCoverage'), {
+  loading: () => <PanelSkeleton />,
+});
+const AdminRates = dynamic(() => import('@/components/ca-admin/AdminRates'), {
+  loading: () => <PanelSkeleton />,
+});
+
 // ─── Page ─────────────────────────────────────────────────────────────
 
+/**
+ * CA Admin — everything a CA manager runs that is not the roster itself.
+ *
+ * The split with Shift Management is by object, not by team: shift CRUD and
+ * creator assignment stay there because that page already owns the calendar, the
+ * modal and recurrence. Money and the absence pipeline live here.
+ *
+ * Payroll is the default tab. It is the one with a deadline on it.
+ */
 export default function CaAdminPage() {
-  const { userData } = useUserData();
   const { setAdminApproval } = useDisputesData();
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const userTimezone =
-    userData?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const { timezone: userTimezone } = useViewerTimezone();
 
   const handleAdminAction = async (
     id: string,
@@ -201,62 +240,86 @@ export default function CaAdminPage() {
   return (
     <AppLayout>
       <div className="max-w-7xl">
-        <h1 className="text-2xl font-bold tracking-tight mb-2">CA Admin</h1>
-        <p className="text-sm text-muted-foreground">
-          Admin-only view of CA processes. Chat Agents should not have access to this page.
+        <h1 className="text-2xl font-bold tracking-tight">CA Admin</h1>
+        <p className="mt-1 text-sm text-zinc-400">
+          Payroll, sales data, coverage and disputes. Chat Agents should not have access to this page.
         </p>
 
-        <h2 className="text-lg font-semibold mb-3">Disputes</h2>
+        <div className="mt-6 rounded-lg border border-border-subtle bg-content-bg">
+          <Tabs defaultValue="salaries">
+            {/* pb-1.5: overflow-x:auto forces overflow-y to auto, so reserve room
+                for the trigger focus ring instead of letting it clip. */}
+            <div className="overflow-x-auto px-6 pb-1.5 pt-4">
+              <TabsList>
+                <TabsTrigger value="salaries">Salaries</TabsTrigger>
+                <TabsTrigger value="sales">Sales data</TabsTrigger>
+                <TabsTrigger value="coverage">Coverage</TabsTrigger>
+                <TabsTrigger value="rates">Rates</TabsTrigger>
+                <TabsTrigger value="disputes">Disputes</TabsTrigger>
+              </TabsList>
+            </div>
 
-        <Tabs defaultValue="all">
-          <TabsList>
-            <TabsTrigger value="all">All</TabsTrigger>
-            <TabsTrigger value="unresolved">Unresolved</TabsTrigger>
-            <TabsTrigger value="ca-approved">CA Approved</TabsTrigger>
-            <TabsTrigger value="resolved">Resolved</TabsTrigger>
-          </TabsList>
+            <div className="min-h-[600px] p-6">
+              <TabsContent value="salaries"><AdminSalaries /></TabsContent>
+              <TabsContent value="sales"><AdminSalesData /></TabsContent>
+              <TabsContent value="coverage"><AdminCoverage /></TabsContent>
+              <TabsContent value="rates"><AdminRates /></TabsContent>
 
-          <TabsContent value="all">
-            <AdminPanel
-              filter="admin-all"
-              userTimezone={userTimezone}
-              refreshKey={refreshKey}
-            />
-          </TabsContent>
+              <TabsContent value="disputes">
+                <h2 className="text-lg font-semibold tracking-tight">Disputes</h2>
+                <Tabs defaultValue="all" className="mt-3">
+                  <TabsList>
+                    <TabsTrigger value="all">All</TabsTrigger>
+                    <TabsTrigger value="unresolved">Unresolved</TabsTrigger>
+                    <TabsTrigger value="ca-approved">CA Approved</TabsTrigger>
+                    <TabsTrigger value="resolved">Resolved</TabsTrigger>
+                  </TabsList>
 
-          <TabsContent value="unresolved">
-            <AdminPanel
-              filter="admin-unresolved"
-              userTimezone={userTimezone}
-              showActions
-              refreshKey={refreshKey}
-              onAction={handleAdminAction}
-            />
-          </TabsContent>
+                  <TabsContent value="all">
+                    <AdminPanel
+                      filter="admin-all"
+                      userTimezone={userTimezone}
+                      refreshKey={refreshKey}
+                    />
+                  </TabsContent>
 
-          <TabsContent value="ca-approved">
-            <AdminPanel
-              filter="admin-ca-approved"
-              columns={ADMIN_CA_APPROVED_COLUMNS}
-              userTimezone={userTimezone}
-              showActions
-              groupByCreatedBy
-              refreshKey={refreshKey}
-              onAction={handleAdminAction}
-            />
-          </TabsContent>
+                  <TabsContent value="unresolved">
+                    <AdminPanel
+                      filter="admin-unresolved"
+                      userTimezone={userTimezone}
+                      showActions
+                      refreshKey={refreshKey}
+                      onAction={handleAdminAction}
+                    />
+                  </TabsContent>
 
-          <TabsContent value="resolved">
-            <AdminPanel
-              filter="admin-resolved"
-              userTimezone={userTimezone}
-              showActions
-              resolvedActions
-              refreshKey={refreshKey}
-              onAction={handleAdminAction}
-            />
-          </TabsContent>
-        </Tabs>
+                  <TabsContent value="ca-approved">
+                    <AdminPanel
+                      filter="admin-ca-approved"
+                      columns={ADMIN_CA_APPROVED_COLUMNS}
+                      userTimezone={userTimezone}
+                      showActions
+                      groupByCreatedBy
+                      refreshKey={refreshKey}
+                      onAction={handleAdminAction}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="resolved">
+                    <AdminPanel
+                      filter="admin-resolved"
+                      userTimezone={userTimezone}
+                      showActions
+                      resolvedActions
+                      refreshKey={refreshKey}
+                      onAction={handleAdminAction}
+                    />
+                  </TabsContent>
+                </Tabs>
+              </TabsContent>
+            </div>
+          </Tabs>
+        </div>
       </div>
     </AppLayout>
   );

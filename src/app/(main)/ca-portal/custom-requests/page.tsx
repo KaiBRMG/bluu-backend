@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import AppLayout from "@/components/AppLayout";
 import { useCreators } from "@/hooks/useCreators";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -41,6 +40,7 @@ import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
 import { TransferDialog, ConfirmDialog, ARCHIVE_CR_TEXT, UNARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
 import { OutstandingPaymentsDonut } from "@/components/campaign/OutstandingPaymentsDonut";
+import { CreatorAvatar } from '@/components/creators/CreatorChip';
 
 // ─── Date picker ─────────────────────────────────────────────────────────────
 
@@ -1256,10 +1256,12 @@ function MyCustomsKanban({ currentUserUid, creators, userNames, isActive }: MyCu
             <div key={creator.creatorID} className="min-w-0">
               <div className="mb-3 px-1">
                 <div className="flex items-center gap-2 mb-0.5">
-                  <Avatar className="size-6 shrink-0">
-                    <AvatarImage src={creator.photoURL ?? undefined} />
-                    <AvatarFallback className="text-[10px]">{creator.stageName.charAt(0)}</AvatarFallback>
-                  </Avatar>
+                  <CreatorAvatar
+                    creatorId={creator.creatorID}
+                    name={creator.stageName}
+                    photoURL={creator.photoURL}
+                    className="size-6 text-[10px]"
+                  />
                   <h3 className="text-sm font-semibold text-zinc-300">{creator.stageName}</h3>
                 </div>
                 <p className="text-xs text-zinc-500">{byCreator[creator.creatorID].length} entries</p>

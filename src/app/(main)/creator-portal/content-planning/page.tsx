@@ -3,7 +3,6 @@
 import { useEffect, useId, useRef, useState, useCallback } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useCreators } from "@/hooks/useCreators";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -35,6 +34,8 @@ import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
 import type { Creator } from "@/lib/campaignTracking";
 import { isOverdue } from "@/lib/timezone";
+import { safeTimezone } from '@/lib/utils/timezone';
+import { CreatorAvatar } from '@/components/creators/CreatorChip';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,7 +88,7 @@ function formatDate(isoOrDateStr: string | null, userTz?: string): string {
     const d = isoOrDateStr.includes("T") ? new Date(isoOrDateStr) : new Date(isoOrDateStr + "T12:00:00Z");
     return d.toLocaleDateString("en-US", {
       month: "short", day: "numeric", year: "numeric",
-      timeZone: userTz ?? "UTC",
+      timeZone: safeTimezone(userTz),
     });
   } catch { return isoOrDateStr; }
 }
@@ -995,10 +996,12 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
               >
                 <div className="flex items-center justify-between mb-0.5">
                   <div className="flex items-center gap-1.5 min-w-0">
-                    <Avatar className="size-4 shrink-0">
-                      <AvatarImage src={creator.photoURL ?? undefined} />
-                      <AvatarFallback className="text-[8px]">{creator.stageName.charAt(0)}</AvatarFallback>
-                    </Avatar>
+                    <CreatorAvatar
+                      creatorId={creator.creatorID}
+                      name={creator.stageName}
+                      photoURL={creator.photoURL}
+                      className="size-4 text-[8px]"
+                    />
                     <p className="text-sm font-semibold text-zinc-300 truncate">{creator.stageName}</p>
                   </div>
                   <span className="text-xs text-zinc-500 shrink-0">{completedByCreator[creator.creatorID].length}</span>
@@ -1047,10 +1050,12 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
               >
                 <div className="flex items-center justify-between mb-0.5">
                   <div className="flex items-center gap-1.5 min-w-0">
-                    <Avatar className="size-4 shrink-0">
-                      <AvatarImage src={creator.photoURL ?? undefined} />
-                      <AvatarFallback className="text-[8px]">{creator.stageName.charAt(0)}</AvatarFallback>
-                    </Avatar>
+                    <CreatorAvatar
+                      creatorId={creator.creatorID}
+                      name={creator.stageName}
+                      photoURL={creator.photoURL}
+                      className="size-4 text-[8px]"
+                    />
                     <p className="text-sm font-semibold text-zinc-300 truncate">{creator.stageName}</p>
                   </div>
                   <span className="text-xs text-zinc-500 shrink-0">{byCreator[creator.creatorID].length}</span>

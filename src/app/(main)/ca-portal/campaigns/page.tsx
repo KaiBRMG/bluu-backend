@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import AppLayout from "@/components/AppLayout";
 import { useCreators } from "@/hooks/useCreators";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -36,6 +35,7 @@ import { apiRequest } from "@/lib/clientApi";
 import { toast } from "sonner";
 import { TransferDialog, ConfirmDialog, ARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
 import { OutstandingPaymentsDonut } from "@/components/campaign/OutstandingPaymentsDonut";
+import { CreatorAvatar } from '@/components/creators/CreatorChip';
 
 // ─── Shared constants ─────────────────────────────────────────────────────────
 
@@ -526,10 +526,12 @@ function OverviewPanel({ creators, userNames, isActive, uid }: OverviewPanelProp
                     <span className="text-xs px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-300 font-medium">
                       {TYPE_LABELS[entry.type]}
                     </span>
-                    <Avatar className="size-4 shrink-0">
-                      <AvatarImage src={creatorPhotoMap[entry.creatorID]} />
-                      <AvatarFallback className="text-[8px]">{(creatorMap[entry.creatorID] ?? entry.creatorID).charAt(0)}</AvatarFallback>
-                    </Avatar>
+                    <CreatorAvatar
+                      creatorId={entry.creatorID}
+                      name={creatorMap[entry.creatorID] ?? entry.creatorID}
+                      photoURL={creatorPhotoMap[entry.creatorID]}
+                      className="size-4 text-[8px]"
+                    />
                     <span className="text-xs text-zinc-500">{creatorMap[entry.creatorID] ?? entry.creatorID}</span>
                   </div>
                   <p className="text-sm text-zinc-200 truncate">{entry.fanName}</p>

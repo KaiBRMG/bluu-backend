@@ -1,6 +1,7 @@
 'use client';
 
 import type { LocalSessionBuffer, SessionEvent } from '@/types/firestore';
+import { safeTimezone } from './utils/timezone';
 export { parseBuffer } from '@/lib/parseBuffer';
 
 // ─── IndexedDB helpers ───────────────────────────────────────────────
@@ -80,7 +81,7 @@ async function saveSessionIndex(db: IDBDatabase, index: SessionIndexEntry[]): Pr
  */
 function dateStringInTZ(ms: number, timezone: string): string {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
+    timeZone: safeTimezone(timezone),
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

@@ -12,6 +12,7 @@ import {
 } from '@/lib/services/shiftService';
 import { adminDb } from '@/lib/firebase-admin';
 import type { DecodedIdToken } from 'firebase-admin/auth';
+import { normaliseCreatorIds } from '@/lib/utils/shiftCreators';
 import type { ShiftDocument } from '@/types/firestore';
 
 // ─── PUT /api/shifts/[shiftId] ───────────────────────────────────────
@@ -42,7 +43,23 @@ export const PUT = withAuth(async (
       // Recurrence scope modifiers
       saveMode,       // 'single' | 'future' — for recurring edits
       overrideDate,   // ISO string — required when saveMode is 'single' or 'future'
+      creatorIds,     // creator accounts this shift covers — sets the wage tier
     } = body;
+
+    // Validated against the live roster before any branch below writes it: the
+    // assignment's *count* is what pays the agent, so an unresolvable id must
+    // fail the request rather than quietly becoming a wage tier.
+    let assignedCreatorIds: string[] | undefined;
+    if ('creatorIds' in body) {
+      const assigned = await normaliseCreatorIds(creatorIds);
+      if (assigned.invalid.length > 0) {
+        return NextResponse.json(
+          { error: `Unknown creator${assigned.invalid.length === 1 ? '' : 's'}: ${assigned.invalid.join(', ')}` },
+          { status: 400 },
+        );
+      }
+      assignedCreatorIds = assigned.creatorIds;
+    }
 
     const startMs = startTime ? new Date(startTime).getTime() : null;
     const endMs   = endTime   ? new Date(endTime).getTime()   : null;
@@ -77,6 +94,10 @@ export const PUT = withAuth(async (
           userTimezone:   userTimezone   ?? existing.userTimezone,
           createdBy:      token.uid,
           recurrence:     null,
+          creatorIds:     assignedCreatorIds ?? existing.creatorIds ?? [],
+          isOvertime:     existing.isOvertime ?? false,
+          coverageOfferId: existing.coverageOfferId ?? null,
+          paysWage:       existing.paysWage ?? true,
         },
       );
     } else if (existing.isRecurring && saveMode === 'future') {
@@ -99,6 +120,10 @@ export const PUT = withAuth(async (
         userTimezone:   userTimezone   ?? existing.userTimezone,
         createdBy:      token.uid,
         recurrence:     recurrence !== undefined ? recurrence : existing.recurrence,
+        creatorIds:     assignedCreatorIds ?? existing.creatorIds ?? [],
+        isOvertime:     existing.isOvertime ?? false,
+        coverageOfferId: existing.coverageOfferId ?? null,
+        paysWage:       existing.paysWage ?? true,
       });
     } else {
       // Plain update (non-recurring, or updating the whole series)
@@ -110,6 +135,7 @@ export const PUT = withAuth(async (
         ...(wallClockEnd   !== undefined && { wallClockEnd }),
         ...(userTimezone   !== undefined && { userTimezone }),
         ...('recurrence' in body        && { recurrence: body.recurrence }),
+        ...(assignedCreatorIds !== undefined && { creatorIds: assignedCreatorIds }),
       });
     }
 

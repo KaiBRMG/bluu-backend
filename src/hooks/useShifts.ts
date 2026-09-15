@@ -27,6 +27,11 @@ export interface CreateShiftPayload {
   wallClockEnd: string;     // "HH:mm"
   userTimezone: string;
   recurrence: object | null;
+  /**
+   * Creator accounts this shift covers. The *count* sets the agent's hourly
+   * wage tier, so the server validates every id against the live roster.
+   */
+  creatorIds?: string[];
 }
 
 export interface UpdateShiftPayload extends Partial<CreateShiftPayload> {

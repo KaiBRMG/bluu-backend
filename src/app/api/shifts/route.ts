@@ -6,29 +6,11 @@ import {
   getShiftsByUserAndRange,
 } from '@/lib/services/shiftService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-import type { ShiftDocument } from '@/types/firestore';
-
-// ─── Serialise ────────────────────────────────────────────────────────
-
-function serialiseShift(s: ShiftDocument) {
-  return {
-    shiftId:        s.shiftId,
-    userId:         s.userId,
-    startTime:      s.startTime.toDate().toISOString(),
-    endTime:        s.endTime.toDate().toISOString(),
-    wallClockStart: s.wallClockStart,
-    wallClockEnd:   s.wallClockEnd,
-    userTimezone:   s.userTimezone,
-    isRecurring:    s.isRecurring,
-    recurrence:     s.recurrence ? {
-      ...s.recurrence,
-      endDate: s.recurrence.endDate ? s.recurrence.endDate.toDate().toISOString() : null,
-    } : null,
-    seriesId:       s.seriesId,
-    overrideDate:   s.overrideDate ? s.overrideDate.toDate().toISOString() : null,
-    isDeleted:      s.isDeleted,
-  };
-}
+// The shared serialiser, not a local copy: it is what carries `creatorIds`
+// through to the salary engine, and a second hand-rolled one here is exactly how
+// the assignment would silently stop reaching the client.
+import { serialiseShift } from '@/lib/utils/shiftSerialise';
+import { normaliseCreatorIds } from '@/lib/utils/shiftCreators';
 
 // ─── GET /api/shifts ─────────────────────────────────────────────────
 // ?userId=uid&start=ISO&end=ISO
@@ -78,7 +60,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     }
 
     const body = await request.json();
-    const { userId, startTime, endTime, wallClockStart, wallClockEnd, userTimezone, recurrence } = body;
+    const { userId, startTime, endTime, wallClockStart, wallClockEnd, userTimezone, recurrence, creatorIds } = body;
 
     if (!userId || !startTime || !endTime || !wallClockStart || !wallClockEnd || !userTimezone) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -100,6 +82,17 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'User does not have time tracking enabled' }, { status: 400 });
     }
 
+    // Creator assignment is validated against the live roster rather than
+    // trusted: an id that no longer resolves would set a wage tier from an
+    // account nobody works, and the count is what pays the agent.
+    const assigned = await normaliseCreatorIds(creatorIds);
+    if (assigned.invalid.length > 0) {
+      return NextResponse.json(
+        { error: `Unknown creator${assigned.invalid.length === 1 ? '' : 's'}: ${assigned.invalid.join(', ')}` },
+        { status: 400 },
+      );
+    }
+
     const shiftId = await createShift({
       userId,
       startTime: startMs,
@@ -109,6 +102,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       userTimezone,
       createdBy: token.uid,
       recurrence: recurrence ?? null,
+      creatorIds: assigned.creatorIds,
     });
 
     return NextResponse.json({ shiftId });

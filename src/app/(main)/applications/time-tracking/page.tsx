@@ -66,22 +66,6 @@ function TimesheetSkeleton() {
   );
 }
 
-function ShiftsSkeleton() {
-  return (
-    <PanelSkeleton>
-      <div className="flex items-center justify-between mb-5">
-        <Skeleton className="h-6 w-56" />
-        <Skeleton className="h-8 w-24 rounded-md" />
-      </div>
-      <div className="space-y-3">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-14 w-full rounded-md" />
-        ))}
-      </div>
-    </PanelSkeleton>
-  );
-}
-
 function ScreenshotsSkeleton() {
   return (
     <PanelSkeleton>
@@ -112,11 +96,6 @@ const TodayTimeline = memo(
 const UserTimesheet = memo(
   dynamic(() => import("@/components/timesheet/UserTimesheet"), {
     loading: TimesheetSkeleton,
-  })
-);
-const UserUpcomingShifts = memo(
-  dynamic(() => import("@/components/shifts/UserUpcomingShifts"), {
-    loading: ShiftsSkeleton,
   })
 );
 const UserScreenshots = memo(
@@ -356,13 +335,11 @@ export default function TimeTrackingPage() {
             <TabsList>
               <TabsTrigger value="today">Today&apos;s Timesheet</TabsTrigger>
               <TabsTrigger value="previous">Previous Timesheets</TabsTrigger>
-              <TabsTrigger value="upcoming">Upcoming Shifts</TabsTrigger>
               <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
             </TabsList>
           </div>
           <TabsContent value="today" className="mt-4"><TodayTimeline /></TabsContent>
           <TabsContent value="previous" className="mt-4"><UserTimesheet /></TabsContent>
-          <TabsContent value="upcoming" className="mt-4"><UserUpcomingShifts /></TabsContent>
           <TabsContent value="screenshots" className="mt-4"><UserScreenshots /></TabsContent>
         </Tabs>
       </div>

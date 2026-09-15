@@ -10,12 +10,14 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 // ─── Color palette (matches STATE_CONFIG in time-tracking page) ───────
 
 import { getShiftColor, hexToRgb } from '@/lib/utils/avatar';
+import { safeTimezone } from '@/lib/utils/timezone';
+import { CreatorChipList } from '@/components/creators/CreatorChip';
 
 // ─── Format helpers ──────────────────────────────────────────────────
 
 function formatLocalTime(ms: number, tz: string): string {
   return new Date(ms).toLocaleTimeString('en-GB', {
-    timeZone: tz,
+    timeZone: safeTimezone(tz),
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
@@ -159,6 +161,35 @@ export default function ShiftCard({ shift, user, viewerTimezone, onClick, onLeav
       <div style={{ fontWeight: 400, fontSize: '10px', color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {startLabel} – {endLabel}
       </div>
+
+      {/* Creator accounts. The roster's whole reason for carrying them: this is
+          the number that sets the agent's hourly rate, so it belongs on the card
+          an admin reads the week from — not only inside the edit modal.
+          Overtime is marked because it pays differently (see caCoverageService). */}
+      {(shift.creatorIds?.length ?? 0) > 0 && (
+        <div style={{ marginTop: '3px', display: 'flex', flexWrap: 'wrap', gap: '2px' }}>
+          {shift.isOvertime && (
+            <span
+              style={{
+                fontSize: '9px',
+                fontWeight: 600,
+                color: shift.paysWage === false ? 'var(--foreground-secondary)' : '#fb923c',
+                alignSelf: 'center',
+              }}
+              title={
+                shift.paysWage === false
+                  ? 'Covering inside an existing shift — sales only, no extra hours'
+                  : 'Overtime — paid hours plus the sales'
+              }
+            >
+              OT
+            </span>
+          )}
+          {/* Avatars only — a roster cell in a seven-day grid has no room for
+              names, and the admin is scanning for "who is on Adam today". */}
+          <CreatorChipList creatorIds={shift.creatorIds!} max={4} size="xs" avatarOnly />
+        </div>
+      )}
 
       {/* Time worked — past shifts only */}
       {isPast && shift.timeWorkedSeconds !== null && (
