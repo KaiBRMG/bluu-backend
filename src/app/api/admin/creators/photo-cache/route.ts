@@ -1,8 +1,8 @@
 /**
  * POST /api/admin/creators/photo-cache — normalise existing creator avatars.
  *
- * Brings photos uploaded before the current policy in line with it. Two things
- * are wrong with them, and this fixes both in one pass:
+ * Brings photos uploaded before the current policy in line with it. Three things
+ * are wrong with them, and this fixes all of them in one pass:
  *
  * 1. **Format.** They are whatever was uploaded — a multi-hundred-KB JPEG or PNG
  *    at full camera resolution, to be drawn in a 20px circle. Re-encoded to a
@@ -10,11 +10,15 @@
  * 2. **Cache header.** They were written with no `cacheControl`, so Firebase
  *    serves them `private, max-age=0` and the browser re-fetches every avatar on
  *    every page load.
+ * 3. **No inline thumbnail.** `photoThumb` did not exist when they were written,
+ *    so every avatar still costs a request to Firebase Storage. Derived from the
+ *    256px object and written onto the creator doc.
  *
  * Converting changes the stored path (`avatar.jpg` → `avatar.webp`) and mints a
  * new download token, so `photoURL` is rewritten in Firestore and the old object
- * is deleted. An avatar already in the right format only has its header touched
- * via `setMetadata`, which leaves the bytes, the token and the URL alone.
+ * is deleted. An avatar already in the right format is repaired **in place** —
+ * `setMetadata` for the header and a thumbnail derived from the existing object
+ * — which leaves the bytes, the token and the URL alone.
  *
  * **Run once.** Idempotent and safe to re-run; there is nothing to do the second
  * time. Deliberately not wired to a button — this is maintenance, and the
@@ -37,13 +41,14 @@ import {
   CREATOR_PHOTO_CACHE_CONTROL,
   CREATOR_PHOTO_CONTENT_TYPE,
   creatorPhotoPath,
+  encodeCreatorThumb,
   storeCreatorPhoto,
 } from '@/lib/services/creatorPhotoService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 interface Outcome {
   creator: string;
-  action: 'converted' | 'header-only' | 'skipped' | 'failed';
+  action: 'converted' | 'repaired' | 'skipped' | 'failed';
   detail?: string;
   beforeBytes?: number;
   afterBytes?: number;
@@ -58,7 +63,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     }
 
     const dryRun = new URL(request.url).searchParams.get('dryRun') === 'true';
-    const snap = await adminDb.collection('creators').select('photoStoragePath', 'stageName').get();
+    const snap = await adminDb.collection('creators').select('photoStoragePath', 'stageName', 'photoThumb').get();
     const bucket = adminStorage.bucket();
 
     // Sequential, not `Promise.all`: each conversion decodes a full-resolution
@@ -69,6 +74,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     for (const doc of snap.docs) {
       const name = (doc.data()?.stageName as string | undefined) ?? doc.id;
       const path = doc.data()?.photoStoragePath as string | undefined;
+      const hasThumb = typeof doc.data()?.photoThumb === 'string';
 
       if (!path) {
         outcomes.push({ creator: name, action: 'skipped', detail: 'no photo' });
@@ -88,16 +94,44 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         const isWebp = metadata.contentType === CREATOR_PHOTO_CONTENT_TYPE && path === creatorPhotoPath(doc.id);
         const headerOk = metadata.cacheControl === CREATOR_PHOTO_CACHE_CONTROL;
 
-        if (isWebp && headerOk) {
+        if (isWebp && headerOk && hasThumb) {
           outcomes.push({ creator: name, action: 'skipped', detail: 'already normalised', beforeBytes });
           continue;
         }
 
         if (isWebp) {
-          // Right format, wrong header. `setMetadata` leaves the bytes and the
-          // download token untouched, so the stored `photoURL` stays valid.
-          if (!dryRun) await file.setMetadata({ cacheControl: CREATOR_PHOTO_CACHE_CONTROL });
-          outcomes.push({ creator: name, action: 'header-only', beforeBytes, afterBytes: beforeBytes });
+          // Right format, but missing the header and/or the thumbnail. Both are
+          // repairable without touching the bytes or the download token, so the
+          // stored `photoURL` stays valid and no cache is invalidated.
+          const repairs: string[] = [];
+
+          if (!headerOk) {
+            if (!dryRun) await file.setMetadata({ cacheControl: CREATOR_PHOTO_CACHE_CONTROL });
+            repairs.push('cache header');
+          }
+
+          if (!hasThumb) {
+            if (!dryRun) {
+              // Derived from the stored 256px object, not the original upload —
+              // the original may be long gone, and re-cropping it could pick a
+              // different `position: 'attention'` window than the full image.
+              const [stored] = await file.download();
+              const photoThumb = await encodeCreatorThumb(stored);
+              await adminDb.collection('creators').doc(doc.id).update({
+                photoThumb,
+                updatedAt: FieldValue.serverTimestamp(),
+              });
+            }
+            repairs.push('thumbnail');
+          }
+
+          outcomes.push({
+            creator: name,
+            action: 'repaired',
+            detail: repairs.join(' + '),
+            beforeBytes,
+            afterBytes: beforeBytes,
+          });
           continue;
         }
 
@@ -112,6 +146,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         await adminDb.collection('creators').doc(doc.id).update({
           photoURL: stored.photoURL,
           photoStoragePath: stored.photoStoragePath,
+          photoThumb: stored.photoThumb,
           updatedAt: FieldValue.serverTimestamp(),
         });
 
@@ -141,7 +176,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       dryRun,
       outcomes,
       summary:
-        `${count('converted')} converted, ${count('header-only')} header-only, ` +
+        `${count('converted')} converted, ${count('repaired')} repaired, ` +
         `${count('skipped')} skipped, ${count('failed')} failed` +
         (saved > 0 ? ` · ${(saved / 1024).toFixed(0)}KB saved` : ''),
     });

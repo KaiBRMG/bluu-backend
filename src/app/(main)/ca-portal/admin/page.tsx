@@ -13,6 +13,7 @@ import { useDisputesData, type AdminFilters } from '@/hooks/useDisputesData';
 import type { DisputeDocument, ApprovalStatus } from '@/types/firestore';
 import { DeletedUser } from '@/components/DeletedUser';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
+import { currentMonthKey } from '@/lib/salary/salaryDate';
 
 // ─── Column set ───────────────────────────────────────────────────────
 
@@ -183,7 +184,7 @@ function AdminPanel({
 
 // ─── Lazily-loaded tab panels ─────────────────────────────────────────
 // Each panel is a substantial tree with its own data fetching, and an admin
-// opens one of them at a time. Loading all four on every visit to this page
+// opens one of them at a time. Loading all five on every visit to this page
 // would be the single heaviest route in the portal.
 
 function PanelSkeleton() {
@@ -198,6 +199,9 @@ function PanelSkeleton() {
   );
 }
 
+const AdminOverview = dynamic(() => import('@/components/ca-admin/AdminOverview'), {
+  loading: () => <PanelSkeleton />,
+});
 const AdminSalaries = dynamic(() => import('@/components/ca-admin/AdminSalaries'), {
   loading: () => <PanelSkeleton />,
 });
@@ -220,11 +224,19 @@ const AdminRates = dynamic(() => import('@/components/ca-admin/AdminRates'), {
  * creator assignment stay there because that page already owns the calendar, the
  * modal and recurrence. Money and the absence pipeline live here.
  *
- * Payroll is the default tab. It is the one with a deadline on it.
+ * Overview is the default tab: the month read whole — revenue by creator, what
+ * payroll cost against it, and anything that needs looking at — before Payroll
+ * asks what to pay any one agent. Payroll is the tab with the deadline on it,
+ * and it is one click away.
+ *
+ * The **month is owned here**, shared by Overview and Payroll, because those two
+ * are read together and a month that only moved on one of them is how a figure
+ * gets quoted from the wrong one (ca-salary.md §10).
  */
 export default function CaAdminPage() {
   const { setAdminApproval } = useDisputesData();
   const [refreshKey, setRefreshKey] = useState(0);
+  const [month, setMonth] = useState(currentMonthKey());
 
   const { timezone: userTimezone } = useViewerTimezone();
 
@@ -246,11 +258,12 @@ export default function CaAdminPage() {
         </p>
 
         <div className="mt-6 rounded-lg border border-border-subtle bg-content-bg">
-          <Tabs defaultValue="salaries">
+          <Tabs defaultValue="overview">
             {/* pb-1.5: overflow-x:auto forces overflow-y to auto, so reserve room
                 for the trigger focus ring instead of letting it clip. */}
             <div className="overflow-x-auto px-6 pb-1.5 pt-4">
               <TabsList>
+                <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="salaries">Salaries</TabsTrigger>
                 <TabsTrigger value="sales">Sales data</TabsTrigger>
                 <TabsTrigger value="coverage">Coverage</TabsTrigger>
@@ -260,7 +273,12 @@ export default function CaAdminPage() {
             </div>
 
             <div className="min-h-[600px] p-6">
-              <TabsContent value="salaries"><AdminSalaries /></TabsContent>
+              <TabsContent value="overview">
+                <AdminOverview month={month} onMonthChange={setMonth} />
+              </TabsContent>
+              <TabsContent value="salaries">
+                <AdminSalaries month={month} onMonthChange={setMonth} />
+              </TabsContent>
               <TabsContent value="sales"><AdminSalesData /></TabsContent>
               <TabsContent value="coverage"><AdminCoverage /></TabsContent>
               <TabsContent value="rates"><AdminRates /></TabsContent>

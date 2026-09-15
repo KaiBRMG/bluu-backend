@@ -610,11 +610,17 @@ export async function buildSalaryMonth(
  * Three collection queries total (sales, overrides, shifts) rather than three
  * per agent, then the pure engine per agent. This is what the admin roster and
  * the payroll summary read.
+ *
+ * `options.salesByUser` lets a caller that has *already* read the month's sales
+ * hand them in rather than paying for the same query twice. The Overview tab
+ * needs the raw rows to build its agent × creator matrix and the totals to
+ * build its header, and those are the same sales — reading them once is rule 9
+ * applied to the most expensive query in the subsystem.
  */
 export async function buildSalaryMonthForUsers(
   userIds: string[],
   month: SalaryMonthKey,
-  options: { now?: number } = {},
+  options: { now?: number; salesByUser?: Map<string, SalarySale[]> } = {},
 ): Promise<Map<string, SalaryMonthResult>> {
   const out = new Map<string, SalaryMonthResult>();
   if (userIds.length === 0) return out;
@@ -625,7 +631,7 @@ export async function buildSalaryMonthForUsers(
   const LEDGER_LOOKBACK_MS = 8 * 60 * 60 * 1000;
 
   const [salesByUser, overridesByUser, shiftDocs, ledgerByUser, activeSessions, finalized] = await Promise.all([
-    getSalesForMonthByUser(month),
+    options.salesByUser ?? getSalesForMonthByUser(month),
     getOverridesForMonthByUser(month),
     getShiftsByRange(windowStart - LEDGER_LOOKBACK_MS, windowEnd),
     getLedgerEntriesForUsers(userIds, windowStart - LEDGER_LOOKBACK_MS, windowEnd),

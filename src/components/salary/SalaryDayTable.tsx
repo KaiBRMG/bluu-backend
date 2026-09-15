@@ -72,8 +72,20 @@ export function SalaryDayTable({
   const canEdit = editable && !locked && !!userId;
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-white/[0.07]">
-      <table className="w-full min-w-[820px] border-collapse text-sm">
+    // Focusable and named. A horizontally scrolling region that only responds to
+    // a pointer is a WCAG 2.1.1 failure, and it bites hardest here: at the 1024px
+    // Electron window floor the content column is ~704px, so the rightmost column
+    // — Salary, the number this table exists to show — started off-screen. The
+    // minimum width came down from 820px and the numeric columns gave up a little
+    // horizontal padding, which closes most of that gap; the rest is now
+    // reachable from the keyboard.
+    <div
+      tabIndex={0}
+      role="region"
+      aria-label="Daily salary breakdown, scrollable"
+      className="overflow-x-auto rounded-lg border border-white/[0.07] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50"
+    >
+      <table className="w-full min-w-[720px] border-collapse text-sm">
         <caption className="sr-only">
           Daily salary breakdown. Each row is one calendar day; figures marked as edited were set by an administrator.
         </caption>
@@ -84,8 +96,8 @@ export function SalaryDayTable({
                 key={column.key}
                 scope="col"
                 className={cn(
-                  'whitespace-nowrap px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400',
-                  column.key === 'day' ? 'text-left' : 'text-right',
+                  'whitespace-nowrap py-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400',
+                  column.key === 'day' ? 'px-3 text-left' : 'px-2.5 text-right',
                 )}
               >
                 {column.hint ? (
@@ -96,7 +108,7 @@ export function SalaryDayTable({
                           mouse only. */}
                       <span
                         tabIndex={0}
-                        className="cursor-help rounded-sm border-b border-dotted border-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]"
+                        className="cursor-help rounded-sm border-b border-dotted border-white/20 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                       >
                         {column.label}
                       </span>
@@ -132,17 +144,17 @@ export function SalaryDayTable({
             <th scope="row" className="px-3 py-3 text-left text-xs uppercase tracking-wide text-zinc-400">
               Total
             </th>
-            <td className={cn('px-3 py-3 text-right tabular-nums', signedMoneyClass(month.totals.grossEarnings))}>
+            <td className={cn('px-2.5 py-3 text-right tabular-nums', signedMoneyClass(month.totals.grossEarnings))}>
               {formatUsd(month.totals.grossEarnings)}
             </td>
-            <td className="px-3 py-3 text-right tabular-nums">{formatUsd(month.totals.netEarnings)}</td>
-            <td className="px-3 py-3 text-right text-zinc-400">—</td>
-            <td className="px-3 py-3 text-right tabular-nums">{formatUsd(month.totals.commission)}</td>
-            <td className="px-3 py-3 text-right tabular-nums">{formatHours(month.totals.hours)}</td>
-            <td className="px-3 py-3 text-right text-zinc-400">—</td>
-            <td className="px-3 py-3 text-right text-zinc-400">—</td>
-            <td className="px-3 py-3 text-right tabular-nums">{formatUsd(month.totals.wage)}</td>
-            <td className="px-3 py-3 text-right tabular-nums">{formatUsd(month.totals.salary)}</td>
+            <td className="px-2.5 py-3 text-right tabular-nums">{formatUsd(month.totals.netEarnings)}</td>
+            <td className="px-2.5 py-3 text-right text-zinc-400">—</td>
+            <td className="px-2.5 py-3 text-right tabular-nums">{formatUsd(month.totals.commission)}</td>
+            <td className="px-2.5 py-3 text-right tabular-nums">{formatHours(month.totals.hours)}</td>
+            <td className="px-2.5 py-3 text-right text-zinc-400">—</td>
+            <td className="px-2.5 py-3 text-right text-zinc-400">—</td>
+            <td className="px-2.5 py-3 text-right tabular-nums">{formatUsd(month.totals.wage)}</td>
+            <td className="px-2.5 py-3 text-right tabular-nums">{formatUsd(month.totals.salary)}</td>
           </tr>
         </tfoot>
       </table>
@@ -191,7 +203,7 @@ function DayRow({
 
     if (!canEdit || !field || !userId) {
       return (
-        <td className="whitespace-nowrap px-3 py-2 text-right">
+        <td className="whitespace-nowrap px-2.5 py-2 text-right">
           {override ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -200,10 +212,10 @@ function DayRow({
                     a keyboard cannot perform. The tooltip is now reinforcement. */}
                 <span
                   tabIndex={0}
-                  className="inline-flex cursor-help items-center gap-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]"
+                  className="inline-flex cursor-help items-center gap-1 rounded-sm focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
                   {content}
-                  <Pencil className="size-3 text-[#3b82f6]" aria-hidden />
+                  <Pencil className="size-3 text-action-blue" aria-hidden />
                   <span className="sr-only">
                     <OverrideExplanation override={override} />
                   </span>
@@ -244,14 +256,14 @@ function DayRow({
   };
 
   return (
-    <tr className={cn(isEmpty && 'text-zinc-400', isToday && 'bg-[#3b82f6]/[0.06]')}>
+    <tr className={cn(isEmpty && 'text-zinc-400', isToday && 'bg-action-blue/[0.06]')}>
       <th scope="row" className="whitespace-nowrap px-3 py-2 text-left font-normal">
         <span className="inline-flex items-center gap-1.5">
           {onInspectDay && day.saleCount > 0 ? (
             <button
               type="button"
               onClick={() => onInspectDay(day.day)}
-              className="rounded-sm text-left transition-colors duration-[120ms] hover:text-white hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#3b82f6]"
+              className="rounded-sm text-left transition-colors duration-[120ms] hover:text-white hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50"
             >
               {formatDayLabelWithWeekday(day.day)}
             </button>
@@ -267,7 +279,7 @@ function DayRow({
               <TooltipTrigger asChild>
                 <span
                   tabIndex={0}
-                  className="inline-flex shrink-0 cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]"
+                  className="inline-flex shrink-0 cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
                   <AlertTriangle className="size-3.5 text-orange-400" aria-hidden />
                   <span className="sr-only">{MISSING_SHIFT_EXPLANATION}</span>
@@ -284,7 +296,7 @@ function DayRow({
               <TooltipTrigger asChild>
                 <span
                   tabIndex={0}
-                  className="inline-flex shrink-0 cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]"
+                  className="inline-flex shrink-0 cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
                   <StickyNote className="size-3.5 text-zinc-400" aria-hidden />
                   <span className="sr-only">{day.note}</span>
@@ -298,7 +310,7 @@ function DayRow({
 
       {cell('gross', 'grossEarnings', day.grossEarnings === 0 ? '—' : formatUsd(day.grossEarnings), day.grossEarnings, signedMoneyClass(day.grossEarnings))}
 
-      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+      <td className="whitespace-nowrap px-2.5 py-2 text-right tabular-nums">
         {day.netEarnings === 0 ? '—' : formatUsd(day.netEarnings)}
       </td>
 

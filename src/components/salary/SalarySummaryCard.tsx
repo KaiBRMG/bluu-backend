@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { cn } from '@/lib/utils';
 import { ArrowRight, Lock, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -9,6 +10,7 @@ import { useSalaryMonth } from '@/hooks/useSalaryMonth';
 import { useBootPhase } from '@/contexts/BootLoaderContext';
 import { formatHours, formatUsd } from '@/lib/salary/salaryFormat';
 import { currentMonthKey, formatMonthLabel } from '@/lib/salary/salaryDate';
+import { SURFACE, SURFACE_INTERACTIVE } from '@/lib/surfaces';
 
 /**
  * The salary section on the chat-agent dashboard.
@@ -37,18 +39,25 @@ export function SalarySummaryCard({ month: monthProp }: { month?: string } = {})
 
   if (loading) {
     return (
-      <section className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-5">
+      <section className={cn('rounded-xl p-5', SURFACE)}>
+        {/* Shaped to the real card, block for block. Stepping the month puts
+            every card on this page back into its skeleton at once, and a
+            skeleton shorter than what replaces it makes the whole page jump and
+            drags the scroll position with it. */}
         <Skeleton className="h-4 w-40 rounded" />
-        <Skeleton className="mt-3 h-9 w-44 rounded" />
-        <Skeleton className="mt-5 h-2 w-full rounded-full" />
-        <Skeleton className="mt-3 h-4 w-64 rounded" />
+        <Skeleton className="mt-2 h-3 w-52 rounded" />
+        <Skeleton className="mt-3 h-8 w-44 rounded" />
+        <Skeleton className="mt-4 h-4 w-full rounded" />
+        <Skeleton className="mt-5 h-3 w-24 rounded" />
+        <Skeleton className="mt-1.5 h-2 w-full rounded-full" />
+        <Skeleton className="mt-2.5 h-4 w-64 rounded" />
       </section>
     );
   }
 
   if (error) {
     return (
-      <section className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-5">
+      <section className={cn('rounded-xl p-5', SURFACE)}>
         <h2 className="text-sm font-semibold">Salary</h2>
         <p className="mt-2 text-sm text-red-400">{error}</p>
         {/* A sentence with no verb is not a recovery. The Electron window has no
@@ -70,7 +79,12 @@ export function SalarySummaryCard({ month: monthProp }: { month?: string } = {})
   return (
     <Link
       href={`/ca-portal/dashboard/salary?month=${month}`}
-      className="group block rounded-xl border border-white/[0.07] bg-white/[0.025] p-5 transition-colors duration-[120ms] hover:bg-white/[0.055] active:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#3b82f6]"
+      // Without this the link's accessible name is computed from everything
+      // inside it — heading, status line, the figure, four term/value pairs and
+      // the ladder's own sentence — and announces as one forty-word link. The
+      // card content stays readable on its own; only the link name is named.
+      aria-label={`View salary details for ${formatMonthLabel(month)}`}
+      className={cn('group block rounded-xl p-5', SURFACE, SURFACE_INTERACTIVE)}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">

@@ -14,6 +14,7 @@ import DeploymentRefresher from "@/components/DeploymentRefresher";
 import NavigationWatchdog from "@/components/NavigationWatchdog";
 import NavigationProgress from "@/components/NavigationProgress";
 import DeepLinkRouter from "@/components/DeepLinkRouter";
+import CreatorRosterPrefetch from "@/components/CreatorRosterPrefetch";
 import LazyProviders from "@/components/LazyProviders";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
@@ -48,6 +49,14 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
               is nothing to show before the first navigation anyway. */}
           <Suspense fallback={null}>
             <NavigationProgress />
+          </Suspense>
+          {/* Outside LazyProviders so the roster request leaves as early as
+              possible — it is a head start on every creator avatar in the app,
+              and it needs no context but auth. The Suspense boundary is for the
+              same reason as NavigationProgress's: it reads an external store,
+              which Cache Components treats as uncached dynamic data. */}
+          <Suspense fallback={null}>
+            <CreatorRosterPrefetch />
           </Suspense>
           <LazyProviders>
             <BootLoaderProvider>

@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Loader2Icon, RotateCcw, Search, Trash2, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { SURFACE } from '@/lib/surfaces';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -20,6 +21,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/components/AuthProvider';
+import { getCache, setCache } from '@/lib/queryCache';
 import { formatSaleDateTime, formatUsd, pluralise, signedMoneyClass } from '@/lib/salary/salaryFormat';
 import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
 import type { SalarySale } from '@/lib/salary/salaryTypes';
@@ -36,6 +38,17 @@ import type { SalarySale } from '@/lib/salary/salaryTypes';
  * Reversals are shown, not hidden, in status red with a negative amount. A
  * refund the agent cannot see is a figure they cannot reconcile.
  */
+
+/** Matches `useSalaryMonth`: an agent who has just been told a figure changed
+ *  expects the next screen to agree with them, so stale sales are worse than a
+ *  second request. Long enough to cover flicking between the three tabs, which
+ *  Radix unmounts and so re-fetched in full every single time. */
+const CACHE_TTL_MS = 60 * 1000;
+
+/** Rows rendered before the "show the rest" step. A busy month runs to hundreds
+ *  of sales, each one mounting its own tooltip; nobody reads past the first
+ *  screenful without filtering, and the filters are right above the table. */
+const INITIAL_ROWS = 150;
 
 interface SalesReportResponse {
   sales: SalarySale[];
@@ -74,8 +87,20 @@ export function SalesReport({
   const [creator, setCreator] = useState('all');
   const [type, setType] = useState('all');
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     if (!user) return;
+
+    const key = `bluu_salary_sales_v1:${user.uid}:${userId ?? user.uid}:${month}:${day ?? 'month'}`;
+    if (!force) {
+      const cached = getCache<SalesReportResponse>(key, CACHE_TTL_MS);
+      if (cached) {
+        setData(cached);
+        setLoading(false);
+        setError(null);
+        return;
+      }
+    }
+
     setLoading(true);
     setError(null);
 
@@ -100,7 +125,9 @@ export function SalesReport({
         throw new Error(message);
       }
 
-      setData((await res.json()) as SalesReportResponse);
+      const body = (await res.json()) as SalesReportResponse;
+      setCache(key, body);
+      setData(body);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load sales');
     } finally {
@@ -112,9 +139,15 @@ export function SalesReport({
     void load();
   }, [load]);
 
+  // The input stays at whatever the user typed; the (potentially several
+  // hundred row) table re-filters at React's convenience. Cheaper and more
+  // honest than a timer, which would have to guess at a delay.
+  const deferredQuery = useDeferredValue(query);
+  const [showAllRows, setShowAllRows] = useState(false);
+
   const filtered = useMemo(() => {
     if (!data) return [];
-    const needle = query.trim().toLowerCase();
+    const needle = deferredQuery.trim().toLowerCase();
     return data.sales.filter(sale => {
       if (creator !== 'all' && sale.creatorName !== creator) return false;
       if (type !== 'all' && sale.type !== type) return false;
@@ -125,10 +158,12 @@ export function SalesReport({
         sale.creatorName.toLowerCase().includes(needle)
       );
     });
-  }, [data, query, creator, type]);
+  }, [data, deferredQuery, creator, type]);
 
-  const filtersActive = query.trim() !== '' || creator !== 'all' || type !== 'all';
+  const filtersActive = deferredQuery.trim() !== '' || creator !== 'all' || type !== 'all';
   const filteredGross = filtered.reduce((sum, sale) => sum + sale.signedGross, 0);
+  const visible = showAllRows ? filtered : filtered.slice(0, INITIAL_ROWS);
+  const hiddenRows = filtered.length - visible.length;
 
   if (loading) {
     return (
@@ -143,7 +178,7 @@ export function SalesReport({
     return (
       <div className="space-y-3">
         <p className="text-sm text-red-400">{error}</p>
-        <Button size="sm" variant="outline" onClick={() => void load()}>
+        <Button size="sm" variant="outline" onClick={() => void load(true)}>
           <RotateCcw className="size-3.5" aria-hidden />
           Try again
         </Button>
@@ -219,7 +254,14 @@ export function SalesReport({
         </Select>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-white/[0.07]">
+      {/* Focusable and named: a region that scrolls only under a pointer is a
+          WCAG 2.1.1 failure. */}
+      <div
+        tabIndex={0}
+        role="region"
+        aria-label="Individual sales, scrollable"
+        className="overflow-x-auto rounded-lg border border-white/[0.07] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50"
+      >
         <table className="w-full min-w-[640px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-white/[0.07]">
@@ -240,7 +282,7 @@ export function SalesReport({
           </thead>
 
           <tbody className="divide-y divide-white/[0.045]">
-            {filtered.map(sale => (
+            {visible.map(sale => (
               <tr key={sale.saleId} className={cn(sale.status === 'reverse' && 'bg-red-500/[0.04]')}>
                 <td className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-400">
                   {formatSaleDateTime(sale.occurredAt, timezone)}
@@ -252,7 +294,7 @@ export function SalesReport({
                       <TooltipTrigger asChild>
                         <span
                           tabIndex={0}
-                          className="block truncate rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]"
+                          className="block truncate rounded-sm focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                         >
                           {sale.fanName}
                         </span>
@@ -276,7 +318,7 @@ export function SalesReport({
                 </td>
                 {allowDelete && (
                   <td className="px-1 py-1 text-right">
-                    <DeleteSaleButton saleId={sale.saleId} onDeleted={() => { void load(); onDeleted?.(); }} />
+                    <DeleteSaleButton saleId={sale.saleId} onDeleted={() => { void load(true); onDeleted?.(); }} />
                   </td>
                 )}
               </tr>
@@ -284,6 +326,16 @@ export function SalesReport({
           </tbody>
         </table>
       </div>
+
+      {hiddenRows > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowAllRows(true)}
+          className="rounded-sm text-sm text-foreground underline underline-offset-2 transition-colors duration-[120ms] hover:text-white focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          Show the remaining {pluralise(hiddenRows, 'sale')}
+        </button>
+      )}
 
       {/* The foot states the truth it has — the filtered total when filtered,
           the real one otherwise. A count with no way out of an empty filter is a
@@ -298,7 +350,7 @@ export function SalesReport({
               setCreator('all');
               setType('all');
             }}
-            className="rounded-sm text-foreground underline underline-offset-2 transition-colors duration-[120ms] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]"
+            className="rounded-sm text-foreground underline underline-offset-2 transition-colors duration-[120ms] hover:text-white focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             Clear them to see all {pluralise(data.sales.length, 'sale')}.
           </button>
@@ -317,7 +369,7 @@ export function SalesReport({
                   setCreator('all');
                   setType('all');
                 }}
-                className="rounded-sm text-foreground underline underline-offset-2 transition-colors duration-[120ms] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]"
+                className="rounded-sm text-foreground underline underline-offset-2 transition-colors duration-[120ms] hover:text-white focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
               >
                 Clear filters
               </button>
@@ -339,7 +391,7 @@ export function SalesReport({
 
 function DayBanner({ day, onClear }: { day: string; onClear?: () => void }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.07] bg-white/[0.025] px-3 py-2">
+    <div className={cn('flex items-center justify-between gap-3 rounded-lg px-3 py-2', SURFACE)}>
       <p className="text-sm">
         Sales on <span className="font-medium">{formatDayLabelWithWeekday(day)}</span>
       </p>
@@ -357,15 +409,15 @@ function BreakdownList({ title, rows }: { title: string; rows: Array<{ name: str
   const max = Math.max(...rows.map(r => Math.abs(r.gross)), 1);
 
   return (
-    <div className="rounded-lg border border-white/[0.07] bg-white/[0.025] p-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">{title}</h3>
+    <div className={cn('rounded-lg p-3', SURFACE)}>
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">{title}</h2>
       <ul className="mt-2.5 space-y-1.5">
         {rows.slice(0, 6).map(row => (
           <li key={row.name} className="relative">
             {/* The bar sits behind the row rather than beside it, so the label
                 keeps its full width and the magnitude still reads at a glance. */}
             <span
-              className="absolute inset-y-0 left-0 rounded-sm bg-[#3b82f6]/[0.12]"
+              className="absolute inset-y-0 left-0 rounded-sm bg-action-blue/[0.12]"
               style={{ width: `${(Math.abs(row.gross) / max) * 100}%` }}
               aria-hidden
             />

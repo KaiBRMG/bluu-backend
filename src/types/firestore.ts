@@ -771,6 +771,13 @@ export interface CreatorFullDocument {
   displayName: string;      // same as stageName
   photoURL: string | null;
   photoStoragePath: string | null;
+  /**
+   * 64px WebP as a `data:` URI, derived from the stored photo by
+   * `creatorPhotoService`. Inlined on the doc so the roster endpoint can deliver
+   * every avatar in one response — see rule 9's indexing note: this field is
+   * exempted in `firestore.indexes.json` because nothing queries it.
+   */
+  photoThumb: string | null;
   OFID: string;             // '@handle' format
   isActive: boolean;
   isArchived: boolean;

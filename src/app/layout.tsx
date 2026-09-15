@@ -34,6 +34,17 @@ export default function RootLayout({
           crossOrigin="anonymous"
         />
         <link rel="stylesheet" href={googleSansHref} />
+        {/* Creator avatars normally render from an inlined `data:` thumbnail and
+            touch no network at all. This covers the fallback path — a creator
+            whose thumbnail has not been backfilled yet — where the first avatar
+            would otherwise pay DNS + TLS to a host nothing else in the app
+            talks to. `crossOrigin` because the images are fetched anonymously;
+            omitting it opens a connection the image load cannot reuse. */}
+        <link
+          rel="preconnect"
+          href="https://firebasestorage.googleapis.com"
+          crossOrigin="anonymous"
+        />
       </head>
       <body
         className="font-sans antialiased bg-background text-foreground"

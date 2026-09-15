@@ -29,6 +29,15 @@
   --content-background: #171717;
   --container-background: #171717;
 
+  /* Action Blue — the app's single interactive accent (DESIGN.md §2).
+     Tokenised because ~25 surfaces had it hand-typed as a literal `#3b82f6`,
+     which is how an accent quietly forks. `action-blue` is the tint (marks,
+     washes, rails, borders); `action-blue-deep` is the filled step that carries
+     white text and is the AA floor for it — white on the tint measures 3.68:1,
+     white on the deep step 5.17:1. */
+  --action-blue: #3b82f6;
+  --action-blue-deep: #2563eb;
+
   /* Text colors */
   --foreground-secondary: #9ca3af;
   /* Ink Secondary. Was #6b7280, which measured 4.12:1 on the canvas and
@@ -90,6 +99,8 @@
   --color-background: var(--background);
   --color-sidebar-bg: var(--sidebar-background);
   --color-content-bg: var(--content-background);
+  --color-action-blue: var(--action-blue);
+  --color-action-blue-deep: var(--action-blue-deep);
   --color-container-bg: var(--container-background);
   --color-foreground: var(--foreground);
   --color-foreground-secondary: var(--foreground-secondary);
@@ -683,7 +694,15 @@ input[type="date"].form-input {
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.552 0.016 285.938);
+  /* The focus ring. Stock shadcn ships a mid-grey here, and every primitive
+     draws it at `ring-ring/50` — which blends to ~2:1 on this app's near-black
+     ground and fails WCAG 1.4.11 (3:1 for a focus indicator) on every control in
+     the product. This is a light tint of Action Blue rather than the accent
+     itself, because the 50% opacity is baked into 18 shadcn primitives and the
+     ring has to clear 3:1 *after* that blend: Action Blue at /50 measures
+     2.15:1, this measures 3.44:1 on the canvas and 3.19:1 on the sidebar.
+     Hand-rolled focus rings elsewhere use `ring-[3px] ring-ring/50` to match. */
+  --ring: #93c5fd;
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);

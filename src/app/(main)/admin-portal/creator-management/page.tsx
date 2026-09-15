@@ -24,6 +24,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { timezoneLabel } from "@/lib/timezone";
 import { toast } from "sonner";
 import { CreatorAvatar } from '@/components/creators/CreatorChip';
+import { useRefreshCreators } from '@/hooks/useCreators';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -503,10 +504,18 @@ export default function CreatorManagementPage() {
 
   useEffect(() => { fetchCreators(); }, [fetchCreators]);
 
+  // `CreatorAvatar` renders the roster's inlined thumbnail in preference to this
+  // page's own `photoURL`, and the roster is cached for five minutes — so
+  // without this an admin would upload a new photo, see this page's list update,
+  // and still be shown the *old* face in the avatar beside it. Refetching the
+  // shared store is the only thing that clears that.
+  const refreshCreators = useRefreshCreators();
+
   const handleFormSave = () => {
     setShowAddCard(false);
     setEditingCreator(null);
     fetchCreators();
+    refreshCreators();
   };
 
   const handleToggleActive = async (creator: Creator) => {

@@ -147,12 +147,12 @@ export function SalaryCellEditor({
           className={cn(
             'inline-flex w-full items-center justify-end gap-1 rounded-sm px-2 py-1 text-right transition-colors duration-[120ms]',
             'hover:bg-white/[0.055] active:bg-white/[0.08]',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#3b82f6]',
+            'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50',
           )}
           aria-label={`Edit ${meta.title.toLowerCase()} for ${formatDayLabelWithWeekday(day)}`}
         >
           {children}
-          {override && <Pencil className="size-3 shrink-0 text-[#3b82f6]" aria-hidden />}
+          {override && <Pencil className="size-3 shrink-0 text-action-blue" aria-hidden />}
         </button>
       </PopoverTrigger>
 

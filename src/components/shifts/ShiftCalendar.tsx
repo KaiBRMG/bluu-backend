@@ -1,18 +1,27 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarX2, Check, Loader2Icon, Plus, RotateCcw, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { SURFACE } from '@/lib/surfaces';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useBootPhase } from '@/contexts/BootLoaderContext';
 import { useShiftCalendar } from '@/hooks/useShiftCalendar';
 import { useCoverageOffers, type CoverageOfferRow } from '@/hooks/useCoverageOffers';
 import { useLeaveRequests, type LeaveRequest } from '@/hooks/useLeaveRequests';
 import { RequestLeaveDialog, MIN_LEAVE_NOTICE_DAYS, type LeaveTarget } from './RequestLeaveDialog';
-import { currentDayKey, daysInMonth, dayOfWeek, formatDayLabelWithWeekday, toDayKey } from '@/lib/salary/salaryDate';
+import {
+  currentDayKey,
+  daysInMonth,
+  dayOfWeek,
+  formatDayLabelWithWeekday,
+  formatMonthLabel,
+  toDayKey,
+} from '@/lib/salary/salaryDate';
 import { formatHours, pluralise } from '@/lib/salary/salaryFormat';
 import type { ExpandedShift } from '@/lib/utils/recurrence';
 import { safeTimezone } from '@/lib/utils/timezone';
@@ -84,8 +93,12 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
     enabled: showOvertime,
   });
 
-  const { leaveRequests, requestLeave, cancelLeave, refetch: refetchLeave } = useLeaveRequests();
+  const { leaveRequests, requestLeave, cancelLeave } = useLeaveRequests();
   const [leaveTarget, setLeaveTarget] = useState<LeaveTarget | null>(null);
+
+  // The salary card above this one gates the boot screen, so without this the
+  // loader lifted on a finished card sitting over a skeleton calendar.
+  useBootPhase('shift-calendar', loading);
 
   const tz = safeTimezone(timezone);
   const today = currentDayKey();
@@ -115,7 +128,7 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
     return map;
   }, [leaveRequests]);
 
-  const { cells, leadingBlanks } = useMemo(() => {
+  const { cells, weeks } = useMemo(() => {
     const count = daysInMonth(month);
 
     const shiftsByDay = new Map<string, ExpandedShift[]>();
@@ -150,17 +163,35 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
 
     // Monday-first: the roster's week starts on Monday, so Sunday sits last.
     const firstWeekday = dayOfWeek(built[0].day);
-    return { cells: built, leadingBlanks: (firstWeekday + 6) % 7 };
+    const leadingBlanks = (firstWeekday + 6) % 7;
+
+    // Chunked into real weeks so the grid can declare `role="row"`. A `grid`
+    // whose gridcells are not owned by rows is invalid ARIA — assistive tech
+    // gets no table structure to traverse — and the flat CSS grid was exactly
+    // that. The row wrappers use `display: contents`, so the seven-column
+    // layout is unchanged; only the accessibility tree gains a level.
+    const padded: Array<DayCell | null> = [...Array.from({ length: leadingBlanks }, () => null), ...built];
+    while (padded.length % 7 !== 0) padded.push(null);
+    const weeks: Array<Array<DayCell | null>> = [];
+    for (let i = 0; i < padded.length; i += 7) weeks.push(padded.slice(i, i + 7));
+
+    return { cells: built, weeks };
   }, [month, shifts, offers, showOvertime]);
 
-  const formatTime = (ms: number) =>
-    new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true }).format(
-      new Date(ms),
-    );
+  // One formatter for the whole grid. Constructing an `Intl.DateTimeFormat` is
+  // the expensive half (~50-100us); `.format()` is cheap. This was an inline
+  // closure rebuilt every render and called two or three times per shift plus
+  // twice per offer row, so a month of shifts rebuilt ~60 formatters on every
+  // claim, every leave change and every parent re-render.
+  const timeFormat = useMemo(
+    () => new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true }),
+    [tz],
+  );
+  const formatTime = useCallback((ms: number) => timeFormat.format(new Date(ms)), [timeFormat]);
 
   if (loading) {
     return (
-      <div className={cn('rounded-xl border border-white/[0.07] bg-white/[0.025] p-4', className)}>
+      <div className={cn('rounded-xl p-4', SURFACE, className)}>
         <Skeleton className="h-4 w-32 rounded" />
         <div className="mt-3 grid grid-cols-7 gap-1">
           {Array.from({ length: 35 }).map((_, index) => (
@@ -173,7 +204,7 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
 
   if (error) {
     return (
-      <div className={cn('rounded-xl border border-white/[0.07] bg-white/[0.025] p-4', className)}>
+      <div className={cn('rounded-xl p-4', SURFACE, className)}>
         <p className="text-sm text-red-400">{error}</p>
         <Button size="sm" variant="outline" className="mt-3" onClick={() => void refetch()}>
           <RotateCcw className="size-3.5" aria-hidden />
@@ -190,7 +221,7 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
   const totalOffers = cells.reduce((sum, cell) => sum + cell.offers.length, 0);
 
   return (
-    <div className={cn('rounded-xl border border-white/[0.07] bg-white/[0.025] p-4', className)}>
+    <div className={cn('rounded-xl p-4', SURFACE, className)}>
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-semibold">My schedule</h2>
         <p className="text-xs text-zinc-400">
@@ -198,172 +229,180 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
         </p>
       </div>
 
-      <div className="grid grid-cols-7 gap-1" role="grid" aria-label={`Shift calendar for ${month}`}>
-        {WEEKDAY_LABELS.map(label => (
-          <div key={label} role="columnheader" className="pb-1 text-center text-[11px] font-medium text-zinc-400">
-            {label}
-          </div>
-        ))}
+      <div
+        className="grid grid-cols-7 gap-1"
+        role="grid"
+        aria-label={`Shift calendar for ${formatMonthLabel(month)}`}
+      >
+        <div role="row" className="contents">
+          {WEEKDAY_LABELS.map(label => (
+            <div key={label} role="columnheader" className="pb-1 text-center text-[11px] font-medium text-zinc-400">
+              {label}
+            </div>
+          ))}
+        </div>
 
-        {Array.from({ length: leadingBlanks }).map((_, index) => (
-          <div key={`blank-${index}`} aria-hidden />
-        ))}
+        {weeks.map((week, weekIndex) => (
+          <div key={`week-${weekIndex}`} role="row" className="contents">
+            {week.map((cell, dayIndex) => {
+              if (!cell) return <div key={`blank-${weekIndex}-${dayIndex}`} role="gridcell" aria-hidden />;
+              const isToday = cell.day === today;
+              const hasShift = cell.shifts.length > 0;
 
-        {cells.map(cell => {
-          const isToday = cell.day === today;
-          const hasShift = cell.shifts.length > 0;
-
-          return (
-            <div
-              key={cell.day}
-              role="gridcell"
-              className={cn(
-                'min-h-[4.75rem] rounded-md border p-1.5 transition-colors duration-[120ms]',
-                hasShift ? 'border-white/[0.07] bg-white/[0.03]' : 'border-transparent',
-                isToday && 'border-[#3b82f6]/40 bg-[#3b82f6]/[0.08]',
-              )}
-            >
-              <span
-                className={cn(
-                  'block text-[11px] tabular-nums',
-                  isToday ? 'font-semibold text-[#3b82f6]' : 'text-zinc-400',
-                )}
-              >
-                {cell.date}
-              </span>
-
-              {/* ── Primary: the agent's own shifts ── */}
-              {cell.shifts.map(shift => {
-                const isOvertime = shift.isOvertime ?? false;
-                const paysWage = shift.paysWage ?? true;
-                const ids = shift.creatorIds ?? [];
-
-                const leave = leaveByOccurrence.get(`${shift.shiftId}:${shift.occurrenceStart}`) ?? null;
-                // Offered right up until the shift starts. The 4-day notice is
-                // guidance, not a gate — an agent who is ill tomorrow still has
-                // to tell someone, and refusing the request only moves that
-                // conversation somewhere nobody can see it. Not offered on an
-                // in-shift cover: there are no hours of its own to take off.
-                const canRequestLeave = paysWage && !leave && shift.occurrenceStart > now;
-                // The cap the salary page tells the agent about, in hours.
-                const shiftHours = (shift.occurrenceEnd - shift.occurrenceStart) / 3_600_000;
-
-                return (
-                  <div
-                    key={`${shift.shiftId}-${shift.occurrenceStart}`}
-                    className="group/shift mt-1"
+              return (
+                <div
+                  key={cell.day}
+                  role="gridcell"
+                  className={cn(
+                    'min-h-[4.75rem] rounded-md border p-1.5 transition-colors duration-[120ms]',
+                    hasShift ? 'border-white/[0.07] bg-white/[0.03]' : 'border-transparent',
+                    isToday && 'border-action-blue/40 bg-action-blue/[0.08]',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'block text-[11px] tabular-nums',
+                      isToday ? 'font-semibold text-action-blue' : 'text-zinc-400',
+                    )}
                   >
-                    {/* An in-shift cover has no hours of its own, so showing a
-                        time for it would misrepresent what it pays. */}
-                    {paysWage ? (
-                      <span className="flex items-center gap-0.5 text-[11px] tabular-nums text-zinc-300">
-                        {isOvertime && <Plus className="size-2.5 shrink-0 text-orange-400" aria-hidden />}
-                        {/* Start *and* length. Hours are capped at the shift's
-                            scheduled length, so a start time alone left the figure
-                            that sets the wage invisible anywhere in the product —
-                            while the offers layer below already showed a window.
-                            The full range does not fit ~90px, and the length is the
-                            half that decides pay; the exact end goes to the screen
-                            reader rather than being dropped. The Clock icon went to
-                            buy the room. */}
-                        <span className="truncate">
-                          {formatTime(shift.occurrenceStart)}
-                          <span className="text-zinc-400">
-                            {' · '}
-                            {formatHours(shiftHours)}
-                          </span>
-                        </span>
-                        <span className="sr-only">
-                          {formatTime(shift.occurrenceStart)} – {formatTime(shift.occurrenceEnd)}
-                        </span>
+                    {cell.date}
+                  </span>
 
-                        {canRequestLeave && (
+                  {/* ── Primary: the agent's own shifts ── */}
+                  {cell.shifts.map(shift => {
+                    const isOvertime = shift.isOvertime ?? false;
+                    const paysWage = shift.paysWage ?? true;
+                    const ids = shift.creatorIds ?? [];
+
+                    const leave = leaveByOccurrence.get(`${shift.shiftId}:${shift.occurrenceStart}`) ?? null;
+                    // Offered right up until the shift starts. The 4-day notice is
+                    // guidance, not a gate — an agent who is ill tomorrow still has
+                    // to tell someone, and refusing the request only moves that
+                    // conversation somewhere nobody can see it. Not offered on an
+                    // in-shift cover: there are no hours of its own to take off.
+                    const canRequestLeave = paysWage && !leave && shift.occurrenceStart > now;
+                    // The cap the salary page tells the agent about, in hours.
+                    const shiftHours = (shift.occurrenceEnd - shift.occurrenceStart) / 3_600_000;
+
+                    return (
+                      <div
+                        key={`${shift.shiftId}-${shift.occurrenceStart}`}
+                        className="group/shift mt-1"
+                      >
+                        {/* An in-shift cover has no hours of its own, so showing a
+                            time for it would misrepresent what it pays. */}
+                        {paysWage ? (
+                          <span className="flex items-center gap-0.5 text-[11px] tabular-nums text-zinc-300">
+                            {isOvertime && <Plus className="size-2.5 shrink-0 text-orange-400" aria-hidden />}
+                            {/* Start *and* length. Hours are capped at the shift's
+                                scheduled length, so a start time alone left the figure
+                                that sets the wage invisible anywhere in the product —
+                                while the offers layer below already showed a window.
+                                The full range does not fit ~90px, and the length is the
+                                half that decides pay; the exact end goes to the screen
+                                reader rather than being dropped. The Clock icon went to
+                                buy the room. */}
+                            {/* Two elements, not one truncating string. At the
+                                1024px window floor a cell has ~80px and the pair
+                                overflows, so a single `truncate` clipped the tail —
+                                which is the length, the half that decides pay. The
+                                length now holds its width and the start time gives
+                                way first. */}
+                            <span className="min-w-0 truncate">{formatTime(shift.occurrenceStart)}</span>
+                            <span className="shrink-0 text-zinc-400">{`· ${formatHours(shiftHours)}`}</span>
+                            <span className="sr-only">
+                              {formatTime(shift.occurrenceStart)} – {formatTime(shift.occurrenceEnd)}
+                            </span>
+
+                            {canRequestLeave && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setLeaveTarget({
+                                        shiftId: shift.shiftId,
+                                        occurrenceStart: shift.occurrenceStart,
+                                      })
+                                    }
+                                    aria-label={`Request time off for ${formatDayLabelWithWeekday(cell.day)}`}
+                                    className={cn(
+                                      'ml-auto shrink-0 rounded-sm p-0.5 text-zinc-500 transition-colors duration-[120ms]',
+                                      'hover:bg-white/[0.08] hover:text-zinc-300',
+                                      // Revealed on hover, but always present to the
+                                      // keyboard — a hover-only control is invisible
+                                      // to it otherwise (DESIGN.md §5).
+                                      'opacity-0 group-hover/shift:opacity-100 focus-visible:opacity-100',
+                                      'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                                    )}
+                                  >
+                                    <CalendarX2 className="size-3" aria-hidden />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>Request time off</TooltipContent>
+                              </Tooltip>
+                            )}
+                          </span>
+                        ) : (
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setLeaveTarget({
-                                    shiftId: shift.shiftId,
-                                    occurrenceStart: shift.occurrenceStart,
-                                  })
-                                }
-                                aria-label={`Request time off for ${formatDayLabelWithWeekday(cell.day)}`}
-                                className={cn(
-                                  'ml-auto shrink-0 rounded-sm p-0.5 text-zinc-500 transition-colors duration-[120ms]',
-                                  'hover:bg-white/[0.08] hover:text-zinc-300',
-                                  // Revealed on hover, but always present to the
-                                  // keyboard — a hover-only control is invisible
-                                  // to it otherwise (DESIGN.md §5).
-                                  'opacity-0 group-hover/shift:opacity-100 focus-visible:opacity-100',
-                                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]',
-                                )}
+                              <span
+                                tabIndex={0}
+                                className="flex cursor-help items-center gap-0.5 rounded-sm text-[11px] text-orange-400 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                               >
-                                <CalendarX2 className="size-3" aria-hidden />
-                              </button>
+                                <Plus className="size-2.5 shrink-0" aria-hidden />
+                                Cover
+                                <span className="sr-only">{IN_SHIFT_COVER_EXPLANATION}</span>
+                              </span>
                             </TooltipTrigger>
-                            <TooltipContent>Request time off</TooltipContent>
+                            <TooltipContent className="max-w-56 text-center leading-relaxed">
+                              {IN_SHIFT_COVER_EXPLANATION}
+                            </TooltipContent>
                           </Tooltip>
                         )}
-                      </span>
-                    ) : (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span
-                            tabIndex={0}
-                            className="flex cursor-help items-center gap-0.5 rounded-sm text-[11px] text-orange-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]"
-                          >
-                            <Plus className="size-2.5 shrink-0" aria-hidden />
-                            Cover
-                            <span className="sr-only">{IN_SHIFT_COVER_EXPLANATION}</span>
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-56 text-center leading-relaxed">
-                          {IN_SHIFT_COVER_EXPLANATION}
-                        </TooltipContent>
-                      </Tooltip>
-                    )}
 
-                    {/* Avatars only: a month grid cell is far too narrow for
-                        names, and the picture is the faster recognition anyway. */}
-                    <div className="mt-0.5">
-                      <CreatorChipList
-                        creatorIds={ids}
-                        max={4}
-                        size="xs"
-                        avatarOnly
-                        emptyLabel={paysWage ? 'No accounts yet' : undefined}
-                      />
+                        {/* Avatars only: a month grid cell is far too narrow for
+                            names, and the picture is the faster recognition anyway. */}
+                        <div className="mt-0.5">
+                          <CreatorChipList
+                            creatorIds={ids}
+                            max={4}
+                            size="xs"
+                            avatarOnly
+                            emptyLabel={paysWage ? 'No accounts yet' : undefined}
+                          />
+                        </div>
+
+                        {leave && (
+                          <LeaveBadge
+                            leave={leave}
+                            onCancel={async () => {
+                              try {
+                                await cancelLeave(leave.leaveId);
+                                toast.success('Leave request cancelled');
+                              } catch (err) {
+                                toast.error(err instanceof Error ? err.message : 'Could not cancel');
+                              }
+                            }}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* ── Secondary: overtime going spare ──
+                      Always below the day's own shifts and visually quieter, so the
+                      roster still reads first. */}
+                  {cell.offers.length > 0 && (
+                    <div className={cn(hasShift ? 'mt-1.5 border-t border-dashed border-white/[0.09] pt-1' : 'mt-1')}>
+                      <OfferCell day={cell.day} offers={cell.offers} formatTime={formatTime} onClaim={setClaim} />
                     </div>
-
-                    {leave && (
-                      <LeaveBadge
-                        leave={leave}
-                        onCancel={async () => {
-                          try {
-                            await cancelLeave(leave.leaveId);
-                            toast.success('Leave request cancelled');
-                          } catch (err) {
-                            toast.error(err instanceof Error ? err.message : 'Could not cancel');
-                          }
-                        }}
-                      />
-                    )}
-                  </div>
-                );
-              })}
-
-              {/* ── Secondary: overtime going spare ──
-                  Always below the day's own shifts and visually quieter, so the
-                  roster still reads first. */}
-              {cell.offers.length > 0 && (
-                <div className={cn(hasShift ? 'mt-1.5 border-t border-dashed border-white/[0.09] pt-1' : 'mt-1')}>
-                  <OfferCell day={cell.day} offers={cell.offers} formatTime={formatTime} onClaim={setClaim} />
+                  )}
                 </div>
-              )}
-            </div>
-          );
-        })}
+              );
+            })}
+          </div>
+        ))}
       </div>
 
       {/* One quiet line rather than a legend nobody reads. */}
@@ -392,8 +431,10 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
         onClose={() => setLeaveTarget(null)}
         onSubmit={async (leaveType, reason) => {
           if (!leaveTarget) return;
+          // No `refetch` afterwards: `requestLeave` already invalidates the cache
+          // and reloads, and the reload now reaches every mounted consumer. The
+          // extra call here was a second identical round-trip per request.
           await requestLeave(leaveTarget.shiftId, leaveTarget.occurrenceStart, leaveType, reason);
-          await refetchLeave();
         }}
       />
     </div>
@@ -446,7 +487,7 @@ function LeaveBadge({ leave, onCancel }: { leave: LeaveRequest; onCancel: () => 
           <span
             tabIndex={0}
             className={cn(
-              'cursor-help rounded-sm text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]',
+              'cursor-help rounded-sm text-[11px] font-medium focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
               LEAVE_STATUS_STYLE[leave.status],
             )}
           >
@@ -475,7 +516,7 @@ function LeaveBadge({ leave, onCancel }: { leave: LeaveRequest; onCancel: () => 
               className={cn(
                 'shrink-0 rounded-sm p-0.5 text-zinc-500 transition-colors duration-[120ms]',
                 'hover:bg-white/[0.08] hover:text-zinc-300',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]',
+                'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
               )}
             >
               {busy ? (
@@ -545,7 +586,7 @@ function OfferCell({
           className={cn(
             'flex w-full items-center gap-1 rounded-sm px-0.5 py-px text-left transition-colors duration-[120ms]',
             'hover:bg-white/[0.055] active:bg-white/[0.08]',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#3b82f6]',
+            'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50',
           )}
           aria-label={`${pluralise(offers.length, 'account')} available to cover on ${formatDayLabelWithWeekday(day)}`}
         >

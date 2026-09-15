@@ -26,7 +26,7 @@ import { CommissionLadder } from '@/components/salary/CommissionLadder';
 import { useAuth } from '@/components/AuthProvider';
 import { useSalaryMonth } from '@/hooks/useSalaryMonth';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
-import { currentMonthKey, formatMonthLabel } from '@/lib/salary/salaryDate';
+import { formatMonthLabel } from '@/lib/salary/salaryDate';
 import { formatHours, formatPercent, formatRelative, formatUsd, pluralise } from '@/lib/salary/salaryFormat';
 import type { SalaryMonthTotals, SalaryTierProgress } from '@/lib/salary/salaryTypes';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
@@ -42,7 +42,12 @@ import { useViewerTimezone } from '@/hooks/useViewerTimezone';
  * The roster deliberately shows two warning counts per agent — days an admin has
  * edited, and days where sales arrived with no shift on record. They are the two
  * ways a month can be quietly wrong, and both are invisible from the totals
- * alone.
+ * alone. The Overview tab rolls the same two counts up across the roster.
+ *
+ * **The month is owned by the page, not by this panel** (ca-salary.md §10 — one
+ * month governs each surface). Overview and Payroll are read together: stepping
+ * back a month on one and finding the other still on this one is the kind of
+ * mismatch that gets a figure quoted from the wrong month.
  */
 
 interface RosterRow {
@@ -66,8 +71,13 @@ interface RosterResponse {
   finalizedCount: number;
 }
 
-export default function AdminSalaries() {
-  const [month, setMonth] = useState(currentMonthKey());
+export default function AdminSalaries({
+  month,
+  onMonthChange,
+}: {
+  month: string;
+  onMonthChange: (month: string) => void;
+}) {
   const [selected, setSelected] = useState<RosterRow | null>(null);
 
   const { user } = useAuth();
@@ -130,7 +140,7 @@ export default function AdminSalaries() {
               : 'Every chat agent’s month'}
           </p>
         </div>
-        <MonthPicker month={month} onChange={setMonth} />
+        <MonthPicker month={month} onChange={onMonthChange} />
       </div>
 
       {loading && <Skeleton className="h-80 w-full rounded-lg" />}
@@ -179,7 +189,7 @@ export default function AdminSalaries() {
                       >
                         <Avatar className="size-7 shrink-0">
                           <AvatarImage src={row.photoURL ?? undefined} alt="" />
-                          <AvatarFallback style={{ backgroundColor: getAvatarColor(row.displayName) }}>
+                          <AvatarFallback className="font-medium text-white" style={{ backgroundColor: getAvatarColor(row.displayName) }}>
                             {getInitials(row.displayName)}
                           </AvatarFallback>
                         </Avatar>
@@ -279,7 +289,7 @@ function AgentDetail({ row, month, onBack }: { row: RosterRow; month: string; on
         <div className="flex min-w-0 items-center gap-3">
           <Avatar className="size-10 shrink-0">
             <AvatarImage src={row.photoURL ?? undefined} alt="" />
-            <AvatarFallback style={{ backgroundColor: getAvatarColor(row.displayName) }}>
+            <AvatarFallback className="font-medium text-white" style={{ backgroundColor: getAvatarColor(row.displayName) }}>
               {getInitials(row.displayName)}
             </AvatarFallback>
           </Avatar>

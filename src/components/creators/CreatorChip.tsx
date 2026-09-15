@@ -1,6 +1,6 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useCallback, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useCreatorMap } from '@/hooks/useCreators';
@@ -35,11 +35,17 @@ import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
  *   landing) re-renders only the chips whose props actually moved. Pass a
  *   **stable** `creatorIds` array to `CreatorChipList` — an inline `.map()` in
  *   the parent defeats it.
- * - The image is cached by the browser for a week: creator photos are written
- *   with `Cache-Control: private, max-age=604800, immutable`, and the download
- *   URL rotates on re-upload so a cached copy can never be the wrong one.
- *   Before that header existed Firebase served them `max-age=0` and every
- *   avatar was re-fetched on every page load.
+ * - **The image is normally not fetched at all.** The roster carries a 64px
+ *   WebP `data:` URI per creator (`photoThumb`), so a thirty-avatar calendar
+ *   costs zero image requests instead of thirty round trips to Firebase
+ *   Storage — which is not a CDN, validates the download token on every
+ *   request, and was the whole of the "avatars take forever" problem.
+ * - The 256px `photoURL` remains the fallback for a creator whose thumbnail has
+ *   not been backfilled yet. Those are cached by the browser for a week
+ *   (`Cache-Control: private, max-age=604800, immutable`, safe because the
+ *   download URL rotates on re-upload), and a failed load is retried once —
+ *   Radix gives up permanently otherwise, which is why an avatar could drop to
+ *   initials and stay there.
  */
 
 type ChipSize = 'xs' | 'sm';
@@ -92,17 +98,61 @@ export const CreatorAvatar = memo(function CreatorAvatar({
 }) {
   const byId = useCreatorMap();
 
-  const hit = name === undefined && creatorId ? byId.get(creatorId) : undefined;
+  // The roster is consulted for the *picture* whenever an id resolves, even when
+  // the caller overrode the name. `name` is a display override — several pages
+  // hold their own creator list and pass the name they already show — but the
+  // roster is the only place the inline thumbnail lives, and preferring a
+  // caller's `photoURL` over it would put those pages back on one HTTP request
+  // per avatar for no benefit.
+  const hit = creatorId ? byId.get(creatorId) : undefined;
   const stageName = name ?? hit?.stageName ?? creatorId ?? '';
-  const resolvedPhoto = (name !== undefined ? photoURL : hit?.photoURL) ?? null;
+
+  // Order matters: the inlined thumbnail first (already in memory, no request),
+  // then whatever the caller handed us, then the roster's 256px object.
+  const src = hit?.photoThumb ?? (name !== undefined ? photoURL : null) ?? hit?.photoURL ?? null;
+
+  // The retry is stored *with the src it belongs to*, rather than being cleared
+  // by an effect when `src` changes. A retry for a previous creator is then
+  // simply not current — no effect, no cascading render, and no window in which
+  // one creator is briefly shown another's photo.
+  const [retry, setRetry] = useState<{ of: string; url: string } | null>(null);
+  const retriedSrc = retry && retry.of === src ? retry.url : null;
+
+  /**
+   * Retry a failed load exactly once.
+   *
+   * Radix's `Avatar.Image` preloads through `new window.Image()` and, on any
+   * error, swaps to the fallback for the life of the mount with no retry. One
+   * transient 5xx from Firebase Storage — entirely likely when thirty requests
+   * leave at once — therefore stranded that creator on their initials, visually
+   * indistinguishable from having no photo at all.
+   *
+   * A `data:` URI cannot fail for a network reason, so it is never retried; a
+   * second attempt would just burn a render. The cache-busting parameter is
+   * what makes the retry a real one — without it Chromium may serve the same
+   * failed entry straight back.
+   */
+  const handleStatus = useCallback(
+    (status: 'idle' | 'loading' | 'loaded' | 'error') => {
+      if (status !== 'error' || !src || src.startsWith('data:') || retriedSrc) return;
+      setRetry({ of: src, url: `${src}${src.includes('?') ? '&' : '?'}_retry=1` });
+    },
+    [src, retriedSrc],
+  );
 
   return (
     <Avatar className={cn('shrink-0', className)}>
       {/* No `loading="lazy"`, deliberately: Radix's Avatar preloads through
           `new window.Image()` and forwards only `referrerPolicy`/`crossOrigin`,
-          so the attribute would be inert and the comment beside it a lie. What
-          actually saves the requests is the HTTP cache — see the header note. */}
-      <AvatarImage src={resolvedPhoto ?? undefined} alt="" decoding="async" />
+          so the attribute would be inert and the comment beside it a lie. On
+          the normal path there is no request to defer anyway — the src is an
+          inlined `data:` URI. */}
+      <AvatarImage
+        src={retriedSrc ?? src ?? undefined}
+        alt=""
+        decoding="async"
+        onLoadingStatusChange={handleStatus}
+      />
       <AvatarFallback
         className="font-medium text-white"
         style={{ backgroundColor: getAvatarColor(stageName) }}

@@ -133,7 +133,7 @@ export function RequestLeaveDialog({ target, onClose, onSubmit }: RequestLeaveDi
                 className={cn(
                   'flex cursor-pointer items-start gap-2.5 rounded-md border border-white/[0.07] p-2.5 transition-colors duration-[120ms]',
                   !unpaidAvailable && 'cursor-not-allowed opacity-50',
-                  leaveType === 'unpaid' && unpaidAvailable && 'border-[#3b82f6]/40 bg-[#3b82f6]/[0.08]',
+                  leaveType === 'unpaid' && unpaidAvailable && 'border-action-blue/40 bg-action-blue/[0.08]',
                 )}
               >
                 <RadioGroupItem value="unpaid" disabled={!unpaidAvailable} className="mt-0.5" />
@@ -149,7 +149,7 @@ export function RequestLeaveDialog({ target, onClose, onSubmit }: RequestLeaveDi
                 className={cn(
                   'flex cursor-pointer items-start gap-2.5 rounded-md border border-white/[0.07] p-2.5 transition-colors duration-[120ms]',
                   !paidAvailable && 'cursor-not-allowed opacity-50',
-                  leaveType === 'paid' && paidAvailable && 'border-[#3b82f6]/40 bg-[#3b82f6]/[0.08]',
+                  leaveType === 'paid' && paidAvailable && 'border-action-blue/40 bg-action-blue/[0.08]',
                 )}
               >
                 <RadioGroupItem value="paid" disabled={!paidAvailable} className="mt-0.5" />

@@ -96,7 +96,7 @@ export function CommissionLadder({
             <span
               className={cn(
                 'block truncate text-[11px] font-semibold tabular-nums transition-colors duration-[120ms]',
-                segment.isCurrent ? 'text-[#3b82f6]' : 'text-zinc-400',
+                segment.isCurrent ? 'text-action-blue' : 'text-zinc-400',
               )}
             >
               {formatPercent(segment.percent)}
@@ -114,14 +114,14 @@ export function CommissionLadder({
             style={{ flexGrow: segment.span / totalSpan }}
             className={cn(
               'relative h-2 min-w-0 overflow-hidden rounded-full',
-              segment.isCurrent ? 'bg-[#3b82f6]/15' : 'bg-white/[0.07]',
+              segment.isCurrent ? 'bg-action-blue/15' : 'bg-white/[0.07]',
             )}
           >
             <div
               className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-300 ease-out"
               style={{
                 width: `${segment.fill * 100}%`,
-                backgroundColor: segment.isCurrent ? '#3b82f6' : 'rgba(255,255,255,0.28)',
+                backgroundColor: segment.isCurrent ? 'var(--action-blue)' : 'rgba(255,255,255,0.28)',
               }}
             />
           </div>

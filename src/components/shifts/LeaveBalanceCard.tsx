@@ -1,7 +1,9 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import { SURFACE } from '@/lib/surfaces';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useBootPhase } from '@/contexts/BootLoaderContext';
 import { useUserData } from '@/hooks/useUserData';
 import { useLeaveRequests } from '@/hooks/useLeaveRequests';
 import { pluralise } from '@/lib/salary/salaryFormat';
@@ -30,6 +32,10 @@ export function LeaveBalanceCard({ className }: { className?: string }) {
   const { userData, loading } = useUserData();
   const { leaveRequests } = useLeaveRequests();
 
+  // Gated like every other async block on this dashboard, so the boot loader
+  // lifts on a complete page rather than on one finished card over two skeletons.
+  useBootPhase('ca-leave-balance', loading && !userData);
+
   // A balance of zero and a balance not yet known are not the same fact. Without
   // this the card asserted "0 unpaid days left" as truth for the whole fetch —
   // wrong status rather than missing status, about someone's time off.
@@ -37,7 +43,8 @@ export function LeaveBalanceCard({ className }: { className?: string }) {
     return (
       <section
         className={cn(
-          'flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border border-white/[0.07] bg-white/[0.025] px-4 py-3',
+          'flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl px-4 py-3',
+          SURFACE,
           className,
         )}
       >
@@ -56,7 +63,8 @@ export function LeaveBalanceCard({ className }: { className?: string }) {
   return (
     <section
       className={cn(
-        'flex flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-xl border border-white/[0.07] bg-white/[0.025] px-4 py-3',
+        'flex flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-xl px-4 py-3',
+        SURFACE,
         className,
       )}
     >
@@ -64,19 +72,18 @@ export function LeaveBalanceCard({ className }: { className?: string }) {
         <h2 className="text-sm font-semibold">Time off</h2>
 
         <dl className="flex flex-wrap items-baseline gap-x-5 gap-y-1.5">
-          <div className="flex items-baseline gap-1.5">
-            <dd className="text-lg font-semibold tabular-nums">
-              {unpaidRemaining}
-            </dd>
+          {/* `flex-row-reverse`, not a reordered DOM: the number reads first, but
+              a definition list pairs each `dt` with the `dd` that follows it, and
+              these were emitted the other way round. */}
+          <div className="flex flex-row-reverse items-baseline gap-1.5">
             <dt className="text-xs text-zinc-400">unpaid {unpaidRemaining === 1 ? 'day' : 'days'} left</dt>
+            <dd className="text-lg font-semibold tabular-nums">{unpaidRemaining}</dd>
           </div>
 
           {hasPaidLeave && (
-            <div className="flex items-baseline gap-1.5">
-              <dd className="text-lg font-semibold tabular-nums">
-                {paidRemaining}
-              </dd>
+            <div className="flex flex-row-reverse items-baseline gap-1.5">
               <dt className="text-xs text-zinc-400">paid {paidRemaining === 1 ? 'day' : 'days'} left</dt>
+              <dd className="text-lg font-semibold tabular-nums">{paidRemaining}</dd>
             </div>
           )}
         </dl>

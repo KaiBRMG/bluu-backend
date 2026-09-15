@@ -18,7 +18,8 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
  * The encoding, validation, sizing and cache policy all live in
  * `creatorPhotoService` — this route is auth, payload shape, and the Firestore
  * write. Whatever is uploaded comes out the other side as a 256px WebP; see
- * that module for why.
+ * that module for why — plus a 64px `data:` thumbnail on the creator doc, which
+ * is what the app's avatars actually render.
  */
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken, params: Promise<{ creatorId: string }>) => {
@@ -52,16 +53,19 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken,
       return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
     }
 
-    const { photoURL, photoStoragePath } = await storeCreatorPhoto(
+    const { photoURL, photoStoragePath, photoThumb } = await storeCreatorPhoto(
       creatorId,
       buffer,
       token.uid,
       snap.data()?.photoStoragePath ?? null,
     );
 
-    await creatorRef.update({ photoURL, photoStoragePath, updatedAt: FieldValue.serverTimestamp() });
+    // `photoThumb` is written unconditionally, `null` included: a re-upload
+    // that failed to produce a thumbnail must clear the previous creator's
+    // thumbnail rather than leave the old face inlined on the roster.
+    await creatorRef.update({ photoURL, photoStoragePath, photoThumb, updatedAt: FieldValue.serverTimestamp() });
 
-    return NextResponse.json({ success: true, photoURL });
+    return NextResponse.json({ success: true, photoURL, photoThumb });
   } catch (error: unknown) {
     // A rejection is the admin's problem to fix (wrong file, too big), so its
     // message goes back verbatim rather than becoming a generic 500.

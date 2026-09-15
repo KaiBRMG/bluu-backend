@@ -73,9 +73,31 @@ export function pluralise(count: number, singular: string, plural = `${singular}
  * called from several surfaces, so they defend themselves rather than trusting
  * every caller to have resolved it.
  */
+/**
+ * Formatters are cached per timezone, because *constructing* an
+ * `Intl.DateTimeFormat` is the expensive part (~50-100us) and `.format()` is
+ * nearly free. `formatSaleDateTime` is called once per row of the sales report,
+ * which re-renders on every keystroke in its search box — so a month with a few
+ * hundred sales was building a few hundred formatters per character typed.
+ *
+ * The key includes the shape as well as the zone: the two functions below want
+ * different options and must not share an entry.
+ */
+const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function dateTimeFormatter(shape: string, timeZone: string, options: Intl.DateTimeFormatOptions) {
+  const zone = safeTimezone(timeZone);
+  const key = `${shape}:${zone}`;
+  let formatter = dateTimeFormatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', { ...options, timeZone: zone });
+    dateTimeFormatters.set(key, formatter);
+  }
+  return formatter;
+}
+
 export function formatSaleTime(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: safeTimezone(timeZone),
+  return dateTimeFormatter('time', timeZone, {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
@@ -83,8 +105,7 @@ export function formatSaleTime(iso: string, timeZone: string): string {
 }
 
 export function formatSaleDateTime(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: safeTimezone(timeZone),
+  return dateTimeFormatter('datetime', timeZone, {
     day: 'numeric',
     month: 'short',
     hour: 'numeric',

@@ -6,6 +6,14 @@
  * backfill go through here, so there is exactly one answer to "what format is a
  * creator avatar" rather than two that drift.
  *
+ * Each photo produces **two** artefacts, and the distinction matters:
+ *
+ * - a **256px object in Storage** (`photoURL`) — the canonical image, for a
+ *   detail view or a surface that cannot reach the shared roster;
+ * - a **64px `data:` URI on the creator doc** (`photoThumb`) — what every
+ *   avatar in the internal app actually renders, delivered inline with the
+ *   roster so no avatar costs an HTTP request. See `encodeCreatorThumb`.
+ *
  * ## Why WebP
  *
  * These are rendered at 16–40px and there are now thirty-odd of them on a shift
@@ -58,6 +66,37 @@ const WEBP_QUALITY = 88;
 
 /** Guards against a decompression bomb, same ceiling as the public upload path. */
 const LIMIT_INPUT_PIXELS = 80_000_000;
+
+/**
+ * Longest edge of the **inline thumbnail**, in pixels.
+ *
+ * Separate from `MAX_EDGE` because it is solving a different problem. The 256px
+ * object exists so a detail view has something to show; the thumbnail exists so
+ * the *calendar* never issues an image request at all.
+ *
+ * 64 is not arbitrary: the largest place a creator avatar is drawn from the
+ * shared roster is `size-8` (32px, the creator-management table), and every
+ * other call site is 16–24px. 64 covers the largest of those exactly on a 2×
+ * display, so the thumbnail is never upscaled anywhere it is used.
+ */
+const THUMB_EDGE = 64;
+
+/**
+ * Lower than `WEBP_QUALITY` on purpose — these bytes are inlined into a JSON
+ * response, so every KB is paid by every consumer of the roster, and the
+ * artefacts a 68 introduces are invisible in a 20px circle.
+ */
+const THUMB_QUALITY = 68;
+
+/**
+ * Hard ceiling on one inlined thumbnail.
+ *
+ * The thumbnail is an *optimisation*, so it must never become the problem: a
+ * pathological source (heavy noise, which WebP does not like) that encodes
+ * above this is dropped rather than stored, and that creator simply falls back
+ * to `photoURL` like they did before. Typical output is 1–3KB.
+ */
+export const MAX_CREATOR_THUMB_BYTES = 6 * 1024;
 
 export const MAX_CREATOR_PHOTO_BYTES = 5 * 1024 * 1024;
 
@@ -123,9 +162,58 @@ export async function encodeCreatorPhoto(buffer: Buffer): Promise<Buffer> {
   }
 }
 
+/**
+ * Encode the inline thumbnail: a `data:` URI small enough to travel with the
+ * roster JSON.
+ *
+ * ## Why this exists
+ *
+ * A shift calendar draws thirty-odd avatars, and each one used to be its own
+ * cross-origin request to `firebasestorage.googleapis.com` — a host that is not
+ * a CDN and that validates the `?token=` on every request. The bytes were never
+ * the problem; **thirty round trips of latency** were, and each one was an
+ * independent chance to fail. Radix's `Avatar.Image` has no retry, so a single
+ * transient 5xx stranded that creator on their initials until the next mount.
+ *
+ * Inlining the thumbnail on the creator doc removes the request entirely: the
+ * avatar arrives in the same payload as the name and paints in the same frame.
+ * There is nothing left to be slow, and nothing left to fail.
+ *
+ * ## Why it is encoded from the 256px WebP, not the original
+ *
+ * The 256px object has already been EXIF-rotated and attention-cropped, so
+ * re-deriving from it guarantees the thumbnail is the same crop as the full
+ * image — two independent `position: 'attention'` passes over different
+ * resolutions can legitimately choose different crops, which would show as the
+ * face jumping when a surface upgrades from thumb to full. It is also far
+ * cheaper: decoding a 256px WebP instead of a full-resolution phone JPEG a
+ * second time.
+ *
+ * Returns `null` rather than throwing. A creator without a thumbnail renders
+ * from `photoURL` exactly as before, so a failure here degrades the
+ * optimisation and never the feature.
+ */
+export async function encodeCreatorThumb(webp: Buffer): Promise<string | null> {
+  try {
+    const thumb = await sharp(webp, { limitInputPixels: LIMIT_INPUT_PIXELS, animated: false })
+      .resize({ width: THUMB_EDGE, height: THUMB_EDGE, fit: 'cover', withoutEnlargement: true })
+      .webp({ quality: THUMB_QUALITY })
+      .toBuffer();
+
+    if (thumb.length > MAX_CREATOR_THUMB_BYTES) return null;
+
+    return `data:${CREATOR_PHOTO_CONTENT_TYPE};base64,${thumb.toString('base64')}`;
+  } catch (error) {
+    console.error('[creatorPhoto] thumb encode failed:', error);
+    return null;
+  }
+}
+
 export interface StoredCreatorPhoto {
   photoURL: string;
   photoStoragePath: string;
+  /** Inline `data:` URI, or `null` when one could not be produced. */
+  photoThumb: string | null;
   bytes: number;
 }
 
@@ -170,5 +258,10 @@ export async function storeCreatorPhoto(
       .catch(() => null);
   }
 
-  return { photoURL: creatorPhotoUrl(filePath, downloadToken), photoStoragePath: filePath, bytes: webp.length };
+  return {
+    photoURL: creatorPhotoUrl(filePath, downloadToken),
+    photoStoragePath: filePath,
+    photoThumb: await encodeCreatorThumb(webp),
+    bytes: webp.length,
+  };
 }

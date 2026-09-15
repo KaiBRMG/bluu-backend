@@ -181,7 +181,10 @@ export interface Creator {
   creatorID: string;
   stageName: string;
   defaultTimezone?: string;
+  /** The 256px Storage object. Fallback only — prefer `photoThumb` for rendering. */
   photoURL?: string | null;
+  /** 64px WebP `data:` URI, inlined so an avatar costs no HTTP request. */
+  photoThumb?: string | null;
 }
 
 export const TYPE_LABELS: Record<CRType, string> = {

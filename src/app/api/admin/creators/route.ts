@@ -133,6 +133,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       userEmail,
       displayName: stageName,
       photoURL: null,
+      photoThumb: null,
       photoStoragePath: null,
       OFID,
       isActive: true,
