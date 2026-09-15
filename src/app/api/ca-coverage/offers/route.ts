@@ -8,12 +8,18 @@
  * render its own state without shipping every claimant's identity to everyone.
  * Full claim lists are admin-only: who else put their name down is the admin's
  * decision input, not a leaderboard.
+ *
+ * Admins also get `withdrawals` — absences that were cancelled after approval.
+ * Those offers are *deleted* rather than left as history (the occurrence has to
+ * be re-releasable), so without this an admin who saw four accounts on the board
+ * yesterday would find them simply gone with no account of why.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError, checkPageAccess } from '@/lib/middleware/apiHelpers';
 import { getOffers } from '@/lib/services/caCoverageService';
+import { getRecentLeaveWithdrawals } from '@/lib/services/coverageNotices';
 import { isDayKey, currentDayKey, addDays } from '@/lib/salary/salaryDate';
 import { getUserById } from '@/lib/services/userService';
 import { adminDb } from '@/lib/firebase-admin';
@@ -89,6 +95,9 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     return NextResponse.json({
       offers: rows,
       isAdmin,
+      // Admin-only: it names the absent agent and everyone whose overtime was
+      // taken back, which is roster information rather than board information.
+      withdrawals: isAdmin ? await getRecentLeaveWithdrawals(10) : [],
       timezone: safeTimezone(caller?.timezone),
     });
   } catch (err) {

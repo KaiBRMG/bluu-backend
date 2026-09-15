@@ -80,6 +80,14 @@ Every row below is **automated** — fired by a handler on an event, never sent 
 | CR/campaign transferred **by someone else** (manager) | `notifications.crTransferredOnBehalf(previousOwnerName, creatorName, actionUrl)` | the receiving uid | `campaign-tracking/[id]/transfer` |
 | Leave approved | `notifications.leaveApproved(leaveLabel, dateStr)` | the requesting user | `shifts/leave/[leaveId]/approve` |
 | Leave denied | `notifications.leaveDenied(leaveLabel, dateStr)` | the requesting user | `shifts/leave/[leaveId]/approve` |
+| Leave requested | `notifications.leaveRequested(requesterName, leaveLabel, dateStr, reason?)` | **one named approver** — `CA_LEAVE_ALERT_RECIPIENT_UID` | `shifts/leave` (POST) |
+| Approved leave withdrawn | `notifications.leaveWithdrawn(requesterName, leaveLabel, dateStr, revertedLabel)` | **one named approver** — `CA_LEAVE_ALERT_RECIPIENT_UID` | `shifts/leave/[leaveId]` (DELETE) |
+| Overtime assigned | `notifications.overtimeAssigned(creatorList, dateStr)` | the assigned agent — **coalesced**, one message per agent per day | `ca-coverage/assign` (POST) queues · `cron/ca-notifications` sends |
+| Overtime cancelled | `notifications.overtimeCancelled(creatorList, dateStr)` | each agent who was covering — **coalesced** the same way | `shifts/leave/[leaveId]` (DELETE) queues · `cron/ca-notifications` sends |
+| Sales imported | `notifications.salesImported(monthLabel)` | every chat agent (`groups: CA`, not archived) | `ca-salary/import` (POST, via `after()`) |
+| Payday in 3 days | `notifications.paydayApproaching(monthLabel)` | every chat agent | `cron/ca-notifications` |
+| Salary finalised | `notifications.salaryFinalized(monthLabel)` | the agent whose month was frozen | `ca-salary/finalize` |
+| Commission tier reached | `notifications.commissionTierUp(percent, monthLabel)` | the agent who crossed the band | `ca-salary/import` **and** `ca-salary/override` |
 | Dispute assigned | `notifications.disputeAssigned(createdByName)` | `assignedTo` (skipped when `'No One'`) | `disputes` (POST) |
 | Dispute — CA approved | `notifications.disputeCaApproved(assignedToName)` | the dispute's `createdBy` | `disputes/[disputeId]/ca-approval` |
 | Dispute — CA rejected | `notifications.disputeCaRejected(assignedToName, reason?)` | the dispute's `createdBy` | `disputes/[disputeId]/ca-approval` |
@@ -103,6 +111,18 @@ The uid is a single named constant, `OPS_ALERT_RECIPIENT_UID` in [`src/lib/servi
 - a **deterministic doc id** (`{uid}__ops-{key}`) means two instances reading the latch in the same instant write one document rather than two.
 
 Both conditions persist until a human fixes them and neither can un-fire, so a repeat would restate a fact the reader already has. They are catalogued on the Automated tab regardless — an admin should be able to see that they exist.
+
+### Chat-agent coverage & salary — the two mechanisms worth knowing
+
+Eight of the rows above belong to the CA subsystem, restored after the deliberate silence documented in [ca-salary.md](ca-salary.md#11-notifications). Two things about them are not like any other notification in the app.
+
+**The two leave alerts go to one named uid**, `CA_LEAVE_ALERT_RECIPIENT_UID` in [`services/caNotifications.ts`](../src/lib/services/caNotifications.ts) — the same carve-out as the OF Manager diagnostics above, and for the same reason. "Never hardcode a uid" exists so a notification *meant for all admins* cannot silently reach one person; leave approval is genuinely one person's queue, and fanning it out would be noise for every admin who does not approve leave. One definition, changed there when the responsibility moves.
+
+**The two coverage alerts are coalesced, not sent inline.** One absence releases *every* creator the agent was covering, and an admin assigns them one at a time down the board — so sending per assignment would message the same person four times in a minute. `POST /api/ca-coverage/assign` therefore **queues** into `ca-coverage-notices`, one document per `(kind, agent, day)`, merging creator names with `arrayUnion` as they arrive. `/api/cron/ca-notifications` (every 5 minutes) sends each queue once it has been quiet for 3 minutes and deletes it; there is no "sent" flag, so a notice either exists (owed) or does not (delivered). Withdrawing approved leave queues the mirror-image `cancelled` notice through the same path.
+
+The delay cannot live inside the request: a serverless function cannot be trusted to still exist in three minutes' time, and a notification that silently never arrives is worse than one that arrives eight minutes late.
+
+**`commissionTierUp` needs stored memory.** Salary is derived on read (ca-salary.md §1), so recomputing a month tells you what band an agent is on and never what band they were last *told* about. `ca-salary-tier-notices/{uid}_{month}` is that memory, and the first sight of an agent-month writes a baseline rather than announcing one — otherwise the 1st of every month would greet everyone with "you are now earning 2.5%". Only an increase notifies; a tier that falls (a large reversal dated mid-month) lowers the stored mark silently, so re-crossing the band notifies again.
 
 ### Release notes ("what's new") — gated on the installed build
 
@@ -167,7 +187,9 @@ The One-Time Notifications tab's recipients dialog only ever reads `notification
 
 **`actionUrl` handling is shared by both paths**, in `resolveActionLine()` inside `telegramService.ts`:
 - An **external** URL (per `classifyNotificationAction`, [`notificationActionUrl.ts`](../src/lib/notificationActionUrl.ts)) is linked directly: `<a href="…">Open link</a>`.
-- An **internal** app route is *not* linked — `src/middleware.ts` rewrites non-Electron page traffic to `/desktop-only`, so a link to an in-app page opened from a phone is a dead end — but it is not silently dropped either. It is resolved against `PAGES` in [`definitions.ts`](../src/lib/definitions.ts) and named instead: `View on Bluu Backend > Disputes`. A route with no matching `PageDef` resolves to nothing (should not happen — every `actionUrl` this app produces is one of `PAGES`' hrefs).
+- An **internal** app route is *not* linked — `src/middleware.ts` rewrites non-Electron page traffic to `/desktop-only`, so a link to an in-app page opened from a phone is a dead end — but it is not silently dropped either. It is resolved against `PAGES` in [`definitions.ts`](../src/lib/definitions.ts) and **named as its full path through the sidebar**: `View on Bluu Backend > CA Portal > Dashboard`.
+  - **The teamspace is part of the name, not decoration.** Page titles are only unique *within* a teamspace — "Admin", "Dashboard", "Notifications" and "Disputes" each appear under more than one portal — so the bare title (`> Dashboard`, which is what this used to print) names a page the reader cannot find, and at worst names the wrong one.
+  - **A sub-route resolves to its parent page.** Not every `actionUrl` is a `PageDef` href: `/ca-portal/dashboard/salary` is a real destination whose permission is held one segment up. An exact href wins; failing that, the **longest** page href that is a path-boundary prefix of the target does — longest, so a nested page beats its own parent. A `PageDef` with a null `href` (a section header) is never a candidate. Only a target matching nothing at all resolves to no line — never to a breadcrumb naming somewhere the reader was not being sent.
 
 ### Recipient resolution
 

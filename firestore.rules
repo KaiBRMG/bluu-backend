@@ -156,6 +156,18 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 11b. Creator sub-accounts: the other accounts a creator runs
+    // ("Cole (Fansly)"). Assignable peers of their parent for shifts and pay.
+    //
+    // Admin SDK only, both directions. Unlike `creators` there is no self-read
+    // rule to write, because a sub-account is an account somebody owns rather
+    // than a person: it has no auth uid, so no client could ever be "it". The
+    // employee-facing list is served by /api/creators, which resolves parents
+    // and inherited avatars server-side.
+    match /creator-subaccounts/{subAccountId} {
+      allow read, write: if false;
+    }
+
     // 12. Bug reports
     // All writes via Admin SDK (API routes). No client-side access needed.
     // Rule exists for defence-in-depth — denies any accidental direct client writes.
@@ -462,6 +474,35 @@ service cloud.firestore {
     // full claim map, turning "who else wants this shift" into public
     // information it was never meant to be.
     match /ca-coverage-offers/{offerId} {
+      allow read, write: if false;
+    }
+
+    // 30. Chat-agent notification bookkeeping.
+    //
+    // Four collections that exist only so a notification fires exactly once.
+    // None of them is ever read by a client: the notifications themselves land
+    // in `notifications/{docId}` under the existing rule, and these are the
+    // ledgers behind them.
+    //
+    // `ca-coverage-notices` is a queue of messages waiting to be coalesced and
+    // sent; `ca-coverage-withdrawals` is the record of a cancelled absence,
+    // served to admins by /api/ca-coverage/offers (which is also what decides
+    // who counts as an admin — a rule cannot); `ca-salary-tier-notices` is the
+    // memory of which commission band an agent was last told about, and reading
+    // it client-side would expose one agent's earnings band to another;
+    // `ca-notification-latches` is the once-a-month guard on the payday
+    // reminder, and a client that could write it could silence that reminder for
+    // the whole roster.
+    match /ca-coverage-notices/{noticeId} {
+      allow read, write: if false;
+    }
+    match /ca-coverage-withdrawals/{leaveId} {
+      allow read, write: if false;
+    }
+    match /ca-salary-tier-notices/{noticeId} {
+      allow read, write: if false;
+    }
+    match /ca-notification-latches/{latchId} {
       allow read, write: if false;
     }
 

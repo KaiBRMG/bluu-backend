@@ -3,6 +3,9 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById, invalidateUserCache } from '@/lib/services/userService';
+import { notifications } from '@/lib/notificationContent';
+import { CA_LEAVE_ALERT_RECIPIENT_UID, notifyUsers } from '@/lib/services/caNotifications';
+import { formatDayLabelWithWeekday, toDayKey } from '@/lib/salary/salaryDate';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { LeaveRequestDocument } from '@/types/firestore';
 
@@ -195,6 +198,24 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     });
     await batch.commit();
     invalidateUserCache(token.uid);
+
+    // Tell the person who approves leave that there is something to approve.
+    //
+    // After the commit and never fatal: the request exists and the balance is
+    // spent, so a notification failure must not 500 and invite the agent to
+    // submit it again — the second attempt would 409 on the duplicate check and
+    // read as the app being broken. The approvals queue is the source of truth
+    // either way; this is the nudge towards it.
+    await notifyUsers(
+      [CA_LEAVE_ALERT_RECIPIENT_UID],
+      notifications.leaveRequested(
+        user.displayName ?? token.email ?? token.uid,
+        leaveType,
+        formatDayLabelWithWeekday(toDayKey(occurrenceStart)),
+        trimmedReason || undefined,
+      ),
+      { label: 'leaveRequested' },
+    );
 
     return NextResponse.json({ leaveId });
   } catch (err) {

@@ -513,6 +513,36 @@
       "indexes": []
     },
     {
+      "collectionGroup": "ca-coverage-notices",
+      "fieldPath": "creatorNames",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-notices",
+      "fieldPath": "day",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-notices",
+      "fieldPath": "kind",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-notices",
+      "fieldPath": "noticeId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-notices",
+      "fieldPath": "updatedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-notices",
+      "fieldPath": "userId",
+      "indexes": []
+    },
+    {
       "collectionGroup": "ca-coverage-offers",
       "fieldPath": "assignedInShift",
       "indexes": []
@@ -570,6 +600,61 @@
     {
       "collectionGroup": "ca-coverage-offers",
       "fieldPath": "windowStart",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-withdrawals",
+      "fieldPath": "creatorNames",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-withdrawals",
+      "fieldPath": "day",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-withdrawals",
+      "fieldPath": "displayName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-withdrawals",
+      "fieldPath": "leaveId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-withdrawals",
+      "fieldPath": "leaveType",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-withdrawals",
+      "fieldPath": "reverted",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-withdrawals",
+      "fieldPath": "shiftRestored",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-coverage-withdrawals",
+      "fieldPath": "userId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-notification-latches",
+      "fieldPath": "claimedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-notification-latches",
+      "fieldPath": "key",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-notification-latches",
+      "fieldPath": "month",
       "indexes": []
     },
     {
@@ -670,6 +755,26 @@
     {
       "collectionGroup": "ca-salary-overrides",
       "fieldPath": "note",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-tier-notices",
+      "fieldPath": "month",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-tier-notices",
+      "fieldPath": "percent",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-tier-notices",
+      "fieldPath": "updatedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-salary-tier-notices",
+      "fieldPath": "userId",
       "indexes": []
     },
     {
@@ -785,6 +890,56 @@
     {
       "collectionGroup": "ca-sales-imports",
       "fieldPath": "uploadedByName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-subaccounts",
+      "fieldPath": "OFID",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-subaccounts",
+      "fieldPath": "createdBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-subaccounts",
+      "fieldPath": "isArchived",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-subaccounts",
+      "fieldPath": "label",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-subaccounts",
+      "fieldPath": "photoStoragePath",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-subaccounts",
+      "fieldPath": "photoThumb",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-subaccounts",
+      "fieldPath": "photoURL",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-subaccounts",
+      "fieldPath": "stageName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-subaccounts",
+      "fieldPath": "subAccountId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creators",
+      "fieldPath": "photoThumb",
       "indexes": []
     },
     {
@@ -1141,7 +1296,12 @@
     {
       "collectionGroup": "shifts",
       "fieldPath": "creatorIds",
-      "indexes": []
+      "indexes": [
+        {
+          "queryScope": "COLLECTION",
+          "arrayConfig": "CONTAINS"
+        }
+      ]
     },
     {
       "collectionGroup": "shifts",

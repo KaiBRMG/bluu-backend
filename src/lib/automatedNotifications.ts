@@ -42,6 +42,8 @@ export type AutomatedNotificationCategory =
   | 'Onboarding'
   | 'Custom Requests'
   | 'Leave'
+  | 'Coverage'
+  | 'Salary'
   | 'Disputes'
   | 'Content Planning'
   | 'Model Submissions'
@@ -184,6 +186,114 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     telegramEnabled: true,
   },
 
+  // ─── Coverage ─────────────────────────────────────────────────────────────
+  // The absence pipeline, restored after the deliberate silence documented in
+  // ca-salary.md §11. The two leave entries go to ONE named uid rather than to
+  // the admin group — same carve-out as the OF Manager alerts below, and for the
+  // same reason: leave approval is one person's queue, not an announcement.
+  {
+    id: 'leaveRequested',
+    category: 'Coverage',
+    event: 'Leave requested',
+    trigger:
+      'A chat agent requests paid or unpaid leave against one of their shifts, from the CA dashboard calendar. The reason clause is omitted for unpaid leave, which does not require one.',
+    recipients: 'The one named leave approver (CA_LEAVE_ALERT_RECIPIENT_UID)',
+    sources: ['src/app/api/shifts/leave/route.ts'],
+    content: notifications.leaveRequested('{requesterName}', '{paid | unpaid}', '{date}', '{reason}'),
+    telegramEnabled: true,
+  },
+  {
+    id: 'leaveWithdrawn',
+    category: 'Coverage',
+    event: 'Approved leave withdrawn',
+    trigger:
+      'An agent cancels leave that had already been approved — so the shift occurrence is restored and every offer the absence created is removed, along with any overtime already assigned from it. Withdrawing a pending request notifies nobody: nothing has been acted on.',
+    recipients: 'The one named leave approver (CA_LEAVE_ALERT_RECIPIENT_UID)',
+    sources: ['src/app/api/shifts/leave/[leaveId]/route.ts'],
+    content: notifications.leaveWithdrawn('{requesterName}', '{paid | unpaid}', '{date}', '{what the revert undid}'),
+    telegramEnabled: true,
+  },
+  {
+    id: 'overtimeAssigned',
+    category: 'Coverage',
+    event: 'Overtime assigned',
+    trigger:
+      'An admin assigns released accounts to an agent on the Coverage board. Coalesced, not per account: assignments queue into ca-coverage-notices and one notification naming every creator is sent once the queue has been quiet for 3 minutes, flushed by the 5-minute cron. Assigning four accounts to one agent therefore sends one message, not four.',
+    recipients: 'The agent the cover was assigned to',
+    sources: [
+      'src/app/api/ca-coverage/assign/route.ts',
+      'src/app/api/cron/ca-notifications/route.ts',
+      'src/lib/services/coverageNotices.ts',
+    ],
+    content: notifications.overtimeAssigned('{creator1, creator2 and creator3}', '{date}'),
+    telegramEnabled: true,
+  },
+  {
+    id: 'overtimeCancelled',
+    category: 'Coverage',
+    event: 'Overtime cancelled',
+    trigger:
+      'The agent who was away withdraws their approved leave, so the cover is no longer needed and the shift that paid for it is deleted. Coalesced through the same queue as the assignment, so an agent covering three of the absent agent’s accounts is told once.',
+    recipients: 'Each agent who had been assigned cover for that absence',
+    sources: [
+      'src/app/api/shifts/leave/[leaveId]/route.ts',
+      'src/app/api/cron/ca-notifications/route.ts',
+      'src/lib/services/coverageNotices.ts',
+    ],
+    content: notifications.overtimeCancelled('{creator1 and creator2}', '{date}'),
+    telegramEnabled: true,
+  },
+
+  // ─── Salary ───────────────────────────────────────────────────────────────
+  {
+    id: 'salesImported',
+    category: 'Salary',
+    event: 'Sales data imported',
+    trigger:
+      'An admin completes a real (non-dry-run) .xlsx sales import that wrote at least one row. A re-upload of an overlapping export writes nothing and sends nothing — every figure would be unchanged.',
+    recipients: 'Every chat agent (the CA group, excluding archived users)',
+    sources: ['src/app/api/ca-salary/import/route.ts'],
+    content: notifications.salesImported('{August 2026}'),
+    telegramEnabled: true,
+  },
+  {
+    id: 'paydayApproaching',
+    category: 'Salary',
+    event: 'Payday reminder',
+    trigger:
+      'Three days before the 1st, measured in the salary timezone (Africa/Harare) and held until 09:00 local. Sent once per month — the 5-minute cron claims a latch, so only the first tick past the hour delivers.',
+    recipients: 'Every chat agent (the CA group, excluding archived users)',
+    sources: ['src/app/api/cron/ca-notifications/route.ts'],
+    content: notifications.paydayApproaching('{August 2026}'),
+    telegramEnabled: true,
+  },
+  {
+    id: 'salaryFinalized',
+    category: 'Salary',
+    event: 'Salary finalised',
+    trigger:
+      'An admin finalises an agent’s month, freezing every figure into ca-salary-months. Reopening a month deliberately sends nothing — an unlocked month has no figure to announce yet.',
+    recipients: 'The agent whose month was finalised',
+    sources: ['src/app/api/ca-salary/finalize/route.ts'],
+    content: notifications.salaryFinalized('{August 2026}'),
+    telegramEnabled: true,
+  },
+  {
+    id: 'commissionTierUp',
+    category: 'Salary',
+    event: 'Commission tier reached',
+    trigger:
+      'An agent’s month-to-date gross crosses into a higher commission band — after a sales import, or after an admin override that re-tiers the month. Once per band per month: the trigger is a change, and the derived salary data cannot remember what the agent was last told, so ca-salary-tier-notices holds that memory. A tier that falls (a large reversal dated mid-month) notifies nobody.',
+    recipients: 'The agent who crossed the band',
+    sources: [
+      'src/app/api/ca-salary/import/route.ts',
+      'src/app/api/ca-salary/override/route.ts',
+      'src/lib/services/caNotifications.ts',
+    ],
+    content: notifications.commissionTierUp('{5%}', '{August 2026}'),
+    telegramEnabled: true,
+  },
+
   // ─── Disputes ─────────────────────────────────────────────────────────────
   {
     id: 'disputeAssigned',
@@ -308,6 +418,8 @@ export const AUTOMATED_NOTIFICATION_CATEGORIES: AutomatedNotificationCategory[] 
   'Onboarding',
   'Custom Requests',
   'Leave',
+  'Coverage',
+  'Salary',
   'Disputes',
   'Content Planning',
   'Model Submissions',

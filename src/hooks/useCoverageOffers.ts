@@ -33,8 +33,26 @@ export interface CoverageOfferRow {
   leaveId: string | null;
 }
 
+/**
+ * An absence that was cancelled after it had already been approved. Admin-only,
+ * and empty for everyone else — the offers it created are deleted by the
+ * revert, so this is the only record that they existed.
+ */
+export interface CoverageWithdrawalRow {
+  leaveId: string;
+  userId: string;
+  displayName: string;
+  day: string;
+  leaveType: 'paid' | 'unpaid';
+  creatorNames: string[];
+  reverted: Array<{ userId: string; displayName: string; creatorNames: string[] }>;
+  shiftRestored: boolean;
+  withdrawnAt: string | null;
+}
+
 interface CoverageState {
   offers: CoverageOfferRow[];
+  withdrawals: CoverageWithdrawalRow[];
   isAdmin: boolean;
   loading: boolean;
   error: string | null;
@@ -53,6 +71,7 @@ export function useCoverageOffers(
 
   const [state, setState] = useState<CoverageState>({
     offers: [],
+    withdrawals: [],
     isAdmin: false,
     loading: enabled,
     error: null,
@@ -82,8 +101,18 @@ export function useCoverageOffers(
         throw new Error(message);
       }
 
-      const body = (await res.json()) as { offers: CoverageOfferRow[]; isAdmin: boolean };
-      setState({ offers: body.offers, isAdmin: body.isAdmin, loading: false, error: null });
+      const body = (await res.json()) as {
+        offers: CoverageOfferRow[];
+        withdrawals?: CoverageWithdrawalRow[];
+        isAdmin: boolean;
+      };
+      setState({
+        offers: body.offers,
+        withdrawals: body.withdrawals ?? [],
+        isAdmin: body.isAdmin,
+        loading: false,
+        error: null,
+      });
     } catch (err) {
       setState(prev => ({
         ...prev,

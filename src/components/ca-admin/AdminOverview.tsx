@@ -80,7 +80,10 @@ interface OverviewCreator {
   name: string;
   gross: number;
   count: number;
+  /** Agents who recorded a sale on this creator — a revenue fact. */
   agentCount: number;
+  /** Agents rostered onto this creator — a coverage fact. `null` when unreadable. */
+  assignedAgentCount: number | null;
   previousGross: number | null;
 }
 
@@ -107,7 +110,10 @@ interface OverviewResponse {
   attention: {
     agentsWithoutSales: Array<{ uid: string; displayName: string }>;
     lapsedCreators: Array<{ name: string; previousGross: number }>;
+    /** Exactly one agent *rostered* on the account — see the route's note. */
     soloCreators: Array<{ name: string; gross: number; agentName: string }>;
+    /** Earning creators whose coverage could not be read. `matched` false = the name is not on the roster. */
+    unmeasuredCreators: Array<{ name: string; gross: number; matched: boolean }>;
   };
 }
 
@@ -405,11 +411,30 @@ function AttentionBand({
       text: (
         <>
           <strong className="font-medium text-foreground">
-            {pluralise(attention.soloCreators.length, 'creator')} with only one agent earning on them
+            {pluralise(attention.soloCreators.length, 'creator')} with only one agent rostered on them
           </strong>{' '}
           — {attention.soloCreators.slice(0, 4).map(c => `${c.name} (${c.agentName})`).join(', ')}
           {attention.soloCreators.length > 4 && `, and ${attention.soloCreators.length - 4} more`}. An absence there has
           nobody to fall back on.
+        </>
+      ),
+    });
+  }
+
+  if (attention.unmeasuredCreators.length > 0) {
+    findings.push({
+      key: 'unmeasured',
+      text: (
+        <>
+          <strong className="font-medium text-foreground">
+            Coverage unknown for {pluralise(attention.unmeasuredCreators.length, 'earning creator')}
+          </strong>{' '}
+          — {attention.unmeasuredCreators.slice(0, 4).map(c => c.name).join(', ')}
+          {attention.unmeasuredCreators.length > 4 && `, and ${attention.unmeasuredCreators.length - 4} more`}.{' '}
+          {attention.unmeasuredCreators.some(c => !c.matched)
+            ? 'Some of these names do not match a creator on the roster, so sales and shifts cannot be joined.'
+            : 'No shift this month records an assignment for them.'}{' '}
+          The solo-coverage check above skips these rows.
         </>
       ),
     });
@@ -763,17 +788,29 @@ function CreatorLeaderboard({
           'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50',
         )}
       >
-        <table className="w-full min-w-[620px] border-collapse text-sm">
+        <table className="w-full min-w-[690px] border-collapse text-sm">
           <thead>
             <tr className={cn('border-b', HAIRLINE)}>
               <th scope="col" className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
                 Creator
               </th>
-              {['Gross', 'Share', 'Sales', 'Agents'].map(label => (
+              {/* `Sellers` and `Cover` are deliberately two columns, not one
+                  "Agents". They are different facts and they disagree all the
+                  time: an agent rostered on an account covers it whether or not
+                  they closed anything that month. Collapsing them is what made
+                  the chip below claim a coverage risk from a revenue number. */}
+              {['Gross', 'Share', 'Sales', 'Sellers', 'Cover'].map(label => (
                 <th
                   key={label}
                   scope="col"
                   className="px-3 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-zinc-400"
+                  title={
+                    label === 'Sellers'
+                      ? 'Agents who recorded a sale on this creator this month'
+                      : label === 'Cover'
+                        ? 'Agents rostered onto this creator this month. — means no shift records an assignment.'
+                        : undefined
+                  }
                 >
                   {label}
                 </th>
@@ -803,9 +840,18 @@ function CreatorLeaderboard({
                         className="size-6 text-[10px]"
                       />
                       <span className="min-w-0 truncate font-medium">{creator.name}</span>
-                      {creator.agentCount === 1 && creator.gross > 0 && (
-                        <span className="shrink-0 rounded-full bg-orange-500/10 px-1.5 py-px text-[10px] font-medium text-orange-400">
-                          One agent
+                      {/* Reads `assignedAgentCount`, not `agentCount`. A lone
+                          *seller* is a revenue observation and routinely
+                          harmless; a lone *rostered agent* is the thing an
+                          absence actually breaks. `null` is unknown, so it
+                          earns no chip rather than a false warning — those rows
+                          are named in the attention band instead. */}
+                      {creator.assignedAgentCount === 1 && creator.gross > 0 && (
+                        <span
+                          className="shrink-0 rounded-full bg-orange-500/10 px-1.5 py-px text-[10px] font-medium text-orange-400"
+                          title="Only one agent is rostered on this account this month"
+                        >
+                          Sole cover
                         </span>
                       )}
                     </span>
@@ -817,6 +863,14 @@ function CreatorLeaderboard({
                   <td className="px-3 py-2 text-right tabular-nums text-zinc-400">{share.toFixed(1)}%</td>
                   <td className="px-3 py-2 text-right tabular-nums text-zinc-400">{creator.count}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-zinc-400">{creator.agentCount}</td>
+                  <td
+                    className={cn(
+                      'px-3 py-2 text-right tabular-nums',
+                      creator.assignedAgentCount === 1 ? 'text-orange-400' : 'text-zinc-400',
+                    )}
+                  >
+                    {creator.assignedAgentCount ?? '—'}
+                  </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right">
                     <Delta current={creator.gross} previous={creator.previousGross} month={previousMonth} />
                   </td>

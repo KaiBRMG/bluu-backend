@@ -10,10 +10,12 @@
  * hours", and it is derivable. `forceInShift` exists for the case the calendar
  * cannot see, such as an agent agreeing to stay on past their shift end.
  *
- * Nobody is notified yet: coverage notifications are held back until the
- * subsystem has run in production (see documentation/ca-salary.md §11), so an
- * admin assigning cover should tell the agent themselves. The board still shows
- * the outcome to anyone who opens it.
+ * **The assignee is notified, but not from here.** An absence releases every
+ * account the agent was covering and an admin assigns them one at a time, so
+ * sending on each POST would message the same person four times in a minute.
+ * The assignment queues into `ca-coverage-notices` instead, and one coalesced
+ * notification naming every creator goes out once the queue has been quiet for
+ * a few minutes — see `services/coverageNotices.ts` and the cron that flushes it.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -22,6 +24,8 @@ import { handleApiError } from '@/lib/middleware/apiHelpers';
 import { requireCaAdmin } from '@/lib/salary/salaryAuth';
 import { assignOffer, getOffer, unassignOffer, cancelOffer } from '@/lib/services/caCoverageService';
 import { getUserById } from '@/lib/services/userService';
+import { queueCoverageNotice } from '@/lib/services/coverageNotices';
+import { toDayKey } from '@/lib/salary/salaryDate';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { safeTimezone } from '@/lib/utils/timezone';
 
@@ -80,6 +84,16 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       forceInShift: body.forceInShift,
       windowStart: body.windowStart,
       windowEnd: body.windowEnd,
+    });
+
+    // Queue rather than send — see the header note. Never fatal: the assignment
+    // and the shift that pays for it are already written, and an admin must not
+    // be told the assignment failed because a message could not be queued.
+    await queueCoverageNotice({
+      kind: 'assigned',
+      userId: body.userId,
+      day: toDayKey(body.windowStart ?? offer.windowStart),
+      creatorNames: [offer.creatorName],
     });
 
     return NextResponse.json({

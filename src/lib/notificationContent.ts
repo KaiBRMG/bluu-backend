@@ -77,18 +77,23 @@ export const notifications = {
   }),
 
   // ─── Leave requests ───────────────────────────────────────────────────────────
+  // Both point at the CA dashboard, which is the ONLY surface that requests
+  // leave (`ShiftCalendar` + `LeaveBalanceCard`, mounted nowhere else). They
+  // used to point at `/applications/time-tracking`, whose "Upcoming Shifts" tab
+  // hosted leave before the calendar absorbed it — that tab is gone, so the
+  // link landed on a page with nothing to see (ca-salary.md §6).
   leaveApproved: (leaveLabel: string, dateStr: string): NotificationContent => ({
     title: '✅ Leave Request Approved',
     message: `Your ${leaveLabel} leave request on ${dateStr} has been approved.`,
     type: 'success',
-    actionUrl: '/applications/time-tracking',
+    actionUrl: '/ca-portal/dashboard',
   }),
 
   leaveDenied: (leaveLabel: string, dateStr: string): NotificationContent => ({
     title: '❗️Leave Request Denied',
     message: `Your ${leaveLabel} leave request on ${dateStr} has been denied.`,
     type: 'alert',
-    actionUrl: '/applications/time-tracking',
+    actionUrl: '/ca-portal/dashboard',
   }),
 
   // ─── Disputes ─────────────────────────────────────────────────────────────────
@@ -173,6 +178,83 @@ export const notifications = {
     message: `The provider is serving its 240p/720p video renditions from ${host}, which the app does not accept as a media host — so videos are falling back to the full-resolution source file, the most expensive download available. Allow that host in CDN_URL_PATTERN to restore the saving. Sent once only.`,
     type: 'alert',
     actionUrl: null,
+  }),
+
+  // ─── Chat-agent coverage (leave → overtime marketplace) ───────────────────────
+  // The absence pipeline's four moving parts, restored after the deliberate
+  // silence documented in ca-salary.md §11. Two rules shape this group:
+  //
+  //  1. **The leave alerts go to ONE named uid**, not to `groups/admin.members`
+  //     — see CA_LEAVE_ALERT_RECIPIENT_UID in `services/caNotifications.ts` for
+  //     why, and change it there.
+  //  2. **The two agent-facing ones are coalesced, never per-account.** An
+  //     absence releases every creator the agent was covering, so assigning
+  //     four accounts to one person must produce one message naming four
+  //     creators — hence `creatorList`, a pre-joined "Cole, Adam and Liam".
+
+  leaveRequested: (requesterName: string, leaveLabel: string, dateStr: string, reason?: string): NotificationContent => ({
+    title: '🗓️ New Leave Request',
+    message: reason
+      ? `${requesterName} has requested ${leaveLabel} leave on ${dateStr}. Reason: ${reason}`
+      : `${requesterName} has requested ${leaveLabel} leave on ${dateStr}.`,
+    type: 'action',
+    actionUrl: '/ca-portal/admin',
+  }),
+
+  // Only ever sent for leave that was already APPROVED — withdrawing a pending
+  // request changes nothing anyone has acted on. `revertedLabel` says what the
+  // withdrawal undid, because that is the part an admin has to check.
+  leaveWithdrawn: (requesterName: string, leaveLabel: string, dateStr: string, revertedLabel: string): NotificationContent => ({
+    title: '↩️ Leave Request Cancelled',
+    message: `${requesterName} has cancelled their approved ${leaveLabel} leave on ${dateStr}. Their shift has been restored and ${revertedLabel}`,
+    type: 'alert',
+    actionUrl: '/ca-portal/admin',
+  }),
+
+  overtimeAssigned: (creatorList: string, dateStr: string): NotificationContent => ({
+    title: '💪 Overtime Assigned',
+    message: `You have been assigned overtime to ${creatorList} on ${dateStr}. Check your calendar for the exact hours.`,
+    type: 'success',
+    actionUrl: '/ca-portal/dashboard',
+  }),
+
+  overtimeCancelled: (creatorList: string, dateStr: string): NotificationContent => ({
+    title: '↩️ Overtime Cancelled',
+    message: `Your overtime on ${creatorList} on ${dateStr} has been cancelled — the agent who was away has withdrawn their leave. You are no longer expected to cover it.`,
+    type: 'alert',
+    actionUrl: '/ca-portal/dashboard',
+  }),
+
+  // ─── Chat-agent salary ────────────────────────────────────────────────────────
+  salesImported: (monthLabel: string): NotificationContent => ({
+    title: '📈 Earnings Report Updated',
+    message: `New sales for ${monthLabel} have been imported. Your earnings report and daily breakdown now include them.`,
+    type: 'system',
+    actionUrl: '/ca-portal/dashboard/salary',
+  }),
+
+  paydayApproaching: (monthLabel: string): NotificationContent => ({
+    title: '💸 Payday is Approaching',
+    message: `Payday is in 3 days. Check your ${monthLabel} daily breakdown now and raise anything that looks wrong before the 1st — once the month is finalised the figures are locked.`,
+    type: 'action',
+    actionUrl: '/ca-portal/dashboard/salary',
+  }),
+
+  salaryFinalized: (monthLabel: string): NotificationContent => ({
+    title: '✅ Salary Finalised',
+    message: `Your ${monthLabel} salary has been finalised and is on the way. The breakdown is now locked to what was paid.`,
+    type: 'success',
+    actionUrl: '/ca-portal/dashboard/salary',
+  }),
+
+  // `percent` is the commission band the agent has just crossed INTO. Gated to
+  // once per band per month by `ca-salary-tier-notices` — the trigger is a
+  // change, and nothing in the derived salary data remembers what was last said.
+  commissionTierUp: (percent: string, monthLabel: string): NotificationContent => ({
+    title: '🔥 Commission Tier Unlocked',
+    message: `You are now earning ${percent} commission for ${monthLabel}. Keep it up 🔥`,
+    type: 'success',
+    actionUrl: '/ca-portal/dashboard/salary',
   }),
 
   // ─── Desktop app releases ─────────────────────────────────────────────────────

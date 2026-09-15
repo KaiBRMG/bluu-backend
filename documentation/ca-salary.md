@@ -76,6 +76,29 @@ Clamps rather than interpolates. **Zero accounts pays nothing** — a shift with
 
 The count comes from the shift's `creatorIds`. For days recorded before creator assignment existed it falls back to **distinct creators with a sale that day**, and the cell is flagged as inferred (orange in the grid, `accountCountSource: 'sales'`).
 
+### Sub-accounts are peers, and cost the engine nothing
+
+A creator often runs more than one account — Cole on OnlyFans, "Cole (Fansly)" on Fansly. These are **assignable peers**: one agent can hold Cole while another holds Cole (Fansly), and each counts as one account toward whoever holds it.
+
+The whole mechanism is one design choice: **a sub-account is just another id in `creatorIds`.** Creator ids are Firebase Auth uids; sub-account ids are Firestore auto-ids. The two spaces are disjoint, so the field needs no discriminator — and the salary engine, the per-shift rate, and the 4/5-account claim cap all required **no change whatsoever**, because every one of them counts ids. `subaccounts.test.ts` pins that: the same agent on Cole + Cole (Fansly) earns exactly what they would on Cole + Adam.
+
+`isSubAccount` exists only for *display* — grouping a picker, naming the parent on a roster. Nothing in the pay path reads it, and nothing should: weighting a sub-account as a fraction of an account is the bug this model was built to avoid.
+
+**A sub-account is not a `creators` document.** A creator doc id *is* an auth uid — creators sign into the Telegram Mini App with it. A sub-account is an account somebody owns, not a person: no login, no Telegram binding, no portal. Modelling one as a creator would mint an auth identity that can never be used and put it in the creator portal's own roster.
+
+| | Creator | Sub-account |
+|---|---|---|
+| Collection | `creators` | `creator-subaccounts` |
+| Id | Firebase Auth uid | Firestore auto-id |
+| Portal login | Yes | No |
+| Assignable to a shift | Yes | Yes — as a peer |
+| Counts toward the wage tier | 1 | 1 |
+| Avatar | Its own | Inherits the parent's unless given one |
+
+Managed in **Creator Management → ⋯ → Sub-accounts**. Archive rather than delete: the id is stored on every shift it was assigned to, and those shifts are what the engine prices, so deleting a used one leaves chips resolving to a raw id. The server refuses that delete (one `array-contains` on `shifts.creatorIds`) and says why.
+
+> **The sales import still keys on creator *names*, not ids.** If the export reports a sub-account's revenue under its own name, the `accountCountSource: 'sales'` fallback counts it correctly; if it reports everything under the parent's, that fallback under-counts for multi-account creators. It only affects days with **no shift on record**, so it is a historical-data concern rather than a live one — but confirm which the export does before relying on a backfilled month.
+
 > **1 and 5 were extrapolated, not observed.** The operated rates are 2/3/4. If payroll ever disputes a figure for a 1- or 5-account day, this is the first thing to check.
 
 ### `wageRateBasis` — the one genuinely ambiguous rule
@@ -138,7 +161,7 @@ An admin with the **admin claim** finalises a month:
 
 - Every derived figure is frozen into `ca-salary-months/{userId}_{month}`.
 - Later sales imports for that agent-month are refused; no override can be written.
-- **The agent is not notified** — see §11. The finalise dialog says so, because somebody has to tell them.
+- **The agent is notified** (`salaryFinalized`) — see §11. Reopening is silent, deliberately.
 
 Reopening keeps the frozen `days` — that is the record of what was paid — and appends to `history`. Again, nobody is notified automatically.
 
@@ -158,7 +181,7 @@ An offer is **one creator on one date**, not one shift, so two agents can split 
 
 ### Approving leave releases automatically
 
-`POST /api/shifts/leave/[leaveId]/approve` calls [`releaseOccurrenceForCoverage`](../src/lib/services/leaveCoverage.ts), which tombstones the occurrence and posts one offer per assigned creator. It does not notify anyone — see §11.
+`POST /api/shifts/leave/[leaveId]/approve` calls [`releaseOccurrenceForCoverage`](../src/lib/services/leaveCoverage.ts), which tombstones the occurrence and posts one offer per assigned creator. The **release** itself still notifies nobody — the accounts appear on every agent's calendar and the board is the signal; it is the *assignment* that reaches a person (§11). Withdrawing approved leave reverses all of it — see §11.
 
 It runs **after the commit and is non-fatal**: the leave was approved and the agent has been told, so a failure to release must not 500 and make an admin approve twice. The response carries the outcome, and the approvals UI surfaces `noAssignments` — a shift with no creators assigned releases nothing, which is not an error but *is* something an admin needs to know.
 
@@ -234,6 +257,11 @@ Two rules, and both are load-bearing:
 | `ca-salary-months` | `{uid}_{YYYY-MM}` | Frozen payout record |
 | `ca-salary-config` | `current` | The rate tables |
 | `ca-coverage-offers` | `{shiftId}_{start}_{creatorId}` | One account needing cover |
+| `ca-coverage-notices` | `{kind}__{uid}__{day}` | Coalescing queue for the two coverage notifications (§11) |
+| `ca-coverage-withdrawals` | `{leaveId}` | A cancelled absence, for the Coverage band (§11) |
+| `ca-salary-tier-notices` | `{uid}_{month}` | The commission band an agent was last told about (§11) |
+| `ca-notification-latches` | `payday-{month}` | Once-a-month guard on the payday reminder (§11) |
+| `creator-subaccounts` | auto-id | A creator's secondary account, assignable as a peer |
 
 **All of it is Admin SDK only, in both directions.** This is the only subsystem where a client-side read would expose one employee's pay to another. Every figure is assembled server-side by `/api/ca-salary/*`, which resolves the subject from the verified token and **never from a query parameter**.
 
@@ -267,6 +295,8 @@ Helpers: [`salaryAuth.ts`](../src/lib/salary/salaryAuth.ts).
   Active Users · Timesheets · Screenshots · Leave (balances) · Analytics
 
 /ca-portal/admin            (tabbed)
+  Overview      the month above the roster — agent × creator matrix,
+                creator leaderboard, payroll share, attention band
   Salaries      roster → one agent's editable month
   Sales data    .xlsx upload with dry-run preview, import history
   Coverage      leave approvals → offer board → assign
@@ -277,6 +307,31 @@ Helpers: [`salaryAuth.ts`](../src/lib/salary/salaryAuth.ts).
                             (own shifts + overtime + request leave)
 /ca-portal/dashboard/salary Overview · Daily breakdown · Sales report
 ```
+
+### The Overview tab
+
+The **first** tab of CA Admin and its landing view. Payroll answers "what do I pay this agent"; Overview answers the two questions that only exist one level up — **which creators the money came from**, and **whether any of it rests on one person**. It is the individual sales report's `By creator` breakdown lifted to the whole roster, which is the read that breakdown could never give: an agent's own top creator says nothing about whether that creator has anyone else on them.
+
+Four parts, in reading order:
+
+- **Header strip** — gross, payroll cost, **payroll share of gross**, hours, agents earning. Payroll share is the only figure on this surface that appears nowhere else, and it is why the strip earns its space: gross and payroll each mean something only next to the other.
+- **Attention band** — the ways a month is quietly wrong, rolled up across the roster: days with sales but no shift, agents with no sales at all, creators with exactly one agent earning on them, creators that earned last month and nothing this month, and admin-edited days. Takes the *attention needed* tint and **no motion** (DESIGN.md §5). Each line **names its rows**, not just a count. It states plainly when there is nothing to check — a check that vanishes when it passes is indistinguishable from one that never ran.
+- **Agent × creator matrix** — gross per intersection, shaded against **one scale shared by the whole grid** so a cell reads both along its row (this agent's earners) and down its column (who carries this creator). Per-row scaling would destroy the second read, which is the one not available anywhere else. Ten creator columns, the rest folded, expandable. The agent column is sticky; the grid scrolls sideways at the 1024px floor and a matrix whose row labels scroll away is unreadable.
+- **Creator leaderboard** — gross, share, sales, **agents covering**, and the month-over-month move. A creator at 30% of the month with one agent on them is a very different fact from the same 30% split four ways.
+
+Three calls worth not re-litigating:
+
+- **Month-over-month is gross, never payroll.** A payroll comparison needs a second `buildSalaryMonthForUsers` — six more queries — for a figure nobody reconciles against. Gross costs one extra query for the previous month's sales.
+- **Deltas carry no hue.** A fall is information, not an error state; colouring every row green-or-red spends the palette on the ordinary case, exactly as `signedMoneyClass` already argues. The few movements that need acting on are escalated into the attention band.
+- **The matrix shades, the leaderboard bars.** Both ramp from the same Action Blue token against the same kind of shared scale. A bar inside an ~80px matrix column degenerates into a two-pixel sliver beside a right-aligned number, so the matrix uses a tint; the leaderboard's rows are wide enough to keep the sales report's bar-behind-the-row idiom.
+
+**Read budget.** `GET /api/ca-salary/overview` reads the month's sales **once** and passes them to `buildSalaryMonthForUsers` via its `salesByUser` option, which would otherwise query them again — so the matrix and the totals are built from the same rows, cannot disagree, and cost one query between them. The previous month adds exactly one more query, for sales only. Creator photos cost nothing: the client joins the roster from `useCreators` (a module-level shared store) on the **folded stage name**, since sales carry a creator *name* typed into the export, not a creator id. A name that matches no creator still renders — `CreatorAvatar` hashes its initials colour from that same string (rule 7), so an unrecognised creator looks like a creator rather than a rendering failure.
+
+**A finalised month shows live revenue against frozen payroll, on purpose.** Its `totals` come from the snapshot while its sales rows stay live, so a late import moves the revenue columns and not the payroll ones. That is the honest pairing — the header strip says how many months are frozen.
+
+**One month governs each page, and so does one day.** In CA Admin the month is owned by **the page**, not by either panel, and Overview and Payroll share it — they are read together, and a month that only moved on one of them is how a figure gets quoted from the wrong one. The dashboard's `MonthPicker` drives the salary card *and* the calendar; on `/salary` the month lives in `?month=YYYY-MM` so a link can point at one. A month change also **clears the inspected day** — the day picked from the Daily breakdown to filter the Sales report. Left alone it outlived its month and the tab requested September's sales for a day in August: an empty list under a banner naming the August date. Any new control that changes the month has to clear it too.
+
+**`SalesReport` is cached and capped.** Radix unmounts an inactive `TabsContent`, so every visit to the Sales tab used to be a full re-fetch of the month's transactions; it now reads through `queryCache` on the same 60s TTL `useSalaryMonth` uses, and a write (a payroll delete) forces past it. The table renders the first 150 rows with a "show the rest" step, filters through `useDeferredValue`, and both tabs' scroll containers are focusable, named regions — a table that only scrolls under a pointer is a WCAG 2.1.1 failure, and at the 1024px window floor the rightmost column is off-screen.
 
 ### Key files
 
@@ -289,32 +344,82 @@ Helpers: [`salaryAuth.ts`](../src/lib/salary/salaryAuth.ts).
 | [`salesImport.ts`](../src/lib/salary/salesImport.ts) | Rows → sales + skip report |
 | [`caSalaryService.ts`](../src/lib/services/caSalaryService.ts) | Firestore + the assembler |
 | [`caCoverageService.ts`](../src/lib/services/caCoverageService.ts) | Offers, claims, assignment |
-| [`leaveCoverage.ts`](../src/lib/services/leaveCoverage.ts) | Leave approval → release |
+| [`leaveCoverage.ts`](../src/lib/services/leaveCoverage.ts) | Leave approval → release, and withdrawal → revert |
+| [`caNotifications.ts`](../src/lib/services/caNotifications.ts) | Recipients, delivery, the tier gate and the payday latch |
+| [`coverageNotices.ts`](../src/lib/services/coverageNotices.ts) | The coalescing queue and the withdrawal record |
+| [`AdminOverview.tsx`](../src/components/ca-admin/AdminOverview.tsx) | The Overview tab — the matrix, the leaderboard and the attention band |
 | [`CommissionLadder.tsx`](../src/components/salary/CommissionLadder.tsx) | The stepped scale, drawn as steps |
 | [`SalaryDayTable.tsx`](../src/components/salary/SalaryDayTable.tsx) | The month grid, read-only and editable |
+| [`useLeaveRequests.ts`](../src/hooks/useLeaveRequests.ts) | **Module-level shared store**, like `useCreators`. The CA dashboard mounts it twice by design (balance card + calendar); per-instance state meant two identical requests on mount and a badge that went stale while the calendar beside it refreshed. |
 | [`CreatorChip.tsx`](../src/components/creators/CreatorChip.tsx) | **The house pattern for showing a creator** — `Avatar` + profile picture, initials fallback seeded from the stage name |
+| [`creatorAccountService.ts`](../src/lib/services/creatorAccountService.ts) | Creators + sub-accounts as one assignable list; validates ids across both collections |
 | [`useCreators.ts`](../src/hooks/useCreators.ts) | Module-level shared store behind every creator chip — one fetch, one parse, one `Map` per page |
 
 ---
 
 ## 11. Notifications
 
-**There are none yet, and that is deliberate.**
+**They are in.** Eight events notify, restored after the deliberate pre-launch silence — the figures have been trusted long enough to tell people about them. Copy lives in `notificationContent.ts` and the catalogue in `automatedNotifications.ts`, under the `Coverage` and `Salary` categories (cross-cutting rule 15); the full event → factory table is in [notifications.md](notifications.md#notification-events--factory-functions).
 
-Six were built and then removed before launch — salary finalised/reopened, commission tier reached, overtime available/assigned/passed-over. They will go back in once the subsystem has run in production and the figures have been trusted for a month or two; a notification that tells eight people a wrong number is worse than no notification.
-
-What that means in the meantime:
-
-| Event | Who needs telling | How |
+| Event | Who is told | Gate |
 |---|---|---|
-| A month is finalised | The agent | The admin, by hand. The finalise dialog says so. |
-| A month is reopened | The agent | The admin, by hand. |
-| Leave releases accounts | Every chat agent | Nobody is pushed. The accounts appear on everyone's calendar. |
-| Cover is assigned | The claimant, and anyone passed over | The admin, by hand. The board shows the outcome. |
+| Leave requested | One named approver | — |
+| Approved leave withdrawn | One named approver | Only for leave that was **approved** — a pending request nobody acted on changes nothing |
+| Overtime assigned | The assignee | **Coalesced** per agent per day |
+| Overtime cancelled | Each agent who was covering | **Coalesced** per agent per day |
+| Sales imported | Every chat agent | Only a real import that wrote rows |
+| Payday in 3 days | Every chat agent | Once per month, latched |
+| Salary finalised | That agent | — (reopening notifies nobody) |
+| Commission tier reached | That agent | Once per band per month, and only upwards |
 
-Leave approval and denial **do** still notify (`leaveApproved` / `leaveDenied`) — those predate this subsystem and were never removed.
+Four decisions inside that table are load-bearing.
 
-When they are added back, rule 15 applies: the factories go in `notificationContent.ts`, the catalogue entries in `automatedNotifications.ts` (which needs its `Salary` and `Coverage` categories restoring to both the union type *and* `AUTOMATED_NOTIFICATION_CATEGORIES`), and the rows in the event → factory table in [notifications.md](notifications.md). The tier-crossing one also needs its `ca-salary-tier-notices` collection back — a "once per tier, per month" gate cannot be derived from the salary data, because the trigger is a *change* and nothing remembers what was last said.
+**The leave alerts name one uid.** `CA_LEAVE_ALERT_RECIPIENT_UID` in [`caNotifications.ts`](../src/lib/services/caNotifications.ts), one definition, the same carve-out from "never hardcode a uid" as the OF Manager diagnostics. Leave approval is one person's queue; every admin hearing about every request is noise.
+
+**Coverage notifications are coalesced, and the delay lives in a cron.** One absence releases every creator the agent was covering, and an admin assigns them one at a time — so an assignment **queues** into `ca-coverage-notices` (one doc per `kind`+agent+day, names merged with `arrayUnion`) and `/api/cron/ca-notifications` sends it once the queue has been quiet for 3 minutes, then deletes it. Assigning four accounts to one agent produces one message naming four creators. There is no "sent" flag: a notice either exists (owed) or does not (delivered). The delay cannot sit inside the request — a serverless function is not going to still be there in three minutes, and a message that never arrives is worse than one eight minutes late.
+
+**Reopening a month is silent on purpose.** Finalising says "your salary is on the way", which is the thing the agent has been waiting to hear. Reopening is an admin correcting something mid-flight, and telling an agent their locked month has come unlocked — before anyone knows what it will settle at — invites a question nobody can answer yet. The finalise that follows is the message.
+
+**The tier notice needs memory, because salary is derived.** Recomputing a month says what band an agent is *on*, never what band they were last told about, so `ca-salary-tier-notices/{uid}_{month}` holds that. First sight of an agent-month writes a **baseline** rather than announcing one, or the 1st of every month would greet everyone with "you are now earning 2.5%". Only an increase notifies; a band that falls (a large reversal dated mid-month) lowers the stored mark silently, so re-crossing notifies again. It fires from the sales import — the one thing that moves a whole roster's gross at once — and from the override endpoints, which already recompute the month.
+
+### Withdrawing approved leave
+
+The mirror image of the release, in [`revertOccurrenceCoverage`](../src/lib/services/leaveCoverage.ts). `DELETE /api/shifts/leave/[leaveId]` on an **approved** request has to undo three things, in this order of importance:
+
+1. **The overtime someone else was assigned goes away**, with the shift that pays for it — the one write here that touches money. Leaving it would pay two people for the same accounts on the same day. An overtime shift carrying several merged offers loses the creator, not the shift, until the last one goes.
+2. **The offers leave the board**, *deleted* rather than marked `cancelled`. Offer ids are derived from the occurrence, so re-approving the same leave has to be able to post them again and `createOffersForOccurrence` writes with `merge: false`.
+3. **The original occurrence comes back** with the creator assignment it always carried — the tombstone override is deleted for a recurring series, `isDeleted` is lifted for a one-off. Nothing ever removed `creatorIds` from that shift, so restoring the occurrence restores the assignment.
+
+The offers are found by the indexed `day` equality and filtered on `leaveId` in memory: `leaveId` is index-exempt (rule 9) and a day holds a handful of offers, so buying an index for it would be the wrong trade.
+
+All of it runs **after** the withdrawal commits and is non-fatal, the same shape as the release on approval — the agent asked to cancel, the cancellation succeeded, and a board that could not be tidied must not surface as "could not cancel your leave".
+
+**Because the offers are deleted, the Coverage tab needs a record.** `ca-coverage-withdrawals/{leaveId}` holds who withdrew, the day, every account that came off the board, and each agent whose overtime was taken back with what they lost. `GET /api/ca-coverage/offers` serves it to admins only (it names people, which is roster information rather than board information) and `AdminCoverage` renders it as an interrupt band on the DESIGN.md §5 recipe — attention tint, static dot, no motion. It names the reverted agents in full rather than counting them: "2 reverted" does not tell an admin whether to go and speak to anyone.
+
+### Collections added
+
+| Collection | Doc id | What |
+|---|---|---|
+| `ca-coverage-notices` | `{kind}__{uid}__{day}` | A coalescing queue waiting for its quiet period. Deleted on send. |
+| `ca-coverage-withdrawals` | `{leaveId}` | A cancelled absence — the Coverage tab's band |
+| `ca-salary-tier-notices` | `{uid}_{month}` | Which commission band the agent was last told about |
+| `ca-notification-latches` | `payday-{month}` | The once-a-month guard on the payday reminder |
+
+All four are Admin-SDK-only (`allow read, write: if false`) and every field on them is index-exempt except `ca-coverage-withdrawals.withdrawnAt`, which the band orders by.
+
+---
+
+## 11c. Admin Overview: sales names vs creator ids
+
+`GET /api/ca-salary/overview` is the one place in this subsystem that has to join **sales** to **shifts**, and the two do not share a key. A sale carries a creator *name* typed into the `.xlsx` export ([`salesImport.ts`](../src/lib/salary/salesImport.ts) trims the `Creator` column and stores it verbatim); a shift carries `creatorIds`, real creator document ids. Anything spanning both needs `buildCreatorIdResolver`.
+
+The export's names are also routinely shorter than the roster's stage names — "Liam" for Liam Heng, "Adam" for Adam Horváth, "Cole" for Cole Bentley — so an exact folded match resolves only some of them. The resolver takes an exact match first, then a **word-boundary prefix**, and **only when exactly one creator matches**: "noah" is a prefix of both Noah Green and Noah Ryder, and guessing there would attribute one creator's coverage to another. Ambiguous or unmatched resolves to `null`.
+
+**The distinction the `attention` findings turn on.** `agentCount` counts agents who *recorded a sale* on a creator — a revenue fact. `assignedAgentCount` counts agents *rostered* onto them — a coverage fact. The solo-coverage finding once used the first while claiming the second, and reported "nobody to fall back on" for a creator three agents were working, because only one of them had closed a sale that month. At low revenue that check inverts entirely: it fires hardest on the accounts where a lone seller means least. It now reads shift assignments.
+
+**The Creators-by-revenue table names both facts, in two columns.** `Sellers` is `agentCount`, `Cover` is `assignedAgentCount`, and the `Sole cover` chip beside the creator's name fires on the second. They were one "Agents" column and a `One agent` chip reading the sales number, which is how the table came to contradict the finding above it. Do not collapse them again — they disagree routinely, and the disagreement is the useful part.
+
+`assignedAgentCount` is `null`, not `0`, when coverage cannot be read — the name matched nothing, or no shift that month carried an assignment (`creatorIds` is absent on every shift created before assignment existed, which is also why the engine has an inferred-account-count fallback). Those creators are **omitted from the solo finding and reported in `unmeasuredCreators`** instead. Assuming they were uncovered would manufacture exactly the false alarm this replaced; omitting them silently would give a coverage check that skips rows and still looks complete.
 
 ---
 
@@ -324,11 +429,15 @@ Avatars went from a handful of rows to **every cell of the shift calendar**, whi
 
 **The format.** Every creator avatar is a **256px WebP**, encoded server-side by [`creatorPhotoService`](../src/lib/services/creatorPhotoService.ts) — the single place that decides how one is stored. Whatever an admin uploads is decoded by `sharp`, EXIF-rotated, square-cropped (`fit: 'cover'` — an avatar is drawn in a circle, so cropping at encode time means no pixel is downloaded to be thrown away), and re-encoded. A phone JPEG drops from megabytes to single-digit KB.
 
+**The thumbnail, and why avatars no longer hit the network.** Each upload also produces a **64px WebP as a `data:` URI**, stored on the creator doc as `photoThumb` and returned inline by `/api/creators`. This is the fix for "creator avatars take forever and sometimes never load", and the diagnosis is worth keeping: the bytes were never the problem. Thirty avatars on a shift calendar were thirty separate cross-origin requests to `firebasestorage.googleapis.com` — a host that is **not a CDN** and validates the `?token=` on every request — so the cost was thirty round trips of *latency*, and thirty independent chances to fail. Inlining the thumbnail removes the request class entirely: the face arrives in the same payload as the name and paints in the same frame.
+
+64px is chosen, not rounded: the largest place the shared roster is rendered is `size-8` (32px, the creator-management table) and every other call site is 16–24px, so 64 covers the biggest of them exactly on a 2× display and is never upscaled. Quality is 68 rather than 88 — these bytes are paid by every consumer of the roster, and the difference is invisible in a 20px circle. `encodeCreatorThumb` derives from the **stored 256px object**, not the original upload, so the thumbnail is guaranteed to be the same crop as the full image (two independent `position: 'attention'` passes at different resolutions can legitimately pick different windows, which would show as the face jumping when a surface upgrades). It returns `null` rather than throwing, and anything over `MAX_CREATOR_THUMB_BYTES` (6KB) is dropped — a creator without a thumbnail simply renders from `photoURL` as before, so this degrades the optimisation and never the feature.
+
 Validation is by **decode, not MIME**: the client's `contentType` is ignored and `sharp` must report a whitelisted format, which rules out renamed archives and polyglot files. Re-encoding also strips EXIF, including GPS (rule 10). Same pattern as `modelSubmissionService.ingestImage`.
 
 **The cache header.** Creator photos were uploaded with no `cacheControl`, so Firebase served the download URL as `private, max-age=0` and the browser re-fetched every avatar on every page load. They are now written with `private, max-age=604800, immutable`. `immutable` is safe *because* the URL carries a `firebaseStorageDownloadTokens` value regenerated on every upload — replacing a photo yields a different URL, so a cached copy can never be the wrong one.
 
-Both only apply to new writes, so `POST /api/admin/creators/photo-cache` (admin claim, `?dryRun=true` to preview) normalises the existing fleet: a non-WebP photo is re-encoded, which changes its path (`avatar.jpg` → `avatar.webp`) and mints a new token, so `photoURL` is rewritten and the old object deleted; one already in the right format has only its header rewritten via `setMetadata`, leaving bytes, token and URL alone. It converts **sequentially** — decoding eight full-resolution images at once is how a serverless instance meets its memory ceiling. **Run it once**; idempotent, and deletable once the fleet is converted.
+All three only apply to new writes, so `POST /api/admin/creators/photo-cache` (admin claim, `?dryRun=true` to preview) normalises the existing fleet: a non-WebP photo is re-encoded, which changes its path (`avatar.jpg` → `avatar.webp`) and mints a new token, so `photoURL` is rewritten and the old object deleted; one already in the right format is **repaired in place** — `setMetadata` for a missing cache header, a thumbnail derived from the existing object for a missing `photoThumb` — leaving bytes, token and URL alone. It converts **sequentially** — decoding eight full-resolution images at once is how a serverless instance meets its memory ceiling. **Run it once**; idempotent, and deletable once the fleet is converted. Until it has run, every avatar is still on the `photoURL` path, which is what the preconnect below covers.
 
 **The read.** `useCreators` was per-consumer `useState` + `useEffect`, which meant thirty chips did thirty `sessionStorage` reads, thirty `JSON.parse`s and thirty fetches-or-cache-checks. It is now a module-level store read through `useSyncExternalStore`:
 
@@ -336,6 +445,12 @@ Both only apply to new writes, so `POST /api/admin/creators/photo-cache` (admin 
 - One request for N simultaneous mounts, via an in-flight promise guard.
 - One array identity, so `getSnapshot` is stable and React does not loop.
 - `useCreatorMap()` exposes a shared id→creator `Map`, rebuilt only when the snapshot changes — O(1) lookup per chip instead of a `.find()`.
+
+That store still fetched **lazily**, from the effect of its first consumer — and its first consumer is a chip inside a page body. So the roster could not start until the RSC payload had landed and the page had rendered, and the avatars could not start until the roster came back: three serial stages before a single face appeared. [`CreatorRosterPrefetch`](../src/components/CreatorRosterPrefetch.tsx) is mounted in `(main)/layout.tsx` to collapse that, firing the roster request at app-shell mount where it overlaps the route payload instead of queueing behind it. It costs one `/api/creators` query per *app session* (the layout outlives every navigation, and an Electron renderer runs for days) for employees who never see a creator — the trade rule 9 asks you to weigh, taken deliberately.
+
+`CreatorAvatar` prefers `photoThumb` over any `photoURL`, **including one the caller passed explicitly**. Several pages hold their own creator list and pass `name` + `photoURL` from it; `name` is honoured as a display override, but the picture is resolved from the roster whenever the `creatorId` hits, because the roster is the only place the thumbnail lives. The consequence to remember: `admin-portal/creator-management` must call `useRefreshCreators()` after a save, or an admin uploads a new photo and is still shown the old face from the five-minute-cached roster.
+
+**The retry.** Radix's `Avatar.Image` preloads through `new window.Image()` and, on any error, swaps to the fallback for the life of the mount with **no retry** — so one transient 5xx from Storage stranded that creator on their initials, visually indistinguishable from having no photo at all. `CreatorAvatar` now retries once with a cache-busting parameter (without it Chromium may hand back the same failed entry). A `data:` URI is never retried: it cannot fail for a network reason. There is also a `preconnect` to `firebasestorage.googleapis.com` in the root layout, so the fallback path does not pay DNS + TLS to a host nothing else in the app talks to.
 
 **One component, everywhere.** [`CreatorAvatar`](../src/components/creators/CreatorChip.tsx) is the primitive (just the face) and `CreatorChip` the pill (face + name). Every creator avatar in the internal app goes through one of them. Before this, six call sites hand-rolled `Avatar` + `AvatarFallback` and three of them used `stageName.charAt(0)` on a plain grey circle — neither the right initials nor the hashed colour that rule 7 requires, so the same creator looked different on different screens.
 

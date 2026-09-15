@@ -10,7 +10,7 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 // through to the salary engine, and a second hand-rolled one here is exactly how
 // the assignment would silently stop reaching the client.
 import { serialiseShift } from '@/lib/utils/shiftSerialise';
-import { normaliseCreatorIds } from '@/lib/utils/shiftCreators';
+import { normaliseAccountIds } from '@/lib/services/creatorAccountService';
 
 // ─── GET /api/shifts ─────────────────────────────────────────────────
 // ?userId=uid&start=ISO&end=ISO
@@ -85,10 +85,10 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     // Creator assignment is validated against the live roster rather than
     // trusted: an id that no longer resolves would set a wage tier from an
     // account nobody works, and the count is what pays the agent.
-    const assigned = await normaliseCreatorIds(creatorIds);
+    const assigned = await normaliseAccountIds(creatorIds);
     if (assigned.invalid.length > 0) {
       return NextResponse.json(
-        { error: `Unknown creator${assigned.invalid.length === 1 ? '' : 's'}: ${assigned.invalid.join(', ')}` },
+        { error: `Unknown account${assigned.invalid.length === 1 ? '' : 's'}: ${assigned.invalid.join(', ')}` },
         { status: 400 },
       );
     }
@@ -102,7 +102,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       userTimezone,
       createdBy: token.uid,
       recurrence: recurrence ?? null,
-      creatorIds: assigned.creatorIds,
+      creatorIds: assigned.accountIds,
     });
 
     return NextResponse.json({ shiftId });

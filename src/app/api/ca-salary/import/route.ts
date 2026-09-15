@@ -22,7 +22,7 @@
  * which is what the upload screen shows before an admin confirms.
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
 import { requireCaAdmin } from '@/lib/salary/salaryAuth';
@@ -38,6 +38,11 @@ import {
   getFinalizedMonthsFor,
 } from '@/lib/services/caSalaryService';
 import { round2 } from '@/lib/salary/salaryEngine';
+import { buildSalaryMonthForUsers } from '@/lib/services/caSalaryService';
+import { notifications } from '@/lib/notificationContent';
+import { getChatAgentUids, notifyUsers, syncCommissionTierNotice } from '@/lib/services/caNotifications';
+import { formatMonthLabel } from '@/lib/salary/salaryDate';
+import { formatPercent } from '@/lib/salary/salaryFormat';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { SalesImportResult } from '@/lib/salary/salaryTypes';
 
@@ -180,6 +185,59 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       await recordImport({
         ...result,
         uploadedByName: actor?.displayName ?? token.email ?? token.uid,
+      });
+    }
+
+    // ── Notifications ──
+    // Two of them, and both belong *after* the response: an admin waiting on an
+    // upload should not also wait on a roster-wide fan-out and a month
+    // recomputation. `after()` runs them once the response is flushed.
+    //
+    // Nothing fires on a dry run (nothing was written) or on an import that
+    // wrote nothing (a re-upload of an overlapping export is the normal case,
+    // and "your earnings were updated" would be a lie).
+    if (!dryRun && written > 0) {
+      const monthsTouched = result.monthsTouched;
+      const affectedUserIds = [...perUserMap.keys()];
+
+      after(async () => {
+        try {
+          const monthLabel =
+            monthsTouched.length === 1 ? formatMonthLabel(monthsTouched[0]) : 'your open months';
+          await notifyUsers(await getChatAgentUids(), notifications.salesImported(monthLabel), {
+            label: 'salesImported',
+          });
+        } catch (err) {
+          console.error('[ca-salary/import] earnings-updated notification failed', err);
+        }
+
+        // ── Commission tier crossings ──
+        // A sales import is the only thing that moves month-to-date gross for a
+        // whole roster at once, which makes it the moment a tier is actually
+        // crossed. The month is recomputed (cheaply — one pass for every agent
+        // in it) and each agent's band compared with what they were last told;
+        // `syncCommissionTierNotice` owns that memory and the once-per-band gate.
+        for (const month of monthsTouched) {
+          try {
+            const months = await buildSalaryMonthForUsers(affectedUserIds, month);
+            const monthLabel = formatMonthLabel(month);
+            for (const [userId, monthResult] of months) {
+              const { crossedTo } = await syncCommissionTierNotice({
+                userId,
+                month,
+                currentPercent: monthResult.tier.currentPercent,
+              });
+              if (crossedTo === null) continue;
+              await notifyUsers(
+                [userId],
+                notifications.commissionTierUp(formatPercent(crossedTo), monthLabel),
+                { label: 'commissionTierUp' },
+              );
+            }
+          } catch (err) {
+            console.error('[ca-salary/import] tier notification failed for', month, err);
+          }
+        }
       });
     }
 

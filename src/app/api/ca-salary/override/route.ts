@@ -11,9 +11,13 @@
  * numbers stop moving — reopen it first, which is recorded.
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
+import { notifications } from '@/lib/notificationContent';
+import { notifyUsers, syncCommissionTierNotice } from '@/lib/services/caNotifications';
+import { formatMonthLabel } from '@/lib/salary/salaryDate';
+import { formatPercent } from '@/lib/salary/salaryFormat';
 import { requireCaAdmin } from '@/lib/salary/salaryAuth';
 import {
   buildSalaryMonth,
@@ -121,6 +125,7 @@ export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     // can move the commission tier on every later day, which no optimistic
     // client-side patch could reproduce.
     const month = await buildSalaryMonth(userId, monthOfDay(day));
+    announceTierCrossing(userId, monthOfDay(day), month.tier.currentPercent);
     return NextResponse.json(month);
   } catch (err) {
     return handleApiError(err, 'ca-salary/override PUT');
@@ -147,8 +152,35 @@ export const DELETE = withAuth(async (request: NextRequest, token: DecodedIdToke
     }
 
     const month = await buildSalaryMonth(userId as string, monthOfDay(day as string));
+    announceTierCrossing(userId as string, monthOfDay(day as string), month.tier.currentPercent);
     return NextResponse.json(month);
   } catch (err) {
     return handleApiError(err, 'ca-salary/override DELETE');
   }
 });
+
+/**
+ * An override can move the commission tier — that is the whole point of the
+ * ratchet — so the same once-per-band gate the sales import uses is applied
+ * here, against the month this route has already recomputed.
+ *
+ * Fire-and-forget through `after()`: the grid is waiting on this response, and
+ * an admin nudging a cell should never pay for a notification round trip. Only
+ * an *increase* is announced; `syncCommissionTierNotice` owns that decision and
+ * the memory it needs.
+ */
+function announceTierCrossing(userId: string, month: string, currentPercent: number): void {
+  after(async () => {
+    try {
+      const { crossedTo } = await syncCommissionTierNotice({ userId, month, currentPercent });
+      if (crossedTo === null) return;
+      await notifyUsers(
+        [userId],
+        notifications.commissionTierUp(formatPercent(crossedTo), formatMonthLabel(month)),
+        { label: 'commissionTierUp' },
+      );
+    } catch (err) {
+      console.error('[ca-salary/override] tier notification failed', err);
+    }
+  });
+}

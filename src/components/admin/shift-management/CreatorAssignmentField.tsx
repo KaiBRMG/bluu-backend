@@ -14,7 +14,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import { useCreators } from '@/hooks/useCreators';
+import { useAssignableAccounts } from '@/hooks/useCreators';
 import { formatUsd } from '@/lib/salary/salaryFormat';
 import { CreatorChip } from '@/components/creators/CreatorChip';
 
@@ -28,6 +28,18 @@ import { CreatorChip } from '@/components/creators/CreatorChip';
  *
  * A `Popover` + `Command` multi-select, matching the Sharing page's pickers, so
  * search-then-toggle behaves the same everywhere in the admin surfaces.
+ *
+ * ## Sub-accounts are peers, and the list says so
+ *
+ * A creator's secondary accounts ("Cole (Fansly)") are listed **as their own
+ * rows**, indented under the parent. One agent can be assigned Cole and another
+ * Cole (Fansly); each row is one account and counts once toward whoever holds
+ * it. The indent is grouping, not hierarchy of importance — nothing about
+ * selecting a parent selects its children, because they are genuinely separate
+ * assignments.
+ *
+ * Searching matches the full name ("Cole (Fansly)") *and* the parent's, so
+ * typing "cole" surfaces the whole family.
  */
 
 interface CreatorAssignmentFieldProps {
@@ -47,14 +59,14 @@ export function CreatorAssignmentField({
   maxAccounts = 5,
   disabled,
 }: CreatorAssignmentFieldProps) {
-  const creators = useCreators();
+  const accounts = useAssignableAccounts();
   const [open, setOpen] = useState(false);
 
   const byId = useMemo(() => {
     const map = new Map<string, string>();
-    for (const creator of creators) map.set(creator.creatorID, creator.stageName);
+    for (const account of accounts) map.set(account.creatorID, account.stageName);
     return map;
-  }, [creators]);
+  }, [accounts]);
 
   const rate = useMemo(() => {
     if (!wageTiers || value.length === 0) return null;
@@ -98,23 +110,25 @@ export function CreatorAssignmentField({
 
         <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
           <Command>
-            <CommandInput placeholder="Search creators…" />
+            <CommandInput placeholder="Search accounts…" />
             <CommandList>
-              <CommandEmpty>No creators found.</CommandEmpty>
+              <CommandEmpty>No accounts found.</CommandEmpty>
               <CommandGroup>
-                {creators.map(creator => {
-                  const selected = value.includes(creator.creatorID);
+                {accounts.map(account => {
+                  const selected = value.includes(account.creatorID);
                   return (
                     <CommandItem
-                      key={creator.creatorID}
-                      value={creator.stageName}
-                      onSelect={() => toggle(creator.creatorID)}
+                      key={account.creatorID}
+                      // Both names, so "cole" finds Cole and Cole (Fansly).
+                      value={`${account.stageName} ${account.parentStageName ?? ''}`}
+                      onSelect={() => toggle(account.creatorID)}
+                      className={cn(account.isSubAccount && 'pl-7')}
                     >
                       <Check className={cn('size-4', selected ? 'opacity-100' : 'opacity-0')} aria-hidden />
                       <CreatorChip
-                        creatorId={creator.creatorID}
-                        name={creator.stageName}
-                        photoURL={creator.photoURL}
+                        creatorId={account.creatorID}
+                        name={account.stageName}
+                        photoURL={account.photoThumb ?? account.photoURL}
                         className="bg-transparent pr-0"
                       />
                     </CommandItem>

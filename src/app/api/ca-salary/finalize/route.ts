@@ -13,9 +13,12 @@
  * "what did we actually pay in August" stays answerable after the month goes
  * live again.
  *
- * Neither action notifies the agent yet. Salary notifications are held back
- * until the subsystem has run in production; until then an admin finalising a
- * month should tell the agent themselves.
+ * **Finalising notifies the agent; reopening does not.** "Your salary is
+ * finalised and on the way" is the thing they have been waiting to hear.
+ * Reopening is an admin correcting something mid-flight, and telling an agent
+ * their locked month has come unlocked — before anyone knows what it will
+ * settle at — invites a question nobody can answer yet. The admin tells them
+ * when the figure is right again, which is the finalise that follows.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -24,7 +27,9 @@ import { handleApiError } from '@/lib/middleware/apiHelpers';
 import { requireAdminClaim } from '@/lib/salary/salaryAuth';
 import { finalizeMonth, reopenMonth, getFinalizedMonth } from '@/lib/services/caSalaryService';
 import { getUserById } from '@/lib/services/userService';
-import { isMonthKey } from '@/lib/salary/salaryDate';
+import { formatMonthLabel, isMonthKey } from '@/lib/salary/salaryDate';
+import { notifications } from '@/lib/notificationContent';
+import { notifyUsers } from '@/lib/services/caNotifications';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
@@ -63,9 +68,18 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
 
       const frozen = await finalizeMonth({ userId, month, actorUid: token.uid, actorName, reason: trimmedReason });
 
-      // NOTE: the agent is deliberately NOT notified yet. Salary notifications
-      // are held back until the subsystem has run in production — see
-      // documentation/ca-salary.md §11.
+      // After the freeze and never fatal: the month is locked whether or not the
+      // message lands, and a failed notification must not read as a failed
+      // finalisation and invite a second attempt (which would 409).
+      //
+      // The figure itself is deliberately NOT in the copy. A salary is between
+      // the agent and payroll, and a notification is mirrored to Telegram and
+      // rendered in a tray that is readable over someone's shoulder.
+      await notifyUsers([userId], notifications.salaryFinalized(formatMonthLabel(month)), {
+        docIdFor: uid => `${uid}__salary-final-${month}`,
+        label: 'salaryFinalized',
+      });
+
       return NextResponse.json({ status: 'finalized', totals: frozen.totals });
     }
 

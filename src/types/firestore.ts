@@ -787,6 +787,53 @@ export interface CreatorFullDocument {
   lastCRID?: number;
 }
 
+/**
+ * `creator-subaccounts/{subAccountId}` — a second account belonging to a creator.
+ *
+ * A creator often runs more than one account (Cole on OnlyFans, "Cole (Fansly)"
+ * on Fansly). For **shift assignment and pay these are peers**: one agent can be
+ * assigned to Cole and a different agent to Cole (Fansly), and each counts as
+ * one account toward the assignee's hourly wage tier.
+ *
+ * ## Why this is not a `creators` document
+ *
+ * A `creators` doc id **is a Firebase Auth uid** — creators sign into the
+ * Telegram Mini App with it. A sub-account is an *account a person owns*, not a
+ * person: it has no login, no Telegram binding and no portal. Modelling one as a
+ * creator would mint an auth identity for something that can never use it, and
+ * put it in the creator portal's own roster.
+ *
+ * ## One id space, deliberately
+ *
+ * Sub-account ids are Firestore auto-ids and creator ids are auth uids, so the
+ * two can never collide. That is what lets `shifts.creatorIds` hold either kind
+ * without a discriminator, and why the salary engine needed no change at all:
+ * it counts ids, and a sub-account is simply another id.
+ */
+export interface CreatorSubAccountDocument {
+  subAccountId: string;
+  /** The `creators` doc that owns this account. */
+  parentCreatorId: string;
+  /** What distinguishes it from the parent — "Fansly", "VIP". */
+  label: string;
+  /** The displayed name, e.g. "Cole (Fansly)". Derived from the parent + label at write time. */
+  stageName: string;
+  /** '@handle' on the sub-account's own platform, when it has one. */
+  OFID?: string;
+  /**
+   * Its own avatar, when it has one. Absent means it inherits the parent's —
+   * resolved on read, so a parent's new photo flows to every sub-account that
+   * never set its own.
+   */
+  photoURL?: string | null;
+  photoThumb?: string | null;
+  photoStoragePath?: string | null;
+  isArchived: boolean;
+  createdBy: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 // ─── Content Planning ────────────────────────────────────────────────
 
 export interface ContentPlanningDescription {

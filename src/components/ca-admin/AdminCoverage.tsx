@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuth } from '@/components/AuthProvider';
-import { useCoverageOffers, type CoverageOfferRow } from '@/hooks/useCoverageOffers';
+import { useCoverageOffers, type CoverageOfferRow, type CoverageWithdrawalRow } from '@/hooks/useCoverageOffers';
 import {
   useAdminLeaveQueue,
   type AdminLeaveRow,
@@ -42,10 +42,20 @@ import { formatRelative, pluralise } from '@/lib/salary/salaryFormat';
  * is the difference between "they keep the sales" and "they keep the sales and
  * get paid for the hours" — and an admin approving cover should know which they
  * are authorising.
+ *
+ * ## Withdrawn absences get a band, because their offers do not survive
+ *
+ * An agent can cancel approved leave, which deletes every offer that absence
+ * created and takes back any overtime already assigned from it. The offers have
+ * to be *deleted* rather than kept as history — their ids are derived from the
+ * occurrence, so re-approving the same leave has to be able to post them again
+ * — which would otherwise leave an admin with four accounts silently gone from
+ * the board. `WithdrawnBand` is that account, on the interrupt-band recipe
+ * (DESIGN.md §5): attention tint, static dot, no motion.
  */
 
 export default function AdminCoverage() {
-  const { offers, loading, error, refetch } = useCoverageOffers({});
+  const { offers, withdrawals, loading, error, refetch } = useCoverageOffers({});
   const { rows: pendingLeave, loading: leaveLoading, decide } = useAdminLeaveQueue('pending');
 
   const available = offers.filter(o => o.status === 'available');
@@ -60,6 +70,8 @@ export default function AdminCoverage() {
           the overtime board automatically, where they show on every chat agent&apos;s calendar.
         </p>
       </div>
+
+      <WithdrawnBand rows={withdrawals} />
 
       <Tabs defaultValue="leave">
         <TabsList>
@@ -115,6 +127,61 @@ export default function AdminCoverage() {
           )}
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+// ─── Withdrawn absences ─────────────────────────────
+
+/**
+ * Leave cancelled after it was approved — what came off the board and whose
+ * overtime went with it.
+ *
+ * Renders nothing when there is nothing to report. That is the one case where a
+ * band may vanish rather than state its empty case: it is not a threshold
+ * control an admin adjusts, it is an account of events, and an empty one would
+ * be a permanent "no absences have been cancelled" strip above every queue.
+ */
+function WithdrawnBand({ rows }: { rows: CoverageWithdrawalRow[] }) {
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-orange-500/20 bg-orange-500/[0.06] px-3 py-2.5">
+      <p className="flex items-center gap-1.5 text-xs font-medium text-orange-400">
+        {/* Static by design — a pulse on a console people sit in front of all day
+            trains them to stop seeing it (DESIGN.md §5). */}
+        <span className="size-1.5 rounded-full bg-orange-400" aria-hidden />
+        Cancelled after approval
+      </p>
+
+      <ul className="mt-1.5 space-y-1">
+        {rows.map(row => (
+          <li key={row.leaveId} className="text-sm leading-relaxed text-zinc-300">
+            <span className="font-medium">{row.displayName}</span>
+            <span className="text-zinc-400">
+              {' withdrew their '}
+              {row.leaveType} leave on {formatDayLabelWithWeekday(row.day)}
+              {row.shiftRestored ? ' · shift restored' : ' · shift could not be restored — check the roster'}
+            </span>
+            {/* The revert is the part an admin has to verify, so it is named in
+                full rather than counted: "2 reverted" does not tell you whether
+                to go and speak to anyone. */}
+            {row.reverted.length > 0 ? (
+              <span className="text-zinc-400">
+                {' · overtime cancelled for '}
+                {row.reverted
+                  .map(entry => `${entry.displayName} (${entry.creatorNames.join(', ')})`)
+                  .join(', ')}
+              </span>
+            ) : (
+              <span className="text-zinc-400">
+                {' · '}
+                {pluralise(row.creatorNames.length, 'account')} taken off the board, none assigned
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

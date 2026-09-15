@@ -27,7 +27,7 @@
 
 import crypto from 'crypto';
 import { classifyNotificationAction } from '@/lib/notificationActionUrl';
-import { PAGES } from '@/lib/definitions';
+import { PAGES, TEAMSPACES } from '@/lib/definitions';
 import { adminDb } from '@/lib/firebase-admin';
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
@@ -190,11 +190,27 @@ export function escapeHtml(text: string): string {
  * An external URL is linked directly. An internal app path is **not**
  * linked — `src/middleware.ts` rewrites non-Electron page traffic to
  * `/desktop-only`, so a link to an in-app page opened from a phone is a dead
- * end — but it is not dropped either: it is named ("View on Bluu Backend >
- * Disputes") off `PAGES` in `definitions.ts` so the recipient at least knows
- * where to go look inside the app. A path with no matching `PageDef` (should
- * not happen — every `actionUrl` this app produces is one of `PAGES`' hrefs)
- * resolves to nothing rather than a broken reference.
+ * end — but it is not dropped either: it is **named**, off `PAGES` in
+ * `definitions.ts`, so the recipient knows where to go look inside the app.
+ *
+ * ## The name is the full path through the sidebar
+ *
+ * `View on Bluu Backend > CA Portal > Dashboard`, not `> Dashboard`. Page
+ * titles are only unique *within* a teamspace — "Admin", "Dashboard",
+ * "Notifications" and "Disputes" each appear under more than one portal — so
+ * the bare title names a page the reader cannot find, and in the worst case
+ * names the wrong one. The teamspace is exactly how the sidebar is organised,
+ * which makes the line a set of directions rather than a label.
+ *
+ * ## Sub-routes resolve to their parent page
+ *
+ * Not every `actionUrl` is a `PageDef` href: `/ca-portal/dashboard/salary` is a
+ * real destination and a real permission is held on `/ca-portal/dashboard`, one
+ * segment up. An exact match wins, and failing that the **longest** page href
+ * that is a path prefix of the target does — longest so that a nested page
+ * beats its own parent. Only a target that matches nothing at all resolves to
+ * no line, rather than to a breadcrumb naming somewhere the reader was not
+ * being sent.
  */
 function resolveActionLine(actionUrl?: string | null): string | null {
   const target = classifyNotificationAction(actionUrl);
@@ -202,10 +218,39 @@ function resolveActionLine(actionUrl?: string | null): string | null {
     return `<a href="${escapeHtml(target.href)}">Open link</a>`;
   }
   if (target.kind === 'internal') {
-    const page = PAGES.find(p => p.href === target.href);
-    if (page) return `View on Bluu Backend &gt; ${escapeHtml(page.title)}`;
+    const page = resolvePageForPath(target.href);
+    if (page) {
+      const teamspace = TEAMSPACES.find(t => t.id === page.teamspaceId);
+      const trail = [teamspace?.name, page.title].filter(Boolean) as string[];
+      return `View on Bluu Backend &gt; ${trail.map(escapeHtml).join(' &gt; ')}`;
+    }
   }
   return null;
+}
+
+/**
+ * The `PageDef` an in-app path belongs to: an exact href, else the longest page
+ * href it sits under. `/ca-portal/dashboard/salaryX` must NOT match
+ * `/ca-portal/dashboard`, hence the boundary check on the next character.
+ */
+function resolvePageForPath(path: string): (typeof PAGES)[number] | null {
+  const exact = PAGES.find(p => p.href === path);
+  if (exact) return exact;
+
+  // `href` is nullable on a `PageDef` (a section header has no destination), so
+  // the candidate list is narrowed before any prefix arithmetic.
+  let best: (typeof PAGES)[number] | null = null;
+  let bestLength = 0;
+  for (const page of PAGES) {
+    const href = page.href;
+    if (!href || !path.startsWith(href)) continue;
+    if (path.charAt(href.length) !== '/') continue;
+    if (href.length > bestLength) {
+      best = page;
+      bestLength = href.length;
+    }
+  }
+  return best;
 }
 
 function buildMessageHtml({ title, message, actionUrl }: TelegramMessagePayload): string {

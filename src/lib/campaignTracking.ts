@@ -178,6 +178,11 @@ function _buildTimezoneList(): { label: string; value: string }[] {
 export const COMMON_TIMEZONES = _buildTimezoneList();
 
 export interface Creator {
+  /**
+   * The assignable account id. A creator's own is their auth uid; a sub-account's
+   * is a Firestore auto-id. The two spaces are disjoint, which is what lets
+   * `shifts.creatorIds` hold either kind with no discriminator.
+   */
   creatorID: string;
   stageName: string;
   defaultTimezone?: string;
@@ -185,6 +190,19 @@ export interface Creator {
   photoURL?: string | null;
   /** 64px WebP `data:` URI, inlined so an avatar costs no HTTP request. */
   photoThumb?: string | null;
+  /**
+   * True for a creator's secondary account — "Cole (Fansly)".
+   *
+   * **Display only.** A sub-account is a peer of its parent for assignment and
+   * pay: each counts as one account toward the agent who holds it, and nothing
+   * in the salary engine reads this flag. It exists so a picker can group them
+   * and a roster can say which creator an account belongs to.
+   */
+  isSubAccount?: boolean;
+  /** The owning creator's id. Null/absent on a creator itself. */
+  parentCreatorId?: string | null;
+  /** The owning creator's name, for grouped display. */
+  parentStageName?: string | null;
 }
 
 export const TYPE_LABELS: Record<CRType, string> = {

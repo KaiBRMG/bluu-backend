@@ -141,5 +141,5 @@ Internal names live on `users/{uid}` as `displayName` (+ `firstName` / `lastName
 ## 4. Profile Pictures
 
 - **RULE:** Always use `src/components/ui/avatar.tsx` (`Avatar`, `AvatarImage`, `AvatarFallback`). **Never** a plain `<img>` for avatars.
-- Creator `photoURL` is included in `useCreators` and `/api/creators` output.
+- Creator `photoURL` **and `photoThumb`** are included in `useCreators` and `/api/creators` output. `photoThumb` is a 64px WebP `data:` URI and is what avatars actually render — `photoURL` is the 256px fallback. See [ca-salary.md §11b](ca-salary.md#11b-creator-avatars-format-caching-and-render-cost).
 - `DisputeDocument` carries `creatorPhotoURL`, `createdByPhotoURL`, `assignedToPhotoURL` — all resolved server-side in `/api/disputes/route.ts`.

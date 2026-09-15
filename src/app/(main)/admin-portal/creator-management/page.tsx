@@ -24,6 +24,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { timezoneLabel } from "@/lib/timezone";
 import { toast } from "sonner";
 import { CreatorAvatar } from '@/components/creators/CreatorChip';
+import { SubAccountsDialog } from '@/components/admin/creators/SubAccountsDialog';
 import { useRefreshCreators } from '@/hooks/useCreators';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -329,11 +330,12 @@ interface CreatorTableProps {
   onDelete: (creator: Creator) => void;
   onTelegramLink: (creator: Creator) => void;
   onTelegramDisconnect: (creator: Creator) => void;
+  onManageSubAccounts: (creator: Creator) => void;
 }
 
 function CreatorTable({
   list, onEdit, onToggleActive, onArchive, onRestore, onDelete,
-  onTelegramLink, onTelegramDisconnect,
+  onTelegramLink, onTelegramDisconnect, onManageSubAccounts,
 }: CreatorTableProps) {
   if (list.length === 0) {
     return (
@@ -436,6 +438,9 @@ function CreatorTable({
                     <DropdownMenuItem onClick={() => onEdit(creator)}>
                       Edit
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onManageSubAccounts(creator)}>
+                      Sub-accounts
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => onTelegramLink(creator)}>
                       {creator.telegram ? 'Copy new Telegram link' : 'Copy Telegram link'}
                     </DropdownMenuItem>
@@ -487,6 +492,7 @@ export default function CreatorManagementPage() {
   const [deactivateTarget, setDeactivateTarget] = useState<Creator | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Creator | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Creator | null>(null);
+  const [subAccountTarget, setSubAccountTarget] = useState<Creator | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
   const fetchCreators = useCallback(async () => {
@@ -652,6 +658,7 @@ export default function CreatorManagementPage() {
                 onArchive={setArchiveTarget}
                 onRestore={handleRestore}
                 onDelete={setDeleteTarget}
+                onManageSubAccounts={setSubAccountTarget}
                 onTelegramLink={handleTelegramLink}
                 onTelegramDisconnect={handleTelegramDisconnect}
               />
@@ -664,6 +671,7 @@ export default function CreatorManagementPage() {
                 onArchive={setArchiveTarget}
                 onRestore={handleRestore}
                 onDelete={setDeleteTarget}
+                onManageSubAccounts={setSubAccountTarget}
                 onTelegramLink={handleTelegramLink}
                 onTelegramDisconnect={handleTelegramDisconnect}
               />
@@ -680,6 +688,16 @@ export default function CreatorManagementPage() {
           onCancel={() => { setShowAddCard(false); setEditingCreator(null); }}
         />
       )}
+
+      {/* Sub-accounts — the other accounts a creator runs. Each is assignable
+          to a shift on its own and counts once toward that agent's hourly rate,
+          which is why this lives here rather than being inferred from anything. */}
+      <SubAccountsDialog
+        creator={subAccountTarget}
+        onClose={() => setSubAccountTarget(null)}
+        onChanged={fetchCreators}
+        apiRequest={apiRequest}
+      />
 
       {/* Deactivate / Reactivate dialog */}
       <AlertDialog open={!!deactivateTarget} onOpenChange={open => { if (!open) setDeactivateTarget(null); }}>

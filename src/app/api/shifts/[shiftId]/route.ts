@@ -12,7 +12,7 @@ import {
 } from '@/lib/services/shiftService';
 import { adminDb } from '@/lib/firebase-admin';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-import { normaliseCreatorIds } from '@/lib/utils/shiftCreators';
+import { normaliseAccountIds } from '@/lib/services/creatorAccountService';
 import type { ShiftDocument } from '@/types/firestore';
 
 // ─── PUT /api/shifts/[shiftId] ───────────────────────────────────────
@@ -51,14 +51,14 @@ export const PUT = withAuth(async (
     // fail the request rather than quietly becoming a wage tier.
     let assignedCreatorIds: string[] | undefined;
     if ('creatorIds' in body) {
-      const assigned = await normaliseCreatorIds(creatorIds);
+      const assigned = await normaliseAccountIds(creatorIds);
       if (assigned.invalid.length > 0) {
         return NextResponse.json(
-          { error: `Unknown creator${assigned.invalid.length === 1 ? '' : 's'}: ${assigned.invalid.join(', ')}` },
+          { error: `Unknown account${assigned.invalid.length === 1 ? '' : 's'}: ${assigned.invalid.join(', ')}` },
           { status: 400 },
         );
       }
-      assignedCreatorIds = assigned.creatorIds;
+      assignedCreatorIds = assigned.accountIds;
     }
 
     const startMs = startTime ? new Date(startTime).getTime() : null;

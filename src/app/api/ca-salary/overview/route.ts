@@ -47,6 +47,43 @@ function foldByCreator(sales: SalarySale[]): Map<string, { gross: number; count:
   return out;
 }
 
+/** Fold a creator name for matching. Mirrors `normalise` in `AdminOverview.tsx`. */
+function foldName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+/**
+ * Sales creator **name** → creator document id.
+ *
+ * Sales carry a name typed into the export, never an id, while shift
+ * assignments carry ids — so any question that spans the two needs this join.
+ * The export's names are also routinely shorter than the stage name on the
+ * roster ("Liam" for "Liam Heng", "Adam" for "Adam Horváth"), so an exact fold
+ * alone resolves only some of them.
+ *
+ * Exact match wins outright. Failing that, a name is accepted as a prefix of a
+ * stage name **at a word boundary** ("liam" → "liam heng"), and only when
+ * exactly one creator matches: "noah" is a prefix of both Noah Green and Noah
+ * Ryder, and guessing between them would silently attribute one creator's
+ * coverage to another. An ambiguous or unmatched name resolves to `null` and is
+ * reported as unmeasurable rather than quietly treated as uncovered.
+ */
+function buildCreatorIdResolver(
+  creators: Array<{ id: string; stageName: string }>,
+): (name: string) => string | null {
+  const exact = new Map<string, string>();
+  for (const creator of creators) exact.set(foldName(creator.stageName), creator.id);
+
+  return (name: string) => {
+    const folded = foldName(name);
+    const hit = exact.get(folded);
+    if (hit) return hit;
+
+    const prefixed = creators.filter(c => foldName(c.stageName).startsWith(`${folded} `));
+    return prefixed.length === 1 ? prefixed[0].id : null;
+  };
+}
+
 export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
     const denied = await requireCaAdmin(token);
@@ -69,10 +106,20 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       .sort((a, b) => (a.displayName ?? '').localeCompare(b.displayName ?? ''));
     const uids = agents.map(a => a.uid);
 
-    const [salesByUser, previousSalesByUser] = await Promise.all([
+    const [salesByUser, previousSalesByUser, creatorSnap] = await Promise.all([
       getSalesForMonthByUser(month),
       getSalesForMonthByUser(previousMonth),
+      // One further query, and the only way to answer the coverage question:
+      // sales name creators, shifts id them, and nothing else joins the two.
+      adminDb.collection('creators').select('creatorID', 'stageName').get(),
     ]);
+
+    const resolveCreatorId = buildCreatorIdResolver(
+      creatorSnap.docs.map(d => ({
+        id: (d.data().creatorID as string | undefined) ?? d.id,
+        stageName: (d.data().stageName as string | undefined) ?? '',
+      })),
+    );
 
     const months = await buildSalaryMonthForUsers(uids, month, { salesByUser });
 
@@ -96,10 +143,28 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       }
     }
 
+    // creatorId → the agents rostered onto that account this month. This is the
+    // coverage graph, and it comes from shift assignments rather than from
+    // sales: an agent who is scheduled on an account covers it whether or not
+    // they happened to close anything. `creatorIds` is absent on shifts created
+    // before assignment existed, so a creator with no entry here is *unknown*,
+    // not uncovered — see `soloCreators`.
+    const assignedAgents = new Map<string, Set<string>>();
+
     const agentRows = agents.map(agent => {
       const result = months.get(agent.uid);
       const sales = salesByUser.get(agent.uid) ?? [];
       const byCreator: Record<string, number> = {};
+
+      for (const day of result?.days ?? []) {
+        for (const shift of day.shifts) {
+          for (const creatorId of shift.creatorIds) {
+            const covering = assignedAgents.get(creatorId) ?? new Set<string>();
+            covering.add(agent.uid);
+            assignedAgents.set(creatorId, covering);
+          }
+        }
+      }
 
       for (const [name, entry] of foldByCreator(sales)) {
         byCreator[name] = entry.gross;
@@ -134,13 +199,25 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     });
 
     const creatorRows = [...rosterGross.entries()]
-      .map(([name, entry]) => ({
-        name,
-        gross: entry.gross,
-        count: entry.count,
-        agentCount: entry.agents.size,
-        previousGross: previousGrossByCreator.get(name) ?? null,
-      }))
+      .map(([name, entry]) => {
+        const creatorId = resolveCreatorId(name);
+        const covering = creatorId ? assignedAgents.get(creatorId) : undefined;
+
+        return {
+          name,
+          gross: entry.gross,
+          count: entry.count,
+          /** Agents who recorded a sale on this creator — a revenue fact. */
+          agentCount: entry.agents.size,
+          /**
+           * Agents rostered onto this creator — a coverage fact. `null` when it
+           * cannot be determined: the name matched no creator, or no shift this
+           * month carried an assignment for them.
+           */
+          assignedAgentCount: covering ? covering.size : null,
+          previousGross: previousGrossByCreator.get(name) ?? null,
+        };
+      })
       .sort((a, b) => b.gross - a.gross);
 
     // ── Totals ────────────────────────────────────────────────────────
@@ -169,13 +246,39 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         .map(([name, previousGross]) => ({ name, previousGross }))
         .sort((a, b) => b.previousGross - a.previousGross),
 
-      /** Revenue with exactly one agent behind it — the coverage single point of failure. */
+      /**
+       * Exactly one agent **rostered** on an earning account — a real single
+       * point of failure.
+       *
+       * This deliberately reads shift assignments rather than sales. It used to
+       * count agents who had recorded a sale, which is a different fact and
+       * produced a claim the data did not support: a creator worked by three
+       * agents, one of whom happened to close a single sale, was reported as
+       * having "nobody to fall back on". At low revenue the sales version
+       * inverts entirely — it fires hardest on the accounts where a lone seller
+       * means least.
+       *
+       * A creator whose coverage cannot be determined is omitted rather than
+       * assumed solo, and surfaces in `unmeasuredCreators` instead.
+       */
       soloCreators: creatorRows
-        .filter(row => row.agentCount === 1 && row.gross > 0)
+        .filter(row => row.assignedAgentCount === 1 && row.gross > 0)
         .map(row => {
-          const only = agentRows.find(a => a.byCreator[row.name] !== undefined);
+          const creatorId = resolveCreatorId(row.name);
+          const onlyUid = creatorId ? [...(assignedAgents.get(creatorId) ?? [])][0] : undefined;
+          const only = agentRows.find(a => a.uid === onlyUid);
           return { name: row.name, gross: row.gross, agentName: only?.displayName ?? '—' };
         }),
+
+      /**
+       * Earning creators whose coverage could not be read at all — the name did
+       * not resolve to a creator on the roster, or no shift this month carried
+       * an assignment for them. Reported because the alternative is a coverage
+       * check that silently skips rows and looks complete.
+       */
+      unmeasuredCreators: creatorRows
+        .filter(row => row.assignedAgentCount === null && row.gross > 0)
+        .map(row => ({ name: row.name, gross: row.gross, matched: resolveCreatorId(row.name) !== null })),
     };
 
     return NextResponse.json({
