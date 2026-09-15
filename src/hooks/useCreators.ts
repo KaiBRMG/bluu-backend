@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useAuth } from '@/components/AuthProvider';
-import { getCache, setCache } from '@/lib/queryCache';
+import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
 import type { Creator } from '@/lib/campaignTracking';
 
 /**
@@ -225,11 +225,27 @@ export function useCreatorMap(): Map<string, Creator> {
   return map;
 }
 
-/** Force a refetch — for a surface that has just changed the creator list. */
+/**
+ * Force a refetch after changing the roster — adding, archiving or deleting a
+ * creator or one of their sub-accounts.
+ *
+ * **Any surface that mutates the roster must call this.** The admin screens have
+ * their own `/api/admin/creators` fetch, which is a completely separate data
+ * path from this store; refreshing that one leaves every picker in the app
+ * holding the old list. A deleted sub-account then stays selectable and the
+ * shift route rejects it as an unknown account — which is exactly the bug that
+ * put this comment here.
+ *
+ * Clearing `sessionStorage` matters as much as resetting the timestamp: the
+ * cache outlives a page reload, and `hydrate()` reads it once at module init, so
+ * a stale entry would survive the very reload someone reaches for when a picker
+ * looks wrong.
+ */
 export function useRefreshCreators(): () => void {
   const { user } = useAuth();
   return useCallback(() => {
     if (!user) return;
+    invalidateCache(CACHE_KEY);
     fetchedAt = 0;
     ensureLoaded(() => user.getIdToken());
   }, [user]);

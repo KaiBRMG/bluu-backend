@@ -24,14 +24,27 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 
 const SUBACCOUNTS = 'creator-subaccounts';
 
-/** Is this account referenced by any shift? One indexed query, capped at one doc. */
-async function isAssigned(subAccountId: string): Promise<boolean> {
-  const snap = await adminDb
-    .collection('shifts')
-    .where('creatorIds', 'array-contains', subAccountId)
-    .limit(1)
-    .get();
-  return !snap.empty;
+/**
+ * Is this account referenced by any shift? One indexed query, capped at one doc.
+ *
+ * Returns `null` when the question cannot be answered — which happens when the
+ * `creatorIds` array index has not been deployed yet (the field was exempted
+ * from indexing back when nothing queried it). **A failure here must not read as
+ * "no", or a lookup outage would silently permit the one delete this guard
+ * exists to prevent.** The caller refuses instead.
+ */
+async function isAssigned(subAccountId: string): Promise<boolean | null> {
+  try {
+    const snap = await adminDb
+      .collection('shifts')
+      .where('creatorIds', 'array-contains', subAccountId)
+      .limit(1)
+      .get();
+    return !snap.empty;
+  } catch (err) {
+    console.error('[subaccounts DELETE] assignment check failed', err);
+    return null;
+  }
 }
 
 export const PATCH = withAuth(async (
@@ -97,7 +110,19 @@ export const DELETE = withAuth(async (
       return NextResponse.json({ error: 'That sub-account belongs to a different creator.' }, { status: 400 });
     }
 
-    if (await isAssigned(subAccountId)) {
+    const assigned = await isAssigned(subAccountId);
+
+    if (assigned === null) {
+      return NextResponse.json(
+        {
+          error:
+            'Could not check whether this account is used by any shift, so it was not deleted. Archive it instead — that removes it from every picker and is always safe.',
+        },
+        { status: 503 },
+      );
+    }
+
+    if (assigned) {
       return NextResponse.json(
         {
           error:

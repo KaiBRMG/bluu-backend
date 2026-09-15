@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CreatorAvatar } from '@/components/creators/CreatorChip';
+import { useRefreshCreators } from '@/hooks/useCreators';
 
 /**
  * Managing a creator's secondary accounts.
@@ -55,6 +56,13 @@ export function SubAccountsDialog({ creator, onClose, onChanged, apiRequest }: S
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Every picker in the app reads the shared creator store, which is a separate
+  // data path from this page's own admin fetch. Without this, a sub-account
+  // added here stays invisible to the shift picker for five minutes — and one
+  // deleted here stays *selectable*, which the shift route then rejects as an
+  // unknown account.
+  const refreshCreators = useRefreshCreators();
+
   const creatorId = creator?.uid ?? null;
 
   const load = useCallback(async () => {
@@ -99,6 +107,7 @@ export function SubAccountsDialog({ creator, onClose, onChanged, apiRequest }: S
       }
       toast.success(success);
       await load();
+      refreshCreators();
       onChanged?.();
       return true;
     } catch {

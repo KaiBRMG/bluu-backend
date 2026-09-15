@@ -88,7 +88,14 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     const assigned = await normaliseAccountIds(creatorIds);
     if (assigned.invalid.length > 0) {
       return NextResponse.json(
-        { error: `Unknown account${assigned.invalid.length === 1 ? '' : 's'}: ${assigned.invalid.join(', ')}` },
+        {
+          // Almost always a stale picker: the account was archived or deleted
+          // while this page had the roster cached. Say so, rather than printing
+          // a raw id the admin cannot look up.
+          error:
+            `${assigned.invalid.length === 1 ? 'An account' : 'Some accounts'} in this assignment no longer exist` +
+            ` (${assigned.invalid.join(', ')}). They may have been archived or deleted — reload the page and pick again.`,
+        },
         { status: 400 },
       );
     }

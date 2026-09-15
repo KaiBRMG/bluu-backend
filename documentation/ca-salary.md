@@ -95,6 +95,8 @@ The whole mechanism is one design choice: **a sub-account is just another id in 
 | Counts toward the wage tier | 1 | 1 |
 | Avatar | Its own | Inherits the parent's unless given one |
 
+**Any surface that adds, archives or deletes an account must call `useRefreshCreators()`.** The admin screens fetch `/api/admin/creators`, which is a *different data path* from the shared store every picker reads (`/api/creators` + a 5-minute `sessionStorage` cache). Refreshing only the admin list leaves a deleted sub-account still selectable in the shift picker — and the shift route then rejects it as an account that no longer exists, which is exactly how this was found. `useRefreshCreators` clears the `sessionStorage` entry as well as the timestamp, because that cache outlives a page reload.
+
 Managed in **Creator Management → ⋯ → Sub-accounts**. Archive rather than delete: the id is stored on every shift it was assigned to, and those shifts are what the engine prices, so deleting a used one leaves chips resolving to a raw id. The server refuses that delete (one `array-contains` on `shifts.creatorIds`) and says why.
 
 > **The sales import still keys on creator *names*, not ids.** If the export reports a sub-account's revenue under its own name, the `accountCountSource: 'sales'` fallback counts it correctly; if it reports everything under the parent's, that fallback under-counts for multi-account creators. It only affects days with **no shift on record**, so it is a historical-data concern rather than a live one — but confirm which the export does before relying on a backfilled month.
