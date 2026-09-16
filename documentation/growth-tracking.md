@@ -106,19 +106,23 @@ The cost of that choice is paid in `firestore.indexes.json`: **`series.days` is 
 
 ## The page
 
-**Four surfaces, one on screen at a time** — Overview, one Account, Tracked posts, Manage accounts. They are **page state, not routes** (`View` in `page.tsx`): both hooks already hold their whole payload in memory, so switching costs no Firestore read and returning from a detail is instant, where routes would remount the app shell and re-run both fetches for data that is already there (rule 9). The cost is that a view is not linkable — accepted, because nothing here is shared by URL and the account detail it replaced was a sheet, which was not linkable either.
+**Three full-width surfaces, one on screen at a time** — Overview, Tracked posts, Manage accounts — **plus one account, which is a side panel over whichever of them is showing.** The three are **page state, not routes** (`View` in `page.tsx`): both hooks already hold their whole payload in memory, so switching costs no Firestore read and returning from a detail is instant, where routes would remount the app shell and re-run both fetches for data that is already there (rule 9). The cost is that a view is not linkable — accepted, because nothing here is shared by URL.
+
+**An account is not a `View` variant**, because it does not replace the page. `openAccountId` is its own state and [`AccountSheet`](../src/components/growth/AccountSheet.tsx) renders outside the view switch — it is reachable from the roster grid *and* from the Signals band, and both of those stay on screen behind it.
 
 **Page state means the page owes what a route would have given.** A `<Link>` navigation resets the scroll, moves focus and re-announces the document; `setView` does none of that — focus falls to `<body>` when the clicked control unmounts, so the next Tab restarts at the top of the app shell and a screen reader is never told the main region was replaced. `page.tsx` therefore focuses the new view's `<h1>` on every view change (`tabIndex={-1}`, removed again on blur) and scrolls to top uniformly. Focusing the heading is also why there is **no** `role="status"` line beside it: moving focus to a heading announces that heading, and a live region would say it twice. Any surface that trades routes for page state inherits this obligation.
 
-**The account view and the post sheet are `next/dynamic`.** They hold the only two recharts charts in the subsystem — the roster's sparklines are hand-drawn SVG specifically to avoid the library — so a static import made every first paint of the overview parse a chart tree it never renders. The sheet is additionally mounted behind a latch (`everOpened`) rather than `openPost !== null`, so the recharts chunk is not fetched until a post is opened and the sheet still keeps its close animation; unmounting on close would make it vanish instead of sliding out.
+**The panel body and the post sheet are `next/dynamic`.** They hold the only two recharts charts in the subsystem — the roster's sparklines are hand-drawn SVG specifically to avoid the library — so a static import made every first paint of the overview parse a chart tree it never renders.
 
-The layout was rebuilt on 2026-09-09 from a supplied reference design. Its **structure** was adopted wholesale — stat row, Signals band, a grid of account cards, a full-page account detail with post tracking inside it. Its **skin** was not: the reference carried a second typeface (Space Grotesk + Manrope), its own oklch palette, a gradient wash with a pulsing dot, and brand-coloured platform tiles. Each of those is a named rule in [DESIGN.md](../DESIGN.md) — the One-Family Rule, the Semantic-Only Rule, "nothing that asks to be watched", and this subsystem's own greyscale platform marks — so the page renders in the house voice throughout. **This is not a divergence surface; do not reintroduce the reference's chrome.**
+**The dynamic boundary sits *inside* the Sheet, not around it.** `AccountSheet` is static and owns nothing but the `Sheet`; `AccountPanel` is the dynamic import. Put the boundary around the Sheet instead and the first click on a card does nothing visible until the chunk lands — this way the skeleton is panel-shaped and slides in immediately. Its `sr-only` `SheetTitle` is load-bearing: Radix names the dialog from that element, and for the frame or two the skeleton stands in there would otherwise be none. On `PostsTab` the standalone post sheet is still mounted behind a latch (`everOpened`) rather than `openPost !== null`, so its chunk is not fetched until a post is opened and the sheet still keeps its close animation.
+
+The layout was rebuilt on 2026-09-09 from a supplied reference design. Its **structure** was adopted wholesale — stat row, Signals band, a grid of account cards, an account detail with post tracking inside it (full-page then; a side panel since — see [the account panel](#the-account-panel)). Its **skin** was not: the reference carried a second typeface (Space Grotesk + Manrope), its own oklch palette, a gradient wash with a pulsing dot, and brand-coloured platform tiles. Each of those is a named rule in [DESIGN.md](../DESIGN.md) — the One-Family Rule, the Semantic-Only Rule, "nothing that asks to be watched", and this subsystem's own greyscale platform marks — so the page renders in the house voice throughout. **This is not a divergence surface; do not reintroduce the reference's chrome.**
 
 ### The overview
 
-**A failed read is marked on the card.** A scrape that fails leaves the last good reading in place, so the card's figure and sparkline still look like current data — the failure state was previously invisible on the one surface the roster is actually read from, and visible only in the manage table and on the account page. `ScrapeFailedBadge` (red, `CircleAlertIcon`, "Read failed") sits in the card's top-right, stacked above the spike badge when both apply, since a spike is computed from history and can be true on the same night a read failed. Deliberately **not** the manage table's `TriangleAlertIcon` — that glyph already means "posts faster than one nightly read can see" here, and two warnings separated by hue alone is what the colour rules exist to prevent. It is gated on `isActive`: a stopped account's `lastScrapeStatus` is frozen at whatever it was when tracking was switched off, and rendering that as a live failure reports a job that is not running.
+**A failed read is marked on the card.** A scrape that fails leaves the last good reading in place, so the card's figure and sparkline still look like current data — the failure state was previously invisible on the one surface the roster is actually read from, and visible only in the manage table and in the account panel. `ScrapeFailedBadge` (red, `CircleAlertIcon`, "Read failed") sits in the card's top-right, stacked above the spike badge when both apply, since a spike is computed from history and can be true on the same night a read failed. Deliberately **not** the manage table's `TriangleAlertIcon` — that glyph already means "posts faster than one nightly read can see" here, and two warnings separated by hue alone is what the colour rules exist to prevent. It is gated on `isActive`: a stopped account's `lastScrapeStatus` is frozen at whatever it was when tracking was switched off, and rendering that as a live failure reports a job that is not running.
 
-**The design problem is scale, and the grid dissolves it.** TwinkUniversity sits near 684k followers and Connor near 13k. The previous overview drew them on one shared axis and needed a re-basing mode (indexed / net / absolute) to stop the big accounts flattening the small ones into the baseline. Each card now carries **its own** sparkline on **its own** scale, so the problem stops existing rather than being worked around, and cross-account comparison is carried by the ranked figures and the Signals band instead of by seventy overlapping traces. `GrowthChart`, `GrowthLeaderboard`, `GrowthSummary` and `AccountDetailSheet` are gone; `MODE_LABEL`, `toChartRows` and `axisDays` went with them. `GROWTH_MODES` and `pointsFor`'s modes stay — every caller asks for `absolute` today, and they are the projection this data needs the moment two accounts share an axis again.
+**The design problem is scale, and the grid dissolves it.** TwinkUniversity sits near 684k followers and Connor near 13k. The previous overview drew them on one shared axis and needed a re-basing mode (indexed / net / absolute) to stop the big accounts flattening the small ones into the baseline. Each card now carries **its own** sparkline on **its own** scale, so the problem stops existing rather than being worked around, and cross-account comparison is carried by the ranked figures and the Signals band instead of by seventy overlapping traces. `GrowthChart`, `GrowthLeaderboard`, `GrowthSummary` and the old `AccountDetailSheet` are gone; `MODE_LABEL`, `toChartRows` and `axisDays` went with them. (Today's `AccountSheet` is not that component returning — the old one was three facts and a chart; this one is the full detail, which is why the detour through a full-width page happened at all.) `GROWTH_MODES` and `pointsFor`'s modes stay — every caller asks for `absolute` today, and they are the projection this data needs the moment two accounts share an axis again.
 
 **The four stat tiles are roster-wide and range-independent, on purpose.** X followers · Facebook followers · Biggest Mover · Fastest Growing. Everything else on the page answers "over the window and filter I picked"; these are the standing facts the reader checks *before* choosing a filter, and tiles whose meaning changed with the chips above them would make the same glance mean something different every time. Followers are **not** summed across platforms — an X follower and a Facebook page follower are not the same unit, they are scraped by different actors on different bills, and the roster is managed as two lists.
 
@@ -138,15 +142,23 @@ They replaced *Posts tracked* and *Active signals* (2026-09-09). Neither figure 
 - **Only upward movement counts, and stopped accounts are excluded.** A collapse is worth knowing about but is a different alarm with a different hue and a different threshold; folding it in would put "up 20%" and "down 20%" in one undifferentiated row. A stopped account's last week is frozen history, not news.
 - A card's spike badge uses the **same** threshold as the band, so the two always agree.
 
-### The account view
+### The account panel
 
-**A page, not a sheet.** The sheet was sized for three facts and a chart; this is where an account's tracked posts now live, and a post table with its own controls does not fit in a 512px panel. The follower axis is scaled to the data rather than zero-based — only one account is on it, so the scale can simply be its own.
+**A panel with two levels, not a page.** It was a full-width page for exactly one reason — `PostsTable` is five columns wide with three sortable headers, and that does not fit a panel. [`PostStrip`](../src/components/growth/PostStrip.tsx) removed the reason, and the panel bought back what a page cannot give: the roster stays on screen behind it, so opening an account is a peek rather than a departure, and moving between accounts does not bounce through an overview you never left. `sm:max-w-2xl`, wider than the post sheet's `max-w-xl`, because this one carries a chart, a control deck *and* a list.
 
-**Post tracking is inside the account, not a separate tab.** The reference put a "check every 15 min / 1 hour / 1 day" picker in that slot; **there is no such control to expose** — a post's cadence is set by its own age (see [post analytics](#post-analytics)), because engagement can only ever be read as its value right now. What occupies the slot is the one thing that *is* a choice: the `trackPosts` switch, which is a separate line on the bill. It is offered here *and* in the manage table, through the shared [`useTrackPosts`](../src/components/growth/useTrackPosts.ts) hook — the cost wording must not drift between the two.
+**Clicking a post drills to level two in the same panel — it does not open a second sheet.** Two stacked Radix dialogs would mean two overlays darkening the canvas twice, two focus traps, and an `Esc` that only closes the top one, paid for a panel entirely hidden behind the one in front of it. [`PostDetailSheet.tsx`](../src/components/growth/PostDetailSheet.tsx) therefore exports **two** things: `PostDetailBody` (the contents) and `PostDetailSheet` (the `Sheet` wrapper `PostsTab` still uses). `onBack` is what tells the body which it is — present, it grows a back control and a delete returns to the account; absent, it is the whole panel and a delete closes it. **Never fork the body into a second copy for the nested case**; the two would drift and one of them would end up describing behaviour the system no longer has.
+
+**`account === null` is both the close signal and the reset.** The panel content unmounts with it — the same construction `PostDetailSheet` already used — which is what makes reopening an account always start at the account level instead of wherever the previous visit was abandoned. No effect, no latch, no key juggling.
+
+**Order is an argument about priority, and controls win.** Controls → followers → tracked posts → folded-away facts. The page version had it backwards: its only two decisions (post discovery, and pasting a link) sat at the very bottom, below a table, which put the surface's actions behind its longest read. The one exception to the order is a failed read, which sits directly under the header — it is the only thing that explains why the chart below it has a flat tail, and folding it away would leave stale numbers looking current.
+
+**The range control belongs to the panel, not to the roster.** One account is on this axis, so the window that suits it has nothing to do with the window the grid behind it is showing. It seeds from the page's range and diverges from there; nothing is written back. The follower axis is scaled to the data rather than zero-based — only one account is on it, so the scale can simply be its own.
+
+**Post tracking is inside the account, not a separate tab.** The reference put a "check every 15 min / 1 hour / 1 day" picker in that slot; **there is no such control to expose** — a post's cadence is set by its own age (see [post analytics](#post-analytics)), because engagement can only ever be read as its value right now. What occupies the slot is the one thing that *is* a choice: the `trackPosts` switch, which is a separate line on the bill. It is offered here *and* in the manage table, through the shared [`useTrackPosts`](../src/components/growth/useTrackPosts.ts) hook — the cost wording must not drift between the two. On a Facebook account the deck is not rendered at all, just a quiet line: a bordered box around one sentence is a container pretending there is content in it.
 
 **An account's posts are matched by `accountId` OR author handle.** A post pasted by hand carries no `accountId`, and filing only by that field would hide a manually tracked post from the very page its author lives on.
 
-**Tracked posts survives as its own surface** because it is the only home an orphan has: a pasted link whose author is not on the roster belongs to no account page. It also carries the monthly spend ledger.
+**Tracked posts survives as its own surface** because it is the only home an orphan has: a pasted link whose author is not on the roster belongs to no account panel. It also carries the monthly spend ledger.
 
 ### Shared behaviour
 
@@ -411,14 +423,37 @@ Identical to the follower rules, for the same reasons:
 
 Two surfaces, both inside the same page and permission — never a separate route.
 
-**An account's own posts live on that account's page**, under the follower
+**An account's own posts live in that account's panel**, under the follower
 chart, matched by `accountId` OR author handle so a hand-pasted post is not
-hidden from its author's page. That is where someone looking at one account
-expects them.
+hidden from the very account its author lives on. That is where someone looking
+at one account expects them.
+
+**At panel width they are strips, not a table.** [`PostStrip`](../src/components/growth/PostStrip.tsx)
+is deliberately built on `AccountCard`'s construction — a post inside an account
+is the same kind of object one level down: a headline number, a rate, and a shape
+over time. It **drops** what the card only needed because it sat in a grid: the
+author avatar (every post here has the same author, so a column of identical
+faces states nothing) and the stacked two-line layout. It **gains** a magnitude
+bar — a translucent Action Blue wash widened against the best post *in that list*,
+the house ranking idiom, which answers "which of these worked" before a number is
+read. A post the scraper has never reported the selected metric for gets **no bar
+at all** (`share: null`), never a zero-width one: those would look identical, and
+inventing a value for a gap is banned everywhere else in this subsystem.
+
+**The whole strip is the button**, the same call as `AccountCard` and for the same
+reason — nothing else is interactive inside it. The table makes the opposite call
+only because `role="button"` on a `<tr>` orphans its cells; there is no `<tr>` here.
+
+**The table's three sortable headers become one two-option control** — Top ·
+Newest. Those are the two questions anyone asks of an account's posts ("what
+worked", "what is happening now"); the table's ascending/descending on three keys
+is six orders for a list that is usually under twenty rows. The metric toggle
+still re-keys the figure, the rate, the sparkline **and now the bar** together,
+rather than eight columns of numbers nobody can scan.
 
 **The roster-wide Tracked posts view** (`PostsTab`) survives beside it because it
 is the only home an orphan has: a pasted link whose author is not on the roster
-belongs to no account page. It also carries the monthly spend ledger.
+belongs to no account panel. It also carries the monthly spend ledger.
 
 **Pasting a link is the primary verb, so it is a permanent bar, not a dialog.**
 Someone arrives here holding a link. The add fires a live scraper call, so it
@@ -455,16 +490,17 @@ the tree preempts pending transitions per-root). `useSlowTick` — the one that
 settings page, because the discipline this feature runs on is that whoever turns
 tracking on can see the price.
 
-The table carries the construction of the follower leaderboard this subsystem
-used to have, and the sheet the construction of its account sheet — down to the
-reasons, which outlived both: real `<table>` semantics, the
+`PostsTable` — still the roster-wide **Tracked posts** view's reading surface,
+where the width exists for it — carries the construction of the follower
+leaderboard this subsystem used to have, down to the reasons, which outlived it:
+real `<table>` semantics, the
 interactive element being the excerpt *inside* the first cell (not
 `role="button"` on the `<tr>`, which orphans the cells and whose focus ring is
 never painted under `border-collapse: collapse`), and one metric selector
 re-keying the number column, the rate column and the sparkline together rather
 than eight columns of numbers nobody can scan.
 
-**The `trackPosts` switch appears twice** — on the account page and in the
+**The `trackPosts` switch appears twice** — in the account panel and in the
 manage table — and both go through [`useTrackPosts`](../src/components/growth/useTrackPosts.ts),
 which owns the toast copy. It says what was armed rather than confirming
 silently, because the discipline this feature runs on is that whoever switches it

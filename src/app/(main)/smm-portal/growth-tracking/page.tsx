@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import dynamic from 'next/dynamic';
 import { ArrowLeftIcon, SettingsIcon, TriangleAlertIcon } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
@@ -10,6 +9,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { FilterChip, SEGMENT_ITEM_CLASS } from '@/components/growth/growthUi';
 import { AccountSearch, matchesAccountQuery } from '@/components/growth/AccountSearch';
 import { AccountCard } from '@/components/growth/AccountCard';
+import { AccountSheet } from '@/components/growth/AccountSheet';
 import { GrowthStatCards } from '@/components/growth/GrowthStatCards';
 import { SignalsStrip } from '@/components/growth/SignalsStrip';
 import { ManageAccountsTab } from '@/components/growth/ManageAccountsTab';
@@ -24,22 +24,6 @@ import { DEFAULT_SPIKE_THRESHOLD, signalsFor, spikePercent } from '@/lib/growth/
 import { PLATFORM_LABEL, type GrowthPlatform } from '@/lib/growth/platform';
 import { GROWTH_CATEGORIES, type GrowthCategory } from '@/lib/growth/category';
 import type { GrowthAccount } from '@/types/firestore';
-
-/**
- * The account view is the only surface on this page that draws a recharts
- * chart, and it pulls the post sheet (a second chart) in with it. Statically
- * imported, that whole tree parsed on every first paint of an overview that
- * renders no recharts instance at all — the roster's sparklines are hand-drawn
- * SVG precisely to avoid it. Split out, the library is fetched when someone
- * opens an account, behind the same skeleton the overview already uses.
- *
- * `ssr: false` because this page is a client component inside the Electron
- * shell; there is no server pass to preserve.
- */
-const AccountDetail = dynamic(
-  () => import('@/components/growth/AccountDetail').then((m) => m.AccountDetail),
-  { ssr: false, loading: () => <DetailSkeleton /> },
-);
 
 /**
  * One filter row, two kinds of facet. Platform and category are single-select
@@ -60,13 +44,12 @@ function matchesFilter(account: GrowthAccount, filter: RosterFilter): boolean {
 }
 
 /**
- * Which of the page's four surfaces is on screen. `account` carries the id
- * rather than the document, so a refresh that replaces the roster array does not
- * leave the open account showing a stale copy of itself.
+ * Which of the page's three full-width surfaces is on screen. One account is not
+ * among them: it opens as a **side panel over whichever of these is showing**, so
+ * it is separate state (`openAccountId`) rather than a fourth variant here.
  */
 type View =
   | { name: 'overview' }
-  | { name: 'account'; accountId: string }
   | { name: 'posts' }
   | { name: 'manage' };
 
@@ -77,11 +60,10 @@ type View =
  * sheets.
  *
  * ── The shape of the page ───────────────────────────────────────────────────
- * Four surfaces, one of which is on screen at a time:
+ * Three full-width surfaces, one of which is on screen at a time:
  *
  *  - **Overview** — the four standing figures, the Signals band, then the roster
  *    as a grid of cards, each carrying its own sparkline.
- *  - **Account** — one account in full, and where its tracked posts live.
  *  - **Tracked posts** — every tracked post across the roster, with the spend
  *    ledger. The only home an orphaned post has: a manually pasted link whose
  *    author is not on the roster belongs to no account page.
@@ -91,7 +73,14 @@ type View =
  * memory, so switching views is instant and costs no read; routes would remount
  * the app shell and re-run both fetches for data that is already here (rule 9).
  * The cost is that a view is not linkable — accepted, because nothing here is
- * shared by URL and the surface it replaced (a sheet) was not linkable either.
+ * shared by URL.
+ *
+ * ── And one account, which is a panel rather than a surface ─────────────────
+ * Opening an account slides [`AccountSheet`](src/components/growth/AccountSheet.tsx)
+ * over whatever is on screen, and a post inside it drills to a second level in
+ * the *same* panel. It is not a `View` variant because it does not replace the
+ * page: the roster stays behind it, so closing is a dismissal rather than a
+ * navigation back to a grid you never left.
  *
  * ── The design problem the layout solves ────────────────────────────────────
  * These accounts differ by two orders of magnitude (~684k followers against
@@ -116,6 +105,12 @@ export default function GrowthTrackingPage() {
   const posts = useGrowthPosts();
 
   const [view, setView] = useState<View>({ name: 'overview' });
+  /**
+   * The open account, by id rather than by document, so a refresh that replaces
+   * the roster array does not leave the panel showing the copy that was current
+   * when it opened.
+   */
+  const [openAccountId, setOpenAccountId] = useState<string | null>(null);
   const [range, setRange] = useState<GrowthRange>('30d');
   const [filter, setFilter] = useState<RosterFilter>({ kind: 'all' });
   const [query, setQuery] = useState('');
@@ -137,7 +132,7 @@ export default function GrowthTrackingPage() {
   }, [setTrackPosts, posts]);
 
   const openAccount = useCallback((account: GrowthAccount) => {
-    setView({ name: 'account', accountId: account.id });
+    setOpenAccountId(account.id);
   }, []);
 
   const backToOverview = useCallback(() => setView({ name: 'overview' }), []);
@@ -145,7 +140,7 @@ export default function GrowthTrackingPage() {
   /**
    * What a route change would have done for us.
    *
-   * These four surfaces are page state on purpose (see above), which buys an
+   * These three surfaces are page state on purpose (see above), which buys an
    * instant switch and costs the two things a navigation normally provides: the
    * scroll does not reset, and focus does not move — it falls to <body> when
    * the control that was clicked unmounts, so the next Tab restarts from the
@@ -259,9 +254,9 @@ export default function GrowthTrackingPage() {
     return newest !== null && isStale(newest) ? newest : null;
   }, [accounts]);
 
-  const openAccountDoc = view.name === 'account'
-    ? accountsById.get(view.accountId) ?? null
-    : null;
+  const openAccountDoc = openAccountId === null
+    ? null
+    : accountsById.get(openAccountId) ?? null;
 
   /**
    * The open account's own posts. Both `accountId` (set by the discovery pass)
@@ -280,23 +275,7 @@ export default function GrowthTrackingPage() {
   return (
     <AppLayout>
       <div ref={mainRef} className="max-w-7xl space-y-4">
-        {view.name === 'account' && openAccountDoc ? (
-          <AccountDetail
-            account={openAccountDoc}
-            days={seriesById.get(openAccountDoc.id) ?? {}}
-            from={from}
-            range={range}
-            posts={accountPosts}
-            postsLoading={posts.loading}
-            onBack={backToOverview}
-            onTrackPost={posts.trackPost}
-            onSyncPost={posts.syncPost}
-            onSetPostTracking={posts.setPostTracking}
-            onDeletePost={posts.deletePost}
-            onLoadFullPostHistory={posts.loadFullHistory}
-            onSetTrackPosts={handleSetTrackPosts}
-          />
-        ) : view.name === 'posts' ? (
+        {view.name === 'posts' ? (
           <SubView title="Tracked posts" onBack={backToOverview}>
             <PostsTab
               posts={posts.posts}
@@ -515,6 +494,25 @@ export default function GrowthTrackingPage() {
             )}
           </>
         )}
+
+        {/* Outside the view switch on purpose: an account is a panel *over* the
+            page, and the roster it was opened from stays on screen behind it. It
+            is reachable from the Signals band too, which renders on the overview
+            — so it belongs to the page, not to one of its surfaces. */}
+        <AccountSheet
+          account={openAccountDoc}
+          days={openAccountDoc ? seriesById.get(openAccountDoc.id) ?? {} : {}}
+          range={range}
+          posts={accountPosts}
+          postsLoading={posts.loading}
+          onOpenChange={(open) => { if (!open) setOpenAccountId(null); }}
+          onTrackPost={posts.trackPost}
+          onSyncPost={posts.syncPost}
+          onSetPostTracking={posts.setPostTracking}
+          onDeletePost={posts.deletePost}
+          onLoadFullPostHistory={posts.loadFullHistory}
+          onSetTrackPosts={handleSetTrackPosts}
+        />
       </div>
     </AppLayout>
   );
@@ -522,8 +520,8 @@ export default function GrowthTrackingPage() {
 
 /**
  * The frame the two secondary surfaces share — a back control and a heading, in
- * the same place the account view puts them, so leaving any of the three is the
- * same gesture in the same spot.
+ * the same place the account panel puts its own back control, so leaving any
+ * detail in this subsystem is the same gesture in the same spot.
  */
 function SubView({
   title,
@@ -546,31 +544,6 @@ function SubView({
   );
 }
 
-/**
- * The account view's own shape, held while its chunk arrives. Shaped like the
- * real thing for the same reason every other skeleton here is: the data is
- * already in memory, so this is only ever the wait for the recharts chunk, and
- * a layout that settles into place is the difference between a fast switch and
- * a broken one.
- */
-function DetailSkeleton() {
-  return (
-    <div className="space-y-6">
-      <Skeleton className="h-8 w-36 rounded-lg" />
-      <div className="flex items-center gap-4">
-        <Skeleton className="size-13 rounded-xl" />
-        <div className="space-y-2">
-          <Skeleton className="h-7 w-56 rounded-lg" />
-          <Skeleton className="h-4 w-72 rounded-lg" />
-        </div>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
-        <Skeleton className="h-[340px] rounded-xl" />
-        <Skeleton className="h-[340px] rounded-xl" />
-      </div>
-    </div>
-  );
-}
 
 /** Shaped to the real layout so nothing jumps when the data lands. */
 function OverviewSkeleton() {
