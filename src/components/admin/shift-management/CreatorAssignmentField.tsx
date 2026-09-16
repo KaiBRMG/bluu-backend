@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/command';
 import { useAssignableAccounts } from '@/hooks/useCreators';
 import { formatUsd } from '@/lib/salary/salaryFormat';
+import { splitShiftAccounts } from '@/lib/salary/shiftAccounts';
 import { CreatorChip } from '@/components/creators/CreatorChip';
 
 /**
@@ -67,6 +68,13 @@ interface CreatorAssignmentFieldProps {
   wageTiers?: Record<number, number>;
   /** Soft cap from the roster rules; exceeding it warns rather than blocks. */
   maxAccounts?: number;
+  /**
+   * False for a shift that pays no hourly wage at all — in-shift cover created
+   * from the Coverage board. The rate line must not quote a figure there: the
+   * accounts are real and the rate is zero, and the two together read as a
+   * promise the payslip will not keep.
+   */
+  paysWage?: boolean;
   disabled?: boolean;
 }
 
@@ -77,6 +85,7 @@ export function CreatorAssignmentField({
   onOvertimeChange,
   wageTiers,
   maxAccounts = 5,
+  paysWage = true,
   disabled,
 }: CreatorAssignmentFieldProps) {
   const accounts = useAssignableAccounts();
@@ -89,9 +98,13 @@ export function CreatorAssignmentField({
   }, [accounts]);
 
   const overtimeSet = useMemo(() => new Set(overtimeValue), [overtimeValue]);
-  // The count that sets the rate: assigned accounts minus the overtime ones.
-  const paidCount = value.filter(id => !overtimeSet.has(id)).length;
-  const overtimeCount = value.length - paidCount;
+  // The count that sets the rate. Normally the assignment minus the overtime
+  // accounts — but a shift that is *entirely* overtime is an overtime shift and
+  // pays on all of it, so the marking there is only telling the agent what kind
+  // of shift they are looking at. One helper, shared with the engine.
+  const split = useMemo(() => splitShiftAccounts(value, overtimeValue), [value, overtimeValue]);
+  const paidCount = split.paidIds.length;
+  const overtimeCount = split.overtimeIds.length;
 
   const rate = useMemo(() => {
     if (!wageTiers || paidCount === 0) return null;
@@ -191,16 +204,19 @@ export function CreatorAssignmentField({
                 key={id}
                 className={cn(
                   'flex items-center gap-2 rounded-md border px-2 py-1',
-                  isOvertime
+                  isOvertime && paysWage
                     ? 'border-orange-500/30 bg-orange-500/[0.06]'
                     : 'border-white/[0.07] bg-white/[0.03]',
                 )}
               >
-                <CreatorChip creatorId={id} overtime={isOvertime} className="min-w-0 bg-transparent pr-0" />
+                <CreatorChip creatorId={id} overtime={isOvertime && paysWage} className="min-w-0 bg-transparent pr-0" />
 
                 {/* Two buttons, not a checkbox: "regular" is a claim about pay,
-                    and it should be read rather than inferred from an empty box. */}
-                <span
+                    and it should be read rather than inferred from an empty box.
+                    Absent on a zero-wage cover shift, where neither setting can
+                    change anything — an inert control that looks live is worse
+                    than no control. */}
+                {paysWage && <span
                   role="group"
                   aria-label={`Pay basis for ${name}`}
                   className="ml-auto flex shrink-0 overflow-hidden rounded-md border border-white/[0.09]"
@@ -232,7 +248,7 @@ export function CreatorAssignmentField({
                   >
                     Overtime
                   </button>
-                </span>
+                </span>}
 
                 <button
                   type="button"
@@ -251,16 +267,33 @@ export function CreatorAssignmentField({
 
       {/* The consequence, stated. This field pays money. */}
       <p className={cn('text-xs leading-relaxed', overCap ? 'text-orange-400' : 'text-zinc-400')}>
-        {value.length === 0 ? (
-          <>No accounts means no hourly pay for this shift — only commission on any sales.</>
-        ) : paidCount === 0 ? (
-          // Every account marked overtime. Legal, and almost never intended: it
-          // is an agent working a scheduled shift for commission alone. Said
-          // plainly rather than left to be discovered on the payroll grid.
+        {!paysWage ? (
+          // A cover shift assigned from the board. It carries accounts and pays
+          // no hours by design, so quoting a rate here — which this line did —
+          // describes a payment that will never be made.
           <span className="text-orange-400">
-            All {value.length} account{value.length === 1 ? ' is' : 's are'} marked overtime, so this shift pays
-            no hourly wage — only commission on the sales.
+            In-shift cover: worked inside a shift that is already being paid for. No hourly wage and no rate,
+            whatever is assigned here — the agent keeps the sales only.
           </span>
+        ) : value.length === 0 ? (
+          <>No accounts means no hourly pay for this shift — only commission on any sales.</>
+        ) : split.isFullyOvertime ? (
+          // Every account marked: an overtime shift, which pays on all of them.
+          // Stated rather than left to inference, because the mixed case one
+          // account away subtracts instead — and an admin needs to know which
+          // side of that line they are on before they save.
+          <>
+            {rate !== null && (
+              <>
+                Overtime shift — pays{' '}
+                <span className="tabular-nums text-foreground">{formatUsd(rate)}/hour</span> on all{' '}
+                {value.length} account{value.length === 1 ? '' : 's'}.
+              </>
+            )}{' '}
+            <span className="text-orange-400">
+              Add a regular account and the overtime ones stop counting toward the rate.
+            </span>
+          </>
         ) : (
           <>
             {rate !== null && (

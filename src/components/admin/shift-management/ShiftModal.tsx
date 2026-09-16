@@ -422,6 +422,7 @@ export default function ShiftModal({
               overtimeValue={overtimeCreatorIds}
               onOvertimeChange={setOvertimeCreatorIds}
               wageTiers={salaryConfig?.wageTiers}
+              paysWage={shift?.paysWage ?? true}
             />
           </div>
 

@@ -33,6 +33,7 @@
 import { adminDb } from '../firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { toDayKey, dayKeyRange, type SalaryDayKey } from '../salary/salaryDate';
+import { splitShiftAccounts } from '../salary/shiftAccounts';
 import type { CaCoverageOfferDocument, ShiftDocument } from '@/types/firestore';
 import { safeTimezone } from '../utils/timezone';
 
@@ -229,6 +230,27 @@ export async function withdrawClaim(offerId: string, userId: string): Promise<vo
 // ─── Assignment ──────────────────────────────────────────────────────
 
 /**
+ * Is this shift an overtime shift?
+ *
+ * **Two documents can mean it**, and both must answer yes here or the same
+ * situation pays two different amounts depending on which screen created it:
+ *
+ * - `isOvertime: true` — created from a coverage offer. The flag means
+ *   "came from an offer", which is why it cannot be the whole test.
+ * - **Every assigned account marked overtime** — built by hand in Shift
+ *   Management, where there is no offer to point at. `splitShiftAccounts` is
+ *   the same function the salary engine prices it with, so "what the engine
+ *   pays" and "what the assigner does" are read from one definition.
+ *
+ * A zero-wage in-shift cover shift is excluded by its caller, not here: it is
+ * overtime, but it is not something another account can be merged into.
+ */
+function isOvertimeShift(shift: ShiftDocument): boolean {
+  if (shift.isOvertime) return true;
+  return splitShiftAccounts(shift.creatorIds, shift.overtimeCreatorIds).isFullyOvertime;
+}
+
+/**
  * Does this agent already have a shift covering the offer's window?
  *
  * Decides in-shift versus outside-shift automatically so the admin is not asked
@@ -252,7 +274,11 @@ export async function findCoveringShift(
   for (const doc of snap.docs) {
     const shift = doc.data() as ShiftDocument;
     if (shift.isDeleted) continue;
-    if (shift.isOvertime) continue;
+    // An overtime shift is never a "covering" shift — an account added to one
+    // merges into it and raises its rate, rather than riding along unpaid. That
+    // is `findOvertimeShift`'s job, and the two use the same containment test,
+    // so every overtime shift this skips is one that function can still find.
+    if (isOvertimeShift(shift)) continue;
     const start = shift.startTime.toMillis();
     const end = shift.endTime.toMillis();
     if (start <= windowStart && end >= windowEnd) return shift;
@@ -309,11 +335,29 @@ export async function assignOffer(params: {
     if (existing) {
       shiftId = existing.shiftId;
       merged = true;
+
+      // The invariant being preserved is "an overtime shift pays on all of its
+      // accounts", and the two kinds of overtime shift express that in opposite
+      // ways — one marks none of its accounts, the other marks all of them. So
+      // the new account has to join whichever side the shift already sits on:
+      //
+      //   board-built (no marks)  → creatorIds only; it stays all-regular
+      //   hand-built (all marked) → both; it stays fully-overtime
+      //
+      // Adding to `creatorIds` alone on a hand-built shift would make it
+      // *mixed*, which silently stops its original accounts counting toward the
+      // rate — the agent would lose money by being given more work.
+      const staysFullyOvertime = splitShiftAccounts(
+        existing.creatorIds,
+        existing.overtimeCreatorIds,
+      ).isFullyOvertime;
+
       await adminDb
         .collection(SHIFTS)
         .doc(shiftId)
         .update({
           creatorIds: FieldValue.arrayUnion(offer.creatorId),
+          ...(staysFullyOvertime && { overtimeCreatorIds: FieldValue.arrayUnion(offer.creatorId) }),
           updatedAt: FieldValue.serverTimestamp(),
         });
     } else {
@@ -356,7 +400,22 @@ export async function assignOffer(params: {
   return { shiftId, inShift, merged };
 }
 
-/** An existing overtime shift for the same agent and the same window, if any. */
+/**
+ * An overtime shift this agent already has that the offer's window belongs to.
+ *
+ * **Exact window first, then containment.** Exact-match-only was enough while
+ * the only overtime shifts were board-created ones, which are minted from an
+ * offer's own window and so match exactly. A shift an admin built by hand in
+ * Shift Management almost never does — 18:00–22:00 against an offer released
+ * from someone else's 19:00–23:00 — and missing it would create a *second*
+ * paid shift overlapping the first, billing the agent's employer twice for the
+ * same hours and paying two low rates instead of one correct one.
+ *
+ * Containment is the safe widening: the agent is already scheduled for the
+ * whole offer window, so the account joins that shift and the shift keeps its
+ * own hours. A *partial* overlap is deliberately not matched — that is genuinely
+ * extra time, and merging would swallow the hours outside the shift.
+ */
 async function findOvertimeShift(
   userId: string,
   windowStart: number,
@@ -370,12 +429,24 @@ async function findOvertimeShift(
     .where('startTime', '<=', Timestamp.fromMillis(dayEnd))
     .get();
 
+  let containing: ShiftDocument | null = null;
+
   for (const doc of snap.docs) {
     const shift = doc.data() as ShiftDocument;
-    if (shift.isDeleted || !shift.isOvertime || shift.paysWage === false) continue;
-    if (shift.startTime.toMillis() === windowStart && shift.endTime.toMillis() === windowEnd) return shift;
+    // `paysWage: false` is in-shift cover: overtime, but a zero-wage record of
+    // somebody else's hours. Merging into it would hide an account inside a
+    // shift that pays nothing.
+    if (shift.isDeleted || shift.paysWage === false || !isOvertimeShift(shift)) continue;
+
+    const start = shift.startTime.toMillis();
+    const end = shift.endTime.toMillis();
+    if (start === windowStart && end === windowEnd) return shift;
+    // Kept, not returned: an exact match later in the snapshot is the better
+    // answer and must win regardless of document order.
+    if (containing === null && start <= windowStart && end >= windowEnd) containing = shift;
   }
-  return null;
+
+  return containing;
 }
 
 function wallClock(ms: number, timeZone: string): string {

@@ -166,10 +166,12 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       // account for a day, not part of this agent's standing roster:
       //
       //   own    — accounts that pay the agent's own wage tier
-      //   cover  — an overtime shift, in-shift cover (`paysWage: false`), or an
-      //            account marked overtime *on* an otherwise regular shift
-      //            (`overtimeCreatorIds`), which is the same fact reached from
-      //            Shift Management instead of the coverage board
+      //   cover  — an overtime shift, in-shift cover (`paysWage: false`), or any
+      //            account marked overtime (`overtimeCreatorIds`), which is the
+      //            same fact reached from Shift Management instead of the
+      //            coverage board. Marked accounts count as cover whether or not
+      //            they are paid: this split is about whose roster an account is
+      //            on, not about what it pays.
       //
       // Counted as **ids**, never grouped: a sub-account is a peer, not a child,
       // and each one counts as one account toward its assignee (rule 9h). The

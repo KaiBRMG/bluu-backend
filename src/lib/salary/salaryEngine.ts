@@ -38,6 +38,7 @@ import {
   DEFAULT_WAGE_TIERS,
 } from './salaryConstants';
 import { enumerateMonthDays } from './salaryDate';
+import { splitShiftAccounts } from './shiftAccounts';
 import type {
   AccountCountSource,
   SalaryConfig,
@@ -267,11 +268,16 @@ export function computeSalaryMonth(input: SalaryMonthInput): SalaryMonthResult {
     //
     // Both exist because the two assignment routes reach the roster from
     // different ends; they must price identically. See ca-salary.md §6.
+    //
+    // `splitShiftAccounts` is also what stops the second exclusion eating a
+    // whole overtime shift: an assignment that is *entirely* overtime pays on
+    // all of it, because that shift is the second-shift case, not free labour.
     const assignedCreators = new Set<string>();
     for (const s of shiftInputs) {
       if (!s.paysWage) continue;
-      const unpaid = new Set(s.overtimeCreatorIds ?? []);
-      for (const c of s.creatorIds) if (!unpaid.has(c)) assignedCreators.add(c);
+      for (const c of splitShiftAccounts(s.creatorIds, s.overtimeCreatorIds).paidIds) {
+        assignedCreators.add(c);
+      }
     }
 
     // The account count an admin sees and can override. Shift assignments are
@@ -304,11 +310,12 @@ export function computeSalaryMonth(input: SalaryMonthInput): SalaryMonthResult {
     const dayRate = hourlyRateFor(accountCount, config);
     const shifts: SalaryShiftBreakdown[] = shiftInputs.map(s => {
       const payable = s.paysWage ? payableHoursFor(s.trackedSeconds, s.scheduledHours, config) : 0;
-      const unpaidIds = new Set(s.overtimeCreatorIds ?? []);
-      // The shift's *paying* accounts. Overtime accounts added to a real shift
-      // are worked and earn commission, but they do not buy a higher tier —
-      // a 3-account agent covering 2 more stays on the 3-account rate.
-      const shiftAccounts = s.paysWage ? new Set(s.creatorIds.filter(id => !unpaidIds.has(id))).size : 0;
+      // The shift's *paying* accounts. Overtime accounts added to a shift the
+      // agent already works do not buy a higher tier — a 3-account agent
+      // covering 2 more stays on the 3-account rate — but a shift that is
+      // nothing but overtime pays on all of it.
+      const split = splitShiftAccounts(s.creatorIds, s.overtimeCreatorIds);
+      const shiftAccounts = s.paysWage ? new Set(split.paidIds).size : 0;
       const rate = !s.paysWage
         ? 0
         : config.wageRateBasis === 'per-day'
@@ -326,7 +333,7 @@ export function computeSalaryMonth(input: SalaryMonthInput): SalaryMonthResult {
         isOvertime: s.isOvertime,
         paysWage: s.paysWage,
         creatorIds: s.creatorIds,
-        overtimeCreatorIds: s.creatorIds.filter(id => unpaidIds.has(id)),
+        overtimeCreatorIds: split.overtimeIds,
       };
     });
 

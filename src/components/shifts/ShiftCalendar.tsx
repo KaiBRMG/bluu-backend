@@ -45,6 +45,7 @@ import type { ExpandedShift } from '@/lib/utils/recurrence';
 import { matchLeaveToOccurrences, occurrenceKey } from '@/lib/utils/leaveMatch';
 import { safeTimezone } from '@/lib/utils/timezone';
 import { CreatorChip, CreatorChipList } from '@/components/creators/CreatorChip';
+import { splitShiftAccounts } from '@/lib/salary/shiftAccounts';
 
 /**
  * The agent's roster at a glance: which days they work, which accounts, and what
@@ -119,6 +120,10 @@ const IN_SHIFT_COVER_EXPLANATION =
  */
 const IN_SHIFT_OVERTIME_EXPLANATION =
   'Worked as overtime inside this shift. You keep the sales, but your hourly rate is still set by your regular accounts only.';
+
+/** A shift that is nothing but overtime. It pays on its own accounts, like any other shift. */
+const FULL_OVERTIME_EXPLANATION =
+  'An overtime shift — every account on it is overtime, so it pays hourly on all of them, plus the sales.';
 
 interface ShiftCalendarProps {
   /** The month to draw, `YYYY-MM`. Month view only — the week view navigates itself. */
@@ -463,11 +468,15 @@ export function ShiftCalendar({
                     const isOvertime = shift.isOvertime ?? false;
                     const paysWage = shift.paysWage ?? true;
                     const ids = shift.creatorIds ?? [];
-                    // Accounts on this shift that are worked for the sales only.
-                    // Distinct from a whole cover shift above: this one still
-                    // pays hours, just not a higher rate.
-                    const overtimeIds = shift.overtimeCreatorIds ?? [];
-                    const paidCount = ids.filter(id => !overtimeIds.includes(id)).length;
+                    // Accounts on this shift marked overtime. What that means
+                    // depends on what sits beside them: alongside regular
+                    // accounts they are worked for the sales only, and on a
+                    // shift that is nothing else they simply mark the shift as
+                    // overtime — it pays on them like any other.
+                    const split = splitShiftAccounts(ids, shift.overtimeCreatorIds);
+                    const overtimeIds = split.overtimeIds;
+                    const paidCount = split.paidIds.length;
+                    const fullOvertime = split.isFullyOvertime;
 
                     const leave = leaveByOccurrence.get(occurrenceKey(shift)) ?? null;
                     // Offered right up until the shift starts. The 4-day notice is
@@ -488,7 +497,9 @@ export function ShiftCalendar({
                             time for it would misrepresent what it pays. */}
                         {paysWage ? (
                           <span className="flex items-center gap-0.5 text-[11px] tabular-nums text-zinc-300">
-                            {isOvertime && <Plus className="size-2.5 shrink-0 text-orange-400" aria-hidden />}
+                            {(isOvertime || fullOvertime) && (
+                              <Plus className="size-2.5 shrink-0 text-orange-400" aria-hidden />
+                            )}
                             {/* Start *and* length. Hours are capped at the shift's
                                 scheduled length, so a start time alone left the figure
                                 that sets the wage invisible anywhere in the product —
@@ -564,7 +575,10 @@ export function ShiftCalendar({
                         <div className="mt-0.5">
                           <CreatorChipList
                             creatorIds={ids}
-                            overtimeIds={overtimeIds}
+                            // The raw field rather than `split.overtimeIds`:
+                            // the list only tests membership, and a new array
+                            // each render would defeat its memo.
+                            overtimeIds={shift.overtimeCreatorIds}
                             max={4}
                             size="xs"
                             avatarOnly
@@ -572,7 +586,7 @@ export function ShiftCalendar({
                           />
                         </div>
 
-                        {paysWage && overtimeIds.length > 0 && (
+                        {paysWage && overtimeIds.length > 0 && !fullOvertime && (
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <span
@@ -589,6 +603,23 @@ export function ShiftCalendar({
                             </TooltipTrigger>
                             <TooltipContent className="max-w-56 text-center leading-relaxed">
                               {IN_SHIFT_OVERTIME_EXPLANATION}
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+
+                        {paysWage && fullOvertime && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span
+                                tabIndex={0}
+                                className="mt-0.5 flex cursor-help items-center gap-0.5 rounded-sm text-[10px] text-orange-400 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                              >
+                                Overtime shift
+                                <span className="sr-only">{FULL_OVERTIME_EXPLANATION}</span>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-56 text-center leading-relaxed">
+                              {FULL_OVERTIME_EXPLANATION}
                             </TooltipContent>
                           </Tooltip>
                         )}

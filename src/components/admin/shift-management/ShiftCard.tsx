@@ -14,6 +14,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 import { getShiftColor, hexToRgb } from '@/lib/utils/avatar';
 import { safeTimezone } from '@/lib/utils/timezone';
 import { CreatorChipList } from '@/components/creators/CreatorChip';
+import { splitShiftAccounts } from '@/lib/salary/shiftAccounts';
 
 // ─── Format helpers ──────────────────────────────────────────────────
 
@@ -78,9 +79,15 @@ export default function ShiftCard({ shift, user, viewerTimezone, onClick, onLeav
   const endLabel   = formatLocalTime(endMs,   viewerTimezone);
 
   // Accounts worked as overtime *inside* this shift: the agent keeps the sales
-  // but the wage tier is counted without them (ca-salary.md §6).
-  const overtimeIds = shift.overtimeCreatorIds ?? [];
-  const paidCount = (shift.creatorIds ?? []).filter(id => !overtimeIds.includes(id)).length;
+  // but the wage tier is counted without them (ca-salary.md §6) — unless the
+  // whole assignment is overtime, in which case this is an overtime shift and
+  // pays on all of it.
+  const accounts = splitShiftAccounts(shift.creatorIds, shift.overtimeCreatorIds);
+  const paidCount = accounts.paidIds.length;
+  // Either door to an overtime shift: assigned from the coverage board, or
+  // built by hand here with every account marked. They pay the same, so they
+  // must not read differently on the grid.
+  const showOvertimeLabel = (shift.isOvertime ?? false) || accounts.isFullyOvertime;
 
   const badge = shift.attendanceStatus ? BADGE_CONFIG[shift.attendanceStatus] : null;
   const leaveBadge = shift.leaveRequest ? LEAVE_BADGE_CONFIG[shift.leaveRequest.status] : null;
@@ -189,7 +196,7 @@ export default function ShiftCard({ shift, user, viewerTimezone, onClick, onLeav
           as though it were not. */}
       {(shift.creatorIds?.length ?? 0) > 0 && (
         <div style={{ marginTop: '3px', display: 'flex', flexWrap: 'wrap', gap: '2px' }}>
-          {shift.isOvertime && (
+          {showOvertimeLabel && (
             <span
               style={{
                 fontSize: '9px',
@@ -210,7 +217,7 @@ export default function ShiftCard({ shift, user, viewerTimezone, onClick, onLeav
               faces. A ring says "this one is different"; only the number says
               which rate the shift is on, and that is the figure an admin is
               here to check. */}
-          {!shift.isOvertime && overtimeIds.length > 0 && (
+          {!showOvertimeLabel && accounts.overtimeIds.length > 0 && (
             <span
               style={{
                 fontSize: '9px',
@@ -218,14 +225,23 @@ export default function ShiftCard({ shift, user, viewerTimezone, onClick, onLeav
                 color: '#fb923c',
                 alignSelf: 'center',
               }}
-              title={`${overtimeIds.length} account${overtimeIds.length === 1 ? '' : 's'} worked as overtime inside this shift — sales only, no extra pay. Paid on ${paidCount} account${paidCount === 1 ? '' : 's'}.`}
+              title={`${accounts.overtimeIds.length} account${accounts.overtimeIds.length === 1 ? '' : 's'} worked as overtime inside this shift — sales only, no extra pay. Paid on ${paidCount} account${paidCount === 1 ? '' : 's'}.`}
             >
-              +{overtimeIds.length} OT
+              +{accounts.overtimeIds.length} OT
             </span>
           )}
           {/* Avatars only — a roster cell in a seven-day grid has no room for
               names, and the admin is scanning for "who is on Adam today". */}
-          <CreatorChipList creatorIds={shift.creatorIds!} overtimeIds={overtimeIds} max={4} size="xs" avatarOnly />
+          {/* The raw field, not the derived subset: `CreatorChipList` is
+              memoised and only tests membership, so a freshly-filtered array
+              every render would defeat the memo and buy nothing. */}
+          <CreatorChipList
+            creatorIds={shift.creatorIds!}
+            overtimeIds={shift.overtimeCreatorIds}
+            max={4}
+            size="xs"
+            avatarOnly
+          />
         </div>
       )}
 

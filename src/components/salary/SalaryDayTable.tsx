@@ -8,6 +8,7 @@ import { CreatorChipList } from '@/components/creators/CreatorChip';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { SalaryCellEditor } from './SalaryCellEditor';
 import { formatDayLabelWithWeekday, currentDayKey } from '@/lib/salary/salaryDate';
+import { splitShiftAccounts } from '@/lib/salary/shiftAccounts';
 import {
   formatHours,
   formatPercent,
@@ -250,7 +251,12 @@ function DayRow({
   const expandable =
     shifts.length > 1 ||
     shifts.some(s => s.isOvertime || !s.paysWage || (s.overtimeCreatorIds?.length ?? 0) > 0);
-  const hasOvertime = shifts.some(s => s.isOvertime);
+  // A hand-built overtime shift carries no `isOvertime` flag — it is overtime
+  // because every account on it is. The header badge has to agree with the
+  // sub-row's own label, or the same shift is two different kinds on one screen.
+  const hasOvertime = shifts.some(
+    s => s.isOvertime || splitShiftAccounts(s.creatorIds, s.overtimeCreatorIds).isFullyOvertime,
+  );
 
   const cell = (
     key: string,
@@ -518,13 +524,20 @@ function ShiftRow({
   // raise the real shift's account count and therefore its rate (see
   // ca-salary.md §6). Saying so here is the point of showing the row at all —
   // otherwise it looks like accounts that went unpaid by mistake.
-  const kind = !shift.paysWage ? 'In-shift cover' : shift.isOvertime ? 'Overtime' : 'Regular';
-  const window = formatShiftWindow(shift.occurrenceStart, shift.scheduledHours, timezone);
-
   // The other half of the same rule: accounts marked overtime *on* a paying
-  // shift. `accountCount` on this row already excludes them, so without saying
-  // so the row reads as five faces beside the number three.
-  const overtimeIds = shift.overtimeCreatorIds ?? [];
+  // shift. `accountCount` on this row excludes them, so without saying so the
+  // row reads as five faces beside the number three — unless every account is
+  // marked, which makes this an overtime shift that pays on all of them and
+  // has nothing left to explain.
+  const split = splitShiftAccounts(shift.creatorIds, shift.overtimeCreatorIds);
+  const overtimeIds = split.overtimeIds;
+
+  const kind = !shift.paysWage
+    ? 'In-shift cover'
+    : shift.isOvertime || split.isFullyOvertime
+      ? 'Overtime'
+      : 'Regular';
+  const window = formatShiftWindow(shift.occurrenceStart, shift.scheduledHours, timezone);
 
   return (
     <tr className="bg-white/[0.02] text-[13px] text-zinc-400">
@@ -534,12 +547,12 @@ function ShiftRow({
           {window && <span className="tabular-nums">{window}</span>}
           <CreatorChipList
             creatorIds={shift.creatorIds}
-            overtimeIds={overtimeIds}
+            overtimeIds={shift.overtimeCreatorIds}
             max={4}
             size="xs"
             emptyLabel="No accounts assigned"
           />
-          {shift.paysWage && overtimeIds.length > 0 && (
+          {shift.paysWage && overtimeIds.length > 0 && !split.isFullyOvertime && (
             <span
               className="text-[11px] text-orange-400"
               title="Worked inside this shift for the sales only. They add no hours and do not raise the hourly rate."

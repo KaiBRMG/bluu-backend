@@ -74,7 +74,7 @@ The commission tier is read from **month-to-date gross including the current day
 
 Clamps rather than interpolates. **Zero accounts pays nothing** — a shift with no accounts assigned is not a shift that was worked, and paying it would quietly reward a missing assignment.
 
-The count comes from the shift's `creatorIds` **minus its `overtimeCreatorIds`** — accounts the agent works inside that shift without extra pay (§6). For days recorded before creator assignment existed it falls back to **distinct creators with a sale that day**, and the cell is flagged as inferred (orange in the grid, `accountCountSource: 'sales'`).
+The count comes from the shift's `creatorIds` **minus its `overtimeCreatorIds`** — accounts the agent works inside that shift without extra pay — **unless every account is marked, in which case it is an overtime shift and counts all of them** (§6, `splitShiftAccounts`). For days recorded before creator assignment existed it falls back to **distinct creators with a sale that day**, and the cell is flagged as inferred (orange in the grid, `accountCountSource: 'sales'`).
 
 ### Sub-accounts are peers, and cost the engine nothing
 
@@ -239,7 +239,13 @@ The release used to read `shifts/{leave.shiftId}` directly, which after any of t
 
 **An agent on 3 regular accounts who picks up 2 more during those same hours is still paid the 3-account rate.** Working a *second* shift outside their hours is the other case entirely, and there the overtime accounts do pay — two shifts in a day, each priced on its own accounts.
 
-Outside-shift assignments **merge** into an overtime shift the agent already has for the same window. Two one-account shifts would pay the 1-account rate twice instead of the 2-account rate once, which is both wrong and worse for the agent.
+Outside-shift assignments **merge** into an overtime shift the agent already has for that window. Two one-account shifts would pay the 1-account rate twice instead of the 2-account rate once, which is both wrong and worse for the agent.
+
+Three rules make that merge safe, and each was a way of paying the wrong number:
+
+1. **"Overtime shift" is one predicate, `isOvertimeShift`, not a flag read.** `isOvertime` means *created from an offer* — a shift an admin built by hand in Shift Management has no offer to point at and is overtime because every account on it is marked. Both `findCoveringShift` and `findOvertimeShift` ask the one predicate, so the same situation cannot be in-shift cover on one path and a merge on the other. It was: a hand-built overtime shift paid $10 where a board-built one in the same spot paid $14.
+2. **The merge matches an exact window first, then a *containing* one.** Exact-only was sufficient while every overtime shift was minted from an offer's own window. A hand-built one almost never matches exactly (18:00–22:00 against an offer released from 19:00–23:00), and a missed merge does not fail quietly — it creates a **second paid shift overlapping the first**, billing the same hours twice at two low rates. A *partial* overlap is still not merged: those hours are genuinely extra.
+3. **The merge preserves which kind of overtime shift it is.** The invariant is *an overtime shift pays on all of its accounts*, and the two kinds express it in opposite ways — a board-built shift marks **none** of its accounts, a hand-built one marks **all** of them. So the new id joins `creatorIds` alone on the first and **both fields** on the second. Adding to `creatorIds` only would make a hand-built shift *mixed*, which stops its original accounts counting toward the rate: a 2-account shift at $2.50 becomes a 1-account shift at $1.50, and the agent is **paid less for being given more work**.
 
 ### In-shift cover has two representations, because it has two doors
 
@@ -250,13 +256,22 @@ The rule above is one rule. It is reached from two places, and each records it t
 | **Coverage board** (CA Admin → Coverage) — an offer released by someone's leave | Its own **zero-wage shift** (`paysWage: false`, `isOvertime: true`, `coverageOfferId` set) | The assignment has to point back at the offer it came from, and appending the creator to the agent's real shift would raise that shift's account count — precisely the raise this case must not produce |
 | **Shift Management** (`/admin-portal/shift-management`) — an admin editing the shift directly | **`overtimeCreatorIds`**, a subset of that shift's own `creatorIds` | There is no offer, and no second shift to attach it to. The admin is editing one shift and is naming, on it, which of its accounts pay |
 
-**Both price identically**, and that is the whole point — the engine excludes a `paysWage: false` shift wholesale and excludes `overtimeCreatorIds` from a paying shift's account count, in the same few lines of `salaryEngine.ts`. Before the second door existed, an admin adding two cover accounts by hand in Shift Management moved the agent from $3.50 to $5.50/hour with nothing on any screen saying so; the assignment field now carries a **Regular / Overtime** toggle per account and restates the rate from the paid count alone.
+**Both price identically** in the mixed case, and that is the whole point — the engine excludes a `paysWage: false` shift wholesale and excludes `overtimeCreatorIds` from a paying shift's account count, in the same few lines of `salaryEngine.ts`. Before the second door existed, an admin adding two cover accounts by hand in Shift Management moved the agent from $3.50 to $5.50/hour with nothing on any screen saying so; the assignment field now carries a **Regular / Overtime** toggle per account and restates the rate from the paid count alone.
+
+**One exception, and it is the one that matters most: a shift where *every* account is marked overtime pays on all of them.** That shift is not free labour — it is the outside-hours case, a second shift in a day, and subtracting its whole assignment would hand an agent **$0/hour** for honestly marking their overtime shift as overtime. So the marking means two things depending on what sits beside it:
+
+| Shift | Marked | Pays on |
+|---|---|---|
+| 3 regular + 2 overtime | a subset | the 3 regular — the agent keeps the sales, not a raise |
+| 2 overtime, nothing else | all of them | all 2 — an overtime shift like any other |
+
+In the second case the marking is **display only**, which is what it is for there: the agent opens their calendar and sees at a glance that this one is overtime. Both readings live in [`splitShiftAccounts`](../src/lib/salary/shiftAccounts.ts) — one function, because five surfaces ask this question and a second copy of it is a second answer to "what does this shift pay". A fully-overtime shift therefore reads as **Overtime** on the admin grid, the agent's calendar and the salary breakdown even though it carries no `isOvertime` flag; that flag means "created from a coverage offer", and a hand-built overtime shift has no offer to point at.
 
 Three constraints on the field:
 
 - **It is always a subset of `creatorIds`, enforced server-side.** `intersectOvertimeIds` runs on every write, because this set is *subtracted* from money: an id left behind after an account was removed from the picker would dock the agent a tier for work nobody does.
 - **It is written only alongside `creatorIds`, never on its own.** The two are one fact — which accounts, and which of them pay — and letting them drift is how a ghost id survives.
-- **It is empty on an outside-shift overtime shift.** Those accounts pay; marking them would be the in-shift rule applied to the case it is not about.
+- **It is empty on an overtime shift created from the coverage board.** Those carry `isOvertime` instead, and their accounts pay either way — the two routes agree by construction rather than by the admin remembering which one they used.
 
 **Marked on both schedules.** An overtime account renders with an orange ring on its avatar — on the admin grid ([`ShiftCard`](../src/components/admin/shift-management/ShiftCard.tsx)) and on the agent's own calendar ([`ShiftCalendar`](../src/components/shifts/ShiftCalendar.tsx)) — beside a count (`+2 OT` / `2 overtime`) that says what the ring means. The ring alone would be colour encoding nothing, which DESIGN.md §2 forbids; the count is also the figure a reader is actually after, since it is the *difference* between the faces they can see and the rate the shift is on. `CreatorChipList` orders paid accounts first so its `max` truncates the overtime ones rather than the ones that set the rate.
 
