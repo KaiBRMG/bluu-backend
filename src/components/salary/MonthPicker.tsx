@@ -15,6 +15,12 @@ import { addMonths, currentMonthKey, formatMonthLabel } from '@/lib/salary/salar
  *
  * `earliest` stops the back arrow at the first month with data, so the same
  * lesson holds in the other direction.
+ *
+ * **`latest` exists because that forward cap is a salary argument, not a
+ * calendar one.** A roster is published ahead — next month's shifts are the
+ * thing an agent most wants to look at — so the Full Schedule dialog raises the
+ * ceiling rather than reimplementing the control. It stays capped at the current
+ * month everywhere money is the subject, which is every other caller.
  */
 
 interface MonthPickerProps {
@@ -22,18 +28,21 @@ interface MonthPickerProps {
   onChange: (month: string) => void;
   /** Oldest selectable month, `YYYY-MM`. Defaults to two years back. */
   earliest?: string;
+  /** Newest selectable month, `YYYY-MM`. Defaults to the current month. */
+  latest?: string;
   className?: string;
 }
 
-export function MonthPicker({ month, onChange, earliest, className }: MonthPickerProps) {
-  const latest = currentMonthKey();
-  const floor = earliest ?? addMonths(latest, -24);
+export function MonthPicker({ month, onChange, earliest, latest, className }: MonthPickerProps) {
+  const current = currentMonthKey();
+  const ceiling = latest ?? current;
+  const floor = earliest ?? addMonths(current, -24);
 
   const previous = addMonths(month, -1);
   const next = addMonths(month, 1);
 
   const canGoBack = previous >= floor;
-  const canGoForward = next <= latest;
+  const canGoForward = next <= ceiling;
 
   return (
     <div className={className}>
@@ -64,8 +73,8 @@ export function MonthPicker({ month, onChange, earliest, className }: MonthPicke
           <ChevronRight aria-hidden />
         </Button>
 
-        {month !== latest && (
-          <Button size="xs" variant="ghost" onClick={() => onChange(latest)} className="ml-1 text-zinc-400">
+        {month !== current && (
+          <Button size="xs" variant="ghost" onClick={() => onChange(current)} className="ml-1 text-zinc-400">
             This month
           </Button>
         )}

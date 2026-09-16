@@ -250,6 +250,23 @@ Everything an agent does with their own roster happens on the dashboard calendar
 
 What remains on the dashboard, in order: salary card → leave balance → calendar. The balance sits **above** the calendar because it is the constraint you read before picking a day to request off.
 
+### The dashboard shows a week; the month is a dialog
+
+The calendar has **two views off one cell renderer** ([`ShiftCalendar`](../src/components/shifts/ShiftCalendar.tsx), `view="week" | "month"`), and the dashboard leads with the **week**:
+
+- `view="week"` draws one Monday-first row with its own **‹ › arrows** and a "This week" reset, and cells roughly twice the height of a month cell.
+- **Full Schedule** (the one prominent button on the panel) opens [`FullScheduleDialog`](../src/components/shifts/FullScheduleDialog.tsx) — the same component with `view="month"`, `bare`, and a `MonthPicker` in the dialog header, at `sm:max-w-5xl`.
+
+Three things about this are load-bearing:
+
+- **It is one component, not two.** Leave, in-shift cover and the claim popover all live *in the day cell*; a separate week component would be a second place for those to drift, and the dialog would quietly lose one of them.
+- **The week arrows have no forward cap, and the dialog's `MonthPicker` has a raised one** (`latest`, 12 months out). The picker's default ceiling is the current month because a future *salary* month has no data by definition — a roster is the opposite, it is published ahead. Money surfaces keep the default; this is the only caller that raises it.
+- **The overtime layer is fetched for the visible range**, not for a rolling window around today. `useCoverageOffers` defaults to `today-1 → today+45`, which was right while the only view was the current month and wrong the moment the arrows can leave it — a week three arrows out would draw the roster and silently claim no cover was going spare.
+
+A week is also the only view that can **straddle a month boundary**, which is why [`useShiftCalendar`](../src/hooks/useShiftCalendar.ts) takes a *list* of months and merges them on `(shiftId, occurrenceStart)` (the padded windows of two adjacent months overlap). It still fetches and caches whole **months** rather than the seven days asked for: scrolling through September is then one request rather than five, and the dialog's month view reuses the entry the week view already warmed (rule 9).
+
+**The dashboard has no month picker any more, and must not regain one.** It used to have one governing the page, because a picker that moved only the calendar could put August's roster above September's pay with both labels correct and nothing saying the two scopes differed. That risk is gone by construction rather than by coordination: the schedule navigates itself, and `SalarySummaryCard` renders the current unfinalised month — the only month a dashboard summary should mean. History has its own picker on `/ca-portal/dashboard/salary`.
+
 > **A dashboard card must not link to a page the viewer may not hold.** The leave balance briefly linked to `/ca-portal/shifts`; `ca-dashboard` and `ca-shifts` are granted separately, so for anyone without the second one `AppLayout` redirected the click to the home page. It is now plain information with no link at all.
 
 ### Overtime lives on the calendar, not beside it
@@ -361,6 +378,14 @@ Four parts, in reading order:
 - **Attention band** — the ways a month is quietly wrong, rolled up across the roster: days with sales but no shift, agents with no sales at all, creators with exactly one agent earning on them, creators that earned last month and nothing this month, and admin-edited days. Takes the *attention needed* tint and **no motion** (DESIGN.md §5). Each line **names its rows**, not just a count. It states plainly when there is nothing to check — a check that vanishes when it passes is indistinguishable from one that never ran.
 - **Agent × creator matrix** — gross per intersection, shaded against **one scale shared by the whole grid** so a cell reads both along its row (this agent's earners) and down its column (who carries this creator). Per-row scaling would destroy the second read, which is the one not available anywhere else. Ten creator columns, the rest folded, expandable. The agent column is sticky; the grid scrolls sideways at the 1024px floor and a matrix whose row labels scroll away is unreadable.
 - **Creator leaderboard** — gross, share, sales, **agents covering**, and the month-over-month move. A creator at 30% of the month with one agent on them is a very different fact from the same 30% split four ways.
+
+**The agent sub-label is a roster fact, not a sales one.** Under each name in the matrix sits how many accounts that agent *works* — `accountCount`, the distinct `creatorIds` across their own shifts for the month. It used to be `Object.keys(byCreator).length`, the number of creators that produced sales, which reported an agent on four accounts as "1 creator" in a month where one of them sold. The bars along the row already say which creators earned; the sub-label is the denominator you read them against, so it must not be the same number.
+
+Three things about how it counts:
+
+- **Ids, never grouped.** A sub-account is an assignable peer and counts as one account toward its assignee (rule 9h). The creator and sub-account id spaces are disjoint, so a `Set` of ids is the whole implementation — do not fold sub-accounts under a parent before counting, and do not weight one as a fraction.
+- **Cover is named separately** (`coverAccountCount`, rendered as `+N covered`), because an overtime shift or in-shift cover is somebody else's account for a day, not part of this agent's standing roster — the same split the wage engine makes (§6). An account both covered and held counts once, as held.
+- **Month-scoped.** An account added mid-month is included. That is the honest answer on a surface whose every other figure is a month.
 
 Three calls worth not re-litigating:
 

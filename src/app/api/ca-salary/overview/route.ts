@@ -156,15 +156,43 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       const sales = salesByUser.get(agent.uid) ?? [];
       const byCreator: Record<string, number> = {};
 
+      // ── How many accounts this agent actually works ──
+      //
+      // A roster fact, and deliberately not the number of creators that produced
+      // sales: an agent assigned four accounts of which one sold this month
+      // works four accounts, and the matrix sub-label used to call that "1
+      // creator". The two sets are kept apart for the same reason the wage
+      // engine keeps them apart (ca-salary.md §6) — cover is somebody else's
+      // account for a day, not part of this agent's standing roster:
+      //
+      //   own    — shifts that pay the agent's own wage tier
+      //   cover  — an overtime shift, or in-shift cover (`paysWage: false`)
+      //
+      // Counted as **ids**, never grouped: a sub-account is a peer, not a child,
+      // and each one counts as one account toward its assignee (rule 9h). The
+      // id spaces are disjoint, so a Set is the whole implementation.
+      //
+      // Month-scoped by construction — an account added mid-month is included,
+      // which is the honest answer for a month view.
+      const ownAccountIds = new Set<string>();
+      const coverAccountIds = new Set<string>();
+
       for (const day of result?.days ?? []) {
         for (const shift of day.shifts) {
+          const isCover = shift.isOvertime || !shift.paysWage;
           for (const creatorId of shift.creatorIds) {
+            if (isCover) coverAccountIds.add(creatorId);
+            else ownAccountIds.add(creatorId);
+
             const covering = assignedAgents.get(creatorId) ?? new Set<string>();
             covering.add(agent.uid);
             assignedAgents.set(creatorId, covering);
           }
         }
       }
+
+      // An account covered *and* held is held — it must not be counted twice.
+      for (const id of ownAccountIds) coverAccountIds.delete(id);
 
       for (const [name, entry] of foldByCreator(sales)) {
         byCreator[name] = entry.gross;
@@ -194,6 +222,10 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         overriddenDays: result ? result.days.filter(d => Object.keys(d.overrides).length > 0).length : 0,
         missingShiftDays: result ? result.days.filter(d => d.missingShift).length : 0,
         byCreator,
+        /** Accounts on the agent's own shifts this month — their roster. */
+        accountCount: ownAccountIds.size,
+        /** Accounts they covered for somebody else, and hold none of themselves. */
+        coverAccountCount: coverAccountIds.size,
         previousGross: previous ?? null,
       };
     });

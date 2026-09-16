@@ -136,6 +136,25 @@ export function dayOfWeek(day: SalaryDayKey): number {
 }
 
 /**
+ * The Monday of the week containing `day`.
+ *
+ * Monday-first because the roster is: `ShiftCalendar`'s weekday header starts on
+ * Monday, and a week view whose first column disagreed with the month view's
+ * would put the same shift in a different column depending on which view you
+ * opened it in.
+ */
+export function startOfWeek(day: SalaryDayKey): SalaryDayKey {
+  return addDays(day, -((dayOfWeek(day) + 6) % 7));
+}
+
+/** Every day key in the Monday-first week containing `day`, ascending. */
+export function enumerateWeekDays(weekStart: SalaryDayKey): SalaryDayKey[] {
+  const out: SalaryDayKey[] = [];
+  for (let i = 0; i < 7; i++) out.push(addDays(weekStart, i));
+  return out;
+}
+
+/**
  * `"2026-08-31 23:52:34"` from the export → a UTC instant.
  *
  * The exporter writes wall-clock time already in the salary timezone and names

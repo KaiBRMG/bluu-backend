@@ -73,6 +73,10 @@ interface OverviewAgent {
   overriddenDays: number;
   missingShiftDays: number;
   byCreator: Record<string, number>;
+  /** Accounts on this agent's own shifts this month — the roster, not the sales. */
+  accountCount: number;
+  /** Accounts they covered for someone else and hold none of themselves. */
+  coverAccountCount: number;
   previousGross: number | null;
 }
 
@@ -127,7 +131,10 @@ export default function AdminOverview({ month, onMonthChange }: { month: string;
     async (force = false) => {
       if (!user) return;
 
-      const key = `bluu_ca_overview_v1:${user.uid}:${month}`;
+      // v2: the agent rows gained `accountCount`/`coverAccountCount`. A v1 entry
+      // is shape-incompatible — the sub-label would render "undefined accounts"
+      // off it — so the version is bumped rather than the fields defaulted.
+      const key = `bluu_ca_overview_v2:${user.uid}:${month}`;
       if (!force) {
         const cached = getCache<OverviewResponse>(key, CACHE_TTL_MS);
         if (cached) {
@@ -607,7 +614,20 @@ function EarningsMatrix({
           <tbody className="divide-y divide-white/[0.045]">
             {agents.map(agent => {
               const otherGross = folded.reduce((sum, c) => sum + (agent.byCreator[c.name] ?? 0), 0);
-              const spread = Object.keys(agent.byCreator).length;
+
+              // How many accounts the agent *works*, from the roster — not how
+              // many produced sales. This read "1 creator" for an agent on four
+              // accounts where one sold, which is a different fact wearing the
+              // same words. The bars along the row already say which creators
+              // earned; the sub-label is the denominator you read them against.
+              const accounts =
+                agent.accountCount === 0
+                  ? 'No accounts'
+                  : pluralise(agent.accountCount, 'account');
+              // Cover is somebody else's account for a day, so it is named
+              // separately rather than folded into the roster count.
+              const cover = agent.coverAccountCount > 0 ? ` · +${agent.coverAccountCount} covered` : '';
+              const noSales = agent.saleCount === 0 ? ' · no sales' : '';
 
               return (
                 <tr key={agent.uid} className="group transition-colors duration-[120ms] hover:bg-white/[0.055]">
@@ -628,7 +648,7 @@ function EarningsMatrix({
                       <span className="min-w-0">
                         <span className="block max-w-[11rem] truncate font-medium">{agent.displayName}</span>
                         <span className="text-xs text-zinc-400">
-                          {spread === 0 ? 'No sales' : pluralise(spread, 'creator')}
+                          {`${accounts}${cover}${noSales}`}
                         </span>
                       </span>
                     </span>

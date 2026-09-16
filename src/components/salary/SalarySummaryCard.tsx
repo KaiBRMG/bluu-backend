@@ -26,10 +26,13 @@ import { SURFACE, SURFACE_INTERACTIVE } from '@/lib/surfaces';
  */
 
 export function SalarySummaryCard({ month: monthProp }: { month?: string } = {}) {
-  // The dashboard's month picker governs the page, this card included. Pinning it
-  // to the current month while a picker sat below it meant August's roster could
-  // render above September's pay, with both labels correct and nothing saying the
-  // two scopes differed.
+  // Defaults to the current, unfinalised month — which is what the dashboard
+  // wants, and the only month a summary card should ever mean. It takes a month
+  // anyway because it once had to: a picker governing the page had to govern this
+  // card too, or August's roster could render above September's pay with both
+  // labels correct and nothing saying the two scopes differed. The dashboard now
+  // has no page-level scope at all (its schedule navigates itself), so nothing
+  // passes one today — history lives on the salary page, which has its own picker.
   const month = monthProp ?? currentMonthKey();
   const { data, loading, error, refetch } = useSalaryMonth(month);
 

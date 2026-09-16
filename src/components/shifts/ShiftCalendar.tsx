@@ -1,7 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarX2, Check, Loader2Icon, Plus, RotateCcw, Users, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  CalendarDays,
+  CalendarX2,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Loader2Icon,
+  Plus,
+  RotateCcw,
+  Users,
+  X,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { SURFACE } from '@/lib/surfaces';
@@ -15,11 +26,18 @@ import { useCoverageOffers, type CoverageOfferRow } from '@/hooks/useCoverageOff
 import { useLeaveRequests, type LeaveRequest } from '@/hooks/useLeaveRequests';
 import { RequestLeaveDialog, MIN_LEAVE_NOTICE_DAYS, type LeaveTarget } from './RequestLeaveDialog';
 import {
+  addDays,
   currentDayKey,
-  daysInMonth,
+  currentMonthKey,
   dayOfWeek,
+  daysInMonth,
+  enumerateMonthDays,
+  enumerateWeekDays,
+  formatDayLabel,
   formatDayLabelWithWeekday,
   formatMonthLabel,
+  monthOfDay,
+  startOfWeek,
   toDayKey,
 } from '@/lib/salary/salaryDate';
 import { formatHours, pluralise } from '@/lib/salary/salaryFormat';
@@ -29,13 +47,32 @@ import { safeTimezone } from '@/lib/utils/timezone';
 import { CreatorChip, CreatorChipList } from '@/components/creators/CreatorChip';
 
 /**
- * The agent's month at a glance: which days they work, which accounts, and what
+ * The agent's roster at a glance: which days they work, which accounts, and what
  * overtime is going spare.
  *
- * Built as a real month grid rather than an agenda list because the question it
- * answers is shaped like a month — "am I on next Tuesday", "how many days am I
- * covering Adam". An agenda answers "what's next", which the dashboard's shift
- * list already does.
+ * Built as a real calendar grid rather than an agenda list because the question
+ * it answers is shaped like a calendar — "am I on next Tuesday", "how many days
+ * am I covering Adam". An agenda answers "what's next", which the dashboard's
+ * shift list already does.
+ *
+ * ## Two views, one grid
+ *
+ * `view="week"` draws a single Monday-first row with its own arrows; `view="month"`
+ * draws the full grid. They are the *same* cell renderer over a different list of
+ * days, deliberately — the cell is where leave, in-shift cover and the overtime
+ * popover all live, and a second implementation of it would be a second place for
+ * those to drift.
+ *
+ * The **dashboard leads with the week** because that is the horizon an agent
+ * actually acts on: am I on tomorrow, is there cover going spare this week. A
+ * month of ~90px cells answers "am I on the 14th" and buries this week's shift in
+ * a thirty-cell scan. The month is one click away in the Full Schedule dialog
+ * (`FullScheduleDialog`), which is the same component with `view="month"` and a
+ * `MonthPicker` in its header — so nothing an agent can do on the dashboard is
+ * missing there, and nothing there needed reimplementing.
+ *
+ * A week is the one view that can straddle a month boundary, which is why
+ * `useShiftCalendar` takes a list of months rather than one.
  *
  * ## One calendar, two layers, and the hierarchy is the design
  *
@@ -73,10 +110,27 @@ const IN_SHIFT_COVER_EXPLANATION =
   'Extra account inside your existing shift. You keep the sales; your hours are unchanged.';
 
 interface ShiftCalendarProps {
-  month: string;
+  /** The month to draw, `YYYY-MM`. Month view only — the week view navigates itself. */
+  month?: string;
   timezone: string;
   /** Render available overtime alongside the agent's own shifts. */
   showOvertime?: boolean;
+  /** `week` (default) draws one Monday-first row with its own arrows; `month` draws the grid. */
+  view?: 'month' | 'week';
+  /** Rendered on the header row — the `MonthPicker`, in the Full Schedule dialog. */
+  headerAction?: ReactNode;
+  /** Renders the Full Schedule button beside the week arrows. Week view only. */
+  onOpenFullSchedule?: () => void;
+  /** Drop the panel chrome and the `<h2>` — for a dialog that already provides both. */
+  bare?: boolean;
+  /**
+   * Hold the boot screen until this instance's first load finishes (rule 8).
+   *
+   * Off for the dialog copy: the boot phase is keyed by name, so a second mount
+   * sharing the key would clear the first one's phase when it unmounts — and the
+   * dialog opens long after boot anyway.
+   */
+  gateBoot?: boolean;
   className?: string;
 }
 
@@ -87,9 +141,46 @@ interface DayCell {
   offers: CoverageOfferRow[];
 }
 
-export function ShiftCalendar({ month, timezone, showOvertime = false, className }: ShiftCalendarProps) {
-  const { shifts, loading, error, refetch } = useShiftCalendar(month);
+export function ShiftCalendar({
+  month: monthProp,
+  timezone,
+  showOvertime = false,
+  view = 'week',
+  headerAction,
+  onOpenFullSchedule,
+  bare = false,
+  gateBoot = true,
+  className,
+}: ShiftCalendarProps) {
+  const isWeek = view === 'week';
+  const month = monthProp ?? currentMonthKey();
+
+  // The week the arrows are parked on. Local state, not a prop: the dashboard has
+  // no other use for it, and lifting it would make every arrow press re-render
+  // the page rather than this panel.
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(currentDayKey()));
+  const weekEnd = addDays(weekStart, 6);
+
+  // A week can straddle a month boundary; a month never does. Fetching whole
+  // months either way is what lets a week of September reuse the entry the last
+  // week of September already warmed — see `useShiftCalendar`.
+  const months = useMemo(
+    () => (isWeek ? [...new Set([monthOfDay(weekStart), monthOfDay(weekEnd)])] : [month]),
+    [isWeek, weekStart, weekEnd, month],
+  );
+
+  // The days actually drawn, which is what the overtime layer is asked for too.
+  // Its default is a rolling window around today — right when the only view was
+  // the current month, and wrong the moment the arrows can leave it: a week three
+  // arrows out, or a month picked in the Full Schedule dialog, would draw the
+  // roster and silently claim no cover was going spare.
+  const rangeStart = isWeek ? weekStart : `${month}-01`;
+  const rangeEnd = isWeek ? weekEnd : `${month}-${daysInMonth(month)}`;
+
+  const { shifts, loading, error, refetch } = useShiftCalendar(months);
   const { offers, setClaim, loading: offersLoading } = useCoverageOffers({
+    from: rangeStart,
+    to: rangeEnd,
     status: 'available',
     enabled: showOvertime,
   });
@@ -99,7 +190,7 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
 
   // The salary card above this one gates the boot screen, so without this the
   // loader lifted on a finished card sitting over a skeleton calendar.
-  useBootPhase('shift-calendar', loading);
+  useBootPhase('shift-calendar', gateBoot && loading);
 
   const tz = safeTimezone(timezone);
   const today = currentDayKey();
@@ -135,8 +226,6 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
   );
 
   const { cells, weeks } = useMemo(() => {
-    const count = daysInMonth(month);
-
     const shiftsByDay = new Map<string, ExpandedShift[]>();
     for (const shift of shifts) {
       const key = toDayKey(shift.occurrenceStart);
@@ -156,16 +245,17 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
       for (const list of offersByDay.values()) list.sort((a, b) => a.windowStart - b.windowStart);
     }
 
-    const built: DayCell[] = [];
-    for (let date = 1; date <= count; date++) {
-      const key = `${month}-${String(date).padStart(2, '0')}`;
-      built.push({
-        day: key,
-        date,
-        shifts: shiftsByDay.get(key) ?? [],
-        offers: offersByDay.get(key) ?? [],
-      });
-    }
+    const dayKeys = isWeek ? enumerateWeekDays(weekStart) : enumerateMonthDays(month);
+    const built: DayCell[] = dayKeys.map(key => ({
+      day: key,
+      date: Number(key.slice(8, 10)),
+      shifts: shiftsByDay.get(key) ?? [],
+      offers: offersByDay.get(key) ?? [],
+    }));
+
+    // A week is already exactly one Monday-first row; only a month needs padding
+    // to land its 1st under the right weekday.
+    if (isWeek) return { cells: built, weeks: [built] };
 
     // Monday-first: the roster's week starts on Monday, so Sunday sits last.
     const firstWeekday = dayOfWeek(built[0].day);
@@ -182,7 +272,7 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
     for (let i = 0; i < padded.length; i += 7) weeks.push(padded.slice(i, i + 7));
 
     return { cells: built, weeks };
-  }, [month, shifts, offers, showOvertime]);
+  }, [isWeek, weekStart, month, shifts, offers, showOvertime]);
 
   // One formatter for the whole grid. Constructing an `Intl.DateTimeFormat` is
   // the expensive half (~50-100us); `.format()` is cheap. This was an inline
@@ -195,13 +285,90 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
   );
   const formatTime = useCallback((ms: number) => timeFormat.format(new Date(ms)), [timeFormat]);
 
+  // `bare` drops the panel because the Full Schedule dialog is already a surface;
+  // nesting one inside the other stacks two overlays and reads as a card in a card.
+  const panel = bare ? className : cn('rounded-xl p-4', SURFACE, className);
+  // Seven cells on one row have the height a month grid cannot spare, and the week
+  // view is the one that has to hold a shift, its accounts and an offer at once.
+  const cellMinHeight = isWeek ? 'min-h-[8.5rem]' : 'min-h-[4.75rem]';
+
+  /**
+   * The panel header, minus its one variable line.
+   *
+   * A function rather than JSX inline in the happy path because the loading and
+   * error states need it too: dropping the week arrows while a week loads means
+   * a second arrow press during the fetch has nothing to hit, and the header
+   * reappearing afterwards shifts everything below it.
+   */
+  const header = (statusLine: ReactNode) => (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <div className="min-w-0">
+        {!bare && <h2 className="text-sm font-semibold">My schedule</h2>}
+        <div className={cn('text-xs text-zinc-400', !bare && 'mt-0.5')}>{statusLine}</div>
+      </div>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1">
+        {isWeek && (
+          <div className="flex items-center gap-1">
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => setWeekStart(addDays(weekStart, -7))}
+              aria-label={`Previous week, ${formatWeekLabel(addDays(weekStart, -7))}`}
+            >
+              <ChevronLeft aria-hidden />
+            </Button>
+
+            {/* aria-live so a screen reader hears the week change without the
+                arrows stealing focus or announcing themselves twice — the same
+                shape as `MonthPicker`, because it is the same gesture. */}
+            <span className="min-w-[8.5rem] text-center text-sm font-medium tabular-nums" aria-live="polite">
+              {formatWeekLabel(weekStart)}
+            </span>
+
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => setWeekStart(addDays(weekStart, 7))}
+              aria-label={`Next week, ${formatWeekLabel(addDays(weekStart, 7))}`}
+            >
+              <ChevronRight aria-hidden />
+            </Button>
+
+            {/* No forward cap, unlike the salary month picker: a roster is
+                published ahead, and next week is the most useful thing on it. */}
+            {weekStart !== startOfWeek(today) && (
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => setWeekStart(startOfWeek(today))}
+                className="ml-1 text-zinc-400"
+              >
+                This week
+              </Button>
+            )}
+          </div>
+        )}
+
+        {headerAction}
+
+        {onOpenFullSchedule && (
+          <Button size="sm" onClick={onOpenFullSchedule}>
+            <CalendarDays aria-hidden />
+            Full Schedule
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+
   if (loading) {
     return (
-      <div className={cn('rounded-xl p-4', SURFACE, className)}>
-        <Skeleton className="h-4 w-32 rounded" />
-        <div className="mt-3 grid grid-cols-7 gap-1">
-          {Array.from({ length: 35 }).map((_, index) => (
-            <Skeleton key={index} className="h-16 rounded-md" />
+      <div className={panel}>
+        {header(<Skeleton className="h-3.5 w-40 rounded" />)}
+        <div className="grid grid-cols-7 gap-1">
+          {Array.from({ length: isWeek ? 7 : 35 }).map((_, index) => (
+            <Skeleton key={index} className={cn('rounded-md', isWeek ? 'h-32' : 'h-16')} />
           ))}
         </div>
       </div>
@@ -210,9 +377,9 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
 
   if (error) {
     return (
-      <div className={cn('rounded-xl p-4', SURFACE, className)}>
-        <p className="text-sm text-red-400">{error}</p>
-        <Button size="sm" variant="outline" className="mt-3" onClick={() => void refetch()}>
+      <div className={panel}>
+        {header(<span className="text-red-400">{error}</span>)}
+        <Button size="sm" variant="outline" onClick={() => void refetch()}>
           <RotateCcw className="size-3.5" aria-hidden />
           Try again
         </Button>
@@ -226,19 +393,20 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
   const totalShifts = cells.reduce((sum, cell) => sum + cell.shifts.length, 0);
   const totalOffers = cells.reduce((sum, cell) => sum + cell.offers.length, 0);
 
+  const scopeLabel = isWeek ? formatWeekLabel(weekStart) : formatMonthLabel(month);
+
   return (
-    <div className={cn('rounded-xl p-4', SURFACE, className)}>
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold">My schedule</h2>
-        <p className="text-xs text-zinc-400">
+    <div className={panel}>
+      {header(
+        <>
           {totalShifts === 0 ? 'No shifts scheduled' : pluralise(totalShifts, 'shift')} · times in your timezone
-        </p>
-      </div>
+        </>,
+      )}
 
       <div
         className="grid grid-cols-7 gap-1"
         role="grid"
-        aria-label={`Shift calendar for ${formatMonthLabel(month)}`}
+        aria-label={`Shift calendar for ${scopeLabel}`}
       >
         <div role="row" className="contents">
           {WEEKDAY_LABELS.map(label => (
@@ -260,7 +428,8 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
                   key={cell.day}
                   role="gridcell"
                   className={cn(
-                    'min-h-[4.75rem] rounded-md border p-1.5 transition-colors duration-[120ms]',
+                    cellMinHeight,
+                    'rounded-md border p-1.5 transition-colors duration-[120ms]',
                     hasShift ? 'border-white/[0.07] bg-white/[0.03]' : 'border-transparent',
                     isToday && 'border-action-blue/40 bg-action-blue/[0.08]',
                   )}
@@ -271,7 +440,11 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
                       isToday ? 'font-semibold text-action-blue' : 'text-zinc-400',
                     )}
                   >
-                    {cell.date}
+                    {/* A week can straddle a month boundary, where a bare "1"
+                        says nothing about which month it is the 1st of. The
+                        month grid never has that ambiguity, so it keeps the
+                        number alone. */}
+                    {isWeek && cell.date === 1 ? formatDayLabel(cell.day) : cell.date}
                   </span>
 
                   {/* ── Primary: the agent's own shifts ── */}
@@ -423,13 +596,15 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
           {offersLoading && totalOffers === 0
             ? 'Checking for available overtime…'
             : totalOffers === 0
-              ? 'No overtime available this month. Accounts appear here when someone’s leave is approved.'
+              ? `No overtime available ${isWeek ? 'this week' : 'this month'}. Accounts appear here when someone’s leave is approved.`
               : `${pluralise(totalOffers, 'account')} available to cover — select one to claim it.`}
         </p>
       )}
 
       {totalShifts === 0 && !showOvertime && (
-        <p className="mt-3 text-sm text-zinc-400">Nothing scheduled this month.</p>
+        <p className="mt-3 text-sm text-zinc-400">
+          {isWeek ? 'Nothing scheduled this week.' : 'Nothing scheduled this month.'}
+        </p>
       )}
 
       <RequestLeaveDialog
@@ -445,6 +620,20 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
       />
     </div>
   );
+}
+
+/**
+ * `'15 – 21 Sep'`, or `'29 Sep – 5 Oct'` when the week straddles a month.
+ *
+ * The year is left off: the arrows move a week at a time from today, so the one
+ * thing nobody is ever unsure of is which year they are in — and the label has to
+ * sit between two arrows in a panel header.
+ */
+function formatWeekLabel(weekStart: string): string {
+  const end = addDays(weekStart, 6);
+  return monthOfDay(weekStart) === monthOfDay(end)
+    ? `${Number(weekStart.slice(8, 10))} – ${formatDayLabel(end)}`
+    : `${formatDayLabel(weekStart)} – ${formatDayLabel(end)}`;
 }
 
 // ─── Leave status on a shift ─────────────────────────────────────────
