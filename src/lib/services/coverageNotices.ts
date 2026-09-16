@@ -37,7 +37,8 @@
 import { adminDb } from '../firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { notifications } from '../notificationContent';
-import { formatDayLabelWithWeekday, type SalaryDayKey } from '../salary/salaryDate';
+import { formatDayLabelWithWeekday, toDayKey, type SalaryDayKey } from '../salary/salaryDate';
+import { resolveAccountNames } from './creatorAccountService';
 import { formatNameList, notifyUsers } from './caNotifications';
 
 const NOTICES = 'ca-coverage-notices';
@@ -105,6 +106,53 @@ export async function queueCoverageNotice(params: {
       );
   } catch (err) {
     console.error('[coverageNotices] failed to queue', params.kind, err);
+  }
+}
+
+/**
+ * Queue the "Overtime Assigned" notice for accounts marked overtime **on a
+ * shift**, in Shift Management.
+ *
+ * The other door to the same fact. `POST /api/ca-coverage/assign` queues this
+ * notice when an admin assigns from the Coverage board; an admin who instead
+ * marks accounts Overtime on the shift itself was assigning overtime just the
+ * same, and the agent was never told — they found out by looking at their
+ * calendar, if they looked.
+ *
+ * It goes through the *same* coalescing queue rather than sending inline, which
+ * matters more here than on the board: one save can mark several accounts at
+ * once, and an admin correcting a roster may save the same shift twice in a
+ * minute. `(kind, agent, day)` absorbs all of it into one message.
+ *
+ * **Pass only the accounts that are newly overtime.** The caller diffs against
+ * what the shift already had, because re-sending on an unrelated edit (moving
+ * the shift by an hour) is how a useful notification becomes one people mute.
+ *
+ * Never throws. The shift is already written and the admin must not be told the
+ * save failed because a message could not be queued.
+ */
+export async function queueOvertimeAssignedForShift(params: {
+  userId: string;
+  /** Any instant inside the day the overtime falls on — bucketed to the salary day. */
+  occurrenceMs: number;
+  /** The accounts that became overtime in this write. Empty is a no-op. */
+  addedCreatorIds: string[];
+}): Promise<void> {
+  if (params.addedCreatorIds.length === 0) return;
+
+  try {
+    const names = await resolveAccountNames(params.addedCreatorIds);
+    await queueCoverageNotice({
+      kind: 'assigned',
+      userId: params.userId,
+      day: toDayKey(params.occurrenceMs),
+      // `resolveAccountNames` falls back to the id, so a deleted account still
+      // produces a message. Better a message naming something odd than silence
+      // about work somebody is expected to do.
+      creatorNames: params.addedCreatorIds.map(id => names.get(id) ?? id),
+    });
+  } catch (err) {
+    console.error('[coverageNotices] failed to queue shift overtime', err);
   }
 }
 

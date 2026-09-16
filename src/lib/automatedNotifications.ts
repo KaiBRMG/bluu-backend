@@ -218,10 +218,12 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     category: 'Coverage',
     event: 'Overtime assigned',
     trigger:
-      'An admin assigns released accounts to an agent on the Coverage board. Coalesced, not per account: assignments queue into ca-coverage-notices and one notification naming every creator is sent once the queue has been quiet for 3 minutes, flushed by the 5-minute cron. Assigning four accounts to one agent therefore sends one message, not four.',
+      'Overtime is assigned to an agent, by either route: an admin assigns released accounts on the Coverage board, or an admin marks accounts as Overtime on a shift in Shift Management. The second sends only for accounts that were not already overtime on that shift, so re-saving a shift does not re-announce it; a shift reassigned to a different agent announces all of them to the new agent. Coalesced, not per account: assignments queue into ca-coverage-notices and one notification naming every creator is sent once the queue has been quiet for 3 minutes, flushed by the 5-minute cron. Assigning four accounts to one agent therefore sends one message, not four — and a board assignment and a shift edit on the same day merge into the same message. A recurring shift is announced by its first occurrence date.',
     recipients: 'The agent the cover was assigned to',
     sources: [
       'src/app/api/ca-coverage/assign/route.ts',
+      'src/app/api/shifts/route.ts',
+      'src/app/api/shifts/[shiftId]/route.ts',
       'src/app/api/cron/ca-notifications/route.ts',
       'src/lib/services/coverageNotices.ts',
     ],

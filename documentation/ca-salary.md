@@ -273,7 +273,7 @@ Three constraints on the field:
 - **It is written only alongside `creatorIds`, never on its own.** The two are one fact — which accounts, and which of them pay — and letting them drift is how a ghost id survives.
 - **It is empty on an overtime shift created from the coverage board.** Those carry `isOvertime` instead, and their accounts pay either way — the two routes agree by construction rather than by the admin remembering which one they used.
 
-**Marked on both schedules.** An overtime account renders with an orange ring on its avatar — on the admin grid ([`ShiftCard`](../src/components/admin/shift-management/ShiftCard.tsx)) and on the agent's own calendar ([`ShiftCalendar`](../src/components/shifts/ShiftCalendar.tsx)) — beside a count (`+2 OT` / `2 overtime`) that says what the ring means. The ring alone would be colour encoding nothing, which DESIGN.md §2 forbids; the count is also the figure a reader is actually after, since it is the *difference* between the faces they can see and the rate the shift is on. `CreatorChipList` orders paid accounts first so its `max` truncates the overtime ones rather than the ones that set the rate.
+**Marked on both schedules.** An overtime account renders with an orange ring on its avatar — on the admin grid ([`ShiftCard`](../src/components/admin/shift-management/ShiftCard.tsx)) and on the agent's own calendar ([`ShiftCalendar`](../src/components/shifts/ShiftCalendar.tsx)) — beside a count (`+2 OT` / `2 overtime`) that says what the ring means. **On the calendar that count is a label, not a hover target**, and must stay one: a day cell is ~90px with the faces directly above it, so a hover card opens on top of the week and hides what the agent came to read. The only thing worth hovering in that cell is an avatar, and the only question a hover is asked there is *which account is that*. The explanation lives in the screen-reader text and, in full, on the salary breakdown, where there is room for it. The ring alone would be colour encoding nothing, which DESIGN.md §2 forbids; the count is also the figure a reader is actually after, since it is the *difference* between the faces they can see and the rate the shift is on. `CreatorChipList` orders paid accounts first so its `max` truncates the overtime ones rather than the ones that set the rate.
 
 ### One surface: the calendar absorbed three pages
 
@@ -480,18 +480,26 @@ Three calls worth not re-litigating:
 |---|---|---|
 | Leave requested | One named approver | — |
 | Approved leave withdrawn | One named approver | Only for leave that was **approved** — a pending request nobody acted on changes nothing |
-| Overtime assigned | The assignee | **Coalesced** per agent per day |
+| Overtime assigned | The assignee | **Coalesced** per agent per day · fires from **both** assignment routes |
 | Overtime cancelled | Each agent who was covering | **Coalesced** per agent per day |
 | Sales imported | Every chat agent | Only a real import that wrote rows |
 | Payday in 3 days | Every chat agent | Once per month, latched |
 | Salary finalised | That agent | — (reopening notifies nobody) |
 | Commission tier reached | That agent | Once per band per month, and only upwards |
 
-Four decisions inside that table are load-bearing.
+Five decisions inside that table are load-bearing.
 
 **The leave alerts name one uid.** `CA_LEAVE_ALERT_RECIPIENT_UID` in [`caNotifications.ts`](../src/lib/services/caNotifications.ts), one definition, the same carve-out from "never hardcode a uid" as the OF Manager diagnostics. Leave approval is one person's queue; every admin hearing about every request is noise.
 
 **Coverage notifications are coalesced, and the delay lives in a cron.** One absence releases every creator the agent was covering, and an admin assigns them one at a time — so an assignment **queues** into `ca-coverage-notices` (one doc per `kind`+agent+day, names merged with `arrayUnion`) and `/api/cron/ca-notifications` sends it once the queue has been quiet for 3 minutes, then deletes it. Assigning four accounts to one agent produces one message naming four creators. There is no "sent" flag: a notice either exists (owed) or does not (delivered). The delay cannot sit inside the request — a serverless function is not going to still be there in three minutes, and a message that never arrives is worse than one eight minutes late.
+
+**Both doors to overtime send it, not just the board.** Assigning released accounts on the Coverage board queues the notice, and so does an admin marking accounts **Overtime** on a shift in Shift Management — `queueOvertimeAssignedForShift` in the same file, called by `POST /api/shifts` and `PUT /api/shifts/[shiftId]` after the write and non-fatally. For a long time only the first did, so an agent given overtime by a roster edit was never told and found out by looking at their calendar, if they looked. Three things make the second route safe to add:
+
+- **It sends only what is *newly* overtime**, diffed against the marks the shift already carried. Without that, moving a shift by an hour re-announces cover the agent was told about last week, which is how a notification becomes one people mute.
+- **A shift reassigned to a different agent announces all of them.** The diff is against the *document*, and the previous holder's marks say nothing about what the new person knows.
+- **It shares the queue**, so a board assignment and a roster edit landing on the same agent and day merge into one message rather than racing to send two.
+
+Its one honest limitation: a **recurring** shift is announced by its first occurrence's date, because the copy names a single date. That understates a standing arrangement rather than misstating it, and the message already sends the agent to their calendar. There is deliberately **no** counterpart when an admin *un*-marks an account — `overtimeCancelled` states that the absent agent withdrew their leave, which would be a lie here, and inventing copy is a decision rather than a fix (rule 5).
 
 **Reopening a month is silent on purpose.** Finalising says "your salary is on the way", which is the thing the agent has been waiting to hear. Reopening is an admin correcting something mid-flight, and telling an agent their locked month has come unlocked — before anyone knows what it will settle at — invites a question nobody can answer yet. The finalise that follows is the message.
 

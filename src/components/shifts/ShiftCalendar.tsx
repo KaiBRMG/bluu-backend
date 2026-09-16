@@ -586,42 +586,32 @@ export function ShiftCalendar({
                           />
                         </div>
 
+                        {/* Label only — deliberately not a tooltip trigger.
+                            A day cell is ~90px and the faces sit right above
+                            this line, so a hover card here opens on top of the
+                            week and hides the thing the agent came to read. The
+                            only hover target in this cell is a creator avatar,
+                            and it answers the only question a hover is asked
+                            here: which account is that. The meaning of the
+                            orange ring stays available to a screen reader, and
+                            in full on the salary breakdown, where there is room
+                            to explain it properly. */}
                         {paysWage && overtimeIds.length > 0 && !fullOvertime && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span
-                                tabIndex={0}
-                                className="mt-0.5 flex cursor-help items-center gap-0.5 rounded-sm text-[10px] text-orange-400 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                              >
-                                <Plus className="size-2.5 shrink-0" aria-hidden />
-                                {overtimeIds.length} overtime
-                                <span className="sr-only">
-                                  {IN_SHIFT_OVERTIME_EXPLANATION} Paid on {paidCount} account
-                                  {paidCount === 1 ? '' : 's'}.
-                                </span>
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent className="max-w-56 text-center leading-relaxed">
-                              {IN_SHIFT_OVERTIME_EXPLANATION}
-                            </TooltipContent>
-                          </Tooltip>
+                          <span className="mt-0.5 flex items-center gap-0.5 text-[10px] text-orange-400">
+                            <Plus className="size-2.5 shrink-0" aria-hidden />
+                            {overtimeIds.length} overtime
+                            <span className="sr-only">
+                              {IN_SHIFT_OVERTIME_EXPLANATION} Paid on {paidCount} account
+                              {paidCount === 1 ? '' : 's'}.
+                            </span>
+                          </span>
                         )}
 
                         {paysWage && fullOvertime && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span
-                                tabIndex={0}
-                                className="mt-0.5 flex cursor-help items-center gap-0.5 rounded-sm text-[10px] text-orange-400 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                              >
-                                Overtime shift
-                                <span className="sr-only">{FULL_OVERTIME_EXPLANATION}</span>
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent className="max-w-56 text-center leading-relaxed">
-                              {FULL_OVERTIME_EXPLANATION}
-                            </TooltipContent>
-                          </Tooltip>
+                          <span className="mt-0.5 flex items-center gap-0.5 text-[10px] text-orange-400">
+                            Overtime shift
+                            <span className="sr-only">{FULL_OVERTIME_EXPLANATION}</span>
+                          </span>
                         )}
 
                         {leave && (

@@ -14,6 +14,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { normaliseAccountIds, intersectOvertimeIds } from '@/lib/services/creatorAccountService';
 import type { ShiftDocument } from '@/types/firestore';
+import { queueOvertimeAssignedForShift } from '@/lib/services/coverageNotices';
 
 // ─── PUT /api/shifts/[shiftId] ───────────────────────────────────────
 
@@ -152,6 +153,25 @@ export const PUT = withAuth(async (
         ...('recurrence' in body        && { recurrence: body.recurrence }),
         ...(assignedCreatorIds !== undefined && { creatorIds: assignedCreatorIds }),
         ...(assignedOvertimeIds !== undefined && { overtimeCreatorIds: assignedOvertimeIds }),
+      });
+    }
+
+    // ── Tell the agent about overtime they did not have before ──
+    //
+    // Only the *newly* overtime accounts, diffed against what the shift already
+    // carried: an admin moving a shift by an hour must not re-announce cover the
+    // agent was told about last week. Reassigning the shift to a different agent
+    // makes every overtime account new *to them*, which the diff would otherwise
+    // miss — the previous holder's marks say nothing about what this person knows.
+    //
+    // After the write and non-fatal, for the same reason as the create path.
+    if (assignedOvertimeIds !== undefined) {
+      const reassigned = Boolean(userId) && userId !== existing.userId;
+      const alreadyMarked = new Set(reassigned ? [] : existing.overtimeCreatorIds ?? []);
+      await queueOvertimeAssignedForShift({
+        userId: userId ?? existing.userId,
+        occurrenceMs: startMs ?? existing.startTime.toMillis(),
+        addedCreatorIds: assignedOvertimeIds.filter(id => !alreadyMarked.has(id)),
       });
     }
 

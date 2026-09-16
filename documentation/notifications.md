@@ -82,7 +82,7 @@ Every row below is **automated** — fired by a handler on an event, never sent 
 | Leave denied | `notifications.leaveDenied(leaveLabel, dateStr)` | the requesting user | `shifts/leave/[leaveId]/approve` |
 | Leave requested | `notifications.leaveRequested(requesterName, leaveLabel, dateStr, reason?)` | **one named approver** — `CA_LEAVE_ALERT_RECIPIENT_UID` | `shifts/leave` (POST) |
 | Approved leave withdrawn | `notifications.leaveWithdrawn(requesterName, leaveLabel, dateStr, revertedLabel)` | **one named approver** — `CA_LEAVE_ALERT_RECIPIENT_UID` | `shifts/leave/[leaveId]` (DELETE) |
-| Overtime assigned | `notifications.overtimeAssigned(creatorList, dateStr)` | the assigned agent — **coalesced**, one message per agent per day | `ca-coverage/assign` (POST) queues · `cron/ca-notifications` sends |
+| Overtime assigned | `notifications.overtimeAssigned(creatorList, dateStr)` | the assigned agent — **coalesced**, one message per agent per day | `ca-coverage/assign` (POST) **and** `shifts` (POST) / `shifts/[shiftId]` (PUT) queue · `cron/ca-notifications` sends |
 | Overtime cancelled | `notifications.overtimeCancelled(creatorList, dateStr)` | each agent who was covering — **coalesced** the same way | `shifts/leave/[leaveId]` (DELETE) queues · `cron/ca-notifications` sends |
 | Sales imported | `notifications.salesImported(monthLabel)` | every chat agent (`groups: CA`, not archived) | `ca-salary/import` (POST, via `after()`) |
 | Payday in 3 days | `notifications.paydayApproaching(monthLabel)` | every chat agent | `cron/ca-notifications` |

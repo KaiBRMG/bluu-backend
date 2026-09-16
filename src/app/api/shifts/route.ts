@@ -11,6 +11,7 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 // the assignment would silently stop reaching the client.
 import { serialiseShift } from '@/lib/utils/shiftSerialise';
 import { normaliseAccountIds, intersectOvertimeIds } from '@/lib/services/creatorAccountService';
+import { queueOvertimeAssignedForShift } from '@/lib/services/coverageNotices';
 
 // ─── GET /api/shifts ─────────────────────────────────────────────────
 // ?userId=uid&start=ISO&end=ISO
@@ -100,6 +101,10 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       );
     }
 
+    // Constrained to the assignment rather than trusted: this set is
+    // *subtracted* from the wage tier, so a stray id would underpay.
+    const overtimeIds = intersectOvertimeIds(assigned.accountIds, overtimeCreatorIds);
+
     const shiftId = await createShift({
       userId,
       startTime: startMs,
@@ -110,9 +115,21 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       createdBy: token.uid,
       recurrence: recurrence ?? null,
       creatorIds: assigned.accountIds,
-      // Constrained to the assignment rather than trusted: this set is
-      // *subtracted* from the wage tier, so a stray id would underpay.
-      overtimeCreatorIds: intersectOvertimeIds(assigned.accountIds, overtimeCreatorIds),
+      overtimeCreatorIds: overtimeIds,
+    });
+
+    // Assigning overtime here is the same act as assigning it from the Coverage
+    // board, so it sends the same notice. After the write and non-fatal: the
+    // shift exists and an admin must not be told the save failed because a
+    // message could not be queued.
+    //
+    // A recurring series is announced by its **first** occurrence's date. That
+    // understates a standing arrangement rather than misstating it, and the
+    // copy already sends the agent to their calendar for the full picture.
+    await queueOvertimeAssignedForShift({
+      userId,
+      occurrenceMs: startMs,
+      addedCreatorIds: overtimeIds,
     });
 
     return NextResponse.json({ shiftId });
