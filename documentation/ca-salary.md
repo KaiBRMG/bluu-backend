@@ -110,6 +110,25 @@ When an agent works more than one shift in a day (a regular shift plus overtime)
 - `per-shift` **(default)** — a 3-account regular shift pays $3.50/h; a 2-account overtime shift pays $2.50/h.
 - `per-day` — all accounts count toward one rate applied to every hour. Pays materially more.
 
+### A multi-shift day's `accountCount` and `hourlyRate` are roll-ups, not rates
+
+Under `per-shift`, a day with a regular shift *and* an overtime shift has **no single account count and no single rate**. The engine still has to put one number in each column, and both are summaries:
+
+- **`accountCount` is the union** of the paying shifts' `creatorIds` — a `Set`, so a 4-account regular shift plus a 3-account overtime shift sharing two creators reads **5**, not 7.
+- **`hourlyRate` is the hours-weighted blend** — `total wage ÷ total payable hours` whenever more than one shift pays. $3.50 and $4.50 across near-equal hours reads **$3.99**, a rate nobody was ever paid.
+
+`wage` is unaffected: it comes from `wageFromShifts`, the sum of each shift priced at its own rate, **not** `hours × hourlyRate`. (The one exception is a day where `hours`, `hourlyRate` or `accountCount` is overridden — there the engine deliberately recomputes `hours × hourlyRate`, because an admin who edits hours should not have to restate the wage too.)
+
+This is correct and it reads as an error, which is exactly how it was reported: *"5 accounts at $3.99/h"* on a day the agent worked 3 accounts of overtime and 4 of their own. **The fix is disclosure, not a different number** — a roll-up is still the right summary, and changing either column would break the reconciliation against `wage`.
+
+[`SalaryDayTable`](../src/components/salary/SalaryDayTable.tsx) therefore **expands**: a chevron on the date opens one sub-row per shift (`SalaryShiftBreakdown`, already on the wire and already frozen into `ca-salary-months`), each carrying its own kind, window, creator chips, accounts, rate, hours and pay. Three details are load-bearing:
+
+- **A blended rate is prefixed `~`.** One character, and it says "summary" before anyone multiplies by it. Suppressed on an overridden rate, which is an instruction rather than a blend.
+- **Only days that hide something get a chevron** — more than one shift, an overtime shift, or in-shift cover. A chevron on all thirty rows is noise, and the one-row-per-calendar-date scan is what the table is for.
+- **Gross, net, commission rate and commission are one `colSpan` on a sub-row, not four `—`s.** Commission is earned on the day's sales and genuinely is not attributable to one shift; four em-dashes would claim the shift earned nothing.
+
+**In-shift cover (`paysWage: false`) gets a sub-row too**, reading `No extra pay`. It is otherwise invisible — the agent covered accounts and saw no change — and the row is where the §6 rule gets explained at the point someone asks.
+
 ---
 
 ## 3. Overrides
@@ -186,6 +205,28 @@ An offer is **one creator on one date**, not one shift, so two agents can split 
 `POST /api/shifts/leave/[leaveId]/approve` calls [`releaseOccurrenceForCoverage`](../src/lib/services/leaveCoverage.ts), which tombstones the occurrence and posts one offer per assigned creator. The **release** itself still notifies nobody — the accounts appear on every agent's calendar and the board is the signal; it is the *assignment* that reaches a person (§11). Withdrawing approved leave reverses all of it — see §11.
 
 It runs **after the commit and is non-fatal**: the leave was approved and the agent has been told, so a failure to release must not 500 and make an admin approve twice. The response carries the outcome, and the approvals UI surfaces `noAssignments` — a shift with no creators assigned releases nothing, which is not an error but *is* something an admin needs to know.
+
+### A leave request is a pinned tuple, and the roster moves under it
+
+A request records `(shiftId, occurrenceStart)` at the moment it is submitted. **Every admin edit path re-homes that occurrence onto a different document** while the request waits in the queue:
+
+| Edit in `PUT /api/shifts/[shiftId]` | What happens to the occurrence |
+|---|---|
+| `saveMode: 'single'` | A **new override doc** holds it, carrying the new `creatorIds`; the root keeps the old ones |
+| `saveMode: 'future'` | The series is truncated and a **new root** is created, with a new id |
+| delete + recreate | A new document id entirely |
+
+The release used to read `shifts/{leave.shiftId}` directly, which after any of those reads the **stale** document. That produced both halves of a real failure: accounts added in the edit never reached the overtime board, and the tombstone landed on a series that no longer expanded that date, so the shift stayed on the calendar after the leave was approved.
+
+**Three things hold the line now, and they are one mechanism, not three patches:**
+
+1. **`resolveLiveOccurrence`** ([leaveCoverage.ts](../src/lib/services/leaveCoverage.ts)) expands the roster around the pinned instant and matches, rather than trusting the id. What gets released and tombstoned is whatever the roster says that occurrence is *now*.
+2. **[`matchLeaveToOccurrences`](../src/lib/utils/leaveMatch.ts)** is that match, and it is **shared** — the release, the admin week view, and the agent calendar all use it, so what an admin sees badged and what approval releases cannot disagree. It degrades in tiers (exact tuple → same series, same day → the day's only shift) and **refuses to guess** when a day holds more than one candidate: badging or releasing the wrong shift is worse than showing nothing, because it pays the wrong person.
+3. **A tombstone beats an override** in [`expandShiftsForWindow`](../src/lib/utils/recurrence.ts). Edit-then-release leaves *both* documents on the same `(seriesId, date)`; overrides used to be included unconditionally, which kept a released shift on the roster.
+
+**The release records where it landed.** `releasedShiftId` / `releasedOccurrenceStart` are written onto the leave document by the approve route, and `revertOccurrenceCoverage` restores **that** document. Restoring the pinned one instead would un-delete a shift nobody released and leave the released one tombstoned. Both fields are index-exempt (rule 9); requests approved before this shipped simply fall back to the pinned pair.
+
+> **Do not "fix" this by storing a creator → agent map.** It was considered and rejected: a map keyed by agent answers *which accounts does this agent work*, while release needs *which accounts was this agent covering on this occurrence*. Those differ whenever a roster is not identical day to day, and the difference is money — a released account the absent agent was not covering that day still creates an offer somebody gets paid to cover. The assignment is already on the shift; derive it from there on read (rule 9f's posture, applied to rostering).
 
 ### The two kinds of overtime pay differently
 
@@ -269,7 +310,7 @@ Two rules, and both are load-bearing:
 
 `ca-coverage-offers` is closed too even though the board is meant to be seen by every agent: the API does something a rule cannot, which is strip the other claimants' identities for non-admin readers.
 
-New fields on `shifts`: `creatorIds`, `isOvertime`, `coverageOfferId`, `paysWage`. Nothing queries them, so all four are index-exempt (rule 9).
+New fields on `shifts`: `creatorIds`, `isOvertime`, `coverageOfferId`, `paysWage`. Nothing queries them, so all four are index-exempt (rule 9). `leave_requests` gained `releasedShiftId` / `releasedOccurrenceStart` (§6) on the same terms.
 
 ---
 
@@ -346,7 +387,8 @@ Three calls worth not re-litigating:
 | [`salesImport.ts`](../src/lib/salary/salesImport.ts) | Rows → sales + skip report |
 | [`caSalaryService.ts`](../src/lib/services/caSalaryService.ts) | Firestore + the assembler |
 | [`caCoverageService.ts`](../src/lib/services/caCoverageService.ts) | Offers, claims, assignment |
-| [`leaveCoverage.ts`](../src/lib/services/leaveCoverage.ts) | Leave approval → release, and withdrawal → revert |
+| [`leaveCoverage.ts`](../src/lib/services/leaveCoverage.ts) | Leave approval → release, and withdrawal → revert. `resolveLiveOccurrence` re-resolves a pinned request against the live roster first — see §6 |
+| [`leaveMatch.ts`](../src/lib/utils/leaveMatch.ts) | The tiered leave ↔ occurrence matcher, shared by the release, the admin week view and the agent calendar |
 | [`caNotifications.ts`](../src/lib/services/caNotifications.ts) | Recipients, delivery, the tier gate and the payday latch |
 | [`coverageNotices.ts`](../src/lib/services/coverageNotices.ts) | The coalescing queue and the withdrawal record |
 | [`AdminOverview.tsx`](../src/components/ca-admin/AdminOverview.tsx) | The Overview tab — the matrix, the leaderboard and the attention band |

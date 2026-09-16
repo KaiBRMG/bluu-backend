@@ -14,7 +14,11 @@ import { adminDb } from '../firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { createOffersForOccurrence } from './caCoverageService';
 import { resolveAccountNames } from './creatorAccountService';
-import { createOccurrenceOverride } from './shiftService';
+import { createOccurrenceOverride, getShiftsByUserAndRange } from './shiftService';
+import { expandShiftsForWindow, type ExpandedShift } from '../utils/recurrence';
+import { serialiseShift } from '../utils/shiftSerialise';
+import { matchLeaveToOccurrences, occurrenceKey } from '../utils/leaveMatch';
+import { toLocalDateStr } from '../utils/timezone';
 import { toDayKey } from '../salary/salaryDate';
 import type { CaCoverageOfferDocument, ShiftDocument } from '@/types/firestore';
 
@@ -26,6 +30,103 @@ export interface CoverageReleaseResult {
   noAssignments: boolean;
   /** True when the occurrence was tombstoned (or already was). */
   occurrenceRemoved: boolean;
+  /**
+   * The occurrence this release actually acted on, resolved against the live
+   * roster rather than the pair the request pinned. Persisted onto the leave
+   * document by the approve route so a later withdrawal unwinds the same
+   * document this released — see `revertOccurrenceCoverage`.
+   *
+   * `null` when nothing on the roster answers to the request any more.
+   */
+  resolved: { shiftId: string; occurrenceStart: number } | null;
+  /**
+   * True when the roster moved the occurrence after the request was submitted
+   * (an admin edited the shift while it sat in the queue). Not an error — the
+   * release followed it — but the thing an admin should be told, because the
+   * accounts that went to the board are not the ones they saw on the request.
+   */
+  rehomed: boolean;
+}
+
+// ─── Resolving what a leave request actually points at ───────────────
+
+/**
+ * Find the occurrence a leave request refers to **as the roster stands now**.
+ *
+ * A request pins `(shiftId, occurrenceStart)` when it is submitted, and every
+ * admin edit path in `/api/shifts/[shiftId]` re-homes that occurrence onto a
+ * different document while the request waits in the queue:
+ *
+ * - `saveMode: 'single'` writes a **new override doc** holding the new
+ *   `creatorIds`; the root the request named keeps the old ones.
+ * - `saveMode: 'future'` truncates the series and creates a **new root** with a
+ *   new id; the old root no longer expands that date at all.
+ *
+ * Reading `shifts/{leave.shiftId}` directly — which this used to do — therefore
+ * released the **stale** assignment and tombstoned a document that was no longer
+ * on the roster. Both halves of the reported failure: the accounts added in the
+ * edit never reached the overtime board, and the shift stayed on the calendar
+ * after the leave was approved.
+ *
+ * So the release reads the roster the way the calendar does — expand, then match
+ * — instead of trusting the pinned id. `matchLeaveToOccurrences` is the same
+ * tiered matcher the week view and the agent calendar use, so what an admin sees
+ * badged and what approval releases cannot disagree.
+ *
+ * Returns `null` when nothing answers to the request: the shift was deleted
+ * outright, or the day is ambiguous enough that the matcher refuses to guess.
+ * A null is reported, never papered over — releasing the wrong accounts pays the
+ * wrong person.
+ */
+export async function resolveLiveOccurrence(params: {
+  userId: string;
+  shiftId: string;
+  occurrenceStart: number;
+}): Promise<ExpandedShift | null> {
+  const { userId, shiftId, occurrenceStart } = params;
+
+  // ±36h around the pinned instant. Wide enough to catch an occurrence whose
+  // time an admin moved within the day (and a midnight-spanning shift whose UTC
+  // start lands on the neighbouring date), narrow enough that this stays one
+  // user's shifts for one day rather than a roster scan.
+  const WINDOW_MS = 36 * 60 * 60 * 1000;
+  const windowStart = occurrenceStart - WINDOW_MS;
+  const windowEnd = occurrenceStart + WINDOW_MS;
+
+  const raw = await getShiftsByUserAndRange(userId, windowStart, windowEnd);
+  const expanded = expandShiftsForWindow(
+    raw.map(shift => ({
+      ...serialiseShift(shift),
+      timeWorkedSeconds: null,
+      attendanceStatus: null,
+    })),
+    windowStart,
+    windowEnd,
+  );
+
+  const matched = matchLeaveToOccurrences([{ shiftId, occurrenceStart, userId }], expanded);
+  if (matched.size === 0) return null;
+
+  return expanded.find(o => matched.has(occurrenceKey(o))) ?? null;
+}
+
+/**
+ * UTC midnight of the occurrence's **local** date — the shape `overrideDate` is
+ * stored in, and the shape `expandShiftsForWindow` compares against.
+ *
+ * The expander reads a tombstone's date as `toLocalDateStr(overrideDate, tz)`,
+ * so a tombstone keyed to the UTC date of a 23:00 shift in a UTC- timezone would
+ * name the following day and suppress nothing. Taking the date from the
+ * expander's own `overrideDate` where it has one keeps the two in step.
+ */
+function overrideDateFor(occurrence: ExpandedShift): number {
+  if (occurrence.overrideDate) {
+    const ms = new Date(occurrence.overrideDate).getTime();
+    if (Number.isFinite(ms)) return ms;
+  }
+  const local = toLocalDateStr(occurrence.occurrenceStart, occurrence.userTimezone || 'UTC');
+  const [y, m, d] = local.split('-').map(Number);
+  return Date.UTC(y, m - 1, d);
 }
 
 /**
@@ -46,41 +147,48 @@ export async function releaseOccurrenceForCoverage(params: {
 }): Promise<CoverageReleaseResult> {
   const { shiftId, occurrenceStart, userId, leaveId, actorUid } = params;
 
-  const shiftSnap = await adminDb.collection('shifts').doc(shiftId).get();
-  if (!shiftSnap.exists) {
-    return { offersCreated: 0, creatorNames: [], noAssignments: true, occurrenceRemoved: false };
+  // ── Resolve what the request points at *now* ──
+  // Not `shifts/{shiftId}`: the pinned id goes stale the moment an admin edits
+  // the shift while the request is queued. See `resolveLiveOccurrence`.
+  const occurrence = await resolveLiveOccurrence({ userId, shiftId, occurrenceStart });
+
+  if (!occurrence) {
+    // Nothing on the roster answers to this request any more — the shift was
+    // deleted outright, or the day became ambiguous. Reported, not guessed at.
+    return {
+      offersCreated: 0,
+      creatorNames: [],
+      noAssignments: true,
+      occurrenceRemoved: false,
+      resolved: null,
+      rehomed: true,
+    };
   }
 
-  const shift = shiftSnap.data() as ShiftDocument;
-  const creatorIds = shift.creatorIds ?? [];
-
-  // The occurrence's real end. A recurring root's stored start/end describe the
-  // first occurrence, so the length is taken from it and applied to the date
-  // actually being released.
-  const durationMs = Math.max(0, shift.endTime.toMillis() - shift.startTime.toMillis());
-  const occurrenceEnd = occurrenceStart + durationMs;
+  const liveShiftId = occurrence.shiftId;
+  const liveStart = occurrence.occurrenceStart;
+  const occurrenceEnd = occurrence.occurrenceEnd;
+  const creatorIds = occurrence.creatorIds ?? [];
+  const rehomed = liveShiftId !== shiftId || liveStart !== occurrenceStart;
+  const resolved = { shiftId: liveShiftId, occurrenceStart: liveStart };
 
   // ── Remove the occurrence from the roster ──
-  // A recurring series gets a tombstone for that date only; a one-off shift is
-  // soft-deleted so the document (and anything referencing it) survives.
+  // A recurring series gets a tombstone for that date only; a one-off shift (or
+  // an override document, which is what a single-occurrence edit produces) is
+  // soft-deleted so the document — and anything referencing it — survives.
   let occurrenceRemoved = false;
   try {
-    if (shift.isRecurring && !shift.seriesId) {
-      const occurrenceDateUtcMidnight = Date.UTC(
-        new Date(occurrenceStart).getUTCFullYear(),
-        new Date(occurrenceStart).getUTCMonth(),
-        new Date(occurrenceStart).getUTCDate(),
-      );
+    if (occurrence.isRecurring && !occurrence.seriesId) {
       await createOccurrenceOverride(
-        shiftId,
-        occurrenceDateUtcMidnight,
+        liveShiftId,
+        overrideDateFor(occurrence),
         {
           userId,
-          startTime: occurrenceStart,
+          startTime: liveStart,
           endTime: occurrenceEnd,
-          wallClockStart: shift.wallClockStart,
-          wallClockEnd: shift.wallClockEnd,
-          userTimezone: shift.userTimezone,
+          wallClockStart: occurrence.wallClockStart,
+          wallClockEnd: occurrence.wallClockEnd,
+          userTimezone: occurrence.userTimezone,
           createdBy: actorUid,
           recurrence: null,
         },
@@ -89,7 +197,7 @@ export async function releaseOccurrenceForCoverage(params: {
     } else {
       await adminDb
         .collection('shifts')
-        .doc(shiftId)
+        .doc(liveShiftId)
         .update({ isDeleted: true, updatedAt: FieldValue.serverTimestamp() });
     }
     occurrenceRemoved = true;
@@ -98,7 +206,7 @@ export async function releaseOccurrenceForCoverage(params: {
   }
 
   if (creatorIds.length === 0) {
-    return { offersCreated: 0, creatorNames: [], noAssignments: true, occurrenceRemoved };
+    return { offersCreated: 0, creatorNames: [], noAssignments: true, occurrenceRemoved, resolved, rehomed };
   }
 
   // ── Resolve account names ──
@@ -112,9 +220,11 @@ export async function releaseOccurrenceForCoverage(params: {
     creatorName: names.get(creatorId) ?? creatorId,
   }));
 
+  // Keyed to the **resolved** occurrence, so the offer ids a withdrawal has to
+  // find match the document that was actually released.
   const offers = await createOffersForOccurrence({
-    shiftId,
-    occurrenceStart,
+    shiftId: liveShiftId,
+    occurrenceStart: liveStart,
     occurrenceEnd,
     userId,
     creators,
@@ -131,6 +241,8 @@ export async function releaseOccurrenceForCoverage(params: {
     creatorNames: creators.map(c => c.creatorName),
     noAssignments: false,
     occurrenceRemoved,
+    resolved,
+    rehomed,
   };
 }
 
@@ -182,9 +294,23 @@ export async function revertOccurrenceCoverage(params: {
   shiftId: string;
   occurrenceStart: number;
   leaveId: string;
+  /**
+   * What the release actually acted on, read back off the leave document.
+   *
+   * The release resolves the pinned pair against the live roster and may land on
+   * a different document (see `resolveLiveOccurrence`). Restoring the *pinned*
+   * one would un-delete a shift nobody released and leave the released one
+   * tombstoned — the agent back on the roster twice, or not at all. Falls back
+   * to the pinned pair for leave approved before this was recorded.
+   */
+  releasedShiftId?: string | null;
+  releasedOccurrenceStart?: number | null;
 }): Promise<CoverageRevertResult> {
   const { shiftId, occurrenceStart, leaveId } = params;
-  const day = toDayKey(occurrenceStart);
+  const releasedShiftId = params.releasedShiftId ?? shiftId;
+  const releasedStart = params.releasedOccurrenceStart ?? occurrenceStart;
+  // The board is keyed by the day the release wrote, which is the resolved one.
+  const day = toDayKey(releasedStart);
 
   const result: CoverageRevertResult = {
     offersRemoved: 0,
@@ -202,7 +328,10 @@ export async function revertOccurrenceCoverage(params: {
     const snap = await adminDb.collection('ca-coverage-offers').where('day', '==', day).get();
     offerDocs = snap.docs.filter(d => {
       const offer = d.data() as CaCoverageOfferDocument;
-      return offer.leaveId === leaveId || (offer.originalShiftId === shiftId && offer.windowStart === occurrenceStart);
+      return (
+        offer.leaveId === leaveId ||
+        (offer.originalShiftId === releasedShiftId && offer.windowStart === releasedStart)
+      );
     });
   } catch (err) {
     console.error('[leaveCoverage] failed to read offers for revert', err);
@@ -244,8 +373,9 @@ export async function revertOccurrenceCoverage(params: {
   result.reverted = [...revertedByUser].map(([userId, creatorNames]) => ({ userId, creatorNames }));
 
   // ── Put the occurrence back ──
+  // Against the document the release acted on, not the one the request pinned.
   try {
-    const shiftSnap = await adminDb.collection('shifts').doc(shiftId).get();
+    const shiftSnap = await adminDb.collection('shifts').doc(releasedShiftId).get();
     if (shiftSnap.exists) {
       const shift = shiftSnap.data() as ShiftDocument;
 
@@ -253,15 +383,27 @@ export async function revertOccurrenceCoverage(params: {
         // The release wrote a tombstone override for that date; removing it is
         // what makes the occurrence expand again. Filtered in memory on
         // `overrideDate` so the query stays the indexed `seriesId` equality.
-        const occurrenceDateUtcMidnight = Date.UTC(
-          new Date(occurrenceStart).getUTCFullYear(),
-          new Date(occurrenceStart).getUTCMonth(),
-          new Date(occurrenceStart).getUTCDate(),
+        //
+        // Matched on the **local** date of the released instant, because that is
+        // what the release wrote (`overrideDateFor`) — a UTC-date match would
+        // miss the tombstone for a late-evening shift in a UTC- timezone and
+        // leave the agent off the roster after withdrawing their leave.
+        const localDate = toLocalDateStr(releasedStart, shift.userTimezone || 'UTC');
+        const [ly, lm, ld] = localDate.split('-').map(Number);
+        const occurrenceDateUtcMidnight = Date.UTC(ly, lm - 1, ld);
+        const legacyDateUtcMidnight = Date.UTC(
+          new Date(releasedStart).getUTCFullYear(),
+          new Date(releasedStart).getUTCMonth(),
+          new Date(releasedStart).getUTCDate(),
         );
-        const overrides = await adminDb.collection('shifts').where('seriesId', '==', shiftId).get();
+        const overrides = await adminDb.collection('shifts').where('seriesId', '==', releasedShiftId).get();
         for (const doc of overrides.docs) {
           const override = doc.data() as ShiftDocument;
-          if (override.isDeleted && override.overrideDate?.toMillis?.() === occurrenceDateUtcMidnight) {
+          const overrideMs = override.overrideDate?.toMillis?.();
+          if (
+            override.isDeleted &&
+            (overrideMs === occurrenceDateUtcMidnight || overrideMs === legacyDateUtcMidnight)
+          ) {
             await doc.ref.delete();
             result.shiftRestored = true;
           }
@@ -269,7 +411,7 @@ export async function revertOccurrenceCoverage(params: {
       } else if (shift.isDeleted) {
         await adminDb
           .collection('shifts')
-          .doc(shiftId)
+          .doc(releasedShiftId)
           .update({ isDeleted: false, updatedAt: FieldValue.serverTimestamp() });
         result.shiftRestored = true;
       } else {

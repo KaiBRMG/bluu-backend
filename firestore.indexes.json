@@ -1128,6 +1128,16 @@
       "indexes": []
     },
     {
+      "collectionGroup": "leave_requests",
+      "fieldPath": "releasedOccurrenceStart",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "leave_requests",
+      "fieldPath": "releasedShiftId",
+      "indexes": []
+    },
+    {
       "collectionGroup": "messages",
       "fieldPath": "attachments",
       "indexes": []
@@ -1413,6 +1423,11 @@
     {
       "collectionGroup": "users",
       "fieldPath": "dismissedAnnouncements",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "lastActiveAt",
       "indexes": []
     },
     {

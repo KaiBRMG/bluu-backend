@@ -117,6 +117,7 @@ Currently exempted (all write-only payload — nothing filters or orders on them
 | `analytics_daily` | `segments`, `sessionBounds`, `hourBuckets`, `sessionIds`, `groupsSnapshot` |
 | `onlyfans-chats` + `messages` | `lastMessageText`, `fan`, `profile`, `text`, `attachments` |
 | `model-submission-sessions`, `model-submission-rate` | `expiresAt` (TTL fields — the TTL policy maintains its own index) |
+| `users` | `lastActiveAt` (presence stamp — the highest-frequency write on the user doc, and nothing queries it; see [user-management.md](user-management.md#last-seen-vs-last-sign-in)) |
 
 **When adding a field, exempt it if nothing queries it** — particularly free text, HTML, arrays of maps, and any timestamp driving a TTL policy.
 

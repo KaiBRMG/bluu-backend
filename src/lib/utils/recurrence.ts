@@ -190,7 +190,9 @@ function* generateCandidateDates(
  *   window are included as-is.
  * - Recurring root shifts (isRecurring: true, seriesId: null) are expanded
  *   into occurrences, skipping dates that have override or tombstone docs.
- * - Override docs (seriesId != null, isDeleted: false) are included as-is.
+ * - Override docs (seriesId != null, isDeleted: false) are included as-is,
+ *   unless a tombstone exists for the same series and date — a deletion always
+ *   takes precedence over an edit.
  * - Tombstone docs (isDeleted: true) are excluded.
  */
 export function expandShiftsForWindow(
@@ -208,12 +210,27 @@ export function expandShiftsForWindow(
 
   // Build sets of overridden/tombstoned dates per series for fast lookup
   // Key: `${seriesId}:${localDateStr in userTimezone}`
+  //
+  // Two sets, not one, because they answer different questions. `suppressedDates`
+  // (tombstones *and* overrides) is what stops the recurring root emitting a
+  // candidate for a date something else already speaks for. `tombstonedDates` is
+  // narrower — only the deletions — and is what gives a tombstone precedence over
+  // an edit on the same date.
+  //
+  // That precedence is load-bearing. An admin edits one occurrence (an override
+  // doc is written), then leave is approved for that same date (a tombstone is
+  // written). Both documents now exist for `${seriesId}:${date}`. Including the
+  // override unconditionally left the shift on the roster after it had been
+  // released for cover — the agent was off, the accounts were on the overtime
+  // board, and the calendar still showed them working.
   const suppressedDates = new Set<string>();
+  const tombstonedDates = new Set<string>();
   for (const t of tombstones) {
     if (t.seriesId && t.overrideDate) {
       const tz = t.userTimezone || 'UTC';
       const localDate = toLocalDateStr(new Date(t.overrideDate).getTime(), tz);
       suppressedDates.add(`${t.seriesId}:${localDate}`);
+      tombstonedDates.add(`${t.seriesId}:${localDate}`);
     }
   }
   for (const o of overrides) {
@@ -224,6 +241,13 @@ export function expandShiftsForWindow(
     }
   }
 
+  /** True when a deletion exists for the same series and date as this override. */
+  const isTombstoned = (o: RawApiShift): boolean => {
+    if (!o.seriesId || !o.overrideDate) return false;
+    const tz = o.userTimezone || 'UTC';
+    return tombstonedDates.has(`${o.seriesId}:${toLocalDateStr(new Date(o.overrideDate).getTime(), tz)}`);
+  };
+
   // Include one-time shifts that overlap the window
   for (const s of oneTime) {
     const startMs = new Date(s.startTime).getTime();
@@ -233,8 +257,10 @@ export function expandShiftsForWindow(
     }
   }
 
-  // Include override docs that overlap the window
+  // Include override docs that overlap the window, unless that date has since
+  // been deleted outright — a tombstone always wins over an edit.
   for (const o of overrides) {
+    if (isTombstoned(o)) continue;
     const startMs = new Date(o.startTime).getTime();
     const endMs   = new Date(o.endTime).getTime();
     if (endMs > windowStartMs && startMs < windowEndMs) {

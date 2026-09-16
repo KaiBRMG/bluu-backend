@@ -1,6 +1,7 @@
 import { AuthProvider } from '@/components/AuthProvider';
 import { NetworkStatusProvider } from '@/contexts/NetworkStatusContext';
 import { UserDataProvider } from '@/hooks/useUserData';
+import PresenceReporter from '@/components/PresenceReporter';
 import OfManagerGuard from './_components/OfManagerGuard';
 
 /**
@@ -20,6 +21,10 @@ export default function OfManagerLayout({ children }: { children: React.ReactNod
     <AuthProvider>
       <NetworkStatusProvider>
         <UserDataProvider>
+          {/* This window being open is the app being open, so it reports
+              presence exactly like the main one. Duplicate pings from a user
+              running both are collapsed server-side. */}
+          <PresenceReporter />
           {/*
             `fixed inset-0` — deliberately, and not `h-screen w-screen`.
             On Windows Electron the scrollbars are classic (space-consuming), so

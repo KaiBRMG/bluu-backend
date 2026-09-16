@@ -72,16 +72,47 @@ function fullNameOf(user: AdminFullUser): string {
   return `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.displayName;
 }
 
-function formatLastSeen(raw: string | null): string | null {
+/** `today` / `yesterday` / `3d ago` / `4mo ago` / `2y ago`, or null if unusable. */
+function formatAge(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const then = new Date(raw).getTime();
   if (Number.isNaN(then)) return null;
   const days = Math.floor((Date.now() - then) / 86_400_000);
-  if (days <= 0) return 'seen today';
-  if (days === 1) return 'seen yesterday';
-  if (days < 30) return `seen ${days}d ago`;
-  if (days < 365) return `seen ${Math.floor(days / 30)}mo ago`;
-  return `seen ${Math.floor(days / 365)}y ago`;
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 30) return `${days}d ago`;
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+
+/**
+ * The row's recency meta — and the two facts it can be are NOT interchangeable,
+ * so the label says which one it is.
+ *
+ * This used to read "seen 4mo ago" off `lastLoginAt`, which is written once, at
+ * sign-in. Nobody quits the Electron shell (rule 9c), so that was reporting how
+ * long ago someone last *signed in* — months, routinely — as though it were how
+ * long ago they were last here. It made a fleet of daily users look abandoned.
+ *
+ * `lastActiveAt` is the real answer (see `PresenceReporter`), but it is absent
+ * for anyone who has not opened the app since presence reporting shipped. So
+ * the fallback is the sign-in date, relabelled honestly rather than dressed up
+ * as a sighting.
+ */
+function recencyMeta(user: AdminFullUser): { label: string; title: string } | null {
+  const seen = formatAge(user.lastActiveAt);
+  if (seen) {
+    return { label: `seen ${seen}`, title: 'Last time this user had the app open.' };
+  }
+  const signedIn = formatAge(user.lastLoginAt);
+  if (signedIn) {
+    return {
+      label: `signed in ${signedIn}`,
+      title:
+        'Last sign-in. This user has not had the app open since presence reporting shipped, so there is no "last seen" for them yet.',
+    };
+  }
+  return null;
 }
 
 function EmployeeRow({
@@ -110,7 +141,7 @@ function EmployeeRow({
     .map((id) => groups.find((g) => g.id === id))
     .filter(Boolean) as AdminGroup[];
   const telegramLinked = !!user.telegram?.userId;
-  const lastSeen = formatLastSeen(user.lastLoginAt);
+  const recency = recencyMeta(user);
 
   const copyEmail = async () => {
     try {
@@ -239,10 +270,12 @@ function EmployeeRow({
                 <span className="shrink-0 text-orange-400">{invitedStageLabel(user)}</span>
               </>
             ) : (
-              lastSeen && (
+              recency && (
                 <>
                   <MetaDot />
-                  <span className="shrink-0 tabular-nums">{lastSeen}</span>
+                  <span className="shrink-0 tabular-nums" title={recency.title}>
+                    {recency.label}
+                  </span>
                 </>
               )
             )}

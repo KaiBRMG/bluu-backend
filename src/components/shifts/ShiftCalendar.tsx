@@ -24,6 +24,7 @@ import {
 } from '@/lib/salary/salaryDate';
 import { formatHours, pluralise } from '@/lib/salary/salaryFormat';
 import type { ExpandedShift } from '@/lib/utils/recurrence';
+import { matchLeaveToOccurrences, occurrenceKey } from '@/lib/utils/leaveMatch';
 import { safeTimezone } from '@/lib/utils/timezone';
 import { CreatorChip, CreatorChipList } from '@/components/creators/CreatorChip';
 
@@ -122,11 +123,16 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
   }, []);
 
   // Keyed lookup so a cell does not scan the list per shift.
-  const leaveByOccurrence = useMemo(() => {
-    const map = new Map<string, LeaveRequest>();
-    for (const request of leaveRequests) map.set(`${request.shiftId}:${request.occurrenceStart}`, request);
-    return map;
-  }, [leaveRequests]);
+  //
+  // Tiered rather than a strict `${shiftId}:${occurrenceStart}` lookup: an admin
+  // edit re-homes the occurrence onto a new document id, and the strict key then
+  // misses a request that is still pending — the cell would show the shift with
+  // no "time off requested" badge while the approvals queue still holds it.
+  // `leaveMatch.ts` carries the tiers and the cases it refuses to guess at.
+  const leaveByOccurrence = useMemo(
+    () => matchLeaveToOccurrences<LeaveRequest, ExpandedShift>(leaveRequests, shifts),
+    [leaveRequests, shifts],
+  );
 
   const { cells, weeks } = useMemo(() => {
     const count = daysInMonth(month);
@@ -274,7 +280,7 @@ export function ShiftCalendar({ month, timezone, showOvertime = false, className
                     const paysWage = shift.paysWage ?? true;
                     const ids = shift.creatorIds ?? [];
 
-                    const leave = leaveByOccurrence.get(`${shift.shiftId}:${shift.occurrenceStart}`) ?? null;
+                    const leave = leaveByOccurrence.get(occurrenceKey(shift)) ?? null;
                     // Offered right up until the shift starts. The 4-day notice is
                     // guidance, not a gate — an agent who is ill tomorrow still has
                     // to tell someone, and refusing the request only moves that

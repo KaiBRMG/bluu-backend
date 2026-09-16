@@ -46,6 +46,20 @@ export interface UserDocument {
   createdAt: Timestamp;
   /** Null until the registered user actually signs in — this is "Invited". */
   lastLoginAt: Timestamp | null;
+  /**
+   * Last time the app was **open** for this user — the real "last seen".
+   *
+   * Distinct from {@link lastLoginAt}, which is only written at sign-in and is
+   * therefore months stale for anyone who never quits the Electron shell
+   * (rule 9c). Written by `POST /api/user/presence` from `PresenceReporter`,
+   * which every authenticated window mounts, so having the app open in any
+   * capacity — main window, OF Manager, GoLogin, clocked in or out, minimised —
+   * counts. Resolution is ~10 minutes by design; it is not an activity signal
+   * (that is `active_sessions`) and it must not be used as one.
+   *
+   * Absent on users who have not been online since this shipped.
+   */
+  lastActiveAt?: Timestamp;
   /** Google's stable account id (`sub`), recorded on login. Survives renames. */
   googleSub?: string | null;
   /** Set when the user moved off their @bluurock.com address. */
@@ -266,6 +280,22 @@ export interface LeaveRequestDocument {
    * 1-on-1 chat message an admin has to go and find before they can decide.
    */
   reason?: string | null;
+  /**
+   * What approval actually released, resolved against the live roster rather
+   * than the `shiftId`/`occurrenceStart` pinned above.
+   *
+   * The two differ whenever an admin edited the shift while the request sat in
+   * the queue — a single-occurrence edit moves it to a new override document, a
+   * "this and future" edit to a whole new series root. The release follows the
+   * roster; this records where it landed so a later withdrawal restores the same
+   * document instead of un-deleting one nobody released.
+   *
+   * Absent on requests approved before this was recorded, and on requests that
+   * were never approved. Nothing queries either field — both are index-exempt
+   * (rule 9).
+   */
+  releasedShiftId?: string | null;
+  releasedOccurrenceStart?: number | null;
 }
 
 // ─── Group ──────────────────────────────────────────────────────────

@@ -140,3 +140,25 @@ export function formatRelative(iso: string | null | undefined): string {
 export function signedMoneyClass(amount: number): string {
   return amount < 0 ? 'text-red-400' : 'text-foreground';
 }
+
+/**
+ * `9:00 AM – 5:00 PM` — one shift occurrence's scheduled window.
+ *
+ * In the reader's own timezone, for the same reason `formatSaleTime` is: the
+ * salary *day* is bucketed in the company zone (`salaryDate.ts`), but a shift's
+ * clock time only helps someone recognise which shift it was if it is their own
+ * clock. The window is the *scheduled* one — the hours actually credited are a
+ * separate figure, and showing tracked time as a range would imply the agent
+ * worked an unbroken block they may not have.
+ */
+export function formatShiftWindow(startMs: number, scheduledHours: number, timeZone: string): string {
+  if (!Number.isFinite(startMs)) return '';
+  const formatter = dateTimeFormatter('time', timeZone, {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+  const start = formatter.format(new Date(startMs));
+  if (!Number.isFinite(scheduledHours) || scheduledHours <= 0) return start;
+  return `${start} – ${formatter.format(new Date(startMs + scheduledHours * 3_600_000))}`;
+}

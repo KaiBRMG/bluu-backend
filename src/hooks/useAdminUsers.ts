@@ -16,6 +16,13 @@ export interface AdminFullUser {
   /** Null until the registered user actually signs in. */
   lastLoginAt: string | null;
   /**
+   * The real "last seen": the last time the app was open in any capacity,
+   * stamped by `PresenceReporter`. Absent for anyone who has not been online
+   * since presence reporting shipped — which is why the registry falls back to
+   * `lastLoginAt` (labelled as a sign-in) rather than showing nothing.
+   */
+  lastActiveAt?: string | null;
+  /**
    * Absent on users created before the onboarding flow shipped — see
    * `isInvitedUser`, which must distinguish `false` from `undefined`.
    */

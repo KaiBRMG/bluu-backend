@@ -792,8 +792,14 @@ export default function UserDetailContent({
                             : 'Unknown'}
                         </dd>
                       </div>
+                      {/* Two different facts, shown as two rows rather than
+                          one. `lastLoginAt` is written only at sign-in, and
+                          nobody quits the Electron shell (rule 9c), so on its
+                          own it reads as "this person disappeared in April".
+                          `lastActiveAt` is the real last-seen — see
+                          `PresenceReporter`. */}
                       <div>
-                        <dt className="text-xs text-zinc-400">Last Login</dt>
+                        <dt className="text-xs text-zinc-400">Last Sign In</dt>
                         <dd className="mt-0.5 text-sm tabular-nums">
                           {user.lastLoginAt
                             ? new Date(user.lastLoginAt).toLocaleDateString('en-US', {
@@ -803,6 +809,19 @@ export default function UserDetailContent({
                                 day: 'numeric',
                               })
                             : 'Never'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-zinc-400">Last Seen</dt>
+                        <dd className="mt-0.5 text-sm tabular-nums">
+                          {user.lastActiveAt
+                            ? new Date(user.lastActiveAt).toLocaleDateString('en-US', {
+                                timeZone: user.timezone || undefined,
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                              })
+                            : 'Not yet recorded'}
                         </dd>
                       </div>
                     </dl>

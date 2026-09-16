@@ -6,6 +6,7 @@ import { BootLoaderProvider } from "@/contexts/BootLoaderContext";
 import AuthWrapper from "@/components/AuthWrapper";
 import ErrorLogger from "@/components/ErrorLogger";
 import AppVersionReporter from "@/components/AppVersionReporter";
+import PresenceReporter from "@/components/PresenceReporter";
 import UpdateBanner from "@/components/UpdateBanner";
 import UpdateAvailableBanner from "@/components/UpdateAvailableBanner";
 import EmailMigrationDialog from "@/components/migration/EmailMigrationDialog";
@@ -26,6 +27,11 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         <UserDataProvider>
           <ErrorLogger />
           <AppVersionReporter />
+          {/* Outside LazyProviders on purpose: presence means "the app is open",
+              which is true before any of the lazily-imported providers have
+              loaded and stays true while clocked out — so it must not sit
+              behind anything that reads clock state. Needs nothing but auth. */}
+          <PresenceReporter />
           {/* Outside LazyProviders on purpose: it needs no context, and a
               navigation can be clicked (and stall) before the lazily-imported
               providers have finished loading. Mounted on the layout, not in

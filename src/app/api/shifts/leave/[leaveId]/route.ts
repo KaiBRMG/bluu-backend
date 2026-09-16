@@ -77,6 +77,9 @@ export const DELETE = withAuth(async (
         shiftId: leave.shiftId,
         occurrenceStart: leave.occurrenceStart,
         leaveId: leave.leaveId,
+        // What the approval actually released — see `revertOccurrenceCoverage`.
+        releasedShiftId: leave.releasedShiftId ?? null,
+        releasedOccurrenceStart: leave.releasedOccurrenceStart ?? null,
       });
     } catch (revertErr) {
       console.error('[shifts/leave DELETE] coverage revert failed', revertErr);

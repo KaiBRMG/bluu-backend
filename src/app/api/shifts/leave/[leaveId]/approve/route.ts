@@ -111,6 +111,20 @@ export const POST = withAuth(async (
       } catch (releaseErr) {
         console.error('[shifts/leave/approve] coverage release failed', releaseErr);
       }
+
+      // Record which occurrence was actually released, so withdrawing this leave
+      // restores that document rather than the (possibly stale) one the request
+      // pinned. Same non-fatal posture as the release itself.
+      if (coverage?.resolved) {
+        try {
+          await leaveRef.update({
+            releasedShiftId: coverage.resolved.shiftId,
+            releasedOccurrenceStart: coverage.resolved.occurrenceStart,
+          });
+        } catch (stampErr) {
+          console.error('[shifts/leave/approve] failed to record released occurrence', stampErr);
+        }
+      }
     }
 
     return NextResponse.json({ success: true, coverage });

@@ -10,6 +10,7 @@ import {
 } from '@/lib/services/shiftService';
 import { expandShiftsForWindow } from '@/lib/utils/recurrence';
 import { serialiseShift } from '@/lib/utils/shiftSerialise';
+import { matchLeaveToOccurrences, occurrenceKey } from '@/lib/utils/leaveMatch';
 import { computeAttendance, computeTimeWorked } from '@/lib/utils/shiftAttendance';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { DocumentSnapshot } from 'firebase-admin/firestore';
@@ -106,36 +107,41 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     // start/end time (not the root document's original timestamp).
     const expandedShifts = expandShiftsForWindow(eligibleRaw, weekStartMs, weekEndMs);
 
-    // ── 5. Fetch leave requests for all shift IDs in the week ─────────
-    const shiftIds = [...new Set(expandedShifts.map(s => s.shiftId))];
+    // ── 5. Fetch leave requests falling in the week ───────────────────
+    //
+    // Queried by `occurrenceStart` range, **not** by the shift ids the week
+    // expanded to. A pending request pins the shift id it was submitted
+    // against, and every admin edit path re-homes the occurrence onto a new
+    // document — so an `in` over the current ids is exactly the query that
+    // cannot see the request that needs seeing. `occurrenceStart` is a plain
+    // single-field range (no composite index, and the field is not exempted),
+    // and it is one query instead of a chunked fan-out over 30 ids at a time.
     type LeaveInfo = { leaveId: string; leaveType: 'paid' | 'unpaid'; status: 'pending' | 'approved' | 'denied'; userId: string; shiftId: string; occurrenceStart: number };
-    const leaveMap = new Map<string, LeaveInfo>();
+    const allLeaveDocs: LeaveInfo[] = [];
 
-    if (shiftIds.length > 0) {
-      const CHUNK_SIZE = 30;
-      const allLeaveDocs: LeaveInfo[] = [];
-      for (let i = 0; i < shiftIds.length; i += CHUNK_SIZE) {
-        const chunk = shiftIds.slice(i, i + CHUNK_SIZE);
-        const snap = await adminDb
-          .collection('leave_requests')
-          .where('shiftId', 'in', chunk)
-          .get();
-        for (const doc of snap.docs) {
-          const d = doc.data();
-          allLeaveDocs.push({
-            leaveId: d.leaveId,
-            leaveType: d.leaveType,
-            status: d.status,
-            userId: d.userId,
-            shiftId: d.shiftId,
-            occurrenceStart: d.occurrenceStart,
-          });
-        }
-      }
-      for (const lr of allLeaveDocs) {
-        leaveMap.set(`${lr.shiftId}:${lr.occurrenceStart}:${lr.userId}`, lr);
+    {
+      const snap = await adminDb
+        .collection('leave_requests')
+        .where('occurrenceStart', '>=', weekStartMs)
+        .where('occurrenceStart', '<=', weekEndMs)
+        .get();
+      for (const doc of snap.docs) {
+        const d = doc.data();
+        if (!eligibleUserIds.has(d.userId)) continue;
+        allLeaveDocs.push({
+          leaveId: d.leaveId,
+          leaveType: d.leaveType,
+          status: d.status,
+          userId: d.userId,
+          shiftId: d.shiftId,
+          occurrenceStart: d.occurrenceStart,
+        });
       }
     }
+
+    // Tiered match rather than a strict tuple lookup — see `leaveMatch.ts` for
+    // why, and for where it deliberately refuses to guess.
+    const leaveMap = matchLeaveToOccurrences(allLeaveDocs, expandedShifts);
 
     const serialisedShifts = expandedShifts.map(s => {
       const shiftStartMs = s.occurrenceStart;
@@ -159,7 +165,7 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         );
       }
 
-      const leaveEntry = leaveMap.get(`${s.shiftId}:${s.occurrenceStart}:${s.userId}`);
+      const leaveEntry = leaveMap.get(occurrenceKey(s));
       const leaveRequest = leaveEntry
         ? { leaveId: leaveEntry.leaveId, leaveType: leaveEntry.leaveType, status: leaveEntry.status }
         : null;

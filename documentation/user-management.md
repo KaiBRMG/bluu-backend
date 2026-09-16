@@ -37,6 +37,28 @@ Surfaced in three places, all from that one definition:
 
 Invitations do not expire; the promoted section is the chase mechanism.
 
+## 0a. "Last seen" vs "last sign in"
+
+They are two different facts, and the registry used to conflate them. The row meta read `seen 4mo ago` off **`lastLoginAt`**, which is written in exactly one place — `recordSuccessfulLogin`, at sign-in. The Electron shell never reloads itself and staff do not quit it (rule 9c), so for most of the fleet that value is months old. The page was reporting *how long ago someone last signed in* as though it were *how long ago they were last here*, and a room full of daily users rendered as abandoned accounts.
+
+| Field | Written by | Means |
+|---|---|---|
+| `lastLoginAt` | `recordSuccessfulLogin` ([`userService.ts`](../src/lib/services/userService.ts)) | The last **sign-in**. Still what `isInvitedUser` keys off — `null` is "never signed in", and that meaning is unchanged. |
+| `lastActiveAt` | `POST /api/user/presence`, from [`PresenceReporter`](../src/components/PresenceReporter.tsx) | The real **last seen**: the last time the app was open. |
+
+**What counts as online: having the app open in any capacity.** Not "clocked in", and not "interacting".
+
+- `PresenceReporter` is mounted in all three authenticated layouts — `(main)`, `/of-manager`, `/gologin` — because each of those windows being open is the app being open. Duplicate pings from someone running more than one are collapsed server-side.
+- In `(main)` it sits **outside `LazyProviders`**, deliberately: presence is true before those providers load and stays true while clocked out, so it must not sit behind anything that reads clock state.
+- It does **not** gate on `document.visibilityState` — a minimised window is still open, and `backgroundThrottling` is off on every Electron window so the interval holds its cadence. A sleeping machine handles itself: timers do not fire, so nothing is stamped.
+- **`active_sessions` cannot substitute for this.** That doc exists only while the user is clocked in and is deleted at clock-out, and the time-tracking heartbeat only runs in the `working` state. Being clocked out is not being away.
+
+**Cost (rule 9).** One ping per window per 10 minutes, floored at 9 minutes client-side and collapsed to one persisted write per user per 5 minutes per server instance. `POST /api/user/presence` is **read-free** — it never fetches the doc to compare, because a value rendered as "seen 3d ago" does not justify a read per ping. It calls `invalidateUserCache` (rule 2) but deliberately **not** `invalidateAdminUsersCache`: that cache's TTL is 30s and this field's resolution is ~10 minutes, so invalidating would force a full `users` re-read several times a minute for nothing. `lastActiveAt` is **exempt from single-field indexing** — if a "who is online right now" query is ever wanted, the exemption has to be removed and the index rebuilt first ([data-layer.md](data-layer.md#single-field-index-exemptions)).
+
+**RULE — label the fact you are showing.** `lastActiveAt` is absent for anyone who has not opened the app since presence reporting shipped, so both surfaces fall back to the sign-in date *relabelled*, never dressed up as a sighting: the index row says `signed in 4mo ago` (with a tooltip saying why there is no last-seen yet), and the record panel shows **Last Sign In** and **Last Seen** as two separate rows, the latter reading "Not yet recorded".
+
+---
+
 ## 0b. The page shape
 
 `/admin-portal/user-management` is **one faceted index of people** — the browse-and-open shape DESIGN.md §5 documents, and the same one `apps-resources` uses. It replaced a four-tab layout in which three tabs rendered the same component with booleans that collapsed to predicates already available as filters inside it.
@@ -65,6 +87,8 @@ Invitations do not expire; the promoted section is the chase mechanism.
 | `src/hooks/useDisputesData.ts` | `/api/disputes/users` — filters archived server-side |
 | `src/components/DeletedUser.tsx` | Renders italic *Deleted User* + `resolveUserName(uid, names)` |
 | `src/components/ui/avatar.tsx` | The **only** avatar renderer |
+| `src/components/PresenceReporter.tsx` | Stamps `lastActiveAt` — the real "last seen". Mounted in all three authenticated layouts |
+| API: `/api/user/presence/route.ts` | The read-free write half of presence |
 | API: `/api/admin/users/[uid]/route.ts` | DELETE cascade |
 | API: `/api/users/display-names/route.ts` | Basic user list |
 | API: `/api/shifts/week/route.ts` | `userMap` excludes archived |
