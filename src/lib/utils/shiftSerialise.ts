@@ -81,6 +81,10 @@ export function serialiseShift(s: ShiftDocument) {
     // created before assignment existed simply report none, which is exactly
     // what the salary engine's inferred-account fallback keys off.
     creatorIds:     s.creatorIds ?? [],
+    // Defended the same way and for the same reason: every consumer reads
+    // `.length` on it, and the subset is what the wage tier is counted *against*
+    // — a missing field must mean "none are overtime", never `undefined`.
+    overtimeCreatorIds: s.overtimeCreatorIds ?? [],
     isOvertime:     s.isOvertime ?? false,
     coverageOfferId: s.coverageOfferId ?? null,
     paysWage:       s.paysWage ?? true,

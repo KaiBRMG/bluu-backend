@@ -257,10 +257,21 @@ export function computeSalaryMonth(input: SalaryMonthInput): SalaryMonthResult {
 
     // ── Hours and accounts, per shift ──
     const shiftInputs = day?.shifts ?? [];
+
+    // The accounts that actually set a rate. Two exclusions, one rule — an
+    // account the agent covers on top of their own roster pays no extra wage:
+    //
+    //   - a whole `paysWage: false` shift  (cover assigned from the board)
+    //   - `overtimeCreatorIds` on a paying shift  (cover an admin added to the
+    //     shift itself, in Shift Management)
+    //
+    // Both exist because the two assignment routes reach the roster from
+    // different ends; they must price identically. See ca-salary.md §6.
     const assignedCreators = new Set<string>();
     for (const s of shiftInputs) {
       if (!s.paysWage) continue;
-      for (const c of s.creatorIds) assignedCreators.add(c);
+      const unpaid = new Set(s.overtimeCreatorIds ?? []);
+      for (const c of s.creatorIds) if (!unpaid.has(c)) assignedCreators.add(c);
     }
 
     // The account count an admin sees and can override. Shift assignments are
@@ -293,7 +304,11 @@ export function computeSalaryMonth(input: SalaryMonthInput): SalaryMonthResult {
     const dayRate = hourlyRateFor(accountCount, config);
     const shifts: SalaryShiftBreakdown[] = shiftInputs.map(s => {
       const payable = s.paysWage ? payableHoursFor(s.trackedSeconds, s.scheduledHours, config) : 0;
-      const shiftAccounts = s.paysWage ? new Set(s.creatorIds).size : 0;
+      const unpaidIds = new Set(s.overtimeCreatorIds ?? []);
+      // The shift's *paying* accounts. Overtime accounts added to a real shift
+      // are worked and earn commission, but they do not buy a higher tier —
+      // a 3-account agent covering 2 more stays on the 3-account rate.
+      const shiftAccounts = s.paysWage ? new Set(s.creatorIds.filter(id => !unpaidIds.has(id))).size : 0;
       const rate = !s.paysWage
         ? 0
         : config.wageRateBasis === 'per-day'
@@ -311,6 +326,7 @@ export function computeSalaryMonth(input: SalaryMonthInput): SalaryMonthResult {
         isOvertime: s.isOvertime,
         paysWage: s.paysWage,
         creatorIds: s.creatorIds,
+        overtimeCreatorIds: s.creatorIds.filter(id => unpaidIds.has(id)),
       };
     });
 

@@ -12,7 +12,7 @@ import {
 } from '@/lib/services/shiftService';
 import { adminDb } from '@/lib/firebase-admin';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-import { normaliseAccountIds } from '@/lib/services/creatorAccountService';
+import { normaliseAccountIds, intersectOvertimeIds } from '@/lib/services/creatorAccountService';
 import type { ShiftDocument } from '@/types/firestore';
 
 // ─── PUT /api/shifts/[shiftId] ───────────────────────────────────────
@@ -44,12 +44,14 @@ export const PUT = withAuth(async (
       saveMode,       // 'single' | 'future' — for recurring edits
       overrideDate,   // ISO string — required when saveMode is 'single' or 'future'
       creatorIds,     // creator accounts this shift covers — sets the wage tier
+      overtimeCreatorIds, // the subset of those worked as unpaid in-shift overtime
     } = body;
 
     // Validated against the live roster before any branch below writes it: the
     // assignment's *count* is what pays the agent, so an unresolvable id must
     // fail the request rather than quietly becoming a wage tier.
     let assignedCreatorIds: string[] | undefined;
+    let assignedOvertimeIds: string[] | undefined;
     if ('creatorIds' in body) {
       const assigned = await normaliseAccountIds(creatorIds);
       if (assigned.invalid.length > 0) {
@@ -66,6 +68,10 @@ export const PUT = withAuth(async (
         );
       }
       assignedCreatorIds = assigned.accountIds;
+      // Always recomputed alongside the assignment, never on its own: the two
+      // are one fact, and an overtime id left pointing at an account that was
+      // just removed would subtract a tier for work nobody does.
+      assignedOvertimeIds = intersectOvertimeIds(assigned.accountIds, overtimeCreatorIds);
     }
 
     const startMs = startTime ? new Date(startTime).getTime() : null;
@@ -102,6 +108,7 @@ export const PUT = withAuth(async (
           createdBy:      token.uid,
           recurrence:     null,
           creatorIds:     assignedCreatorIds ?? existing.creatorIds ?? [],
+          overtimeCreatorIds: assignedOvertimeIds ?? existing.overtimeCreatorIds ?? [],
           isOvertime:     existing.isOvertime ?? false,
           coverageOfferId: existing.coverageOfferId ?? null,
           paysWage:       existing.paysWage ?? true,
@@ -128,6 +135,7 @@ export const PUT = withAuth(async (
         createdBy:      token.uid,
         recurrence:     recurrence !== undefined ? recurrence : existing.recurrence,
         creatorIds:     assignedCreatorIds ?? existing.creatorIds ?? [],
+        overtimeCreatorIds: assignedOvertimeIds ?? existing.overtimeCreatorIds ?? [],
         isOvertime:     existing.isOvertime ?? false,
         coverageOfferId: existing.coverageOfferId ?? null,
         paysWage:       existing.paysWage ?? true,
@@ -143,6 +151,7 @@ export const PUT = withAuth(async (
         ...(userTimezone   !== undefined && { userTimezone }),
         ...('recurrence' in body        && { recurrence: body.recurrence }),
         ...(assignedCreatorIds !== undefined && { creatorIds: assignedCreatorIds }),
+        ...(assignedOvertimeIds !== undefined && { overtimeCreatorIds: assignedOvertimeIds }),
       });
     }
 

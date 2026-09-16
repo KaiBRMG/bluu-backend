@@ -59,6 +59,16 @@ interface CreatorChipProps {
   size?: ChipSize;
   /** Renders just the avatar, with the name as a tooltip. For very dense rows. */
   avatarOnly?: boolean;
+  /**
+   * Marks this account as overtime the agent works without extra pay.
+   *
+   * Rendered as an orange ring on the avatar — orange already means
+   * "overtime / cover" everywhere in this subsystem, and a ring is the one
+   * affordance that survives a ~90px calendar cell where the chip is a bare
+   * face. The tooltip carries the meaning, because a ring on its own is a
+   * decoration and DESIGN.md §2 forbids colour that encodes nothing.
+   */
+  overtime?: boolean;
   className?: string;
 }
 
@@ -169,6 +179,7 @@ export const CreatorChip = memo(function CreatorChip({
   photoURL,
   size = 'sm',
   avatarOnly = false,
+  overtime = false,
   className,
 }: CreatorChipProps) {
   const byId = useCreatorMap();
@@ -179,21 +190,28 @@ export const CreatorChip = memo(function CreatorChip({
   // Falling back to the id keeps a deleted or not-yet-loaded creator visible
   // rather than rendering an empty chip that looks like a rendering bug.
   const stageName = name ?? hit?.stageName ?? creatorId;
+  const label = overtime ? `${stageName} — overtime, no extra pay` : stageName;
 
   const avatar = (
     <CreatorAvatar
       creatorId={creatorId}
       name={name}
       photoURL={photoURL}
-      className={cn(AVATAR_SIZE[size], TEXT_SIZE[size])}
+      className={cn(
+        AVATAR_SIZE[size],
+        TEXT_SIZE[size],
+        // `ring-offset` against the surface, so the ring reads as a border on
+        // the face rather than merging into a neighbouring avatar in a dense row.
+        overtime && 'ring-2 ring-orange-400 ring-offset-1 ring-offset-[#0A0A0A]',
+      )}
     />
   );
 
   if (avatarOnly) {
     return (
-      <span className={cn('inline-flex', className)} title={stageName}>
+      <span className={cn('inline-flex', className)} title={label}>
         {avatar}
-        <span className="sr-only">{stageName}</span>
+        <span className="sr-only">{label}</span>
       </span>
     );
   }
@@ -204,7 +222,7 @@ export const CreatorChip = memo(function CreatorChip({
         'inline-flex max-w-full items-center gap-1 rounded-full bg-white/[0.08] py-px pl-px pr-2',
         className,
       )}
-      title={stageName}
+      title={label}
     >
       {avatar}
       <span className={cn('truncate text-zinc-300', TEXT_SIZE[size])}>{stageName}</span>
@@ -223,6 +241,7 @@ export const CreatorChipList = memo(function CreatorChipList({
   max,
   size = 'sm',
   avatarOnly = false,
+  overtimeIds,
   emptyLabel,
   className,
 }: {
@@ -230,6 +249,11 @@ export const CreatorChipList = memo(function CreatorChipList({
   max?: number;
   size?: ChipSize;
   avatarOnly?: boolean;
+  /**
+   * Which of `creatorIds` are overtime the agent works unpaid. Pass a **stable**
+   * array — an inline literal defeats the memo on every chip in the row.
+   */
+  overtimeIds?: string[];
   /** Rendered when there are no creators. Omit to render nothing at all. */
   emptyLabel?: string;
   className?: string;
@@ -240,20 +264,36 @@ export const CreatorChipList = memo(function CreatorChipList({
     return emptyLabel ? <span className={cn('text-[11px] text-zinc-500', className)}>{emptyLabel}</span> : null;
   }
 
-  const shown = max ? creatorIds.slice(0, max) : creatorIds;
-  const hidden = creatorIds.slice(shown.length);
+  // A Set per row, not a `.includes()` per chip. Cheap either way at these
+  // sizes, but this row renders thirty-odd times on a month calendar.
+  const overtime = overtimeIds && overtimeIds.length > 0 ? new Set(overtimeIds) : null;
+
+  // Paid accounts first, so `max` truncates the overtime ones rather than the
+  // ones that set the agent's rate — the count a reader is scanning for.
+  const ordered = overtime
+    ? [...creatorIds.filter(id => !overtime.has(id)), ...creatorIds.filter(id => overtime.has(id))]
+    : creatorIds;
+
+  const shown = max ? ordered.slice(0, max) : ordered;
+  const hidden = ordered.slice(shown.length);
 
   const nameOf = (id: string) => byId.get(id)?.stageName ?? id;
 
   return (
     <span className={cn('inline-flex flex-wrap items-center gap-1', className)}>
       {shown.map(id => (
-        <CreatorChip key={id} creatorId={id} size={size} avatarOnly={avatarOnly} />
+        <CreatorChip
+          key={id}
+          creatorId={id}
+          size={size}
+          avatarOnly={avatarOnly}
+          overtime={overtime?.has(id) ?? false}
+        />
       ))}
       {hidden.length > 0 && (
         <span
           className={cn('rounded-full bg-white/[0.08] px-1.5 py-px text-zinc-400', TEXT_SIZE[size])}
-          title={hidden.map(nameOf).join(', ')}
+          title={hidden.map(id => (overtime?.has(id) ? `${nameOf(id)} (overtime)` : nameOf(id))).join(', ')}
         >
           +{hidden.length}
         </span>

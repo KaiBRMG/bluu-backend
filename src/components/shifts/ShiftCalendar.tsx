@@ -109,6 +109,17 @@ const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const IN_SHIFT_COVER_EXPLANATION =
   'Extra account inside your existing shift. You keep the sales; your hours are unchanged.';
 
+/**
+ * The same fact as {@link IN_SHIFT_COVER_EXPLANATION}, for accounts marked
+ * overtime **on** a shift the agent is already paid for.
+ *
+ * Two wordings because the two are genuinely different reads: a cover shift is
+ * a whole row that pays nothing, while this is a subset of a row that does pay
+ * — and the agent's question there is "why is my rate still on three accounts".
+ */
+const IN_SHIFT_OVERTIME_EXPLANATION =
+  'Worked as overtime inside this shift. You keep the sales, but your hourly rate is still set by your regular accounts only.';
+
 interface ShiftCalendarProps {
   /** The month to draw, `YYYY-MM`. Month view only — the week view navigates itself. */
   month?: string;
@@ -452,6 +463,11 @@ export function ShiftCalendar({
                     const isOvertime = shift.isOvertime ?? false;
                     const paysWage = shift.paysWage ?? true;
                     const ids = shift.creatorIds ?? [];
+                    // Accounts on this shift that are worked for the sales only.
+                    // Distinct from a whole cover shift above: this one still
+                    // pays hours, just not a higher rate.
+                    const overtimeIds = shift.overtimeCreatorIds ?? [];
+                    const paidCount = ids.filter(id => !overtimeIds.includes(id)).length;
 
                     const leave = leaveByOccurrence.get(occurrenceKey(shift)) ?? null;
                     // Offered right up until the shift starts. The 4-day notice is
@@ -541,16 +557,41 @@ export function ShiftCalendar({
                         )}
 
                         {/* Avatars only: a month grid cell is far too narrow for
-                            names, and the picture is the faster recognition anyway. */}
+                            names, and the picture is the faster recognition anyway.
+                            Ringed faces are overtime — the ring is the only mark
+                            that survives at this width, and the line below says
+                            what it means so the colour is not decoration. */}
                         <div className="mt-0.5">
                           <CreatorChipList
                             creatorIds={ids}
+                            overtimeIds={overtimeIds}
                             max={4}
                             size="xs"
                             avatarOnly
                             emptyLabel={paysWage ? 'No accounts yet' : undefined}
                           />
                         </div>
+
+                        {paysWage && overtimeIds.length > 0 && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span
+                                tabIndex={0}
+                                className="mt-0.5 flex cursor-help items-center gap-0.5 rounded-sm text-[10px] text-orange-400 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                              >
+                                <Plus className="size-2.5 shrink-0" aria-hidden />
+                                {overtimeIds.length} overtime
+                                <span className="sr-only">
+                                  {IN_SHIFT_OVERTIME_EXPLANATION} Paid on {paidCount} account
+                                  {paidCount === 1 ? '' : 's'}.
+                                </span>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-56 text-center leading-relaxed">
+                              {IN_SHIFT_OVERTIME_EXPLANATION}
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
 
                         {leave && (
                           <LeaveBadge

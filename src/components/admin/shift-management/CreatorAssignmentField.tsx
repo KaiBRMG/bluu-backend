@@ -40,11 +40,29 @@ import { CreatorChip } from '@/components/creators/CreatorChip';
  *
  * Searching matches the full name ("Cole (Fansly)") *and* the parent's, so
  * typing "cole" surfaces the whole family.
+ *
+ * ## Regular vs overtime, per account
+ *
+ * The same shift can hold both. An agent who works three accounts and picks up
+ * two more *inside those same hours* is still paid the three-account rate — they
+ * keep the sales, not a raise (ca-salary.md §6). Before this control existed the
+ * only way to record that was the coverage board's zero-wage shift, so an admin
+ * adding the accounts by hand here silently moved the agent from $3.50 to
+ * $5.50/hour.
+ *
+ * Each selected account therefore carries a two-state toggle, and the line
+ * beneath restates the rate from the **paid** count only. The toggle is a
+ * segmented pair rather than a checkbox because neither state is the absence of
+ * the other — "regular" is a claim about pay, and an admin should be reading it,
+ * not inferring it from an unticked box.
  */
 
 interface CreatorAssignmentFieldProps {
   value: string[];
   onChange: (creatorIds: string[]) => void;
+  /** The subset of `value` worked as overtime — no extra pay, no higher tier. */
+  overtimeValue: string[];
+  onOvertimeChange: (creatorIds: string[]) => void;
   /** Account count → $/hour, from the salary config. Omit to hide the rate line. */
   wageTiers?: Record<number, number>;
   /** Soft cap from the roster rules; exceeding it warns rather than blocks. */
@@ -55,6 +73,8 @@ interface CreatorAssignmentFieldProps {
 export function CreatorAssignmentField({
   value,
   onChange,
+  overtimeValue,
+  onOvertimeChange,
   wageTiers,
   maxAccounts = 5,
   disabled,
@@ -68,18 +88,39 @@ export function CreatorAssignmentField({
     return map;
   }, [accounts]);
 
+  const overtimeSet = useMemo(() => new Set(overtimeValue), [overtimeValue]);
+  // The count that sets the rate: assigned accounts minus the overtime ones.
+  const paidCount = value.filter(id => !overtimeSet.has(id)).length;
+  const overtimeCount = value.length - paidCount;
+
   const rate = useMemo(() => {
-    if (!wageTiers || value.length === 0) return null;
+    if (!wageTiers || paidCount === 0) return null;
     const counts = Object.keys(wageTiers).map(Number).sort((a, b) => a - b);
     if (counts.length === 0) return null;
-    const clamped = Math.min(Math.max(value.length, counts[0]), counts[counts.length - 1]);
+    const clamped = Math.min(Math.max(paidCount, counts[0]), counts[counts.length - 1]);
     let found = wageTiers[counts[0]];
     for (const count of counts) if (clamped >= count) found = wageTiers[count];
     return found;
-  }, [wageTiers, value.length]);
+  }, [wageTiers, paidCount]);
 
   const toggle = (creatorId: string) => {
-    onChange(value.includes(creatorId) ? value.filter(id => id !== creatorId) : [...value, creatorId]);
+    if (value.includes(creatorId)) {
+      onChange(value.filter(id => id !== creatorId));
+      // Removing the account removes its overtime mark with it. The server
+      // intersects anyway, but leaving a ghost here would make the rate line
+      // above disagree with what saving actually produces.
+      if (overtimeSet.has(creatorId)) onOvertimeChange(overtimeValue.filter(id => id !== creatorId));
+    } else {
+      onChange([...value, creatorId]);
+    }
+  };
+
+  const setOvertime = (creatorId: string, isOvertime: boolean) => {
+    if (isOvertime) {
+      if (!overtimeSet.has(creatorId)) onOvertimeChange([...overtimeValue, creatorId]);
+    } else {
+      onOvertimeChange(overtimeValue.filter(id => id !== creatorId));
+    }
   };
 
   const overCap = value.length > maxAccounts;
@@ -141,21 +182,70 @@ export function CreatorAssignmentField({
       </Popover>
 
       {value.length > 0 && (
-        <ul className="flex flex-wrap gap-1 pt-0.5">
-          {value.map(id => (
-            <li key={id}>
-              <button
-                type="button"
-                disabled={disabled}
-                onClick={() => toggle(id)}
-                className="inline-flex items-center gap-1 rounded-full transition-opacity duration-[120ms] hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]"
-                aria-label={`Remove ${byId.get(id) ?? id}`}
+        <ul className="space-y-1 pt-0.5">
+          {value.map(id => {
+            const isOvertime = overtimeSet.has(id);
+            const name = byId.get(id) ?? id;
+            return (
+              <li
+                key={id}
+                className={cn(
+                  'flex items-center gap-2 rounded-md border px-2 py-1',
+                  isOvertime
+                    ? 'border-orange-500/30 bg-orange-500/[0.06]'
+                    : 'border-white/[0.07] bg-white/[0.03]',
+                )}
               >
-                <CreatorChip creatorId={id} className="pr-1" />
-                <X className="mr-1 size-3 text-zinc-400" aria-hidden />
-              </button>
-            </li>
-          ))}
+                <CreatorChip creatorId={id} overtime={isOvertime} className="min-w-0 bg-transparent pr-0" />
+
+                {/* Two buttons, not a checkbox: "regular" is a claim about pay,
+                    and it should be read rather than inferred from an empty box. */}
+                <span
+                  role="group"
+                  aria-label={`Pay basis for ${name}`}
+                  className="ml-auto flex shrink-0 overflow-hidden rounded-md border border-white/[0.09]"
+                >
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    aria-pressed={!isOvertime}
+                    onClick={() => setOvertime(id, false)}
+                    className={cn(
+                      'px-2 py-0.5 text-[10px] font-medium transition-colors duration-[120ms]',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]',
+                      !isOvertime ? 'bg-white/[0.12] text-foreground' : 'text-zinc-400 hover:text-zinc-200',
+                    )}
+                  >
+                    Regular
+                  </button>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    aria-pressed={isOvertime}
+                    onClick={() => setOvertime(id, true)}
+                    title="Worked inside this shift for the sales only — adds no hours and does not raise the hourly rate."
+                    className={cn(
+                      'px-2 py-0.5 text-[10px] font-medium transition-colors duration-[120ms]',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]',
+                      isOvertime ? 'bg-orange-500/25 text-orange-300' : 'text-zinc-400 hover:text-zinc-200',
+                    )}
+                  >
+                    Overtime
+                  </button>
+                </span>
+
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => toggle(id)}
+                  aria-label={`Remove ${name}`}
+                  className="shrink-0 rounded-sm p-0.5 text-zinc-500 transition-colors duration-[120ms] hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]"
+                >
+                  <X className="size-3" aria-hidden />
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -163,21 +253,41 @@ export function CreatorAssignmentField({
       <p className={cn('text-xs leading-relaxed', overCap ? 'text-orange-400' : 'text-zinc-400')}>
         {value.length === 0 ? (
           <>No accounts means no hourly pay for this shift — only commission on any sales.</>
-        ) : overCap ? (
-          <>
-            {value.length} accounts is over the {maxAccounts}-account limit for a shift.
-            {rate !== null && <> Pays {formatUsd(rate)}/hour.</>}
-          </>
+        ) : paidCount === 0 ? (
+          // Every account marked overtime. Legal, and almost never intended: it
+          // is an agent working a scheduled shift for commission alone. Said
+          // plainly rather than left to be discovered on the payroll grid.
+          <span className="text-orange-400">
+            All {value.length} account{value.length === 1 ? ' is' : 's are'} marked overtime, so this shift pays
+            no hourly wage — only commission on the sales.
+          </span>
         ) : (
           <>
             {rate !== null && (
               <>
-                Pays <span className="tabular-nums text-foreground">{formatUsd(rate)}/hour</span> for this shift.
+                Pays <span className="tabular-nums text-foreground">{formatUsd(rate)}/hour</span> for this shift
+                {overtimeCount > 0 && <> on {paidCount} regular account{paidCount === 1 ? '' : 's'}</>}.
+              </>
+            )}
+            {overtimeCount > 0 && (
+              <>
+                {' '}
+                <span className="text-orange-400">
+                  {overtimeCount} overtime account{overtimeCount === 1 ? '' : 's'}
+                </span>{' '}
+                worked inside these same hours — the agent keeps the sales, the rate does not move.
+              </>
+            )}
+            {overCap && (
+              <>
+                {' '}
+                {value.length} accounts is over the {maxAccounts}-account limit for a shift.
               </>
             )}
           </>
         )}
       </p>
+
     </div>
   );
 }

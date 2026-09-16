@@ -32,6 +32,8 @@ export interface CreateShiftPayload {
    * wage tier, so the server validates every id against the live roster.
    */
   creatorIds?: string[];
+  /** The subset of `creatorIds` worked as unpaid in-shift overtime. */
+  overtimeCreatorIds?: string[];
 }
 
 export interface UpdateShiftPayload extends Partial<CreateShiftPayload> {

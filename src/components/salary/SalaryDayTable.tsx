@@ -247,7 +247,9 @@ function DayRow({
   // a chevron on every row is noise on a thirty-row table. Expansion is offered
   // only where the roll-up hides something: more than one shift, an overtime
   // shift, or in-shift cover (which adds accounts while paying no wage).
-  const expandable = shifts.length > 1 || shifts.some(s => s.isOvertime || !s.paysWage);
+  const expandable =
+    shifts.length > 1 ||
+    shifts.some(s => s.isOvertime || !s.paysWage || (s.overtimeCreatorIds?.length ?? 0) > 0);
   const hasOvertime = shifts.some(s => s.isOvertime);
 
   const cell = (
@@ -519,13 +521,32 @@ function ShiftRow({
   const kind = !shift.paysWage ? 'In-shift cover' : shift.isOvertime ? 'Overtime' : 'Regular';
   const window = formatShiftWindow(shift.occurrenceStart, shift.scheduledHours, timezone);
 
+  // The other half of the same rule: accounts marked overtime *on* a paying
+  // shift. `accountCount` on this row already excludes them, so without saying
+  // so the row reads as five faces beside the number three.
+  const overtimeIds = shift.overtimeCreatorIds ?? [];
+
   return (
     <tr className="bg-white/[0.02] text-[13px] text-zinc-400">
       <th scope="row" className="py-1.5 pl-9 pr-3 text-left font-normal">
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="font-medium text-zinc-300">{kind}</span>
           {window && <span className="tabular-nums">{window}</span>}
-          <CreatorChipList creatorIds={shift.creatorIds} max={4} size="xs" emptyLabel="No accounts assigned" />
+          <CreatorChipList
+            creatorIds={shift.creatorIds}
+            overtimeIds={overtimeIds}
+            max={4}
+            size="xs"
+            emptyLabel="No accounts assigned"
+          />
+          {shift.paysWage && overtimeIds.length > 0 && (
+            <span
+              className="text-[11px] text-orange-400"
+              title="Worked inside this shift for the sales only. They add no hours and do not raise the hourly rate."
+            >
+              {overtimeIds.length} overtime
+            </span>
+          )}
         </span>
       </th>
 

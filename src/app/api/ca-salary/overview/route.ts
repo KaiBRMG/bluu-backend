@@ -165,8 +165,11 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       // engine keeps them apart (ca-salary.md §6) — cover is somebody else's
       // account for a day, not part of this agent's standing roster:
       //
-      //   own    — shifts that pay the agent's own wage tier
-      //   cover  — an overtime shift, or in-shift cover (`paysWage: false`)
+      //   own    — accounts that pay the agent's own wage tier
+      //   cover  — an overtime shift, in-shift cover (`paysWage: false`), or an
+      //            account marked overtime *on* an otherwise regular shift
+      //            (`overtimeCreatorIds`), which is the same fact reached from
+      //            Shift Management instead of the coverage board
       //
       // Counted as **ids**, never grouped: a sub-account is a peer, not a child,
       // and each one counts as one account toward its assignee (rule 9h). The
@@ -179,9 +182,10 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 
       for (const day of result?.days ?? []) {
         for (const shift of day.shifts) {
-          const isCover = shift.isOvertime || !shift.paysWage;
+          const wholeShiftIsCover = shift.isOvertime || !shift.paysWage;
+          const unpaidIds = new Set(shift.overtimeCreatorIds ?? []);
           for (const creatorId of shift.creatorIds) {
-            if (isCover) coverAccountIds.add(creatorId);
+            if (wholeShiftIsCover || unpaidIds.has(creatorId)) coverAccountIds.add(creatorId);
             else ownAccountIds.add(creatorId);
 
             const covering = assignedAgents.get(creatorId) ?? new Set<string>();

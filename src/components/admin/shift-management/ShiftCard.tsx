@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import type { ExpandedShift } from '@/lib/utils/recurrence';
 import type { ShiftUser } from '@/hooks/useShifts';
+import { invalidateShiftCalendarCache } from '@/hooks/useShiftCalendar';
+import { invalidateLeaveRequestsCache } from '@/hooks/useLeaveRequests';
 import { useAuth } from '@/components/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
@@ -75,6 +77,11 @@ export default function ShiftCard({ shift, user, viewerTimezone, onClick, onLeav
   const startLabel = formatLocalTime(startMs, viewerTimezone);
   const endLabel   = formatLocalTime(endMs,   viewerTimezone);
 
+  // Accounts worked as overtime *inside* this shift: the agent keeps the sales
+  // but the wage tier is counted without them (ca-salary.md §6).
+  const overtimeIds = shift.overtimeCreatorIds ?? [];
+  const paidCount = (shift.creatorIds ?? []).filter(id => !overtimeIds.includes(id)).length;
+
   const badge = shift.attendanceStatus ? BADGE_CONFIG[shift.attendanceStatus] : null;
   const leaveBadge = shift.leaveRequest ? LEAVE_BADGE_CONFIG[shift.leaveRequest.status] : null;
 
@@ -100,6 +107,14 @@ export default function ShiftCard({ shift, user, viewerTimezone, onClick, onLeav
         headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       });
+      // Approving released this occurrence, which changes the *agent's* roster —
+      // and their dashboard caches it under a key this grid otherwise never
+      // touches. `onLeaveAction` only refreshes the admin week view, so without
+      // this the shift stayed on their calendar while the accounts it released
+      // showed up on the overtime board immediately (that board caches nothing).
+      // Reaches this tab only; other renderers revalidate on focus.
+      invalidateShiftCalendarCache(shift.userId);
+      invalidateLeaveRequestsCache(shift.userId);
       onLeaveAction?.();
     } catch (err) {
       console.error('[ShiftCard] leave action failed', err);
@@ -165,7 +180,13 @@ export default function ShiftCard({ shift, user, viewerTimezone, onClick, onLeav
       {/* Creator accounts. The roster's whole reason for carrying them: this is
           the number that sets the agent's hourly rate, so it belongs on the card
           an admin reads the week from — not only inside the edit modal.
-          Overtime is marked because it pays differently (see caCoverageService). */}
+          Overtime is marked because it pays differently (see caCoverageService).
+
+          Two kinds of overtime land here and they look different on purpose:
+          a whole overtime shift takes the "OT" prefix, while individual accounts
+          worked as overtime *inside* a regular shift take an orange ring each —
+          the rest of that shift is ordinary paid work and must not be labelled
+          as though it were not. */}
       {(shift.creatorIds?.length ?? 0) > 0 && (
         <div style={{ marginTop: '3px', display: 'flex', flexWrap: 'wrap', gap: '2px' }}>
           {shift.isOvertime && (
@@ -185,9 +206,26 @@ export default function ShiftCard({ shift, user, viewerTimezone, onClick, onLeav
               OT
             </span>
           )}
+          {/* The count that actually pays, when it differs from the count of
+              faces. A ring says "this one is different"; only the number says
+              which rate the shift is on, and that is the figure an admin is
+              here to check. */}
+          {!shift.isOvertime && overtimeIds.length > 0 && (
+            <span
+              style={{
+                fontSize: '9px',
+                fontWeight: 600,
+                color: '#fb923c',
+                alignSelf: 'center',
+              }}
+              title={`${overtimeIds.length} account${overtimeIds.length === 1 ? '' : 's'} worked as overtime inside this shift — sales only, no extra pay. Paid on ${paidCount} account${paidCount === 1 ? '' : 's'}.`}
+            >
+              +{overtimeIds.length} OT
+            </span>
+          )}
           {/* Avatars only — a roster cell in a seven-day grid has no room for
               names, and the admin is scanning for "who is on Adam today". */}
-          <CreatorChipList creatorIds={shift.creatorIds!} max={4} size="xs" avatarOnly />
+          <CreatorChipList creatorIds={shift.creatorIds!} overtimeIds={overtimeIds} max={4} size="xs" avatarOnly />
         </div>
       )}
 

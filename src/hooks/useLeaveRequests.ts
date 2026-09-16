@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
+import { invalidateShiftCalendarCache } from './useShiftCalendar';
 
 export interface LeaveRequest {
   leaveId: string;
@@ -25,6 +26,17 @@ interface LeaveRequestsState {
 }
 
 const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
+/**
+ * Drop one agent's cached leave requests.
+ *
+ * Exported for the same reason as `invalidateShiftCalendarCache`: approval
+ * happens in the CA admin queue, which is a different hook on a different
+ * surface, and the badge on the dashboard calendar is read from here.
+ */
+export function invalidateLeaveRequestsCache(uid: string): void {
+  invalidateCache(cacheKey(uid));
+}
 
 function cacheKey(uid: string): string {
   return `bluu_leave_requests_v1:${uid}`;
@@ -203,6 +215,10 @@ export function useLeaveRequests() {
       if (!res.ok) throw new Error(await errorMessage(res, 'Failed to cancel leave'));
 
       invalidateCache(cacheKey(user.uid));
+      // Withdrawing *approved* leave puts the shift occurrence back on the
+      // roster, so the cached calendar is now wrong in the other direction —
+      // missing a shift the agent is working again.
+      invalidateShiftCalendarCache(user.uid);
       await fetchData(true);
     },
     [user, fetchData],

@@ -170,6 +170,25 @@ export async function normaliseAccountIds(
   return { accountIds: valid.sort(), invalid };
 }
 
+/**
+ * The overtime subset of an assignment, constrained to it.
+ *
+ * `overtimeCreatorIds` marks which of a shift's accounts the agent covers
+ * *without extra pay*, so the wage tier counts `creatorIds` **minus** this set.
+ * That makes it a subtraction from money, which is why it is intersected rather
+ * than trusted: an id the client left behind after removing an account from the
+ * picker would quietly dock the agent a tier for an account nobody works.
+ *
+ * Pure — the ids are already validated as part of `accountIds`, so there is no
+ * second read (rule 9). Order follows `accountIds` so the stored field is
+ * stable between saves.
+ */
+export function intersectOvertimeIds(accountIds: string[], raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const requested = new Set(raw.filter((id): id is string => typeof id === 'string').map(id => id.trim()));
+  return accountIds.filter(id => requested.has(id));
+}
+
 /** Resolve ids to display names across both collections. Missing ids fall back to the id. */
 export async function resolveAccountNames(accountIds: string[]): Promise<Map<string, string>> {
   const names = new Map<string, string>();

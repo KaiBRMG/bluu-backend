@@ -23,6 +23,12 @@ export interface CreateShiftInput {
    * does not resolve would pay for an account nobody works.
    */
   creatorIds?: string[];
+  /**
+   * The subset of `creatorIds` worked as unpaid overtime *inside* this shift.
+   * Intersected with `creatorIds` by the API before it gets here — storing an id
+   * that is not assigned would subtract an account the agent never worked.
+   */
+  overtimeCreatorIds?: string[];
   isOvertime?: boolean;
   coverageOfferId?: string | null;
   paysWage?: boolean;
@@ -37,6 +43,7 @@ export interface UpdateShiftInput {
   userTimezone?: string;
   recurrence?: ShiftRecurrence | null;
   creatorIds?: string[];
+  overtimeCreatorIds?: string[];
 }
 
 /**
@@ -101,6 +108,7 @@ export async function createShift(input: CreateShiftInput): Promise<string> {
     overrideDate: null,
     isDeleted: false,
     creatorIds: input.creatorIds ?? [],
+    overtimeCreatorIds: input.overtimeCreatorIds ?? [],
     isOvertime: input.isOvertime ?? false,
     coverageOfferId: input.coverageOfferId ?? null,
     paysWage: input.paysWage ?? true,
@@ -132,6 +140,10 @@ export async function updateShift(
   // `in` rather than `!== undefined` so an explicit empty array clears the
   // assignment instead of being read as "leave it alone".
   if ('creatorIds' in updates) patch.creatorIds = updates.creatorIds ?? [];
+  // Written whenever the assignment is, never independently: the two are one
+  // fact (which accounts, and which of them pay) and letting them drift would
+  // leave an overtime id pointing at an account no longer on the shift.
+  if ('overtimeCreatorIds' in updates) patch.overtimeCreatorIds = updates.overtimeCreatorIds ?? [];
 
   await adminDb.collection(SHIFTS).doc(shiftId).update(patch);
 }
@@ -199,6 +211,7 @@ export async function createOccurrenceOverride(
     overrideDate: Timestamp.fromMillis(overrideDateMs),
     isDeleted,
     creatorIds: input.creatorIds ?? [],
+    overtimeCreatorIds: input.overtimeCreatorIds ?? [],
     isOvertime: input.isOvertime ?? false,
     coverageOfferId: input.coverageOfferId ?? null,
     paysWage: input.paysWage ?? true,

@@ -95,6 +95,15 @@ export interface SalaryShiftInput {
   trackedSeconds: number;
   /** Creators assigned to this shift. */
   creatorIds: string[];
+  /**
+   * The subset of `creatorIds` worked as overtime **inside** this shift.
+   *
+   * Subtracted from the shift's account count, so the agent keeps the sales but
+   * the hourly rate does not move — the same outcome as a `paysWage: false`
+   * cover shift, reached on the one shift an admin actually edits. Never
+   * populated on an outside-shift overtime shift, whose accounts do pay.
+   */
+  overtimeCreatorIds: string[];
   /** True for a shift created to cover someone else's released accounts. */
   isOvertime: boolean;
   /**
@@ -141,6 +150,8 @@ export interface SalaryShiftBreakdown {
   isOvertime: boolean;
   paysWage: boolean;
   creatorIds: string[];
+  /** Which of `creatorIds` were unpaid in-shift overtime, so the row can say so. */
+  overtimeCreatorIds: string[];
 }
 
 export interface SalaryDayResult {

@@ -31,6 +31,8 @@ export interface RawApiShift {
   // Creator assignment — carried through expansion so an occurrence knows which
   // accounts it covers. An override document may differ from its series root.
   creatorIds?: string[];
+  /** Subset of `creatorIds` worked as unpaid in-shift overtime — see ShiftDocument. */
+  overtimeCreatorIds?: string[];
   isOvertime?: boolean;
   coverageOfferId?: string | null;
   paysWage?: boolean;

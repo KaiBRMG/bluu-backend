@@ -157,6 +157,10 @@ export default function ShiftModal({
   // which is exactly the case the salary engine's inferred-account fallback
   // covers — see salaryEngine.ts.
   const [creatorIds,    setCreatorIds]    = useState<string[]>(shift?.creatorIds ?? []);
+  // Which of those accounts are overtime the agent works *without* extra pay.
+  // Absent on every shift written before this control existed, which reads as
+  // "all regular" — the behaviour those shifts were priced at.
+  const [overtimeCreatorIds, setOvertimeCreatorIds] = useState<string[]>(shift?.overtimeCreatorIds ?? []);
 
   // ── Date picker open states ──────────────────────────────────────────
   const [startDateOpen,  setStartDateOpen]  = useState(false);
@@ -227,6 +231,9 @@ export default function ShiftModal({
       userTimezone:   employeeTz,
       recurrence:     recurrencePayload,
       creatorIds,
+      // Sent alongside the assignment, never on its own — the server intersects
+      // the two, so an id dropped from `creatorIds` cannot survive here.
+      overtimeCreatorIds,
     };
   }
 
@@ -412,6 +419,8 @@ export default function ShiftModal({
             <CreatorAssignmentField
               value={creatorIds}
               onChange={setCreatorIds}
+              overtimeValue={overtimeCreatorIds}
+              onOvertimeChange={setOvertimeCreatorIds}
               wageTiers={salaryConfig?.wageTiers}
             />
           </div>

@@ -10,7 +10,7 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 // through to the salary engine, and a second hand-rolled one here is exactly how
 // the assignment would silently stop reaching the client.
 import { serialiseShift } from '@/lib/utils/shiftSerialise';
-import { normaliseAccountIds } from '@/lib/services/creatorAccountService';
+import { normaliseAccountIds, intersectOvertimeIds } from '@/lib/services/creatorAccountService';
 
 // ─── GET /api/shifts ─────────────────────────────────────────────────
 // ?userId=uid&start=ISO&end=ISO
@@ -60,7 +60,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     }
 
     const body = await request.json();
-    const { userId, startTime, endTime, wallClockStart, wallClockEnd, userTimezone, recurrence, creatorIds } = body;
+    const { userId, startTime, endTime, wallClockStart, wallClockEnd, userTimezone, recurrence, creatorIds, overtimeCreatorIds } = body;
 
     if (!userId || !startTime || !endTime || !wallClockStart || !wallClockEnd || !userTimezone) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -110,6 +110,9 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       createdBy: token.uid,
       recurrence: recurrence ?? null,
       creatorIds: assigned.accountIds,
+      // Constrained to the assignment rather than trusted: this set is
+      // *subtracted* from the wage tier, so a stray id would underpay.
+      overtimeCreatorIds: intersectOvertimeIds(assigned.accountIds, overtimeCreatorIds),
     });
 
     return NextResponse.json({ shiftId });

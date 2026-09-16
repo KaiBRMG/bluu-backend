@@ -1324,6 +1324,11 @@
       "indexes": []
     },
     {
+      "collectionGroup": "shifts",
+      "fieldPath": "overtimeCreatorIds",
+      "indexes": []
+    },
+    {
       "collectionGroup": "submissions",
       "fieldPath": "originalLinkNormalized",
       "indexes": [

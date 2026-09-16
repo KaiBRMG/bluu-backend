@@ -456,6 +456,21 @@ export interface ShiftDocument {
    */
   creatorIds?: string[];
 
+  /**
+   * The subset of {@link creatorIds} the agent covers as **overtime inside this
+   * shift** — extra accounts they work without extra pay.
+   *
+   * They keep the sales, but the accounts do not count toward the shift's wage
+   * tier: an agent on 3 regular accounts who picks up 2 more during the same
+   * hours is still paid the 3-account rate. Outside-shift overtime is the other
+   * case entirely — a second shift with `isOvertime: true`, whose accounts *do*
+   * pay (see documentation/ca-salary.md §6).
+   *
+   * Always a subset of `creatorIds`; the API intersects the two before writing,
+   * so an id removed from the assignment cannot survive here as a ghost.
+   */
+  overtimeCreatorIds?: string[];
+
   /** True for a shift created to cover accounts released by someone else's leave. */
   isOvertime?: boolean;
 

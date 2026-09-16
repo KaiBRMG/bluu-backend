@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
-import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
+import { getCache, setCache, invalidateCache, invalidateCacheByPrefix } from '@/lib/queryCache';
 import { expandShiftsForWindow, type ExpandedShift, type RawApiShift } from '@/lib/utils/recurrence';
 import { monthKeyRange, currentMonthKey } from '@/lib/salary/salaryDate';
 
@@ -32,9 +32,29 @@ import { monthKeyRange, currentMonthKey } from '@/lib/salary/salaryDate';
 
 const CACHE_TTL_MS = 2 * 60 * 1000;
 const PAD_MS = 24 * 60 * 60 * 1000;
+const CACHE_PREFIX = 'bluu_shift_calendar_v1:';
 
 function cacheKey(uid: string, month: string): string {
-  return `bluu_shift_calendar_v1:${uid}:${month}`;
+  return `${CACHE_PREFIX}${uid}:${month}`;
+}
+
+/**
+ * Drop the cached roster so the next read goes to the server.
+ *
+ * Exported because **the things that change an agent's roster do not live in
+ * this hook**: approving leave tombstones an occurrence from the CA admin
+ * queue, and assigning cover creates a shift from the coverage board. Neither
+ * knew about this cache, so the dashboard kept showing a shift that had just
+ * been released — while the overtime accounts it released appeared instantly,
+ * because `useCoverageOffers` caches nothing. One surface, two staleness
+ * policies, which reads as the app being wrong rather than slow.
+ *
+ * Only reaches the caller's own tab: `sessionStorage` is per-renderer, so
+ * another user's dashboard is covered by the focus revalidation below, not by
+ * this.
+ */
+export function invalidateShiftCalendarCache(uid?: string): void {
+  invalidateCacheByPrefix(uid ? `${CACHE_PREFIX}${uid}:` : CACHE_PREFIX);
 }
 
 function mergeMonths(batches: ExpandedShift[][]): ExpandedShift[] {
@@ -131,6 +151,32 @@ export function useShiftCalendar(months: string | string[] = currentMonthKey()) 
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  // ── Revalidate when the window comes back ──
+  //
+  // Without this the roster is read **once per mount and never again**. The
+  // Electron shell routinely stays open for weeks (CLAUDE.md rule 9c), so an
+  // admin editing the schedule in another window — or in another surface of this
+  // one — reached a dashboard that had already been sitting on its answer for
+  // days. The TTL alone does not help: nothing re-reads the cache, so nothing
+  // ever notices it expired.
+  //
+  // Deliberately `load()` and not `load(true)`: a cache hit inside the TTL costs
+  // nothing and does not even touch the network, so the refresh is free for
+  // someone alt-tabbing and is exactly one request for someone returning after a
+  // couple of minutes (rule 9). Staleness is bounded by the TTL instead of being
+  // unbounded.
+  useEffect(() => {
+    const revalidate = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    window.addEventListener('focus', revalidate);
+    document.addEventListener('visibilitychange', revalidate);
+    return () => {
+      window.removeEventListener('focus', revalidate);
+      document.removeEventListener('visibilitychange', revalidate);
+    };
   }, [load]);
 
   const refetch = useCallback(async () => {

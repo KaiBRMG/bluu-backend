@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
+import { invalidateShiftCalendarCache } from './useShiftCalendar';
+import { invalidateLeaveRequestsCache } from './useLeaveRequests';
 
 /**
  * The admin leave-approval queue — every agent's requests, soonest shift first.
@@ -109,10 +111,27 @@ export function useAdminLeaveQueue(status: 'pending' | 'approved' | 'denied' | '
       }
 
       const body = (await res.json()) as { coverage?: LeaveDecisionResult | null };
+
+      // Approving releases the occurrence — the agent's roster just changed, and
+      // the dashboard caches that answer for two minutes under a key this hook
+      // has no other reason to know about. Without this the shift stayed on the
+      // calendar while the accounts it released appeared on the overtime board
+      // immediately (that board caches nothing), which reads as the release
+      // half-working rather than as a stale read.
+      //
+      // Only the acting admin's own tab is reachable — `sessionStorage` is
+      // per-renderer — so this is what fixes approving your *own* leave. Another
+      // agent's dashboard picks the change up on its next focus revalidation.
+      const target = rows.find(row => row.leaveId === leaveId)?.userId;
+      if (target) {
+        invalidateShiftCalendarCache(target);
+        invalidateLeaveRequestsCache(target);
+      }
+
       await load();
       return body.coverage ?? null;
     },
-    [user, load],
+    [user, load, rows],
   );
 
   return { rows, loading, error, refetch: load, decide };

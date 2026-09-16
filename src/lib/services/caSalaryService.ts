@@ -489,6 +489,7 @@ function resolveShiftInputs(
       scheduledHours: Math.max(0, (end - start) / 3_600_000),
       trackedSeconds,
       creatorIds: occurrence.creatorIds ?? [],
+      overtimeCreatorIds: occurrence.overtimeCreatorIds ?? [],
       isOvertime: occurrence.isOvertime ?? false,
       paysWage: occurrence.paysWage ?? true,
     };

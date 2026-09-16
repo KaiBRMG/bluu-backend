@@ -74,7 +74,7 @@ The commission tier is read from **month-to-date gross including the current day
 
 Clamps rather than interpolates. **Zero accounts pays nothing** — a shift with no accounts assigned is not a shift that was worked, and paying it would quietly reward a missing assignment.
 
-The count comes from the shift's `creatorIds`. For days recorded before creator assignment existed it falls back to **distinct creators with a sale that day**, and the cell is flagged as inferred (orange in the grid, `accountCountSource: 'sales'`).
+The count comes from the shift's `creatorIds` **minus its `overtimeCreatorIds`** — accounts the agent works inside that shift without extra pay (§6). For days recorded before creator assignment existed it falls back to **distinct creators with a sale that day**, and the cell is flagged as inferred (orange in the grid, `accountCountSource: 'sales'`).
 
 ### Sub-accounts are peers, and cost the engine nothing
 
@@ -114,7 +114,7 @@ When an agent works more than one shift in a day (a regular shift plus overtime)
 
 Under `per-shift`, a day with a regular shift *and* an overtime shift has **no single account count and no single rate**. The engine still has to put one number in each column, and both are summaries:
 
-- **`accountCount` is the union** of the paying shifts' `creatorIds` — a `Set`, so a 4-account regular shift plus a 3-account overtime shift sharing two creators reads **5**, not 7.
+- **`accountCount` is the union** of the paying shifts' *paying* accounts (`creatorIds` less `overtimeCreatorIds`) — a `Set`, so a 4-account regular shift plus a 3-account overtime shift sharing two creators reads **5**, not 7.
 - **`hourlyRate` is the hours-weighted blend** — `total wage ÷ total payable hours` whenever more than one shift pays. $3.50 and $4.50 across near-equal hours reads **$3.99**, a rate nobody was ever paid.
 
 `wage` is unaffected: it comes from `wageFromShifts`, the sum of each shift priced at its own rate, **not** `hours × hourlyRate`. (The one exception is a day where `hours`, `hourlyRate` or `accountCount` is overridden — there the engine deliberately recomputes `hours × hourlyRate`, because an admin who edits hours should not have to restate the wage too.)
@@ -235,11 +235,30 @@ The release used to read `shifts/{leave.shiftId}` directly, which after any of t
 | Extra hours paid | No | Yes |
 | Counts toward the wage tier | No | Yes |
 | Keeps the sales | Yes | Yes |
-| How it is stored | A shift with `paysWage: false` | A real shift, `isOvertime: true` |
+| How it is stored | `paysWage: false` shift, **or** `overtimeCreatorIds` on the real shift | A real shift, `isOvertime: true` |
 
-In-shift cover is recorded as its **own zero-wage shift** rather than by appending the creator to the agent's real shift. Appending would raise that shift's account count and therefore its hourly rate — precisely the wage increase this case must not produce.
+**An agent on 3 regular accounts who picks up 2 more during those same hours is still paid the 3-account rate.** Working a *second* shift outside their hours is the other case entirely, and there the overtime accounts do pay — two shifts in a day, each priced on its own accounts.
 
 Outside-shift assignments **merge** into an overtime shift the agent already has for the same window. Two one-account shifts would pay the 1-account rate twice instead of the 2-account rate once, which is both wrong and worse for the agent.
+
+### In-shift cover has two representations, because it has two doors
+
+The rule above is one rule. It is reached from two places, and each records it the way its own surface can:
+
+| Door | Representation | Why that one |
+|---|---|---|
+| **Coverage board** (CA Admin → Coverage) — an offer released by someone's leave | Its own **zero-wage shift** (`paysWage: false`, `isOvertime: true`, `coverageOfferId` set) | The assignment has to point back at the offer it came from, and appending the creator to the agent's real shift would raise that shift's account count — precisely the raise this case must not produce |
+| **Shift Management** (`/admin-portal/shift-management`) — an admin editing the shift directly | **`overtimeCreatorIds`**, a subset of that shift's own `creatorIds` | There is no offer, and no second shift to attach it to. The admin is editing one shift and is naming, on it, which of its accounts pay |
+
+**Both price identically**, and that is the whole point — the engine excludes a `paysWage: false` shift wholesale and excludes `overtimeCreatorIds` from a paying shift's account count, in the same few lines of `salaryEngine.ts`. Before the second door existed, an admin adding two cover accounts by hand in Shift Management moved the agent from $3.50 to $5.50/hour with nothing on any screen saying so; the assignment field now carries a **Regular / Overtime** toggle per account and restates the rate from the paid count alone.
+
+Three constraints on the field:
+
+- **It is always a subset of `creatorIds`, enforced server-side.** `intersectOvertimeIds` runs on every write, because this set is *subtracted* from money: an id left behind after an account was removed from the picker would dock the agent a tier for work nobody does.
+- **It is written only alongside `creatorIds`, never on its own.** The two are one fact — which accounts, and which of them pay — and letting them drift is how a ghost id survives.
+- **It is empty on an outside-shift overtime shift.** Those accounts pay; marking them would be the in-shift rule applied to the case it is not about.
+
+**Marked on both schedules.** An overtime account renders with an orange ring on its avatar — on the admin grid ([`ShiftCard`](../src/components/admin/shift-management/ShiftCard.tsx)) and on the agent's own calendar ([`ShiftCalendar`](../src/components/shifts/ShiftCalendar.tsx)) — beside a count (`+2 OT` / `2 overtime`) that says what the ring means. The ring alone would be colour encoding nothing, which DESIGN.md §2 forbids; the count is also the figure a reader is actually after, since it is the *difference* between the faces they can see and the rate the shift is on. `CreatorChipList` orders paid accounts first so its `max` truncates the overtime ones rather than the ones that set the rate.
 
 ### One surface: the calendar absorbed three pages
 
@@ -264,6 +283,16 @@ Three things about this are load-bearing:
 - **The overtime layer is fetched for the visible range**, not for a rolling window around today. `useCoverageOffers` defaults to `today-1 → today+45`, which was right while the only view was the current month and wrong the moment the arrows can leave it — a week three arrows out would draw the roster and silently claim no cover was going spare.
 
 A week is also the only view that can **straddle a month boundary**, which is why [`useShiftCalendar`](../src/hooks/useShiftCalendar.ts) takes a *list* of months and merges them on `(shiftId, occurrenceStart)` (the padded windows of two adjacent months overlap). It still fetches and caches whole **months** rather than the seven days asked for: scrolling through September is then one request rather than five, and the dialog's month view reuses the entry the week view already warmed (rule 9).
+
+### Keeping the dashboard current — one surface, one staleness policy
+
+The calendar caches the roster in `sessionStorage` for two minutes; the overtime layer beside it caches **nothing**. Left alone, that asymmetry is visible as a bug: approving leave put the released accounts on the board instantly while the shift they came from stayed on the calendar. Same panel, same second, two answers.
+
+Three rules keep them in step, and a new surface that changes a roster has to honour them:
+
+1. **A write invalidates what it changed.** [`invalidateShiftCalendarCache(uid)`](../src/hooks/useShiftCalendar.ts) and [`invalidateLeaveRequestsCache(uid)`](../src/hooks/useLeaveRequests.ts) are exported for callers **outside** these hooks, because the writes live elsewhere: leave is approved from the CA admin queue (`useAdminLeaveQueue`) **and** from a card on the shift-management grid (`ShiftCard`) — two call sites, both of which must invalidate, and the second is the one that gets forgotten. Withdrawing approved leave invalidates too: it puts the occurrence *back*.
+2. **`sessionStorage` is per-renderer, so invalidation only reaches the acting user's own tab.** That is what fixes approving your *own* leave. It can do nothing for the absent agent's dashboard, which is what rule 3 is for.
+3. **The calendar revalidates on `focus` / `visibilitychange`.** Without it the roster is read once per mount and never again, and this renderer stays open for weeks (rule 9c) — an admin's schedule edit reached a dashboard that had been sitting on its answer since it was opened. The handler calls `load()`, not `load(true)`: a hit inside the TTL costs nothing, so the refresh is free for someone alt-tabbing and is one request for someone returning later. Staleness is bounded by the TTL rather than unbounded.
 
 **The dashboard has no month picker any more, and must not regain one.** It used to have one governing the page, because a picker that moved only the calendar could put August's roster above September's pay with both labels correct and nothing saying the two scopes differed. That risk is gone by construction rather than by coordination: the schedule navigates itself, and `SalarySummaryCard` renders the current unfinalised month — the only month a dashboard summary should mean. History has its own picker on `/ca-portal/dashboard/salary`.
 
@@ -327,7 +356,7 @@ Two rules, and both are load-bearing:
 
 `ca-coverage-offers` is closed too even though the board is meant to be seen by every agent: the API does something a rule cannot, which is strip the other claimants' identities for non-admin readers.
 
-New fields on `shifts`: `creatorIds`, `isOvertime`, `coverageOfferId`, `paysWage`. Nothing queries them, so all four are index-exempt (rule 9). `leave_requests` gained `releasedShiftId` / `releasedOccurrenceStart` (§6) on the same terms.
+New fields on `shifts`: `creatorIds`, `overtimeCreatorIds`, `isOvertime`, `coverageOfferId`, `paysWage`. Only `creatorIds` is queried (one `array-contains`, by the sub-account delete guard); the rest are index-exempt (rule 9). `leave_requests` gained `releasedShiftId` / `releasedOccurrenceStart` (§6) on the same terms.
 
 ---
 
@@ -351,7 +380,8 @@ Helpers: [`salaryAuth.ts`](../src/lib/salary/salaryAuth.ts).
 
 ```
 /admin-portal/shift-management
-  Shifts        ← creator chips on each card + the picker in the modal
+  Shifts        ← creator chips on each card + the picker in the modal,
+                  each account marked Regular or Overtime (unpaid, in-shift)
   Active Users · Timesheets · Screenshots · Leave (balances) · Analytics
 
 /ca-portal/admin            (tabbed)
@@ -419,7 +449,8 @@ Three calls worth not re-litigating:
 | [`AdminOverview.tsx`](../src/components/ca-admin/AdminOverview.tsx) | The Overview tab — the matrix, the leaderboard and the attention band |
 | [`CommissionLadder.tsx`](../src/components/salary/CommissionLadder.tsx) | The stepped scale, drawn as steps |
 | [`SalaryDayTable.tsx`](../src/components/salary/SalaryDayTable.tsx) | The month grid, read-only and editable |
-| [`useLeaveRequests.ts`](../src/hooks/useLeaveRequests.ts) | **Module-level shared store**, like `useCreators`. The CA dashboard mounts it twice by design (balance card + calendar); per-instance state meant two identical requests on mount and a badge that went stale while the calendar beside it refreshed. |
+| [`useLeaveRequests.ts`](../src/hooks/useLeaveRequests.ts) | **Module-level shared store**, like `useCreators`. The CA dashboard mounts it twice by design (balance card + calendar); per-instance state meant two identical requests on mount and a badge that went stale while the calendar beside it refreshed. Exports `invalidateLeaveRequestsCache` for writers on other surfaces — see §6. |
+| [`useShiftCalendar.ts`](../src/hooks/useShiftCalendar.ts) | The agent's own roster, cached per month and revalidated on window focus. Exports `invalidateShiftCalendarCache` — see §6. |
 | [`CreatorChip.tsx`](../src/components/creators/CreatorChip.tsx) | **The house pattern for showing a creator** — `Avatar` + profile picture, initials fallback seeded from the stage name |
 | [`creatorAccountService.ts`](../src/lib/services/creatorAccountService.ts) | Creators + sub-accounts as one assignable list; validates ids across both collections |
 | [`useCreators.ts`](../src/hooks/useCreators.ts) | Module-level shared store behind every creator chip — one fetch, one parse, one `Map` per page |
