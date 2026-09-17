@@ -11,6 +11,7 @@ import CreateNotificationDialog from "@/components/admin/notifications/CreateNot
 import NotificationHistoryList from "@/components/admin/notifications/NotificationHistoryList";
 import NotificationRecipientsDialog from "@/components/admin/notifications/NotificationRecipientsDialog";
 import AutomatedNotificationsList from "@/components/admin/notifications/AutomatedNotificationsList";
+import NotificationLogsList from "@/components/admin/notifications/NotificationLogsList";
 import { AUTOMATED_NOTIFICATIONS, AUTOMATED_CREATOR_NOTIFICATIONS } from "@/lib/automatedNotifications";
 import type { AdminNotificationBatch } from "@/types/firestore";
 
@@ -19,10 +20,13 @@ export default function AdminNotificationsPage() {
   const { creators, loading: creatorsLoading } = useCreatorRecipients();
   const { batches, loading: batchesLoading, refetch, createBatch, deleteBatch } = useAdminNotifications();
   const [selectedBatch, setSelectedBatch] = useState<AdminNotificationBatch | null>(null);
+  // Tabs are controlled only so the shell can widen for the Logs ledger: six
+  // columns do not fit the reading measure the other two tabs are sized to.
+  const [tab, setTab] = useState("sent");
 
   return (
     <AppLayout>
-      <div className="max-w-5xl">
+      <div className={tab === "logs" ? "max-w-7xl" : "max-w-5xl"}>
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold tracking-tight">System Notifications</h1>
 
@@ -39,7 +43,7 @@ export default function AdminNotificationsPage() {
           )}
         </div>
 
-        <Tabs defaultValue="sent">
+        <Tabs value={tab} onValueChange={setTab}>
           <TabsList>
             <TabsTrigger value="sent">One-Time Notifications</TabsTrigger>
             <TabsTrigger value="automated">
@@ -48,6 +52,7 @@ export default function AdminNotificationsPage() {
                 {AUTOMATED_NOTIFICATIONS.length + AUTOMATED_CREATOR_NOTIFICATIONS.length}
               </span>
             </TabsTrigger>
+            <TabsTrigger value="logs">Logs</TabsTrigger>
           </TabsList>
 
           <TabsContent value="sent">
@@ -60,6 +65,16 @@ export default function AdminNotificationsPage() {
 
           <TabsContent value="automated">
             <AutomatedNotificationsList />
+          </TabsContent>
+
+          {/*
+            The delivery log is one row per `notifications` document — what was
+            sent, to whom, and whether they opened it — across both the manual
+            and the automated paths. Mounted lazily by `Tabs`, so an admin who
+            never opens it pays nothing.
+          */}
+          <TabsContent value="logs">
+            <NotificationLogsList />
           </TabsContent>
         </Tabs>
 

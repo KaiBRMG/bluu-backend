@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  ArrowLeftIcon, ExternalLinkIcon, ImageIcon, Loader2Icon, RefreshCwIcon,
+  ExternalLinkIcon, ImageIcon, Loader2Icon, RefreshCwIcon,
 } from 'lucide-react';
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts';
 import {
@@ -95,31 +95,26 @@ export function PostDetailSheet({
 }
 
 /**
- * The post view's own contents, with no panel around them.
+ * The panel's contents, split from the panel itself so `post` is non-null in
+ * here. The `Sheet` above keeps rendering through its close animation while this
+ * unmounts with the post, which is also what resets the metric selection between
+ * two posts opened in a row.
  *
- * Split out so the account panel can render this **as its second level** rather
- * than opening a second Sheet on top of the first. Two stacked Radix dialogs
- * would mean two overlays darkening the canvas twice, two focus traps, and an
- * Esc that only closes the top one — for a panel that is entirely hidden behind
- * the one in front of it anyway. One panel that drills in keeps a single trap
- * and makes "back to the account" the same gesture, in the same place, as every
- * other back control in this subsystem.
- *
- * `onBack` is what distinguishes the two callers: present, the header grows a
- * back control and a delete returns to the account; absent, this is the whole
- * panel and a delete closes it.
+ * The **account** panel does not use this. Its posts open their detail inside
+ * their own card ([`PostCard`](./PostCard.tsx)) rather than in a second sheet:
+ * there, the list is the context for every number in it, and a detail that
+ * replaced the list made comparing two posts a round trip with nothing on screen
+ * in between. Here the post arrived alone, from a roster-wide table, so there is
+ * no list to preserve and the width is worth a chart.
  */
-export function PostDetailBody({
+function PostDetailBody({
   post,
-  onBack,
   onAfterDelete,
   onSync,
   onSetTracking,
   onDelete,
 }: {
   post: GrowthPost;
-  /** Provided only when this is a level inside another panel. */
-  onBack?: () => void;
   /** Where to go once the post no longer exists. */
   onAfterDelete: () => void;
   onSync: (id: string) => Promise<{ refreshedAlongside: number }>;
@@ -204,14 +199,6 @@ export function PostDetailBody({
   return (
     <>
       <SheetHeader className="gap-3">
-        {/* The same back control, in the same place, as every other way out of
-            a detail in this subsystem. */}
-        {onBack && (
-          <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 h-8 w-fit text-zinc-400">
-            <ArrowLeftIcon className="size-4" aria-hidden />
-            Back to account
-          </Button>
-        )}
         <div className="flex flex-wrap items-center gap-2">
           <RefreshStatePill post={post} />
           <span className="text-[11px] text-zinc-400">

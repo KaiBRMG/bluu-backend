@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { toast } from 'sonner';
 import type { ExpandedShift } from '@/lib/utils/recurrence';
 import type { ShiftUser } from '@/hooks/useShifts';
 import { invalidateShiftCalendarCache } from '@/hooks/useShiftCalendar';
@@ -109,11 +110,32 @@ export default function ShiftCard({ shift, user, viewerTimezone, onClick, onLeav
     setIsActioning(true);
     try {
       const idToken = await authUser.getIdToken();
-      await fetch(`/api/shifts/leave/${shift.leaveRequest.leaveId}/approve`, {
+      const res = await fetch(`/api/shifts/leave/${shift.leaveRequest.leaveId}/approve`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       });
+
+      // Checked, and the server's own message shown. This used to be
+      // fire-and-forget, which was survivable while approval could not fail on
+      // anything an admin controls. It can now: approving leave an agent has no
+      // balance for is refused with a 409 naming the fix, and a refusal this
+      // surface swallowed would look exactly like a success — the shift simply
+      // staying on the roster, which is also what a successful *denial* looks
+      // like. `useAdminLeaveQueue` already does this; this is the second call
+      // site, and the one that gets forgotten (ca-salary.md §6).
+      if (!res.ok) {
+        let message = `Could not ${action} this request (${res.status})`;
+        try {
+          const body = await res.json();
+          if (body?.error) message = body.error;
+        } catch {
+          /* keep the status-based message */
+        }
+        toast.error(message);
+        return;
+      }
+
       // Approving released this occurrence, which changes the *agent's* roster —
       // and their dashboard caches it under a key this grid otherwise never
       // touches. `onLeaveAction` only refreshes the admin week view, so without
@@ -125,6 +147,9 @@ export default function ShiftCard({ shift, user, viewerTimezone, onClick, onLeav
       onLeaveAction?.();
     } catch (err) {
       console.error('[ShiftCard] leave action failed', err);
+      // A thrown request is a network failure, and an admin who saw nothing
+      // happen would click again. The console alone was never the audience.
+      toast.error(`Could not ${action} this request. Check your connection and try again.`);
     } finally {
       setIsActioning(false);
     }

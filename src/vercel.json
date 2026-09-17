@@ -16,6 +16,10 @@
     {
       "path": "/api/cron/ca-notifications",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/leave-reset",
+      "schedule": "30 22 * * *"
     }
   ]
 }

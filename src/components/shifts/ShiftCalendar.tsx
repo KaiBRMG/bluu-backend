@@ -7,6 +7,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  CircleAlert,
   Loader2Icon,
   Plus,
   RotateCcw,
@@ -19,7 +20,7 @@ import { SURFACE } from '@/lib/surfaces';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useBootPhase } from '@/contexts/BootLoaderContext';
 import { useShiftCalendar } from '@/hooks/useShiftCalendar';
 import { useCoverageOffers, type CoverageOfferRow } from '@/hooks/useCoverageOffers';
@@ -105,6 +106,17 @@ import { splitShiftAccounts } from '@/lib/salary/shiftAccounts';
  */
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/**
+ * The empty account list, shared.
+ *
+ * `creatorIds` is optional on `ExpandedShift`, and `?? []` built a fresh array
+ * identity on every render — which defeats `CreatorChipList`'s `memo` exactly
+ * where it matters most, inside a grid that re-renders on every claim, every
+ * leave change and every window focus. The component's own doc warns about this;
+ * the adjacent `overtimeIds` prop already avoided it.
+ */
+const NO_IDS: string[] = [];
 
 /** Declared once so each tooltip and its screen-reader text cannot drift apart. */
 const IN_SHIFT_COVER_EXPLANATION =
@@ -194,14 +206,25 @@ export function ShiftCalendar({
   const rangeEnd = isWeek ? weekEnd : `${month}-${daysInMonth(month)}`;
 
   const { shifts, loading, error, refetch } = useShiftCalendar(months);
-  const { offers, setClaim, loading: offersLoading } = useCoverageOffers({
+  const {
+    offers,
+    setClaim,
+    loading: offersLoading,
+    // Both hooks below build a real error message and both used to have it
+    // dropped right here. An unreadable list then rendered as an authoritative
+    // empty one: "No overtime available this week" for a request that failed,
+    // and — worse — no "time off requested" badge on a shift that has one, which
+    // also re-offers the leave button for a day already booked off.
+    error: offersError,
+    refetch: refetchOffers,
+  } = useCoverageOffers({
     from: rangeStart,
     to: rangeEnd,
     status: 'available',
     enabled: showOvertime,
   });
 
-  const { leaveRequests, requestLeave, cancelLeave } = useLeaveRequests();
+  const { leaveRequests, requestLeave, cancelLeave, error: leaveError } = useLeaveRequests();
   const [leaveTarget, setLeaveTarget] = useState<LeaveTarget | null>(null);
 
   // The salary card above this one gates the boot screen, so without this the
@@ -301,9 +324,37 @@ export function ShiftCalendar({
   );
   const formatTime = useCallback((ms: number) => timeFormat.format(new Date(ms)), [timeFormat]);
 
+  // Hoisted out of the cell map: it was an inline async closure rebuilt per
+  // shift per render, and both layouts need the identical one.
+  const handleCancelLeave = useCallback(
+    async (leaveId: string) => {
+      try {
+        await cancelLeave(leaveId);
+        toast.success('Leave request cancelled');
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Could not cancel');
+      }
+    },
+    [cancelLeave],
+  );
+
   // `bare` drops the panel because the Full Schedule dialog is already a surface;
   // nesting one inside the other stacks two overlays and reads as a card in a card.
   const panel = bare ? className : cn('rounded-xl p-4', SURFACE, className);
+
+  /**
+   * Every branch below renders through this, so the panel gets one tooltip
+   * policy instead of inheriting the sidebar's.
+   *
+   * `AppLayout`'s provider sets `delayDuration={0}`, which is right for a nav
+   * rail where each item is a deliberate target. It is wrong here: the month
+   * grid packs up to four triggers into a ~90px cell, so a mouse crossing a week
+   * opens a chain of tooltips over the content the agent is reading. 300ms is
+   * the value OF Manager's composer already uses for the same reason.
+   */
+  const withTooltipPolicy = (children: ReactNode) => (
+    <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
+  );
   // Seven cells on one row have the height a month grid cannot spare, and the week
   // view is the one that has to hold a shift, its accounts and an offer at once.
   const cellMinHeight = isWeek ? 'min-h-[8.5rem]' : 'min-h-[4.75rem]';
@@ -382,11 +433,26 @@ export function ShiftCalendar({
     return (
       <div className={panel}>
         {header(<Skeleton className="h-3.5 w-40 rounded" />)}
-        <div className="grid grid-cols-7 gap-1">
-          {Array.from({ length: isWeek ? 7 : 35 }).map((_, index) => (
-            <Skeleton key={index} className={cn('rounded-md', isWeek ? 'h-32' : 'h-16')} />
-          ))}
-        </div>
+        {/* Shaped to what replaces it, in both layouts.
+            The old version drew 35 cells at `h-16` for every month — but a month
+            starting on a Saturday or Sunday pads to six rows, so a whole row
+            appeared on load, and `h-16` (64px) sits 12px under the real
+            `min-h-[4.75rem]`. Across six rows that is ~70px of jump, which drags
+            the scroll position with it — the exact failure `SalarySummaryCard`
+            documents itself as avoiding. */}
+        {isWeek ? (
+          <div className="flex flex-col gap-1">
+            {Array.from({ length: 7 }).map((_, index) => (
+              <Skeleton key={index} className="h-[4.5rem] rounded-md" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-7 gap-1">
+            {Array.from({ length: weeks.length * 7 }).map((_, index) => (
+              <Skeleton key={index} className="h-[4.75rem] rounded-md" />
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -411,7 +477,7 @@ export function ShiftCalendar({
 
   const scopeLabel = isWeek ? formatWeekLabel(weekStart) : formatMonthLabel(month);
 
-  return (
+  return withTooltipPolicy(
     <div className={panel}>
       {header(
         <>
@@ -419,232 +485,205 @@ export function ShiftCalendar({
         </>,
       )}
 
-      <div
-        className="grid grid-cols-7 gap-1"
-        role="grid"
-        aria-label={`Shift calendar for ${scopeLabel}`}
-      >
-        <div role="row" className="contents">
-          {WEEKDAY_LABELS.map(label => (
-            <div key={label} role="columnheader" className="pb-1 text-center text-[11px] font-medium text-zinc-400">
-              {label}
-            </div>
-          ))}
-        </div>
+      {isWeek ? (
+        /* ── The week is seven rows, not seven cells ──
 
-        {weeks.map((week, weekIndex) => (
-          <div key={`week-${weekIndex}`} role="row" className="contents">
-            {week.map((cell, dayIndex) => {
-              if (!cell) return <div key={`blank-${weekIndex}-${dayIndex}`} role="gridcell" aria-hidden />;
-              const isToday = cell.day === today;
-              const hasShift = cell.shifts.length > 0;
+           Every hard constraint the grid imposed traced back to one number: a
+           day cell is ~90px. That forced avatars without names, pushed all three
+           overtime explanations into tooltips, truncated the start time, and
+           drove pay-relevant text to 10px — below this system's own floor for
+           content that carries meaning.
 
-              return (
-                <div
-                  key={cell.day}
-                  role="gridcell"
-                  className={cn(
-                    cellMinHeight,
-                    'rounded-md border p-1.5 transition-colors duration-[120ms]',
-                    hasShift ? 'border-white/[0.07] bg-white/[0.03]' : 'border-transparent',
-                    isToday && 'border-action-blue/40 bg-action-blue/[0.08]',
-                  )}
-                >
-                  <span
+           A week has seven days and the full panel width, so a row gives each
+           one ~700px instead. Names render, the pay consequence is visible text
+           rather than a hover, and the leave button can rest visible because it
+           is no longer competing for a cell. The month keeps the grid, in the
+           Full Schedule dialog, where it is read for *shape* — "which weeks am I
+           heavy" — rather than for detail.
+
+           The two layouts share `ShiftEntry` and `OfferCell`, so what the
+           original single-cell renderer was protecting (one definition of leave,
+           cover and the claim popover) still holds. What differs between them is
+           density, which is the one thing that actually differs. */
+        <ul className="flex flex-col gap-1" aria-label={`Shifts for ${scopeLabel}`}>
+          {cells.map(cell => {
+            const isToday = cell.day === today;
+            const hasShift = cell.shifts.length > 0;
+
+            return (
+              <li
+                key={cell.day}
+                className={cn(
+                  'flex gap-3 rounded-md border p-2 transition-colors duration-[120ms] sm:gap-4 sm:p-2.5',
+                  hasShift || cell.offers.length > 0
+                    ? 'border-white/[0.07] bg-white/[0.025]'
+                    : 'border-transparent',
+                  // `/70` rather than `/40`: at row scale the border is what the
+                  // eye lands on for "today", and `/40` measured 1.74:1 against
+                  // the canvas — a mark that is technically present and
+                  // practically invisible.
+                  isToday && 'border-action-blue/70 bg-action-blue/[0.08]',
+                )}
+              >
+                {/* The date column. Fixed width so every row's content starts on
+                    the same x — a readable left edge is the point of a list. */}
+                <div className="w-14 shrink-0 sm:w-16">
+                  <div
                     className={cn(
-                      'block text-[11px] tabular-nums',
-                      isToday ? 'font-semibold text-action-blue' : 'text-zinc-400',
+                      'text-[11px] font-medium uppercase tracking-wide',
+                      isToday ? 'text-action-blue' : 'text-zinc-400',
                     )}
                   >
-                    {/* A week can straddle a month boundary, where a bare "1"
-                        says nothing about which month it is the 1st of. The
-                        month grid never has that ambiguity, so it keeps the
-                        number alone. */}
-                    {isWeek && cell.date === 1 ? formatDayLabel(cell.day) : cell.date}
-                  </span>
+                    {WEEKDAY_LABELS[(dayOfWeek(cell.day) + 6) % 7]}
+                  </div>
+                  <div
+                    className={cn(
+                      'text-lg font-semibold tabular-nums leading-tight',
+                      isToday ? 'text-action-blue' : 'text-foreground',
+                    )}
+                  >
+                    {cell.date}
+                  </div>
+                  {/* Today is a shape and a word, never only a hue — the same
+                      rule the leave badge follows. */}
+                  {isToday && <div className="text-[10px] font-medium text-action-blue">Today</div>}
+                </div>
 
-                  {/* ── Primary: the agent's own shifts ── */}
-                  {cell.shifts.map(shift => {
-                    const isOvertime = shift.isOvertime ?? false;
-                    const paysWage = shift.paysWage ?? true;
-                    const ids = shift.creatorIds ?? [];
-                    // Accounts on this shift marked overtime. What that means
-                    // depends on what sits beside them: alongside regular
-                    // accounts they are worked for the sales only, and on a
-                    // shift that is nothing else they simply mark the shift as
-                    // overtime — it pays on them like any other.
-                    const split = splitShiftAccounts(ids, shift.overtimeCreatorIds);
-                    const overtimeIds = split.overtimeIds;
-                    const paidCount = split.paidIds.length;
-                    const fullOvertime = split.isFullyOvertime;
+                <div className="min-w-0 flex-1">
+                  {!hasShift && cell.offers.length === 0 && (
+                    <p className="py-1 text-xs text-zinc-400">No shift</p>
+                  )}
 
-                    const leave = leaveByOccurrence.get(occurrenceKey(shift)) ?? null;
-                    // Offered right up until the shift starts. The 4-day notice is
-                    // guidance, not a gate — an agent who is ill tomorrow still has
-                    // to tell someone, and refusing the request only moves that
-                    // conversation somewhere nobody can see it. Not offered on an
-                    // in-shift cover: there are no hours of its own to take off.
-                    const canRequestLeave = paysWage && !leave && shift.occurrenceStart > now;
-                    // The cap the salary page tells the agent about, in hours.
-                    const shiftHours = (shift.occurrenceEnd - shift.occurrenceStart) / 3_600_000;
+                  {cell.shifts.map(shift => (
+                    <ShiftEntry
+                      key={`${shift.shiftId}-${shift.occurrenceStart}`}
+                      shift={shift}
+                      day={cell.day}
+                      dense={false}
+                      leave={leaveByOccurrence.get(occurrenceKey(shift)) ?? null}
+                      leaveBlocked={Boolean(leaveError)}
+                      now={now}
+                      formatTime={formatTime}
+                      onRequestLeave={setLeaveTarget}
+                      onCancelLeave={handleCancelLeave}
+                    />
+                  ))}
 
-                    return (
-                      <div
-                        key={`${shift.shiftId}-${shift.occurrenceStart}`}
-                        className="group/shift mt-1"
-                      >
-                        {/* An in-shift cover has no hours of its own, so showing a
-                            time for it would misrepresent what it pays. */}
-                        {paysWage ? (
-                          <span className="flex items-center gap-0.5 text-[11px] tabular-nums text-zinc-300">
-                            {(isOvertime || fullOvertime) && (
-                              <Plus className="size-2.5 shrink-0 text-orange-400" aria-hidden />
-                            )}
-                            {/* Start *and* length. Hours are capped at the shift's
-                                scheduled length, so a start time alone left the figure
-                                that sets the wage invisible anywhere in the product —
-                                while the offers layer below already showed a window.
-                                The full range does not fit ~90px, and the length is the
-                                half that decides pay; the exact end goes to the screen
-                                reader rather than being dropped. The Clock icon went to
-                                buy the room. */}
-                            {/* Two elements, not one truncating string. At the
-                                1024px window floor a cell has ~80px and the pair
-                                overflows, so a single `truncate` clipped the tail —
-                                which is the length, the half that decides pay. The
-                                length now holds its width and the start time gives
-                                way first. */}
-                            <span className="min-w-0 truncate">{formatTime(shift.occurrenceStart)}</span>
-                            <span className="shrink-0 text-zinc-400">{`· ${formatHours(shiftHours)}`}</span>
-                            <span className="sr-only">
-                              {formatTime(shift.occurrenceStart)} – {formatTime(shift.occurrenceEnd)}
-                            </span>
-
-                            {canRequestLeave && (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setLeaveTarget({
-                                        shiftId: shift.shiftId,
-                                        occurrenceStart: shift.occurrenceStart,
-                                      })
-                                    }
-                                    aria-label={`Request time off for ${formatDayLabelWithWeekday(cell.day)}`}
-                                    className={cn(
-                                      'ml-auto shrink-0 rounded-sm p-0.5 text-zinc-500 transition-colors duration-[120ms]',
-                                      'hover:bg-white/[0.08] hover:text-zinc-300',
-                                      // Revealed on hover, but always present to the
-                                      // keyboard — a hover-only control is invisible
-                                      // to it otherwise (DESIGN.md §5).
-                                      'opacity-0 group-hover/shift:opacity-100 focus-visible:opacity-100',
-                                      'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                                    )}
-                                  >
-                                    <CalendarX2 className="size-3" aria-hidden />
-                                  </button>
-                                </TooltipTrigger>
-                                <TooltipContent>Request time off</TooltipContent>
-                              </Tooltip>
-                            )}
-                          </span>
-                        ) : (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span
-                                tabIndex={0}
-                                className="flex cursor-help items-center gap-0.5 rounded-sm text-[11px] text-orange-400 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                              >
-                                <Plus className="size-2.5 shrink-0" aria-hidden />
-                                Cover
-                                <span className="sr-only">{IN_SHIFT_COVER_EXPLANATION}</span>
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent className="max-w-56 text-center leading-relaxed">
-                              {IN_SHIFT_COVER_EXPLANATION}
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
-
-                        {/* Avatars only: a month grid cell is far too narrow for
-                            names, and the picture is the faster recognition anyway.
-                            Ringed faces are overtime — the ring is the only mark
-                            that survives at this width, and the line below says
-                            what it means so the colour is not decoration. */}
-                        <div className="mt-0.5">
-                          <CreatorChipList
-                            creatorIds={ids}
-                            // The raw field rather than `split.overtimeIds`:
-                            // the list only tests membership, and a new array
-                            // each render would defeat its memo.
-                            overtimeIds={shift.overtimeCreatorIds}
-                            max={4}
-                            size="xs"
-                            avatarOnly
-                            emptyLabel={paysWage ? 'No accounts yet' : undefined}
-                          />
-                        </div>
-
-                        {/* Label only — deliberately not a tooltip trigger.
-                            A day cell is ~90px and the faces sit right above
-                            this line, so a hover card here opens on top of the
-                            week and hides the thing the agent came to read. The
-                            only hover target in this cell is a creator avatar,
-                            and it answers the only question a hover is asked
-                            here: which account is that. The meaning of the
-                            orange ring stays available to a screen reader, and
-                            in full on the salary breakdown, where there is room
-                            to explain it properly. */}
-                        {paysWage && overtimeIds.length > 0 && !fullOvertime && (
-                          <span className="mt-0.5 flex items-center gap-0.5 text-[10px] text-orange-400">
-                            <Plus className="size-2.5 shrink-0" aria-hidden />
-                            {overtimeIds.length} overtime
-                            <span className="sr-only">
-                              {IN_SHIFT_OVERTIME_EXPLANATION} Paid on {paidCount} account
-                              {paidCount === 1 ? '' : 's'}.
-                            </span>
-                          </span>
-                        )}
-
-                        {paysWage && fullOvertime && (
-                          <span className="mt-0.5 flex items-center gap-0.5 text-[10px] text-orange-400">
-                            Overtime shift
-                            <span className="sr-only">{FULL_OVERTIME_EXPLANATION}</span>
-                          </span>
-                        )}
-
-                        {leave && (
-                          <LeaveBadge
-                            leave={leave}
-                            onCancel={async () => {
-                              try {
-                                await cancelLeave(leave.leaveId);
-                                toast.success('Leave request cancelled');
-                              } catch (err) {
-                                toast.error(err instanceof Error ? err.message : 'Could not cancel');
-                              }
-                            }}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
-
-                  {/* ── Secondary: overtime going spare ──
-                      Always below the day's own shifts and visually quieter, so the
-                      roster still reads first. */}
                   {cell.offers.length > 0 && (
-                    <div className={cn(hasShift ? 'mt-1.5 border-t border-dashed border-white/[0.09] pt-1' : 'mt-1')}>
-                      <OfferCell day={cell.day} offers={cell.offers} formatTime={formatTime} onClaim={setClaim} />
+                    <div
+                      className={cn(
+                        hasShift ? 'mt-2 border-t border-dashed border-white/[0.07] pt-2' : 'mt-0.5',
+                      )}
+                    >
+                      <OfferCell
+                        day={cell.day}
+                        offers={cell.offers}
+                        formatTime={formatTime}
+                        onClaim={setClaim}
+                      />
                     </div>
                   )}
                 </div>
-              );
-            })}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <div
+          className="grid grid-cols-7 gap-1"
+          // `role="table"`, not `role="grid"`. The structure was already correct
+          // — rows owning cells, `display: contents` keeping the CSS layout — but
+          // `grid` tells assistive tech this is an interactive widget and
+          // switches some screen readers out of browse mode expecting arrow-key
+          // traversal. None was ever implemented, and a promise the widget does
+          // not keep is worse than the honest role: this is a table of days whose
+          // cells contain their own controls, and DOM order is the navigation.
+          role="table"
+          aria-label={`Shift calendar for ${scopeLabel}`}
+        >
+          <div role="row" className="contents">
+            {WEEKDAY_LABELS.map(label => (
+              <div
+                key={label}
+                role="columnheader"
+                className="pb-1 text-center text-[11px] font-medium text-zinc-400"
+              >
+                {label}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+
+          {weeks.map((week, weekIndex) => (
+            <div key={`week-${weekIndex}`} role="row" className="contents">
+              {week.map((cell, dayIndex) => {
+                // An empty cell, not an absent one: `aria-hidden` here left the
+                // row with fewer cells than the header had columns, which is the
+                // one thing a table's structure has to get right.
+                if (!cell) return <div key={`blank-${weekIndex}-${dayIndex}`} role="cell" />;
+                const isToday = cell.day === today;
+                const hasShift = cell.shifts.length > 0;
+
+                return (
+                  <div
+                    key={cell.day}
+                    role="cell"
+                    className={cn(
+                      cellMinHeight,
+                      'rounded-md border p-1.5 transition-colors duration-[120ms]',
+                      hasShift ? 'border-white/[0.07] bg-white/[0.03]' : 'border-transparent',
+                      isToday && 'border-action-blue/70 bg-action-blue/[0.08]',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'block text-[11px] tabular-nums',
+                        isToday ? 'font-semibold text-action-blue' : 'text-zinc-400',
+                      )}
+                    >
+                      {cell.date}
+                    </span>
+
+                    {cell.shifts.map(shift => (
+                      <ShiftEntry
+                        key={`${shift.shiftId}-${shift.occurrenceStart}`}
+                        shift={shift}
+                        day={cell.day}
+                        dense
+                        leave={leaveByOccurrence.get(occurrenceKey(shift)) ?? null}
+                        leaveBlocked={Boolean(leaveError)}
+                        now={now}
+                        formatTime={formatTime}
+                        onRequestLeave={setLeaveTarget}
+                        onCancelLeave={handleCancelLeave}
+                      />
+                    ))}
+
+                    {/* ── Secondary: overtime going spare ──
+                        Always below the day's own shifts and visually quieter, so
+                        the roster still reads first. */}
+                    {cell.offers.length > 0 && (
+                      <div
+                        className={cn(
+                          hasShift
+                            ? 'mt-1.5 border-t border-dashed border-white/[0.07] pt-1'
+                            : 'mt-1',
+                        )}
+                      >
+                        <OfferCell
+                          day={cell.day}
+                          offers={cell.offers}
+                          formatTime={formatTime}
+                          onClaim={setClaim}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* One quiet line rather than a legend nobody reads. */}
       <p className="mt-3 text-xs text-zinc-400">
@@ -652,18 +691,59 @@ export function ShiftCalendar({
         Leave not requested at least {MIN_LEAVE_NOTICE_DAYS} days in advance may be rejected.
       </p>
 
-      {showOvertime && (
-        <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-zinc-400">
-          <span className="inline-block size-1.5 shrink-0 rounded-full bg-orange-400" aria-hidden />
-          {offersLoading && totalOffers === 0
-            ? 'Checking for available overtime…'
-            : totalOffers === 0
-              ? `No overtime available ${isWeek ? 'this week' : 'this month'}. Accounts appear here when someone’s leave is approved.`
-              : `${pluralise(totalOffers, 'account')} available to cover — select one to claim it.`}
+      {/* An unreadable leave list changes what every cell above means, so it is
+          reported once for the grid rather than per shift. */}
+      {leaveError && (
+        <p className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-red-400">
+          <CircleAlert className="size-3.5 shrink-0" aria-hidden />
+          Couldn&rsquo;t load your time-off requests, so this week may not show them. Requesting time
+          off is unavailable until it loads.
         </p>
       )}
 
-      {totalShifts === 0 && !showOvertime && (
+      {showOvertime && (
+        <p
+          className={cn(
+            'mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs',
+            offersError ? 'text-red-400' : 'text-zinc-400',
+          )}
+        >
+          {offersError ? (
+            <>
+              <CircleAlert className="size-3.5 shrink-0" aria-hidden />
+              {/* Never "no overtime available". The board is first-come, so a
+                  failed fetch presented as a confident negative is an agent
+                  losing money to a network error they were never told about. */}
+              Couldn&rsquo;t check for available overtime.
+              <Button
+                size="xs"
+                variant="ghost"
+                className="ml-0.5 text-red-400 hover:text-red-300"
+                onClick={() => void refetchOffers()}
+              >
+                <RotateCcw className="size-3" aria-hidden />
+                Try again
+              </Button>
+            </>
+          ) : (
+            <>
+              <span className="inline-block size-1.5 shrink-0 rounded-full bg-orange-400" aria-hidden />
+              {offersLoading && totalOffers === 0
+                ? 'Checking for available overtime…'
+                : totalOffers === 0
+                  ? `No overtime available ${isWeek ? 'this week' : 'this month'}. Accounts appear here when someone’s leave is approved.`
+                  : `${pluralise(totalOffers, 'account')} available to cover — select one to claim it.`}
+            </>
+          )}
+        </p>
+      )}
+
+      {/* The `!showOvertime` guard used to sit here, which meant this sentence
+          never rendered on the dashboard at all — the one surface that always
+          passes `showOvertime`. An agent with an empty week got seven blank
+          cells and the fact only as 12px meta in the header. An empty roster is
+          worth a sentence; the overtime line below says its own separate thing. */}
+      {totalShifts === 0 && !loading && !error && (
         <p className="mt-3 text-sm text-zinc-400">
           {isWeek ? 'Nothing scheduled this week.' : 'Nothing scheduled this month.'}
         </p>
@@ -680,7 +760,7 @@ export function ShiftCalendar({
           await requestLeave(leaveTarget.shiftId, leaveTarget.occurrenceStart, leaveType, reason);
         }}
       />
-    </div>
+    </div>,
   );
 }
 
@@ -698,6 +778,249 @@ function formatWeekLabel(weekStart: string): string {
     : `${formatDayLabel(weekStart)} – ${formatDayLabel(end)}`;
 }
 
+// ─── One shift, at either density ────────────────────────────────────
+
+/**
+ * A single shift on the roster: its hours, its accounts, what it pays, and any
+ * leave attached to it.
+ *
+ * **One component, two densities.** The week view renders rows with ~700px to
+ * spend and the month grid renders cells with ~90px, but leave, in-shift cover
+ * and the pay semantics have to mean the same thing in both — a second
+ * implementation would be a second place for them to drift, which is what the
+ * original single-cell renderer was protecting against. So the layouts differ
+ * and this does not: `dense` picks avatars-only and 10–11px type for the grid,
+ * or names and readable type for the row.
+ *
+ * `dense` is the *only* thing it branches on. Anything that would be true in one
+ * view and false in the other belongs in the caller, not here.
+ */
+function ShiftEntry({
+  shift,
+  day,
+  dense,
+  leave,
+  leaveBlocked,
+  now,
+  formatTime,
+  onRequestLeave,
+  onCancelLeave,
+}: {
+  shift: ExpandedShift;
+  day: string;
+  dense: boolean;
+  leave: LeaveRequest | null;
+  /** The leave list failed to load, so "no leave on this shift" is not known. */
+  leaveBlocked: boolean;
+  now: number;
+  formatTime: (ms: number) => string;
+  onRequestLeave: (target: LeaveTarget) => void;
+  onCancelLeave: (leaveId: string) => Promise<void>;
+}) {
+  const isOvertime = shift.isOvertime ?? false;
+  const paysWage = shift.paysWage ?? true;
+  const ids = shift.creatorIds ?? NO_IDS;
+
+  // Accounts on this shift marked overtime. What that means depends on what sits
+  // beside them: alongside regular accounts they are worked for the sales only,
+  // and on a shift that is nothing else they simply mark the shift as overtime —
+  // it pays on them like any other.
+  const split = splitShiftAccounts(ids, shift.overtimeCreatorIds);
+  const overtimeIds = split.overtimeIds;
+  const paidCount = split.paidIds.length;
+  const fullOvertime = split.isFullyOvertime;
+
+  // Offered right up until the shift starts. The 4-day notice is guidance, not a
+  // gate — an agent who is ill tomorrow still has to tell someone, and refusing
+  // the request only moves that conversation somewhere nobody can see it. Not
+  // offered on an in-shift cover: there are no hours of its own to take off.
+  //
+  // Withdrawn entirely while the leave list failed to load: `leave` is null for
+  // every shift in that state, so offering the button would invite a second
+  // request for a day already booked off. "Unknown" must not render as "none".
+  const canRequestLeave = paysWage && !leave && !leaveBlocked && shift.occurrenceStart > now;
+
+  // The cap the salary page tells the agent about, in hours.
+  const shiftHours = (shift.occurrenceEnd - shift.occurrenceStart) / 3_600_000;
+
+  const leaveButton = canRequestLeave && (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={() =>
+            onRequestLeave({ shiftId: shift.shiftId, occurrenceStart: shift.occurrenceStart })
+          }
+          aria-label={`Request time off for ${formatDayLabelWithWeekday(day)}`}
+          className={cn(
+            'relative ml-auto shrink-0 rounded-sm p-1 transition-colors duration-[120ms]',
+            'text-zinc-400 hover:bg-white/[0.08] hover:text-zinc-200',
+            'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+            // The glyph stays small; the hit area does not. WCAG 2.5.8 AA wants
+            // 24px and neither layout can spare that in ink, so the target is
+            // expanded past the icon rather than the icon being inflated.
+            'after:absolute after:-inset-1.5 after:content-[""]',
+            // Rests visible, at both densities. It used to be `opacity-0` until
+            // hover while the line below the calendar instructed the reader to
+            // "select the icon on a shift" — an instruction naming a control
+            // that was not on screen, and the one thing a first-week agent is
+            // explicitly told to look for. `focus-visible` kept it reachable by
+            // keyboard and did nothing for the mouse user who could not find it.
+            dense ? 'opacity-70 group-hover/shift:opacity-100' : 'opacity-100',
+          )}
+        >
+          <CalendarX2 className={dense ? 'size-3' : 'size-3.5'} aria-hidden />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>Request time off</TooltipContent>
+    </Tooltip>
+  );
+
+  return (
+    <div className={cn('group/shift', dense ? 'mt-1' : 'mt-0.5 first:mt-0')}>
+      {/* An in-shift cover has no hours of its own, so showing a time for it
+          would misrepresent what it pays. */}
+      {paysWage ? (
+        <span
+          className={cn(
+            'flex items-center gap-1 tabular-nums',
+            dense ? 'text-[11px] text-zinc-300' : 'text-sm text-foreground',
+          )}
+        >
+          {(isOvertime || fullOvertime) && (
+            <Plus
+              className={cn('shrink-0 text-orange-400', dense ? 'size-2.5' : 'size-3.5')}
+              aria-hidden
+            />
+          )}
+
+          {dense ? (
+            <>
+              {/* Start *and* length. Hours are capped at the shift's scheduled
+                  length, so a start time alone left the figure that sets the
+                  wage invisible anywhere in the product. Two elements rather
+                  than one truncating string: at the 1024px floor the pair
+                  overflows a cell, and a single `truncate` clipped the tail —
+                  which is the length, the half that decides pay. The length
+                  holds its width; the start time gives way first. */}
+              <span className="min-w-0 truncate">{formatTime(shift.occurrenceStart)}</span>
+              <span className="shrink-0 text-zinc-400">{`· ${formatHours(shiftHours)}`}</span>
+              <span className="sr-only">
+                {formatTime(shift.occurrenceStart)} – {formatTime(shift.occurrenceEnd)}
+              </span>
+            </>
+          ) : (
+            // A row has the width for the full range, so the screen reader and
+            // the screen finally say the same thing.
+            <>
+              <span className="font-medium">
+                {formatTime(shift.occurrenceStart)} – {formatTime(shift.occurrenceEnd)}
+              </span>
+              <span className="text-zinc-400">{`· ${formatHours(shiftHours)}`}</span>
+            </>
+          )}
+
+          {leaveButton}
+        </span>
+      ) : dense ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              tabIndex={0}
+              className="flex cursor-help items-center gap-0.5 rounded-sm text-[11px] text-orange-400 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              <Plus className="size-2.5 shrink-0" aria-hidden />
+              Cover
+              <span className="sr-only">{IN_SHIFT_COVER_EXPLANATION}</span>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-56 text-center leading-relaxed">
+            {IN_SHIFT_COVER_EXPLANATION}
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        // No tooltip and no tab stop in the row layout: there is room to simply
+        // say it, and an explanation you can read beats one you have to find.
+        <div className="text-sm text-orange-400">
+          <span className="flex items-center gap-1 font-medium">
+            <Plus className="size-3.5 shrink-0" aria-hidden />
+            Cover
+          </span>
+          <p className="mt-0.5 text-xs text-zinc-400">{IN_SHIFT_COVER_EXPLANATION}</p>
+        </div>
+      )}
+
+      {/* Avatars carry the accounts in the grid — a ~90px cell is far too narrow
+          for names, and the picture is the faster recognition anyway. A row has
+          the width, so it names them. Ringed faces are overtime in both, and the
+          line below says what the ring means so the colour is never the only
+          carrier. */}
+      <div className={dense ? 'mt-0.5' : 'mt-1'}>
+        <CreatorChipList
+          creatorIds={ids}
+          // The raw field rather than `split.overtimeIds`: the list only tests
+          // membership, and a new array each render would defeat its memo.
+          overtimeIds={shift.overtimeCreatorIds}
+          max={dense ? 4 : 6}
+          size="xs"
+          avatarOnly={dense}
+          emptyLabel={paysWage ? 'No accounts yet' : undefined}
+        />
+      </div>
+
+      {paysWage && overtimeIds.length > 0 && !fullOvertime && (
+        <span
+          className={cn(
+            'mt-0.5 flex items-center gap-1 text-orange-400',
+            // 11px, not 10px: this is a pay-relevant fact and 10px sits below
+            // the smallest step DESIGN.md allows to carry real content.
+            dense ? 'text-[11px]' : 'text-xs',
+          )}
+        >
+          <Plus className="size-2.5 shrink-0" aria-hidden />
+          {overtimeIds.length} overtime
+          {dense ? (
+            <span className="sr-only">
+              {IN_SHIFT_OVERTIME_EXPLANATION} Paid on {paidCount} account
+              {paidCount === 1 ? '' : 's'}.
+            </span>
+          ) : (
+            <span className="text-zinc-400">
+              · paid on {paidCount} account{paidCount === 1 ? '' : 's'}
+            </span>
+          )}
+        </span>
+      )}
+
+      {/* The row says the pay rule outright. In the grid it stays `sr-only`,
+          because a hover card over a ~90px cell covers the week the agent came
+          to read — but "visible only on hover" was never a good answer for the
+          three explanations that decide what a shift pays. */}
+      {!dense && paysWage && overtimeIds.length > 0 && !fullOvertime && (
+        <p className="mt-0.5 text-xs text-zinc-400">{IN_SHIFT_OVERTIME_EXPLANATION}</p>
+      )}
+
+      {paysWage && fullOvertime && (
+        <span
+          className={cn(
+            'mt-0.5 flex items-center gap-1 text-orange-400',
+            dense ? 'text-[11px]' : 'text-xs',
+          )}
+        >
+          Overtime shift
+          {dense && <span className="sr-only">{FULL_OVERTIME_EXPLANATION}</span>}
+        </span>
+      )}
+
+      {!dense && paysWage && fullOvertime && (
+        <p className="mt-0.5 text-xs text-zinc-400">{FULL_OVERTIME_EXPLANATION}</p>
+      )}
+
+      {leave && <LeaveBadge leave={leave} dense={dense} onCancel={() => onCancelLeave(leave.leaveId)} />}
+    </div>
+  );
+}
+
 // ─── Leave status on a shift ─────────────────────────────────────────
 
 const LEAVE_STATUS_STYLE: Record<LeaveRequest['status'], string> = {
@@ -707,7 +1030,7 @@ const LEAVE_STATUS_STYLE: Record<LeaveRequest['status'], string> = {
 };
 
 /**
- * What happened to a leave request, in a cell that has ~90px to say it.
+ * What happened to a leave request.
  *
  * A pending request can still be withdrawn, so it carries its own cancel; a
  * resolved one is just a state.
@@ -717,13 +1040,22 @@ const LEAVE_STATUS_STYLE: Record<LeaveRequest['status'], string> = {
  * approved" and "we have not decided" — with the real words reachable only by
  * hovering a non-focusable span. The tooltip now reinforces rather than carries,
  * and the leave *type* and reason are what the announced detail adds.
+ *
+ * `dense` is the grid's ~90px cell, where the type and reason stay in the
+ * tooltip because there is nowhere to put them. The row has the width, so it
+ * prints them and the tooltip stops being load-bearing.
  */
-function LeaveBadge({ leave, onCancel }: { leave: LeaveRequest; onCancel: () => Promise<void> }) {
+function LeaveBadge({
+  leave,
+  dense,
+  onCancel,
+}: {
+  leave: LeaveRequest;
+  dense: boolean;
+  onCancel: () => Promise<void>;
+}) {
   const [busy, setBusy] = useState(false);
 
-  // Whether someone's time off is approved is not supplementary information, and
-  // `Off?` versus `Off` is one character of difference. Until the visible label
-  // itself is reworked, the full state is announced rather than left to a hover.
   const label =
     leave.status === 'pending' ? 'Off — pending' : leave.status === 'approved' ? 'Off' : 'Off — denied';
 
@@ -738,22 +1070,31 @@ function LeaveBadge({ leave, onCancel }: { leave: LeaveRequest; onCancel: () => 
   }`;
 
   return (
-    <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-0.5">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span
-            tabIndex={0}
-            className={cn(
-              'cursor-help rounded-sm text-[11px] font-medium focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-              LEAVE_STATUS_STYLE[leave.status],
-            )}
-          >
-            {label}
-            <span className="sr-only"> · {announcedDetail}</span>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-56 text-center leading-relaxed">{fullState}</TooltipContent>
-      </Tooltip>
+    <span className={cn('flex min-w-0 flex-wrap items-center gap-1', dense ? 'mt-0.5' : 'mt-1')}>
+      {dense ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              tabIndex={0}
+              className={cn(
+                'cursor-help rounded-sm text-[11px] font-medium focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                LEAVE_STATUS_STYLE[leave.status],
+              )}
+            >
+              {label}
+              <span className="sr-only"> · {announcedDetail}</span>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-56 text-center leading-relaxed">{fullState}</TooltipContent>
+        </Tooltip>
+      ) : (
+        // Printed, not hovered, and not a tab stop: the row has room for the
+        // whole fact, so there is nothing left for a tooltip to carry.
+        <span className={cn('text-xs font-medium', LEAVE_STATUS_STYLE[leave.status])}>
+          {label}
+          <span className="font-normal text-zinc-400"> · {announcedDetail}</span>
+        </span>
+      )}
 
       {leave.status === 'pending' && (
         <Tooltip>
@@ -771,15 +1112,23 @@ function LeaveBadge({ leave, onCancel }: { leave: LeaveRequest; onCancel: () => 
               }}
               aria-label="Withdraw this leave request"
               className={cn(
-                'shrink-0 rounded-sm p-0.5 text-zinc-500 transition-colors duration-[120ms]',
-                'hover:bg-white/[0.08] hover:text-zinc-300',
+                // `relative` + an expanded `after` pseudo-element: the glyph is
+                // 10–12px but the target must clear WCAG 2.5.8's 24px, and this
+                // sits two pixels from the focusable status label beside it, so
+                // the spacing exception does not rescue it either.
+                'relative shrink-0 rounded-sm p-1 transition-colors duration-[120ms]',
+                // `zinc-400`, not `zinc-500`: DESIGN.md §2 records 500 as failing
+                // AA on every ground in this app, and this is a control that
+                // discards someone's time-off request.
+                'text-zinc-400 hover:bg-white/[0.08] hover:text-zinc-200',
                 'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                'after:absolute after:-inset-1.5 after:content-[""]',
               )}
             >
               {busy ? (
-                <Loader2Icon className="activity-spinner size-2.5" aria-hidden />
+                <Loader2Icon className={cn('activity-spinner', dense ? 'size-2.5' : 'size-3')} aria-hidden />
               ) : (
-                <X className="size-2.5" aria-hidden />
+                <X className={dense ? 'size-2.5' : 'size-3'} aria-hidden />
               )}
             </button>
           </TooltipTrigger>

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
-import { getUserById, invalidateUserCache } from '@/lib/services/userService';
+import { getUserById } from '@/lib/services/userService';
+import { resolveLeaveBalances } from '@/lib/leave/leaveBalance';
 import { notifications } from '@/lib/notificationContent';
 import { CA_LEAVE_ALERT_RECIPIENT_UID, notifyUsers } from '@/lib/services/caNotifications';
 import { formatDayLabelWithWeekday, toDayKey } from '@/lib/salary/salaryDate';
@@ -147,41 +148,56 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // Check leave balance
-    if (leaveType === 'unpaid') {
-      const remaining = user.remainingUnpaidLeave ?? 0;
-      if (remaining <= 0) {
-        return NextResponse.json({ error: 'No unpaid leave remaining' }, { status: 400 });
-      }
-    } else {
-      if (!user.hasPaidLeave) {
-        return NextResponse.json({ error: 'Paid leave is not enabled for this user' }, { status: 400 });
-      }
-      const remaining = user.remainingPaidLeave ?? 0;
-      if (remaining <= 0) {
-        return NextResponse.json({ error: 'No paid leave remaining' }, { status: 400 });
-      }
+    if (leaveType === 'paid' && !user.hasPaidLeave) {
+      return NextResponse.json({ error: 'Paid leave is not enabled for this user' }, { status: 400 });
     }
 
-    // Duplicate check: one request per shift occurrence per user
-    const existing = await adminDb
+    // ── The balance check, against what is left *after* everything already in
+    //    flight ──
+    //
+    // A request no longer spends the balance; approval does (see the approve
+    // route). That is the right model — a request an admin never gets to must
+    // not hold someone's days hostage, and a denied request should cost nothing
+    // — but it means the balance alone is not what an agent has left to spend.
+    // Four pending requests against four days is fully committed, and checking
+    // only `remaining` would let them queue a fifth.
+    //
+    // So the gate is `remaining - pending`. The pending count is the same
+    // indexed `userId` query the duplicate check below needs anyway.
+    const ownRequests = await adminDb
       .collection('leave_requests')
-      .where('shiftId', '==', shiftId)
-      .where('occurrenceStart', '==', occurrenceStart)
       .where('userId', '==', token.uid)
       .get();
 
-    if (!existing.empty) {
+    const requests = ownRequests.docs.map(d => d.data() as LeaveRequestDocument);
+
+    // Duplicate check: one request per shift occurrence per user.
+    if (requests.some(r => r.shiftId === shiftId && r.occurrenceStart === occurrenceStart)) {
       return NextResponse.json({ error: 'Leave request already exists for this shift occurrence' }, { status: 409 });
+    }
+
+    const balances = resolveLeaveBalances(user);
+    const remaining = leaveType === 'paid' ? balances.paid : balances.unpaid;
+    const pending = requests.filter(r => r.status === 'pending' && r.leaveType === leaveType).length;
+    const uncommitted = remaining - pending;
+
+    if (uncommitted <= 0) {
+      const label = leaveType === 'paid' ? 'paid' : 'unpaid';
+      return NextResponse.json(
+        {
+          error:
+            pending > 0
+              ? `You have ${remaining} ${label} ${remaining === 1 ? 'day' : 'days'} left and ${pending} ${pending === 1 ? 'request' : 'requests'} already awaiting approval.`
+              : `No ${label} leave remaining.`,
+        },
+        { status: 400 },
+      );
     }
 
     const leaveRef = adminDb.collection('leave_requests').doc();
     const leaveId = leaveRef.id;
-    const balanceField = leaveType === 'paid' ? 'remainingPaidLeave' : 'remainingUnpaidLeave';
 
-    // Atomically create the leave request and decrement the balance
-    const batch = adminDb.batch();
-    batch.set(leaveRef, {
+    await leaveRef.set({
       leaveId,
       shiftId,
       occurrenceStart,
@@ -193,19 +209,14 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       resolvedBy: null,
       reason: trimmedReason || null,
     });
-    batch.update(adminDb.collection('users').doc(token.uid), {
-      [balanceField]: FieldValue.increment(-1),
-    });
-    await batch.commit();
-    invalidateUserCache(token.uid);
 
     // Tell the person who approves leave that there is something to approve.
     //
-    // After the commit and never fatal: the request exists and the balance is
-    // spent, so a notification failure must not 500 and invite the agent to
-    // submit it again — the second attempt would 409 on the duplicate check and
-    // read as the app being broken. The approvals queue is the source of truth
-    // either way; this is the nudge towards it.
+    // After the write and never fatal: the request exists, so a notification
+    // failure must not 500 and invite the agent to submit it again — the second
+    // attempt would 409 on the duplicate check and read as the app being broken.
+    // The approvals queue is the source of truth either way; this is the nudge
+    // towards it.
     await notifyUsers(
       [CA_LEAVE_ALERT_RECIPIENT_UID],
       notifications.leaveRequested(

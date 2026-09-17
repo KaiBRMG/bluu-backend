@@ -13,6 +13,7 @@
 import { adminDb } from '../firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { createOffersForOccurrence } from './caCoverageService';
+import { detachAccountFromShift } from '../utils/coverageDetach';
 import { resolveAccountNames } from './creatorAccountService';
 import { createOccurrenceOverride, getShiftsByUserAndRange } from './shiftService';
 import { expandShiftsForWindow, type ExpandedShift } from '../utils/recurrence';
@@ -348,12 +349,15 @@ export async function revertOccurrenceCoverage(params: {
         const shiftRef = adminDb.collection('shifts').doc(offer.assignedShiftId);
         const shiftSnap = await shiftRef.get();
         if (shiftSnap.exists) {
-          const coverShift = shiftSnap.data() as ShiftDocument;
-          const remaining = (coverShift.creatorIds ?? []).filter(id => id !== offer.creatorId);
           // One overtime shift can carry several offers (they merge, so that two
-          // accounts pay the 2-account rate once). Drop it only with the last.
-          if (remaining.length === 0) await shiftRef.delete();
-          else await shiftRef.update({ creatorIds: remaining, updatedAt: FieldValue.serverTimestamp() });
+          // accounts pay the 2-account rate once). Drop it only with the last —
+          // and only when coverage created it. `assignedShiftId` now often
+          // points at the agent's **own** rostered shift, because in-shift cover
+          // merges into it; deleting that because its last covered account came
+          // off would delete a working day nobody released.
+          const outcome = detachAccountFromShift(shiftSnap.data() as ShiftDocument, offer.creatorId);
+          if (outcome.delete) await shiftRef.delete();
+          else await shiftRef.update(outcome.patch);
         }
       }
 

@@ -563,7 +563,9 @@ function ShiftRow({
         </span>
       </th>
 
-      <td colSpan={4} className="px-2.5 py-1.5 text-right text-[11px] text-zinc-500">
+      {/* `zinc-400`: `zinc-500` measures 3.99:1 on this ground and fails AA at
+          11px (DESIGN.md §2). */}
+      <td colSpan={4} className="px-2.5 py-1.5 text-right text-[11px] text-zinc-400">
         {isFirst && 'Commission is earned on the day’s sales, not split by shift'}
       </td>
 

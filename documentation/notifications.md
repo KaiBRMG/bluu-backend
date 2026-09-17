@@ -15,11 +15,12 @@
 | `src/lib/services/onlyfansOpsAlerts.ts` | `sendOpsAlertOnce` + the single-maintainer recipient uid, for the two OF Manager diagnostics |
 | `src/lib/notificationTypeBadge.ts` | Two maps, one per ground. `notificationTypeBadge(type)` — badge label/colour for the three **admin** surfaces (light chips, `-600` inks). `notificationTypeDot(type)` — the `-400` semantic hue for the **tray's** leading dot on the near-black panel. Import the one that matches the surface; never re-map a type to a hex inline. |
 | `src/components/admin/notifications/AutomatedNotificationsList.tsx` | Renders the catalogue on the **Automated** tab of `/admin-portal/notifications` |
+| `src/components/admin/notifications/NotificationLogsList.tsx` + `src/hooks/useNotificationLogs.ts` | The **Logs** tab — the delivery log, one row per `notifications` doc. See "The admin notifications page" below. |
 | `src/lib/services/telegramService.ts` | **Server-only** Telegram Bot API delivery + recipient resolution. Owns formatting, never copy. See "Telegram alerts" below. |
 | `src/lib/notificationActionUrl.ts` | Pure classifier: is an `actionUrl` an app route or an external link? Shared by the client helper below **and** the server (which normalises before storing). See RULE 3. |
 | `src/lib/notificationNavigation.ts` | `navigateToNotificationAction(router, actionUrl)` — the **only** place an `actionUrl` is followed. External vs internal branch + arms `NavigationWatchdog`. See RULE 3. |
 | API: `src/app/api/notifications/*` | `create`, `dismiss`, `mark-read` |
-| API: `src/app/api/admin/notifications/*` | admin send + `[batchId]/recipients` (GET) + `[batchId]` (DELETE = "unsend": removes every per-user notification doc for the batch + the batch record) |
+| API: `src/app/api/admin/notifications/*` | admin send + `[batchId]/recipients` (GET) + `[batchId]` (DELETE = "unsend": removes every per-user notification doc for the batch + the batch record) + `logs` (GET — the delivery log behind the Logs tab) |
 
 ## Firestore
 
@@ -141,12 +142,28 @@ The one notification whose recipient list is decided by **what version of the de
 
 ## The admin notifications page
 
-`/admin-portal/notifications` has two tabs:
+`/admin-portal/notifications` has three tabs:
 
 - **One-Time Notifications** — history of manual admin broadcasts (`notifications-batches`), click a row for per-recipient read/dismiss state and to unsend. Batches that were also pushed to Telegram carry a "Telegram" chip next to the title.
 - **Automated** — a **read-only** catalogue of the table above, grouped by category, from `src/lib/automatedNotifications.ts`. Expanding an entry shows the message template (interpolated values render as `{token}` chips), what fires it, who receives it, the `actionUrl`, and the source route. An entry with `telegramEnabled: true` carries the same "Telegram" chip as the One-Time Notifications tab. Nothing on this tab is sendable, editable or unsendable — it exists so admins can see what the system sends on its own.
 
   **A separate Creators section sits below the categories**, from `AUTOMATED_CREATOR_NOTIFICATIONS` — see [Creator notifications](#creator-notifications-telegram-only) below.
+
+- **Logs** — the **delivery log**: one row per `notifications` document, i.e. one notification as it landed on one person, across **both** paths (manual broadcasts and automated events). The other two tabs answer "what does the system send" and "what did we send"; this one answers "what actually reached whom, and did they look at it".
+
+### The Logs tab
+
+Backed by `GET /api/admin/notifications/logs` (`admin-notifications` page permission, same tier as the rest of the page) and [`useNotificationLogs`](../src/hooks/useNotificationLogs.ts).
+
+- **The server does one thing: a window, newest first.** The query is `orderBy('createdAt','desc')` with an optional `createdAt >=` bound and a 250-doc page — a **range and an order on the same field**, which is a single-field index Firestore already provides. **Every filter and every sort is client-side, over the fetched page, on purpose:** each server-side facet (type, read, recipient) combined with that order would need its own composite index and the combinations multiply, while the page limit — not the filter — is what caps the read count either way (rule 9).
+- **Paging is by document id, not by timestamp.** Every notification in one broadcast shares a `createdAt` to the millisecond, so a timestamp cursor would drop or duplicate a run of them. A cursor pointing at a since-unsent document reports the page as exhausted rather than silently restarting from the top.
+- **Two batched, field-masked lookups per page** resolve the names: recipient `displayName` off `users`, and `sentByName` off `admin_notification_batches`. One `getAll` each, one field each.
+- **Provenance is read from `batchId`, never from the sender's name.** A batch doc that no longer exists (an unsend) or predates the field leaves `sentByName` null; a row with a `batchId` is still a manual send.
+- **Only the first page is cached** (sessionStorage, 2 min) — a deep "load more" stack is unbounded and the cheapest thing to refetch.
+- **Facet counts are taken with that facet cleared**, per [DESIGN.md](../DESIGN.md#5-components) — the number beside an option is what selecting it will actually produce.
+- **Two things are deliberately not in this log, and the UI says so rather than implying completeness:**
+  - **Creators never appear.** They have no in-app tray and therefore no `notifications` document at all — their sends exist only as Telegram messages. The footer line states this.
+  - **An unsent batch vanishes entirely.** `DELETE /api/admin/notifications/[batchId]` removes every per-user document, which is the whole point of an unsend; the log is a record of what is *deliverable*, not an append-only audit trail. If an immutable trail is ever needed it has to be written separately at send time — this surface cannot be made into one.
 
 ## Creator notifications (Telegram only)
 

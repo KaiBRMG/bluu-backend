@@ -60,13 +60,22 @@ interface CreatorChipProps {
   /** Renders just the avatar, with the name as a tooltip. For very dense rows. */
   avatarOnly?: boolean;
   /**
-   * Marks this account as overtime the agent works without extra pay.
+   * Marks this account as one the agent works as **overtime** on that shift.
    *
    * Rendered as an orange ring on the avatar — orange already means
    * "overtime / cover" everywhere in this subsystem, and a ring is the one
    * affordance that survives a ~90px calendar cell where the chip is a bare
-   * face. The tooltip carries the meaning, because a ring on its own is a
-   * decoration and DESIGN.md §2 forbids colour that encodes nothing.
+   * face.
+   *
+   * **It says "overtime", never anything about pay.** Whether an overtime
+   * account is paid depends on the rest of the shift, which this component
+   * cannot see: alongside regular accounts it is worked for the sales only, but
+   * on a shift where every account is overtime it is paid like any other
+   * (ca-salary.md §6). The title used to assert "no extra pay" for both, which
+   * was simply false on the second — and it is the hover an agent reaches for
+   * when they want to know *which account is that*. The caller renders the
+   * meaning as visible text beside the row (`+2 OT`, `2 overtime`, `Overtime
+   * shift`), where it can be stated correctly for that shift.
    */
   overtime?: boolean;
   className?: string;
@@ -190,7 +199,6 @@ export const CreatorChip = memo(function CreatorChip({
   // Falling back to the id keeps a deleted or not-yet-loaded creator visible
   // rather than rendering an empty chip that looks like a rendering bug.
   const stageName = name ?? hit?.stageName ?? creatorId;
-  const label = overtime ? `${stageName} — overtime, no extra pay` : stageName;
 
   const avatar = (
     <CreatorAvatar
@@ -202,16 +210,21 @@ export const CreatorChip = memo(function CreatorChip({
         TEXT_SIZE[size],
         // `ring-offset` against the surface, so the ring reads as a border on
         // the face rather than merging into a neighbouring avatar in a dense row.
-        overtime && 'ring-2 ring-orange-400 ring-offset-1 ring-offset-[#0A0A0A]',
+        // `ring-offset-background`, not a literal. `#0A0A0A` was the stock
+        // `:root` canvas, which nothing in this app ever resolves — every screen
+        // runs `<html class="dark">`, where `--background` is `#09090b`. It was
+        // also punching a near-black halo through whatever surface the chip
+        // actually sat on (a calendar cell's overlay, or the today tint).
+        overtime && 'ring-2 ring-orange-400 ring-offset-1 ring-offset-background',
       )}
     />
   );
 
   if (avatarOnly) {
     return (
-      <span className={cn('inline-flex', className)} title={label}>
+      <span className={cn('inline-flex', className)} title={stageName}>
         {avatar}
-        <span className="sr-only">{label}</span>
+        <span className="sr-only">{stageName}</span>
       </span>
     );
   }
@@ -222,7 +235,7 @@ export const CreatorChip = memo(function CreatorChip({
         'inline-flex max-w-full items-center gap-1 rounded-full bg-white/[0.08] py-px pl-px pr-2',
         className,
       )}
-      title={label}
+      title={stageName}
     >
       {avatar}
       <span className={cn('truncate text-zinc-300', TEXT_SIZE[size])}>{stageName}</span>
@@ -261,7 +274,10 @@ export const CreatorChipList = memo(function CreatorChipList({
   const byId = useCreatorMap();
 
   if (creatorIds.length === 0) {
-    return emptyLabel ? <span className={cn('text-[11px] text-zinc-500', className)}>{emptyLabel}</span> : null;
+    // `zinc-400`, not `zinc-500`: DESIGN.md §2 measures Ink Muted at 4.12:1 on
+    // the canvas and states plainly that it is not a text colour on any ground
+    // in this app. This one renders at 11px inside a calendar cell.
+    return emptyLabel ? <span className={cn('text-[11px] text-zinc-400', className)}>{emptyLabel}</span> : null;
   }
 
   // A Set per row, not a `.includes()` per chip. Cheap either way at these

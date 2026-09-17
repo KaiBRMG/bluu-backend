@@ -61,7 +61,7 @@ import { CreatorChip } from '@/components/creators/CreatorChip';
 interface CreatorAssignmentFieldProps {
   value: string[];
   onChange: (creatorIds: string[]) => void;
-  /** The subset of `value` worked as overtime — no extra pay, no higher tier. */
+  /** The subset of `value` worked as overtime. Whether they pay depends on the rest of the shift — see `splitShiftAccounts`. */
   overtimeValue: string[];
   onOvertimeChange: (creatorIds: string[]) => void;
   /** Account count → $/hour, from the salary config. Omit to hide the rate line. */
@@ -239,7 +239,14 @@ export function CreatorAssignmentField({
                     disabled={disabled}
                     aria-pressed={isOvertime}
                     onClick={() => setOvertime(id, true)}
-                    title="Worked inside this shift for the sales only — adds no hours and does not raise the hourly rate."
+                    title={
+                      // The same mark means two different things depending on
+                      // what else is on the shift, so the tooltip cannot state
+                      // one of them as if it were both.
+                      split.isFullyOvertime
+                        ? 'Every account on this shift is overtime, so the shift is an overtime shift and pays hourly on all of them.'
+                        : 'Worked inside this shift for the sales only — adds no hours and does not raise the hourly rate.'
+                    }
                     className={cn(
                       'px-2 py-0.5 text-[10px] font-medium transition-colors duration-[120ms]',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]',

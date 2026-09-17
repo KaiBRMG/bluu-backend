@@ -7,8 +7,18 @@ import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
 import { sendTelegramNotification } from '@/lib/services/telegramService';
 import { releaseOccurrenceForCoverage } from '@/lib/services/leaveCoverage';
+import { LEAVE_BALANCE_FIELD, resolveLeaveBalances } from '@/lib/leave/leaveBalance';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-import type { LeaveRequestDocument } from '@/types/firestore';
+import type { LeaveRequestDocument, UserDocument } from '@/types/firestore';
+
+/**
+ * A refusal the admin needs to read, raised from inside the transaction.
+ *
+ * Distinguished from a genuine failure so the catch can answer 409 with the
+ * message rather than 500 with a stack — "they have no days left" is an outcome,
+ * not an error.
+ */
+class LeaveConflict extends Error {}
 
 // ─── POST /api/shifts/leave/[leaveId]/approve ─────────────────────────────
 
@@ -47,7 +57,15 @@ export const POST = withAuth(async (
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // Balance was already decremented at request time; no balance check needed on approve.
+    if (leave.status !== 'pending') {
+      // Re-deciding a resolved request would deduct a second day for the same
+      // absence, or refund one that was never spent. The queue only offers the
+      // action on pending rows, so this is a double-submit or a stale tab.
+      return NextResponse.json(
+        { error: `That request has already been ${leave.status}.` },
+        { status: 409 },
+      );
+    }
 
     // Format date in the user's timezone for the notification message
     const userTimezone = targetUser.timezone || 'UTC';
@@ -61,28 +79,72 @@ export const POST = withAuth(async (
 
     const leaveLabel = leave.leaveType === 'paid' ? 'paid' : 'unpaid';
 
-    // Batch: update leave doc + (if approve) decrement balance + create notification
-    const batch = adminDb.batch();
-
-    batch.update(leaveRef, {
-      status: action === 'approve' ? 'approved' : 'denied',
-      resolvedAt: FieldValue.serverTimestamp(),
-      resolvedBy: token.uid,
-    });
-
-    if (action === 'deny') {
-      // Refund the balance that was decremented when the request was created
-      const balanceField = leave.leaveType === 'paid' ? 'remainingPaidLeave' : 'remainingUnpaidLeave';
-      batch.update(adminDb.collection('users').doc(leave.userId), {
-        [balanceField]: FieldValue.increment(1),
-      });
-    }
-
     const content = action === 'approve'
       ? notifications.leaveApproved(leaveLabel, dateStr)
       : notifications.leaveDenied(leaveLabel, dateStr);
-    addNotificationToBatch(batch, leave.userId, content);
 
+    // ── Approval is what spends the balance ──
+    //
+    // A **transaction**, not a batch, and this is the whole point of the change.
+    // The old flow decremented at request time with a blind
+    // `FieldValue.increment(-1)` after an unrelated read, so two requests landing
+    // together both saw "1 left" and both decremented — a balance that could go
+    // negative and a day nobody was entitled to. Reading the user document
+    // *inside* the transaction is what makes the check and the write one
+    // operation.
+    //
+    // Denial costs nothing, because nothing was ever taken: there is no refund
+    // path left to get wrong.
+    const balanceField = LEAVE_BALANCE_FIELD[leave.leaveType];
+
+    try {
+      await adminDb.runTransaction(async tx => {
+        const userRef = adminDb.collection('users').doc(leave.userId);
+        const freshLeave = await tx.get(leaveRef);
+
+        // Re-checked inside the transaction: the status test above ran before it
+        // opened, so two admins clicking Approve at once both passed it.
+        if ((freshLeave.data() as LeaveRequestDocument | undefined)?.status !== 'pending') {
+          throw new LeaveConflict('That request has already been decided.');
+        }
+
+        if (action === 'approve') {
+          const userSnap = await tx.get(userRef);
+          const balances = resolveLeaveBalances(userSnap.data() as UserDocument | undefined);
+          const remaining = leave.leaveType === 'paid' ? balances.paid : balances.unpaid;
+
+          // Refused rather than clamped. Approving leave the agent cannot afford
+          // is a payroll decision — it either costs the company a day it did not
+          // grant, or (clamped at zero) silently records an absence against a
+          // balance that never moved. An admin who means to allow it can raise
+          // the balance in CA Admin → Leave and approve again, which leaves a
+          // trail; a clamp leaves none.
+          if (remaining <= 0) {
+            throw new LeaveConflict(
+              `${targetUser.displayName ?? 'That agent'} has no ${leaveLabel} leave remaining. Adjust their balance in CA Admin → Leave to approve this.`,
+            );
+          }
+
+          tx.update(userRef, { [balanceField]: remaining - 1 });
+        }
+
+        tx.update(leaveRef, {
+          status: action === 'approve' ? 'approved' : 'denied',
+          resolvedAt: FieldValue.serverTimestamp(),
+          resolvedBy: token.uid,
+        });
+      });
+    } catch (txErr) {
+      if (txErr instanceof LeaveConflict) {
+        return NextResponse.json({ error: txErr.message }, { status: 409 });
+      }
+      throw txErr;
+    }
+
+    // The notification is outside the transaction on purpose: a transaction that
+    // retries would write the notification once per attempt.
+    const batch = adminDb.batch();
+    addNotificationToBatch(batch, leave.userId, content);
     await batch.commit();
     await sendTelegramNotification([leave.userId], content);
 

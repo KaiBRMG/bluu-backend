@@ -117,10 +117,18 @@ export function CommissionLadder({
               segment.isCurrent ? 'bg-action-blue/15' : 'bg-white/[0.07]',
             )}
           >
+            {/* `scaleX`, not `width`. `width` is a layout property, so each
+                frame relayouts and repaints up to four bars; a transform is
+                composited. Same reason the creator portal's runway fill is
+                written this way. Duration comes down to the house 120ms budget
+                (DESIGN.md §1) — 300ms on a bar that animates from zero on every
+                mount was a third of a second of movement nobody asked to watch.
+                `origin-left` is what makes the scale grow from the band's start
+                rather than its centre. */}
             <div
-              className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-300 ease-out"
+              className="absolute inset-y-0 left-0 w-full origin-left rounded-full transition-transform duration-[120ms] ease-out"
               style={{
-                width: `${segment.fill * 100}%`,
+                transform: `scaleX(${segment.fill})`,
                 backgroundColor: segment.isCurrent ? 'var(--action-blue)' : 'rgba(255,255,255,0.28)',
               }}
             />

@@ -42,6 +42,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useAdminData } from '@/hooks/useAdminData';
+import { LEAVE_ALLOTMENT } from '@/lib/leave/leaveBalance';
 
 interface UserDetailContentProps {
   user: AdminFullUser;
@@ -150,8 +151,11 @@ function buildFormData(user: AdminFullUser): FormData {
     enableIdleTimeout: user.enableIdleTimeout ?? true,
     enableScreenshots: user.enableScreenshots ?? true,
     hasPaidLeave: user.hasPaidLeave ?? false,
-    remainingUnpaidLeave: String(user.remainingUnpaidLeave ?? 4),
-    remainingPaidLeave: String(user.remainingPaidLeave ?? 10),
+    // The allotment constants — see `lib/leave/leaveBalance.ts`. Hand-typed here
+    // and disagreeing with the agent-facing default was how one document showed
+    // two different balances depending on who was looking.
+    remainingUnpaidLeave: String(user.remainingUnpaidLeave ?? LEAVE_ALLOTMENT.unpaid),
+    remainingPaidLeave: String(user.remainingPaidLeave ?? LEAVE_ALLOTMENT.paid),
   };
 }
 

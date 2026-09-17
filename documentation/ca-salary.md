@@ -127,7 +127,7 @@ This is correct and it reads as an error, which is exactly how it was reported: 
 - **Only days that hide something get a chevron** — more than one shift, an overtime shift, or in-shift cover. A chevron on all thirty rows is noise, and the one-row-per-calendar-date scan is what the table is for.
 - **Gross, net, commission rate and commission are one `colSpan` on a sub-row, not four `—`s.** Commission is earned on the day's sales and genuinely is not attributable to one shift; four em-dashes would claim the shift earned nothing.
 
-**In-shift cover (`paysWage: false`) gets a sub-row too**, reading `No extra pay`. It is otherwise invisible — the agent covered accounts and saw no change — and the row is where the §6 rule gets explained at the point someone asks.
+**A legacy in-shift cover shift (`paysWage: false`) gets a sub-row too**, reading `No extra pay`. It is otherwise invisible — the agent covered accounts and saw no change — and the row is where the §6 rule gets explained at the point someone asks. Cover now merges into the shift instead of creating one of these (§6), so on a current day the same disclosure is the `N overtime` note beside that shift's own chips; the row stays for the documents already written and for `forceInShift` assignments.
 
 ---
 
@@ -235,7 +235,7 @@ The release used to read `shifts/{leave.shiftId}` directly, which after any of t
 | Extra hours paid | No | Yes |
 | Counts toward the wage tier | No | Yes |
 | Keeps the sales | Yes | Yes |
-| How it is stored | `paysWage: false` shift, **or** `overtimeCreatorIds` on the real shift | A real shift, `isOvertime: true` |
+| How it is stored | `overtimeCreatorIds` on the shift the agent already works | A real shift, `isOvertime: true` |
 
 **An agent on 3 regular accounts who picks up 2 more during those same hours is still paid the 3-account rate.** Working a *second* shift outside their hours is the other case entirely, and there the overtime accounts do pay — two shifts in a day, each priced on its own accounts.
 
@@ -243,20 +243,29 @@ Outside-shift assignments **merge** into an overtime shift the agent already has
 
 Three rules make that merge safe, and each was a way of paying the wrong number:
 
+0. **The finders expand recurrence.** They used to run a bare `startTime` range query, and a recurring root's `startTime` is its *first* occurrence — so a weekly roster created in January was invisible to a query for a day in September. An agent on a recurring roster therefore looked like an agent with **no shift at all**: cover landed on a brand-new *paying* overtime shift stacked on the shift they were already being paid for, and the day billed **16 hours instead of 8** — $40 where $28 was owed. Both finders now read `getShiftsByUserAndRange` + `expandShiftsForWindow`, the same read `resolveLiveOccurrence` does, because what the roster says on a date is the expansion and never a document. `getShiftsByRange` carries a second query for exactly this reason; a bare query does not.
 1. **"Overtime shift" is one predicate, `isOvertimeShift`, not a flag read.** `isOvertime` means *created from an offer* — a shift an admin built by hand in Shift Management has no offer to point at and is overtime because every account on it is marked. Both `findCoveringShift` and `findOvertimeShift` ask the one predicate, so the same situation cannot be in-shift cover on one path and a merge on the other. It was: a hand-built overtime shift paid $10 where a board-built one in the same spot paid $14.
 2. **The merge matches an exact window first, then a *containing* one.** Exact-only was sufficient while every overtime shift was minted from an offer's own window. A hand-built one almost never matches exactly (18:00–22:00 against an offer released from 19:00–23:00), and a missed merge does not fail quietly — it creates a **second paid shift overlapping the first**, billing the same hours twice at two low rates. A *partial* overlap is still not merged: those hours are genuinely extra.
 3. **The merge preserves which kind of overtime shift it is.** The invariant is *an overtime shift pays on all of its accounts*, and the two kinds express it in opposite ways — a board-built shift marks **none** of its accounts, a hand-built one marks **all** of them. So the new id joins `creatorIds` alone on the first and **both fields** on the second. Adding to `creatorIds` only would make a hand-built shift *mixed*, which stops its original accounts counting toward the rate: a 2-account shift at $2.50 becomes a 1-account shift at $1.50, and the agent is **paid less for being given more work**.
 
-### In-shift cover has two representations, because it has two doors
+### In-shift cover joins the shift — it is not a second shift
 
-The rule above is one rule. It is reached from two places, and each records it the way its own surface can:
+Both doors now write the **same thing**: the account is added to the shift the agent already works, and marked in `overtimeCreatorIds`.
 
-| Door | Representation | Why that one |
-|---|---|---|
-| **Coverage board** (CA Admin → Coverage) — an offer released by someone's leave | Its own **zero-wage shift** (`paysWage: false`, `isOvertime: true`, `coverageOfferId` set) | The assignment has to point back at the offer it came from, and appending the creator to the agent's real shift would raise that shift's account count — precisely the raise this case must not produce |
-| **Shift Management** (`/admin-portal/shift-management`) — an admin editing the shift directly | **`overtimeCreatorIds`**, a subset of that shift's own `creatorIds` | There is no offer, and no second shift to attach it to. The admin is editing one shift and is naming, on it, which of its accounts pay |
+| Door | What it writes |
+|---|---|
+| **Coverage board** (CA Admin → Coverage) — an offer released by someone's leave | The released account joins the covering occurrence, marked overtime |
+| **Shift Management** — an admin editing the shift directly | The admin marks accounts **Regular / Overtime** on the shift itself |
 
-**Both price identically** in the mixed case, and that is the whole point — the engine excludes a `paysWage: false` shift wholesale and excludes `overtimeCreatorIds` from a paying shift's account count, in the same few lines of `salaryEngine.ts`. Before the second door existed, an admin adding two cover accounts by hand in Shift Management moved the agent from $3.50 to $5.50/hour with nothing on any screen saying so; the assignment field now carries a **Regular / Overtime** toggle per account and restates the rate from the paid count alone.
+The board used to write **its own zero-wage shift** (`paysWage: false`) instead, for one stated reason: appending the creator to the agent's real shift would have raised that shift's account count and therefore its rate — the exact raise this case must not produce. **`overtimeCreatorIds` is precisely the mechanism that removes that objection.** Once it existed the parallel document bought nothing and cost the agent a duplicate card on their calendar for a shift they work once, so the board merges too.
+
+> **`paysWage: false` is now legacy, and the engine must keep honouring it.** Documents written before the merge still exist, still price correctly (the engine excludes such a shift wholesale), and still render their own row. One live writer remains: `forceInShift: true` on an assignment where no shift can be found — an admin asserting cover inside hours the calendar cannot see. There is nothing to merge into there, so a zero-wage record is still the only way to say *worked, pays no hours*.
+
+**The two doors price identically**, which is the whole point, and a merged cover pays exactly what the parallel document did: a 3-account shift covering a 4th reads **3 accounts at $3.50**, not 4 at $4.50.
+
+**Merging into a recurring occurrence writes a per-occurrence override, never the series root.** The root's `creatorIds` are the assignment for *every* occurrence, so appending there would turn an account borrowed for one Tuesday into a permanent one. `addAccountToOccurrence` writes the same kind of override document a single-occurrence edit produces.
+
+**Revert deletes a shift only when coverage created it** (`coverageOfferId` set), not when it has no accounts left. `assignedShiftId` now routinely points at the agent's *own* rostered shift, and the old "nothing left, drop it" rule would have deleted a working day nobody released. One decision function, [`detachAccountFromShift`](../src/lib/utils/coverageDetach.ts), shared by all three revert paths — `cancelOffer`, `unassignOffer` and `revertOccurrenceCoverage` — and deliberately kept free of Firebase imports so it can be tested.
 
 **One exception, and it is the one that matters most: a shift where *every* account is marked overtime pays on all of them.** That shift is not free labour — it is the outside-hours case, a second shift in a day, and subtracting its whole assignment would hand an agent **$0/hour** for honestly marking their overtime shift as overtime. So the marking means two things depending on what sits beside it:
 
@@ -288,12 +297,14 @@ What remains on the dashboard, in order: salary card → leave balance → calen
 
 The calendar has **two views off one cell renderer** ([`ShiftCalendar`](../src/components/shifts/ShiftCalendar.tsx), `view="week" | "month"`), and the dashboard leads with the **week**:
 
-- `view="week"` draws one Monday-first row with its own **‹ › arrows** and a "This week" reset, and cells roughly twice the height of a month cell.
-- **Full Schedule** (the one prominent button on the panel) opens [`FullScheduleDialog`](../src/components/shifts/FullScheduleDialog.tsx) — the same component with `view="month"`, `bare`, and a `MonthPicker` in the dialog header, at `sm:max-w-5xl`.
+- `view="week"` draws **seven full-width rows**, one per day, with its own **‹ › arrows** and a "This week" reset.
+- **Full Schedule** (the one prominent button on the panel) opens [`FullScheduleDialog`](../src/components/shifts/FullScheduleDialog.tsx) — the same component with `view="month"`, `bare`, and a `MonthPicker` in the dialog header, at `sm:max-w-5xl`. The month is still a **7-column grid**.
+
+**The week is rows and the month is a grid, and the split is the point.** Every hard constraint the old seven-column week imposed traced back to one number — a day cell is ~90px — which forced avatars without names, pushed all three overtime pay explanations into tooltips and `sr-only` text, truncated the start time, and drove pay-relevant labels to 10px, below the smallest step DESIGN.md allows to carry real content. A week has only seven days and the full panel width, so a row gives each one ~700px: names render, the pay consequence is visible prose, and the leave button rests visible instead of appearing on hover. The month keeps the grid because it is read for **shape** ("which weeks am I heavy") rather than for detail.
 
 Three things about this are load-bearing:
 
-- **It is one component, not two.** Leave, in-shift cover and the claim popover all live *in the day cell*; a separate week component would be a second place for those to drift, and the dialog would quietly lose one of them.
+- **It is still one component, and the shift body is still one renderer.** [`ShiftEntry`](../src/components/shifts/ShiftCalendar.tsx) takes a `dense` flag — avatars and 11px type for the grid, names and readable type for the row — and `OfferCell` and `LeaveBadge` are shared unchanged. `dense` is the *only* thing any of them branch on. That preserves what the original single-cell renderer was protecting (one definition of leave, in-shift cover and the claim popover) while letting the two layouts differ in the one way they genuinely do. **A change to what a shift means goes in `ShiftEntry`, never in a layout branch.**
 - **The week arrows have no forward cap, and the dialog's `MonthPicker` has a raised one** (`latest`, 12 months out). The picker's default ceiling is the current month because a future *salary* month has no data by definition — a roster is the opposite, it is published ahead. Money surfaces keep the default; this is the only caller that raises it.
 - **The overtime layer is fetched for the visible range**, not for a rolling window around today. `useCoverageOffers` defaults to `today-1 → today+45`, which was right while the only view was the current month and wrong the moment the arrows can leave it — a week three arrows out would draw the roster and silently claim no cover was going spare.
 
@@ -313,6 +324,22 @@ Three rules keep them in step, and a new surface that changes a roster has to ho
 
 > **A dashboard card must not link to a page the viewer may not hold.** The leave balance briefly linked to `/ca-portal/shifts`; `ca-dashboard` and `ca-shifts` are granted separately, so for anyone without the second one `AppLayout` redirected the click to the home page. It is now plain information with no link at all.
 
+### A failed read is a state, never an empty list
+
+Three surfaces on this dashboard render facts the agent acts on, and each hook builds a real error message. **Dropping one at the destructure turns a failure into a confident negative**, which on this dashboard costs money or a day off:
+
+- **Overtime.** `useCoverageOffers` exposes `error`; ignoring it rendered *"No overtime available this week. Accounts appear here when someone's leave is approved."* for a request that failed. The board is first-come, so that is an agent losing a claim to a network error nobody told them about.
+- **Leave.** `useLeaveRequests` exposes `error`; ignoring it dropped every "Off — pending" badge from the grid **and** re-enabled the request button on a shift already booked off (the API then 409s). `ShiftCalendar` now reports it once for the whole grid and withdraws the leave button while it is true — *unknown* must not render as *none*.
+- **The balance card.** `LeaveBalanceCard` shows the same error with a retry rather than silently rendering no pending count and no decisions.
+
+The correct shape already existed in the same file — `useShiftCalendar`'s error branch with its `Try again` — and is what all three now match.
+
+### The agent is never told a leave decision, so the dashboard has to say it
+
+There is **no notification for leave approved or denied** (§11) — the approver hears about the request, the agent never hears the answer. Before this, the only rendering of an outcome was the badge on that shift's calendar cell, which may be weeks out and invisible in the default week view: an agent could be denied a day and find out by not being on the roster.
+
+`DecisionPills` in [`LeaveBalanceCard`](../src/components/shifts/LeaveBalanceCard.tsx) is that missing channel. Every request resolved in the last **14 days** shows as a pill naming the date and the outcome in words, until dismissed. Dismissal is `localStorage`, not a Firestore write — it is an acknowledgement, not a fact anyone else needs — and every access is wrapped, because a browser that refuses storage must still show the pill rather than hide the only place a denial appears. **If a leave-decision notification is ever added, this is the thing to reconsider, not to duplicate.**
+
 ### Overtime lives on the calendar, not beside it
 
 The agent-facing board is a **second layer inside `ShiftCalendar`**, not a section of its own. Their own shifts are primary — filled cell, solid time, full-size avatars, always first in the cell; available cover is secondary — no fill, a dashed rule above it, an orange dot, dimmed faces. The ordering is load-bearing: a board that competes with the real roster is one people misread on a Monday morning.
@@ -327,6 +354,31 @@ Claiming happens in a popover off the day cell: a month cell is ~90px and the de
 - **1 day's notice** to claim overtime. Enforced.
 - **4 days' notice to request leave is stated, not enforced.** Leave can be requested right up until the shift starts; the only hard boundary is a shift that has already begun. Blocking a late request would push an agent who is ill tomorrow into telling someone off-system, where no admin can see it — the approvals queue shows how much notice each request actually carries ("in 1 day") and an admin decides. The UI states the expectation in both places it appears.
 - Paid leave requires a stated reason; unpaid does not.
+
+### Leave balances — the entitlement, and who spends it
+
+**[`src/lib/leave/leaveBalance.ts`](../src/lib/leave/leaveBalance.ts) is the only place the allotments are written down, and `resolveLeaveBalances` is the only sanctioned way to read a balance off a user document.** Both matter: the numbers were previously spelled out at six call sites, and two of them disagreed — `AdminLeave` and `UserDetailContent` read a missing balance as `4`/`10` while the request route, `LeaveBalanceCard` and `RequestLeaveDialog` read the same missing field as `0`. An admin and the agent saw different numbers for one person. `resolveLeaveBalances` also gates the paid figure on `hasPaidLeave`, because `remainingPaidLeave` holds `10` whether or not the entitlement is switched on.
+
+- **Unpaid: 4 days, reset on the 1st of each month.** **Paid: 10 days, reset on 1 January**, for users with `hasPaidLeave`. A reset **assigns** the allotment — balances do not carry over.
+- **The period boundary is `Africa/Harare`**, the same as §7's salary day, so a day off cannot land in one month's roster and spend another month's balance. The period keys come from `salaryDate.ts` for exactly that reason.
+
+**Approval spends the day. Requesting does not.** This was the other way round and was wrong in three ways: a request an admin never got to held the balance hostage indefinitely, a denied request needed a refund to undo a charge it should never have made, and requesting-then-withdrawing refunded a day that was never spent. Now:
+
+| Transition | Balance effect |
+|---|---|
+| Request created | none — but the request counts against what is left |
+| Approved | **−1**, in a transaction |
+| Denied | none |
+| Approved leave withdrawn | **+1**, capped at the allotment |
+| Pending or denied request withdrawn | none |
+
+- **The request gate is `remaining − pending`, not `remaining`.** Since a request no longer spends anything, the balance alone is not what an agent has left to commit; four pending requests against four days is fully spent, and checking only the balance would let them queue a fifth.
+- **Every mutation is a `runTransaction`, reading the user document inside it.** The old code paired an unrelated read with a blind `FieldValue.increment(-1)`, so two requests landing together both saw "1 left" and both decremented — a balance that could go negative.
+- **An approval against a zero balance is refused (409), never clamped.** Approving leave an agent cannot afford is a payroll decision: it either grants a day the company did not, or (clamped) records an absence against a balance that never moved. The message names the fix — raise the balance in CA Admin → Leave — so the override leaves a trail.
+- **The withdrawal refund is capped at the allotment**, so a day approved in March and withdrawn in April cannot push the new month above four.
+- **Both approval call sites must surface the refusal.** `useAdminLeaveQueue` and `ShiftCard` both POST to the approve route (§6 — `ShiftCard` is the one that gets forgotten). `ShiftCard` used to ignore the response entirely, which would have made a refusal look identical to a successful denial.
+
+**The reset is a daily cron with a stored marker, not a job scheduled for the 1st.** [`/api/cron/leave-reset`](../src/app/api/cron/leave-reset/route.ts) runs every day at 22:30 UTC (00:30 Harare) and resets a user when their `unpaidLeaveResetMonth` / `paidLeaveResetYear` stamp is not the current period. A date test would make correctness depend on the job firing on one specific day — a missed run silently skips a month for everyone, which is the failure the whole mechanism exists to prevent. The marker makes it **idempotent** (a second run the same day writes nothing) and **self-healing** (a run missed for three days catches up on the fourth). A user with no stamp and an existing balance is *stamped without being reset*, so the first run after deploy does not undo an admin's hand-set value. Both marker fields are index-exempt (rule 9); the cohort is `permittedPageIds array-contains 'time-tracking'`, which needs no new index. It notifies nobody, deliberately — see the route's own comment.
 
 ---
 
@@ -458,6 +510,7 @@ Three calls worth not re-litigating:
 | [`caSalaryService.ts`](../src/lib/services/caSalaryService.ts) | Firestore + the assembler |
 | [`caCoverageService.ts`](../src/lib/services/caCoverageService.ts) | Offers, claims, assignment |
 | [`leaveCoverage.ts`](../src/lib/services/leaveCoverage.ts) | Leave approval → release, and withdrawal → revert. `resolveLiveOccurrence` re-resolves a pinned request against the live roster first — see §6 |
+| [`leave/leaveBalance.ts`](../src/lib/leave/leaveBalance.ts) | The leave allotments, the one sanctioned balance reader (`resolveLeaveBalances`), the reset period keys, and the pure `computeLeaveReset` the cron applies — see §6 |
 | [`leaveMatch.ts`](../src/lib/utils/leaveMatch.ts) | The tiered leave ↔ occurrence matcher, shared by the release, the admin week view and the agent calendar |
 | [`caNotifications.ts`](../src/lib/services/caNotifications.ts) | Recipients, delivery, the tier gate and the payday latch |
 | [`coverageNotices.ts`](../src/lib/services/coverageNotices.ts) | The coalescing queue and the withdrawal record |

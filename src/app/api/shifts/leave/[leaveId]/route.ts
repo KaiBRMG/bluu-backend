@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById, invalidateUserCache } from '@/lib/services/userService';
 import { notifications } from '@/lib/notificationContent';
 import { CA_LEAVE_ALERT_RECIPIENT_UID, formatNameList, notifyUsers } from '@/lib/services/caNotifications';
 import { queueCoverageNotice, recordLeaveWithdrawal } from '@/lib/services/coverageNotices';
 import { revertOccurrenceCoverage } from '@/lib/services/leaveCoverage';
+import { LEAVE_ALLOTMENT, LEAVE_BALANCE_FIELD, resolveLeaveBalances } from '@/lib/leave/leaveBalance';
 import { formatDayLabelWithWeekday, toDayKey } from '@/lib/salary/salaryDate';
 import { pluralise } from '@/lib/salary/salaryFormat';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-import type { LeaveRequestDocument } from '@/types/firestore';
+import type { LeaveRequestDocument, UserDocument } from '@/types/firestore';
 
 // ─── DELETE /api/shifts/leave/[leaveId] ────────────────────────────────────
 //
@@ -54,17 +54,39 @@ export const DELETE = withAuth(async (
 
     const wasApproved = leave.status === 'approved';
 
-    // Always refund the balance — it was decremented when the request was created.
-    // Exception: if already denied, balance was already refunded by the deny action.
-    const balanceField = leave.leaveType === 'paid' ? 'remainingPaidLeave' : 'remainingUnpaidLeave';
-    const batch = adminDb.batch();
-    batch.delete(leaveRef);
-    if (leave.status !== 'denied') {
-      batch.update(adminDb.collection('users').doc(leave.userId), {
-        [balanceField]: FieldValue.increment(1),
-      });
-    }
-    await batch.commit();
+    // ── The refund, and only where one is owed ──
+    //
+    // Approval is what spends a day, so withdrawal refunds one **only** for an
+    // approved request. A pending or denied request never cost anything, and the
+    // old code refunding both is what let an agent gain a day by requesting
+    // leave and immediately withdrawing it.
+    //
+    // Transactional for the same reason the deduction is: the refund is computed
+    // from the value read inside it, so a withdrawal racing the monthly reset
+    // cannot write back a pre-reset number.
+    const balanceField = LEAVE_BALANCE_FIELD[leave.leaveType];
+
+    await adminDb.runTransaction(async tx => {
+      const userRef = adminDb.collection('users').doc(leave.userId);
+
+      if (wasApproved) {
+        const userSnap = await tx.get(userRef);
+        const balances = resolveLeaveBalances(userSnap.data() as UserDocument | undefined);
+        const remaining = leave.leaveType === 'paid' ? balances.paid : balances.unpaid;
+
+        // Capped at the allotment. A day approved in March and withdrawn in
+        // April belongs to a period that has already been reset — refunding it
+        // would push the new month above four days for an absence that never
+        // happened. The cap costs the agent nothing they still hold and stops
+        // the balance ratcheting upward across resets.
+        tx.update(userRef, {
+          [balanceField]: Math.min(remaining + 1, LEAVE_ALLOTMENT[leave.leaveType]),
+        });
+      }
+
+      tx.delete(leaveRef);
+    });
+
     invalidateUserCache(leave.userId);
 
     if (!wasApproved) {

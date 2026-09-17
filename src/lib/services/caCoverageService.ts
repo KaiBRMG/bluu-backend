@@ -35,7 +35,11 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { toDayKey, dayKeyRange, type SalaryDayKey } from '../salary/salaryDate';
 import { splitShiftAccounts } from '../salary/shiftAccounts';
 import type { CaCoverageOfferDocument, ShiftDocument } from '@/types/firestore';
-import { safeTimezone } from '../utils/timezone';
+import { safeTimezone, toLocalDateStr } from '../utils/timezone';
+import { getShiftsByUserAndRange, createOccurrenceOverride } from './shiftService';
+import { serialiseShift } from '../utils/shiftSerialise';
+import { detachAccountFromShift } from '../utils/coverageDetach';
+import { expandShiftsForWindow, type ExpandedShift } from '../utils/recurrence';
 
 const OFFERS = 'ca-coverage-offers';
 const SHIFTS = 'shifts';
@@ -245,9 +249,123 @@ export async function withdrawClaim(offerId: string, userId: string): Promise<vo
  * A zero-wage in-shift cover shift is excluded by its caller, not here: it is
  * overtime, but it is not something another account can be merged into.
  */
-function isOvertimeShift(shift: ShiftDocument): boolean {
+function isOvertimeShift(shift: {
+  isOvertime?: boolean;
+  creatorIds?: string[];
+  overtimeCreatorIds?: string[];
+}): boolean {
   if (shift.isOvertime) return true;
   return splitShiftAccounts(shift.creatorIds, shift.overtimeCreatorIds).isFullyOvertime;
+}
+
+/**
+ * One agent's shift **occurrences** around a window, recurrence expanded.
+ *
+ * The finders below used to run a raw `startTime` range query, and that is a
+ * money bug rather than an inefficiency: a recurring root's `startTime` is its
+ * *first* occurrence, so a weekly roster created in January is invisible to a
+ * range query for a day in September. `getShiftsByRange` carries a second query
+ * for exactly that reason; a bare query does not.
+ *
+ * The effect was that an agent on a recurring roster looked, to the assigner,
+ * like an agent with no shift at all — so cover landed on a brand-new **paying**
+ * overtime shift stacked on top of the shift they were already being paid for,
+ * and the day billed those hours twice.
+ *
+ * This is the same read `leaveCoverage.resolveLiveOccurrence` does, and for the
+ * same reason: what the roster *says* on a date is the expansion, never a
+ * document.
+ */
+async function occurrencesAround(
+  userId: string,
+  windowStart: number,
+  windowEnd: number,
+): Promise<ExpandedShift[]> {
+  const [dayStart, dayEnd] = dayKeyRange(toDayKey(windowStart));
+  // Padded either side so a midnight-spanning shift that starts the previous
+  // day still expands into view.
+  const from = Math.min(dayStart, windowStart) - 12 * 3_600_000;
+  const to = Math.max(dayEnd, windowEnd) + 12 * 3_600_000;
+
+  const raw = await getShiftsByUserAndRange(userId, from, to);
+  return expandShiftsForWindow(
+    raw.map(shift => ({ ...serialiseShift(shift), timeWorkedSeconds: null, attendanceStatus: null })),
+    from,
+    to,
+  );
+}
+
+/**
+ * Add one account to an occurrence the agent already works.
+ *
+ * Returns the id of the document that now carries it.
+ *
+ * **A virtual occurrence of a recurring series cannot be written to.** Its
+ * `shiftId` is the series *root*, so appending there would put the account on
+ * every occurrence of that series for ever — an account borrowed for one
+ * Tuesday becoming a permanent assignment. A per-occurrence override is
+ * written instead, which is exactly what a single-occurrence edit in Shift
+ * Management produces.
+ */
+async function addAccountToOccurrence(params: {
+  occurrence: ExpandedShift;
+  creatorId: string;
+  /** Mark it overtime — worked for the sales, with no effect on the wage tier. */
+  markOvertime: boolean;
+  actorUid: string;
+}): Promise<string> {
+  const { occurrence, creatorId, markOvertime, actorUid } = params;
+
+  const creatorIds = [...new Set([...(occurrence.creatorIds ?? []), creatorId])];
+  const existingMarks = occurrence.overtimeCreatorIds ?? [];
+  const overtimeCreatorIds = markOvertime
+    ? [...new Set([...existingMarks, creatorId])]
+    : [...existingMarks];
+
+  // A virtual occurrence: `isRecurring` with no `seriesId` is a series root the
+  // expander stamped with one date's times. Anything else — a one-off shift, or
+  // an override document — is a real document and is updated in place.
+  const isVirtualOccurrence = occurrence.isRecurring && occurrence.seriesId === null;
+
+  if (!isVirtualOccurrence) {
+    await adminDb.collection(SHIFTS).doc(occurrence.shiftId).update({
+      creatorIds,
+      overtimeCreatorIds,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return occurrence.shiftId;
+  }
+
+  // UTC midnight of the occurrence's **local** date — the shape the expander
+  // compares an override against. Taking it from the expander's own
+  // `overrideDate` where it has one keeps the two in step; the fallback derives
+  // it the same way `leaveCoverage.overrideDateFor` does, in the shift's own
+  // timezone rather than the salary one, because that is the calendar the
+  // expander reads.
+  let overrideDateMs: number | null = occurrence.overrideDate
+    ? new Date(occurrence.overrideDate).getTime()
+    : null;
+  if (overrideDateMs === null || !Number.isFinite(overrideDateMs)) {
+    const local = toLocalDateStr(occurrence.occurrenceStart, occurrence.userTimezone || 'UTC');
+    const [y, m, d] = local.split('-').map(Number);
+    overrideDateMs = Date.UTC(y, m - 1, d);
+  }
+
+  return createOccurrenceOverride(occurrence.shiftId, overrideDateMs, {
+    userId: occurrence.userId,
+    startTime: occurrence.occurrenceStart,
+    endTime: occurrence.occurrenceEnd,
+    wallClockStart: occurrence.wallClockStart,
+    wallClockEnd: occurrence.wallClockEnd,
+    userTimezone: occurrence.userTimezone,
+    createdBy: actorUid,
+    recurrence: null,
+    creatorIds,
+    overtimeCreatorIds,
+    isOvertime: occurrence.isOvertime ?? false,
+    coverageOfferId: occurrence.coverageOfferId ?? null,
+    paysWage: occurrence.paysWage ?? true,
+  });
 }
 
 /**
@@ -262,26 +380,19 @@ export async function findCoveringShift(
   userId: string,
   windowStart: number,
   windowEnd: number,
-): Promise<ShiftDocument | null> {
-  const [dayStart, dayEnd] = dayKeyRange(toDayKey(windowStart));
-  const snap = await adminDb
-    .collection(SHIFTS)
-    .where('userId', '==', userId)
-    .where('startTime', '>=', Timestamp.fromMillis(dayStart - 12 * 3_600_000))
-    .where('startTime', '<=', Timestamp.fromMillis(dayEnd))
-    .get();
-
-  for (const doc of snap.docs) {
-    const shift = doc.data() as ShiftDocument;
-    if (shift.isDeleted) continue;
+): Promise<ExpandedShift | null> {
+  for (const occurrence of await occurrencesAround(userId, windowStart, windowEnd)) {
+    // A zero-wage cover record is not a shift anybody is working — it is the
+    // legacy note that they picked up an account inside one.
+    if (occurrence.paysWage === false) continue;
     // An overtime shift is never a "covering" shift — an account added to one
     // merges into it and raises its rate, rather than riding along unpaid. That
     // is `findOvertimeShift`'s job, and the two use the same containment test,
     // so every overtime shift this skips is one that function can still find.
-    if (isOvertimeShift(shift)) continue;
-    const start = shift.startTime.toMillis();
-    const end = shift.endTime.toMillis();
-    if (start <= windowStart && end >= windowEnd) return shift;
+    if (isOvertimeShift(occurrence)) continue;
+    if (occurrence.occurrenceStart <= windowStart && occurrence.occurrenceEnd >= windowEnd) {
+      return occurrence;
+    }
   }
   return null;
 }
@@ -333,7 +444,6 @@ export async function assignOffer(params: {
   if (!inShift) {
     const existing = await findOvertimeShift(userId, windowStart, windowEnd);
     if (existing) {
-      shiftId = existing.shiftId;
       merged = true;
 
       // The invariant being preserved is "an overtime shift pays on all of its
@@ -352,14 +462,12 @@ export async function assignOffer(params: {
         existing.overtimeCreatorIds,
       ).isFullyOvertime;
 
-      await adminDb
-        .collection(SHIFTS)
-        .doc(shiftId)
-        .update({
-          creatorIds: FieldValue.arrayUnion(offer.creatorId),
-          ...(staysFullyOvertime && { overtimeCreatorIds: FieldValue.arrayUnion(offer.creatorId) }),
-          updatedAt: FieldValue.serverTimestamp(),
-        });
+      shiftId = await addAccountToOccurrence({
+        occurrence: existing,
+        creatorId: offer.creatorId,
+        markOvertime: staysFullyOvertime,
+        actorUid,
+      });
     } else {
       shiftId = await createCoverageShift({
         userId,
@@ -372,11 +480,27 @@ export async function assignOffer(params: {
         paysWage: true,
       });
     }
+  } else if (covering) {
+    // Cover taken inside a shift the agent already works **joins that shift**,
+    // marked overtime. One card on their calendar, the extra face ringed.
+    //
+    // It used to be written as a separate zero-wage shift, for one reason: back
+    // then, appending the creator would have raised that shift's account count
+    // and therefore its hourly rate — the exact wage increase this case must not
+    // produce. `overtimeCreatorIds` is precisely the mechanism that removes that
+    // objection, so the parallel document no longer buys anything and cost the
+    // agent a duplicate entry on their roster for a shift they work once.
+    merged = true;
+    shiftId = await addAccountToOccurrence({
+      occurrence: covering,
+      creatorId: offer.creatorId,
+      markOvertime: true,
+      actorUid,
+    });
   } else {
-    // In-shift cover is recorded as its own zero-wage shift rather than by
-    // appending the creator to the agent's real shift: appending would raise
-    // that shift's account count and therefore its hourly rate, which is
-    // precisely the wage increase this case must not produce.
+    // `forceInShift: true` with no shift found — an admin asserting cover inside
+    // hours the calendar cannot see. There is nothing to merge into, so the
+    // zero-wage record is still the only way to say "worked, pays no hours".
     shiftId = await createCoverageShift({
       userId,
       windowStart,
@@ -420,30 +544,21 @@ async function findOvertimeShift(
   userId: string,
   windowStart: number,
   windowEnd: number,
-): Promise<ShiftDocument | null> {
-  const [dayStart, dayEnd] = dayKeyRange(toDayKey(windowStart));
-  const snap = await adminDb
-    .collection(SHIFTS)
-    .where('userId', '==', userId)
-    .where('startTime', '>=', Timestamp.fromMillis(dayStart - 12 * 3_600_000))
-    .where('startTime', '<=', Timestamp.fromMillis(dayEnd))
-    .get();
+): Promise<ExpandedShift | null> {
+  let containing: ExpandedShift | null = null;
 
-  let containing: ShiftDocument | null = null;
-
-  for (const doc of snap.docs) {
-    const shift = doc.data() as ShiftDocument;
+  for (const occurrence of await occurrencesAround(userId, windowStart, windowEnd)) {
     // `paysWage: false` is in-shift cover: overtime, but a zero-wage record of
     // somebody else's hours. Merging into it would hide an account inside a
     // shift that pays nothing.
-    if (shift.isDeleted || shift.paysWage === false || !isOvertimeShift(shift)) continue;
+    if (occurrence.paysWage === false || !isOvertimeShift(occurrence)) continue;
 
-    const start = shift.startTime.toMillis();
-    const end = shift.endTime.toMillis();
-    if (start === windowStart && end === windowEnd) return shift;
-    // Kept, not returned: an exact match later in the snapshot is the better
-    // answer and must win regardless of document order.
-    if (containing === null && start <= windowStart && end >= windowEnd) containing = shift;
+    const start = occurrence.occurrenceStart;
+    const end = occurrence.occurrenceEnd;
+    if (start === windowStart && end === windowEnd) return occurrence;
+    // Kept, not returned: an exact match later in the list is the better answer
+    // and must win regardless of order.
+    if (containing === null && start <= windowStart && end >= windowEnd) containing = occurrence;
   }
 
   return containing;
@@ -517,11 +632,11 @@ export async function cancelOffer(offerId: string): Promise<void> {
     const shiftRef = adminDb.collection(SHIFTS).doc(offer.assignedShiftId);
     const shiftSnap = await shiftRef.get();
     if (shiftSnap.exists) {
-      const shift = shiftSnap.data() as ShiftDocument;
-      const remaining = (shift.creatorIds ?? []).filter(id => id !== offer.creatorId);
-      // The shift may cover several offers; only drop it once the last one goes.
-      if (remaining.length === 0) batch.delete(shiftRef);
-      else batch.update(shiftRef, { creatorIds: remaining, updatedAt: FieldValue.serverTimestamp() });
+      // The shift may cover several offers; only drop it once the last one goes
+      // — and only if coverage created it in the first place.
+      const outcome = detachAccountFromShift(shiftSnap.data() as ShiftDocument, offer.creatorId);
+      if (outcome.delete) batch.delete(shiftRef);
+      else batch.update(shiftRef, outcome.patch);
     }
   }
 
@@ -546,10 +661,9 @@ export async function unassignOffer(offerId: string): Promise<void> {
     const shiftRef = adminDb.collection(SHIFTS).doc(offer.assignedShiftId);
     const shiftSnap = await shiftRef.get();
     if (shiftSnap.exists) {
-      const shift = shiftSnap.data() as ShiftDocument;
-      const remaining = (shift.creatorIds ?? []).filter(id => id !== offer.creatorId);
-      if (remaining.length === 0) await shiftRef.delete();
-      else await shiftRef.update({ creatorIds: remaining, updatedAt: FieldValue.serverTimestamp() });
+      const outcome = detachAccountFromShift(shiftSnap.data() as ShiftDocument, offer.creatorId);
+      if (outcome.delete) await shiftRef.delete();
+      else await shiftRef.update(outcome.patch);
     }
   }
 

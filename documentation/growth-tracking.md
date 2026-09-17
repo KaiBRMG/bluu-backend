@@ -144,15 +144,21 @@ They replaced *Posts tracked* and *Active signals* (2026-09-09). Neither figure 
 
 ### The account panel
 
-**A panel with two levels, not a page.** It was a full-width page for exactly one reason — `PostsTable` is five columns wide with three sortable headers, and that does not fit a panel. [`PostStrip`](../src/components/growth/PostStrip.tsx) removed the reason, and the panel bought back what a page cannot give: the roster stays on screen behind it, so opening an account is a peek rather than a departure, and moving between accounts does not bounce through an overview you never left. `sm:max-w-2xl`, wider than the post sheet's `max-w-xl`, because this one carries a chart, a control deck *and* a list.
+**A panel, not a page.** It was a full-width page for exactly one reason — `PostsTable` is five columns wide with three sortable headers, and that does not fit a panel. A column of [`PostCard`](../src/components/growth/PostCard.tsx)s removed the reason, and the panel bought back what a page cannot give: the roster stays on screen behind it, so opening an account is a peek rather than a departure, and moving between accounts does not bounce through an overview you never left. `sm:max-w-2xl`, wider than the post sheet's `max-w-xl`, because this one carries a chart, a control deck *and* a list.
 
-**Clicking a post drills to level two in the same panel — it does not open a second sheet.** Two stacked Radix dialogs would mean two overlays darkening the canvas twice, two focus traps, and an `Esc` that only closes the top one, paid for a panel entirely hidden behind the one in front of it. [`PostDetailSheet.tsx`](../src/components/growth/PostDetailSheet.tsx) therefore exports **two** things: `PostDetailBody` (the contents) and `PostDetailSheet` (the `Sheet` wrapper `PostsTab` still uses). `onBack` is what tells the body which it is — present, it grows a back control and a delete returns to the account; absent, it is the whole panel and a delete closes it. **Never fork the body into a second copy for the nested case**; the two would drift and one of them would end up describing behaviour the system no longer has.
+**A post's detail opens inside its own card. There is no second level and no second sheet.** Both alternatives were built and both are wrong here. A second `Sheet` means two overlays darkening the canvas twice, two focus traps and an `Esc` that only closes the top one. Replacing the panel's contents avoids that and still loses the thing that matters: **the list is the context for every number in it** — with it covered, comparing two posts is a round trip with nothing on screen in between. Expanded in place, the neighbours stay visible and the reading log lands directly under the sparkline it explains. `Accordion type="single" collapsible` keeps one open at a time, so the panel never becomes a page of stacked detail.
 
-**`account === null` is both the close signal and the reset.** The panel content unmounts with it — the same construction `PostDetailSheet` already used — which is what makes reopening an account always start at the account level instead of wherever the previous visit was abandoned. No effect, no latch, no key juggling.
+**`account === null` is both the close signal and the reset.** The panel content unmounts with it — the same construction `PostDetailSheet` already used — which is what makes reopening an account always start with nothing expanded instead of wherever the previous visit was abandoned. No effect, no latch, no key juggling.
+
+**Posts are ordered newest first, and the metric toggle does not touch that.** Ranking by the selected metric is the obvious move and it is wrong: engagement is cumulative, so that list is simply the oldest posts, permanently, while the ones still accumulating — the only ones the next refresh can change — sink out of sight. The timeline is also the order the reader already holds in their head. A post with no publish time sinks either way; it is missing from the timeline, not the oldest thing in it.
 
 **Order is an argument about priority, and controls win.** Controls → followers → tracked posts → folded-away facts. The page version had it backwards: its only two decisions (post discovery, and pasting a link) sat at the very bottom, below a table, which put the surface's actions behind its longest read. The one exception to the order is a failed read, which sits directly under the header — it is the only thing that explains why the chart below it has a flat tail, and folding it away would leave stale numbers looking current.
 
-**The range control belongs to the panel, not to the roster.** One account is on this axis, so the window that suits it has nothing to do with the window the grid behind it is showing. It seeds from the page's range and diverges from there; nothing is written back. The follower axis is scaled to the data rather than zero-based — only one account is on it, so the scale can simply be its own.
+**The Window control belongs to the panel, not to the roster and not to the chart.** One account is on this axis, so the window that suits it has nothing to do with the window the grid behind it is showing. It seeds from the page's range and diverges from there; nothing is written back. The follower axis is scaled to the data rather than zero-based — only one account is on it, so the scale can simply be its own.
+
+**It scopes the posts as well as the chart, which is why it sits in the header.** It started inside the Followers section, where it silently changed a list further down the panel — the same failure the roster's control layout already avoids by putting every control above what it filters. In the header it is visibly the panel's own scope.
+
+**For posts it filters by publish date, not by trimming each post's readings.** A post's engagement curve runs on its own clock — the 6h/12h/daily ladder — so clipping it to the roster's calendar would leave most cards holding a single point and a `—` rate, which reads as broken rather than as filtered. The window answers "which posts are in scope"; each card still shows that post's whole life. **A post with no publish time is always shown** — it is unplaced in the timeline, not old, and hiding it for a date nobody knows is the same invention this subsystem refuses everywhere else. The section count reads `3 of 14` whenever the window is hiding some, and the filtered-empty state carries its own way out (`Show all 14`), which the never-tracked-anything state correctly does not.
 
 **Post tracking is inside the account, not a separate tab.** The reference put a "check every 15 min / 1 hour / 1 day" picker in that slot; **there is no such control to expose** — a post's cadence is set by its own age (see [post analytics](#post-analytics)), because engagement can only ever be read as its value right now. What occupies the slot is the one thing that *is* a choice: the `trackPosts` switch, which is a separate line on the bill. It is offered here *and* in the manage table, through the shared [`useTrackPosts`](../src/components/growth/useTrackPosts.ts) hook — the cost wording must not drift between the two. On a Facebook account the deck is not rendered at all, just a quiet line: a bordered box around one sentence is a container pretending there is content in it.
 
@@ -428,28 +434,42 @@ chart, matched by `accountId` OR author handle so a hand-pasted post is not
 hidden from the very account its author lives on. That is where someone looking
 at one account expects them.
 
-**At panel width they are strips, not a table.** [`PostStrip`](../src/components/growth/PostStrip.tsx)
-is deliberately built on `AccountCard`'s construction — a post inside an account
-is the same kind of object one level down: a headline number, a rate, and a shape
-over time. It **drops** what the card only needed because it sat in a grid: the
-author avatar (every post here has the same author, so a column of identical
-faces states nothing) and the stacked two-line layout. It **gains** a magnitude
-bar — a translucent Action Blue wash widened against the best post *in that list*,
-the house ranking idiom, which answers "which of these worked" before a number is
-read. A post the scraper has never reported the selected metric for gets **no bar
-at all** (`share: null`), never a zero-width one: those would look identical, and
-inventing a value for a gap is banned everywhere else in this subsystem.
+**At panel width they are cards, not a table.** [`PostCard`](../src/components/growth/PostCard.tsx)
+is `AccountCard` one level down — the same three bands in the same order (identity
+block with its state marks pushed right, then the headline figure with its rate
+beside it, then a full-width sparkline on its own scale), because a post inside an
+account is the same *kind* of object as an account inside the roster and should be
+read with the same eye movement. The author avatar is dropped: every post in this
+list has the same author, so a column of identical faces states nothing.
 
-**The whole strip is the button**, the same call as `AccountCard` and for the same
-reason — nothing else is interactive inside it. The table makes the opposite call
-only because `role="button"` on a `<tr>` orphans its cells; there is no `<tr>` here.
+**The one band deliberately not copied is colour.** `AccountCard` tints its delta
+and its trace green or red because a follower count genuinely falls. **Cumulative
+engagement essentially cannot** — carried over unchanged, every post card would be
+green every day, and a hue that never varies encodes nothing. So the post trace
+stays greyscale and the card's colour is spent on the two things that do vary: the
+refresh state (Action Blue while a post is young enough for its numbers to move)
+and a failed read (red, gated on `isActive` for the same reason the account card
+gates its own). `VelocityValue` keeps its tone because a rate that has gone flat or
+negative is the exception worth seeing. **Check what a hue distinguishes before
+copying a card's palette down a level.**
 
-**The table's three sortable headers become one two-option control** — Top ·
-Newest. Those are the two questions anyone asks of an account's posts ("what
-worked", "what is happening now"); the table's ascending/descending on three keys
-is six orders for a list that is usually under twenty rows. The metric toggle
-still re-keys the figure, the rate, the sparkline **and now the bar** together,
-rather than eight columns of numbers nobody can scan.
+**The card is the trigger and the detail is its `AccordionContent`.** The excerpt
+stays clamped in the header even while open: repeating the opening line is the
+accordion convention, it holds the header at a predictable height instead of
+reflowing every card below it on each open, and it keeps the post's own words
+selectable *outside* the trigger button, where selecting them does not fight the
+click. The expansion carries the full text, the tag row, the live line with
+**Refresh now**, every metric the scraper returned, the reading log, and
+stop/resume/delete.
+
+**No chart in the expansion, on purpose.** The standalone sheet on the roster-wide
+view draws one because it is one post, alone, with the width for it. Here the
+reading log states every moment a number was actually taken — the same truth in
+the form that survives at this size — and a recharts instance per open card in a
+scrolling panel is exactly the cost this subsystem hand-draws its sparklines to
+avoid. The clock (`useSlowTick`) lives in the detail component rather than the
+card for the same reason: `AccordionContent` unmounts when closed, so a twenty-post
+list runs **one** timer, not twenty.
 
 **The roster-wide Tracked posts view** (`PostsTab`) survives beside it because it
 is the only home an orphan has: a pasted link whose author is not on the roster

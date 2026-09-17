@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { ExternalLinkIcon } from 'lucide-react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
+import { Accordion } from '@/components/ui/accordion';
 import { SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -15,10 +16,8 @@ import {
 } from './growthUi';
 import { RefreshCountdown } from './postUi';
 import { TrackPostBar } from './TrackPostBar';
-import { PostStrip } from './PostStrip';
-import { PostDetailBody } from './PostDetailSheet';
+import { PostCard, type CardMetric } from './PostCard';
 import { useTrackPosts } from './useTrackPosts';
-import type { TableMetric } from './PostsTable';
 import {
   RANGE_DAYS, RANGE_LABEL, deltaFor, formatCompact, formatCount, pointsFor, rangeStart,
   type DayMap, type GrowthRange, type SeriesPoint,
@@ -34,9 +33,9 @@ import type { GrowthAccount, GrowthPost } from '@/types/firestore';
 const chartConfig = { followers: { label: 'Followers', color: '#3b82f6' } } satisfies ChartConfig;
 
 /** Same five as the table's, with the panel-width labels the post view uses. */
-const PANEL_METRICS: TableMetric[] = ['engagement', 'likes', 'reposts', 'replies', 'views'];
+const PANEL_METRICS: CardMetric[] = ['engagement', 'likes', 'reposts', 'replies', 'views'];
 
-const METRIC_CHIP: Record<TableMetric, string> = {
+const METRIC_CHIP: Record<CardMetric, string> = {
   engagement: 'Total',
   likes: METRIC_LABEL.likes,
   reposts: METRIC_LABEL.reposts,
@@ -46,20 +45,25 @@ const METRIC_CHIP: Record<TableMetric, string> = {
   bookmarks: METRIC_LABEL.bookmarks,
 };
 
-type PostSort = 'top' | 'new';
-
 /**
  * One account, inside the panel — and the panel's first of two levels.
  *
  * ── Why it went back to being a sheet ───────────────────────────────────────
  * It was a full-width page for one reason: `PostsTable`, five columns and three
- * sortable headers, does not fit in a panel. Replacing that table with
- * [`PostStrip`](./PostStrip.tsx) removes the reason. What is bought back is the
- * thing a full-page detail costs and cannot give back — the roster stays on
- * screen behind the panel, so opening an account is a peek rather than a
- * departure, and moving between accounts does not bounce through an overview
- * you just left. The post detail was already a panel; now the two levels are the
- * same object rather than a page and an overlay on top of it.
+ * sortable headers, does not fit in a panel. Replacing that table with a column
+ * of [`PostCard`](./PostCard.tsx)s removes the reason — and the cards are
+ * `AccountCard` one level down, so the roster behind the panel and the list
+ * inside it are read with the same eye movement. What is bought back is the
+ * thing a full-page detail costs and cannot give back: the roster stays on
+ * screen, so opening an account is a peek rather than a departure, and moving
+ * between accounts does not bounce through an overview you just left.
+ *
+ * ── One panel, no second level ──────────────────────────────────────────────
+ * A post's detail opens **inside its own card**, not in a panel over this one.
+ * The list is the context for every number in it; a detail that replaced the
+ * list made comparing two posts a round trip with nothing on screen in between.
+ * `Accordion type="single"` keeps one open at a time, so the panel never becomes
+ * a page of stacked detail.
  *
  * ── Order of the contents is an argument about priority ─────────────────────
  * Controls first, then the number, then the posts, then the facts:
@@ -71,7 +75,11 @@ type PostSort = 'top' | 'new';
  *  2. **Followers**, with its own range control. The range belongs to the panel
  *     rather than to the roster behind it: one account is on this axis, so the
  *     window that suits it has nothing to do with the window the grid is showing.
- *  3. **Tracked posts**, ranked by a chosen metric.
+ *  3. **Tracked posts**, newest first. The order is the timeline, not the
+ *     leaderboard: engagement is cumulative, so ranking by it puts the oldest
+ *     posts permanently on top and buries the ones still moving — which are the
+ *     only ones a refresh can still change. The metric toggle re-keys what each
+ *     card *says*; it never re-orders the list out from under the reader.
  *  4. **Everything else**, folded away — the extras the scraper returned free,
  *     which are a footnote, not a headline.
  *
@@ -112,9 +120,8 @@ export function AccountPanel({
   onSetTrackPosts: (id: string, trackPosts: boolean) => Promise<TrackPostsResult>;
 }) {
   const [panelRange, setPanelRange] = useState<GrowthRange>(range);
-  const [metric, setMetric] = useState<TableMetric>('engagement');
-  const [sort, setSort] = useState<PostSort>('top');
-  const [openPostId, setOpenPostId] = useState<string | null>(null);
+  const [metric, setMetric] = useState<CardMetric>('engagement');
+  const [openPostId, setOpenPostId] = useState<string>('');
   const { busyId, setTrackPosts } = useTrackPosts(onSetTrackPosts);
 
   const from = useMemo(() => rangeStart(panelRange), [panelRange]);
@@ -125,89 +132,71 @@ export function AccountPanel({
     spike: account.isActive ? spikePercent(days) : null,
   }), [days, from, account.isActive]);
 
-  const nextReading = useMemo(() => soonestRefresh(posts), [posts]);
+  /**
+   * The window scopes the post list too, by **when a post was published** — not
+   * by trimming each post's readings. A post's engagement curve runs on its own
+   * clock (the 6h/12h/daily ladder), so clipping it to the roster's calendar
+   * would leave most cards holding a single point and a `—` rate, which reads as
+   * broken rather than as filtered. The window answers "which posts are in
+   * scope"; the card still tells each one's whole life.
+   *
+   * A post with no publish time is **always shown**. It is unplaced in the
+   * timeline, not old, and hiding it because the date is unknown would be the
+   * same invention this subsystem refuses everywhere else.
+   */
+  const visiblePosts = useMemo(() => {
+    if (from === null) return posts;
+    return posts.filter((p) => p.postedAt === null || p.postedAt.slice(0, 10) >= from);
+  }, [posts, from]);
+
+  // Computed over what is actually listed, so the countdown describes the list
+  // it sits above rather than a post the window has filtered out.
+  const nextReading = useMemo(() => soonestRefresh(visiblePosts), [visiblePosts]);
 
   /**
-   * The strips, and the scale their magnitude bars share.
+   * The cards, newest first.
    *
-   * `best` is the largest measured value in *this* list, so the bar ranks the
-   * account's own posts against each other — which is the only comparison that
-   * means anything here. A post the scraper has never reported this metric for
-   * gets `share: null` and no bar, rather than a zero-width one that would be
-   * indistinguishable from a real zero.
+   * **The order is fixed, and the metric toggle does not touch it.** Ranking by
+   * the selected metric was the obvious move and it is wrong here: engagement is
+   * cumulative, so the top of that list is simply the oldest posts, permanently,
+   * while the ones still accumulating — the only ones the next refresh can
+   * change — sink out of sight. The timeline is also the order the reader
+   * already holds in their head. A post with no publish time sinks either way:
+   * it is missing from the timeline, not the oldest thing in it.
    */
-  const strips = useMemo(() => {
-    const mapped = posts.map((post) => ({
+  const cards = useMemo(() => visiblePosts
+    .map((post) => ({
       post,
       value: post.latest ? metricValue(post.latest, metric) : null,
       velocity: velocityFor(post.history, metric),
       spark: pointsForMetric(post.history, metric).map(
         (p): SeriesPoint => ({ date: p.t, value: p.value }),
       ),
-    }));
+    }))
+    .sort((a, b) => {
+      const at = a.post.postedAt ? Date.parse(a.post.postedAt) : null;
+      const bt = b.post.postedAt ? Date.parse(b.post.postedAt) : null;
+      if (at === null && bt === null) return 0;
+      if (at === null) return 1;
+      if (bt === null) return -1;
+      return bt - at;
+    }), [visiblePosts, metric]);
 
-    const best = mapped.reduce((max, r) => (r.value !== null && r.value > max ? r.value : max), 0);
-
-    const sorted = [...mapped].sort((a, b) => {
-      if (sort === 'new') {
-        // An unplaced post sinks either way: it is missing from the timeline,
-        // not the oldest thing in it.
-        const at = a.post.postedAt ? Date.parse(a.post.postedAt) : null;
-        const bt = b.post.postedAt ? Date.parse(b.post.postedAt) : null;
-        if (at === null && bt === null) return 0;
-        if (at === null) return 1;
-        if (bt === null) return -1;
-        return bt - at;
-      }
-      // Unmeasured rows sink too — "not reported" is not "worst performing".
-      if (a.value === null && b.value === null) return 0;
-      if (a.value === null) return 1;
-      if (b.value === null) return -1;
-      return b.value - a.value;
-    });
-
-    return sorted.map((r) => ({
-      ...r,
-      share: r.value === null || best <= 0 ? null : r.value / best,
-    }));
-  }, [posts, metric, sort]);
-
-  // Read from the live array rather than held in state, so a sync updates the
-  // open post in place instead of showing the copy captured when it opened. It
-  // also self-heals: a deleted post resolves to null and the panel falls back to
-  // the account level on its own.
-  const openPost = useMemo(
-    () => (openPostId === null ? null : posts.find((p) => p.id === openPostId) ?? null),
-    [posts, openPostId],
-  );
-
-  /** Stable, so `PostStrip`'s `memo` is not defeated by a new callback each render. */
-  const openPostDetail = useCallback((post: GrowthPost) => {
-    setOpenPostId(post.id);
-    // The detail opens on the trimmed series it already has; the untrimmed one
-    // arrives a read later and replaces it.
-    void onLoadFullPostHistory(post.id);
+  /**
+   * Opening a card fetches its untrimmed history — the card renders on the
+   * trimmed series it already has, and the full one replaces it a read later.
+   * `''` is Radix's "nothing open"; a `collapsible` single accordion reports a
+   * close as the empty string.
+   */
+  const openPostDetail = useCallback((id: string) => {
+    setOpenPostId(id);
+    if (id) void onLoadFullPostHistory(id);
   }, [onLoadFullPostHistory]);
 
   const isX = account.platform === 'twitter';
   const readFailed = account.isActive && account.lastScrapeStatus === 'failed';
   const trackBusy = busyId === account.id;
 
-  // ── Level two ────────────────────────────────────────────────────────────
-  if (openPost) {
-    return (
-      <PostDetailBody
-        post={openPost}
-        onBack={() => setOpenPostId(null)}
-        onAfterDelete={() => setOpenPostId(null)}
-        onSync={onSyncPost}
-        onSetTracking={onSetPostTracking}
-        onDelete={onDeletePost}
-      />
-    );
-  }
-
-  // ── Level one ────────────────────────────────────────────────────────────
   return (
     <>
       <SheetHeader className="gap-3">
@@ -239,6 +228,32 @@ export function AccountPanel({
           )}
           {readFailed && <ScrapeFailedBadge error={account.lastScrapeError} />}
           {view.spike !== null && view.spike > 0 && <SpikeBadge percent={view.spike} />}
+        </div>
+
+        {/* The window belongs to the whole panel, not to the chart, so it sits
+            above everything it scopes — the follower series *and* which posts are
+            listed. Left inside the Followers section it silently changed the list
+            further down, which is the failure the roster's own control layout
+            already avoids. */}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.07] pt-3">
+          <span id="account-window-label" className="text-[11px] font-semibold uppercase tracking-[0.06em] text-zinc-400">
+            Window
+          </span>
+          <ToggleGroup
+            type="single"
+            value={panelRange}
+            onValueChange={(v) => v && setPanelRange(v as GrowthRange)}
+            variant="outline"
+            size="sm"
+            aria-labelledby="account-window-label"
+          >
+            {(Object.keys(RANGE_DAYS) as GrowthRange[]).map((r) => (
+              <ToggleGroupItem key={r} value={r} className={SEGMENT_ITEM_CLASS}>
+                {r === 'all' ? 'All' : r}
+                <span className="sr-only"> — {RANGE_LABEL[r]}</span>
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
         </div>
       </SheetHeader>
 
@@ -313,32 +328,15 @@ export function AccountPanel({
 
         {/* ── 2. Followers ─────────────────────────────────────────────── */}
         <section>
-          <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
-            <SectionLabel>Followers</SectionLabel>
-            <ToggleGroup
-              type="single"
-              value={panelRange}
-              onValueChange={(v) => v && setPanelRange(v as GrowthRange)}
-              variant="outline"
-              size="sm"
-              aria-label="Date range"
-            >
-              {(Object.keys(RANGE_DAYS) as GrowthRange[]).map((r) => (
-                <ToggleGroupItem key={r} value={r} className={SEGMENT_ITEM_CLASS}>
-                  {r === 'all' ? 'All' : r}
-                  <span className="sr-only"> — {RANGE_LABEL[r]}</span>
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          </div>
+          <SectionLabel>Followers</SectionLabel>
 
-          <div className="flex flex-wrap items-baseline gap-2.5">
+          <div className="mt-2 flex flex-wrap items-baseline gap-2.5">
             <p className="text-2xl font-semibold tabular-nums">
               {view.delta.last === null ? '—' : formatCount(view.delta.last)}
             </p>
             <DeltaValue delta={view.delta} className="text-sm font-medium" />
             <span className="text-[11px] text-zinc-400">
-              {RANGE_LABEL[panelRange].toLowerCase()}
+              {panelRange === 'all' ? 'all time' : `over ${RANGE_LABEL[panelRange]}`}
             </span>
           </div>
 
@@ -388,12 +386,16 @@ export function AccountPanel({
               <SectionLabel>
                 Tracked posts
                 {posts.length > 0 && (
-                  <span className="ml-1.5 font-normal tabular-nums text-zinc-500">
-                    {posts.length}
+                  // "3 of 14" whenever the window is hiding some, so a short list
+                  // reads as filtered rather than as all there is.
+                  <span className="ml-1.5 font-normal tabular-nums text-zinc-400">
+                    {visiblePosts.length === posts.length
+                      ? posts.length
+                      : `${visiblePosts.length} of ${posts.length}`}
                   </span>
                 )}
               </SectionLabel>
-              {posts.length > 0 && (
+              {visiblePosts.length > 0 && (
                 <p className="flex items-baseline gap-1.5 text-[11px] text-zinc-400">
                   Next refresh
                   <span className="font-medium text-white">
@@ -405,64 +407,71 @@ export function AccountPanel({
               )}
             </div>
 
-            {posts.length > 0 && (
+            {visiblePosts.length > 0 && (
               <>
-                {/* One choice, three places — the figure, the rate and the bar
-                    behind every strip all describe the selected metric, rather
-                    than eight columns of numbers nobody can scan. */}
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <ToggleGroup
-                    type="single"
-                    value={metric}
-                    onValueChange={(v) => v && setMetric(v as TableMetric)}
-                    variant="outline"
-                    size="sm"
-                    aria-label="Metric shown"
-                  >
-                    {PANEL_METRICS.map((m) => (
-                      <ToggleGroupItem key={m} value={m} className={SEGMENT_ITEM_CLASS}>
-                        {METRIC_CHIP[m]}
-                      </ToggleGroupItem>
-                    ))}
-                  </ToggleGroup>
-                  {/* What the table's sortable headers did, at panel width. Two
-                      orders are the two questions anyone asks of this list —
-                      "what worked" and "what is happening now". */}
-                  <ToggleGroup
-                    type="single"
-                    value={sort}
-                    onValueChange={(v) => v && setSort(v as PostSort)}
-                    variant="outline"
-                    size="sm"
-                    aria-label="Order"
-                  >
-                    <ToggleGroupItem value="top" className={SEGMENT_ITEM_CLASS}>Top</ToggleGroupItem>
-                    <ToggleGroupItem value="new" className={SEGMENT_ITEM_CLASS}>Newest</ToggleGroupItem>
-                  </ToggleGroup>
-                </div>
-
-                <ul className="space-y-1.5">
-                  {strips.map(({ post, value, velocity, spark, share }) => (
-                    <li key={post.id}>
-                      <PostStrip
-                        post={post}
-                        metric={metric}
-                        value={value}
-                        velocity={velocity}
-                        spark={spark}
-                        share={share}
-                        onOpen={openPostDetail}
-                      />
-                    </li>
+                {/* One choice, three places — the figure on every card, the rate
+                    beside it and the sparkline under it all describe the selected
+                    metric, rather than eight columns of numbers nobody can scan.
+                    It changes what the cards *say*, never the order they are in. */}
+                <ToggleGroup
+                  type="single"
+                  value={metric}
+                  onValueChange={(v) => v && setMetric(v as CardMetric)}
+                  variant="outline"
+                  size="sm"
+                  aria-label="Metric shown"
+                >
+                  {PANEL_METRICS.map((m) => (
+                    <ToggleGroupItem key={m} value={m} className={SEGMENT_ITEM_CLASS}>
+                      {METRIC_CHIP[m]}
+                    </ToggleGroupItem>
                   ))}
-                </ul>
+                </ToggleGroup>
+
+                <Accordion
+                  type="single"
+                  collapsible
+                  value={openPostId}
+                  onValueChange={openPostDetail}
+                  className="space-y-2"
+                >
+                  {cards.map(({ post, value, velocity, spark }) => (
+                    <PostCard
+                      key={post.id}
+                      post={post}
+                      metric={metric}
+                      value={value}
+                      velocity={velocity}
+                      spark={spark}
+                      onSync={onSyncPost}
+                      onSetTracking={onSetPostTracking}
+                      onDelete={onDeletePost}
+                    />
+                  ))}
+                </Accordion>
               </>
             )}
 
+            {/* Two different empty states, because they are two different facts
+                and only one of them has a way out (DESIGN.md §6). */}
             {posts.length === 0 && !postsLoading && (
               <p className="text-sm text-zinc-400">
                 No posts from @{account.handle} are tracked yet. Paste a link above, or switch on
                 automatic discovery to pick up its newest posts each night.
+              </p>
+            )}
+
+            {posts.length > 0 && visiblePosts.length === 0 && (
+              <p className="text-sm text-zinc-400">
+                Nothing from @{account.handle} was posted in the last {RANGE_LABEL[panelRange]}.{' '}
+                <button
+                  type="button"
+                  onClick={() => setPanelRange('all')}
+                  className="rounded-sm text-zinc-300 underline underline-offset-2 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                >
+                  Show all {posts.length}
+                </button>
+                .
               </p>
             )}
           </section>

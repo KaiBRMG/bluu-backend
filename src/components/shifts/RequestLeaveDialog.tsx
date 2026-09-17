@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Loader2Icon } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -18,6 +18,8 @@ import {
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useUserData } from '@/hooks/useUserData';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
+import { resolveLeaveBalances } from '@/lib/leave/leaveBalance';
+import { safeTimezone } from '@/lib/utils/timezone';
 
 /**
  * Requesting time off against one shift occurrence.
@@ -57,9 +59,12 @@ export function RequestLeaveDialog({ target, onClose, onSubmit }: RequestLeaveDi
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const paidRemaining = userData?.remainingPaidLeave ?? 0;
-  const unpaidRemaining = userData?.remainingUnpaidLeave ?? 0;
-  const hasPaidLeave = userData?.hasPaidLeave === true;
+  // Through the engine, never off the raw fields. `?? 0` here disagreed with the
+  // `?? 4` / `?? 10` the admin screens used for the same document, so an agent
+  // whose balance had never been written was told they had none while an admin
+  // looking at that same person saw four. See `lib/leave/leaveBalance.ts`.
+  const { paid: paidRemaining, unpaid: unpaidRemaining, hasPaidLeave } =
+    resolveLeaveBalances(userData);
 
   const paidAvailable = hasPaidLeave && paidRemaining > 0;
   const unpaidAvailable = unpaidRemaining > 0;
@@ -71,16 +76,26 @@ export function RequestLeaveDialog({ target, onClose, onSubmit }: RequestLeaveDi
 
   const remainingAfter = (leaveType === 'paid' ? paidRemaining : unpaidRemaining) - 1;
 
-  const formatShiftDate = (ms: number) =>
-    new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    }).format(new Date(ms));
+  // Built once per timezone, and through `safeTimezone` — rule 9g. `useUserData`
+  // seeds `timezone: ''`, which `Intl` throws a `RangeError` on rather than
+  // falling back, and the calendar that opens this dialog already re-applies the
+  // guard for exactly that reason. Constructing the formatter is the expensive
+  // half; this used to rebuild one on every keystroke in the reason field.
+  const shiftDateFormat = useMemo(
+    () =>
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: safeTimezone(timezone),
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      }),
+    [timezone],
+  );
+
+  const formatShiftDate = (ms: number) => shiftDateFormat.format(new Date(ms));
 
   function reset() {
     setReason('');
@@ -129,33 +144,55 @@ export function RequestLeaveDialog({ target, onClose, onSubmit }: RequestLeaveDi
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium">Type</legend>
             <RadioGroup value={leaveType} onValueChange={value => setLeaveType(value as 'paid' | 'unpaid')}>
+              {/* `htmlFor` on an explicit `<label>`, not an implicit wrap.
+                  `RadioGroupItem` renders a Radix `<button role="radio">` whose
+                  only child is an indicator icon — it has no text of its own, and
+                  implicit label association is not reliably honoured for a
+                  `role="radio"` button. Both options therefore announced as
+                  "radio button, 1 of 2, not checked", with nothing saying which
+                  balance the choice spends. `aria-describedby` carries the days
+                  remaining as description rather than folding it into the name. */}
               <label
+                htmlFor="leave-type-unpaid"
                 className={cn(
                   'flex cursor-pointer items-start gap-2.5 rounded-md border border-white/[0.07] p-2.5 transition-colors duration-[120ms]',
                   !unpaidAvailable && 'cursor-not-allowed opacity-50',
                   leaveType === 'unpaid' && unpaidAvailable && 'border-action-blue/40 bg-action-blue/[0.08]',
                 )}
               >
-                <RadioGroupItem value="unpaid" disabled={!unpaidAvailable} className="mt-0.5" />
+                <RadioGroupItem
+                  id="leave-type-unpaid"
+                  value="unpaid"
+                  disabled={!unpaidAvailable}
+                  aria-describedby="leave-type-unpaid-balance"
+                  className="mt-0.5"
+                />
                 <span className="min-w-0">
                   <span className="block text-sm font-medium">Unpaid</span>
-                  <span className="block text-xs text-zinc-400">
+                  <span id="leave-type-unpaid-balance" className="block text-xs text-zinc-400">
                     {unpaidAvailable ? `${unpaidRemaining} day${unpaidRemaining === 1 ? '' : 's'} left` : 'None left'}
                   </span>
                 </span>
               </label>
 
               <label
+                htmlFor="leave-type-paid"
                 className={cn(
                   'flex cursor-pointer items-start gap-2.5 rounded-md border border-white/[0.07] p-2.5 transition-colors duration-[120ms]',
                   !paidAvailable && 'cursor-not-allowed opacity-50',
                   leaveType === 'paid' && paidAvailable && 'border-action-blue/40 bg-action-blue/[0.08]',
                 )}
               >
-                <RadioGroupItem value="paid" disabled={!paidAvailable} className="mt-0.5" />
+                <RadioGroupItem
+                  id="leave-type-paid"
+                  value="paid"
+                  disabled={!paidAvailable}
+                  aria-describedby="leave-type-paid-balance"
+                  className="mt-0.5"
+                />
                 <span className="min-w-0">
                   <span className="block text-sm font-medium">Paid</span>
-                  <span className="block text-xs text-zinc-400">
+                  <span id="leave-type-paid-balance" className="block text-xs text-zinc-400">
                     {!hasPaidLeave
                       ? 'Not enabled on your account'
                       : paidRemaining > 0

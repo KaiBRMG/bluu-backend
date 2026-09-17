@@ -1437,6 +1437,11 @@
     },
     {
       "collectionGroup": "users",
+      "fieldPath": "paidLeaveResetYear",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
       "fieldPath": "sessions",
       "indexes": []
     },
@@ -1453,6 +1458,11 @@
     {
       "collectionGroup": "users",
       "fieldPath": "telegramLinkTokenHash",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "unpaidLeaveResetMonth",
       "indexes": []
     },
     {

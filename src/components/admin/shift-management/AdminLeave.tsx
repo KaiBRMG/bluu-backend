@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { Info } from 'lucide-react';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
+import { LEAVE_ALLOTMENT } from '@/lib/leave/leaveBalance';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -36,7 +37,10 @@ export default function AdminLeave() {
     (uid: string, field: 'remainingUnpaidLeave' | 'remainingPaidLeave') => {
       if (edits[uid] !== undefined) return edits[uid][field];
       const user = users.find(u => u.uid === uid);
-      return user?.[field] ?? (field === 'remainingPaidLeave' ? 10 : 4);
+      // The allotment constants, not hand-typed numbers. These were `10` and `4`
+      // here while the agent-facing surfaces defaulted the same missing field to
+      // `0` — an admin and an agent reading different numbers off one document.
+      return user?.[field] ?? LEAVE_ALLOTMENT[field === 'remainingPaidLeave' ? 'paid' : 'unpaid'];
     },
     [edits, users]
   );
@@ -51,8 +55,8 @@ export default function AdminLeave() {
 
     const user = users.find(u => u.uid === uid);
     const baseline = {
-      remainingUnpaidLeave: user?.remainingUnpaidLeave ?? 4,
-      remainingPaidLeave: user?.remainingPaidLeave ?? 10,
+      remainingUnpaidLeave: user?.remainingUnpaidLeave ?? LEAVE_ALLOTMENT.unpaid,
+      remainingPaidLeave: user?.remainingPaidLeave ?? LEAVE_ALLOTMENT.paid,
     };
     const current = edits[uid] ?? baseline;
     const updated = { ...current, [field]: value };

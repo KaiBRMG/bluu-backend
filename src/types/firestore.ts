@@ -131,6 +131,21 @@ export interface UserDocument {
   hasPaidLeave?: boolean;
   remainingUnpaidLeave?: number;
   remainingPaidLeave?: number;
+  /**
+   * The leave periods this user's balances were last reset for — `YYYY-MM` for
+   * unpaid, a year for paid.
+   *
+   * Written only by the daily reset cron (`/api/cron/leave-reset`) and by user
+   * creation. They are what makes the reset idempotent: the job asks "which
+   * period is this user stamped for", never "what day is it today", so a missed
+   * run catches up and a double run does nothing. See
+   * [`leaveBalance.ts`](../lib/leave/leaveBalance.ts).
+   *
+   * Nothing queries either field — the cron filters in memory over a cohort it
+   * already had to fetch — so both are index-exempt (rule 9).
+   */
+  unpaidLeaveResetMonth?: string;
+  paidLeaveResetYear?: number;
   enableIdleTimeout?: boolean;
   enableScreenshots?: boolean;
 

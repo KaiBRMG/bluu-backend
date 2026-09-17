@@ -10,14 +10,12 @@
  * Import these tokens; never inline a hex on this surface.
  */
 
-/** Bluu azure, sampled from the logo. Same voice as the creator portal. */
-export const AZURE = '#00b8f5';
-export const AZURE_DEEP = '#0090c8';
 /**
- * Ink for anything sitting ON azure. White on `AZURE` measures 2.3:1 and fails
- * AA outright; this brand-tinted near-black reads 7.2:1. Never re-ink it white.
+ * The azure triad and the panel recipe are shared with every other public
+ * surface and live in `src/lib/publicSkin.ts`. They are re-exported here so
+ * this file remains the one import path for this surface's skin.
  */
-export const AZURE_INK = '#04141c';
+export { AZURE, AZURE_DEEP, AZURE_INK, PANEL } from '@/lib/publicSkin';
 
 /**
  * The one decorative-colour exception on this surface: a single stage-light
@@ -29,9 +27,6 @@ export const STAGE_GROUND = {
   backgroundImage:
     'radial-gradient(ellipse 110% 55% at 50% -10%, rgba(0,184,245,0.16), transparent 70%)',
 } as const;
-
-/** Interior surface recipe — translucent white on the dark ground. */
-export const PANEL = 'border border-white/[0.08] bg-white/[0.025]';
 
 /**
  * Field chrome. 16px text is deliberate, not a rounding error: anything smaller
