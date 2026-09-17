@@ -1151,6 +1151,16 @@ export interface GrowthAccount {
    * read can see, and posts are being missed. Surfaced in the manage tab.
    */
   postsWindowSaturated: boolean;
+  /**
+   * When someone last bought a manual refresh for this account from the panel.
+   *
+   * The cooldown gate for that button, and the reason it is a stored field
+   * rather than client state: a timer in the renderer is a suggestion anyone can
+   * skip from a devtools console, and every skip runs two billed Apify actors
+   * (cross-cutting rule 10 — the same reasoning as a post's `lastManualSyncAt`).
+   * Nothing queries it; exempted from indexing in `firestore.indexes.json`.
+   */
+  lastManualRefreshAt: string | null;
   addedBy: string;
   addedTime: string | null;
 }

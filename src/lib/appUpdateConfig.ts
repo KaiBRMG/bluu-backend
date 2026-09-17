@@ -183,6 +183,10 @@ export interface ClientAppUpdateConfig {
 
 export const APP_UPDATE: AppUpdateConfig = {
 
+  // `latestVersion` here is a POLICY (who gets prompted). The version the public
+  // /download page prints on its buttons is a FACT about the Drive folders and
+  // lives in `latestRelease.ts` — keep the two in step when a release ships.
+
   // Cohort reminder: `allUsers: true` is the whole fleet (the historical
   // behaviour, and the right end state for a real release). To pilot one first,
   // set `allUsers: false` and list uids or group slugs instead — see

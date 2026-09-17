@@ -397,9 +397,37 @@ export function serializeGrowthAccount(doc: DocumentSnapshot): GrowthAccount {
     lastPostDiscoveryStatus: (d.lastPostDiscoveryStatus as GrowthAccount['lastPostDiscoveryStatus']) ?? null,
     lastPostDiscoveryError: (d.lastPostDiscoveryError as string) ?? null,
     postsWindowSaturated: d.postsWindowSaturated === true,
+    lastManualRefreshAt: serializeTimestamp(d.lastManualRefreshAt as Timestamp | null),
     addedBy: (d.addedBy as string) ?? '',
     addedTime: serializeTimestamp(d.addedTime as Timestamp | null),
   };
+}
+
+/**
+ * The manual-refresh window. Defined in the pure module so the button can render
+ * its own disabled state without importing `firebase-admin`; re-exported here so
+ * the route reads it from the same place as everything else it needs.
+ */
+export { MANUAL_REFRESH_COOLDOWN_MS } from '@/lib/growth/metrics';
+
+/** One account by id, or `null`. */
+export async function getGrowthAccount(id: string): Promise<GrowthAccount | null> {
+  const doc = await adminDb.collection(GROWTH_ACCOUNTS).doc(id).get();
+  return doc.exists ? serializeGrowthAccount(doc) : null;
+}
+
+/**
+ * Start this account's manual-refresh cooldown.
+ *
+ * Stamped whether or not the scrapes resolved anything, for the same reason the
+ * post sync route stamps a post it failed to read: the actors ran and the call
+ * was billed either way, so a failure must not become a free retry loop.
+ */
+export async function stampManualRefresh(id: string): Promise<void> {
+  await adminDb.collection(GROWTH_ACCOUNTS).doc(id).set(
+    { lastManualRefreshAt: FieldValue.serverTimestamp() },
+    { merge: true },
+  );
 }
 
 /** Every tracked account, active and stopped alike, name-sorted. */

@@ -2,7 +2,11 @@
 
 import { memo, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { ExternalLinkIcon, ImageIcon, Loader2Icon, RefreshCwIcon } from 'lucide-react';
+import {
+  BookmarkIcon, ChartNoAxesColumnIncreasingIcon, ExternalLinkIcon, HeartIcon, ImageIcon,
+  Loader2Icon, MessageCircleIcon, QuoteIcon, Repeat2Icon, RefreshCwIcon,
+  type LucideIcon,
+} from 'lucide-react';
 import {
   AccordionContent, AccordionItem, AccordionTrigger,
 } from '@/components/ui/accordion';
@@ -17,86 +21,150 @@ import {
   AnimatedCount, ReadFreshness, RefreshCountdown, RefreshStatePill, VelocityValue,
   postExcerpt, useSlowTick,
 } from './postUi';
-import { formatCount, type SeriesPoint } from '@/lib/growth/metrics';
+import { cn } from '@/lib/utils';
+import { formatCompact, formatCount, formatDelta, type SeriesPoint } from '@/lib/growth/metrics';
 import {
   MANUAL_SYNC_COOLDOWN_MS,
   METRIC_LABEL,
-  POST_METRICS,
   historyKeys,
   metricValue,
+  postDeltaFor,
   totalEngagement,
+  type PostDelta,
   type PostMetric,
   type PostVelocity,
 } from '@/lib/growth/postMetrics';
 import type { GrowthPost } from '@/types/firestore';
 
-export type CardMetric = PostMetric | 'engagement';
+/**
+ * The five figures X itself puts under a post, in X's own order and with the
+ * marks it uses for them.
+ *
+ * This replaced a segmented "Total · Likes · Reposts · Replies · Views" picker
+ * above the list. That control made the reader choose which single number every
+ * card was allowed to show, when all five fit on one 16px line — and the person
+ * reading this panel already knows these five glyphs by heart from the platform
+ * the data came from. A control that hides four facts to reveal one is a worse
+ * deal than the line that shows all five.
+ *
+ * `quotes` is deliberately **not** on the strip: X does not surface it under a
+ * post either, and it is the one engagement component people do not scan for.
+ * It keeps its row in the open card's breakdown, where nothing is competing for
+ * the space.
+ */
+const STRIP: Array<{ metric: PostMetric; icon: LucideIcon }> = [
+  { metric: 'replies', icon: MessageCircleIcon },
+  { metric: 'reposts', icon: Repeat2Icon },
+  { metric: 'likes', icon: HeartIcon },
+  { metric: 'views', icon: ChartNoAxesColumnIncreasingIcon },
+  { metric: 'bookmarks', icon: BookmarkIcon },
+];
+
+/**
+ * Exactly the metrics the strip renders, so the panel builds five figures per
+ * card rather than all six. `quotes` was being computed for every card on every
+ * window change and thrown away — the open card recomputes its own rows.
+ */
+export const STRIP_METRICS: readonly PostMetric[] = STRIP.map((s) => s.metric);
+
+/** The strip's five, plus the one it leaves out — the open card shows all six. */
+const BREAKDOWN: Array<{ metric: PostMetric; icon: LucideIcon }> = [
+  ...STRIP.slice(0, 3),
+  { metric: 'quotes', icon: QuoteIcon },
+  ...STRIP.slice(3),
+];
+
+export interface PostCardFigures {
+  /** Latest reading per strip metric — absolute, as X states them. */
+  totals: Partial<Record<PostMetric, number | null>>;
+  /** Latest total engagement. */
+  engagement: number | null;
+  /** Engagement gained over the panel's window. */
+  delta: PostDelta;
+  /** Engagement *per day* between each pair of readings in the window. */
+  rateSpark: SeriesPoint[];
+  /** The rate across the two most recent readings — the sparkline's last value. */
+  velocity: PostVelocity | null;
+}
 
 /**
  * One tracked post, as a card in the account panel — and, when opened, the whole
  * of that post's detail directly beneath it.
  *
  * ── It is `AccountCard`, one level down ─────────────────────────────────────
- * Same three bands, in the same order, for the same reasons: an identity block
- * with its state marks pushed to the right, then the headline figure with its
- * rate beside it, then a full-width sparkline on its own scale. A post inside an
- * account is the same *kind* of object as an account inside the roster — a thing
- * with a number, a rate and a shape — so it should be read with the same eye
- * movement rather than as a different species of row.
+ * The same reading order, for the same reasons: identity with its state marks
+ * pushed right, then the headline figure with its change beside it, then a
+ * full-width sparkline on its own scale. A post inside an account is the same
+ * *kind* of object as an account inside the roster — a thing with a number, a
+ * change and a shape — so it should be read with the same eye movement rather
+ * than as a different species of row.
  *
- * ── The one band that is deliberately not the same: colour ──────────────────
- * `AccountCard` tints its figure, its delta and its sparkline green or red,
- * because a follower count genuinely falls. **Cumulative engagement essentially
- * cannot.** Carried over unchanged, every post card in the panel would be green
- * every day — a hue that never varies encodes nothing, which is precisely what
- * the Semantic-Only Rule exists to prevent. So the trace here stays greyscale
- * and the card's colour is spent on the two things that *do* vary: the refresh
- * state (Action Blue while a post is still young enough for its numbers to move)
- * and a failed read (red). `VelocityValue` keeps its own tone because a rate
- * that has gone flat or negative is the exception worth seeing.
+ * It adds one band the account card has no use for: **the platform's own metric
+ * strip**, sitting directly under the post the way X puts it directly under the
+ * post. That placement is not decoration — it is the layout the reader already
+ * has memorised, so five numbers land without a single label being read.
+ *
+ * ── Everything on this card is measured over the panel's window ─────────────
+ * The headline figure is where the post stands *now*; the change beside it and
+ * the sparkline under it are both scoped to the window chosen in the panel
+ * header, exactly as the follower section above scopes its own. One control, one
+ * meaning, applied to every number on the panel that can carry a window.
+ *
+ * A post with fewer than two readings inside the window renders `—` and a dashed
+ * hairline rather than a zero. "Nothing was measured in this window" and "this
+ * did not change" are different facts, and a `0` meaning the first is a lie the
+ * reader cannot detect — which is exactly why a **frozen** post reads as blank
+ * under a short window instead of as flat.
+ *
+ * ── Two things deliberately not copied from `AccountCard` ───────────────────
+ * **Colour.** That card tints its figure, its delta and its sparkline green or
+ * red because a follower count genuinely falls. **Cumulative engagement
+ * essentially cannot.** Carried over unchanged, every post card here would be
+ * green every day — a hue that never varies encodes nothing, which is precisely
+ * what the Semantic-Only Rule exists to prevent. The trace stays greyscale, and
+ * the card's colour is spent on the things that *do* vary: the refresh state
+ * (Action Blue while a post is young enough for its numbers to move), a failed
+ * read (red), and — since a card can be opened — the open state.
+ *
+ * **What the sparkline draws.** The same test, applied to the other half of that
+ * vocabulary, and it fails there too: a trace of the running total is a rise
+ * that flattens on *every* post that ever worked, and `Sparkline` normalises to
+ * its own min/max, so +3 and +1,600 draw an identical full-height climb. This
+ * card draws the **rate** instead (`ratePointsFor`), zero-based — a series that
+ * rises while a post spreads and decays to nothing as it settles, so "is this
+ * still moving?" is legible at 36px. The figure beside it is that rate's current
+ * value, which is what stops the mark being decoration.
  *
  * ── Why the detail opens here rather than in a panel ────────────────────────
  * It was a second level inside the account sheet. The trouble with that is what
  * it costs to compare: reading one post's numbers meant losing the list, and
  * comparing two meant going in and out twice with nothing on screen in between.
  * Opened in place, the post stays in its list, the neighbours stay visible, and
- * the reading log lands directly under the sparkline it explains. One card is
- * open at a time (the `Accordion` above it is `type="single"`), so the list
- * never becomes a page of stacked detail.
+ * the breakdown lands directly under the strip it expands. One card is open at a
+ * time (the `Accordion` above it is `type="single"`), so the list never becomes
+ * a page of stacked detail.
  *
  * The excerpt stays clamped in the header even while open. Repeating the first
  * two lines is the accordion convention and it keeps the header a predictable
  * height — the alternative reflows every card below it on each open, and puts
  * the post's own words inside a button where selecting them fights the click.
- *
- * ── No chart in the expansion, on purpose ───────────────────────────────────
- * The standalone post sheet on the roster-wide **Tracked posts** view draws one,
- * and that is where it belongs: it is one post, alone, with the width for it.
- * Here the reading log states every moment a number was actually taken, which is
- * the same truth in the form that survives at this size — and a recharts
- * instance per open card in a scrolling panel is exactly the cost this
- * subsystem hand-draws its sparklines to avoid.
  */
 export const PostCard = memo(function PostCard({
   post,
-  metric,
-  value,
-  velocity,
-  spark,
+  figures,
+  windowLabel,
+  from,
   onSync,
   onSetTracking,
   onDelete,
 }: {
   post: GrowthPost;
-  /** Which metric `value` measures — a change snaps the count instead of tweening. */
-  metric: CardMetric;
-  value: number | null;
-  velocity: PostVelocity | null;
-  spark: SeriesPoint[];
-  onSync: (id: string) => Promise<{ refreshedAlongside: number }>;
-  onSetTracking: (id: string, isActive: boolean) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-}) {
+  figures: PostCardFigures;
+  /** How the window reads in prose — "over 7 days", "all time". */
+  windowLabel: string;
+  /** Window start as a day key, or `null` for all time. */
+  from: string | null;
+} & PostCardActions) {
   const posted = post.postedAt
     ? new Date(post.postedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
     : 'Date unknown';
@@ -109,13 +177,18 @@ export const PostCard = memo(function PostCard({
   return (
     <AccordionItem
       value={post.id}
-      // The overlay recipe, and open is a *raised* step of it rather than a
-      // different colour — the card lifts toward the reader instead of
-      // announcing itself (DESIGN.md §4, The No-Shadow Rule).
+      // The overlay recipe, with **open raised above every hover step**. It used
+      // not to be: the trigger's hover wash composites on top of this ground, so
+      // a rest of 0.025 + a hover of 0.03 rendered ≈0.054 against an open card's
+      // 0.04 — every neighbour the cursor touched was brighter than the one
+      // actually open, and both states drew the same 0.12 border. Open now sits
+      // at 0.07 (above the composited hover) and takes the **Action Blue** edge:
+      // an open card is the current selection, which is the one job DESIGN.md
+      // licenses that hue for, and it is the only cue hover cannot imitate.
       className="overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.025] transition-colors
         duration-[120ms] ease-out last:border-b
         hover:border-white/[0.12]
-        data-[state=open]:border-white/[0.12] data-[state=open]:bg-white/[0.04]"
+        data-[state=open]:border-action-blue/40 data-[state=open]:bg-white/[0.07]"
     >
       <AccordionTrigger
         // The overlay hover steps, layered over the card's own ground, rather
@@ -129,8 +202,8 @@ export const PostCard = memo(function PostCard({
           [&>svg]:mt-1 [&>svg]:text-zinc-400"
       >
         <span className="flex min-w-0 flex-1 flex-col">
-          {/* ── Band 1 · what this post is ───────────────────────────── */}
-          <span className="mb-3 flex items-start gap-2.5">
+          {/* ── 1 · what this post is ────────────────────────────────── */}
+          <span className="flex items-start gap-2.5">
             <span className="min-w-0 flex-1">
               <span className="line-clamp-2 text-sm font-medium leading-snug text-zinc-100">
                 {postExcerpt(post.text, 180)}
@@ -159,35 +232,64 @@ export const PostCard = memo(function PostCard({
             </span>
           </span>
 
-          {/* ── Band 2 · the figure, and the rate beside it ───────────── */}
-          <span className="mb-2 flex items-baseline justify-between gap-2">
-            {/* `formatCount`, not the card's compact form: this panel has the
-                width for the exact figure, and `AnimatedCount` tweens between two
-                measured readings — a fact worth more here than four saved pixels. */}
-            <AnimatedCount
-              value={value}
-              subject={metric}
-              className="text-2xl font-semibold text-zinc-100"
-            />
-            <VelocityValue velocity={velocity} className="text-xs font-medium" />
+          {/* ── 2 · the platform's own strip, where the platform puts it ──
+              A five-column grid, not a flex row: under `flex … gap-x-5` each
+              glyph's x-position depended on the digit width of the value before
+              it, so three stacked cards put their five metrics at three
+              different sets of positions and the column could not be read
+              downward at all. `tabular-nums` aligns digits inside one figure and
+              does nothing for this. */}
+          <span className="mt-3 grid grid-cols-5 gap-x-2 gap-y-1.5">
+            {STRIP.map(({ metric, icon }) => (
+              <StripValue
+                key={metric}
+                icon={icon}
+                metric={metric}
+                value={figures.totals[metric] ?? null}
+              />
+            ))}
           </span>
 
-          {/* ── Band 3 · the shape ───────────────────────────────────── */}
-          <Sparkline
-            points={spark}
-            // Above the widest this card renders at, so the viewBox is
-            // compressed rather than stretched — see `Sparkline`'s `width` note.
-            width={640}
-            height={36}
-            className="w-full"
-          />
+          {/* ── 3 · the headline, and its change over the window ───────── */}
+          <span className="mt-3 mb-2 flex items-baseline justify-between gap-2">
+            <span className="flex items-baseline gap-1.5">
+              {/* `formatCount`, not the account card's compact form: this panel
+                  has the width for the exact figure, and `AnimatedCount` tweens
+                  between two measured readings — worth more than four pixels. */}
+              <AnimatedCount
+                value={figures.engagement}
+                subject="engagement"
+                className="text-2xl font-semibold text-zinc-100"
+              />
+              <span className="text-[11px] text-zinc-400">engagement</span>
+            </span>
+            <WindowDelta delta={figures.delta} windowLabel={windowLabel} />
+          </span>
+
+          {/* ── 4 · is it still moving? ─────────────────────────────────
+              The rate's shape and the rate's current value, on one line. The
+              figure is what keeps the mark from being decoration: it names, in
+              words, the series the line is drawing. */}
+          <span className="flex items-center gap-3">
+            <Sparkline
+              points={figures.rateSpark}
+              // Above the widest this card renders at, so the viewBox is
+              // compressed rather than stretched — see `Sparkline`'s `width` note.
+              width={640}
+              height={36}
+              zeroBased
+              className="min-w-0 flex-1"
+            />
+            <VelocityValue velocity={figures.velocity} className="shrink-0 text-xs font-medium" />
+          </span>
         </span>
       </AccordionTrigger>
 
       <AccordionContent className="px-4 pt-0 pb-4">
         <PostCardDetail
           post={post}
-          metric={metric}
+          windowLabel={windowLabel}
+          from={from}
           onSync={onSync}
           onSetTracking={onSetTracking}
           onDelete={onDelete}
@@ -197,6 +299,85 @@ export const PostCard = memo(function PostCard({
   );
 });
 
+interface PostCardActions {
+  onSync: (id: string) => Promise<{ refreshedAlongside: number }>;
+  onSetTracking: (id: string, isActive: boolean) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}
+
+/**
+ * One figure on the strip.
+ *
+ * The glyph is `aria-hidden` and the metric is named in text for a screen
+ * reader: a heart is unambiguous to anyone who uses X and meaningless to anyone
+ * who does not, and this is a console people are read aloud to on.
+ *
+ * An absent metric renders `—`, never `0`. X reports `views` and `bookmarks`
+ * inconsistently, so the difference between "nobody bookmarked this" and "X did
+ * not say" is real and has to survive.
+ */
+function StripValue({
+  icon: Icon,
+  metric,
+  value,
+}: {
+  icon: LucideIcon;
+  metric: PostMetric;
+  value: number | null;
+}) {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 text-[13px] tabular-nums text-zinc-300"
+      title={`${METRIC_LABEL[metric]}: ${value === null ? 'not reported' : formatCount(value)}`}
+    >
+      <Icon className="size-3.5 shrink-0 text-zinc-400" aria-hidden />
+      {value === null ? <span className="text-zinc-400">—</span> : formatCompact(value)}
+      <span className="sr-only"> {METRIC_LABEL[metric]}</span>
+    </span>
+  );
+}
+
+/**
+ * Engagement gained inside the panel's window.
+ *
+ * Green only when there is a real rise to report. A window with fewer than two
+ * readings is not zero growth — it is no measurement — so it renders `—` with
+ * the reason in its tooltip rather than a confident `+0`.
+ */
+function WindowDelta({
+  delta,
+  windowLabel,
+  className,
+}: {
+  delta: PostDelta;
+  windowLabel: string;
+  className?: string;
+}) {
+  if (delta.change === null) {
+    return (
+      <span
+        className={cn('text-xs tabular-nums text-zinc-400', className)}
+        title={delta.points === 1
+          ? `Only one refresh landed ${windowLabel} — a change needs two`
+          : `No refreshes landed ${windowLabel}`}
+      >
+        — <span className="font-normal">{windowLabel}</span>
+      </span>
+    );
+  }
+
+  const tone = delta.change > 0
+    ? 'text-green-400'
+    : delta.change < 0 ? 'text-red-400' : 'text-zinc-400';
+
+  return (
+    <span className={cn('text-xs font-medium tabular-nums', tone, className)}>
+      {formatDelta(delta.change)}
+      <span className="ml-1 font-normal text-zinc-400">{windowLabel}</span>
+    </span>
+  );
+}
+
 /**
  * The open card's contents.
  *
@@ -204,25 +385,48 @@ export const PostCard = memo(function PostCard({
  * is where the clock lives: `useSlowTick` is a real `setState`, so one per card
  * in a twenty-post list would be twenty timers and twenty re-renders every
  * thirty seconds for a countdown nineteen of them are not showing.
+ *
+ * ── What it is for, now that the strip carries the numbers ──────────────────
+ * It used to be a grid of the same figures the collapsed card now shows, which
+ * made opening a card mostly a restatement. Its job is the **second column**:
+ * every metric's movement *inside the panel's window*, which is the one thing no
+ * amount of space on the collapsed card could hold. The strip says where a post
+ * stands; this says what it did lately, per metric, and the engagement row under
+ * the rule is the sum the headline figure reports.
  */
 function PostCardDetail({
   post,
-  metric,
+  windowLabel,
+  from,
   onSync,
   onSetTracking,
   onDelete,
 }: {
   post: GrowthPost;
-  metric: CardMetric;
-  onSync: (id: string) => Promise<{ refreshedAlongside: number }>;
-  onSetTracking: (id: string, isActive: boolean) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-}) {
+  windowLabel: string;
+  from: string | null;
+} & PostCardActions) {
   const [syncing, setSyncing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const readings = useMemo(() => historyKeys(post.history).reverse(), [post.history]);
+  /** Readings inside the window, newest first — the record behind every figure. */
+  const readings = useMemo(
+    () => historyKeys(post.history, from).reverse(),
+    [post.history, from],
+  );
+
+  const rows = useMemo(() => BREAKDOWN.map(({ metric, icon }) => ({
+    metric,
+    icon,
+    now: post.latest ? metricValue(post.latest, metric) : null,
+    delta: postDeltaFor(post.history, metric, from),
+  })), [post, from]);
+
+  const engagementRow = useMemo(() => ({
+    now: post.latest ? totalEngagement(post.latest) : null,
+    delta: postDeltaFor(post.history, 'engagement', from),
+  }), [post, from]);
 
   // Affordance only — the server owns this window and 429s inside it. Subscribed
   // to the slow tick so the button re-enables itself while the card stays open;
@@ -277,8 +481,6 @@ function PostCardDetail({
       setBusy(false);
     }
   };
-
-  const metricLabel = metric === 'engagement' ? 'Engagement' : METRIC_LABEL[metric];
 
   return (
     <div className="space-y-4 border-t border-white/[0.07] pt-4">
@@ -349,47 +551,101 @@ function PostCardDetail({
         </Button>
       </div>
 
-      {/* Every metric the scraper returned, all free inside the same billed
-          result. The card above shows one because a list can only be scanned on
-          one; here there is room for all of them. Absent ones render an em dash,
-          never a zero. */}
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-        <Stat label="Engagement">
-          <AnimatedCount value={post.latest ? totalEngagement(post.latest) : null} subject="engagement" />
-        </Stat>
-        {POST_METRICS.map((m) => (
-          <Stat key={m} label={METRIC_LABEL[m]}>
-            <AnimatedCount value={post.latest ? metricValue(post.latest, m) : null} subject={m} />
-          </Stat>
-        ))}
-        <Stat
-          label="Author followers"
-          hint="Captured alongside this post, inside the same billed result, and written through to the account's follower history."
-        >
-          <AnimatedCount value={post.latest?.authorFollowers ?? null} subject="authorFollowers" />
-        </Stat>
-      </dl>
+      {/* ── The breakdown ───────────────────────────────────────────────
+          Every metric the scraper returned inside the same billed result, each
+          with what it did over the panel's window. A real <table>, because two
+          figures per metric with a shared pair of column headings is exactly
+          what a table is. */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px]">
+          <caption className="sr-only">
+            Each metric now, and its change {windowLabel}
+          </caption>
+          <thead>
+            <tr className="text-[11px] text-zinc-400">
+              <th scope="col" className="pb-1.5 text-left font-medium">Metric</th>
+              <th scope="col" className="pb-1.5 text-right font-medium">Now</th>
+              {/* `first-letter:`, not `capitalize` — CSS `capitalize` titles
+                  every word, so this column read "Over 7 Days" while the same
+                  string rendered lowercase everywhere else on the panel. */}
+              <th scope="col" className="pb-1.5 text-right font-medium first-letter:uppercase">
+                {windowLabel}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ metric, icon: Icon, now, delta }) => (
+              <tr key={metric}>
+                <th scope="row" className="py-1 text-left font-normal text-zinc-300">
+                  <span className="inline-flex items-center gap-2">
+                    <Icon className="size-3.5 shrink-0 text-zinc-400" aria-hidden />
+                    {METRIC_LABEL[metric]}
+                  </span>
+                </th>
+                <td className="py-1 text-right tabular-nums text-zinc-100">
+                  <AnimatedCount value={now} subject={metric} />
+                </td>
+                <td className="py-1 text-right">
+                  <DeltaCell delta={delta} />
+                </td>
+              </tr>
+            ))}
+            {/* The sum the card's headline reports, under a rule because it is a
+                total of the rows above rather than a seventh peer. Views and
+                bookmarks sit above it but are *not* in it — views are an
+                impression count orders of magnitude larger, and bookmarks are
+                reported inconsistently (see `ENGAGEMENT_METRICS`). */}
+            <tr className="border-t border-white/[0.07]">
+              <th scope="row" className="pt-1.5 text-left font-medium text-zinc-200">
+                Engagement
+              </th>
+              <td className="pt-1.5 text-right font-semibold tabular-nums text-zinc-100">
+                <AnimatedCount value={engagementRow.now} subject="engagement" />
+              </td>
+              <td className="pt-1.5 text-right">
+                <DeltaCell delta={engagementRow.delta} />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p className="mt-2 text-[11px] text-zinc-400">
+          Likes, reposts, replies and quotes make up engagement — views and bookmarks are reported
+          alongside them but not counted in it.{' '}
+          {post.latest?.authorFollowers !== undefined && (
+            <>
+              @{post.authorHandle ?? 'unknown'} had{' '}
+              <span className="tabular-nums text-zinc-300">
+                {formatCount(post.latest.authorFollowers)}
+              </span>{' '}
+              followers at the last reading.
+            </>
+          )}
+        </p>
+      </div>
 
       {/* The reading log. This is what makes every number above a measurement
           rather than a claim: each row is a moment something was actually read.
-          It reports whichever metric the list is ranked on, so the toggle above
-          the panel re-keys the sparkline and this together. */}
+          Scoped to the window like everything else, so the log and the sparkline
+          on the card describe the same stretch of time. */}
       <div>
         <div className="mb-1.5 flex items-baseline justify-between gap-2">
-          <h4 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-zinc-400">
-            {metricLabel} per refresh
-          </h4>
+          {/* The plain label step, not the sidebar eyebrow — see `SectionLabel`
+              in AccountPanel. `<h4>` under the panel's `<h3>` section headings,
+              which sit under the sheet's own `<h2>` title. */}
+          <h4 className="text-xs font-medium text-zinc-400">Engagement per refresh</h4>
           <span className="text-[11px] tabular-nums text-zinc-400">
-            {readings.length} {readings.length === 1 ? 'refresh' : 'refreshes'}
-            {post.readCount > readings.length && ' shown'}
+            {readings.length} {readings.length === 1 ? 'refresh' : 'refreshes'} {windowLabel}
           </span>
         </div>
         {readings.length === 0 ? (
-          <p className="text-[11px] text-zinc-400">Nothing read yet.</p>
+          <p className="text-[11px] text-zinc-400">
+            Nothing was read {windowLabel}.
+            {post.readCount > 0 && ' Widen the window to see this post’s earlier refreshes.'}
+          </p>
         ) : (
           <ol className="max-h-40 overflow-y-auto">
             {readings.map((key) => {
-              const reading = metricValue(post.history[key], metric);
+              const reading = metricValue(post.history[key], 'engagement');
               return (
                 <li
                   key={key}
@@ -460,19 +716,24 @@ function PostCardDetail({
   );
 }
 
-function Stat({
-  label, hint, children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <dt className="text-[11px] text-zinc-400" title={hint}>{label}</dt>
-      <dd className="text-lg font-semibold tabular-nums text-zinc-100">{children}</dd>
-    </div>
-  );
+/** A metric's movement inside the window, or an honest blank. */
+function DeltaCell({ delta }: { delta: PostDelta }) {
+  if (delta.change === null) {
+    return (
+      <span
+        className="tabular-nums text-zinc-400"
+        title={delta.points === 1
+          ? 'Only one refresh in this window — a change needs two'
+          : 'No refreshes in this window'}
+      >
+        —
+      </span>
+    );
+  }
+  const tone = delta.change > 0
+    ? 'text-green-400'
+    : delta.change < 0 ? 'text-red-400' : 'text-zinc-400';
+  return <span className={cn('tabular-nums', tone)}>{formatDelta(delta.change)}</span>;
 }
 
 function Tag({ children }: { children: React.ReactNode }) {

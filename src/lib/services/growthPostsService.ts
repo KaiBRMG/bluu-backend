@@ -687,6 +687,25 @@ export async function stampManualSync(tweetId: string): Promise<void> {
   );
 }
 
+/**
+ * Start the manual cooldown on several posts at once — the account refresh,
+ * which asks for every post it owns in one call.
+ *
+ * Only the posts that were **requested** are stamped, never the padding that
+ * rode along free. A padded post got a fresh reading it did not ask for; locking
+ * its own button for fifteen minutes because of that would charge a user for
+ * someone else's call.
+ */
+export async function stampManualSyncMany(tweetIds: string[]): Promise<void> {
+  if (tweetIds.length === 0) return;
+  const batch = adminDb.batch();
+  const at = FieldValue.serverTimestamp();
+  for (const id of tweetIds) {
+    batch.set(adminDb.collection(GROWTH_POSTS).doc(id), { lastManualSyncAt: at }, { merge: true });
+  }
+  await batch.commit();
+}
+
 // ─── Reads / serialization ───────────────────────────────────────────
 
 export function serializeGrowthPost(doc: DocumentSnapshot, historyLimit?: number): GrowthPost {
@@ -751,6 +770,36 @@ export async function listGrowthPosts(historyLimit = 24): Promise<GrowthPost[]> 
     .limit(MAX_TRACKED_POSTS)
     .get();
   return snap.docs.map((doc) => serializeGrowthPost(doc, historyLimit));
+}
+
+/**
+ * One account's tracked posts — by `accountId` **or** by author handle.
+ *
+ * Both, for the reason the panel filters on both: a post pasted by hand carries
+ * no `accountId`, and filing only by that field would leave a manually tracked
+ * post out of its own author's refresh. The two equality queries ride the
+ * automatic single-field indexes (neither field is exempted), which is why this
+ * is two small reads rather than a full collection scan — `listGrowthPosts`
+ * would read every post on the roster to find a dozen (rule 9).
+ */
+export async function listPostsForAccount(
+  accountId: string,
+  handleNormalized: string,
+  historyLimit = 24,
+): Promise<GrowthPost[]> {
+  const collection = adminDb.collection(GROWTH_POSTS);
+  const [byAccount, byHandle] = await Promise.all([
+    collection.where('accountId', '==', accountId).get(),
+    handleNormalized
+      ? collection.where('authorHandleNormalized', '==', handleNormalized).get()
+      : Promise.resolve(null),
+  ]);
+
+  // Deduped by document id: a discovered post matches both queries.
+  const posts = new Map<string, GrowthPost>();
+  for (const doc of byAccount.docs) posts.set(doc.id, serializeGrowthPost(doc, historyLimit));
+  for (const doc of byHandle?.docs ?? []) posts.set(doc.id, serializeGrowthPost(doc, historyLimit));
+  return [...posts.values()];
 }
 
 export async function getGrowthPost(tweetId: string): Promise<GrowthPost | null> {

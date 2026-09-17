@@ -187,6 +187,22 @@ export function formatPercent(p: number): string {
  * single late or slow run does not cry wolf every morning; two consecutive
  * misses do trip it.
  */
+/**
+ * How long a manual account refresh locks itself out for.
+ *
+ * Here, in the pure module, rather than in the service, for the same reason
+ * `MANUAL_SYNC_COOLDOWN_MS` is: the button needs it to render its own disabled
+ * state and the route needs it to enforce the window, and importing the service
+ * into the renderer would drag `firebase-admin` with it. The service re-exports
+ * this one value.
+ *
+ * Deliberately the same fifteen minutes as the post-level cooldown — the two
+ * buttons sit on the same panel, and a user who learned one wait should not have
+ * to learn a second. They stay separate constants because they guard two
+ * different bills; if one moves it should be a decision, not a side effect.
+ */
+export const MANUAL_REFRESH_COOLDOWN_MS = 15 * 60 * 1000;
+
 export const STALE_AFTER_HOURS = 36;
 
 export function isStale(lastScrapeAt: string | null, now: Date = new Date()): boolean {

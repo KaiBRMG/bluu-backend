@@ -1064,6 +1064,11 @@
     },
     {
       "collectionGroup": "growth-accounts",
+      "fieldPath": "lastManualRefreshAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-accounts",
       "fieldPath": "latest",
       "indexes": []
     },

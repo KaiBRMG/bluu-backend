@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { DayMap, GrowthRange } from '@/lib/growth/metrics';
-import type { TrackPostsResult } from '@/hooks/useGrowthTracking';
+import type { RefreshAccountResult, TrackPostsResult } from '@/hooks/useGrowthTracking';
 import type { GrowthAccount, GrowthPost } from '@/types/firestore';
 
 /**
@@ -48,6 +48,7 @@ export function AccountSheet({
   onDeletePost,
   onLoadFullPostHistory,
   onSetTrackPosts,
+  onRefreshAccount,
 }: {
   account: GrowthAccount | null;
   days: DayMap;
@@ -61,12 +62,23 @@ export function AccountSheet({
   onDeletePost: (id: string) => Promise<void>;
   onLoadFullPostHistory: (id: string) => Promise<void>;
   onSetTrackPosts: (id: string, trackPosts: boolean) => Promise<TrackPostsResult>;
+  onRefreshAccount: (id: string) => Promise<RefreshAccountResult>;
 }) {
   return (
     <Sheet open={account !== null} onOpenChange={onOpenChange}>
-      {/* Wider than the post panel's `max-w-xl`: this one carries a chart, a
-          control deck and a list of posts, where that one carries a post. */}
-      <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-2xl">
+      {/*
+        Wider than the post panel's `max-w-xl`: this one carries a chart, a
+        control deck and a list of posts, where that one carries a post.
+
+        `overflow-hidden`, **not** `overflow-y-auto` — the scroll lives on the
+        panel's body instead (see `AccountPanel`). When this element scrolled,
+        two things went with it: the Window control, which scopes every figure
+        below it and sat ~2,600px above the reader by post 14, and shadcn's own
+        close button, which is `absolute` inside this box and therefore scrolls
+        with its content. A panel whose whole argument is "a peek" had no visible
+        exit from its second screenful.
+      */}
+      <SheetContent className="w-full gap-0 overflow-hidden sm:max-w-2xl">
         {account && (
           <AccountPanel
             key={account.id}
@@ -81,6 +93,7 @@ export function AccountSheet({
             onDeletePost={onDeletePost}
             onLoadFullPostHistory={onLoadFullPostHistory}
             onSetTrackPosts={onSetTrackPosts}
+            onRefreshAccount={onRefreshAccount}
           />
         )}
       </SheetContent>
@@ -100,7 +113,9 @@ export function AccountSheet({
 function PanelSkeleton() {
   return (
     <>
-      <div className="flex flex-col gap-3 p-4">
+      {/* Same two-part frame as the real panel — fixed header band, scrolling
+          body — so nothing jumps when the chunk lands. */}
+      <div className="flex shrink-0 flex-col gap-3 border-b border-white/[0.07] p-4">
         <SheetTitle className="sr-only">Loading account</SheetTitle>
         <div className="flex items-center gap-3">
           <Skeleton className="size-11 rounded-xl" />
@@ -111,7 +126,7 @@ function PanelSkeleton() {
         </div>
         <Skeleton className="h-5 w-56 rounded-lg" />
       </div>
-      <div className="space-y-5 px-4 pb-6">
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pt-4 pb-6">
         <Skeleton className="h-[132px] rounded-xl" />
         <Skeleton className="h-[236px] rounded-xl" />
         <div className="space-y-1.5">

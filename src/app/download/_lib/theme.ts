@@ -59,13 +59,39 @@ export const OPTION =
 
 /** The primary action. 48px tall and 16px — this is a phone target too. */
 export const PRIMARY_BTN =
-  'h-12 w-full rounded-xl px-6 text-base font-semibold shadow-none transition-[filter,transform] duration-150 ' +
-  'hover:brightness-110 active:scale-[0.99] sm:w-auto ' +
+  'h-12 w-full self-start rounded-xl px-6 text-base font-semibold shadow-none ' +
+  'transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.99] sm:w-auto ' +
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00b8f5]/50 focus-visible:ring-offset-2 ' +
   'focus-visible:ring-offset-[#08090b]';
 
 /** Inline fill for `PRIMARY_BTN` — the one place azure carries ink. */
 export const PRIMARY_BTN_STYLE = { background: AZURE, color: AZURE_INK } as const;
+
+/**
+ * The same button, unfilled — a real action that is not *this* step's action.
+ * On Windows the two download buttons are both live from the first paint; which
+ * one is filled is the whole instruction, so the other has to stay legible
+ * rather than disabled. Azure-lettered on the bare ground.
+ */
+export const STEP_BTN_QUIET =
+  'h-12 w-full self-start rounded-xl border border-[#00b8f5]/35 bg-transparent px-6 text-base font-semibold ' +
+  'text-[#00b8f5] shadow-none transition-colors duration-150 hover:bg-[#00b8f5]/10 sm:w-auto ' +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00b8f5]/50 focus-visible:ring-offset-2 ' +
+  'focus-visible:ring-offset-[#08090b]';
+
+/**
+ * The version rider inside a download button. Measured, not eyeballed: on the
+ * azure fill `AZURE_INK` at 75% reads 5.1:1, and on the unfilled button azure at
+ * 80% reads 4.6:1 — both clear AA for this size.
+ */
+export const BTN_VERSION = 'font-medium opacity-75 tabular-nums';
+
+/** One step in the Windows sequence. The number is the instruction, so it leads. */
+export const STEP_MARK =
+  'flex size-7 flex-none items-center justify-center rounded-full text-[13px] font-semibold tabular-nums';
+export const STEP_MARK_CURRENT = 'bg-[#00b8f5] text-[#04141c]';
+export const STEP_MARK_DONE = 'bg-[#00b8f5]/15 text-[#00b8f5]';
+export const STEP_MARK_UPCOMING = 'bg-white/[0.08] text-white/55';
 
 /** The secondary action — outlined, azure-lettered, same height class family. */
 export const SECONDARY_BTN =
@@ -80,11 +106,11 @@ export const SECONDARY_BTN =
  * state (DESIGN.md §5, Attribute chip).
  */
 export const UI_CHIP =
-  'rounded bg-white/[0.07] px-1.5 py-0.5 text-[13px] font-medium text-white/90';
+  'rounded bg-white/[0.07] px-1.5 py-0.5 text-[13px] font-medium whitespace-nowrap text-white/90';
 
 /** A filename or path the reader has to recognise on disk. */
 export const FILE_CHIP =
-  'rounded bg-white/[0.07] px-1.5 py-0.5 font-mono text-[12.5px] font-medium text-white/90';
+  'rounded bg-white/[0.07] px-1.5 py-0.5 font-mono text-[12.5px] font-medium whitespace-nowrap text-white/90';
 
 /** An inline azure link inside running text. */
 export const INLINE_LINK =

@@ -35,7 +35,7 @@ Both actors return extra fields **inside the same billed result**, so these cost
 | Components | `src/components/growth/*` |
 | Cron | `src/app/api/cron/growth-tracking/route.ts` + the entry in `src/vercel.json` |
 | Cron | `src/app/api/cron/growth-posts/route.ts` — the post refresh cycle, `0 */6 * * *` |
-| API routes | `src/app/api/smm/growth/{accounts,accounts/[id],series}` |
+| API routes | `src/app/api/smm/growth/{accounts,accounts/[id],accounts/[id]/refresh,series}` |
 | API routes | `src/app/api/smm/growth/posts`, `posts/[tweetId]`, `posts/[tweetId]/sync` |
 | Service | `src/lib/services/growthTrackingService.ts` (follower scrape; owns the two profile actors) |
 | Service | `src/lib/services/growthPostsService.ts` (**the only module that calls the tweet actor**) |
@@ -53,7 +53,7 @@ Registered in `src/lib/definitions.ts` as `smm-growth-tracking` under the `smm-p
 
 | Path | Purpose |
 |---|---|
-| `growth-accounts/{platform}_{handleNormalized}` | A tracked account. `isActive` (false = stopped, history kept), `latest`/`previous` denormalized readings, `lastScrapeAt`/`lastScrapeStatus`/`lastScrapeError` |
+| `growth-accounts/{platform}_{handleNormalized}` | A tracked account. `isActive` (false = stopped, history kept), `latest`/`previous` denormalized readings, `lastScrapeAt`/`lastScrapeStatus`/`lastScrapeError`, `lastManualRefreshAt` (the manual-refresh cooldown gate; index-exempted) |
 | `growth-accounts/{id}/series/{YYYY}` | `days: { 'YYYY-MM-DD': { followers, …extras } }` — **one document per account per year** |
 | `growth-posts/{tweetId}` | One tracked X post: metadata, `latest`/`previous`, and `history: { 'YYYY-MM-DDTHH:mm': {…} }` — readings live **on the document**, no subcollection |
 | `growth-spend/{YYYY-MM}` | The rolling cost ledger the refresh breaker reads: `results`, `usd`, `runs` |
@@ -100,6 +100,22 @@ The cost of that choice is paid in `firestore.indexes.json`: **`series.days` is 
 
 `POST /api/smm/growth/accounts` fires **one immediate single-account scrape** (~$0.01) and is all-or-nothing: a URL the actor cannot resolve **writes nothing**. That matters because a typo would otherwise become a document that fails, and bills, every night forever while showing an empty chart. The same scrape doubles as day zero.
 
+### Refreshing one account by hand
+
+`POST /api/smm/growth/accounts/[id]/refresh` — **the only control in the subsystem that spends on two bills in one click.** One profile-actor run for followers (~$0.004 X / ~$0.010 Facebook) *and* one tweet-actor run for that account's tracked posts (a floor of 20 billed results, ~$0.005). Roughly 1.5¢ a click against a subsystem that runs at ~$11/month. Five things hold that line:
+
+1. **The cooldown is server-side.** `lastManualRefreshAt` on the account document, 15 minutes, the same window as a post's `MANUAL_SYNC_COOLDOWN_MS` so nobody has to learn two waits. The constant lives in [`metrics.ts`](../src/lib/growth/metrics.ts) (pure, so the button can render its own disabled state without importing `firebase-admin`) and the service re-exports it — exactly the arrangement `MANUAL_SYNC_COOLDOWN_MS` already uses. A timer in the renderer is a suggestion anyone can skip from a console, and every skip is two actor runs.
+2. **The stamp lands whether or not anything resolved.** The actors ran; the call was billed. A failure that left the cooldown unset would be a free retry loop over a paid API.
+3. **A stopped account is refused, 409.** Stopping *is* the instruction to stop spending — the whole difference between stopping and deleting — so a button that spent anyway would quietly undo the one thing the user asked for. Disabled in the UI **and** refused by the route; a disabled button is an affordance, not a rule (rule 10).
+4. **The post call is padded to the floor, never sent under it.** An account with three posts asks for those three plus the seventeen stalest on the roster, which get a free reading. `MAX_REFRESH_PER_RUN` caps the other end so an account with hundreds of tracked posts cannot turn one click into a hundred-result bill.
+5. **Only the requested posts are stamped**, never the padding. A padded post got a reading it did not ask for; locking its own button for fifteen minutes because of that would charge it for someone else's call.
+
+**The two calls run concurrently and settle independently.** Different actors, different collections, nothing shared — so `Promise.allSettled` keeps the wall clock at the slower of the two rather than their sum (hence `maxDuration = 120`, headroom for one call and not for two in series). It also makes partial success first-class: followers can land while the post read fails, or the reverse, and the response says which. A single try/catch would have discarded the half that worked.
+
+**The spend ceiling stops the posts, not the followers.** `checkSpendCeiling` guards the tweet actor's monthly ledger specifically; the profile actors are a different bill with no ledger. A month that has hit its post ceiling still refreshes followers and says why the posts were skipped — refusing the whole request would withhold something the ceiling was never protecting.
+
+**An account's posts are found by `accountId` OR author handle**, the same union the panel filters on, via two equality queries on the automatic single-field indexes ([`listPostsForAccount`](../src/lib/services/growthPostsService.ts)). `listGrowthPosts` would have read every post on the roster to find a dozen (rule 9).
+
 **Remove is `isActive: false`, not a delete.** Stopping ends the cost and takes the account off the active roster while keeping every reading, and it is one click to resume. `DELETE` exists but only from the stopped list, behind a confirm that names what it destroys — `recursiveDelete` takes the `series` subtree with it, and the scrapers only ever return *today's* number, so deleted history cannot be re-collected.
 
 **Access is one tier.** `checkGrowthAccess(uid)` = `smm-growth-tracking || smm-admin` for reads *and* writes: anyone holding the page may add and remove (confirmed with the user). Page permission, not the admin JWT claim — these routes touch no part of the auth graph.
@@ -144,21 +160,31 @@ They replaced *Posts tracked* and *Active signals* (2026-09-09). Neither figure 
 
 ### The account panel
 
+**The panel's body scrolls, not the panel.** `SheetContent` is `overflow-hidden`; the header is `shrink-0` and the body is `min-h-0 flex-1 overflow-y-auto`. When the whole sheet scrolled, two things left with it: the Window control — which scopes every figure below it, and sat ~2,600px above the reader by post 14 — and shadcn's own close button, which is `absolute` inside that box and therefore scrolls with its content. A panel whose argument is "a peek" had no visible exit from its second screenful. `min-h-0` is load-bearing: a flex child's default `min-height: auto` refuses to shrink below its content, so without it the body grows full-height and the sheet scrolls as a whole again.
+
+**Section headings are the section rail, not the eyebrow.** A plain `text-xs font-medium text-zinc-400` label, an `h-px bg-white/[0.07]` rule filling the width, and anything the section states on the same line (a count, a countdown) — the pattern DESIGN.md §5 already defines. The panel previously rendered the uppercase 11px eyebrow five times, which DESIGN.md §3 reserves for sidebar section headers as "a deliberate, single-use brand device, **not a per-section scaffold**" — and which failed at the job anyway, since `space-y-5` gives sections the same gap as the elements inside them, leaving the eye nothing to catch on down a 3,000px column. Heading levels now run `SheetTitle` `<h2>` → `SectionLabel` `<h3>` → the open card's log `<h4>`; they used to skip from a second `<h2>` straight to `<h4>`.
+
 **A panel, not a page.** It was a full-width page for exactly one reason — `PostsTable` is five columns wide with three sortable headers, and that does not fit a panel. A column of [`PostCard`](../src/components/growth/PostCard.tsx)s removed the reason, and the panel bought back what a page cannot give: the roster stays on screen behind it, so opening an account is a peek rather than a departure, and moving between accounts does not bounce through an overview you never left. `sm:max-w-2xl`, wider than the post sheet's `max-w-xl`, because this one carries a chart, a control deck *and* a list.
 
 **A post's detail opens inside its own card. There is no second level and no second sheet.** Both alternatives were built and both are wrong here. A second `Sheet` means two overlays darkening the canvas twice, two focus traps and an `Esc` that only closes the top one. Replacing the panel's contents avoids that and still loses the thing that matters: **the list is the context for every number in it** — with it covered, comparing two posts is a round trip with nothing on screen in between. Expanded in place, the neighbours stay visible and the reading log lands directly under the sparkline it explains. `Accordion type="single" collapsible` keeps one open at a time, so the panel never becomes a page of stacked detail.
 
 **`account === null` is both the close signal and the reset.** The panel content unmounts with it — the same construction `PostDetailSheet` already used — which is what makes reopening an account always start with nothing expanded instead of wherever the previous visit was abandoned. No effect, no latch, no key juggling.
 
-**Posts are ordered newest first, and the metric toggle does not touch that.** Ranking by the selected metric is the obvious move and it is wrong: engagement is cumulative, so that list is simply the oldest posts, permanently, while the ones still accumulating — the only ones the next refresh can change — sink out of sight. The timeline is also the order the reader already holds in their head. A post with no publish time sinks either way; it is missing from the timeline, not the oldest thing in it.
+**Posts are ordered newest first, and nothing re-sorts them.** Ranking by engagement is the obvious move and it is wrong: engagement is cumulative, so that list is simply the oldest posts, permanently, while the ones still accumulating — the only ones the next refresh can change — sink out of sight. The timeline is also the order the reader already holds in their head. A post with no publish time sinks either way; it is missing from the timeline, not the oldest thing in it.
 
-**Order is an argument about priority, and controls win.** Controls → followers → tracked posts → folded-away facts. The page version had it backwards: its only two decisions (post discovery, and pasting a link) sat at the very bottom, below a table, which put the surface's actions behind its longest read. The one exception to the order is a failed read, which sits directly under the header — it is the only thing that explains why the chart below it has a flat tail, and folding it away would leave stale numbers looking current.
+**The live line sits above the Controls deck, and is the post card's live line one level up.** Same construction, same grouping: when the number was taken, when the next one is due, and the control that buys one now — together, because they answer one question, and apart they are three unrelated facts scattered down a panel. It sits *outside* the Controls deck for a reason that is not cosmetic: that deck is X-only (post tracking is a capability Facebook does not have here) and a Facebook page still has followers worth refreshing. One placement, every platform. `AccountFacts` lost its "Last reading" line in the same change — a freshness claim in two places is the start of the two drifting apart.
+
+**The price is on screen, not in the tooltip.** The meta line names both halves and counts the posts ("Reads followers and 12 tracked posts. Both are billed."); the `title` carries only what does not fit — that the post read is padded to the 20-result floor, so the longest-waiting posts ride along free. A tooltip reaches neither a keyboard nor a glance, and the discipline this feature runs on is that whoever spends can see what they are spending.
+
+**Order is an argument about priority, and controls win.** Live line → Controls → followers → tracked posts → folded-away facts. The page version had it backwards: its only two decisions (post discovery, and pasting a link) sat at the very bottom, below a table, which put the surface's actions behind its longest read. The one exception to the order is a failed read, which sits directly under the header — it is the only thing that explains why the chart below it has a flat tail, and folding it away would leave stale numbers looking current.
 
 **The Window control belongs to the panel, not to the roster and not to the chart.** One account is on this axis, so the window that suits it has nothing to do with the window the grid behind it is showing. It seeds from the page's range and diverges from there; nothing is written back. The follower axis is scaled to the data rather than zero-based — only one account is on it, so the scale can simply be its own.
 
-**It scopes the posts as well as the chart, which is why it sits in the header.** It started inside the Followers section, where it silently changed a list further down the panel — the same failure the roster's control layout already avoids by putting every control above what it filters. In the header it is visibly the panel's own scope.
+**It sits in the header because it scopes the whole panel**: the follower delta and chart, *and* every post card's change figure and sparkline, *and* every row of the open card's breakdown. One picker meaning one thing wherever its effect lands is the reason it sits above all of it. It started inside the Followers section, where it silently changed content further down — the same failure the roster's control layout already avoids.
 
-**For posts it filters by publish date, not by trimming each post's readings.** A post's engagement curve runs on its own clock — the 6h/12h/daily ladder — so clipping it to the roster's calendar would leave most cards holding a single point and a `—` rate, which reads as broken rather than as filtered. The window answers "which posts are in scope"; each card still shows that post's whole life. **A post with no publish time is always shown** — it is unplaced in the timeline, not old, and hiding it for a date nobody knows is the same invention this subsystem refuses everywhere else. The section count reads `3 of 14` whenever the window is hiding some, and the filtered-empty state carries its own way out (`Show all 14`), which the never-tracked-anything state correctly does not.
+**It scopes measurement, not membership — and that distinction was learned the hard way.** The first version also cut the list to posts *published* inside the window, which made the control look broken: under a 7-day window every listed post was at most seven days old, so "change over 7 days" was simply its lifetime total. Every tracked post is now always listed, and the window says *how much each one moved lately*. A post with fewer than two readings inside the window renders `—` and a dashed hairline, never a zero — so a **frozen** post reads as unmeasured under a short window rather than as flat, which is the same "never invent a value for a gap" rule the follower chart follows.
+
+**The headline figures are not windowed, deliberately.** The five-metric strip and the engagement total state where a post *stands*, which is not a windowed question — and keeping them unscoped is what leaves a frozen post readable under a window that can measure nothing about it.
 
 **Post tracking is inside the account, not a separate tab.** The reference put a "check every 15 min / 1 hour / 1 day" picker in that slot; **there is no such control to expose** — a post's cadence is set by its own age (see [post analytics](#post-analytics)), because engagement can only ever be read as its value right now. What occupies the slot is the one thing that *is* a choice: the `trackPosts` switch, which is a separate line on the bill. It is offered here *and* in the manage table, through the shared [`useTrackPosts`](../src/components/growth/useTrackPosts.ts) hook — the cost wording must not drift between the two. On a Facebook account the deck is not rendered at all, just a quiet line: a bordered box around one sentence is a container pretending there is content in it.
 
@@ -442,24 +468,61 @@ account is the same *kind* of object as an account inside the roster and should 
 read with the same eye movement. The author avatar is dropped: every post in this
 list has the same author, so a column of identical faces states nothing.
 
-**The one band deliberately not copied is colour.** `AccountCard` tints its delta
-and its trace green or red because a follower count genuinely falls. **Cumulative
-engagement essentially cannot** — carried over unchanged, every post card would be
-green every day, and a hue that never varies encodes nothing. So the post trace
-stays greyscale and the card's colour is spent on the two things that do vary: the
-refresh state (Action Blue while a post is young enough for its numbers to move)
-and a failed read (red, gated on `isActive` for the same reason the account card
-gates its own). `VelocityValue` keeps its tone because a rate that has gone flat or
-negative is the exception worth seeing. **Check what a hue distinguishes before
-copying a card's palette down a level.**
+**Two bands are deliberately not copied: colour, and what the sparkline draws.**
+
+*Colour.* `AccountCard` tints its delta and its trace green or red because a
+follower count genuinely falls. **Cumulative engagement essentially cannot** —
+carried over unchanged, every post card would be green every day, and a hue that
+never varies encodes nothing. So the post trace stays greyscale and the card's
+colour is spent on what does vary: the refresh state (Action Blue while a post is
+young enough for its numbers to move), a failed read (red, gated on `isActive`),
+and the open state. **Check what a hue distinguishes before copying a card's
+palette down a level.**
+
+*The sparkline draws the **rate**, not the running total* —
+[`ratePointsFor`](../src/lib/growth/postMetrics.ts), zero-based. The same test
+applied to the other half of that vocabulary fails there too: a trace of the
+total is a rise that flattens on *every* post that ever worked, and `Sparkline`
+normalises to its own min/max, so a post that gained 3 and one that gained 1,600
+draw an identical full-height climb. The rate rises while a post spreads and
+decays to nothing as it settles, so "is this still moving?" — the one question a
+refresh can still change the answer to — is legible at 36px. It is a rate rather
+than a raw increment because the ladder's intervals are unequal (6h → 12h → daily
+→ weekly); raw increments would draw the weekly reading as a spike when it merely
+accumulated over seven times as long. `from` clips the output, not the input, so
+the window's first pair still bases on the last reading *before* it.
+`VelocityValue` sits at the end of that line stating the current rate — which is
+what keeps the mark from being decoration, since it names in words the series the
+line is drawing.
+
+**`Sparkline`'s `zeroBased` exists for exactly this and must not become the
+default.** Zero is a meaningful floor for a decaying rate; on the follower counts
+this mark usually draws, a zero baseline flattens a good month into a straight
+line (the whole reason this subsystem scales to data).
+
+**The card carries X's own metric strip, where X puts it.** Replies · reposts · likes · views · bookmarks, with the platform's own glyphs (`MessageCircle`, `Repeat2`, `Heart`, `ChartNoAxesColumnIncreasing`, `Bookmark`), sitting directly under the post the way they do on X. This **replaced a segmented `Total · Likes · Reposts · Replies · Views` picker** above the list: all five fit on one 16px line, and the person reading this panel already knows those glyphs by heart from the platform the data came from — a control that hides four facts to reveal one is a worse deal than the line that shows all five. Each glyph is `aria-hidden` with the metric named in `sr-only` text; a heart means nothing to a screen reader. An unreported metric renders `—`, never `0`, because X reports `views` and `bookmarks` inconsistently and "nobody bookmarked this" is not "X did not say".
+
+`quotes` is the one engagement component **not** on the strip — X does not surface it under a post either — but it keeps its row in the open card's breakdown. `STRIP_METRICS` is exported so the panel builds exactly the five figures the strip renders; it briefly built all six and threw `quotes` away on every card, every window change.
+
+**The strip is a five-column grid, not a flex row.** Under `flex … gap-x-5` each glyph's x-position depended on the digit width of the value before it, so three stacked cards put their five metrics at three different sets of positions and the column could not be read downward at all — which is most of what a strip like this is for. `tabular-nums` aligns digits *inside* one figure and does nothing for this.
+
+**Open is raised above every hover step, and takes the Action Blue edge.** It was not: the trigger's hover wash composites on top of the item's ground, so a rest of `0.025` + a hover of `0.03` rendered ≈`0.054` against an open card's `0.04` — every neighbour the cursor touched was brighter than the one actually open, and both states drew the same `white/[0.12]` border. Open now sits at `bg-white/[0.07]` with `border-action-blue/40`. An open card is the current selection, which is the one job DESIGN.md licenses that hue for, and it is the only cue hover cannot imitate.
 
 **The card is the trigger and the detail is its `AccordionContent`.** The excerpt
 stays clamped in the header even while open: repeating the opening line is the
 accordion convention, it holds the header at a predictable height instead of
 reflowing every card below it on each open, and it keeps the post's own words
 selectable *outside* the trigger button, where selecting them does not fight the
-click. The expansion carries the full text, the tag row, the live line with
-**Refresh now**, every metric the scraper returned, the reading log, and
+click.
+
+**The open card's job is the second column.** It used to be a grid of the same
+figures the strip now shows, which made opening a card mostly a restatement. It
+is now a real `<table>` — metric · **Now** · **movement over the window** — for
+all six metrics with engagement summed under a rule. The strip says where a post
+stands; this says what it did lately, per metric, which is the one thing no
+amount of space on the collapsed card could hold. Around it: the full text, the
+tag row, the live line with **Refresh now**, the reading log (windowed, so it and
+the card's sparkline describe the same stretch of time), and
 stop/resume/delete.
 
 **No chart in the expansion, on purpose.** The standalone sheet on the roster-wide
@@ -543,3 +606,7 @@ beside the switch.
   **indexes** (one composite on `isActive`+`nextRefreshAt`, plus field exemptions
   for every map/array/free-text field) both changed — see the deploy commands in
   cross-cutting rule 1.
+- **`growth-accounts.lastManualRefreshAt` added a field exemption** when the
+  manual account refresh shipped. Nothing queries it (rule 9), so it is
+  `"indexes": []` like the other non-queried fields on that collection.
+  `firebase deploy --only firestore:indexes`.

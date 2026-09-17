@@ -95,7 +95,7 @@ type View =
 export default function GrowthTrackingPage() {
   const {
     accounts, seriesById, loading, error, refresh,
-    addAccount, setTracking, setTrackPosts, setCategory, deleteAccount,
+    addAccount, setTracking, setTrackPosts, setCategory, deleteAccount, refreshAccount,
   } = useGrowthTracking();
 
   // A separate collection on a separate cadence, so a separate hook and a
@@ -130,6 +130,20 @@ export default function GrowthTrackingPage() {
     if (discovery && discovery.created + discovery.refreshed > 0) await posts.refresh();
     return discovery;
   }, [setTrackPosts, posts]);
+
+  /**
+   * A manual refresh writes to **both** collections — a follower reading into
+   * the account's series, and an engagement reading into every post it owns — so
+   * both hooks have to hear about it. `refreshAccount` refetches the roster
+   * itself; this is the second seam where the two independent hooks meet, and
+   * the post refetch is unconditional here (unlike the discovery one below)
+   * because the call always writes post readings when it runs at all.
+   */
+  const handleRefreshAccount = useCallback(async (id: string) => {
+    const result = await refreshAccount(id);
+    if (result.postsRead > 0 || result.refreshedAlongside > 0) await posts.refresh();
+    return result;
+  }, [refreshAccount, posts]);
 
   const openAccount = useCallback((account: GrowthAccount) => {
     setOpenAccountId(account.id);
@@ -512,6 +526,7 @@ export default function GrowthTrackingPage() {
           onDeletePost={posts.deletePost}
           onLoadFullPostHistory={posts.loadFullHistory}
           onSetTrackPosts={handleSetTrackPosts}
+          onRefreshAccount={handleRefreshAccount}
         />
       </div>
     </AppLayout>

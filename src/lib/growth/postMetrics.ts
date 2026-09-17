@@ -229,6 +229,51 @@ export function pointsForMetric(
 }
 
 /**
+ * The *rate* between each consecutive pair of readings, in units per day.
+ *
+ * ── Why a card's sparkline draws this and not the running total ─────────────
+ * Engagement is cumulative and essentially never falls, so a trace of the total
+ * is the same shape on every post that ever worked: a rise that flattens. Worse,
+ * `Sparkline` scales to its own min/max, so a post that gained 3 and a post that
+ * gained 1,600 draw an identical full-height climb. A mark whose shape never
+ * varies encodes nothing — the same test that took colour off the post card,
+ * applied to the other half of its vocabulary.
+ *
+ * The rate does vary, and it varies in the direction that matters: it rises
+ * while a post is spreading and decays toward zero as it settles, which is the
+ * one question a refresh can still change the answer to. Drawn zero-based (see
+ * `Sparkline`'s `zeroBased`), "has this finished?" becomes readable at 36px.
+ *
+ * It is a rate rather than a raw increment because the ladder's intervals are
+ * not equal — 6h early, then 12h, then daily, then weekly. Plotting raw
+ * increments side by side would draw the weekly reading as a spike when all it
+ * did was accumulate over seven times as long.
+ *
+ * `from` clips the output, not the input: the first pair inside the window still
+ * uses the last reading *before* it as its base, so the window's opening rate is
+ * a measurement rather than a gap.
+ */
+export function ratePointsFor(
+  history: PostHistory,
+  metric: PostMetric | 'engagement',
+  from?: string | null,
+): PostPoint[] {
+  const all = pointsForMetric(history, metric);
+  const rates: PostPoint[] = [];
+
+  for (let i = 1; i < all.length; i += 1) {
+    const prev = all[i - 1];
+    const curr = all[i];
+    if (from && curr.t < from) continue;
+    const hours = (curr.ms - prev.ms) / 3_600_000;
+    if (!(hours > 0)) continue;
+    rates.push({ t: curr.t, ms: curr.ms, value: ((curr.value - prev.value) / hours) * 24 });
+  }
+
+  return rates;
+}
+
+/**
  * Rows for a multi-line chart: one row per reading, one column per metric.
  * Metrics a reading is missing are simply absent from the row.
  */

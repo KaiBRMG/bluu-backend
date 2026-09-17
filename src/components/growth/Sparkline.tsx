@@ -22,6 +22,7 @@ export const Sparkline = memo(function Sparkline({
   width = 88,
   height = 24,
   stroke: strokeOverride,
+  zeroBased = false,
   className,
 }: {
   points: SeriesPoint[];
@@ -46,6 +47,12 @@ export const Sparkline = memo(function Sparkline({
    * so the caller tints it to match the delta beside it — one fact, stated twice.
    */
   stroke?: string;
+  /**
+   * Anchor the vertical scale at zero instead of at the series' own minimum.
+   * Only for a series where zero is a meaningful floor (a rate decaying to
+   * nothing); on an absolute count it flattens the shape the mark exists to show.
+   */
+  zeroBased?: boolean;
   className?: string;
 }) {
   // React 19 emits ids like `«r0»`. A fragment reference resolves today, but
@@ -76,8 +83,13 @@ export const Sparkline = memo(function Sparkline({
   }
 
   const values = points.map((p) => p.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  // Zero-based makes "has this settled?" readable, because the floor stops being
+  // whatever the series' own worst point happened to be. It is only right for a
+  // series where zero *means* something — a rate that decays to nothing — and
+  // wrong for the follower counts this mark usually draws, where a zero baseline
+  // flattens a good month into a straight line. Hence a prop, not a default.
+  const min = zeroBased ? Math.min(0, ...values) : Math.min(...values);
+  const max = zeroBased ? Math.max(0, ...values) : Math.max(...values);
   // A perfectly flat series would divide by zero; centre it instead.
   const span = max - min || 1;
   const pad = 2;

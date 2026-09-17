@@ -30,6 +30,26 @@ export interface AddGrowthAccountPayload {
  * `null` when nothing was searched — switching it off, or an account that was
  * already opted in.
  */
+/**
+ * What one manual account refresh actually bought.
+ *
+ * Every field is reported separately because the two halves are two billed
+ * calls that succeed and fail independently — a response that collapsed them
+ * into one boolean could not say "followers landed, the post read did not",
+ * which is the outcome the user most needs to hear.
+ */
+export interface RefreshAccountResult {
+  success: boolean;
+  followersRead: boolean;
+  /** Of this account's own posts — never counts the padding. */
+  postsRead: number;
+  trackedPosts: number;
+  /** Other accounts' posts that rode the same billed call for free. */
+  refreshedAlongside: number;
+  /** Why the post half did not run, when it did not. */
+  postsSkipped: string | null;
+}
+
 export type TrackPostsResult = {
   created: number;
   refreshed: number;
@@ -162,6 +182,24 @@ export function useGrowthTracking() {
     await refresh();
   }, [authFetch, refresh]);
 
+  /**
+   * Buy a reading for one account now — its followers and its tracked posts, on
+   * two separate bills. The server owns the cooldown and the spend ceiling; this
+   * only relays what happened.
+   *
+   * It force-refreshes rather than patching state locally: the call writes a new
+   * follower reading into the series subcollection, and the panel's chart reads
+   * that, not the account document. A local patch would move the headline figure
+   * and leave the chart a day behind it.
+   */
+  const refreshAccount = useCallback(async (id: string): Promise<RefreshAccountResult> => {
+    const result = await authFetch(`/api/smm/growth/accounts/${id}/refresh`, {
+      method: 'POST',
+    }) as RefreshAccountResult;
+    await refresh();
+    return result;
+  }, [authFetch, refresh]);
+
   /** Account id → day map, the shape everything in `metrics.ts` takes. */
   const seriesById = useMemo(() => {
     const map = new Map<string, DayMap>();
@@ -180,5 +218,6 @@ export function useGrowthTracking() {
     setTrackPosts,
     setCategory,
     deleteAccount,
-  }), [accounts, seriesById, loading, error, refresh, addAccount, setTracking, setTrackPosts, setCategory, deleteAccount]);
+    refreshAccount,
+  }), [accounts, seriesById, loading, error, refresh, addAccount, setTracking, setTrackPosts, setCategory, deleteAccount, refreshAccount]);
 }
