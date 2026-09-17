@@ -165,10 +165,24 @@ export function PostsTab({
                 </dt>
                 <dd
                   className="tabular-nums text-zinc-200"
-                  title={`${spend.results.toLocaleString('en-US')} refreshes across ${spend.runs} scraper calls`}
+                  title={
+                    spend.actualTotalUsd != null
+                      ? `$${spend.actualTotalUsd.toFixed(2)} billed across every Apify actor this month, ` +
+                        `of which $${(spend.actualUsd ?? 0).toFixed(2)} is post tracking. ` +
+                        `Open Manage accounts → Usage for the full breakdown.`
+                      : `Estimated from ${spend.results.toLocaleString('en-US')} refreshes across ` +
+                        `${spend.runs} scraper calls — Apify's own figures have not been read yet.`
+                  }
                 >
-                  ${spend.usd.toFixed(2)}
+                  ${(spend.actualUsd ?? spend.usd).toFixed(2)}
                 </dd>
+                {/* An estimate is labelled as one. It was previously shown bare,
+                    which is how a guessed unit price came to be read as the
+                    bill; the real figure arrives on the next usage sync and the
+                    tag disappears on its own. */}
+                {spend.actualUsd == null && (
+                  <dd className="text-[11px] text-zinc-500">est.</dd>
+                )}
               </div>
             )}
           </dl>

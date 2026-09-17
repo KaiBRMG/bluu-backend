@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { ExternalLinkIcon, PlusIcon, TriangleAlertIcon } from 'lucide-react';
+import { ExternalLinkIcon, PlusIcon, ReceiptTextIcon, TriangleAlertIcon } from 'lucide-react';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -17,6 +17,7 @@ import { formatCount } from '@/lib/growth/metrics';
 import type { GrowthCategory } from '@/lib/growth/category';
 import { AccountIdentity, CategoryChip, CategorySelect, ScrapeStatus } from './growthUi';
 import { AddAccountDialog } from './AddAccountDialog';
+import { UsageDialog } from './UsageDialog';
 import { useTrackPosts } from './useTrackPosts';
 import type { AddGrowthAccountPayload, TrackPostsResult } from '@/hooks/useGrowthTracking';
 import type { GrowthAccount } from '@/types/firestore';
@@ -52,6 +53,7 @@ export function ManageAccountsTab({
   accounts, loading, onAdd, onSetTracking, onSetTrackPosts, onSetCategory, onDelete,
 }: ManageAccountsTabProps) {
   const [addOpen, setAddOpen] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<GrowthAccount | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   // The switch and its copy are shared with the account page, which offers the
@@ -117,7 +119,16 @@ export function ManageAccountsTab({
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-end">
+      {/* Usage sits beside Track Account because this is the page where the
+          bill is *incurred* — every switch on it adds or removes a nightly
+          scrape. Putting the cost anywhere else means the decision and its
+          price are read on different screens. It is the secondary action of
+          the pair, so it takes the outline variant. */}
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" onClick={() => setUsageOpen(true)}>
+          <ReceiptTextIcon className="size-4" aria-hidden />
+          Usage
+        </Button>
         <Button onClick={() => setAddOpen(true)}>
           <PlusIcon className="size-4" aria-hidden />
           Track Account
@@ -271,6 +282,7 @@ export function ManageAccountsTab({
       )}
 
       <AddAccountDialog open={addOpen} onOpenChange={setAddOpen} onAdd={onAdd} />
+      <UsageDialog open={usageOpen} onOpenChange={setUsageOpen} />
 
       <AlertDialog open={pendingDelete !== null} onOpenChange={(o) => { if (!o) setPendingDelete(null); }}>
         <AlertDialogContent>

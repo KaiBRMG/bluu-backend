@@ -14,6 +14,8 @@ Not a shared id, not a join, not a lookup, not a shared normalizer. The accounts
 | `apidojo/twitter-user-scraper` | $0.004 / profile URL | 60 profiles | $0.240 |
 | `kaitoeasyapi/twitter-x-data-tweet-scraper-…-cheapest` | **$0.00025 / result** | see [post analytics](#post-analytics) | ~$0.03–0.10 |
 
+**Those unit prices are planning figures, not the invoice** — what Apify actually charged is read from its own billing records and shown in **Manage accounts → Usage**; see [usage & real cost](#usage--real-cost--what-apify-actually-billed). Check the measured number before trusting the table above.
+
 **≈ $0.36/night, ≈ $10.90/month** at the full managed roster (72 accounts, imported 2026-09-09 — see [the roster import](#the-roster-import)), linear per account added. It was ≈ $0.078/night at the original twelve-account seed list. Four things hold that line, and each is easy to undo by accident:
 
 1. **The X actor takes `twitterHandles` only.** `getFollowers` / `getFollowing` / `getRetweeters` are the **$0.016-per-query** paths. They are passed explicitly `false` in [`runTwitterScrape`](../src/lib/services/growthTrackingService.ts) as an assertion, not because `false` is the default — "tidying away" those three lines is how a $2/month job silently becomes a $400/month one.
@@ -33,16 +35,19 @@ Both actors return extra fields **inside the same billed result**, so these cost
 |---|---|
 | Page | `src/app/(main)/smm-portal/growth-tracking/page.tsx` |
 | Components | `src/components/growth/*` |
+| Client hook | `src/hooks/useApifyUsage.ts` (fetches only while the Usage dialog is open) |
 | Cron | `src/app/api/cron/growth-tracking/route.ts` + the entry in `src/vercel.json` |
 | Cron | `src/app/api/cron/growth-posts/route.ts` — the post refresh cycle, `0 */6 * * *` |
 | API routes | `src/app/api/smm/growth/{accounts,accounts/[id],accounts/[id]/refresh,series}` |
 | API routes | `src/app/api/smm/growth/posts`, `posts/[tweetId]`, `posts/[tweetId]/sync` |
+| API routes | `src/app/api/smm/growth/usage` — the measured-cost report behind the **Usage** dialog |
 | Service | `src/lib/services/growthTrackingService.ts` (follower scrape; owns the two profile actors) |
 | Service | `src/lib/services/growthPostsService.ts` (**the only module that calls the tweet actor**) |
+| Service | `src/lib/services/apifyUsageService.ts` (**measured** cost — reads Apify's own billing records; never runs an actor) |
 | Pure logic | `src/lib/growth/{platform,metrics,signals,postLink,postMetrics,category}.ts` |
 | Client hook | `src/hooks/useGrowthTracking.ts` |
 | Client hook | `src/hooks/useGrowthPosts.ts` |
-| Types | `src/types/firestore.ts` (`GrowthAccount`, `GrowthSeries`, `GrowthSnapshot`, `GrowthPost`, `GrowthPostSnapshot`, `GrowthSpendLedger`) |
+| Types | `src/types/firestore.ts` (`GrowthAccount`, `GrowthSeries`, `GrowthSnapshot`, `GrowthPost`, `GrowthPostSnapshot`, `GrowthSpendLedger`, `ApifyUsageReport`) |
 | Import script | `src/scripts/import-growth-tracking.js` (`--dry-run`, `--wipe`) — the hand-collected *history* |
 | Import script | `src/scripts/import-growth-accounts.js` (`--dry-run`, `--file=`) — the *roster* + categories |
 | Migration (one-off) | `src/scripts/recategorise-facebook.js` (`--dry-run`) — splits the retired `FACEBOOK` category into `GENERAL` / `CREATOR`. Delete once run |
@@ -56,7 +61,9 @@ Registered in `src/lib/definitions.ts` as `smm-growth-tracking` under the `smm-p
 | `growth-accounts/{platform}_{handleNormalized}` | A tracked account. `isActive` (false = stopped, history kept), `latest`/`previous` denormalized readings, `lastScrapeAt`/`lastScrapeStatus`/`lastScrapeError`, `lastManualRefreshAt` (the manual-refresh cooldown gate; index-exempted) |
 | `growth-accounts/{id}/series/{YYYY}` | `days: { 'YYYY-MM-DD': { followers, …extras } }` — **one document per account per year** |
 | `growth-posts/{tweetId}` | One tracked X post: metadata, `latest`/`previous`, and `history: { 'YYYY-MM-DDTHH:mm': {…} }` — readings live **on the document**, no subcollection |
-| `growth-spend/{YYYY-MM}` | The rolling cost ledger the refresh breaker reads: `results`, `usd`, `runs` |
+| `growth-spend/{YYYY-MM}` | The rolling cost ledger the refresh breaker reads. `results`/`usd`/`runs` are our own **estimate**, incremented as we spend; `actualUsd`/`actualTotalUsd`/`actualRuns` are what **Apify billed**, written back by `apifyUsageService` |
+| `apify-usage/{YYYY-MM}` | A month's measured spend, read from Apify: per-actor and per-day totals plus the last 60 runs. Index-exempt — fetched by id only |
+| `apify-actors/{actId}` | Immutable `actId` → `username/name` mapping, so a run row can be named without a lookup every time |
 
 Both denied in `firestore.rules` (the subcollection match is explicit — rules don't cascade).
 
@@ -610,6 +617,122 @@ not have here, not a permission the user lacks, and a greyed control would
 suggest it could be turned on. `postsWindowSaturated` renders as an amber warning
 beside the switch.
 
+## Usage & real cost — what Apify actually billed
+
+> Every figure above this line is an **estimate**. This section is the measured
+> one. Both exist on purpose, and confusing them is the mistake this feature was
+> built to end.
+
+### Why the estimate was never the bill
+
+`growth-spend/{YYYY-MM}` counts billed results and multiplies by
+`UNIT_COST_PER_RESULT`. That number was wrong in three structural ways, none of
+them fixable by correcting the arithmetic:
+
+1. **It only counted the tweet actor.** The nightly Facebook and X profile
+   scrapes — the larger half of the bill — were never recorded at all, so the
+   figure on Tracked posts was a fraction of a fraction.
+2. **The unit price was a guess.** $0.00025 was read off a store page. The store
+   page and the invoice do not have to agree, and nothing inside our own code
+   could tell.
+3. **Apify does not only bill per result.** Platform usage rides on the same run
+   — compute units, dataset writes, data transfer, proxy. Two runs returning
+   twenty rows each cost different amounts if one of them ground for four
+   minutes.
+
+So the estimate was replaced rather than repaired. It is still written, and still
+what the breaker falls back on, because it is the only figure that exists the
+*instant* a call is made — the measured one arrives minutes later.
+
+### The ground truth is the run list
+
+[`apifyUsageService.ts`](../src/lib/services/apifyUsageService.ts) reads three
+endpoints, **all of them free account metadata**:
+
+| Endpoint | Gives |
+|---|---|
+| `GET /v2/actor-runs` | one row per run, with the real `usageTotalUsd` — per-call granularity, bucketable by calendar month |
+| `GET /v2/users/me/usage/monthly` | Apify's own **billing-cycle** total, for context |
+| `GET /v2/acts/{actId}` | the `username/name` behind a run's opaque `actId` |
+
+The run list is the report; the monthly endpoint is only context. **They are
+different windows and the UI says so** rather than reconciling them: a billing
+cycle need not start on the 1st, and a gap between the two is itself information
+— it means runs are being started by something other than this app.
+
+### RULE 8 — this does not weaken rule 9d
+
+Cross-cutting rule 9d bans calling the Apify API by hand, and it is unchanged.
+What it protects against is **actor runs**, which bill per result. Everything
+this module calls is metadata and is free and unmetered. Two consequences:
+
+- **Never add a call to this module that starts a run.** It is the one module in
+  the subsystem that talks to Apify without spending anything, and that property
+  is why it is allowed to be called from a cron and from a dialog's Refresh
+  button without a cooldown.
+- **It is still not a licence to `curl` `api.apify.com` yourself.** Use the
+  actor pages and the API reference, or ask the user.
+
+### Where the numbers surface
+
+- **Manage accounts → Usage** ([`UsageDialog.tsx`](../src/components/growth/UsageDialog.tsx)):
+  a wide centred dialog, month-stepped. Three tiles (billed, runs, against last
+  month), Apify's cycle line, a hand-drawn per-day bar row, the per-actor
+  breakdown, and a log of the last 60 individual runs with a cost on each. The
+  button sits on Manage accounts because that is the page where the bill is
+  *incurred* — every switch on it adds or removes a nightly scrape.
+- **The month-on-month tile compares like for like.** `comparison.toDateUsd` is
+  last month summed *only as far into it as we have got into this one*, and that
+  is what the percentage is against; `comparison.totalUsd` (last month complete)
+  is shown beside it as the record. Seventeen days of September set against all
+  of August reads as a 45% saving nobody made, and a cost surface that cries
+  wolf once is never read again. It is computed at sync time from the previous
+  month's stored snapshot — one document read, no API call — and is `null` when
+  no such snapshot exists, which renders as "no record of last month yet" rather
+  than as growth from zero.
+- **Tracked posts** shows `actualUsd` when it has been synced and falls back to
+  the estimate **labelled `est.`**. The bare unlabelled figure is what let a
+  guess be read as the bill.
+
+Three details are load-bearing:
+
+- **The month picker is UTC, and is deliberately not `components/salary/MonthPicker`.**
+  That control looks identical and steps months in `Africa/Harare` because a
+  salary day does (rule 9f). Runs are bucketed by UTC day, so a picker two hours
+  out from the aggregation is a bug that appears once a month at the worst
+  moment.
+- **Nothing is projected.** A month in progress reads as what it has cost *so
+  far*, never extrapolated. This is the surface that replaced a made-up number;
+  it must not introduce a different one.
+- **A run still going counts as a run at $0**, not as a dropped row, so the run
+  count matches the log. Its cost lands on the next sync — which is why a month
+  is re-synced rather than frozen the first time it is read.
+
+### The breaker now measures money, not predictions
+
+`ledgerSpendUsd()` is `Math.max(estimate, actualUsd)`, and the ceiling is checked
+against that. Neither figure alone is safe: the estimate **under-counts** (it
+prices results and ignores the platform usage on the same run), and the measured
+one **lags** (it is written by a background sync, so a burst of calls reads as
+free until the next one). Taking the larger means neither blind spot passes
+spending through.
+
+`actualUsd` is the **tweet actor alone**, because that is what the post-tracking
+ceiling governs; `actualTotalUsd` is every actor, because that is what a person
+means by "what are we paying". Charging the follower scrape against the post
+ceiling would trip a breaker over spending it does not control.
+
+### When it syncs
+
+- Both crons call `syncApifyUsageQuietly()` after their work — free, and
+  **non-fatal by construction**: the money is already spent by that point, so a
+  failed reconciliation must not turn a successful cycle into a 500 the cron
+  retries.
+- The route serves a stored snapshot for 15 minutes; Refresh forces a live read.
+- A live read that fails falls back to the stored snapshot **with the reason
+  shown on screen**. A cost dialog that cannot open because Apify blinked is
+  worse than a figure labelled with when it was taken.
+
 ### Deployment notes
 
 - **`0 */6 * * *` is a third Vercel cron.** The Hobby plan allows two, daily
@@ -624,3 +747,11 @@ beside the switch.
   manual account refresh shipped. Nothing queries it (rule 9), so it is
   `"indexes": []` like the other non-queried fields on that collection.
   `firebase deploy --only firestore:indexes`.
+- **Usage tracking changed rules and indexes.** `apify-usage` and `apify-actors`
+  are both denied to clients (the usage document holds spend for the whole Apify
+  account), and every field on them — plus the three new `growth-spend.actual*`
+  fields — is exempted, since nothing queries either collection by anything but
+  document id. `firebase deploy --only firestore:rules,firestore:indexes`.
+- **No new env var.** `APIFY_API_KEY` already had to be set; the usage endpoints
+  authenticate with the same token, sent as a `Bearer` header rather than a
+  query parameter so it never lands in a log line or an error message.

@@ -424,7 +424,26 @@ export async function readSpendLedger(now: Date = new Date()): Promise<GrowthSpe
     usd: (d.usd as number) ?? 0,
     runs: (d.runs as number) ?? 0,
     updatedAt: serializeTimestamp(d.updatedAt as Timestamp | null),
+    actualUsd: (d.actualUsd as number) ?? null,
+    actualTotalUsd: (d.actualTotalUsd as number) ?? null,
+    actualRuns: (d.actualRuns as number) ?? null,
+    actualSyncedAt: serializeTimestamp(d.actualSyncedAt as Timestamp | null),
   };
+}
+
+/**
+ * The figure the ceiling is measured against.
+ *
+ * The **larger** of our estimate and Apify's measured tweet-actor spend, and
+ * never just one of them. The estimate alone under-counts — it prices results
+ * and ignores the compute, dataset and transfer usage that rides on the same
+ * run. The measured figure alone lags: it is written by a background sync, so
+ * the minutes between a burst of calls and the next sync would read as free.
+ * Taking the max means neither blind spot can let spending through, which is
+ * the only property a breaker actually needs.
+ */
+export function ledgerSpendUsd(ledger: GrowthSpendLedger): number {
+  return Math.max(ledger.usd, ledger.actualUsd ?? 0);
 }
 
 /**
@@ -436,7 +455,7 @@ export async function checkSpendCeiling(now: Date = new Date()): Promise<{
   ledger: GrowthSpendLedger;
 }> {
   const ledger = await readSpendLedger(now);
-  return { blocked: ledger.usd >= MONTHLY_SPEND_CEILING_USD, ledger };
+  return { blocked: ledgerSpendUsd(ledger) >= MONTHLY_SPEND_CEILING_USD, ledger };
 }
 
 // ─── The refresh ladder ──────────────────────────────────────────────
@@ -935,7 +954,7 @@ export function spendCeilingResponse(ledger: GrowthSpendLedger): NextResponse {
   return NextResponse.json({
     error:
       `The monthly post-tracking budget of $${MONTHLY_SPEND_CEILING_USD.toFixed(2)} has been ` +
-      `reached ($${ledger.usd.toFixed(2)} spent across ${ledger.runs} runs this month). ` +
+      `reached ($${ledgerSpendUsd(ledger).toFixed(2)} spent across ${ledger.runs} runs this month). ` +
       `Refreshing is paused until next month, or until the ceiling is raised deliberately.`,
   }, { status: 429 });
 }

@@ -270,6 +270,20 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 18e. Apify usage. `apify-usage/{YYYY-MM}` is the measured cost of a
+    // month's actor runs, read from Apify's own billing records and served
+    // through /api/smm/growth/usage; `apify-actors/{actId}` is the immutable
+    // actor-id -> name mapping those reports are built from. Both are written
+    // only by the Admin SDK, and the usage document contains spend figures for
+    // the whole Apify account, so neither is client-readable.
+    match /apify-usage/{month} {
+      allow read, write: if false;
+    }
+
+    match /apify-actors/{actorId} {
+      allow read, write: if false;
+    }
+
     // 19. App resources
     // Group/user-filtered reads happen server-side in /api/resources; management
     // writes go through /api/admin/resources. All access via Admin SDK, so no

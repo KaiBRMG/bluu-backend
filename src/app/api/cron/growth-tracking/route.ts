@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
+import { syncApifyUsageQuietly } from '@/lib/services/apifyUsageService';
 import {
   MAX_TRACKED_ACCOUNTS,
   currentDayKey,
@@ -151,6 +152,14 @@ export async function GET() {
         message,
       );
     }
+
+    // Reconcile the month against what Apify actually billed. Free account
+    // metadata, never an actor run (rule 9d), and non-fatal by construction:
+    // the money is already spent by this point, so a failed reconciliation must
+    // not turn a successful cycle into a 500 the cron will retry. Doing it here
+    // is what keeps the real figure on the Tracked-posts strip without that
+    // page paying a network call on load.
+    await syncApifyUsageQuietly();
 
     const cost = estimateCost({ facebook: facebook.length, twitter: twitter.length });
     console.log(

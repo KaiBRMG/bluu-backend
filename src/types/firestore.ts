@@ -1263,7 +1263,16 @@ export interface GrowthPostMedia {
   url: string;
 }
 
-/** Serialised growth-spend/{YYYY-MM} — the rolling cost breaker's ledger. */
+/**
+ * Serialised growth-spend/{YYYY-MM} — the rolling cost breaker's ledger.
+ *
+ * Two kinds of figure live here and they must not be confused. `results` /
+ * `usd` / `runs` are our own **estimate**, incremented as we spend: cheap,
+ * synchronous, and the thing the breaker could always rely on. The `actual*`
+ * fields are what **Apify billed**, written back by `apifyUsageService` on a
+ * schedule. The estimate is never removed, because it is the only figure that
+ * exists the instant a call is made — the actual one arrives minutes later.
+ */
 export interface GrowthSpendLedger {
   month: string;
   /** Billed scraper results this month, across every call shape. */
@@ -1271,6 +1280,85 @@ export interface GrowthSpendLedger {
   usd: number;
   runs: number;
   updatedAt: string | null;
+  /** Apify's real cost for the **tweet actor only** — what the ceiling governs. */
+  actualUsd?: number | null;
+  /** Apify's real cost for **every** actor this month, follower scrapes included. */
+  actualTotalUsd?: number | null;
+  /** Runs Apify recorded this month, across every actor. */
+  actualRuns?: number | null;
+  /** When those figures were last read from Apify. */
+  actualSyncedAt?: string | null;
+}
+
+// ─── Apify usage (what the platform actually billed) ──────────────────
+
+/** One actor's share of a month's bill. */
+export interface ApifyActorUsage {
+  /** Apify's opaque actor id, which is what a run row carries. */
+  actorId: string;
+  /** `username/name`, resolved once and cached — `apidojo/twitter-user-scraper`. */
+  actorName: string;
+  /** Our own plain-English name for it, or null for an actor we do not run. */
+  label: string | null;
+  runs: number;
+  /** Runs that ended in anything other than success (timeouts, aborts, errors). */
+  failed: number;
+  usd: number;
+}
+
+/** A calendar day's spend, bucketed in UTC from the run list. */
+export interface ApifyDailyUsage {
+  date: string;
+  usd: number;
+  runs: number;
+}
+
+/** One actor run, as the usage dialog's call log shows it. */
+export interface ApifyRunSummary {
+  id: string;
+  actorId: string;
+  actorName: string;
+  status: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationSecs: number | null;
+  usd: number;
+}
+
+/** Serialised apify-usage/{YYYY-MM} — a month's measured spend. */
+export interface ApifyUsageReport {
+  month: string;
+  /** Summed from the run list, so it is per-actor attributable. */
+  totalUsd: number;
+  runs: number;
+  actors: ApifyActorUsage[];
+  daily: ApifyDailyUsage[];
+  recentRuns: ApifyRunSummary[];
+  /**
+   * Apify's own billing-cycle total. Separate from `totalUsd` because a cycle
+   * need not start on the 1st — the two are different windows, not two attempts
+   * at the same number, and the UI must say so rather than reconcile them.
+   */
+  cycle: { startAt: string; endAt: string; creditsUsd: number } | null;
+  /**
+   * Last month, for the only question this surface is really asked: is it going
+   * up. `toDateUsd` is the **like-for-like** figure — last month summed only as
+   * far into it as we have got into this one — and it is what the UI compares
+   * against. `totalUsd` is last month complete, shown as the record beside it.
+   * Null when no snapshot of the previous month exists, which reads as "nothing
+   * to compare against" rather than as growth from zero.
+   */
+  comparison: {
+    month: string;
+    totalUsd: number;
+    toDateUsd: number;
+    /** The day-of-month the like-for-like window was cut at. */
+    dayReached: number;
+  } | null;
+  syncedAt: string;
+  cached: boolean;
+  /** Set when a live read failed and a stored snapshot was served instead. */
+  staleReason?: string | null;
 }
 
 // ─── Resolved access (returned to client after permission resolution) ─

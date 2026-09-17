@@ -513,6 +513,51 @@
       "indexes": []
     },
     {
+      "collectionGroup": "apify-actors",
+      "fieldPath": "name",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apify-actors",
+      "fieldPath": "title",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apify-usage",
+      "fieldPath": "actors",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apify-usage",
+      "fieldPath": "comparison",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apify-usage",
+      "fieldPath": "cycle",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apify-usage",
+      "fieldPath": "daily",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apify-usage",
+      "fieldPath": "recentRuns",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apify-usage",
+      "fieldPath": "runs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "apify-usage",
+      "fieldPath": "totalUsd",
+      "indexes": []
+    },
+    {
       "collectionGroup": "ca-coverage-notices",
       "fieldPath": "creatorNames",
       "indexes": []
@@ -1114,6 +1159,21 @@
     },
     {
       "collectionGroup": "growth-spend",
+      "fieldPath": "actualRuns",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-spend",
+      "fieldPath": "actualTotalUsd",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-spend",
+      "fieldPath": "actualUsd",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-spend",
       "fieldPath": "results",
       "indexes": []
     },
@@ -1325,12 +1385,12 @@
     },
     {
       "collectionGroup": "shifts",
-      "fieldPath": "paysWage",
+      "fieldPath": "overtimeCreatorIds",
       "indexes": []
     },
     {
       "collectionGroup": "shifts",
-      "fieldPath": "overtimeCreatorIds",
+      "fieldPath": "paysWage",
       "indexes": []
     },
     {
