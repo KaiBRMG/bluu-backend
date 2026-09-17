@@ -802,6 +802,49 @@ export async function listPostsForAccount(
   return [...posts.values()];
 }
 
+/**
+ * Stop every one of an account's posts, in one batched write.
+ *
+ * Called when an account is stopped. Stopping an account is the instruction to
+ * stop spending on it, and its posts are a line on the *same* bill — leaving
+ * them in the refresh queue would keep buying readings for an account the user
+ * just switched off, which is the one thing stopping is supposed to prevent.
+ *
+ * It is **not** symmetrical: resuming the account does not resume its posts.
+ * Follower scraping is one cheap call, while resuming twenty posts restarts
+ * twenty billed refreshes — a cost nobody asked for by clicking "Resume". They
+ * are resumed one at a time, from the account panel that still lists them.
+ *
+ * Returns how many were actually stopped, so the caller can say so rather than
+ * claim a number it guessed. Already-stopped posts are skipped: writing
+ * `isActive: false` over `false` is a billed write that changes nothing (rule 9).
+ */
+export async function stopPostsForAccount(
+  accountId: string,
+  handleNormalized: string,
+): Promise<number> {
+  const collection = adminDb.collection(GROWTH_POSTS);
+  const [byAccount, byHandle] = await Promise.all([
+    collection.where('accountId', '==', accountId).get(),
+    handleNormalized
+      ? collection.where('authorHandleNormalized', '==', handleNormalized).get()
+      : Promise.resolve(null),
+  ]);
+
+  // Deduped by id: a discovered post matches both queries, and writing it twice
+  // in one batch is an error rather than a no-op.
+  const ids = new Set<string>();
+  for (const doc of [...byAccount.docs, ...(byHandle?.docs ?? [])]) {
+    if (doc.get('isActive') !== false) ids.add(doc.id);
+  }
+  if (ids.size === 0) return 0;
+
+  const batch = adminDb.batch();
+  for (const id of ids) batch.update(collection.doc(id), { isActive: false });
+  await batch.commit();
+  return ids.size;
+}
+
 export async function getGrowthPost(tweetId: string): Promise<GrowthPost | null> {
   const doc = await adminDb.collection(GROWTH_POSTS).doc(tweetId).get();
   return doc.exists ? serializeGrowthPost(doc) : null;

@@ -1,9 +1,11 @@
 'use client';
 
+import { useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { DayMap, GrowthRange } from '@/lib/growth/metrics';
+import type { GrowthCategory } from '@/lib/growth/category';
 import type { RefreshAccountResult, TrackPostsResult } from '@/hooks/useGrowthTracking';
 import type { GrowthAccount, GrowthPost } from '@/types/firestore';
 
@@ -48,6 +50,8 @@ export function AccountSheet({
   onDeletePost,
   onLoadFullPostHistory,
   onSetTrackPosts,
+  onSetTracking,
+  onSetCategory,
   onRefreshAccount,
 }: {
   account: GrowthAccount | null;
@@ -62,8 +66,12 @@ export function AccountSheet({
   onDeletePost: (id: string) => Promise<void>;
   onLoadFullPostHistory: (id: string) => Promise<void>;
   onSetTrackPosts: (id: string, trackPosts: boolean) => Promise<TrackPostsResult>;
+  onSetTracking: (id: string, isActive: boolean) => Promise<number>;
+  onSetCategory: (id: string, category: GrowthCategory | null) => Promise<void>;
   onRefreshAccount: (id: string) => Promise<RefreshAccountResult>;
 }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+
   return (
     <Sheet open={account !== null} onOpenChange={onOpenChange}>
       {/*
@@ -78,7 +86,25 @@ export function AccountSheet({
         with its content. A panel whose whole argument is "a peek" had no visible
         exit from its second screenful.
       */}
-      <SheetContent className="w-full gap-0 overflow-hidden sm:max-w-2xl">
+      <SheetContent
+        ref={contentRef}
+        /* `.focus()` on a plain <div> does nothing, and Radix then falls back to
+           the first tabbable — which is the whole thing being avoided here. */
+        tabIndex={-1}
+        className="w-full gap-0 overflow-hidden sm:max-w-2xl"
+        /*
+          Radix hands opening focus to the first tabbable descendant. Once the
+          header gained the category picker that became a `<button>` that writes
+          data — so every account opened with a focus ring on it, and the first
+          Tab started *past* the panel's own header. Focusing the panel instead
+          keeps the trap intact, lets the title be what a screen reader
+          announces, and leaves the header quiet.
+        */
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          contentRef.current?.focus();
+        }}
+      >
         {account && (
           <AccountPanel
             key={account.id}
@@ -93,6 +119,8 @@ export function AccountSheet({
             onDeletePost={onDeletePost}
             onLoadFullPostHistory={onLoadFullPostHistory}
             onSetTrackPosts={onSetTrackPosts}
+            onSetTracking={onSetTracking}
+            onSetCategory={onSetCategory}
             onRefreshAccount={onRefreshAccount}
           />
         )}

@@ -10,6 +10,7 @@ import {
 import {
   checkSpendCeiling,
   discoverPostsForAccounts,
+  stopPostsForAccount,
 } from '@/lib/services/growthPostsService';
 import { categoryListFor, normalizeCategoryFor } from '@/lib/growth/category';
 import type { DecodedIdToken } from 'firebase-admin/auth';
@@ -28,6 +29,15 @@ export const maxDuration = 60;
  * scraped (and stops costing money) while its history is kept and the account
  * can be resumed. Archive ≠ delete — the same principle as rule 6, applied here
  * because months of daily readings cannot be recovered once dropped.
+ *
+ * **Stopping cascades to the account's posts; resuming does not.** Stopping is
+ * the instruction to stop spending, and an account's posts are a line on the
+ * same bill — so they are stopped too, here rather than in the client, because
+ * doing it per post would be one HTTP round trip each (rule 9). The reverse is
+ * deliberately not symmetrical: resuming an account buys one cheap follower
+ * call, while resuming twenty posts restarts twenty billed refreshes nobody
+ * asked for. Posts are resumed individually, from the panel that still lists
+ * them. The count comes back in the response so the UI can state it.
  */
 export const PATCH = withAuth(async (
   request: NextRequest,
@@ -96,6 +106,16 @@ export const PATCH = withAuth(async (
       ...(hasCategory ? { category } : {}),
     });
 
+    // ── Stopping takes the account's posts with it ───────────────────────────
+    // Only on the true → false edge: re-stopping an already-stopped account
+    // would re-run two queries to write nothing. The posts keep every reading
+    // they have — this drops them out of the refresh queue, it does not delete
+    // them, and the account panel still lists them so one can be resumed alone.
+    let postsStopped = 0;
+    if (hasIsActive && body.isActive === false && account.isActive) {
+      postsStopped = await stopPostsForAccount(id, account.handleNormalized);
+    }
+
     // ── Switching post tracking ON searches straight away ────────────────────
     // Otherwise the toggle looks like it did nothing: the nightly pass would not
     // run for up to six hours, and the Posts tab would stay empty in the
@@ -134,7 +154,7 @@ export const PATCH = withAuth(async (
       }
     }
 
-    return NextResponse.json({ success: true, discovery });
+    return NextResponse.json({ success: true, discovery, postsStopped });
   } catch (error) {
     return handleApiError(error, 'PATCH /api/smm/growth/accounts/[id]');
   }

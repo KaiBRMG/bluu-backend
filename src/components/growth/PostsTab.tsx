@@ -29,12 +29,17 @@ const PostDetailSheet = dynamic(
   { ssr: false },
 );
 
-type PostFilter = 'all' | 'live' | 'stopped';
+/**
+ * No `stopped` facet any more: this page is given only the posts still being
+ * refreshed, so the chip counted nothing and led to an empty list. A stopped
+ * post is not gone — its readings are kept, and the account panel still lists it
+ * so it can be resumed on its own.
+ */
+type PostFilter = 'all' | 'live';
 
 const FILTER_LABEL: Record<PostFilter, string> = {
   all: 'All posts',
   live: 'Moving now',
-  stopped: 'Stopped',
 };
 
 const TABLE_METRICS: TableMetric[] = ['engagement', 'likes', 'reposts', 'replies', 'views'];
@@ -103,15 +108,14 @@ export function PostsTab({
     // "Moving now" is the ladder's top rung — the posts still being read every
     // six hours, which is the only window where coming back tomorrow shows
     // something meaningfully different.
-    live: posts.filter((p) => p.isActive && refreshStateFor(ageHoursOf(p.postedAt)) === 'live').length,
-    stopped: posts.filter((p) => !p.isActive).length,
+    live: posts.filter((p) => refreshStateFor(ageHoursOf(p.postedAt)) === 'live').length,
   }), [posts]);
 
-  const visible = useMemo(() => posts.filter((post) => {
-    if (filter === 'stopped') return !post.isActive;
-    if (filter === 'live') return post.isActive && refreshStateFor(ageHoursOf(post.postedAt)) === 'live';
-    return true;
-  }), [posts, filter]);
+  const visible = useMemo(() => (
+    filter === 'live'
+      ? posts.filter((post) => refreshStateFor(ageHoursOf(post.postedAt)) === 'live')
+      : posts
+  ), [posts, filter]);
 
   const nextReading = useMemo(() => soonestRefresh(posts), [posts]);
 
@@ -152,12 +156,7 @@ export function PostsTab({
             </div>
             <div className="flex items-baseline gap-2">
               <dt className="text-[11px] text-zinc-400">Tracked</dt>
-              <dd className="tabular-nums text-zinc-200">
-                {counts.all - counts.stopped} refreshing
-                {counts.stopped > 0 && (
-                  <span className="text-zinc-400">, {counts.stopped} stopped</span>
-                )}
-              </dd>
+              <dd className="tabular-nums text-zinc-200">{counts.all} refreshing</dd>
             </div>
             {spend && (
               <div className="flex items-baseline gap-2">
@@ -178,17 +177,15 @@ export function PostsTab({
               above the table — the same placement rule the overview follows. */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-1.5">
-              {(['all', 'live', 'stopped'] as const).map((f) => (
-                (f !== 'stopped' || counts.stopped > 0) && (
-                  <FilterChip
-                    key={f}
-                    active={filter === f}
-                    onClick={() => setFilter(f)}
-                    count={counts[f]}
-                  >
-                    {FILTER_LABEL[f]}
-                  </FilterChip>
-                )
+              {(['all', 'live'] as const).map((f) => (
+                <FilterChip
+                  key={f}
+                  active={filter === f}
+                  onClick={() => setFilter(f)}
+                  count={counts[f]}
+                >
+                  {FILTER_LABEL[f]}
+                </FilterChip>
               ))}
             </div>
             <ToggleGroup

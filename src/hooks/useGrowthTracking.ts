@@ -121,12 +121,22 @@ export function useGrowthTracking() {
     await refresh();
   }, [authFetch, refresh]);
 
-  const setTracking = useCallback(async (id: string, isActive: boolean) => {
-    await authFetch(`/api/smm/growth/accounts/${id}`, {
+  /**
+   * Stop or resume an account.
+   *
+   * Stopping also stops the account's posts — the server does that in one pass
+   * (see the PATCH route) rather than the client firing one request per post.
+   * The count comes back so the caller can say what actually happened instead of
+   * claiming a number; resuming always reports `0`, because resuming is
+   * deliberately not symmetrical.
+   */
+  const setTracking = useCallback(async (id: string, isActive: boolean): Promise<number> => {
+    const response = await authFetch(`/api/smm/growth/accounts/${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ isActive }),
-    });
+    }) as { postsStopped?: number };
     await refresh();
+    return response.postsStopped ?? 0;
   }, [authFetch, refresh]);
 
   /**

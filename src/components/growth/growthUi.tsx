@@ -4,10 +4,15 @@ import Image from 'next/image';
 import { ArrowUpRightIcon, CircleAlertIcon } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { cn } from '@/lib/utils';
 import { PLATFORM_LABEL, type GrowthPlatform } from '@/lib/growth/platform';
-import { CATEGORY_TONE, type GrowthCategory } from '@/lib/growth/category';
+import {
+  CATEGORIES_BY_PLATFORM, CATEGORY_TONE, type GrowthCategory,
+} from '@/lib/growth/category';
 import { formatDelta, formatPercent, type GrowthDelta } from '@/lib/growth/metrics';
 import type { GrowthAccount } from '@/types/firestore';
 
@@ -414,5 +419,73 @@ export function SpikeBadge({ percent, className }: { percent: number; className?
       {formatPercent(percent)}
       <span className="sr-only"> over 7 days</span>
     </span>
+  );
+}
+
+/**
+ * The account's category, editable in place — shared by the manage table and the
+ * account panel, so the two cannot drift into offering different vocabularies.
+ *
+ * **The options are the account's own platform's**, not the whole vocabulary:
+ * TWXNK / BONUS / SFW REPOST describe how the X roster is run and mean nothing
+ * on a Facebook page, which is GENERAL or CREATOR. The server checks the same
+ * thing against the stored platform — this list is the affordance, not the
+ * validation.
+ *
+ * Radix reserves the empty string as "no value", so "no category" travels as a
+ * sentinel and is mapped back to `null` — the same trick the add dialog uses.
+ *
+ * `dot` is the one thing the two call sites disagree about, and the reason is
+ * worth stating. In the manage table the trigger stays greyscale: a coloured
+ * `Select` in a column of controls reads as a status control rather than a
+ * picker, and that table shows the hue elsewhere. On the account panel this
+ * control *replaces* `CategoryDot` — the only place that account's category
+ * colour appeared — so the mark moves inside the trigger rather than being lost.
+ */
+const NO_CATEGORY = 'none';
+
+export function CategorySelect({
+  account,
+  busy,
+  onChange,
+  dot = false,
+  className,
+}: {
+  account: GrowthAccount;
+  busy: boolean;
+  onChange: (next: GrowthCategory | null) => void;
+  /** Show the category's colour inside the trigger. See above. */
+  dot?: boolean;
+  className?: string;
+}) {
+  return (
+    <Select
+      value={account.category ?? NO_CATEGORY}
+      disabled={busy}
+      onValueChange={(v) => onChange(v === NO_CATEGORY ? null : (v as GrowthCategory))}
+    >
+      <SelectTrigger
+        size="sm"
+        className={cn('text-xs', className)}
+        aria-label={`Category for @${account.handle}`}
+      >
+        {dot && (
+          <span
+            aria-hidden
+            className={cn(
+              'size-1.5 shrink-0 rounded-full',
+              account.category ? CATEGORY_TONE[account.category].dot : 'bg-zinc-500',
+            )}
+          />
+        )}
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={NO_CATEGORY}>Unfiled</SelectItem>
+        {CATEGORIES_BY_PLATFORM[account.platform].map((c) => (
+          <SelectItem key={c} value={c}>{c}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

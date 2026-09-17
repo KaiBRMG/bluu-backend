@@ -13,12 +13,9 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
 import { formatCount } from '@/lib/growth/metrics';
-import { CATEGORIES_BY_PLATFORM, type GrowthCategory } from '@/lib/growth/category';
-import { AccountIdentity, CategoryChip, ScrapeStatus } from './growthUi';
+import type { GrowthCategory } from '@/lib/growth/category';
+import { AccountIdentity, CategoryChip, CategorySelect, ScrapeStatus } from './growthUi';
 import { AddAccountDialog } from './AddAccountDialog';
 import { useTrackPosts } from './useTrackPosts';
 import type { AddGrowthAccountPayload, TrackPostsResult } from '@/hooks/useGrowthTracking';
@@ -44,7 +41,8 @@ interface ManageAccountsTabProps {
   accounts: GrowthAccount[];
   loading: boolean;
   onAdd: (payload: AddGrowthAccountPayload) => Promise<void>;
-  onSetTracking: (id: string, isActive: boolean) => Promise<void>;
+  /** Resolves with how many of the account's posts were stopped alongside it. */
+  onSetTracking: (id: string, isActive: boolean) => Promise<number>;
   onSetTrackPosts: (id: string, trackPosts: boolean) => Promise<TrackPostsResult>;
   onSetCategory: (id: string, category: GrowthCategory | null) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -69,10 +67,12 @@ export function ManageAccountsTab({
   const setTracking = async (account: GrowthAccount, isActive: boolean) => {
     setBusyId(account.id);
     try {
-      await onSetTracking(account.id, isActive);
+      const postsStopped = await onSetTracking(account.id, isActive);
       toast.success(isActive
         ? `Tracking @${account.handle} again`
-        : `Stopped tracking @${account.handle}. Its history is kept.`);
+        : postsStopped > 0
+          ? `Stopped tracking @${account.handle} and ${postsStopped} of its post${postsStopped === 1 ? '' : 's'}. All history is kept.`
+          : `Stopped tracking @${account.handle}. Its history is kept.`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not update that account.');
     } finally {
@@ -158,6 +158,7 @@ export function ManageAccountsTab({
                   </TableCell>
                   <TableCell className="w-[10.5rem]">
                     <CategorySelect
+                      className="w-full"
                       account={account}
                       busy={busyId === account.id}
                       onChange={(next) => setCategory(account, next)}
@@ -293,49 +294,6 @@ export function ManageAccountsTab({
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  );
-}
-
-/**
- * The account's category, editable in place.
- *
- * **The options are the account's own platform's**, not the whole vocabulary:
- * TWXNK / BONUS / SFW REPOST describe how the X roster is run and mean nothing
- * on a Facebook page, which is GENERAL or CREATOR. The server checks the same
- * thing against the stored platform — this list is the affordance, not the
- * validation.
- *
- * Radix reserves the empty string as "no value", so "no category" travels as a
- * sentinel and is mapped back to `null` — the same trick the add dialog uses.
- * The chip's hue is not repeated in the trigger: a coloured `Select` would read
- * as a status control rather than a picker, and the overview is where the
- * colour does its work.
- */
-const NO_CATEGORY = 'none';
-
-function CategorySelect({
-  account, busy, onChange,
-}: {
-  account: GrowthAccount;
-  busy: boolean;
-  onChange: (next: GrowthCategory | null) => void;
-}) {
-  return (
-    <Select
-      value={account.category ?? NO_CATEGORY}
-      disabled={busy}
-      onValueChange={(v) => onChange(v === NO_CATEGORY ? null : (v as GrowthCategory))}
-    >
-      <SelectTrigger size="sm" className="w-full text-xs" aria-label={`Category for @${account.handle}`}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={NO_CATEGORY}>No category</SelectItem>
-        {CATEGORIES_BY_PLATFORM[account.platform].map((c) => (
-          <SelectItem key={c} value={c}>{c}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
   );
 }
 

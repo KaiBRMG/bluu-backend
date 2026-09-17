@@ -2,9 +2,14 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { ExternalLinkIcon, Loader2Icon, RefreshCwIcon } from 'lucide-react';
+import { CircleSlashIcon, ExternalLinkIcon, Loader2Icon, RefreshCwIcon } from 'lucide-react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { Accordion } from '@/components/ui/accordion';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -12,7 +17,7 @@ import {
   ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig,
 } from '@/components/ui/chart';
 import {
-  AccountAvatar, CategoryDot, DeltaValue, PlatformChip, SEGMENT_ITEM_CLASS,
+  AccountAvatar, CategorySelect, DeltaValue, PlatformChip, SEGMENT_ITEM_CLASS,
   ScrapeFailedBadge, SpikeBadge,
 } from './growthUi';
 import { RefreshCountdown, useSlowTick } from './postUi';
@@ -32,6 +37,7 @@ import {
   type PostMetric,
 } from '@/lib/growth/postMetrics';
 import { PLATFORM_LABEL } from '@/lib/growth/platform';
+import type { GrowthCategory } from '@/lib/growth/category';
 import type { RefreshAccountResult, TrackPostsResult } from '@/hooks/useGrowthTracking';
 import type { GrowthAccount, GrowthPost } from '@/types/firestore';
 
@@ -108,6 +114,8 @@ export function AccountPanel({
   onDeletePost,
   onLoadFullPostHistory,
   onSetTrackPosts,
+  onSetTracking,
+  onSetCategory,
   onRefreshAccount,
 }: {
   account: GrowthAccount;
@@ -123,12 +131,35 @@ export function AccountPanel({
   onDeletePost: (id: string) => Promise<void>;
   onLoadFullPostHistory: (id: string) => Promise<void>;
   onSetTrackPosts: (id: string, trackPosts: boolean) => Promise<TrackPostsResult>;
+  /** Stop or resume the account. Resolves with how many posts stopped with it. */
+  onSetTracking: (id: string, isActive: boolean) => Promise<number>;
+  onSetCategory: (id: string, category: GrowthCategory | null) => Promise<void>;
   /** Buys one reading now — followers and this account's posts, two bills. */
   onRefreshAccount: (id: string) => Promise<RefreshAccountResult>;
 }) {
   const [panelRange, setPanelRange] = useState<GrowthRange>(range);
   const [openPostId, setOpenPostId] = useState<string>('');
+  const [categoryBusy, setCategoryBusy] = useState(false);
   const { busyId, setTrackPosts } = useTrackPosts(onSetTrackPosts);
+
+  /**
+   * Re-file the account. Optimism is safe here and nowhere else on this panel:
+   * a category is a label with no history consequences, the hook patches the
+   * row in place, and a failure is reported rather than swallowed.
+   */
+  const setCategory = useCallback(async (next: GrowthCategory | null) => {
+    setCategoryBusy(true);
+    try {
+      await onSetCategory(account.id, next);
+      toast.success(next
+        ? `@${account.handle} is now filed under ${next}`
+        : `@${account.handle} is now unfiled`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not change that category.');
+    } finally {
+      setCategoryBusy(false);
+    }
+  }, [account.id, account.handle, onSetCategory]);
 
   const from = useMemo(() => rangeStart(panelRange), [panelRange]);
 
@@ -205,6 +236,9 @@ export function AccountPanel({
     if (id) void onLoadFullPostHistory(id);
   }, [onLoadFullPostHistory]);
 
+  /** What stopping would actually switch off — the confirm has to name it. */
+  const activePosts = useMemo(() => posts.filter((p) => p.isActive).length, [posts]);
+
   const isX = account.platform === 'twitter';
   const readFailed = account.isActive && account.lastScrapeStatus === 'failed';
   const trackBusy = busyId === account.id;
@@ -234,16 +268,33 @@ export function AccountPanel({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <PlatformChip platform={account.platform} />
-          <CategoryDot category={account.category} />
-          {!account.isActive && (
-            <span className="rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[11px] font-medium text-zinc-300">
-              Not tracked
-            </span>
-          )}
-          {readFailed && <ScrapeFailedBadge error={account.lastScrapeError} />}
-          {view.spike !== null && view.spike > 0 && <SpikeBadge percent={view.spike} />}
+        {/* What this account *is* on the left, what can be done to it on the
+            right. The two things that belong here rather than in the deck below
+            are the two that are true of the account itself rather than of what
+            the panel is showing: its filing, and whether it is read at all.
+
+            The category was a read-only dot. Making it the picker rather than
+            adding one beside it keeps one element for one fact — and this is the
+            only place the account's category colour appears on the panel, which
+            is why this call site is the one that puts the mark in the trigger. */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <PlatformChip platform={account.platform} />
+            <CategorySelect
+              dot
+              className="h-6! w-auto gap-1.5 border-white/[0.07] bg-white/[0.04] px-2 py-0 text-[11px] font-medium"
+              account={account}
+              busy={categoryBusy}
+              onChange={setCategory}
+            />
+            {readFailed && <ScrapeFailedBadge error={account.lastScrapeError} />}
+            {view.spike !== null && view.spike > 0 && <SpikeBadge percent={view.spike} />}
+          </div>
+          <TrackingButton
+            account={account}
+            activePosts={activePosts}
+            onSetTracking={onSetTracking}
+          />
         </div>
 
         {/* The window belongs to the whole panel, not to the chart, so it sits
@@ -477,6 +528,112 @@ export function AccountPanel({
         <AccountFacts account={account} />
       </div>
     </>
+  );
+}
+
+/**
+ * Stop reading this account — or start again.
+ *
+ * ── Stopping is not deleting, and the confirm has to make that obvious ───────
+ * The word "stop" next to a destructive-looking button reads as "remove", and a
+ * user who believes that will not stop an account they should. So the dialog
+ * states the three things that are actually true: the card leaves the overview,
+ * the account is still in Manage accounts, and every reading is kept. The button
+ * is `outline`, not `destructive`, for the same reason — nothing is destroyed.
+ *
+ * ── It names the posts because they go too ──────────────────────────────────
+ * Stopping an account stops its posts (the server cascades it in one pass — see
+ * the PATCH route). That is the whole point of stopping, since the posts are a
+ * line on the same bill, but it is invisible from here unless the dialog counts
+ * them. Resuming does not bring them back on: twenty posts resuming themselves
+ * is twenty billed refreshes nobody asked for, so they come back one at a time
+ * from the list below.
+ *
+ * ── Resuming needs no confirm ───────────────────────────────────────────────
+ * It costs one nightly follower read and undoes nothing. A dialog in front of it
+ * would be ceremony — and the panel would otherwise be a dead end, since
+ * stopping from here leaves the reader looking at an account they cannot
+ * restart without going to find another screen.
+ */
+function TrackingButton({
+  account,
+  activePosts,
+  onSetTracking,
+}: {
+  account: GrowthAccount;
+  /** How many of its posts stopping would switch off. */
+  activePosts: number;
+  onSetTracking: (id: string, isActive: boolean) => Promise<number>;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  const run = async (isActive: boolean) => {
+    setBusy(true);
+    try {
+      const postsStopped = await onSetTracking(account.id, isActive);
+      toast.success(isActive
+        ? `Tracking @${account.handle} again`
+        : postsStopped > 0
+          ? `Stopped tracking @${account.handle} and ${postsStopped} of its post${postsStopped === 1 ? '' : 's'}. All history is kept.`
+          : `Stopped tracking @${account.handle}. Its history is kept.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not update that account.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!account.isActive) {
+    return (
+      <Button variant="outline" size="xs" disabled={busy} onClick={() => { void run(true); }}>
+        {busy
+          ? <Loader2Icon className="activity-spinner size-3.5 animate-spin" aria-hidden />
+          : <RefreshCwIcon className="size-3.5" aria-hidden />}
+        Resume tracking
+      </Button>
+    );
+  }
+
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant="outline" size="xs" disabled={busy}>
+          {busy
+            ? <Loader2Icon className="activity-spinner size-3.5 animate-spin" aria-hidden />
+            : <CircleSlashIcon className="size-3.5" aria-hidden />}
+          Stop tracking
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Stop tracking @{account.handle}?</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="space-y-2 text-sm text-zinc-400">
+              <p>
+                Nothing more is read or billed for this account. Its card leaves the
+                overview{activePosts > 0 && (
+                  <>
+                    {' '}and {activePosts} tracked post{activePosts === 1 ? '' : 's'} stop
+                    refreshing
+                  </>
+                )}.
+              </p>
+              <p>
+                Every follower reading and every post’s history is kept, and the account
+                stays in <span className="text-zinc-300">Manage accounts</span>, where it can
+                be resumed.
+              </p>
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep tracking</AlertDialogCancel>
+          <AlertDialogAction onClick={() => { void run(false); }}>
+            Stop tracking
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

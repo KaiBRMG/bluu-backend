@@ -145,6 +145,26 @@ export default function GrowthTrackingPage() {
     return result;
   }, [refreshAccount, posts]);
 
+  /**
+   * Stop or resume an account — the **third** seam between the two hooks, and
+   * the reason there is one handler rather than one per surface.
+   *
+   * Stopping cascades to the account's posts, server-side and in one pass, so
+   * the posts hook is holding a stale `isActive` for every one of them the
+   * moment it returns. Refetched only when something actually changed: resuming,
+   * and stopping an account with no live posts, both report `0` and leave the
+   * posts payload alone (rule 9).
+   *
+   * The panel and the manage table share this, so the two cannot drift into
+   * stopping an account by different amounts — which matters here more than
+   * usual, because what "stop" costs is the thing the user is deciding about.
+   */
+  const handleSetTracking = useCallback(async (id: string, isActive: boolean) => {
+    const postsStopped = await setTracking(id, isActive);
+    if (postsStopped > 0) await posts.refresh();
+    return postsStopped;
+  }, [setTracking, posts]);
+
   const openAccount = useCallback((account: GrowthAccount) => {
     setOpenAccountId(account.id);
   }, []);
@@ -188,10 +208,27 @@ export default function GrowthTrackingPage() {
     [accounts],
   );
 
+  /**
+   * The Overview is the **active** roster, not the whole ledger.
+   *
+   * Stopping an account is the instruction to stop spending on it, and leaving
+   * its card on the page it is read from every day made that instruction look
+   * like it had not taken. Everything on this surface reads from here — the
+   * grid, the category chips, the stat tiles and the Signals band — so the
+   * totals always describe what is on screen. Manage accounts keeps the full
+   * list, including its own Stopped section, and that is where an account is
+   * found again and resumed.
+   *
+   * `accountsById` below is deliberately built from the *whole* list: the panel
+   * has to keep rendering the account that was just stopped, and has to open
+   * for a stopped one reached from Manage accounts.
+   */
+  const roster = useMemo(() => accounts.filter((a) => a.isActive), [accounts]);
+
   /** The chip-filtered roster. */
   const visible = useMemo(
-    () => accounts.filter((a) => matchesFilter(a, filter)),
-    [accounts, filter],
+    () => roster.filter((a) => matchesFilter(a, filter)),
+    [roster, filter],
   );
 
   /**
@@ -235,8 +272,8 @@ export default function GrowthTrackingPage() {
   }), [matched, seriesById, from, gridThreshold]);
 
   const signals = useMemo(
-    () => signalsFor(accounts, seriesById, threshold),
-    [accounts, seriesById, threshold],
+    () => signalsFor(roster, seriesById, threshold),
+    [roster, seriesById, threshold],
   );
 
   /**
@@ -247,11 +284,11 @@ export default function GrowthTrackingPage() {
    */
   const categoryCounts = useMemo(() => {
     const counts = new Map<GrowthCategory, number>();
-    for (const account of accounts) {
+    for (const account of roster) {
       if (account.category) counts.set(account.category, (counts.get(account.category) ?? 0) + 1);
     }
     return GROWTH_CATEGORIES.filter((c) => counts.has(c)).map((c) => [c, counts.get(c)!] as const);
-  }, [accounts]);
+  }, [roster]);
 
   /**
    * Staleness is measured against the newest successful read across the whole
@@ -260,13 +297,13 @@ export default function GrowthTrackingPage() {
    * the nightly job itself has stopped, which is the only thing worth a banner.
    */
   const stale = useMemo(() => {
-    const newest = accounts
+    const newest = roster
       .map((a) => a.lastScrapeAt)
       .filter((d): d is string => d !== null)
       .sort()
       .at(-1) ?? null;
     return newest !== null && isStale(newest) ? newest : null;
-  }, [accounts]);
+  }, [roster]);
 
   const openAccountDoc = openAccountId === null
     ? null
@@ -278,6 +315,16 @@ export default function GrowthTrackingPage() {
    * `accountId`, and filing it only by that would hide a manually tracked post
    * from the very page its author lives on.
    */
+  /**
+   * What the Tracked posts page lists: the posts still being refreshed.
+   *
+   * A stopped post costs nothing and its figures are frozen, so on a page whose
+   * every column describes movement it is a row that can only mislead. They are
+   * not deleted — the readings are as unrecoverable as an account's — and the
+   * account panel still lists them, which is where one is resumed on its own.
+   */
+  const activePosts = useMemo(() => posts.posts.filter((p) => p.isActive), [posts.posts]);
+
   const accountPosts = useMemo(() => {
     if (!openAccountDoc) return [];
     const handle = openAccountDoc.handleNormalized;
@@ -292,7 +339,7 @@ export default function GrowthTrackingPage() {
         {view.name === 'posts' ? (
           <SubView title="Tracked posts" onBack={backToOverview}>
             <PostsTab
-              posts={posts.posts}
+              posts={activePosts}
               spend={posts.spend}
               loading={posts.loading}
               error={posts.error}
@@ -310,7 +357,7 @@ export default function GrowthTrackingPage() {
               accounts={accounts}
               loading={loading}
               onAdd={addAccount}
-              onSetTracking={setTracking}
+              onSetTracking={handleSetTracking}
               onSetTrackPosts={handleSetTrackPosts}
               onSetCategory={setCategory}
               onDelete={deleteAccount}
@@ -323,8 +370,8 @@ export default function GrowthTrackingPage() {
                 <h1 className="text-2xl font-bold tracking-tight outline-none">Growth Tracking</h1>
                 <p className="text-sm text-zinc-400">
                   Follower counts for managed Facebook and X pages, read nightly ·{' '}
-                  <span className="tabular-nums">{accounts.length}</span>{' '}
-                  {accounts.length === 1 ? 'account' : 'accounts'} tracked
+                  <span className="tabular-nums">{roster.length}</span>{' '}
+                  {roster.length === 1 ? 'account' : 'accounts'} tracked
                 </p>
               </div>
               {/* A page's actions sit to the right of its title, on the same row
@@ -332,7 +379,7 @@ export default function GrowthTrackingPage() {
               <div className="flex shrink-0 items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => setView({ name: 'posts' })}>
                   Tracked posts
-                  <span className="tabular-nums text-zinc-400">{posts.posts.length}</span>
+                  <span className="tabular-nums text-zinc-400">{activePosts.length}</span>
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => setView({ name: 'manage' })}>
                   <SettingsIcon className="size-4" aria-hidden />
@@ -363,7 +410,7 @@ export default function GrowthTrackingPage() {
 
             {loading ? (
               <OverviewSkeleton />
-            ) : accounts.length === 0 ? (
+            ) : roster.length === 0 ? (
               <p className="text-sm text-zinc-400">
                 No accounts are tracked yet.{' '}
                 <button
@@ -377,7 +424,7 @@ export default function GrowthTrackingPage() {
               </p>
             ) : (
               <>
-                <GrowthStatCards accounts={accounts} seriesById={seriesById} />
+                <GrowthStatCards accounts={roster} seriesById={seriesById} />
 
                 <SignalsStrip
                   signals={signals}
@@ -404,7 +451,7 @@ export default function GrowthTrackingPage() {
                         key={p}
                         active={filter.kind === 'platform' && filter.platform === p}
                         onClick={() => setFilter({ kind: 'platform', platform: p })}
-                        count={accounts.filter((a) => a.platform === p).length}
+                        count={roster.filter((a) => a.platform === p).length}
                       >
                         {PLATFORM_LABEL[p]}
                       </FilterChip>
@@ -526,6 +573,8 @@ export default function GrowthTrackingPage() {
           onDeletePost={posts.deletePost}
           onLoadFullPostHistory={posts.loadFullHistory}
           onSetTrackPosts={handleSetTrackPosts}
+          onSetTracking={handleSetTracking}
+          onSetCategory={setCategory}
           onRefreshAccount={handleRefreshAccount}
         />
       </div>
