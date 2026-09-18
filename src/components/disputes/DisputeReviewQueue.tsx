@@ -18,7 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { EllipsisPagination } from '@/components/EllipsisPagination';
 import type { DisputeDocument, ApprovalStatus } from '@/types/firestore';
 import { formatMoney } from './disputeStatus';
-import { PersonTag, SaleDate, StagePill, QuietLine, LoadError, RejectReasonBar } from './disputeUi';
+import { DisputeCreatorChip, PersonTag, SaleDate, StagePill, QuietLine, LoadError, RejectReasonBar } from './disputeUi';
 
 export type DisputeVerdict = Extract<ApprovalStatus, 'Approved' | 'Rejected'>;
 
@@ -100,7 +100,7 @@ export function DisputeReviewQueue({
                     <span aria-hidden>·</span>
                     <span className="inline-flex items-center gap-1.5">
                       Creator
-                      <PersonTag name={d.creatorName} photoURL={d.creatorPhotoURL} size="sm" className="text-zinc-300" />
+                      <DisputeCreatorChip dispute={d} size="xs" className="text-zinc-300" />
                     </span>
                     <span aria-hidden>·</span>
                     <span className="inline-flex items-center gap-1.5">

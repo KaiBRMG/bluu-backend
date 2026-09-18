@@ -9,7 +9,7 @@
 | `src/lib/definitions.ts` | **Code-defined** page list (source of truth for what pages exist) |
 | `src/lib/services/pageService.ts` | Page permission resolution (server) |
 | `src/lib/services/permissionResolver.ts` | Resolves groups/users → `permittedPageIds` |
-| `src/lib/permissionsCache.ts` | Client localStorage cache (no TTL) |
+| `src/lib/permissionsCache.ts` | Client localStorage cache (4-hour TTL) |
 | `src/hooks/usePermissions.ts` | Client permission hook |
 | `src/lib/middleware/apiHelpers.ts` | `checkPageAccess(uid, pageId)` |
 | `src/app/api/admin/pages/route.ts` | GET permission map (gated by `'sharing'` page permission) |
@@ -38,7 +38,7 @@ users/{uid}.permittedPageIds   ── denormalized, read by sidebar + checkPageA
 - **Pages are code-defined** in `src/lib/definitions.ts`, not stored in Firestore.
 - `page-permissions/{pageId}` maps each page → allowed groups/users.
 - Resolved access is **denormalized** onto `users/{uid}.permittedPageIds` for fast sidebar rendering.
-- Client caches permissions in **localStorage** via `permissionsCache.ts` (**no TTL**).
+- Client caches permissions in **localStorage** via `permissionsCache.ts` (**4-hour TTL**), and `/api/permissions/pages` adds a 60s `private, max-age` browser cache on top (rule 9i — `AppLayout` re-fetches it on every navigation). Neither is how a permission *change* travels: that is pushed down the `users/{uid}` snapshot as `permittedPageIds` and derived locally, which is why both caches are safe.
 
 ---
 

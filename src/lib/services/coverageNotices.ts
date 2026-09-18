@@ -1,5 +1,6 @@
 /**
- * Coalesced coverage notifications, and the record of a withdrawn absence.
+ * Coalesced coverage notifications, the day-before chaser for cover nobody has
+ * been assigned, and the record of a withdrawn absence.
  *
  * ## Why these are not sent inline
  *
@@ -37,12 +38,21 @@
 import { adminDb } from '../firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { notifications } from '../notificationContent';
-import { formatDayLabelWithWeekday, toDayKey, type SalaryDayKey } from '../salary/salaryDate';
+import {
+  addDays,
+  currentDayKey,
+  dayKeyToStartMs,
+  formatDayLabelWithWeekday,
+  toDayKey,
+  type SalaryDayKey,
+} from '../salary/salaryDate';
 import { resolveAccountNames } from './creatorAccountService';
-import { formatNameList, notifyUsers } from './caNotifications';
+import { CA_LEAVE_ALERT_RECIPIENT_UID, formatNameList, notifyUsers } from './caNotifications';
+import { getOffers } from './caCoverageService';
 
 const NOTICES = 'ca-coverage-notices';
 const WITHDRAWALS = 'ca-coverage-withdrawals';
+const LATCHES = 'ca-notification-latches';
 
 /**
  * How long a queue must sit untouched before it is sent.
@@ -206,6 +216,106 @@ export async function flushCoverageNotices(now: number = Date.now()): Promise<Fl
   }
 
   return { scanned: snap.size, sent, waiting };
+}
+
+// ─── The day-before chaser (unassigned offers) ───────────────────────
+
+/**
+ * Hour of the salary day (00–23) at or after which the "still unassigned"
+ * reminder may go out. Without it the chaser lands at ~02:00 local, which is a
+ * phone buzzing in the night about a board nobody is going to open until
+ * morning. Same reasoning as the payday reminder's own hour gate.
+ */
+const UNASSIGNED_REMINDER_HOUR = 9;
+
+/** `ca-notification-latches/{id}` — what has already been chased for a day. */
+function unassignedLatchId(day: SalaryDayKey): string {
+  return `overtime-unassigned-${day}`;
+}
+
+export interface UnassignedReminderReport {
+  sent: boolean;
+  day?: SalaryDayKey;
+  /** Accounts named in the message just sent. */
+  creators?: number;
+  reason?: string;
+}
+
+/**
+ * Chase the leave approver about overtime that is still on the board for
+ * **tomorrow**.
+ *
+ * An offer released by approved leave sits `available` until an admin assigns
+ * it, and nothing has ever said so out loud — the board is a screen somebody has
+ * to remember to open. This is the one notification in the subsystem that fires
+ * because something did *not* happen, so the trigger is a date rather than an
+ * action and it needs the same two gates the payday reminder has: an hour of the
+ * day, and a memory of what it already said.
+ *
+ * **The memory is a set of offer ids, not a once-a-day latch.** Leave approved
+ * at lunchtime releases accounts onto tomorrow's board *after* the morning tick,
+ * and a plain latch would swallow them silently — the exact accounts most likely
+ * to go uncovered. So the latch document accumulates the ids it has chased and
+ * each tick sends only what is new. An account assigned and then unassigned is
+ * deliberately not re-chased: the approver moved it by hand and knows it is
+ * there.
+ *
+ * The mark is written **before** the send, inside a transaction, so two ticks
+ * overlapping cannot both chase the same offer. A delivery that then fails loses
+ * that reminder rather than repeating it — the same trade the payday latch
+ * makes, and `notifyUsers` never throws, so the failure mode is narrow.
+ *
+ * Read budget: one indexed query (`status` + `day`, the existing composite) and
+ * one document read, only for the ticks past the hour gate.
+ */
+export async function remindUnassignedOffers(now: number = Date.now()): Promise<UnassignedReminderReport> {
+  const today = currentDayKey(now);
+  const hourOfSalaryDay = Math.floor((now - dayKeyToStartMs(today)) / 3_600_000);
+  if (hourOfSalaryDay < UNASSIGNED_REMINDER_HOUR) return { sent: false, reason: 'too early in the day' };
+
+  const day = addDays(today, 1);
+  const offers = await getOffers({ fromDay: day, toDay: day, status: 'available' });
+  if (offers.length === 0) return { sent: false, day, reason: 'nothing unassigned' };
+
+  const ref = adminDb.collection(LATCHES).doc(unassignedLatchId(day));
+
+  let pending: typeof offers = [];
+  try {
+    pending = await adminDb.runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      const chased = new Set<string>((snap.data()?.chasedOfferIds as string[] | undefined) ?? []);
+      const fresh = offers.filter(offer => !chased.has(offer.offerId));
+      if (fresh.length === 0) return [];
+
+      tx.set(
+        ref,
+        {
+          key: unassignedLatchId(day),
+          day,
+          chasedOfferIds: FieldValue.arrayUnion(...fresh.map(offer => offer.offerId)),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      return fresh;
+    });
+  } catch (err) {
+    console.error('[coverageNotices] failed to claim unassigned chase', err);
+    return { sent: false, day, reason: 'latch failed' };
+  }
+
+  if (pending.length === 0) return { sent: false, day, reason: 'already chased' };
+
+  await notifyUsers(
+    [CA_LEAVE_ALERT_RECIPIENT_UID],
+    notifications.overtimeUnassigned(
+      formatNameList(pending.map(offer => offer.creatorName)),
+      formatDayLabelWithWeekday(day),
+    ),
+    { label: 'overtimeUnassigned' },
+  );
+
+  return { sent: true, day, creators: pending.length };
 }
 
 // ─── The withdrawal record (the Coverage tab's indicator) ────────────

@@ -114,6 +114,7 @@ function ApprovalBadge({ value }: { value: ApprovalStatus }) {
 // ─── UserChip — promoted to a shared component ────────────────────────
 
 import { UserChip } from '@/components/UserChip';
+import { DisputeCreatorChip } from './disputeUi';
 import { safeTimezone } from '@/lib/utils/timezone';
 
 // ─── CommentCell — truncated trigger + hover card with full comment ───
@@ -550,7 +551,11 @@ function DisputeRow({
       case 'fanName':
         return dispute.fanName;
       case 'creatorName':
-        return <UserChip name={dispute.creatorName} photoURL={dispute.creatorPhotoURL} />;
+        // A creator, not a person — `CreatorChip` via `DisputeCreatorChip`,
+        // never `UserChip` (CLAUDE.md rule 7). It also falls back to the shared
+        // roster when the server could not resolve the id, which is what stops
+        // a sub-account rendering as a raw Firestore auto-id here.
+        return <DisputeCreatorChip dispute={dispute} />;
       case 'createdByName':
         return <UserChip name={dispute.createdByName} photoURL={dispute.createdByPhotoURL} />;
       case 'assignedToName':

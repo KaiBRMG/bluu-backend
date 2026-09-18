@@ -38,6 +38,17 @@ import { APP_UPDATE, resolveAppUpdateConfigFor } from '@/lib/appUpdateConfig';
  * rejects that segment config outright (build error) because the model is
  * inverted — handlers are dynamic unless they opt into `'use cache'`. The
  * `no-store` header below is what keeps a proxy from holding the answer.
+ *
+ * **Cacheability (rule 9i): `no-store` is the answer, and it is not an oversight.**
+ * The response is cohort-resolved, so it is per-user and can never sit in a shared
+ * cache (rule 10) — and `private`, the directive that would enforce that, is also
+ * the one that makes `s-maxage` inert, so there is no CDN saving on offer. More
+ * to the point, a `compulsory` entry decides whether a user can open the app at
+ * all: a cached "no update" strands a fleet on a broken build, and a cached
+ * *stale* update blocks users against a release that has since been pulled.
+ * `fetchAppUpdateConfig` sends `cache: 'no-store'` for the same reason. The call
+ * volume is a couple of requests per user per session, so there is nothing here
+ * worth trading for. Do not add a cache header to this route.
  */
 export async function GET(request: NextRequest) {
   let audience: { uid: string; groups: string[] } | null = null;

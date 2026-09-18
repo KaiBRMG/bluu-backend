@@ -91,10 +91,25 @@ export default function AnnouncementCard() {
       });
   }, [user]);
 
+  // Armed once per signed-in user, on the transition into "ready to be
+  // interrupted" — **not** on every `userData` identity change.
+  //
+  // Rule 9i. `userData` is an `onSnapshot` object, and `POST /api/user/presence`
+  // stamps `lastActiveAt` on `users/{uid}` every ten minutes, so depending on it
+  // directly re-ran this effect on that cadence: a mount-only fetch had quietly
+  // become a poll, at ~1,165 calls a day against a config that cannot change
+  // without a deploy. The latch keeps the original intent — fire as soon as the
+  // user doc arrives — without inheriting the churn.
+  //
+  // The clock-out re-arm below deliberately calls `load()` directly rather than
+  // clearing this latch: that path is *meant* to refetch.
+  const loadedForUidRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!userData || isOnboarding) return;
+    if (!user || !userData || isOnboarding) return;
+    if (loadedForUidRef.current === user.uid) return;
+    loadedForUidRef.current = user.uid;
     load();
-  }, [userData, isOnboarding, load]);
+  }, [user, userData, isOnboarding, load]);
 
   // Re-arm on the clock-out *transition*, not on the state — otherwise every
   // render while clocked out would clear a snooze the user just asked for.

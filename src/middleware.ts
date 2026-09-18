@@ -41,6 +41,32 @@ export function middleware(request: NextRequest) {
   return NextResponse.rewrite(url);
 }
 
+/**
+ * Page traffic only, and **document requests only** — never RSC requests.
+ *
+ * Rule 9i. This middleware ran on all ~61k origin requests a day to compare one
+ * user-agent string, and middleware is billed as Fast Origin Transfer on both
+ * the request and the response. The overwhelming majority of those were RSC
+ * payload fetches (`<Link>` navigations and prefetches), which carry an `RSC`
+ * header that a browser address-bar navigation never does.
+ *
+ * **Skipping them is safe, and is not a hole in the desktop-only gate.** An RSC
+ * request can only be issued by an App Router client that is already running,
+ * which means its own document request came through here first and a browser
+ * was already rewritten to `/desktop-only`. There is nothing to gate on the
+ * second hop.
+ *
+ * **It is not an authorization boundary either**, so nothing security-relevant
+ * rides on it (rule 10). Every page renders behind `AuthProvider`/`withAuth`
+ * and every API route behind `withAuth`; these routes are client components
+ * whose RSC payload is a module graph with no user data in it. This gate
+ * decides where a *browser* lands, not what anyone is allowed to read.
+ */
 export const config = {
-  matcher: ['/((?!_next|api|.*\\.[a-zA-Z0-9]+$).*)'],
+  matcher: [
+    {
+      source: '/((?!_next|api|.*\\.[a-zA-Z0-9]+$).*)',
+      missing: [{ type: 'header', key: 'RSC' }],
+    },
+  ],
 };

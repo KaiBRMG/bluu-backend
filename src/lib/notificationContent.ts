@@ -256,6 +256,17 @@ export const notifications = {
     actionUrl: '/ca-portal/dashboard',
   }),
 
+  // The board chaser, sent the day before. Goes to the leave approver rather
+  // than to an agent: an offer nobody has been assigned is the approver's queue,
+  // not news for the roster. `creatorList` names only the accounts *still*
+  // available, so a partly-assigned absence chases the remainder.
+  overtimeUnassigned: (creatorList: string, dateStr: string): NotificationContent => ({
+    title: '⚠️ Overtime Still Unassigned',
+    message: `Overtime is scheduled for tomorrow (${dateStr}) and is still unassigned: ${creatorList}. Review the Coverage board and assign it ASAP.`,
+    type: 'action',
+    actionUrl: '/ca-portal/admin',
+  }),
+
   // ─── Chat-agent salary ────────────────────────────────────────────────────────
   salesImported: (monthLabel: string): NotificationContent => ({
     title: '📈 Earnings Report Updated',

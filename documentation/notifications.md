@@ -85,6 +85,7 @@ Every row below is **automated** — fired by a handler on an event, never sent 
 | Approved leave withdrawn | `notifications.leaveWithdrawn(requesterName, leaveLabel, dateStr, revertedLabel)` | **one named approver** — `CA_LEAVE_ALERT_RECIPIENT_UID` | `shifts/leave/[leaveId]` (DELETE) |
 | Overtime assigned | `notifications.overtimeAssigned(creatorList, dateStr)` | the assigned agent — **coalesced**, one message per agent per day | `ca-coverage/assign` (POST) **and** `shifts` (POST) / `shifts/[shiftId]` (PUT) queue · `cron/ca-notifications` sends |
 | Overtime cancelled | `notifications.overtimeCancelled(creatorList, dateStr)` | each agent who was covering — **coalesced** the same way | `shifts/leave/[leaveId]` (DELETE) queues · `cron/ca-notifications` sends |
+| Overtime still unassigned | `notifications.overtimeUnassigned(creatorList, dateStr)` | **one named approver** — `CA_LEAVE_ALERT_RECIPIENT_UID` | `cron/ca-notifications` — the day before, from 09:00 salary-local |
 | Sales imported | `notifications.salesImported(monthLabel)` | every chat agent (`groups: CA`, not archived) | `ca-salary/import` (POST, via `after()`) |
 | Payday in 3 days | `notifications.paydayApproaching(monthLabel)` | every chat agent | `cron/ca-notifications` |
 | Salary finalised | `notifications.salaryFinalized(monthLabel)` | the agent whose month was frozen | `ca-salary/finalize` |

@@ -246,6 +246,18 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     telegramEnabled: true,
   },
 
+  {
+    id: 'overtimeUnassigned',
+    category: 'Coverage',
+    event: 'Overtime still unassigned',
+    trigger:
+      'The day before a released account is due to be covered, it is still sitting on the Coverage board with nobody assigned. Checked by the 5-minute cron and held until 09:00 in the salary timezone (Africa/Harare), so it lands in working hours rather than overnight. It names only the accounts still available, so a partly-assigned absence chases the remainder — and it remembers which offers it has already chased, so accounts released later the same day are still chased while nothing is chased twice.',
+    recipients: 'The one named leave approver (CA_LEAVE_ALERT_RECIPIENT_UID)',
+    sources: ['src/app/api/cron/ca-notifications/route.ts', 'src/lib/services/coverageNotices.ts'],
+    content: notifications.overtimeUnassigned('{creator1 and creator2}', '{Tue 23 Sep}'),
+    telegramEnabled: true,
+  },
+
   // ─── Salary ───────────────────────────────────────────────────────────────
   {
     id: 'salesImported',

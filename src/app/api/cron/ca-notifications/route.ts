@@ -3,7 +3,7 @@ import { headers } from 'next/headers';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
 import { claimNotificationLatch, getChatAgentUids, notifyUsers } from '@/lib/services/caNotifications';
-import { flushCoverageNotices } from '@/lib/services/coverageNotices';
+import { flushCoverageNotices, remindUnassignedOffers } from '@/lib/services/coverageNotices';
 import { flushDisputeNotices } from '@/lib/services/disputeNotices';
 import {
   addMonths,
@@ -16,8 +16,8 @@ import {
 /**
  * GET /api/cron/ca-notifications — the chat-agent notification tick.
  *
- * Runs every 5 minutes (`vercel.json`) and does two unrelated jobs that share a
- * schedule because neither is worth a cron entry of its own:
+ * Runs every 5 minutes (`vercel.json`) and does four unrelated jobs that share a
+ * schedule because none of them is worth a cron entry of its own:
  *
  * 1. **Flush coalesced coverage notices.** An admin assigning four released
  *    accounts to one agent must produce one message naming four creators, not
@@ -29,15 +29,20 @@ import {
  *    decides many of one person's disputes in a sitting; that must produce one
  *    message naming the count, not one per dispute — see
  *    `services/disputeNotices.ts`.
- * 3. **The payday reminder**, 3 days before the 1st.
+ * 3. **Chase unassigned overtime.** An offer released by approved leave sits on
+ *    the Coverage board until an admin assigns it, and nobody is told. The day
+ *    before the shift, the leave approver is — see
+ *    `services/coverageNotices.ts` for the offer-id memory that stops it
+ *    repeating while still catching accounts released after the first chase.
+ * 4. **The payday reminder**, 3 days before the 1st.
  *
  * It lives here rather than in `functions/` for the reason every scheduled job
  * that notifies does: notification copy lives only in `notificationContent.ts`
  * and Cloud Functions cannot import it (see the hub's system map).
  *
  * Every job is independent and each is caught on its own — a failure to flush
- * the coverage queue must not also skip the dispute queue or the payday
- * reminder for the month.
+ * the coverage queue must not also skip the dispute queue, the unassigned-cover
+ * chase or the payday reminder for the month.
  */
 
 /** Salary days are Africa/Harare, UTC+2, no DST (ca-salary.md §7). */
@@ -80,6 +85,13 @@ export async function GET() {
   } catch (err) {
     console.error('[cron/ca-notifications] dispute flush failed', err);
     report.disputes = { error: 'failed' };
+  }
+
+  try {
+    report.unassignedCoverage = await remindUnassignedOffers();
+  } catch (err) {
+    console.error('[cron/ca-notifications] unassigned coverage chase failed', err);
+    report.unassignedCoverage = { error: 'failed' };
   }
 
   try {

@@ -729,7 +729,17 @@
     },
     {
       "collectionGroup": "ca-notification-latches",
+      "fieldPath": "chasedOfferIds",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-notification-latches",
       "fieldPath": "claimedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-notification-latches",
+      "fieldPath": "day",
       "indexes": []
     },
     {
@@ -740,6 +750,11 @@
     {
       "collectionGroup": "ca-notification-latches",
       "fieldPath": "month",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-notification-latches",
+      "fieldPath": "updatedAt",
       "indexes": []
     },
     {

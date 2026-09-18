@@ -6,19 +6,21 @@ import type { PagePermissionDoc } from '@/types/firestore';
 import type { PageDef, TeamspaceDef } from '@/lib/definitions';
 import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
 
+// Both shapes mirror the projection in `/api/admin/pages` exactly. `photoURL`
+// and the groups' `members` array used to be fetched here and rendered nowhere
+// (rule 9i); if a revoke confirm ever wants a blast-radius count, add
+// `memberCount` on the server rather than pulling the uid array back down.
 interface AdminUser {
   uid: string;
   displayName: string;
   workEmail: string;
   groups: string[];
-  photoURL?: string;
 }
 
 interface AdminGroup {
   id: string;
   name: string;
   level: number;
-  members: string[];
 }
 
 interface AdminDataState {

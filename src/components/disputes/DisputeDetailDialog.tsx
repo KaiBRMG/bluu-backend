@@ -9,7 +9,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { CreatorChip } from '@/components/creators/CreatorChip';
 import { HAIRLINE } from '@/lib/surfaces';
 import { cn } from '@/lib/utils';
 import type { DisputeDocument } from '@/types/firestore';
@@ -19,7 +18,7 @@ import {
   formatSaleDate,
   STAGE_HINT,
 } from './disputeStatus';
-import { PersonTag, StagePill, RejectReasonBar } from './disputeUi';
+import { DisputeCreatorChip, PersonTag, StagePill, RejectReasonBar } from './disputeUi';
 import type { DisputeVerdict } from './DisputeReviewQueue';
 
 /**
@@ -126,11 +125,7 @@ export function DisputeDetailDialog({
 
               <dt className="text-zinc-400">Creator</dt>
               <dd className="min-w-0">
-                <CreatorChip
-                  creatorId={dispute.Creator}
-                  name={dispute.creatorName}
-                  photoURL={dispute.creatorPhotoURL}
-                />
+                <DisputeCreatorChip dispute={dispute} />
               </dd>
 
               <dt className="text-zinc-400">Claimed by</dt>

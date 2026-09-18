@@ -202,7 +202,7 @@ An offer is **one creator on one date**, not one shift, so two agents can split 
 
 ### Approving leave releases automatically
 
-`POST /api/shifts/leave/[leaveId]/approve` calls [`releaseOccurrenceForCoverage`](../src/lib/services/leaveCoverage.ts), which tombstones the occurrence and posts one offer per assigned creator. The **release** itself still notifies nobody — the accounts appear on every agent's calendar and the board is the signal; it is the *assignment* that reaches a person (§11). Withdrawing approved leave reverses all of it — see §11.
+`POST /api/shifts/leave/[leaveId]/approve` calls [`releaseOccurrenceForCoverage`](../src/lib/services/leaveCoverage.ts), which tombstones the occurrence and posts one offer per assigned creator. The **release** itself still notifies nobody — the accounts appear on every agent's calendar and the board is the signal; it is the *assignment* that reaches a person, and — if nobody is assigned by the day before — the chaser that reaches the approver (§11). Withdrawing approved leave reverses all of it — see §11.
 
 It runs **after the commit and is non-fatal**: the leave was approved and the agent has been told, so a failure to release must not 500 and make an admin approve twice. The response carries the outcome, and the approvals UI surfaces `noAssignments` — a shift with no creators assigned releases nothing, which is not an error but *is* something an admin needs to know.
 
@@ -520,6 +520,31 @@ Five things about the move are load-bearing:
   queue on the dialog now uses too. Three copies of a reason field is how one of
   them quietly loses its `Esc` handler.
 
+### A dispute's `Creator` can be a sub-account, and the serialiser did not know
+
+`serialiseDispute` resolved creator names with one `creators where creatorID in
+[...]` query and fell back to `?? data.Creator` on a miss. **Sub-account ids are
+Firestore auto-ids in a space disjoint from `creators.creatorID`** (rule 9h), so
+that query could never match one — and a dispute raised against "Cole (Fansly)"
+rendered the literal string `YF7WLhnq7aRXJqUsMHKN` on every dispute surface in
+the app. The client roster knew the name the whole time; the payload overrode it.
+
+Two changes, at both ends:
+
+- [`disputeSerialise.ts`](../src/lib/services/disputeSerialise.ts) now resolves
+  the leftovers **by document id**, with one `getAll` over only the ids that
+  missed — not a second scan of the roster. A sub-account with no photo of its
+  own inherits the parent's, the same way `getAssignableAccounts` does it, and
+  any parent fetched for that purpose is cached into the same map.
+- [`DisputeCreatorChip`](../src/components/disputes/disputeUi.tsx) is now the
+  single place this subsystem draws a creator, and it offers the server's name
+  to `CreatorChip` as an override **only when the server actually resolved
+  one**. Otherwise the chip falls back to the shared roster, which is the better
+  informed of the two. Four call sites — the dashboard column, the detail
+  dialog, the wide review queue and the ledger — plus the admin table, which was
+  drawing creators through `UserChip`. All five were rule 7 drift: creators
+  render through `CreatorChip`, people through `PersonTag`/`UserChip`.
+
 ### `resolvedAt`, and why the dashboard needed it
 
 A dispute carried no record of *when* it was decided, only `createdAt`. That is
@@ -608,7 +633,7 @@ Three calls worth not re-litigating:
 
 ## 11. Notifications
 
-**They are in.** Eight events notify, restored after the deliberate pre-launch silence — the figures have been trusted long enough to tell people about them. Copy lives in `notificationContent.ts` and the catalogue in `automatedNotifications.ts`, under the `Coverage` and `Salary` categories (cross-cutting rule 15); the full event → factory table is in [notifications.md](notifications.md#notification-events--factory-functions).
+**They are in.** Nine events notify, restored after the deliberate pre-launch silence — the figures have been trusted long enough to tell people about them. Copy lives in `notificationContent.ts` and the catalogue in `automatedNotifications.ts`, under the `Coverage` and `Salary` categories (cross-cutting rule 15); the full event → factory table is in [notifications.md](notifications.md#notification-events--factory-functions).
 
 | Event | Who is told | Gate |
 |---|---|---|
@@ -616,16 +641,19 @@ Three calls worth not re-litigating:
 | Approved leave withdrawn | One named approver | Only for leave that was **approved** — a pending request nobody acted on changes nothing |
 | Overtime assigned | The assignee | **Coalesced** per agent per day · fires from **both** assignment routes |
 | Overtime cancelled | Each agent who was covering | **Coalesced** per agent per day |
+| Overtime still unassigned | One named approver | The day before the shift, from 09:00 salary-local · remembers the offers it has chased |
 | Sales imported | Every chat agent | Only a real import that wrote rows |
 | Payday in 3 days | Every chat agent | Once per month, latched |
 | Salary finalised | That agent | — (reopening notifies nobody) |
 | Commission tier reached | That agent | Once per band per month, and only upwards |
 
-Six decisions inside that table are load-bearing.
+Seven decisions inside that table are load-bearing.
 
 **The leave alerts name one uid.** `CA_LEAVE_ALERT_RECIPIENT_UID` in [`caNotifications.ts`](../src/lib/services/caNotifications.ts), one definition, the same carve-out from "never hardcode a uid" as the OF Manager diagnostics. Leave approval is one person's queue; every admin hearing about every request is noise.
 
 **Coverage notifications are coalesced, and the delay lives in a cron.** One absence releases every creator the agent was covering, and an admin assigns them one at a time — so an assignment **queues** into `ca-coverage-notices` (one doc per `kind`+agent+day, names merged with `arrayUnion`) and `/api/cron/ca-notifications` sends it once the queue has been quiet for 3 minutes, then deletes it. Assigning four accounts to one agent produces one message naming four creators. There is no "sent" flag: a notice either exists (owed) or does not (delivered). The delay cannot sit inside the request — a serverless function is not going to still be there in three minutes, and a message that never arrives is worse than one eight minutes late.
+
+**The unassigned chaser is the one notification that fires because something did *not* happen.** An offer released by approved leave sits `available` until an admin assigns it, and until now nothing said so — the board was a screen someone had to remember to open. `remindUnassignedOffers` runs on the same 5-minute cron, holds until **09:00 in the salary timezone** (the chaser is for a working day, not a phone at 02:00), and names only the accounts *still* on the board for **tomorrow**, so a partly-assigned absence chases the remainder. Its gate is deliberately **not** a once-a-day latch but a set of offer ids, in `ca-notification-latches/overtime-unassigned-{day}`: leave approved at lunchtime releases accounts onto tomorrow's board after the morning tick, and a plain latch would swallow exactly the accounts most likely to go uncovered. The ids are marked inside a transaction **before** the send, so two overlapping ticks cannot both chase the same offer — the same trade the payday latch makes. An offer assigned and then unassigned is not re-chased: the approver moved it by hand and knows it is there.
 
 **Dispute decisions are coalesced too, through a second queue.** Same mechanism, different shape: a reviewer rules on a whole screen of disputes in one sitting, so each decision **queues** into `ca-dispute-notices` (one doc per `stage`+`outcome`+filer, count incremented, reasons merged with `arrayUnion`) and the same cron sends it after the same 3-minute quiet period. Three things differ from the coverage queue and each is deliberate:
 
@@ -669,7 +697,7 @@ All of it runs **after** the withdrawal commits and is non-fatal, the same shape
 | `ca-dispute-notices` | `{stage}__{outcome}__{uid}` | The same, for dispute decisions. Counts rather than names. Deleted on send. |
 | `ca-coverage-withdrawals` | `{leaveId}` | A cancelled absence — the Coverage tab's band |
 | `ca-salary-tier-notices` | `{uid}_{month}` | Which commission band the agent was last told about |
-| `ca-notification-latches` | `payday-{month}` | The once-a-month guard on the payday reminder |
+| `ca-notification-latches` | `payday-{month}` · `overtime-unassigned-{day}` | The once-a-month guard on the payday reminder, and the offer ids the unassigned chaser has already sent for that day |
 
 All five are Admin-SDK-only (`allow read, write: if false`) and every field on them is index-exempt except `ca-coverage-withdrawals.withdrawnAt`, which the band orders by.
 

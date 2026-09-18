@@ -6,7 +6,6 @@ import { CheckIcon, CircleAlert, PlusIcon, RotateCcw, XIcon } from 'lucide-react
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CreatorChip } from '@/components/creators/CreatorChip';
 import { useBootPhase } from '@/contexts/BootLoaderContext';
 import { useDisputeSummary } from '@/hooks/useDisputeSummary';
 import { useDisputesData } from '@/hooks/useDisputesData';
@@ -21,7 +20,7 @@ import {
   STAGE_LABEL,
   stagePillClass,
 } from './disputeStatus';
-import { PersonTag, RejectReasonBar } from './disputeUi';
+import { DisputeCreatorChip, PersonTag, RejectReasonBar } from './disputeUi';
 import { DisputeDetailDialog } from './DisputeDetailDialog';
 import type { DisputeVerdict } from './DisputeReviewQueue';
 
@@ -490,13 +489,7 @@ function RowIdentity({ dispute }: { dispute: DisputeDocument }) {
         {formatMoney(dispute.saleAmount)}
       </span>
       <span aria-hidden className="text-zinc-400">·</span>
-      <CreatorChip
-        creatorId={dispute.Creator}
-        name={dispute.creatorName}
-        photoURL={dispute.creatorPhotoURL}
-        size="xs"
-        className="min-w-0 text-zinc-300"
-      />
+      <DisputeCreatorChip dispute={dispute} size="xs" className="min-w-0 text-zinc-300" />
     </div>
   );
 }

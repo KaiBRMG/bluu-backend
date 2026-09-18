@@ -93,13 +93,83 @@ export async function resolveNames(
   const uniqueCreatorIds = [...new Set(ids.map(d => d.Creator).filter(Boolean))];
   const creatorMap: Record<string, CreatorInfo> = {};
   if (uniqueCreatorIds.length > 0) {
-    const chunks: string[][] = [];
-    for (let i = 0; i < uniqueCreatorIds.length; i += 30) {
-      chunks.push(uniqueCreatorIds.slice(i, i + 30));
-    }
-    await Promise.all(chunks.map(async chunk => {
-      const snap = await adminDb.collection('creators').where('creatorID', 'in', chunk).get();
+    const chunks = chunk30(uniqueCreatorIds);
+    await Promise.all(chunks.map(async ids30 => {
+      const snap = await adminDb.collection('creators').where('creatorID', 'in', ids30).get();
       for (const doc of snap.docs) {
+        creatorMap[doc.data().creatorID] = {
+          stageName: doc.data().stageName ?? doc.data().creatorID,
+          photoURL: doc.data().photoURL ?? null,
+        };
+      }
+    }));
+
+    await resolveSubAccounts(uniqueCreatorIds, creatorMap);
+  }
+
+  return { userMap, creatorMap };
+}
+
+function chunk30(values: string[]): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < values.length; i += 30) out.push(values.slice(i, i + 30));
+  return out;
+}
+
+/**
+ * Resolve the ids the `creators` query could not — they are sub-accounts.
+ *
+ * **A creator's sub-account is an assignable peer, not a child** (CLAUDE.md
+ * rule 9h): a shift can name one, a sale can land on one, and a dispute's
+ * `Creator` is therefore sometimes a `creator-subaccounts` auto-id. Those ids
+ * live in a disjoint space from `creators.creatorID`, so the equality query
+ * above can never match one — and `serialiseDispute`'s `?? data.Creator`
+ * fallback then rendered the raw document id on the row. Which is exactly what
+ * it looked like: `YF7WLhnq7aRXJqUsMHKN` where a stage name belonged.
+ *
+ * Only the leftovers are looked up, and by **document id**, so the cost is one
+ * `getAll` over the handful of ids that actually missed rather than a second
+ * scan of the roster. A sub-account with no photo of its own inherits the
+ * parent's, resolved the same way `getAssignableAccounts` does it — otherwise a
+ * face that exists everywhere else in the app drops to initials here.
+ */
+async function resolveSubAccounts(
+  creatorIds: string[],
+  creatorMap: Record<string, CreatorInfo>,
+): Promise<void> {
+  const unresolved = creatorIds.filter(id => !creatorMap[id]);
+  if (unresolved.length === 0) return;
+
+  const subDocs = await adminDb.getAll(
+    ...unresolved.map(id => adminDb.collection('creator-subaccounts').doc(id)),
+  );
+
+  // { subAccountId -> its doc }, plus the parents whose photo we may still need.
+  const subs: { id: string; stageName: string; photoURL: string | null; parentId: string }[] = [];
+  const parentsNeeded = new Set<string>();
+
+  for (const doc of subDocs) {
+    if (!doc.exists) continue;
+    const data = doc.data()!;
+    const parentId = typeof data.parentCreatorId === 'string' ? data.parentCreatorId : '';
+    const photoURL = (data.photoURL as string | undefined) ?? null;
+    subs.push({
+      id: doc.id,
+      // `stageName` is derived from the parent + label at write time, so it is
+      // normally present; the label form is the fallback for an older doc.
+      stageName: (data.stageName as string) || `${data.label ?? 'Sub-account'}`,
+      photoURL,
+      parentId,
+    });
+    if (!photoURL && parentId && !creatorMap[parentId]) parentsNeeded.add(parentId);
+  }
+
+  if (parentsNeeded.size > 0) {
+    await Promise.all(chunk30([...parentsNeeded]).map(async ids30 => {
+      const snap = await adminDb.collection('creators').where('creatorID', 'in', ids30).get();
+      for (const doc of snap.docs) {
+        // Cached into the same map: a payload that names both a parent and its
+        // sub-account then costs one lookup, not two.
         creatorMap[doc.data().creatorID] = {
           stageName: doc.data().stageName ?? doc.data().creatorID,
           photoURL: doc.data().photoURL ?? null,
@@ -108,7 +178,12 @@ export async function resolveNames(
     }));
   }
 
-  return { userMap, creatorMap };
+  for (const sub of subs) {
+    creatorMap[sub.id] = {
+      stageName: sub.stageName,
+      photoURL: sub.photoURL ?? creatorMap[sub.parentId]?.photoURL ?? null,
+    };
+  }
 }
 
 /** Newest first, by `createdAt`. Applied in memory — see `route.ts`. */

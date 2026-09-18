@@ -223,7 +223,7 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
                     <Image src="/logo/bluu_uu.svg" alt="Bluu" width={20} height={20} priority style={{ height: '1.25rem', width: 'auto' }} />
                   </button>
                 ) : (
-                  <Link href="/">
+                  <Link href="/" prefetch={false}>
                     <Image src="/logo/bluu_long.svg" alt="Bluu" width={120} height={28} priority style={{ height: '1.75rem', width: 'auto' }} />
                   </Link>
                 )}
@@ -241,7 +241,12 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
               isActive={pathname === "/"}
               tooltip="Home"
             >
-              <Link href="/">
+              {/* prefetch={false} — rule 9i. Every link in this sidebar sits in
+                  the viewport, so Next prefetches the whole menu on mount, and
+                  `AppLayout` remounts this tree on every navigation, so it did
+                  that again on every click. That treadmill was the single
+                  largest source of Fast Origin Transfer. */}
+              <Link href="/" prefetch={false}>
                 <House />
                 <span>Home</span>
               </Link>
@@ -257,7 +262,8 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
                 isActive={pathname.startsWith(page.href)}
                 tooltip={page.title}
               >
-                <Link href={page.href}>
+                {/* prefetch={false} — rule 9i, same reason as Home above. */}
+                <Link href={page.href} prefetch={false}>
                   <PageIcon name={page.icon} />
                   <span>{page.title}</span>
                 </Link>
@@ -307,7 +313,11 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
                               isActive={!!page.href && pathname === page.href}
                               tooltip={page.title}
                             >
-                              <Link href={page.href ?? "#"}>
+                              {/* prefetch={false} — rule 9i. This is the big
+                                  one: every teamspace page a user can reach is
+                                  rendered here, so the default behaviour
+                                  prefetched ~25 routes per shell mount. */}
+                              <Link href={page.href ?? "#"} prefetch={false}>
                                 <PageIcon name={page.icon ?? undefined} />
                                 <span>{page.title}</span>
                               </Link>

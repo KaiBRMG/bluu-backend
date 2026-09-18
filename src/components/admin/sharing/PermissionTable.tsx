@@ -42,7 +42,6 @@ interface AdminUser {
   displayName: string;
   workEmail: string;
   groups: string[];
-  photoURL?: string;
 }
 
 type PermissionMap = { groups: Record<string, true>; users: Record<string, true> };

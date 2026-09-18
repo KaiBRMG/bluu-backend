@@ -13,7 +13,9 @@ import { useState, type ReactNode } from 'react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { CreatorChip } from '@/components/creators/CreatorChip';
 import { DeletedUser } from '@/components/DeletedUser';
+import type { DisputeDocument } from '@/types/firestore';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { cn } from '@/lib/utils';
 import {
@@ -68,6 +70,48 @@ export function PersonTag({
       </Avatar>
       <span className="truncate">{name}</span>
     </span>
+  );
+}
+
+// ─── DisputeCreatorChip ───────────────────────────────────────────────
+
+/**
+ * The creator on a dispute — the one place this subsystem draws one.
+ *
+ * Creators render through `CreatorChip`, never a hand-rolled `Avatar`
+ * (CLAUDE.md rule 7). `PersonTag` below is for *people*; it was doing double
+ * duty here, which is how these rows ended up with a different avatar
+ * treatment from every other creator in the app.
+ *
+ * ## Why the name is passed conditionally
+ *
+ * `CreatorChip` treats a supplied `name` as an override and stops consulting
+ * the shared roster. That is right when the caller genuinely holds the name —
+ * but `serialiseDispute` falls back to the raw id when it cannot resolve one,
+ * and handing *that* over as an override made the chip render a Firestore
+ * auto-id while the roster sitting in memory knew the stage name perfectly
+ * well. So the override is offered only when the server actually resolved
+ * something; otherwise the chip falls back to the store, which is the more
+ * informed of the two.
+ */
+export function DisputeCreatorChip({
+  dispute,
+  size = 'sm',
+  className,
+}: {
+  dispute: Pick<DisputeDocument, 'Creator' | 'creatorName' | 'creatorPhotoURL'>;
+  size?: 'xs' | 'sm';
+  className?: string;
+}) {
+  const resolved = dispute.creatorName && dispute.creatorName !== dispute.Creator;
+  return (
+    <CreatorChip
+      creatorId={dispute.Creator}
+      name={resolved ? dispute.creatorName : undefined}
+      photoURL={resolved ? dispute.creatorPhotoURL : undefined}
+      size={size}
+      className={className}
+    />
   );
 }
 

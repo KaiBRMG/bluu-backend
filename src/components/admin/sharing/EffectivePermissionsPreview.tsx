@@ -27,7 +27,6 @@ interface AdminUser {
   displayName: string;
   workEmail: string;
   groups: string[];
-  photoURL?: string;
 }
 
 interface EffectivePermissionsPreviewProps {

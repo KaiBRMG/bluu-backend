@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { DisputeDocument } from '@/types/firestore';
 import { formatMoney } from './disputeStatus';
-import { PersonTag, SaleDate, StagePill, QuietLine, LoadError } from './disputeUi';
+import { DisputeCreatorChip, PersonTag, SaleDate, StagePill, QuietLine, LoadError } from './disputeUi';
 import { FeedFooter } from './DisputeReviewQueue';
 
 const COLUMN_COUNT = 7;
@@ -89,7 +89,7 @@ export function DisputeLedger({
                     {d.fanName}
                   </TableCell>
                   <TableCell className="max-w-[12rem]">
-                    <PersonTag name={d.creatorName} photoURL={d.creatorPhotoURL} />
+                    <DisputeCreatorChip dispute={d} />
                   </TableCell>
                   <TableCell className="max-w-[12rem]">
                     <PersonTag name={d.assignedToName} photoURL={d.assignedToPhotoURL} />
