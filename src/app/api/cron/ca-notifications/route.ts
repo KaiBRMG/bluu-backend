@@ -4,6 +4,7 @@ import { handleApiError } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
 import { claimNotificationLatch, getChatAgentUids, notifyUsers } from '@/lib/services/caNotifications';
 import { flushCoverageNotices } from '@/lib/services/coverageNotices';
+import { flushDisputeNotices } from '@/lib/services/disputeNotices';
 import {
   addMonths,
   currentDayKey,
@@ -24,14 +25,19 @@ import {
  *    queue once it has been quiet for a few minutes — see
  *    `services/coverageNotices.ts` for why the delay cannot live inside the
  *    assignment request.
- * 2. **The payday reminder**, 3 days before the 1st.
+ * 2. **Flush coalesced dispute decisions.** A reviewer clearing a backlog
+ *    decides many of one person's disputes in a sitting; that must produce one
+ *    message naming the count, not one per dispute — see
+ *    `services/disputeNotices.ts`.
+ * 3. **The payday reminder**, 3 days before the 1st.
  *
  * It lives here rather than in `functions/` for the reason every scheduled job
  * that notifies does: notification copy lives only in `notificationContent.ts`
  * and Cloud Functions cannot import it (see the hub's system map).
  *
- * Both jobs are independent and each is caught on its own — a failure to flush
- * the coverage queue must not also skip the payday reminder for the month.
+ * Every job is independent and each is caught on its own — a failure to flush
+ * the coverage queue must not also skip the dispute queue or the payday
+ * reminder for the month.
  */
 
 /** Salary days are Africa/Harare, UTC+2, no DST (ca-salary.md §7). */
@@ -67,6 +73,13 @@ export async function GET() {
   } catch (err) {
     console.error('[cron/ca-notifications] coverage flush failed', err);
     report.coverage = { error: 'failed' };
+  }
+
+  try {
+    report.disputes = await flushDisputeNotices();
+  } catch (err) {
+    console.error('[cron/ca-notifications] dispute flush failed', err);
+    report.disputes = { error: 'failed' };
   }
 
   try {

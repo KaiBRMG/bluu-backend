@@ -810,6 +810,11 @@ export interface DisputeDocument {
   creatorName: string;             // resolved from creators.stageName
   creatorPhotoURL: string | null;
   saleDate: string | null;         // UTC ISO string — convert to user tz on display
+  // When the dispute reached a terminal verdict (admin ruling, or a CA
+  // rejection, which is terminal for the filer). Null on every dispute decided
+  // before the field existed — the dashboard reads that as "not decided
+  // recently", never as "decided long ago".
+  resolvedAt: string | null;
   saleAmount: number;
   fanName: string;
   Comment: string;

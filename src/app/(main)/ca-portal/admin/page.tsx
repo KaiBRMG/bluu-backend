@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import dynamic from 'next/dynamic';
+import { toast } from 'sonner';
 import AppLayout from "@/components/AppLayout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -109,8 +110,10 @@ function AdminPanel({
   showActions,
   resolvedActions,
   groupByCreatedBy,
+  selectable,
   refreshKey,
   onAction,
+  onBulkAction,
 }: {
   filter: string;
   columns?: ColumnKey[];
@@ -118,8 +121,10 @@ function AdminPanel({
   showActions?: boolean;
   resolvedActions?: boolean;
   groupByCreatedBy?: boolean;
+  selectable?: boolean;
   refreshKey: number;
   onAction?: (id: string, action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>, reason?: string) => Promise<void>;
+  onBulkAction?: (ids: string[], action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>, reason?: string) => Promise<void>;
 }) {
   const { fetchDisputes } = useDisputesData();
   const [disputes, setDisputes] = useState<DisputeDocument[]>([]);
@@ -159,6 +164,13 @@ function AdminPanel({
       }
     : undefined;
 
+  const handleBulkAction = onBulkAction
+    ? async (ids: string[], action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>, reason?: string) => {
+        await onBulkAction(ids, action, reason);
+        load(page, adminFilters);
+      }
+    : undefined;
+
   return (
     <div className="pt-3">
       <AdminFiltersBar
@@ -177,6 +189,8 @@ function AdminPanel({
         onAction={showActions ? handleAction : undefined}
         resolvedActions={resolvedActions}
         groupByCreatedBy={groupByCreatedBy}
+        selectable={selectable}
+        onBulkAction={handleBulkAction}
       />
     </div>
   );
@@ -234,7 +248,7 @@ const AdminRates = dynamic(() => import('@/components/ca-admin/AdminRates'), {
  * gets quoted from the wrong one (ca-salary.md §10).
  */
 export default function CaAdminPage() {
-  const { setAdminApproval } = useDisputesData();
+  const { setAdminApproval, setAdminApprovalBulk } = useDisputesData();
   const [refreshKey, setRefreshKey] = useState(0);
   const [month, setMonth] = useState(currentMonthKey());
 
@@ -247,6 +261,28 @@ export default function CaAdminPage() {
   ) => {
     await setAdminApproval(id, action, reason);
     setRefreshKey(k => k + 1);
+  };
+
+  /**
+   * One request for a whole selection.
+   *
+   * Not a loop over `handleAdminAction`: that would be N round trips and, more
+   * importantly, N notifications — the bulk route writes the decisions in a
+   * batch and queues **one** message per filer naming the count.
+   */
+  const handleAdminBulkAction = async (
+    ids: string[],
+    action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>,
+    reason?: string,
+  ) => {
+    const { updated, skipped } = await setAdminApprovalBulk(ids, action, reason);
+    setRefreshKey(k => k + 1);
+    toast.success(
+      `${updated} ${updated === 1 ? 'dispute' : 'disputes'} ${action === 'Approved' ? 'approved' : 'rejected'}` +
+        // A stale row is the reviewer's business: it means the list they acted
+        // on no longer matches the data.
+        (skipped > 0 ? ` · ${skipped} no longer existed` : ''),
+    );
   };
 
   return (
@@ -306,8 +342,10 @@ export default function CaAdminPage() {
                       filter="admin-unresolved"
                       userTimezone={userTimezone}
                       showActions
+                      selectable
                       refreshKey={refreshKey}
                       onAction={handleAdminAction}
+                      onBulkAction={handleAdminBulkAction}
                     />
                   </TabsContent>
 
@@ -318,8 +356,10 @@ export default function CaAdminPage() {
                       userTimezone={userTimezone}
                       showActions
                       groupByCreatedBy
+                      selectable
                       refreshKey={refreshKey}
                       onAction={handleAdminAction}
+                      onBulkAction={handleAdminBulkAction}
                     />
                   </TabsContent>
 

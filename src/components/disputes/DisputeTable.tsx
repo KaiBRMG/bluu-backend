@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { EllipsisIcon } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '@/components/ui/table';
@@ -53,7 +54,33 @@ interface DisputeTableProps {
   onAction?: (disputeId: string, action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>, reason?: string) => void;
   resolvedActions?: boolean;   // admin resolved tab — conditional approve/reject
   groupByCreatedBy?: boolean;  // admin CA Approved tab
+  /**
+   * Adds the leading checkbox column and the bulk bar.
+   *
+   * Only pass it on a tab where **every** row takes the same two verdicts. The
+   * resolved tab does not qualify: there Approve and Reject are offered per row
+   * depending on the current outcome, and a bar that applied one verdict to a
+   * mixed selection would quietly flip decisions the reviewer never looked at.
+   */
+  selectable?: boolean;
+  /** Required for `selectable` to do anything. Resolves once the write lands. */
+  onBulkAction?: (
+    disputeIds: string[],
+    action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>,
+    reason?: string,
+  ) => Promise<void>;
 }
+
+const REASON_MAX = 50;
+
+/**
+ * shadcn's checked state paints `--primary`, which renders near-white in this
+ * theme (DESIGN.md §2) — so a checked box reads as "disabled" rather than "on".
+ * Selection is exactly what Action Blue is for (the One Voice Rule), and the
+ * trailing `!` is needed to beat the primitive's own same-specificity rule.
+ */
+const SELECT_BOX_CLASS =
+  'data-[state=checked]:bg-[#2563eb]! data-[state=checked]:border-[#2563eb]! data-[state=checked]:text-white!';
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -239,8 +266,29 @@ export function DisputeTable({
   onAction,
   resolvedActions = false,
   groupByCreatedBy = false,
+  selectable = false,
+  onBulkAction,
 }: DisputeTableProps) {
   const showActions = !!onAction;
+  const showSelect = selectable && !!onBulkAction;
+
+  const [picked, setPicked] = useState<string[]>([]);
+
+  const visibleIds = useMemo(() => disputes.map(d => d.id), [disputes]);
+
+  // A page change, a filter change or a reload after a write replaces the rows
+  // under the selection. The selection is therefore **derived** against what is
+  // on screen rather than pruned in an effect: an id that scrolled out of the
+  // result set can never reach a bulk action, and a reviewer can never approve a
+  // dispute they cannot see. (Doing this in an effect would also mean a second
+  // render pass on every load.)
+  const selected = useMemo(() => picked.filter(id => visibleIds.includes(id)), [picked, visibleIds]);
+
+  const toggleOne = (id: string, on: boolean) =>
+    setPicked(prev => (on ? [...new Set([...prev, id])] : prev.filter(x => x !== id)));
+
+  const allSelected = visibleIds.length > 0 && selected.length === visibleIds.length;
+  const toggleAll = (on: boolean) => setPicked(on ? visibleIds : []);
 
   if (loading) {
     return <div className="py-12 text-center text-sm text-muted-foreground">Loading...</div>;
@@ -256,19 +304,24 @@ export function DisputeTable({
     ...columns.filter(c => c !== 'saleDate'),
   ];
 
+  const renderRow = (d: DisputeDocument) => (
+    <DisputeRow
+      key={d.id}
+      dispute={d}
+      columns={orderedColumns}
+      userTimezone={userTimezone}
+      showActions={showActions}
+      resolvedActions={resolvedActions}
+      onAction={onAction}
+      showSelect={showSelect}
+      selected={selected.includes(d.id)}
+      onSelectChange={toggleOne}
+    />
+  );
+
   const renderRows = () => {
     if (!groupByCreatedBy) {
-      return disputes.map(d => (
-        <DisputeRow
-          key={d.id}
-          dispute={d}
-          columns={orderedColumns}
-          userTimezone={userTimezone}
-          showActions={showActions}
-          resolvedActions={resolvedActions}
-          onAction={onAction}
-        />
-      ));
+      return disputes.map(renderRow);
     }
 
     // Group by createdBy
@@ -285,31 +338,41 @@ export function DisputeTable({
     return groups.flatMap(g => [
       <TableRow key={`group-${g.uid}`} className="bg-muted/30 hover:bg-muted/30">
         <TableCell
-          colSpan={orderedColumns.length + (showActions ? 1 : 0)}
+          colSpan={orderedColumns.length + (showActions ? 1 : 0) + (showSelect ? 1 : 0)}
           className="py-2 px-2"
         >
           <UserChip name={g.name} photoURL={g.photoURL} />
         </TableCell>
       </TableRow>,
-      ...g.items.map(d => (
-        <DisputeRow
-          key={d.id}
-          dispute={d}
-          columns={orderedColumns}
-          userTimezone={userTimezone}
-          showActions={showActions}
-          resolvedActions={resolvedActions}
-          onAction={onAction}
-        />
-      )),
+      ...g.items.map(renderRow),
     ]);
   };
 
   return (
     <div>
+      {showSelect && (
+        <BulkActionBar
+          count={selected.length}
+          onClear={() => setPicked([])}
+          onRun={async (action, reason) => {
+            await onBulkAction!(selected, action, reason);
+            setPicked([]);
+          }}
+        />
+      )}
       <Table>
         <TableHeader>
           <TableRow>
+            {showSelect && (
+              <TableHead className="w-8">
+                <Checkbox
+                  checked={allSelected}
+                  onCheckedChange={v => toggleAll(v === true)}
+                  aria-label={allSelected ? 'Clear selection' : 'Select all disputes on this page'}
+                  className={SELECT_BOX_CLASS}
+                />
+              </TableHead>
+            )}
             {orderedColumns.map(col => (
               <TableHead key={col}>{COLUMN_LABELS[col]}</TableHead>
             ))}
@@ -325,6 +388,136 @@ export function DisputeTable({
   );
 }
 
+// ─── BulkActionBar ────────────────────────────────────────────────────
+
+/**
+ * The bar above the table once something is selected.
+ *
+ * It reserves its own height at zero selection rather than appearing and
+ * disappearing: a bar that pushes the whole table down on the first tick moves
+ * the row the reviewer was aiming at out from under the cursor.
+ *
+ * Reject opens its reason field in place, in the same bar — DESIGN.md's decision
+ * queue rule ("a destructive verdict opens its reason in place"). `Esc` cancels,
+ * `Enter` confirms, and a failed write keeps both the selection and the typed
+ * reason so the decision is not lost with it.
+ */
+function BulkActionBar({
+  count,
+  onClear,
+  onRun,
+}: {
+  count: number;
+  onClear: () => void;
+  onRun: (action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>, reason?: string) => Promise<void>;
+}) {
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  // Nothing selected — the bar holds its space and says how to use it.
+  if (count === 0) {
+    return (
+      <div className="mb-2 flex h-9 items-center text-[11px] text-zinc-400">
+        Select disputes to approve or reject them together.
+      </div>
+    );
+  }
+
+  const closeReject = () => {
+    setRejecting(false);
+    setReason('');
+  };
+
+  const run = async (action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>, withReason?: string) => {
+    setBusy(true);
+    try {
+      await onRun(action, withReason);
+      closeReject();
+    } catch {
+      // The caller surfaces the failure. Keep the selection and the reason.
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const noun = `${count} ${count === 1 ? 'dispute' : 'disputes'}`;
+
+  return (
+    <div className="mb-2 flex min-h-9 flex-wrap items-center gap-2 rounded-lg border border-[#3b82f6]/20 bg-[#3b82f6]/[0.06] px-3 py-1.5">
+      <span className="text-sm font-medium text-white tabular-nums">{noun} selected</span>
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={onClear}
+        disabled={busy}
+        className="h-7 px-2 text-zinc-400 hover:text-white"
+      >
+        Clear
+      </Button>
+
+      <div className="ml-auto flex flex-wrap items-center gap-2">
+        {rejecting ? (
+          <>
+            <label htmlFor="bulk-reject-reason" className="sr-only">
+              Reason for rejecting {noun}
+            </label>
+            <Input
+              id="bulk-reject-reason"
+              autoFocus
+              value={reason}
+              maxLength={REASON_MAX}
+              placeholder="Reason (optional) — every filer sees this"
+              onChange={e => setReason(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Escape') closeReject();
+                if (e.key === 'Enter' && !busy) run('Rejected', reason.trim() || undefined);
+              }}
+              className="h-8 w-64"
+            />
+            <span className="shrink-0 text-[11px] tabular-nums text-zinc-400">
+              {reason.length}/{REASON_MAX}
+            </span>
+            <Button size="sm" variant="ghost" onClick={closeReject} disabled={busy} className="text-zinc-400 hover:text-white">
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={busy}
+              onClick={() => run('Rejected', reason.trim() || undefined)}
+            >
+              {busy ? 'Rejecting…' : `Reject ${count}`}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => run('Approved')}
+              className="border border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/20 hover:text-green-300 dark:bg-green-500/10 dark:hover:bg-green-500/20"
+            >
+              {busy ? 'Approving…' : `Approve ${count}`}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => setRejecting(true)}
+              aria-expanded={rejecting}
+              className="text-red-400 hover:bg-red-500/10 hover:text-red-300 dark:hover:bg-red-500/10"
+            >
+              Reject
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Row ──────────────────────────────────────────────────────────────
 
 function DisputeRow({
@@ -334,6 +527,9 @@ function DisputeRow({
   showActions,
   resolvedActions,
   onAction,
+  showSelect,
+  selected,
+  onSelectChange,
 }: {
   dispute: DisputeDocument;
   columns: ColumnKey[];
@@ -341,6 +537,9 @@ function DisputeRow({
   showActions: boolean;
   resolvedActions: boolean;
   onAction?: (id: string, action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>, reason?: string) => void;
+  showSelect: boolean;
+  selected: boolean;
+  onSelectChange: (id: string, on: boolean) => void;
 }) {
   const cellValue = (col: ColumnKey) => {
     switch (col) {
@@ -372,7 +571,23 @@ function DisputeRow({
   };
 
   return (
-    <TableRow>
+    // Two cues for a selected row, never hue alone (WCAG 1.4.11): the checked
+    // box and the Action Blue tint. Hover keeps the neutral overlay, so hue is
+    // what separates "selected" from "under the cursor".
+    <TableRow
+      data-state={selected ? 'selected' : undefined}
+      className={selected ? 'bg-[#3b82f6]/10 hover:bg-[#3b82f6]/15 data-[state=selected]:bg-[#3b82f6]/10' : undefined}
+    >
+      {showSelect && (
+        <TableCell className="w-8">
+          <Checkbox
+            checked={selected}
+            onCheckedChange={v => onSelectChange(dispute.id, v === true)}
+            aria-label={`Select the $${dispute.saleAmount.toLocaleString()} dispute from ${dispute.createdByName || 'a deleted user'}`}
+            className={SELECT_BOX_CLASS}
+          />
+        </TableCell>
+      )}
       {columns.map(col => (
         <TableCell key={col}>{cellValue(col)}</TableCell>
       ))}

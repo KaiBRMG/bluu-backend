@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
-import { getUserById } from '@/lib/services/userService';
-import { checkPageAccess, addNotificationToBatch } from '@/lib/middleware/apiHelpers';
-import { notifications } from '@/lib/notificationContent';
-import { sendTelegramNotification } from '@/lib/services/telegramService';
+import { FieldValue } from 'firebase-admin/firestore';
+import { checkPageAccess } from '@/lib/middleware/apiHelpers';
+import { queueDisputeNotice } from '@/lib/services/disputeNotices';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { ApprovalStatus } from '@/types/firestore';
 
@@ -38,17 +37,21 @@ export const PATCH = withAuth(async (
 
     const dispute = disputeDoc.data()!;
 
-    const batch = adminDb.batch();
+    // `resolvedAt` is what lets the filer's dashboard say "decided in the last
+    // fortnight" rather than "filed in the last fortnight" — a dispute raised
+    // in March and ruled on today is news, and `createdAt` cannot tell them so.
+    await disputeRef.update({ AdminApproval, resolvedAt: FieldValue.serverTimestamp() });
 
-    batch.update(disputeRef, { AdminApproval });
-
-    const content = AdminApproval === 'Approved'
-      ? notifications.disputeAdminApproved()
-      : notifications.disputeAdminRejected(reason);
-    addNotificationToBatch(batch, dispute.createdBy, content);
-
-    await batch.commit();
-    await sendTelegramNotification([dispute.createdBy], content);
+    // Queued, not sent: a team leader clearing a backlog decides many of one
+    // person's disputes in a sitting, and each one notifying would be a phone
+    // buzzing six times in a minute. The cron flushes the queue into a single
+    // message once the reviewer has been quiet — see services/disputeNotices.ts.
+    await queueDisputeNotice({
+      stage: 'admin',
+      outcome: AdminApproval === 'Approved' ? 'approved' : 'rejected',
+      userId: dispute.createdBy,
+      reason,
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

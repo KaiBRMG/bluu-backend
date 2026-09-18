@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById } from '@/lib/services/userService';
-import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
-import { notifications } from '@/lib/notificationContent';
-import { sendTelegramNotification } from '@/lib/services/telegramService';
+import { queueDisputeNotice } from '@/lib/services/disputeNotices';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { ApprovalStatus } from '@/types/firestore';
 
@@ -41,17 +40,26 @@ export const PATCH = withAuth(async (
     const callerUser = await getUserById(token.uid);
     const assignedToName = callerUser?.displayName ?? 'Someone';
 
-    const batch = adminDb.batch();
+    // A CA *rejection* is terminal for the filer — they refile rather than
+    // wait — so it stamps `resolvedAt` like an admin verdict does. An approval
+    // does not: the dispute is still moving, and stamping it here would
+    // announce "decided" for something that has not been.
+    await disputeRef.update(
+      CaApproval === 'Rejected'
+        ? { CaApproval, resolvedAt: FieldValue.serverTimestamp() }
+        : { CaApproval },
+    );
 
-    batch.update(disputeRef, { CaApproval });
-
-    const content = CaApproval === 'Approved'
-      ? notifications.disputeCaApproved(assignedToName)
-      : notifications.disputeCaRejected(assignedToName, reason);
-    addNotificationToBatch(batch, dispute.createdBy, content);
-
-    await batch.commit();
-    await sendTelegramNotification([dispute.createdBy], content);
+    // Queued, not sent: an assigned CA works down their whole queue in one
+    // sitting, so the decisions are coalesced into a single message a few
+    // quiet minutes later — see services/disputeNotices.ts.
+    await queueDisputeNotice({
+      stage: 'ca',
+      outcome: CaApproval === 'Approved' ? 'approved' : 'rejected',
+      userId: dispute.createdBy,
+      actorName: assignedToName,
+      reason,
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

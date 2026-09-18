@@ -173,6 +173,35 @@ export function useDisputesData({ lookups = true }: UseDisputesDataOptions = {})
     }
   }, [authFetch]);
 
+  // ── Set admin approval on many disputes at once ─────────────────────
+  //
+  // One request for a whole selection, not one per row: the server writes them
+  // in a batch and queues a single notification per filer. Returns how many
+  // rows the server actually wrote, because a stale selection can legitimately
+  // contain a dispute that no longer exists.
+
+  const setAdminApprovalBulk = useCallback(async (
+    disputeIds: string[],
+    value: Extract<ApprovalStatus, 'Approved' | 'Rejected'>,
+    reason?: string,
+  ): Promise<{ updated: number; skipped: number }> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await authFetch('/api/disputes/bulk-approval', {
+        method: 'PATCH',
+        body: JSON.stringify({ disputeIds, AdminApproval: value, reason }),
+      });
+      return { updated: data.updated ?? disputeIds.length, skipped: data.skipped ?? 0 };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to update disputes';
+      setError(msg);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [authFetch]);
+
   return useMemo(() => ({
     creators,
     caUsers,
@@ -182,5 +211,6 @@ export function useDisputesData({ lookups = true }: UseDisputesDataOptions = {})
     createDispute,
     setCaApproval,
     setAdminApproval,
-  }), [creators, caUsers, loading, error, fetchDisputes, createDispute, setCaApproval, setAdminApproval]);
+    setAdminApprovalBulk,
+  }), [creators, caUsers, loading, error, fetchDisputes, createDispute, setCaApproval, setAdminApproval, setAdminApprovalBulk]);
 }

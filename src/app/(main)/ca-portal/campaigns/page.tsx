@@ -853,7 +853,9 @@ export default function CACampaignsPage() {
     <AppLayout>
       <div className="max-w-7xl">
         <h1 className="text-2xl font-bold tracking-tight mb-2">Campaigns</h1>
-
+        <p className="text-zinc-400">
+          For internal tracking of fan campaigns, such as BF Experience, VIP, etc. 
+        </p>
         <div className="mt-6 flex items-center gap-3">
           <label htmlFor="creator-select" className="text-sm font-medium text-zinc-300 shrink-0">
             Select a Creator

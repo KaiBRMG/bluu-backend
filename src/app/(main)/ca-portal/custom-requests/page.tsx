@@ -1401,7 +1401,7 @@ export default function CACustomRequestsPage() {
       <div className="max-w-7xl">
         <h1 className="text-2xl font-bold tracking-tight mb-2">Custom Requests</h1>
         <p className="text-zinc-400">
-          For a custom that has been completed, please notify your team leader. Make sure to include the CR code and creator!
+          Create and track custom requests, call schedules, and item requests for creators here. The Account Manager will sign off on all requests before they are sent to the creator.
         </p>
         <div className="mt-6 flex items-center gap-3">
           <label htmlFor="creator-select" className="text-sm font-medium text-zinc-300 shrink-0">

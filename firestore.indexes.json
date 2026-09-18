@@ -688,6 +688,46 @@
       "indexes": []
     },
     {
+      "collectionGroup": "ca-dispute-notices",
+      "fieldPath": "actorNames",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-dispute-notices",
+      "fieldPath": "count",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-dispute-notices",
+      "fieldPath": "noticeId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-dispute-notices",
+      "fieldPath": "outcome",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-dispute-notices",
+      "fieldPath": "reasons",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-dispute-notices",
+      "fieldPath": "stage",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-dispute-notices",
+      "fieldPath": "updatedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-dispute-notices",
+      "fieldPath": "userId",
+      "indexes": []
+    },
+    {
       "collectionGroup": "ca-notification-latches",
       "fieldPath": "claimedAt",
       "indexes": []
@@ -1538,6 +1578,11 @@
     {
       "collectionGroup": "versions",
       "fieldPath": "textHtml",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "disputes",
+      "fieldPath": "resolvedAt",
       "indexes": []
     }
   ]

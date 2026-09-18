@@ -7,6 +7,21 @@ export interface NotificationContent {
   actionUrl: string | null;
 }
 
+/**
+ * The trailing "REASON:" clause on a rejection.
+ *
+ * Lives here rather than at the call site because the label is copy, and copy
+ * lives only in this file (rule 5). Empty when nobody gave a reason — the
+ * message reads correctly without one — and pluralises when a coalesced batch
+ * collected more than one distinct reason.
+ */
+function formatReasonClause(reasons: string[]): string {
+  const unique = [...new Set(reasons.map(r => r.trim()).filter(Boolean))];
+  if (unique.length === 0) return '';
+  if (unique.length === 1) return ` REASON: ${unique[0]}`;
+  return ` REASONS: ${unique.join('; ')}`;
+}
+
 export const notifications = {
   // ─── User onboarding ──────────────────────────────────────────────────────────
   // Personal information is collected during the onboarding flow itself (the
@@ -97,6 +112,14 @@ export const notifications = {
   }),
 
   // ─── Disputes ─────────────────────────────────────────────────────────────────
+  //
+  // Every `actionUrl` below is `/ca-portal/disputes`, which since 2026-09-18 is
+  // a **redirect** onto `/ca-portal/dashboard?disputes=1` (the disputes page was
+  // merged into the dashboard — ca-salary.md §10). Do not "fix" them to point at
+  // the dashboard directly: notifications already sitting in trays and in
+  // Telegram carry the old URL and cannot be rewritten, so the old address has
+  // to keep working regardless. Keeping every copy on one address is what makes
+  // that redirect the single thing to change if the destination moves again.
   disputeAssigned: (createdByName: string): NotificationContent => ({
     title: 'New Dispute',
     message: `${createdByName} has submitted a dispute against a sale assigned to you. Click here to check it out ASAP!`,
@@ -104,34 +127,42 @@ export const notifications = {
     actionUrl: '/ca-portal/disputes',
   }),
 
-  disputeAdminApproved: (): NotificationContent => ({
-    title: 'Dispute Approved',
-    message: 'Good news 🎉 your dispute has been approved! It will be added to your Earnings Report soon.',
+  // Dispute decisions are coalesced before they are sent (services/disputeNotices.ts),
+  // so each of these renders a whole sitting's worth of decisions: `count` is how
+  // many disputes the message covers and `reasons` are the distinct reasons given
+  // across them. `count = 1` keeps the original single-dispute wording.
+  disputeAdminApproved: (count = 1): NotificationContent => ({
+    title: count > 1 ? 'Disputes Approved' : 'Dispute Approved',
+    message: count > 1
+      ? `Good news 🎉 ${count} of your disputes have been approved! They will be added to your Earnings Report soon.`
+      : 'Good news 🎉 your dispute has been approved! It will be added to your Earnings Report soon.',
     type: 'success',
     actionUrl: '/ca-portal/disputes',
   }),
 
-  disputeAdminRejected: (reason?: string): NotificationContent => ({
-    title: 'Dispute Rejected',
-    message: reason
-      ? `❗️Your dispute has been Rejected, please resubmit your dispute or contact your team leader! REASON: ${reason}`
-      : '❗️Your dispute has been Rejected, please resubmit your dispute or contact your team leader!',
+  disputeAdminRejected: (reasons: string[] = [], count = 1): NotificationContent => ({
+    title: count > 1 ? 'Disputes Rejected' : 'Dispute Rejected',
+    message: count > 1
+      ? `❗️${count} of your disputes have been Rejected, please resubmit them or contact your team leader!${formatReasonClause(reasons)}`
+      : `❗️Your dispute has been Rejected, please resubmit your dispute or contact your team leader!${formatReasonClause(reasons)}`,
     type: 'alert',
     actionUrl: '/ca-portal/disputes',
   }),
 
-  disputeCaApproved: (assignedToName: string): NotificationContent => ({
-    title: 'Dispute Partially Approved',
-    message: `${assignedToName} has approved your dispute! It will now be passed to your team leader for approval.`,
+  disputeCaApproved: (assignedToName: string, count = 1): NotificationContent => ({
+    title: count > 1 ? 'Disputes Partially Approved' : 'Dispute Partially Approved',
+    message: count > 1
+      ? `${assignedToName} approved ${count} of your disputes! They will now be passed to your team leader for approval.`
+      : `${assignedToName} has approved your dispute! It will now be passed to your team leader for approval.`,
     type: 'success',
     actionUrl: '/ca-portal/disputes',
   }),
 
-  disputeCaRejected: (assignedToName: string, reason?: string): NotificationContent => ({
-    title: 'Dispute Rejected',
-    message: reason
-      ? `${assignedToName} has rejected your dispute! Please contact them privately to settle your dispute. REASON: ${reason}`
-      : `${assignedToName} has rejected your dispute! Please contact them privately to settle your dispute.`,
+  disputeCaRejected: (assignedToName: string, reasons: string[] = [], count = 1): NotificationContent => ({
+    title: count > 1 ? 'Disputes Rejected' : 'Dispute Rejected',
+    message: count > 1
+      ? `${assignedToName} rejected ${count} of your disputes! Please contact them privately to settle them.${formatReasonClause(reasons)}`
+      : `${assignedToName} has rejected your dispute! Please contact them privately to settle your dispute.${formatReasonClause(reasons)}`,
     type: 'alert',
     actionUrl: '/ca-portal/disputes',
   }),

@@ -12,6 +12,16 @@ import { STATUS_COLORS, STATUS_DOT, type CRStatus } from '@/lib/campaignTracking
 import type { DisputeDocument } from '@/types/firestore';
 import { safeTimezone } from '@/lib/utils/timezone';
 
+/**
+ * Query parameter that opens the dashboard's All-disputes dialog on arrival.
+ *
+ * Named here rather than typed at both ends: the redirect that writes it
+ * (`/ca-portal/disputes`) and the panel that reads it are in different trees,
+ * and a typo in either is a silent no-op — the dashboard would simply open
+ * without the dialog and nobody would know why.
+ */
+export const DISPUTES_OPEN_ALL_PARAM = 'disputes';
+
 export type DisputeStage =
   | 'awaiting-ca'
   | 'awaiting-admin'
@@ -79,6 +89,29 @@ export function formatSaleDate(iso: string | null, timezone: string): string {
       timeZone: safeTimezone(timezone),
       dateStyle: 'medium',
       timeStyle: 'short',
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
+
+/**
+ * The same instant, short enough for a dashboard column.
+ *
+ * `formatSaleDate` renders `Sep 12, 2026, 2:32 PM` — correct on a table row and
+ * three characters too wide for a 23rem column, where it pushes the filer's
+ * name into an ellipsis. The year is what goes: a dispute is filed against a
+ * recent sale, and the full stamp is one click away in the detail dialog.
+ */
+export function formatSaleDateCompact(iso: string | null, timezone: string): string {
+  if (!iso) return '—';
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: safeTimezone(timezone),
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
     }).format(new Date(iso));
   } catch {
     return iso;

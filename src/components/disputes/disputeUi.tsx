@@ -9,8 +9,10 @@
  * fallback from the same display name everywhere).
  */
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { DeletedUser } from '@/components/DeletedUser';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { cn } from '@/lib/utils';
@@ -134,5 +136,81 @@ export function LoadError({ onRetry }: { onRetry: () => void }) {
         Try again
       </button>
     </p>
+  );
+}
+
+// ─── RejectReasonBar ──────────────────────────────────────────────────
+
+/** The filer reads this verbatim, so it is a line, not a paragraph. */
+export const REASON_MAX = 50;
+
+/**
+ * The reason field for a rejection, opened in place under the row it belongs to.
+ *
+ * One component for every surface that rejects a dispute — the wide queue, the
+ * dashboard column, the detail dialog. DESIGN.md §5 fixes the behaviour (a bar
+ * on the overlay recipe under its own row, never a modal, `Esc` cancels,
+ * `Enter` confirms) and three copies of it is how one of them quietly loses the
+ * `Esc` handler.
+ *
+ * **The typed reason lives here, not in the parent.** A failed write keeps the
+ * bar mounted, so the words survive the failure without the parent having to
+ * hold them — which is what the queue used to do, and what the column would
+ * otherwise have had to re-implement.
+ */
+export function RejectReasonBar({
+  id,
+  busy,
+  onCancel,
+  onConfirm,
+  /** `stack` is the narrow-column form: the field above its own buttons. */
+  layout = 'row',
+}: {
+  id: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (reason?: string) => void;
+  layout?: 'row' | 'stack';
+}) {
+  const [reason, setReason] = useState('');
+  const confirm = () => onConfirm(reason.trim() || undefined);
+
+  return (
+    <div
+      className={cn(
+        'mt-2 flex flex-col gap-2 rounded-lg border border-white/[0.07] bg-white/[0.025] p-2.5',
+        layout === 'row' && 'sm:flex-row sm:items-center sm:p-3',
+      )}
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <label htmlFor={`reason-${id}`} className="sr-only">
+          Reason for rejecting this dispute
+        </label>
+        <Input
+          id={`reason-${id}`}
+          autoFocus
+          value={reason}
+          maxLength={REASON_MAX}
+          placeholder="Reason (optional) — the filer sees this"
+          onChange={e => setReason(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Escape') onCancel();
+            if (e.key === 'Enter' && !busy) confirm();
+          }}
+          className="h-8"
+        />
+        <span className="shrink-0 text-[11px] tabular-nums text-zinc-400">
+          {reason.length}/{REASON_MAX}
+        </span>
+      </div>
+      <div className="flex shrink-0 justify-end gap-2">
+        <Button size="sm" variant="ghost" onClick={onCancel} disabled={busy} className="text-zinc-400 hover:text-white">
+          Cancel
+        </Button>
+        <Button size="sm" variant="destructive" disabled={busy} onClick={confirm}>
+          {busy ? 'Rejecting…' : 'Confirm reject'}
+        </Button>
+      </div>
+    </div>
   );
 }

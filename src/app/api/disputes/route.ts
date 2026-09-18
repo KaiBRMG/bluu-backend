@@ -3,104 +3,18 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
 import { FieldValue, Timestamp, DocumentData } from 'firebase-admin/firestore';
-import { checkPageAccess, serializeTimestamp, addNotificationToBatch } from '@/lib/middleware/apiHelpers';
+import { byNewest, serialiseDisputes } from '@/lib/services/disputeSerialise';
+import { checkPageAccess, addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
 import { sendTelegramNotification } from '@/lib/services/telegramService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-import type { DisputeDocument } from '@/types/firestore';
 
 const PAGE_SIZE = 10;
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-interface UserInfo { displayName: string; photoURL: string | null; }
-interface CreatorInfo { stageName: string; photoURL: string | null; }
-
-function serialiseDispute(
-  id: string,
-  data: DocumentData,
-  userMap: Record<string, UserInfo>,
-  creatorMap: Record<string, CreatorInfo>,
-): DisputeDocument {
-  // Empty displayName signals a deleted user — the client renders an italic
-  // "Deleted User" label in place of the (now meaningless) raw UID.
-  const assignedToInfo = data.assignedTo === 'No One'
-    ? { displayName: 'No One', photoURL: null }
-    : (userMap[data.assignedTo] ?? { displayName: '', photoURL: null });
-  const createdByInfo = userMap[data.createdBy] ?? { displayName: '', photoURL: null };
-  const creatorInfo = creatorMap[data.Creator];
-  return {
-    id,
-    createdAt: serializeTimestamp(data.createdAt),
-    saleDate: serializeTimestamp(data.saleDate),
-    assignedTo: data.assignedTo,
-    assignedToName: assignedToInfo.displayName,
-    assignedToPhotoURL: assignedToInfo.photoURL,
-    CaApproval: data.CaApproval,
-    AdminApproval: data.AdminApproval,
-    Creator: data.Creator,
-    creatorName: creatorInfo?.stageName ?? data.Creator,
-    creatorPhotoURL: creatorInfo?.photoURL ?? null,
-    saleAmount: data.saleAmount,
-    fanName: data.fanName,
-    Comment: data.Comment,
-    createdBy: data.createdBy,
-    createdByName: createdByInfo.displayName,
-    createdByPhotoURL: createdByInfo.photoURL,
-  };
-}
-
-async function resolveNames(
-  rawDocs: DocumentData[],
-  ids: { createdBy: string; assignedTo: string; Creator: string }[],
-) {
-  // Batch-fetch all unique user docs in one round-trip
-  const uniqueUids = [...new Set([
-    ...ids.map(d => d.createdBy),
-    ...ids.filter(d => d.assignedTo !== 'No One').map(d => d.assignedTo),
-  ])];
-  const userMap: Record<string, UserInfo> = {};
-  if (uniqueUids.length > 0) {
-    const userRefs = uniqueUids.map(uid => adminDb.collection('users').doc(uid));
-    const userDocs = await adminDb.getAll(...userRefs);
-    for (const doc of userDocs) {
-      if (doc.exists) {
-        userMap[doc.id] = {
-          displayName: doc.data()?.displayName ?? doc.id,
-          photoURL: doc.data()?.photoURL ?? null,
-        };
-      }
-    }
-  }
-
-  // Batch-fetch creator names + photos via 'in' query (max 30 per Firestore limit)
-  const uniqueCreatorIds = [...new Set(ids.map(d => d.Creator).filter(Boolean))];
-  const creatorMap: Record<string, CreatorInfo> = {};
-  if (uniqueCreatorIds.length > 0) {
-    const chunks: string[][] = [];
-    for (let i = 0; i < uniqueCreatorIds.length; i += 30) {
-      chunks.push(uniqueCreatorIds.slice(i, i + 30));
-    }
-    await Promise.all(chunks.map(async chunk => {
-      const snap = await adminDb.collection('creators').where('creatorID', 'in', chunk).get();
-      for (const doc of snap.docs) {
-        creatorMap[doc.data().creatorID] = {
-          stageName: doc.data().stageName ?? doc.data().creatorID,
-          photoURL: doc.data().photoURL ?? null,
-        };
-      }
-    }));
-  }
-
-  return { userMap, creatorMap };
-}
-
 function sortAndPaginate(docs: DocumentData[], page: number) {
-  docs.sort((a, b) => {
-    const aMs = a.createdAt?.toMillis?.() ?? 0;
-    const bMs = b.createdAt?.toMillis?.() ?? 0;
-    return bMs - aMs;
-  });
+  docs.sort(byNewest);
   const total = docs.length;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const paginated = docs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -220,16 +134,7 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       return NextResponse.json({ disputes: [], total: 0, totalPages: 1 });
     }
 
-    const ids = paginated.map(d => ({
-      createdBy: d.createdBy,
-      assignedTo: d.assignedTo,
-      Creator: d.Creator,
-    }));
-    const { userMap, creatorMap } = await resolveNames(paginated, ids);
-
-    const disputes = paginated.map(d =>
-      serialiseDispute(d._id as string, d, userMap, creatorMap)
-    );
+    const disputes = await serialiseDisputes(paginated as (DocumentData & { _id: string })[]);
 
     return NextResponse.json({ disputes, total, totalPages });
   } catch (error) {
@@ -241,7 +146,14 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 // ─── POST /api/disputes ───────────────────────────────────────────────
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
-  const denied = await checkPageAccess(token.uid, 'ca-disputes');
+  // Gated on `ca-dashboard`, not the retired `ca-disputes`: filing a dispute is
+  // a control on the dashboard now (the Sale Disputes column's New dispute
+  // button), and the pageId that used to guard it no longer exists — a
+  // `checkPageAccess` against a pruned page would refuse everyone. The tier is
+  // unchanged in substance: the write is hard-scoped to `createdBy: token.uid`
+  // and to a sale the caller names, so page access decides who may *reach* the
+  // form, never whose report a sale can be claimed off.
+  const denied = await checkPageAccess(token.uid, 'ca-dashboard');
   if (denied) return denied;
 
   try {

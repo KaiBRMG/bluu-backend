@@ -14,14 +14,11 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EllipsisPagination } from '@/components/EllipsisPagination';
 import type { DisputeDocument, ApprovalStatus } from '@/types/firestore';
 import { formatMoney } from './disputeStatus';
-import { PersonTag, SaleDate, StagePill, QuietLine, LoadError } from './disputeUi';
-
-const REASON_MAX = 50;
+import { PersonTag, SaleDate, StagePill, QuietLine, LoadError, RejectReasonBar } from './disputeUi';
 
 export type DisputeVerdict = Extract<ApprovalStatus, 'Approved' | 'Rejected'>;
 
@@ -54,13 +51,11 @@ export function DisputeReviewQueue({
   emptyLine,
 }: DisputeReviewQueueProps) {
   const [rejectingId, setRejectingId] = useState<string | null>(null);
-  const [reason, setReason] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const closeReject = () => {
-    setRejectingId(null);
-    setReason('');
-  };
+  // Unmounting the bar is what clears the typed reason — it owns that state, so
+  // there is nothing else to reset here.
+  const closeReject = () => setRejectingId(null);
 
   const run = async (id: string, verdict: DisputeVerdict, withReason?: string) => {
     setBusyId(id);
@@ -135,10 +130,7 @@ export function DisputeReviewQueue({
                         size="sm"
                         variant="ghost"
                         disabled={busy}
-                        onClick={() => {
-                          setRejectingId(rejecting ? null : d.id);
-                          setReason('');
-                        }}
+                        onClick={() => setRejectingId(rejecting ? null : d.id)}
                         aria-expanded={rejecting}
                         aria-controls={`reject-${d.id}`}
                         className="text-red-400 hover:bg-red-500/10 hover:text-red-300 dark:hover:bg-red-500/10"
@@ -153,44 +145,13 @@ export function DisputeReviewQueue({
               </div>
 
               {rejecting && (
-                <div
-                  id={`reject-${d.id}`}
-                  className="mt-3 flex flex-col gap-2 rounded-lg border border-white/[0.07] bg-white/[0.025] p-3 sm:flex-row sm:items-center"
-                >
-                  <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <label htmlFor={`reason-${d.id}`} className="sr-only">
-                      Reason for rejecting this dispute
-                    </label>
-                    <Input
-                      id={`reason-${d.id}`}
-                      autoFocus
-                      value={reason}
-                      maxLength={REASON_MAX}
-                      placeholder="Reason (optional) — the filer sees this"
-                      onChange={e => setReason(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Escape') closeReject();
-                        if (e.key === 'Enter' && !busy) run(d.id, 'Rejected', reason.trim() || undefined);
-                      }}
-                      className="h-8"
-                    />
-                    <span className="shrink-0 text-[11px] tabular-nums text-zinc-400">
-                      {reason.length}/{REASON_MAX}
-                    </span>
-                  </div>
-                  <div className="flex shrink-0 gap-2">
-                    <Button size="sm" variant="ghost" onClick={closeReject} disabled={busy} className="text-zinc-400 hover:text-white">
-                      Cancel
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      disabled={busy}
-                      onClick={() => run(d.id, 'Rejected', reason.trim() || undefined)}
-                    >
-                      {busy ? 'Rejecting…' : 'Confirm reject'}
-                    </Button>
-                  </div>
+                <div id={`reject-${d.id}`} className="mt-1">
+                  <RejectReasonBar
+                    id={d.id}
+                    busy={busy}
+                    onCancel={closeReject}
+                    onConfirm={r => run(d.id, 'Rejected', r)}
+                  />
                 </div>
               )}
             </li>

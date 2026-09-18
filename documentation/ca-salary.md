@@ -306,7 +306,7 @@ Three things about this are load-bearing:
 
 - **It is still one component, and the shift body is still one renderer.** [`ShiftEntry`](../src/components/shifts/ShiftCalendar.tsx) takes a `dense` flag — avatars and 11px type for the grid, names and readable type for the row — and `OfferCell` and `LeaveBadge` are shared unchanged. `dense` is the *only* thing any of them branch on. That preserves what the original single-cell renderer was protecting (one definition of leave, in-shift cover and the claim popover) while letting the two layouts differ in the one way they genuinely do. **A change to what a shift means goes in `ShiftEntry`, never in a layout branch.**
 - **The week arrows have no forward cap, and the dialog's `MonthPicker` has a raised one** (`latest`, 12 months out). The picker's default ceiling is the current month because a future *salary* month has no data by definition — a roster is the opposite, it is published ahead. Money surfaces keep the default; this is the only caller that raises it.
-- **The overtime layer is fetched for the visible range**, not for a rolling window around today. `useCoverageOffers` defaults to `today-1 → today+45`, which was right while the only view was the current month and wrong the moment the arrows can leave it — a week three arrows out would draw the roster and silently claim no cover was going spare.
+- **The overtime layer is fetched for the visible range plus one week**, not for a rolling window around today. `useCoverageOffers` defaults to `today-1 → today+45`, which was right while the only view was the current month and wrong the moment the arrows can leave it — a week three arrows out would draw the roster and silently claim no cover was going spare. The **+7** is the other half of the same failure and is not an approximation of the old default: scoping the fetch to the visible week made the panel say *"No overtime available this week"* while accounts sat on the board for the following Tuesday, with nothing on the screen giving the reader a reason to press the arrow. Those extra days are **fetched and summarised, never drawn** — the cells are built from the days in view, so an out-of-range offer has no cell to land in — and they surface as a second line under the grid: *"2 accounts available next week — the first on Tue 23 Sep"*, with a **View next week** button in week view (the month view's scope is a prop this panel does not own, so there the date is the whole affordance). It is deliberately a **separate sentence** from the in-view line rather than a clause on it: the two are claims about two different weeks, and someone about to claim something this week must not have to work out which half applies to them. One week, not the 47-day default — *"3 accounts available next week"* is a nudge to press an arrow, *"11 in the next seven weeks"* is a second board. When the lookahead has something to say, the empty-board explainer (*"Accounts appear here when someone's leave is approved"*) is dropped, because some already have. Suppressed entirely on an errored fetch: the count comes from the same request that just failed.
 
 A week is also the only view that can **straddle a month boundary**, which is why [`useShiftCalendar`](../src/hooks/useShiftCalendar.ts) takes a *list* of months and merges them on `(shiftId, occurrenceStart)` (the padded windows of two adjacent months overlap). It still fetches and caches whole **months** rather than the seven days asked for: scrolling through September is then one request rather than five, and the dialog's month view reuses the entry the week view already warmed (rule 9).
 
@@ -318,7 +318,7 @@ Three rules keep them in step, and a new surface that changes a roster has to ho
 
 1. **A write invalidates what it changed.** [`invalidateShiftCalendarCache(uid)`](../src/hooks/useShiftCalendar.ts) and [`invalidateLeaveRequestsCache(uid)`](../src/hooks/useLeaveRequests.ts) are exported for callers **outside** these hooks, because the writes live elsewhere: leave is approved from the CA admin queue (`useAdminLeaveQueue`) **and** from a card on the shift-management grid (`ShiftCard`) — two call sites, both of which must invalidate, and the second is the one that gets forgotten. Withdrawing approved leave invalidates too: it puts the occurrence *back*.
 2. **`sessionStorage` is per-renderer, so invalidation only reaches the acting user's own tab.** That is what fixes approving your *own* leave. It can do nothing for the absent agent's dashboard, which is what rule 3 is for.
-3. **The calendar revalidates on `focus` / `visibilitychange`.** Without it the roster is read once per mount and never again, and this renderer stays open for weeks (rule 9c) — an admin's schedule edit reached a dashboard that had been sitting on its answer since it was opened. The handler calls `load()`, not `load(true)`: a hit inside the TTL costs nothing, so the refresh is free for someone alt-tabbing and is one request for someone returning later. Staleness is bounded by the TTL rather than unbounded.
+3. **The calendar revalidates on `focus` / `visibilitychange`, and carries a manual refresh.** Without it the roster is read once per mount and never again, and this renderer stays open for weeks (rule 9c) — an admin's schedule edit reached a dashboard that had been sitting on its answer since it was opened. The handler calls `load()`, not `load(true)`: a hit inside the TTL costs nothing, so the refresh is free for someone alt-tabbing and is one request for someone returning later. Staleness is bounded by the TTL rather than unbounded. The **refresh button** in the panel header covers what focus cannot: an agent *watching* this screen while a roster is published or a claim is decided never blurs the window, so nothing revalidates and the two-minute cache is all they get. It refetches **all three layers** — roster, overtime and leave — because the grid draws them together and a button that refreshed one of them would leave the other two stale behind an affordance claiming otherwise, and it uses `Promise.allSettled` so one failing read cannot abandon the others. Two details are load-bearing: the boot phase is gated `&& !refreshing` (`refetch` sets the hook's `loading`, which would otherwise re-arm a boot phase hours into a session), and the skeleton branch is gated the same way — `shifts` is only replaced on success, so the week being refreshed stays readable in place instead of collapsing and dragging the scroll with it. It is icon-only with an `aria-label` and deliberately **no tooltip**: the loading and error branches reuse the same header and neither sits inside the panel's `TooltipProvider`.
 
 **The dashboard has no month picker any more, and must not regain one.** It used to have one governing the page, because a picker that moved only the calendar could put August's roster above September's pay with both labels correct and nothing saying the two scopes differed. That risk is gone by construction rather than by coordination: the schedule navigates itself, and `SalarySummaryCard` renders the current unfinalised month — the only month a dashboard summary should mean. History has its own picker on `/ca-portal/dashboard/salary`.
 
@@ -423,6 +423,8 @@ Two rules, and both are load-bearing:
 
 `ca-coverage-offers` is closed too even though the board is meant to be seen by every agent: the API does something a rule cannot, which is strip the other claimants' identities for non-admin readers.
 
+`disputes` gained `resolvedAt` (§10) — written only on a terminal verdict, queried by nothing, index-exempt.
+
 New fields on `shifts`: `creatorIds`, `overtimeCreatorIds`, `isOvertime`, `coverageOfferId`, `paysWage`. Only `creatorIds` is queried (one `array-contains`, by the sub-account delete guard); the rest are index-exempt (rule 9). `leave_requests` gained `releasedShiftId` / `releasedOccurrenceStart` (§6) on the same terms.
 
 ---
@@ -458,12 +460,87 @@ Helpers: [`salaryAuth.ts`](../src/lib/salary/salaryAuth.ts).
   Sales data    .xlsx upload with dry-run preview, import history
   Coverage      leave approvals → offer board → assign
   Rates         tiers, wage table, grace, deduction, rate basis
-  Disputes      (existing, unchanged)
+  Disputes      the admin desk — bulk bar, all filters (unchanged)
 
-/ca-portal/dashboard        salary card · leave balance · shift calendar
-                            (own shifts + overtime + request leave)
+/ca-portal/dashboard        LEFT  salary card · leave balance · shift calendar
+                                  (own shifts + overtime + request leave)
+                            RIGHT Sale Disputes — the open review queue, recent
+                                  verdicts on your own claims, and what is still
+                                  waiting. New dispute + All disputes (dialog).
 /ca-portal/dashboard/salary Overview · Daily breakdown · Sales report
+/ca-portal/disputes         REDIRECT → /ca-portal/dashboard?disputes=1
 ```
+
+### Disputes moved onto the dashboard (2026-09-18)
+
+`/ca-portal/disputes` was a whole page for a queue that is empty most days, and
+it was the only place an agent could learn that a sale they had claimed was
+decided. So the one thing with somebody waiting on the other end of it lived
+behind a nav item nobody had a reason to click, while the dashboard — which
+they do open — ran at `max-w-5xl` with a third of the window unused beside it.
+
+The page's contents are now the dashboard's **right-hand column**
+([`SaleDisputesPanel`](../src/components/disputes/SaleDisputesPanel.tsx)), in
+three blocks ordered by whether anyone is waiting: **Needs your review** (the
+only block with buttons), **Decided** (verdicts on your own claims), **Your
+claims** (open, with the stage each is sitting at). Four review rows and three
+claim rows; past that the count links into the dialog.
+
+Five things about the move are load-bearing:
+
+- **The page is a redirect, not a deletion.** Five notification `actionUrl`s
+  point at `/ca-portal/disputes` (§11), and a notification is the slowest link
+  in the product — one sitting in a tray from last month is still live, and the
+  Telegram copy is out of our hands entirely. Re-pointing the factories would
+  fix every message sent from here on and break every message already sent. The
+  route forwards to `/ca-portal/dashboard?disputes=1`, which opens the
+  All-disputes dialog on arrival, so that click still lands on disputes.
+- **The `ca-disputes` pageId is gone** from `definitions.ts`, and
+  `POST /api/disputes` is therefore gated on **`ca-dashboard`** — a
+  `checkPageAccess` against a pruned page refuses everyone. The tier is
+  unchanged in substance: the write is hard-scoped to `createdBy: token.uid`.
+  **Anyone who held Disputes but not Dashboard needs Dashboard granting.**
+- **The full workspace is one component, rendered in a dialog.**
+  [`DisputesWorkspace`](../src/components/disputes/DisputesWorkspace.tsx) is the
+  old page body verbatim — both paginated feeds, both Open/Resolved tabs, the
+  ledger table, the "How disputes work" note. The page lost its route and
+  nothing else, and there is no second implementation to drift.
+- **The column reads one endpoint, not three.**
+  `GET /api/disputes/summary` answers all three blocks in **two** Firestore
+  queries with one batched name resolution. Assembled from the paginated list
+  it would be three requests, and one of them (`created-resolved`) already
+  scans every dispute the caller ever filed — so the "open" query would be a
+  strict subset of it, run twice (rule 9). Neither query orders or ranges, so
+  both are served by equality merge-join on single-field indexes: **no
+  composite index, nothing to deploy with the code.**
+- **Verdicts live in exactly two places and share their machinery.** The
+  compact row's tick/cross and the detail dialog's Approve/Reject both call the
+  panel's one `rule()`, and both open the same shared
+  [`RejectReasonBar`](../src/components/disputes/disputeUi.tsx) — which the wide
+  queue on the dialog now uses too. Three copies of a reason field is how one of
+  them quietly loses its `Esc` handler.
+
+### `resolvedAt`, and why the dashboard needed it
+
+A dispute carried no record of *when* it was decided, only `createdAt`. That is
+the difference between "decided in the last fortnight" and "filed in the last
+fortnight", and a dispute raised in March and ruled on today is news the second
+reading cannot surface. Both approval routes and the bulk route now stamp
+`resolvedAt` on a **terminal** verdict — an admin ruling either way, and a CA
+*rejection*, which is terminal for the filer because they refile rather than
+wait. A CA *approval* does not stamp: the dispute is still moving.
+
+It is absent on every dispute settled before the field existed, and the
+serialiser leaves it `null` rather than defaulting — an absent stamp reads as
+"not decided recently", never as the epoch, which is the only reading that does
+not resurface a two-year-old verdict as news. Nothing queries it, so it is
+index-exempt in `firestore.indexes.json` (rule 9).
+
+**Decisions are dismissible, per browser.** A verdict sits in the Decided block
+for 14 days or until acknowledged, in `localStorage` — the same mechanism, the
+same window and the same reasoning as `LeaveBalanceCard`'s leave decisions
+(§6): it is an acknowledgement, not a fact anyone else needs, and a Firestore
+write per dismissal would be a document update to say "I saw that".
 
 ### The Overview tab
 
@@ -522,6 +599,10 @@ Three calls worth not re-litigating:
 | [`CreatorChip.tsx`](../src/components/creators/CreatorChip.tsx) | **The house pattern for showing a creator** — `Avatar` + profile picture, initials fallback seeded from the stage name |
 | [`creatorAccountService.ts`](../src/lib/services/creatorAccountService.ts) | Creators + sub-accounts as one assignable list; validates ids across both collections |
 | [`useCreators.ts`](../src/hooks/useCreators.ts) | Module-level shared store behind every creator chip — one fetch, one parse, one `Map` per page |
+| [`SaleDisputesPanel.tsx`](../src/components/disputes/SaleDisputesPanel.tsx) | The dashboard's Sale Disputes column — review queue, verdicts, your open claims, and the three dialogs behind it |
+| [`DisputesWorkspace.tsx`](../src/components/disputes/DisputesWorkspace.tsx) | The old `/ca-portal/disputes` body, now rendered inside `AllDisputesDialog` |
+| [`disputeSerialise.ts`](../src/lib/services/disputeSerialise.ts) | One projection of a `disputes` doc, shared by the paginated list and the summary. `resolveNames` is what keeps a dispute list off an N+1 |
+| [`useDisputeSummary.ts`](../src/hooks/useDisputeSummary.ts) | The column's single read. Uncached and revalidated on focus — a verdict is a decision someone is waiting on |
 
 ---
 
@@ -540,11 +621,19 @@ Three calls worth not re-litigating:
 | Salary finalised | That agent | — (reopening notifies nobody) |
 | Commission tier reached | That agent | Once per band per month, and only upwards |
 
-Five decisions inside that table are load-bearing.
+Six decisions inside that table are load-bearing.
 
 **The leave alerts name one uid.** `CA_LEAVE_ALERT_RECIPIENT_UID` in [`caNotifications.ts`](../src/lib/services/caNotifications.ts), one definition, the same carve-out from "never hardcode a uid" as the OF Manager diagnostics. Leave approval is one person's queue; every admin hearing about every request is noise.
 
 **Coverage notifications are coalesced, and the delay lives in a cron.** One absence releases every creator the agent was covering, and an admin assigns them one at a time — so an assignment **queues** into `ca-coverage-notices` (one doc per `kind`+agent+day, names merged with `arrayUnion`) and `/api/cron/ca-notifications` sends it once the queue has been quiet for 3 minutes, then deletes it. Assigning four accounts to one agent produces one message naming four creators. There is no "sent" flag: a notice either exists (owed) or does not (delivered). The delay cannot sit inside the request — a serverless function is not going to still be there in three minutes, and a message that never arrives is worse than one eight minutes late.
+
+**Dispute decisions are coalesced too, through a second queue.** Same mechanism, different shape: a reviewer rules on a whole screen of disputes in one sitting, so each decision **queues** into `ca-dispute-notices` (one doc per `stage`+`outcome`+filer, count incremented, reasons merged with `arrayUnion`) and the same cron sends it after the same 3-minute quiet period. Three things differ from the coverage queue and each is deliberate:
+
+- **Outcome is part of the key.** Approved and rejected are different messages with different `type`s, so a sitting that approved two of someone's disputes and rejected one produces **two** notifications, not one blurred summary. An agent must hear both facts.
+- **`count` is a counter, not a name list.** Nothing in the copy names the disputes — "3 of your disputes have been approved" — so the queue carries a `FieldValue.increment` rather than merging labels. `reasons` is the arrayUnion, de-duplicated, which is why ten rejections citing the same reason produce one `REASON:` clause and a mixed batch produces `REASONS: a; b`.
+- **A bulk decision queues once, with the size of the set.** `PATCH /api/disputes/bulk-approval` (below) groups its selection by filer and calls `queueDisputeNotice({ count })` once per person — one write, not one per dispute.
+
+**The admin table decides in bulk, and that is the other half of the fix.** The CA Admin → Disputes **Unresolved** and **CA Approved** tabs carry a leading checkbox column and a bulk bar; `PATCH /api/disputes/bulk-approval` (`ca-admin` page permission, `MAX_BULK` 100) reads the set with one `getAll`, writes one Firestore batch, and reports partial success rather than failing the set — an id that vanished since the page loaded is counted in `skipped` while the rest are written. It is **not** offered on the **Resolved** tab, where Approve and Reject are offered per row depending on the current outcome: one verdict applied to a mixed selection would flip decisions the reviewer never looked at. The agent-facing `/ca-portal/disputes` queue is unchanged — it rules on one sale at a time by design.
 
 **Both doors to overtime send it, not just the board.** Assigning released accounts on the Coverage board queues the notice, and so does an admin marking accounts **Overtime** on a shift in Shift Management — `queueOvertimeAssignedForShift` in the same file, called by `POST /api/shifts` and `PUT /api/shifts/[shiftId]` after the write and non-fatally. For a long time only the first did, so an agent given overtime by a roster edit was never told and found out by looking at their calendar, if they looked. Three things make the second route safe to add:
 
@@ -577,11 +666,12 @@ All of it runs **after** the withdrawal commits and is non-fatal, the same shape
 | Collection | Doc id | What |
 |---|---|---|
 | `ca-coverage-notices` | `{kind}__{uid}__{day}` | A coalescing queue waiting for its quiet period. Deleted on send. |
+| `ca-dispute-notices` | `{stage}__{outcome}__{uid}` | The same, for dispute decisions. Counts rather than names. Deleted on send. |
 | `ca-coverage-withdrawals` | `{leaveId}` | A cancelled absence — the Coverage tab's band |
 | `ca-salary-tier-notices` | `{uid}_{month}` | Which commission band the agent was last told about |
 | `ca-notification-latches` | `payday-{month}` | The once-a-month guard on the payday reminder |
 
-All four are Admin-SDK-only (`allow read, write: if false`) and every field on them is index-exempt except `ca-coverage-withdrawals.withdrawnAt`, which the band orders by.
+All five are Admin-SDK-only (`allow read, write: if false`) and every field on them is index-exempt except `ca-coverage-withdrawals.withdrawnAt`, which the band orders by.
 
 ---
 

@@ -493,13 +493,14 @@ service cloud.firestore {
 
     // 30. Chat-agent notification bookkeeping.
     //
-    // Four collections that exist only so a notification fires exactly once.
+    // Five collections that exist only so a notification fires exactly once.
     // None of them is ever read by a client: the notifications themselves land
     // in `notifications/{docId}` under the existing rule, and these are the
     // ledgers behind them.
     //
-    // `ca-coverage-notices` is a queue of messages waiting to be coalesced and
-    // sent; `ca-coverage-withdrawals` is the record of a cancelled absence,
+    // `ca-coverage-notices` and `ca-dispute-notices` are queues of messages
+    // waiting to be coalesced and sent — a client that could write either could
+    // forge a decision notice or suppress one; `ca-coverage-withdrawals` is the record of a cancelled absence,
     // served to admins by /api/ca-coverage/offers (which is also what decides
     // who counts as an admin — a rule cannot); `ca-salary-tier-notices` is the
     // memory of which commission band an agent was last told about, and reading
@@ -508,6 +509,9 @@ service cloud.firestore {
     // reminder, and a client that could write it could silence that reminder for
     // the whole roster.
     match /ca-coverage-notices/{noticeId} {
+      allow read, write: if false;
+    }
+    match /ca-dispute-notices/{noticeId} {
       allow read, write: if false;
     }
     match /ca-coverage-withdrawals/{leaveId} {

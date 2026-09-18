@@ -53,7 +53,8 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
  Vercel Cron (src/vercel.json) → daily OF media-cache size reading
               + nightly Apify follower scrape (Growth Tracking, 00:00 UTC)
               + CA notification tick every 5 min (coalesced overtime alerts
-                + the monthly payday reminder) — see ca-salary.md §11
+                + coalesced dispute decisions + the monthly payday reminder)
+                — see ca-salary.md §11
               + daily leave-balance reset (22:30 UTC = 00:30 Harare): unpaid
                 → 4 on the 1st, paid → 10 on 1 Jan. Daily + a per-user period
                 marker, so a missed run self-heals — see ca-salary.md §6

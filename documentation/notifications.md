@@ -90,10 +90,10 @@ Every row below is **automated** — fired by a handler on an event, never sent 
 | Salary finalised | `notifications.salaryFinalized(monthLabel)` | the agent whose month was frozen | `ca-salary/finalize` |
 | Commission tier reached | `notifications.commissionTierUp(percent, monthLabel)` | the agent who crossed the band | `ca-salary/import` **and** `ca-salary/override` |
 | Dispute assigned | `notifications.disputeAssigned(createdByName)` | `assignedTo` (skipped when `'No One'`) | `disputes` (POST) |
-| Dispute — CA approved | `notifications.disputeCaApproved(assignedToName)` | the dispute's `createdBy` | `disputes/[disputeId]/ca-approval` |
-| Dispute — CA rejected | `notifications.disputeCaRejected(assignedToName, reason?)` | the dispute's `createdBy` | `disputes/[disputeId]/ca-approval` |
-| Dispute — admin approved | `notifications.disputeAdminApproved()` | the dispute's `createdBy` | `disputes/[disputeId]/admin-approval` |
-| Dispute — admin rejected | `notifications.disputeAdminRejected(reason?)` | the dispute's `createdBy` | `disputes/[disputeId]/admin-approval` |
+| Dispute — CA approved | `notifications.disputeCaApproved(assignedToName, count)` | the dispute's `createdBy` — **coalesced**, one message per filer | `disputes/[disputeId]/ca-approval` queues · `cron/ca-notifications` sends |
+| Dispute — CA rejected | `notifications.disputeCaRejected(assignedToName, reasons, count)` | the dispute's `createdBy` — **coalesced** the same way | `disputes/[disputeId]/ca-approval` queues · `cron/ca-notifications` sends |
+| Dispute — admin approved | `notifications.disputeAdminApproved(count)` | the dispute's `createdBy` — **coalesced** | `disputes/[disputeId]/admin-approval` **and** `disputes/bulk-approval` queue · `cron/ca-notifications` sends |
+| Dispute — admin rejected | `notifications.disputeAdminRejected(reasons, count)` | the dispute's `createdBy` — **coalesced** | `disputes/[disputeId]/admin-approval` **and** `disputes/bulk-approval` queue · `cron/ca-notifications` sends |
 | Content request completed | `notifications.contentPlanCompleted(stageName, contentSummary)` | `groups/OFAM.members` | `content-planning/[id]/creator-complete` |
 | Model application received | `notifications.modelSubmissionReceived(applicantName, location)` | every user whose `permittedPageIds` contains `apps-model-submissions` | `model-submissions/submit` |
 | Desktop app updated | `notifications.releaseNote(version)` | each user as they reach `APP_UPDATE.releaseNote.version` | `user/app-version` |

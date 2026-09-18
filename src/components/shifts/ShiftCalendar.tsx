@@ -90,6 +90,23 @@ import { splitShiftAccounts } from '@/lib/salary/shiftAccounts';
  * already work on the 14th makes "this is inside my shift" or "this is a second
  * shift that day" visible without arithmetic.
  *
+ * ## The overtime layer looks one week further than the grid draws
+ *
+ * Scoping the board to the visible range is right for what it *draws* and wrong
+ * for what it *claims*. A week with nothing on it said "No overtime available
+ * this week" while accounts sat on the board for the following Tuesday, and
+ * nothing on the panel gave the reader a reason to press the arrow — on a
+ * first-come board, that is money lost to a scope they were never told about.
+ *
+ * So the fetch runs to `rangeEnd + 7` and the extra days are summarised in one
+ * line under the grid ("2 accounts available next week — the first on Tue 23
+ * Sep", with a button that moves the week). They are never drawn: the cells are
+ * built from the days in view, so an out-of-range offer has no cell to land in.
+ *
+ * The lookahead is one week, not the hook's 47-day default, because the line is
+ * a nudge to press an arrow rather than a second board — "3 accounts available
+ * next week" is actionable, "11 available in the next seven weeks" is not.
+ *
  * ## Leave lives on the shift, not in a list
  *
  * Each future shift carries a small `CalendarX2` button. Requesting time off is
@@ -205,6 +222,15 @@ export function ShiftCalendar({
   const rangeStart = isWeek ? weekStart : `${month}-01`;
   const rangeEnd = isWeek ? weekEnd : `${month}-${daysInMonth(month)}`;
 
+  // One week further than the grid draws. An offer released for next Tuesday is
+  // invisible on a panel scoped to this week, and an agent with no reason to
+  // press the arrow never learns it exists — the board is first-come, so that is
+  // money lost to a scope nobody told them about. The extra days are fetched,
+  // never drawn (the cells are keyed by the days in view), and summarised in one
+  // line under the grid. Cheap by construction: the hook's own default window is
+  // 47 days wide, so this is a smaller read than the one it replaced.
+  const lookaheadEnd = addDays(rangeEnd, 7);
+
   const { shifts, loading, error, refetch } = useShiftCalendar(months);
   const {
     offers,
@@ -219,17 +245,57 @@ export function ShiftCalendar({
     refetch: refetchOffers,
   } = useCoverageOffers({
     from: rangeStart,
-    to: rangeEnd,
+    to: lookaheadEnd,
     status: 'available',
     enabled: showOvertime,
   });
 
-  const { leaveRequests, requestLeave, cancelLeave, error: leaveError } = useLeaveRequests();
+  const {
+    leaveRequests,
+    requestLeave,
+    cancelLeave,
+    error: leaveError,
+    refetch: refetchLeave,
+  } = useLeaveRequests();
   const [leaveTarget, setLeaveTarget] = useState<LeaveTarget | null>(null);
+
+  // ── Refresh ──
+  //
+  // The panel already revalidates on focus, but that only helps someone who left
+  // the window. An agent watching this screen while an admin publishes a roster,
+  // or while a claim is being decided, has a two-minute cache and no way to ask.
+  // On a first-come board "I can see it is stale and I cannot do anything about
+  // it" is the worst of the three states.
+  //
+  // It refreshes **all three layers**, not just the roster: the grid draws shifts,
+  // overtime and leave badges together, and a button that silently refreshed one
+  // of them would leave the other two stale behind an affordance that claims
+  // otherwise. `refetchOffers` is skipped when the layer is not rendered.
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      // `allSettled`, not `all`: each hook reports its own failure in its own
+      // strip, and one rejecting must not abandon the other two — a refresh that
+      // left the roster stale because the leave read 500'd is the stale state the
+      // button exists to end.
+      await Promise.allSettled([
+        refetch(),
+        refetchLeave(),
+        showOvertime ? refetchOffers() : Promise.resolve(),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetch, refetchLeave, refetchOffers, showOvertime]);
 
   // The salary card above this one gates the boot screen, so without this the
   // loader lifted on a finished card sitting over a skeleton calendar.
-  useBootPhase('shift-calendar', gateBoot && loading);
+  // `&& !refreshing`: `refetch` sets the hook's `loading` true, and without this
+  // a refresh pressed hours into a session would re-arm a boot phase the boot
+  // screen has long finished with.
+  useBootPhase('shift-calendar', gateBoot && loading && !refreshing);
 
   const tz = safeTimezone(timezone);
   const today = currentDayKey();
@@ -417,6 +483,23 @@ export function ShiftCalendar({
           </div>
         )}
 
+        {/* Sits with the arrows rather than beside Full Schedule: it acts on
+            what is on screen, and the two things that change it are adjacent.
+            Icon-only and `aria-label`-named, deliberately without a tooltip —
+            the loading and error branches reuse this header and neither is
+            inside `withTooltipPolicy`, so a Tooltip here would be a trigger
+            without a provider on exactly the states a stuck reader lands on. */}
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          onClick={() => void handleRefresh()}
+          disabled={refreshing || loading}
+          aria-label={refreshing ? 'Refreshing schedule' : 'Refresh schedule'}
+          className="text-zinc-400"
+        >
+          <RotateCcw className={cn(refreshing && 'activity-spinner animate-spin')} aria-hidden />
+        </Button>
+
         {headerAction}
 
         {onOpenFullSchedule && (
@@ -429,7 +512,10 @@ export function ShiftCalendar({
     </div>
   );
 
-  if (loading) {
+  // `!refreshing`: a manual refresh keeps the grid it is refreshing. `shifts` is
+  // only replaced on success, so the stale week stays readable and in place
+  // rather than collapsing to a skeleton and jumping the scroll back.
+  if (loading && !refreshing) {
     return (
       <div className={panel}>
         {header(<Skeleton className="h-3.5 w-40 rounded" />)}
@@ -474,6 +560,16 @@ export function ShiftCalendar({
   // that this grid never draws.
   const totalShifts = cells.reduce((sum, cell) => sum + cell.shifts.length, 0);
   const totalOffers = cells.reduce((sum, cell) => sum + cell.offers.length, 0);
+
+  // Offers that landed in the fetched lookahead but outside the drawn range —
+  // the ones the reader has no way to see from here. Plain array work over a
+  // list that is already small; not a hook, because it sits below the early
+  // returns and both of those render before any offer has arrived.
+  const upcomingOffers = showOvertime ? offers.filter(offer => offer.day > rangeEnd) : [];
+  const firstUpcomingDay = upcomingOffers.reduce<string | null>(
+    (earliest, offer) => (earliest === null || offer.day < earliest ? offer.day : earliest),
+    null,
+  );
 
   const scopeLabel = isWeek ? formatWeekLabel(weekStart) : formatMonthLabel(month);
 
@@ -731,9 +827,67 @@ export function ShiftCalendar({
               {offersLoading && totalOffers === 0
                 ? 'Checking for available overtime…'
                 : totalOffers === 0
-                  ? `No overtime available ${isWeek ? 'this week' : 'this month'}. Accounts appear here when someone’s leave is approved.`
+                  ? // The explainer is for a genuinely empty board. When the
+                    // line below is about to name accounts a week out, "accounts
+                    // appear here when someone's leave is approved" reads as a
+                    // contradiction of it — some already have.
+                    `No overtime available ${isWeek ? 'this week' : 'this month'}.${
+                      firstUpcomingDay === null
+                        ? ' Accounts appear here when someone’s leave is approved.'
+                        : ''
+                    }`
                   : `${pluralise(totalOffers, 'account')} available to cover — select one to claim it.`}
             </>
+          )}
+        </p>
+      )}
+
+      {/* ── Overtime the reader cannot see from here ──
+
+          The line above answers "is there anything going spare *in view*", and
+          answering only that was the bug: a week with nothing on it read as a
+          flat "No overtime available this week" while accounts sat on the board
+          for the Tuesday after, and the panel gave no reason to press the arrow.
+
+          Deliberately a second sentence rather than a clause on the first. The
+          two are different claims about different weeks, and a reader who is
+          about to claim something this week must not have to parse which half
+          of a sentence applies to them. The *same* orange dot, at the same
+          strength: it is the same thing one scope away, and a second, dimmer
+          orange for one meaning is the drift DESIGN.md §5 names by example.
+          Rank is carried by order and by wording, not by a new token.
+
+          Suppressed on an errored fetch — `upcomingOffers` comes from the same
+          request, so a failure there has already been reported honestly above
+          and a confident count here would contradict it. */}
+      {showOvertime && !offersError && firstUpcomingDay !== null && (
+        <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-zinc-400">
+          <span className="inline-block size-1.5 shrink-0 rounded-full bg-orange-400" aria-hidden />
+          <span>
+            {/* The week view's lookahead *is* exactly next week, so it can count.
+                The month view's is only the seven days after the 31st, so a
+                count there would read as the whole of next month and be wrong by
+                omission — it names the date instead, which is the actionable
+                half either way. */}
+            {isWeek
+              ? `${pluralise(upcomingOffers.length, 'account')} available next week`
+              : 'More overtime is on the board after this month'}{' '}
+            — the first on {formatDayLabelWithWeekday(firstUpcomingDay)}.
+          </span>
+
+          {/* Week view only: the month is driven by a prop this panel does not
+              own, so there is nowhere for the arrow to go. The sentence still
+              carries the date, which is the part that is actionable. */}
+          {isWeek && (
+            <Button
+              size="xs"
+              variant="ghost"
+              className="ml-0.5 text-orange-400 hover:text-orange-300"
+              onClick={() => setWeekStart(addDays(weekStart, 7))}
+            >
+              View next week
+              <ChevronRight className="size-3" aria-hidden />
+            </Button>
           )}
         </p>
       )}
