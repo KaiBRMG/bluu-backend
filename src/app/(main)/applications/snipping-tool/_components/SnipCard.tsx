@@ -70,7 +70,7 @@ export function SnipCard({
   const taken = stamp.format(new Date(snip.createdAt)).replace(',', '');
 
   return (
-    <li className={cn('group flex flex-col overflow-hidden rounded-xl', SURFACE)}>
+    <li className={cn('flex flex-col overflow-hidden rounded-xl', SURFACE)}>
       {/* The preview is the row's identity — a screenshot has no name, so the
           picture is the only thing that tells one from another. `object-contain`
           on a fixed box rather than `cover`: cropping a crop is how a user loses
