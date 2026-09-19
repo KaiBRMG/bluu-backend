@@ -10,7 +10,13 @@ import { auth } from '@/firebase-config';
 import { useUserData } from '@/hooks/useUserData';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { copyText } from '@/lib/copyText';
-import { formatSnipShortcut, resolveSnipSettings } from '@/lib/snips';
+import {
+  SNIPPING_TOOL_MIN_APP_VERSION,
+  formatSnipShortcut,
+  resolveSnipSettings,
+} from '@/lib/snips';
+import { meetsMinVersion } from '@/lib/appVersion';
+import { useAppVersion } from '@/hooks/useAppVersion';
 import type { SnipPage, SnipRow } from '@/types/snips';
 import { SnipCard } from './_components/SnipCard';
 import { SnipSettingsPopover } from './_components/SnipSettingsPopover';
@@ -25,8 +31,48 @@ import { SnipSettingsPopover } from './_components/SnipSettingsPopover';
  * "New Snip" button is a convenience for a user who is already looking at it,
  * not the primary path.
  */
+/**
+ * What a user on too old a shell sees instead of the library.
+ *
+ * It is a whole-page state rather than a disabled button because *nothing* here
+ * works on an old build: the shortcut cannot be armed, the tray item cannot be
+ * planted, and New Snip has no IPC to call. Showing a grid of snips they can
+ * still copy links from would be defensible, but it would also be a page that
+ * silently does a fraction of what its own description promises.
+ *
+ * Quiet, per DESIGN.md: one line of explanation, no illustration, no box around
+ * it. The version is stated because "update the app" is unactionable if you
+ * cannot tell whether you already did.
+ */
+function UpdateRequired({ version }: { version: string | null }) {
+  return (
+    <div className="max-w-xl">
+      <h1 className="mb-2 text-2xl font-bold tracking-tight">Snipping Tool</h1>
+      <p className="text-sm text-zinc-400">
+        This needs desktop app version{' '}
+        <span className="tabular-nums text-zinc-300">{SNIPPING_TOOL_MIN_APP_VERSION}</span> or newer
+        {version ? (
+          <>
+            {' '}— you are on{' '}
+            <span className="tabular-nums text-zinc-300">{version}</span>.
+          </>
+        ) : (
+          '.'
+        )}{' '}
+        Screen capture runs in the desktop app itself, so it cannot arrive with a
+        page refresh.
+      </p>
+      <p className="mt-3 text-sm text-zinc-400">
+        You will be prompted to update when the build is released. Quit and
+        reopen the app if you have already installed it.
+      </p>
+    </div>
+  );
+}
+
 export default function SnippingToolPage() {
   const { userData } = useUserData();
+  const { version, status: versionStatus } = useAppVersion();
   const { timezone } = useViewerTimezone();
 
   const [snips, setSnips] = useState<SnipRow[] | null>(null);
@@ -207,6 +253,33 @@ export default function SnippingToolPage() {
       toast.error(err instanceof Error ? err.message : 'Could not delete that snip');
     }
   }, []);
+
+  // The version floor, checked here and not only in the sidebar: this route is
+  // reachable by deep link, by the completion notification's `actionUrl`, and by
+  // typing it. `versionStatus` is what keeps the refusal from flashing for
+  // everyone during the tick before the IPC answer lands — `meetsMinVersion`
+  // treats "unknown" as failing, which is right for a decision and wrong to
+  // render. An old shell that cannot even answer resolves to `null`, which
+  // fails the floor, which is the correct outcome.
+  const tooOld = versionStatus === 'resolved' && !meetsMinVersion(version, SNIPPING_TOOL_MIN_APP_VERSION);
+
+  if (versionStatus === 'checking') {
+    return (
+      <AppLayout>
+        <div className="max-w-6xl">
+          <Skeleton className="h-8 w-48 rounded-md" />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (tooOld) {
+    return (
+      <AppLayout>
+        <UpdateRequired version={version} />
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>

@@ -17,6 +17,24 @@
  */
 export const SNIPPING_TOOL_PAGE_ID = 'apps-snipping-tool';
 
+/**
+ * The installed Electron build the Snipping Tool needs.
+ *
+ * Capture is **entirely main-process work** — the global shortcut, the tray
+ * item, the transparent selection surfaces, `desktopCapturer` and the crop all
+ * ship in `electron/main.js`. None of it can be delivered by a Vercel deploy, so
+ * a renderer running inside an older shell (rule 9c — weeks-old renderers are
+ * normal here) would render a perfectly working-looking page whose every button
+ * does nothing.
+ *
+ * Feature-detecting `window.electronAPI.snip` would catch today's case on its
+ * own. This floor is the thing that stays correct if the bridge is ever
+ * backported or partially present, and it is what lets the UI say *"update the
+ * app"* rather than *"something went wrong"*. Mirrors `minVersion` on GoLogin's
+ * entry in `SATELLITE_PAGES`.
+ */
+export const SNIPPING_TOOL_MIN_APP_VERSION = '0.13.0';
+
 // ─── Share tokens ────────────────────────────────────────────────────
 
 /**

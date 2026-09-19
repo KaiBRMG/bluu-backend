@@ -127,6 +127,23 @@ A snip's token is its **document id**, unlike the prompt library, where `prompt-
 
 32 characters over a 32-symbol alphabet ≈ 160 bits. `randomBytes % 32` is unbiased **only because the alphabet is exactly 32 long** — 256 divides evenly by it. Changing the alphabet's length reintroduces modulo bias and `mintSnipId` has to become a rejection loop.
 
+## The version floor: 0.13.0
+
+Capture is **entirely main-process work** — the global shortcut, the tray item, the transparent selection surfaces, `desktopCapturer` and the crop all live in `electron/main.js`. None of it can arrive by a Vercel deploy, and a renderer inside an older shell is the normal case here, not an edge case (rule 9c). Without a floor, such a user gets a page that looks completely functional and whose every button does nothing.
+
+`SNIPPING_TOOL_MIN_APP_VERSION` in [`src/lib/snips.ts`](../src/lib/snips.ts) is the single declaration. It is enforced in **two** places, and both are needed:
+
+| Where | What it does | Why it is not enough alone |
+|---|---|---|
+| `MIN_VERSION_PAGES` in [`Sidebar.tsx`](../src/components/Sidebar.tsx) | Refuses the click, toasts "needs version 0.13.0 or newer" | The rail is not the only way to reach a route — deep links, the completion notification's `actionUrl`, and typing the URL all bypass it |
+| The page itself | Renders an "update required" state instead of the library | Nothing stops a user reaching the route; this is the actual gate |
+
+This mirrors GoLogin's `minVersion` in `SATELLITE_PAGES`, but the mechanism differs and the difference matters: GoLogin opens a **satellite window**, so `main.js` also refuses the path outright via `SATELLITE_PREFIXES`. The Snipping Tool is an ordinary in-window route, so there is no main-process refusal to lean on — the renderer is the only thing that can say no.
+
+**`useAppVersion` is three-state (`checking` / `resolved`) and the page must wait for `resolved`.** `meetsMinVersion` treats an unknown version as failing the floor, which is the right default for a decision and the wrong thing to paint: gating on the boolean alone flashes "update required" at every user during the tick before the IPC answers. A shell so old it cannot answer resolves to `null`, which fails the floor — which is the correct outcome, arrived at deliberately rather than by a race.
+
+The version arithmetic itself (`parseVersion` / `meetsMinVersion`) lives in [`src/lib/appVersion.ts`](../src/lib/appVersion.ts). It was private to `Sidebar.tsx` until this feature needed it from a page as well; two copies of version comparison is the kind of thing that drifts into disagreeing about what `0.13.0` means.
+
 ## Authorisation, in three layers
 
 1. **The page permission `apps-snipping-tool`** (tier 2) gates every owner-facing route *and* the native surfaces: `SnipController` pushes `enabled` to Electron from `permittedPageIds`, so revoking the page takes the tray item and the shortcut away rather than just hiding the list. Main deliberately **never caches that config to disk** — a cached one would re-arm a revoked user's shortcut at next launch.
@@ -231,4 +248,5 @@ One transparent surface per display, each covering that display's bounds.
 - **Cache Components.** `/s/[shareId]` reads uncached data inside a `<Suspense>` boundary and must stay that way. Do not add `export const dynamic` (rejected outright under the flag) and do not mark the page or `getPublicSnip` cacheable — a deleted snip has to stop resolving immediately.
 - **`/s` is allowlisted in `src/middleware.ts`.** Without it a recipient in a normal browser is rewritten to `/desktop-only`, which would make sharing pointless.
 - **The bucket's CORS policy is a deployment prerequisite** — see the Storage section above. `Failed to fetch` on `storage.googleapis.com` is always this, never the code.
+- **The page is gated on app version 0.13.0** in two places — see the version-floor section above. Bumping `electron/package.json` without updating `SNIPPING_TOOL_MIN_APP_VERSION` (or vice versa) is how a release gates out the very build that contains the feature.
 - **This needs an Electron build** (rule 14, the two-push dance): `electron/main.js`, `preload.js` and two new files changed. A renderer on an older shell degrades cleanly — `window.electronAPI.snip` is absent, every call site feature-detects, and the page says to update.

@@ -8,6 +8,9 @@ import { House, ChevronLeft, ChevronDown } from "lucide-react";
 import type { ResolvedAccess } from "@/types/firestore";
 import type { TeamspaceDef } from "@/lib/definitions";
 import { UNIVERSAL_PAGES } from "@/lib/definitions";
+import { meetsMinVersion } from "@/lib/appVersion";
+import { readAppVersion } from "@/hooks/useAppVersion";
+import { SNIPPING_TOOL_MIN_APP_VERSION } from "@/lib/snips";
 import {
   Sidebar as SidebarPrimitive,
   SidebarContent,
@@ -58,32 +61,68 @@ const SATELLITE_PAGES: Record<string, { route: string; key: string; minVersion?:
   "apps-gologin": { route: "/gologin", key: "gologin", minVersion: "0.12.0" },
 };
 
-/** `1.2.3` -> comparable tuple. Ignores any pre-release suffix. */
-function parseVersion(value: string): number[] {
-  return String(value)
-    .split("-")[0]
-    .split(".")
-    .map((part) => Number.parseInt(part, 10) || 0);
-}
+/**
+ * Navigable pages that need a minimum shell, keyed by pageId.
+ *
+ * Distinct from `SATELLITE_PAGES` above because these pages *do* navigate — they
+ * are ordinary routes inside this window, not their own Electron window — so
+ * there is no `openSatellite` call for main to refuse. The refusal has to happen
+ * here, on the click.
+ *
+ * **This rail is not the enforcement.** A route is reachable by deep link, by a
+ * notification `actionUrl`, and by typing it; the page itself re-checks the
+ * floor and renders its own "update required" state. This is what stops a user
+ * walking into that state from the one place the app invites them to.
+ */
+const MIN_VERSION_PAGES: Record<string, string> = {
+  // Capture is entirely main-process work (global shortcut, tray item, selection
+  // surfaces, desktopCapturer). A pre-0.13.0 shell renders the library fine and
+  // then cannot capture anything.
+  "apps-snipping-tool": SNIPPING_TOOL_MIN_APP_VERSION,
+};
 
 /**
- * True when `version` is at least `minimum`.
+ * A page that navigates normally once the shell is new enough, and refuses with
+ * a toast when it is not.
  *
- * Returns **false when the version is unknown** — no IPC, no answer, an
- * unparseable string. A satellite gated on a version is gated because the build
- * has to carry specific main-process code, and "I could not tell" is not
- * evidence that it does.
+ * It asks for the version on the **click** rather than on render. Two reasons:
+ * this tree remounts on every navigation (see the app-shell note in CLAUDE.md),
+ * so a render-time check would be an IPC round trip per navigation for a value
+ * that cannot change without a restart; and `useAppVersion` memoises the answer
+ * at module scope, so the await here is free after the first one.
  */
-function meetsMinVersion(version: string | null | undefined, minimum: string): boolean {
-  if (!version) return false;
-  const actual = parseVersion(version);
-  const required = parseVersion(minimum);
-  for (let i = 0; i < Math.max(actual.length, required.length); i++) {
-    const a = actual[i] ?? 0;
-    const b = required[i] ?? 0;
-    if (a !== b) return a > b;
-  }
-  return true;
+function VersionGatedPageButton({
+  href,
+  title,
+  icon,
+  minVersion,
+  isActive,
+}: {
+  href: string;
+  title: string;
+  icon?: string | null;
+  minVersion: string;
+  isActive: boolean;
+}) {
+  const router = useRouter();
+
+  const open = useCallback(async () => {
+    const version = await readAppVersion().catch(() => null);
+    if (!meetsMinVersion(version, minVersion)) {
+      toast.error(`${title} needs app version ${minVersion} or newer.`, {
+        description: "Update the desktop app to use it.",
+      });
+      return;
+    }
+    router.push(href);
+  }, [href, minVersion, router, title]);
+
+  return (
+    <SidebarMenuButton onClick={open} isActive={isActive} tooltip={title}>
+      <PageIcon name={icon ?? undefined} />
+      <span>{title}</span>
+    </SidebarMenuButton>
+  );
 }
 
 function SatelliteButton({
@@ -308,6 +347,14 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
                               pageId={page.pageId}
                               title={page.title}
                               icon={page.icon}
+                            />
+                          ) : page.href && MIN_VERSION_PAGES[page.pageId] ? (
+                            <VersionGatedPageButton
+                              href={page.href}
+                              title={page.title}
+                              icon={page.icon}
+                              minVersion={MIN_VERSION_PAGES[page.pageId]}
+                              isActive={pathname === page.href}
                             />
                           ) : (
                             <SidebarMenuButton
