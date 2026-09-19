@@ -958,6 +958,15 @@ function armSnipOverlays() {
  * Retina laptop beside a 1080p monitor) crop correctly.
  */
 async function captureDisplay(display) {
+  // macOS gates screen capture behind a TCC grant, and when it is missing
+  // `desktopCapturer` does not throw — it hands back sources whose thumbnails
+  // are empty. Checking the status first is the only way to tell "you have not
+  // allowed this" apart from "the capture genuinely failed", and they need
+  // completely different advice: one is a settings toggle, the other is a retry.
+  if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted') {
+    return { error: 'permission' };
+  }
+
   const displays = electronScreen.getAllDisplays();
   const box = displays.reduce(
     (acc, d) => ({
@@ -972,7 +981,7 @@ async function captureDisplay(display) {
     thumbnailSize: box,
     fetchWindowIcons: false,
   });
-  if (sources.length === 0) return null;
+  if (sources.length === 0) return { error: 'no-sources' };
 
   // `display_id` is the reliable pairing; index order is the fallback for
   // platforms/versions that leave it blank.
@@ -982,7 +991,11 @@ async function captureDisplay(display) {
     sources[index] ||
     sources[0];
 
-  return match && !match.thumbnail.isEmpty() ? match.thumbnail : null;
+  // An empty thumbnail with the permission granted means the compositor gave us
+  // nothing for this display — a monitor unplugged or a resolution change inside
+  // the settle window is the realistic cause.
+  if (!match || match.thumbnail.isEmpty()) return { error: 'empty' };
+  return { shot: match.thumbnail };
 }
 
 async function startSnip(source) {
@@ -1125,8 +1138,10 @@ ipcMain.on('snip:region', async (event, rect) => {
   await new Promise(resolve => setTimeout(resolve, SNIP_SETTLE_MS));
 
   let payload = null;
+  let failure = 'unknown';
   try {
-    const shot = await captureDisplay(display);
+    const { shot, error } = await captureDisplay(display);
+    if (error) failure = error;
     if (shot) {
       const shotSize = shot.getSize();
       // CSS pixels on the surface → device pixels in the capture. Derived from
@@ -1142,6 +1157,7 @@ ipcMain.on('snip:region', async (event, rect) => {
         shotSize.height,
       );
 
+      failure = 'crop';
       const cropped = shot.crop(crop);
       const size = cropped.getSize();
       payload = {
@@ -1151,13 +1167,21 @@ ipcMain.on('snip:region', async (event, rect) => {
       };
     }
   } catch (err) {
-    console.error('[snip] capture failed:', err.message);
+    console.error(`[snip] capture failed (${failure}):`, err.message);
   }
 
   teardownSnip();
 
-  if (payload) sendTo(mainWindow, 'snip:captured', payload);
-  else sendTo(mainWindow, 'snip:failed', { reason: 'capture' });
+  if (payload) {
+    sendTo(mainWindow, 'snip:captured', payload);
+  } else {
+    // Logged here and not only in the catch: `captureDisplay` returning a reason
+    // is not an exception, so this branch used to produce a user-visible toast
+    // with NOTHING in the log to explain it. A failure the user can see and
+    // nobody can diagnose is the worst of both.
+    console.error(`[snip] capture produced nothing (${failure})`);
+    sendTo(mainWindow, 'snip:failed', { reason: failure });
+  }
 });
 
 ipcMain.on('snip:cancel', (event) => {

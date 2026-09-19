@@ -133,8 +133,32 @@ export default function SnipController() {
     api.onCaptured(handleCapture);
     // The screen is photographed after the box is drawn, so a capture failure
     // costs the user work they have already done. Saying nothing would look
-    // like the tool ignored them.
-    api.onFailed?.(() => toast.error('That region could not be captured — try again.'));
+    // like the tool ignored them — and saying only "try again" is barely
+    // better, because the most common cause on macOS is a permission that no
+    // amount of retrying will grant.
+    api.onFailed?.(payload => {
+      if (payload?.reason === 'permission') {
+        toast.error('Bluu needs Screen Recording permission to capture.', {
+          description: 'Turn it on in System Settings → Privacy & Security → Screen Recording, then try again.',
+          action: window.electronAPI?.permissions?.requestScreenAccess
+            ? {
+                label: 'Open Settings',
+                onClick: () => { window.electronAPI?.permissions?.requestScreenAccess?.(); },
+              }
+            : undefined,
+        });
+        return;
+      }
+      if (payload?.reason === 'empty' || payload?.reason === 'no-sources') {
+        // Realistically a display that changed underneath us — unplugged, or a
+        // resolution switch — inside the window between the drag and the shot.
+        toast.error('That screen could not be read.', {
+          description: 'If you changed displays mid-capture, try again.',
+        });
+        return;
+      }
+      toast.error('That region could not be captured — try again.');
+    });
     return () => api.removeCapturedListeners?.();
   }, [handleCapture]);
 

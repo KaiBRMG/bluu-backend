@@ -9,6 +9,7 @@ import { invalidateDisplayNamesCache } from '@/app/api/users/display-names/route
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { randomUUID } from 'crypto';
 import type { DecodedIdToken } from 'firebase-admin/auth';
+import { deleteAllSnipsForUser } from '@/lib/services/snipService';
 
 /**
  * PUT /api/admin/users/[uid]
@@ -203,7 +204,16 @@ export const DELETE = withAuth(async (
       // Rule 6 — a new per-user collection joins the cascade. Snips are also
       // live PUBLIC links, so leaving them behind would keep a departed
       // employee's screenshots served to anyone still holding a URL.
-      deleteQueryDocs(adminDb.collection('snips').where('ownerUid', '==', targetUid)),
+      //
+      // Through the service rather than a query + a prefix delete, because snip
+      // objects are NOT stored under a per-user prefix (the path carries no uid
+      // — see `createSnipUploadSlot`). `deleteAllSnipsForUser` resolves each
+      // object from its own document's `storagePath`, which is the only thing
+      // that works for both the current layout and the older `snips/{uid}/...`
+      // one.
+      deleteAllSnipsForUser(targetUid).catch(err => {
+        console.error(`[DeleteUser] Failed to delete snips for ${targetUid}:`, err);
+      }),
     ]);
 
     // ─── 3. Storage: screenshots (full-size + thumbnails) and profile photo ──
@@ -214,9 +224,6 @@ export const DELETE = withAuth(async (
       }),
       bucket.deleteFiles({ prefix: `profile-photos/${targetUid}/` }).catch(err => {
         console.error(`[DeleteUser] Failed to delete profile photo for ${targetUid}:`, err);
-      }),
-      bucket.deleteFiles({ prefix: `snips/${targetUid}/` }).catch(err => {
-        console.error(`[DeleteUser] Failed to delete snip storage for ${targetUid}:`, err);
       }),
     ]);
 

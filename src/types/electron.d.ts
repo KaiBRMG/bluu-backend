@@ -334,8 +334,20 @@ interface ElectronAPI {
     onCaptured: (
       callback: (payload: { dataBase64: string; width: number; height: number }) => void,
     ) => void;
-    /** The capture runs after the box is drawn, so a failure is otherwise
-     *  silent — the user selected a region and nothing happened. */
+    /**
+     * The capture runs after the box is drawn, so a failure is otherwise silent
+     * — the user selected a region and nothing happened.
+     *
+     * `reason` distinguishes causes that need different advice:
+     *  • `permission`  — macOS Screen Recording is not granted. Retrying cannot
+     *                    fix it; the user has to toggle it in System Settings.
+     *  • `no-sources`  — `desktopCapturer` returned nothing at all.
+     *  • `empty`       — the display's thumbnail came back blank; realistically
+     *                    a monitor unplugged or a resolution change inside the
+     *                    settle window.
+     *  • `crop`        — the crop or PNG encode threw.
+     *  • `unknown`     — anything else.
+     */
     onFailed?: (callback: (payload: { reason: string }) => void) => void;
     removeCapturedListeners: () => void;
     onNavigate: (callback: (href: string) => void) => void;

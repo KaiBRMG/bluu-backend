@@ -41,14 +41,17 @@ export function SnipImage({
     );
   }
 
+  // Deliberately NOT wrapped in a link. It used to be an `<a href={src}>`
+  // "open full size", but `src` is a 302 to a signed Storage URL — following it
+  // put `storage.googleapis.com/.../snips/<owner uid>/...` in the visitor's
+  // address bar, handing a stranger the owner's uid and a one-hour bearer URL
+  // that outlives deleting the snip. `getPublicSnip` goes to some length to keep
+  // uids off this page; a link that leaks one undoes that.
+  //
+  // Nothing is lost: the image already renders at the full width of the page,
+  // which is the widest this layout has to offer.
   return (
-    <a
-      href={src}
-      target="_blank"
-      rel="noreferrer"
-      className="block overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.025] transition-colors hover:border-white/[0.12] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-      title="Open full size"
-    >
+    <div className="overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.025]">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
@@ -61,6 +64,6 @@ export function SnipImage({
         onError={() => setFailed(true)}
         className="h-auto w-full"
       />
-    </a>
+    </div>
   );
 }

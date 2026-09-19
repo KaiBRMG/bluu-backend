@@ -27,7 +27,11 @@
 
 ## Storage
 
-- `snips/{uid}/{shareId}.png` — written by a v4 signed URL from the renderer, read by a v4 signed URL through the image route. Storage rules are never consulted on either leg; **this route is the authorisation.**
+- `snips/{shareId}.png` — written by a v4 signed URL from the renderer, read by a v4 signed URL through the image route. Storage rules are never consulted on either leg; **this route is the authorisation.**
+
+**The object path carries no uid, deliberately.** It used to be `snips/{uid}/{shareId}.png`, and that leaked: a signed URL is a place a path becomes *visible* — an address bar, a referrer, a pasted link — so the owner's Firebase uid travelled with every image. `shareId` is already 160 bits of globally unique token, so the per-user folder bought nothing but that exposure. Ownership is enforced on the Firestore document (`ownerUid`), which is the only place it was ever checked.
+
+Snips created before this change still carry the old path. Nothing needs migrating: **every read and delete resolves `storagePath` from the document** rather than rebuilding it from a uid, so both layouts work. The one place that did rebuild it was the account-deletion cascade's `bucket.deleteFiles({ prefix: 'snips/{uid}/' })`, which now calls `deleteAllSnipsForUser` instead — per-document, and correct for both layouts.
 
 ### The bucket needs a CORS policy, and without one nothing uploads
 
@@ -106,6 +110,18 @@ The residue is a ~100ms window in which live content could change under the rect
 
 **A capture failure here is silent from the user's side** — they drew a box and nothing happened — which is why main emits `snip:failed` and `SnipController` toasts it. Do not remove that channel.
 
+`snip:failed` carries a **`reason`**, because the causes need different advice and a single "try again" is wrong for the most common one:
+
+| `reason` | What happened | What the user is told |
+|---|---|---|
+| `permission` | macOS Screen Recording is not granted. `desktopCapturer` does **not** throw for this — it returns sources whose thumbnails are empty — so main checks `getMediaAccessStatus('screen')` up front | Name the permission, with an **Open Settings** action (`permissions.requestScreenAccess`). Retrying cannot fix it |
+| `no-sources` | `desktopCapturer` returned nothing at all | "That screen could not be read" |
+| `empty` | The thumbnail came back blank with permission granted — realistically a monitor unplugged or a resolution change inside the settle window | Same, plus "if you changed displays mid-capture, try again" |
+| `crop` | The crop or the PNG encode threw | Generic retry |
+| `unknown` | Anything else | Generic retry |
+
+**Every branch logs.** The first version of this returned a bare `null` when `captureDisplay` could not produce an image, which is not an exception — so it skipped the `catch`, produced a user-visible toast, and left **nothing in the log to explain it**. A failure the user can see and nobody can diagnose is the worst of both; keep the `console.error` on the no-payload path.
+
 ### Why main crops and the renderer never sees the full screen
 
 The surface reports a rectangle. Main takes the capture and crops it, then sends **only that region** down. A surface that received the whole capture and cropped it in the page would be a full-screen screen-reader running at a `file://` origin — which is why `snip-preload.js` has **no image channel at all**. Nothing can send that window a picture, so nothing can leak one through it.
@@ -142,6 +158,17 @@ This mirrors GoLogin's `minVersion` in `SATELLITE_PAGES`, but the mechanism diff
 
 **`useAppVersion` is three-state (`checking` / `resolved`) and the page must wait for `resolved`.** `meetsMinVersion` treats an unknown version as failing the floor, which is the right default for a decision and the wrong thing to paint: gating on the boolean alone flashes "update required" at every user during the tick before the IPC answers. A shell so old it cannot answer resolves to `null`, which fails the floor — which is the correct outcome, arrived at deliberately rather than by a race.
 
+**It is a floor, set once, and then left alone.** `meetsMinVersion` is `>=`, so `0.13.0`, `0.14.0`, `1.0.0` and a `0.13.0-beta.1` all pass — routine releases never touch this constant, and nothing needs to be kept "in sync" with `electron/package.json`. Verified against the real function:
+
+| Installed build | Result |
+|---|---|
+| `0.12.0`, `0.12.9` | blocked |
+| `0.13.0`, `0.13.1`, `0.14.0`, `1.0.0` | access |
+| `0.13.0-beta.1` | access (the pre-release suffix is stripped by `parseVersion`) |
+| `null`, `''`, unparseable | blocked |
+
+The **one** thing that would break it: the constant must name the version that *actually* ships the main-process code, not the version it was planned for. If this release slipped and the snip code landed in `0.14.0` instead, a floor left at `0.13.0` would wave through `0.13.0` users to a page that cannot capture. Set it to the build it really shipped in; after that it is finished.
+
 The version arithmetic itself (`parseVersion` / `meetsMinVersion`) lives in [`src/lib/appVersion.ts`](../src/lib/appVersion.ts). It was private to `Sidebar.tsx` until this feature needed it from a page as well; two copies of version comparison is the kind of thing that drifts into disagreeing about what `0.13.0` means.
 
 ## Authorisation, in three layers
@@ -165,6 +192,10 @@ On the page, the sentinel and the "Load more" button are **the same element**: s
 ## The public page shows a name and nothing else
 
 `getPublicSnip` is the whole of what an anonymous visitor can see: the image, the date, the dimensions, and the owner's `displayName`. **No uid, no email, no avatar, no storage path, no retention, no byte size.** A forwarded link must not become a staff directory entry. Keep it that way when extending the projection.
+
+**Neither the public page nor the owner's library links to the image URL**, and that is a rule, not an oversight. `imageUrl` is a 302 to a signed Storage URL, so *navigating* to it (rather than loading it as an `<img src>`) lands the browser on `storage.googleapis.com/...` with the signed credential sitting in the address bar and the session history. Two things leak there: the object path, and a bearer URL that stays valid for its full hour — outliving the snip being deleted, which is precisely what the indirection below exists to prevent.
+
+So: the owner's card opens `shareUrl` (the public page — which also shows them what a recipient sees), and the public page's image is **not wrapped in a link at all**. If a "view full size" affordance is ever wanted back, it needs to be a client-side zoom, not an anchor to the image route.
 
 The image is served through `/api/public/snip/{id}/image`, which **302s to a freshly signed URL** rather than streaming the object. That indirection is what makes the URL a recipient holds permanent to the outside (a Slack unfurl, a browser cache, an OG preview) and revocable from the inside — deleting the snip kills it immediately, where a handed-out signed URL would keep working until its own expiry. Both the redirect and the 404 are `no-store`; a cached redirect would outlive its target *and* survive the delete.
 
@@ -248,5 +279,5 @@ One transparent surface per display, each covering that display's bounds.
 - **Cache Components.** `/s/[shareId]` reads uncached data inside a `<Suspense>` boundary and must stay that way. Do not add `export const dynamic` (rejected outright under the flag) and do not mark the page or `getPublicSnip` cacheable — a deleted snip has to stop resolving immediately.
 - **`/s` is allowlisted in `src/middleware.ts`.** Without it a recipient in a normal browser is rewritten to `/desktop-only`, which would make sharing pointless.
 - **The bucket's CORS policy is a deployment prerequisite** — see the Storage section above. `Failed to fetch` on `storage.googleapis.com` is always this, never the code.
-- **The page is gated on app version 0.13.0** in two places — see the version-floor section above. Bumping `electron/package.json` without updating `SNIPPING_TOOL_MIN_APP_VERSION` (or vice versa) is how a release gates out the very build that contains the feature.
+- **The page is gated on app version 0.13.0** in two places — see the version-floor section above. It is a **floor, set once**: `0.14.0` and everything after it passes, so routine releases never touch it.
 - **This needs an Electron build** (rule 14, the two-push dance): `electron/main.js`, `preload.js` and two new files changed. A renderer on an older shell degrades cleanly — `window.electronAPI.snip` is absent, every call site feature-detects, and the page says to update.

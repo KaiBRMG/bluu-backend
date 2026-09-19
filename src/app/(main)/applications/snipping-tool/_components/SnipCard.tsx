@@ -74,14 +74,20 @@ export function SnipCard({
       {/* The preview is the row's identity — a screenshot has no name, so the
           picture is the only thing that tells one from another. `object-contain`
           on a fixed box rather than `cover`: cropping a crop is how a user loses
-          the one detail they took the shot for. */}
+          the one detail they took the shot for.
+
+          It opens `shareUrl` (the public page), NOT `imageUrl`. `imageUrl` is a
+          302 to a signed Storage URL, so navigating to it lands the browser on
+          `storage.googleapis.com/...` with the signed credential in the address
+          bar and the bar's history. Opening the share page also shows the owner
+          exactly what a recipient sees, which is the more useful click. */}
       <a
-        href={snip.imageUrl}
+        href={snip.shareUrl}
         target="_blank"
         rel="noreferrer"
         className="flex h-40 items-center justify-center overflow-hidden border-b border-white/[0.07] bg-black/30 transition-colors hover:bg-black/20 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50"
-        aria-label={`Open the snip taken ${taken} at full size`}
-        title="Open full size"
+        aria-label={`Open the shared page for the snip taken ${taken}`}
+        title="Open shared page"
       >
         {/* A raw <img>, for the same reason the public page uses one: next/image
             would pull the bytes through Vercel's optimizer (rule 9i), and `src`

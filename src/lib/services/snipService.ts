@@ -184,7 +184,16 @@ export async function createSnipUploadSlot(
   }
 
   const id = mintSnipId();
-  const storagePath = `${SNIP_STORAGE_PREFIX}/${uid}/${id}.png`;
+  // **No uid in the path.** The object is reachable by signed URL, and a signed
+  // URL is a place a uid can end up visible — in an address bar, a referrer, a
+  // pasted link. `id` is already 160 bits of unguessable, globally unique token,
+  // so a per-user folder bought nothing except that exposure. Ownership lives on
+  // the Firestore doc (`ownerUid`), which is where it is actually enforced.
+  //
+  // Older snips still carry `snips/{uid}/{id}.png`; every read and delete path
+  // resolves `storagePath` from the document rather than rebuilding it, so both
+  // layouts work and no migration is required.
+  const storagePath = `${SNIP_STORAGE_PREFIX}/${id}.png`;
 
   // The pending row is what makes the object reachable before the renderer
   // confirms the upload — without it, a PUT that succeeds and a finalise that
