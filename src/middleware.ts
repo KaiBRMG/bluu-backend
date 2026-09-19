@@ -15,6 +15,10 @@ const BROWSER_ALLOWED_PREFIXES = [
   // share token in the path.
   '/p',
   '/raffle',
+  // Shared snips. Same reasoning as `/p` above: the entire purpose of the link
+  // is that it opens for a recipient who does not have the desktop app.
+  // Read-only, and reachable only with the 160-bit token in the path.
+  '/s',
   // Onboarding links the terms of use out to the system browser (Electron routes
   // target=_blank through shell.openExternal), so it must resolve without the
   // Electron user agent. Public, read-only, no user data.

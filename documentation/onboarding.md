@@ -237,9 +237,9 @@ Validation is `validateOnboardingProfile` (`src/lib/validation.ts`), which layer
 **`personalEmail` is deliberately no longer required.** Since staff sign in with personal Google accounts, `workEmail` already *is* their personal address for almost everyone — requiring it a second time was a blocking field with no information in it. It survives as an optional "Alternative email" for the minority who keep a separate contact address. The read-only login field above it is labelled **"Login email"**, not "Company email", for the same reason.
 - **DOB** additionally runs `validateDateOfBirth` (not future, age 16–100). The picker's `startMonth`/`endMonth` are bound to the same range so it cannot offer a date the form then rejects.
 
-Address is required because it is what resolves the user's timezone — `resolveTimezoneFromAddress` runs client-side and its result rides along in the **same** `/api/user/update` write, rather than the second request Settings makes.
+**Address no longer sets the timezone.** It used to — `resolveTimezoneFromAddress` mapped the typed country through a hand-maintained ~60-country table, which is why an unmappable country was a *validation error* on a form about where someone lives, and why anyone who never reached this form had no timezone at all. The zone now comes from the request IP (`POST /api/user/timezone`, header `x-vercel-ip-timezone`) via `TimezoneReporter`, which is mounted on the `(main)` layout and therefore already running during onboarding. The address stays required, for the employee record.
 
-On success: `POST /api/user/update` (profile + timezone) → `PATCH /api/user/onboarding { hasCompletedOnboarding: true }` → push to `done`.
+On success: `POST /api/user/update` (profile) → `PATCH /api/user/onboarding { hasCompletedOnboarding: true }` → push to `done`.
 
 **RULE — the completion flag belongs to this step, not the notifications step.** It is set only after the details are stored, so an interrupted flow re-enters onboarding rather than leaking a user into the app with an empty record.
 

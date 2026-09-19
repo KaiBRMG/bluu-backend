@@ -129,7 +129,8 @@ async function deleteQueryDocs(query: FirebaseFirestore.Query): Promise<number> 
  * DELETE /api/admin/users/[uid]
  * Admin-only. Permanently deletes a user and ALL of their personal data:
  * the user document, group membership, page permissions, active session,
- * time entries (timesheets), screenshots (Firestore docs + Storage files),
+ * time entries (timesheets), screenshots and snips (Firestore docs + Storage
+ * files),
  * shifts, leave requests, notifications, bug reports, and profile photo.
  *
  * Shared business records (disputes, campaign-tracking, content-planning,
@@ -199,6 +200,10 @@ export const DELETE = withAuth(async (
       deleteQueryDocs(adminDb.collection('leave_requests').where('userId', '==', targetUid)),
       deleteQueryDocs(adminDb.collection('notifications').where('userId', '==', targetUid)),
       deleteQueryDocs(adminDb.collection('bugs').where('uid', '==', targetUid)),
+      // Rule 6 — a new per-user collection joins the cascade. Snips are also
+      // live PUBLIC links, so leaving them behind would keep a departed
+      // employee's screenshots served to anyone still holding a URL.
+      deleteQueryDocs(adminDb.collection('snips').where('ownerUid', '==', targetUid)),
     ]);
 
     // ─── 3. Storage: screenshots (full-size + thumbnails) and profile photo ──
@@ -209,6 +214,9 @@ export const DELETE = withAuth(async (
       }),
       bucket.deleteFiles({ prefix: `profile-photos/${targetUid}/` }).catch(err => {
         console.error(`[DeleteUser] Failed to delete profile photo for ${targetUid}:`, err);
+      }),
+      bucket.deleteFiles({ prefix: `snips/${targetUid}/` }).catch(err => {
+        console.error(`[DeleteUser] Failed to delete snip storage for ${targetUid}:`, err);
       }),
     ]);
 

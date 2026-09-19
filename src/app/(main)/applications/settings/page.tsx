@@ -74,7 +74,7 @@ export default function Settings() {
                 <PersonalInfoForm onHasChanges={setPersonalInfoHasChanges} />
               </TabsContent>
               <TabsContent value="app-settings">
-                <AppSettingsForm onSectionChange={setActiveSection} />
+                <AppSettingsForm />
               </TabsContent>
             </div>
           </Tabs>

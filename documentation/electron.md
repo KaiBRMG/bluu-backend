@@ -38,6 +38,9 @@ The same Vercel project serves **two hosts**, and the difference matters:
 | `electron/widget.html` | The **Windows** timer HUD page (see [Session timer widget](#session-timer-widget-tray-title--docked-hud)). Renders nothing on its own — main sends it a finished string each second. |
 | `electron/widget-preload.js` | Preload for `widget.html` **only** — exposes `onTick` plus the four drag channels (`setInteractive`/`dragStart`/`dragEnd`/`resetPosition`), and nothing else. Deliberately not the app preload; the drag channels carry no coordinates, and main accepts them only from the HUD window. |
 | `electron/public/tray/*.png` | Timer-state glyphs (`*Template.png` + `@2x`), black + alpha. macOS template images; the Windows HUD uses the same files as a CSS mask. |
+| `electron/snip.html` | The **Snipping Tool** selection surface — one **fully transparent** window per display. It draws nothing but the rectangle being dragged: the desktop stays live underneath and there is no scrim. See [snipping-tool.md](snipping-tool.md). |
+| `electron/snip-preload.js` | Preload for `snip.html` **only** — two channels (`commit`/`cancel`) and nothing else, with **no image channel by design**. Deliberately not the app preload: that window is invisible, always-on-top and watching the mouse. |
+| `electron/public/tray/snip*.png` | Snipping Tool tray glyphs. `snipTemplate.png` (+`@2x`) is black+alpha for the macOS menu bar; `snip-win.png` is **white**, because Windows draws a tray icon as-is. |
 | `electron/package.json` | App version, npm scripts, and the full `electron-builder` config (incl. the `build.files` allowlist). |
 | `electron/public/logo/*` | App icons (`icon.icns`, `icon.ico`). |
 | `electron/public/*.mp3` | Notification sound (played in the renderer). |
@@ -102,6 +105,12 @@ All renderer↔main communication goes through `preload.js` → `window.electron
 | `updater.getPending()` | invoke | `updater:getPending` | result of the start-up check (`{version}` or null); **v0.8.0+ — feature-detect** |
 | `updater.download()` | send | `updater:download` | begin download; only ever from an explicit user click. **v0.8.0+** |
 | `updater.onAvailable/onProgress/onStatus/onBeforeInstall`, `readyToInstall()` | both | `updater:*` | live on macOS; inert on Windows (auto-update is darwin-gated) |
+| `clipboard.writeText(text)` | invoke | `clipboard:writeText` | writes from **main**. `navigator.clipboard.writeText` needs the document focused, and a snip completes while this window is hidden. Feature-detect |
+| `snip.configure(config)` | invoke | `snip:configure` | arms/disarms the global shortcut + tray item. Main-window only, and **never cached to disk** — see [snipping-tool.md](snipping-tool.md). Returns `{ok, shortcutRegistered}`; `false` there means another app owns the combination |
+| `snip.start()` | invoke | `snip:start` | the in-app "New Snip" button. Main-window only |
+| `snip.onCaptured(cb)` / `removeCapturedListeners()` | main→renderer | `snip:captured` | the **cropped region only**, base64 PNG. The full screen never reaches a web context |
+| `snip.onFailed(cb)` | main→renderer | `snip:failed` | the capture runs *after* the box is drawn, so a failure is otherwise silent — the user selected a region and nothing happened. Feature-detect |
+| `snip.onNavigate(cb)` / `removeNavigateListeners()` | main→renderer | `snip:navigate` | the tray's "My Snips" — main asks the renderer to route, so the App Router transition is a normal client-side one |
 | `updater.check()` | invoke | `updater:check` | re-run the GitHub check on demand — the renderer's "Check again" button, and what a hidden-not-quit macOS app relies on between the shell's own 4-hourly re-checks. **v0.10.3+** — feature-detect; on an older shell the renderer falls back to re-reading `getPending()`, which there really can only change on a relaunch |
 
 ## Renderer staleness: the app that is never closed

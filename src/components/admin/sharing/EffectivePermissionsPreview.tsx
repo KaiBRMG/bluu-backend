@@ -77,9 +77,15 @@ export default function EffectivePermissionsPreview({
           teamspaces.find((t) => t.id === page.teamspaceId)?.name ||
           page.teamspaceId;
 
+        // A sub-item's own title is a fragment ("Management"); this list has no
+        // indent to lean on, so it carries its parent's name.
+        const parent = page.parentPageId
+          ? pages.find((p) => p.pageId === page.parentPageId)
+          : undefined;
+
         return {
           pageId: page.pageId,
-          title: page.title,
+          title: parent ? `${parent.title} → ${page.title}` : page.title,
           icon: page.icon,
           teamspaceName: tsName,
           teamspaceId: page.teamspaceId,

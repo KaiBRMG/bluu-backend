@@ -59,6 +59,31 @@ They are two different facts, and the registry used to conflate them. The row me
 
 ---
 
+## 0b. Timezone — detected, not declared
+
+A user's timezone drives every time the product renders: shift times, salary day boundaries, sale timestamps, deadlines. It used to be derived from the **address** typed into Settings → Personal Information, through a hand-maintained country → zone map in `timezoneData.ts`. Three things were wrong with that, and all three are now gone:
+
+- **Most users never had one.** The map only ran when somebody opened that form and filled in a country. Everyone else sat on the `timezone: ''` that `ensureUserExists` seeds, and silently read the entire product in UTC — two hours out in SAST, eight in Manila. `TimezoneNotice` exists because of this failure mode.
+- **A whole country resolved to one zone.** Every US employee became `America/New_York`.
+- **The map was a validation gate on an unrelated field.** A country it did not know made the *address* invalid.
+
+**What happens now.** Vercel's Edge Network tags every request with `x-vercel-ip-timezone`, a real IANA zone, for free — no geocoding call, no external API, no extra round trip.
+
+| Field | Written by | Means |
+|---|---|---|
+| `timezone` / `timezoneOffset` | `POST /api/user/timezone` (auto) or `POST /api/user/update` from App Settings (manual) | The zone every surface renders in. Read through [`useViewerTimezone()`](../src/hooks/useViewerTimezone.ts) / `safeTimezone()` — never raw (rule 9g). |
+| `timezoneSource` | Same two paths — `'auto'` server-side only, `'manual'` only from App Settings | Which of them owns the field. |
+| `timezoneDetectedAt` | `POST /api/user/timezone` | When detection last wrote. Diagnostic; nothing queries it. |
+
+- [`TimezoneReporter`](../src/components/TimezoneReporter.tsx) (mounted on the `(main)` layout, outside `LazyProviders`) pings on mount, on focus/`online`, and on a 6-hour interval. The interval is the point: the shell never reloads (rule 9c), so a sign-in hook would reach most of the fleet roughly never — and this is what makes a relocation, or a DST shift in the stored offset label, land within a working day.
+- **RULE — a manual choice is final.** Saving in App Settings stamps `timezoneSource: 'manual'` and detection then refuses to touch the zone, forever. This is the answer to the VPN case, which is detection's known false positive: an `'auto'` zone is one click away from being permanent, whereas what it replaced was UTC for everyone who never went looking.
+- **RULE — a client may declare a zone *chosen*, never *detected*.** `/api/user/update` 400s any `timezoneSource` other than `'manual'`; `'auto'` is written only by `/api/user/timezone`, from the request's own IP. Accepting it on the update route would let a client clear the manual latch behind the user's back. That route also now rejects a `timezone` or `additionalTimezones` entry that is not a real IANA zone.
+- Detection is **best-effort**: the header is absent off-platform (local `next dev`), where the route falls back to the device's own `Intl` zone sent in the body — client input, so it is validated and only ever consulted when the header is missing. Nothing may assume a user has a timezone; `''` is still a normal state and rule 9g still applies in full.
+
+**Cost (rules 9 and 9i).** One small request per window per six hours, and **none at all** once a user has chosen manually. The route's read is the 60s-cached `getUserById`, collapsed further by a 30-minute per-uid throttle per server instance, and it **writes only when the zone or the offset label actually changed** — steady state for the whole fleet is a cached read and no write. Both new fields are exempt from single-field indexing ([data-layer.md](data-layer.md#single-field-index-exemptions)).
+
+---
+
 ## 0b. The page shape
 
 `/admin-portal/user-management` is **one faceted index of people** — the browse-and-open shape DESIGN.md §5 documents, and the same one `apps-resources` uses. It replaced a four-tab layout in which three tabs rendered the same component with booleans that collapsed to predicates already available as filters inside it.
@@ -89,6 +114,8 @@ They are two different facts, and the registry used to conflate them. The row me
 | `src/components/ui/avatar.tsx` | The **only** avatar renderer |
 | `src/components/PresenceReporter.tsx` | Stamps `lastActiveAt` — the real "last seen". Mounted in all three authenticated layouts |
 | API: `/api/user/presence/route.ts` | The read-free write half of presence |
+| `src/components/TimezoneReporter.tsx` | Triggers IP timezone detection. `(main)` layout only |
+| API: `/api/user/timezone/route.ts` | Detects the zone from `x-vercel-ip-timezone`; never overrides a manual choice |
 | API: `/api/admin/users/[uid]/route.ts` | DELETE cascade |
 | API: `/api/users/display-names/route.ts` | Basic user list |
 | API: `/api/shifts/week/route.ts` | `userMap` excludes archived |

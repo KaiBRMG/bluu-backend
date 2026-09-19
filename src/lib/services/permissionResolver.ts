@@ -53,6 +53,7 @@ export function resolveAccessiblePages(
         href: page.href,
         icon: page.icon,
         order: page.order,
+        parentPageId: page.parentPageId,
         grantedVia: resolved.via,
         grantingGroupId: resolved.groupId,
       });

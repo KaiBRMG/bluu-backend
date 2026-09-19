@@ -144,3 +144,21 @@ export function timezoneLabel(tz: string | null | undefined): string {
     return tz.replace(/_/g, ' ');
   }
 }
+
+/**
+ * The requester's IANA timezone, derived from their IP by Vercel's Edge Network.
+ *
+ * `x-vercel-ip-timezone` is attached to every request that reaches a function
+ * (https://vercel.com/docs/headers/request-headers), so this costs nothing —
+ * no geocoding call, no extra round trip, no billed lookup. It is the reason
+ * the product no longer asks a user for their address before it can tell the
+ * time.
+ *
+ * Returns `null` off-platform (local `next dev`, a self-hosted run) and for
+ * anything this runtime's tz database does not recognise, so every caller must
+ * have a path for "not detected" rather than treating absence as an error.
+ */
+export function timezoneFromRequest(request: Request): string | null {
+  const header = request.headers.get('x-vercel-ip-timezone');
+  return isValidTimezone(header) ? header : null;
+}

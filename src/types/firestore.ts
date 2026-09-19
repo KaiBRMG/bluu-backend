@@ -125,6 +125,15 @@ export interface UserDocument {
 
   timezone?: string;
   timezoneOffset?: string;
+  /**
+   * How `timezone` got its value. `'auto'` was detected from the user's IP by
+   * `/api/user/timezone`; `'manual'` was chosen in App Settings and is final —
+   * detection never overwrites it. Absent on anyone who has not been through
+   * either path since the field was introduced, which counts as auto.
+   */
+  timezoneSource?: 'auto' | 'manual';
+  /** When IP detection last wrote `timezone`. Diagnostic only — nothing queries it. */
+  timezoneDetectedAt?: Timestamp;
   additionalTimezones?: string[];
   // Notion document IDs the user has pinned to their home dashboard (max 10).
   pinnedResources?: string[];
@@ -153,6 +162,18 @@ export interface UserDocument {
   // User-controlled in Settings → App Settings and DEFAULT ON, so absent must
   // read as enabled — test it with `!== false`, never as truthy.
   timerWidgetEnabled?: boolean;
+
+  // Snipping Tool preferences — the tray item, the global shortcut and the
+  // auto-delete window. Every field defaults ON/to a value, so an absent map is
+  // a fully working tool, not a disabled one: read it through
+  // `resolveSnipSettings()` in `src/lib/snips.ts` and never field-by-field.
+  // See documentation/snipping-tool.md.
+  snipSettings?: {
+    trayIconEnabled?: boolean;
+    shortcutEnabled?: boolean;
+    shortcut?: string;
+    retention?: '1m' | '3m' | '6m' | '1y' | 'never';
+  };
 
   notificationPreferences?: {
     desktopEnabled: boolean;
@@ -1375,6 +1396,8 @@ export interface ResolvedAccess {
   href: string | null;
   icon: string | null;
   order: number;
+  /** Mirrors PageDef.parentPageId — set on sub-items, which the sidebar skips. */
+  parentPageId?: string;
   grantedVia: 'user' | 'group';
   grantingGroupId?: string;
 }

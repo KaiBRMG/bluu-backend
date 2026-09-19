@@ -165,7 +165,11 @@ export function usePermissions() {
     const accessiblePages: ResolvedAccess[] = PAGES
       .filter(p => ids.has(p.pageId))
       .map(p => ({ ...p, grantedVia: 'group' as const }));
-    const usedTeamspaceIds = new Set(accessiblePages.map(p => p.teamspaceId));
+    // Sub-items render nothing in the sidebar, so one on its own must not open
+    // an otherwise-empty teamspace section.
+    const usedTeamspaceIds = new Set(
+      accessiblePages.filter(p => !p.parentPageId).map(p => p.teamspaceId)
+    );
     const teamspaces = TEAMSPACES.filter(t => usedTeamspaceIds.has(t.id));
 
     const cached = getCachedPermissions();

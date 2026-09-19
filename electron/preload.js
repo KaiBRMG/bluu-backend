@@ -175,6 +175,46 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // a screenshot into a composer).
   clipboard: {
     readImage: () => ipcRenderer.invoke('clipboard:readImage'),
+    // Written from MAIN, not `navigator.clipboard.writeText`, which needs the
+    // document focused — a snip completes while the user is in another app with
+    // this window hidden, so the web API would silently do nothing.
+    writeText: (text) => ipcRenderer.invoke('clipboard:writeText', text),
+  },
+
+  // Snipping Tool — the region capture. `configure` arms the global shortcut and
+  // the menu-bar/tray item (and disarms them: pushing `enabled: false` is how a
+  // user who loses the page permission gets them taken away). `start` is the
+  // in-app "New Snip" button; the shortcut and tray call into main directly.
+  //
+  // `onCaptured` delivers the cropped PNG as base64 — only the selected region
+  // ever reaches this context, never the full screen. The renderer uploads it.
+  // The selection surface itself is transparent and never receives an image at
+  // all; see electron/snip-preload.js.
+  snip: {
+    configure: (config) => ipcRenderer.invoke('snip:configure', config),
+    start: () => ipcRenderer.invoke('snip:start'),
+    onCaptured: (callback) => {
+      ipcRenderer.on('snip:captured', (_event, payload) => callback(payload));
+    },
+    // The capture is taken AFTER the user has already drawn their box, so a
+    // failure there is silent from their side — they did the work and nothing
+    // happened. This is what lets the renderer say so.
+    onFailed: (callback) => {
+      ipcRenderer.on('snip:failed', (_event, payload) => callback(payload));
+    },
+    removeCapturedListeners: () => {
+      ipcRenderer.removeAllListeners('snip:captured');
+      ipcRenderer.removeAllListeners('snip:failed');
+    },
+    // The tray's "My Snips" item — main asks the renderer to navigate rather
+    // than loading a URL itself, so the App Router transition is a normal
+    // client-side one and the watchdog (NavigationWatchdog) sees it.
+    onNavigate: (callback) => {
+      ipcRenderer.on('snip:navigate', (_event, href) => callback(href));
+    },
+    removeNavigateListeners: () => {
+      ipcRenderer.removeAllListeners('snip:navigate');
+    },
   },
 
   // Saving files. The renderer never names a path: main shows a native save

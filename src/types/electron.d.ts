@@ -311,6 +311,35 @@ interface ElectronAPI {
    *  not exposed — the normal paste path already delivers it. */
   clipboard?: {
     readImage: () => Promise<{ dataUrl: string; width: number; height: number } | null>;
+    /** Written from main — `navigator.clipboard.writeText` needs the document
+     *  focused, and a snip finishes while this window is hidden. */
+    writeText?: (text: string) => Promise<{ success: boolean }>;
+  };
+  /**
+   * Snipping Tool — region capture from a global shortcut or the menu-bar/tray
+   * item. Optional throughout: a renderer may be weeks older than the installed
+   * shell (rule 9c), so every call site feature-detects.
+   */
+  snip?: {
+    /** Arms or disarms the shortcut + tray. `enabled` is the page permission,
+     *  resolved client-side; every server route re-checks it independently. */
+    configure: (config: {
+      enabled: boolean;
+      trayIconEnabled: boolean;
+      shortcutEnabled: boolean;
+      shortcut: string;
+    }) => Promise<{ ok: boolean; shortcutRegistered?: boolean }>;
+    start: () => Promise<{ success: boolean; error?: string }>;
+    /** The cropped region only — never the full screen. */
+    onCaptured: (
+      callback: (payload: { dataBase64: string; width: number; height: number }) => void,
+    ) => void;
+    /** The capture runs after the box is drawn, so a failure is otherwise
+     *  silent — the user selected a region and nothing happened. */
+    onFailed?: (callback: (payload: { reason: string }) => void) => void;
+    removeCapturedListeners: () => void;
+    onNavigate: (callback: (href: string) => void) => void;
+    removeNavigateListeners: () => void;
   };
   /** Saving to disk. Always via a native save dialog; the renderer never names
    *  a path, and only paths written this session can be revealed or opened. */

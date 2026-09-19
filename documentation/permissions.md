@@ -90,6 +90,35 @@ Consequences worth knowing:
 - **Retiring a page means deleting its `page-permissions` doc**, not just removing it from `PAGES`. Leave the doc and the cron keeps re-adding that id to `permittedPageIds` nightly, bumping `permissionsVersion` for everyone forever. `src/scripts/remove-retired-pages.js` does both halves.
 - **Never reintroduce a hardcoded page list in `functions/`.** There is no test that would catch it going stale; the failure is silent, nightly, and fleet-wide.
 
+## Sub-item pages: a capability *inside* a page
+
+Some things an admin needs to grant are not destinations. GoLogin's **Management** dialog is the first: it lives inside the GoLogin window, it is a different authority from using GoLogin, and until 2026-09-19 the only way to delegate it was to make someone a Bluu admin — which also hands over user management and the permission map itself.
+
+A **sub-item** is the narrower instrument. `PageDef.parentPageId` marks it:
+
+```ts
+{ pageId: 'apps-gologin',            title: 'GoLogin',    …, href: null, order: 6 },
+{ pageId: 'apps-gologin-management', title: 'Management', …, href: null, order: 7,
+  parentPageId: 'apps-gologin' },
+```
+
+**It is an ordinary tier-2 page in every mechanical respect** — a `page-permissions/{pageId}` doc, an entry in `permittedPageIds`, a row on the Sharing page, the nightly sync, `repair-permissions.js`, all unchanged. What differs follows entirely from it not being a destination:
+
+| | Sub-item |
+|---|---|
+| `href` | **`null`**, always — there is nowhere to go |
+| Sidebar | **skipped** (`!p.parentPageId` in `Sidebar.tsx`); it also does not count toward whether a teamspace section renders, in `usePermissions.ts` |
+| `/admin-portal/sharing` | a row **indented under its parent**, sorted next to it rather than by `order`. Announced and toasted as "GoLogin → Management", since "Management" alone names nothing |
+| Enforcement | the parent page's own code, not a route guard |
+
+**Three rules, all load-bearing:**
+
+- **Gate on both, server-side.** Holding the sub-item without the parent is meaningless, and nothing enforces the pairing automatically. GoLogin's routes read `requireGoLoginAccess(uid)` **then** `requireGoLoginManagement(token)`.
+- **Decide what the escape hatch is.** A sub-item that can be revoked from the only people who can fix the thing it gates is a lockout. GoLogin lets admins through `requireGoLoginManagement` unconditionally, because they are the ones who administer the workspace.
+- **A grant is not a role.** The sub-item unlocks a surface; it does not confer the other things admins get. A GoLogin manager is still an ordinary operator everywhere else — notably `usesMasterGoLoginToken` still reads the `admin` group, so the master API token never reaches their desktop. Widen deliberately or not at all.
+
+Adding one: the `parentPageId` field, an icon registered in `ICON_MAP` ([`PageIcon.tsx`](../src/components/PageIcon.tsx)), and the check in whatever renders the surface. Nothing else — the resolver, the sync and the Sharing page all follow.
+
 ## Universal pages (outside the permission system)
 
 Some pages are org-wide, like Home: **every** authenticated employee reaches them and there is nothing for an admin to grant. Those live in `UNIVERSAL_PAGES` in `src/lib/definitions.ts` and are deliberately **not** in `PAGES`.
@@ -112,6 +141,6 @@ Access is still real for a universal page — it is just enforced by the page's 
 
 ## Rules for new pages
 
-- Add the page to `src/lib/definitions.ts` (that's what makes it exist) — `PAGES` for a permissioned page, `UNIVERSAL_PAGES` for an org-wide one.
+- Add the page to `src/lib/definitions.ts` (that's what makes it exist) — `PAGES` for a permissioned page, `UNIVERSAL_PAGES` for an org-wide one, `PAGES` with a `parentPageId` for a capability inside another page (see above).
 - Gate its route with `checkPageAccess(token.uid, '<pageId>')` (tier 2) unless it's general reference data (tier 1) or auth-graph/account-state (tier 3).
 - The sidebar renders from `users/{uid}.permittedPageIds` — no extra client wiring needed once resolution runs.

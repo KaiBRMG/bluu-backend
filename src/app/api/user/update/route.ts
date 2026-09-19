@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { invalidateUserCache } from '@/lib/services/userService';
+import { isValidTimezone } from '@/lib/timezone';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -23,6 +24,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       'photoURL',
       'timezone',
       'timezoneOffset',
+      // Only ever 'manual' from a client — see the validation block below.
+      'timezoneSource',
       'additionalTimezones',
       'pinnedResources',
       'notificationPreferences',
@@ -46,6 +49,41 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         { error: 'screenshotBugFixed may only be set to true' },
         { status: 400 }
       );
+    }
+
+    // A client may declare its timezone *chosen*; it may not declare one
+    // *detected*. `'auto'` is written only by `/api/user/timezone`, from the
+    // request's own IP — accepting it here would let a client clear the manual
+    // latch and hand the user's zone back to detection behind their back.
+    if (updates.timezoneSource !== undefined && updates.timezoneSource !== 'manual') {
+      return NextResponse.json(
+        { error: 'timezoneSource may only be set to manual' },
+        { status: 400 }
+      );
+    }
+
+    // Every zone on this doc goes straight into `Intl` on every surface that
+    // renders a time. `safeTimezone` stops a bad one crashing a page, but the
+    // door is the right place to refuse it.
+    if (updates.timezone !== undefined && !isValidTimezone(updates.timezone)) {
+      return NextResponse.json({ error: 'timezone must be a valid IANA zone' }, { status: 400 });
+    }
+
+    const MAX_ADDITIONAL_TIMEZONES = 2;
+    if (updates.additionalTimezones !== undefined) {
+      const zones = updates.additionalTimezones;
+      if (!Array.isArray(zones) || zones.some((tz: unknown) => !isValidTimezone(tz))) {
+        return NextResponse.json(
+          { error: 'additionalTimezones must be an array of valid IANA zones' },
+          { status: 400 }
+        );
+      }
+      if (zones.length > MAX_ADDITIONAL_TIMEZONES) {
+        return NextResponse.json(
+          { error: `additionalTimezones is limited to ${MAX_ADDITIONAL_TIMEZONES} zones` },
+          { status: 400 }
+        );
+      }
     }
 
     if (updates.timerWidgetEnabled !== undefined && typeof updates.timerWidgetEnabled !== 'boolean') {

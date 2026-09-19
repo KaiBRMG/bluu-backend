@@ -8,7 +8,6 @@ import { validatePersonalInfoForm, PersonalInfoFormData } from '@/lib/validation
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
-import { resolveTimezoneFromAddress } from '@/lib/timezoneData';
 import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
@@ -131,9 +130,7 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
 
   const handleSave = async () => {
     // Validate
-    const validation = validatePersonalInfoForm(formData, {
-      resolveTimezone: resolveTimezoneFromAddress,
-    });
+    const validation = validatePersonalInfoForm(formData);
     if (!validation.isValid) {
       setErrors(validation.errors);
       toast.error('Please fix the highlighted fields');
@@ -181,35 +178,15 @@ export default function PersonalInfoForm({ onHasChanges }: PersonalInfoFormProps
         throw new Error(data.error || 'Failed to update');
       }
 
-      // Update original data reference after successful save
-      const prevData = originalDataRef.current;
+      // Update original data reference after successful save.
+      // Note: the address deliberately does NOT set the timezone any more. It
+      // used to, through a country → zone map, which meant anyone who never
+      // opened this form had no timezone at all and read every time in the app
+      // in UTC. `/api/user/timezone` detects it from the IP instead — see
+      // `TimezoneReporter`.
       originalDataRef.current = { ...formData };
       setHasChanges(false);
       toast.success('Changes saved');
-
-      // Auto-detect timezone from address when country/city changes
-      if (formData.address.country) {
-        const addressChanged =
-          prevData?.address?.country !== formData.address.country ||
-          prevData?.address?.city !== formData.address.city;
-
-        if (addressChanged || !userData?.timezone) {
-          const resolved = resolveTimezoneFromAddress(formData.address);
-          if (resolved) {
-            fetch('/api/user/update', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${idToken}`,
-              },
-              body: JSON.stringify({
-                timezone: resolved.timezone,
-                timezoneOffset: resolved.timezoneOffset,
-              }),
-            }).catch(err => console.error('Failed to auto-set timezone:', err));
-          }
-        }
-      }
     } catch (error) {
       console.error('Save error:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to save changes');

@@ -83,10 +83,7 @@ export interface PersonalInfoFormData {
   userComments: string;
 }
 
-export function validatePersonalInfoForm(
-  data: PersonalInfoFormData,
-  options?: { resolveTimezone?: (address: { city?: string; country?: string }) => unknown | null }
-): ValidationResult {
+export function validatePersonalInfoForm(data: PersonalInfoFormData): ValidationResult {
   const errors: Record<string, string> = {};
 
   // Required field: displayName
@@ -107,16 +104,10 @@ export function validatePersonalInfoForm(
   const emergencyPhoneError = validatePhoneNumber(data.emergencyContactNumber);
   if (emergencyPhoneError) errors.emergencyContactNumber = emergencyPhoneError;
 
-  // Timezone resolution check: if city or country is provided, both must resolve to a timezone
-  if (options?.resolveTimezone && (data.address.city || data.address.country)) {
-    const resolved = options.resolveTimezone(data.address);
-    if (!resolved) {
-      const msg = 'Unable to determine time zone from this location';
-      if (data.address.country) errors.addressCountry = msg;
-      if (data.address.city) errors.addressCity = msg;
-      if (!data.address.country) errors.addressCountry = 'Country is required to determine time zone';
-    }
-  }
+  // No timezone check here. The address used to have to resolve against a
+  // hand-maintained country → zone map, so "Côte d'Ivoire" was a validation
+  // error on a form about where someone lives. The timezone now comes from the
+  // request IP (`/api/user/timezone`), which frees the address to be an address.
 
   return {
     isValid: Object.keys(errors).length === 0,
@@ -169,11 +160,8 @@ const ONBOARDING_REQUIRED_ADDRESS: ReadonlyArray<{
  * check. Error keys match the Settings form's so the two share field wiring —
  * address errors are keyed `addressStreet`, `addressCity`, and so on.
  */
-export function validateOnboardingProfile(
-  data: PersonalInfoFormData,
-  options?: { resolveTimezone?: (address: { city?: string; country?: string }) => unknown | null }
-): ValidationResult {
-  const { errors } = validatePersonalInfoForm(data, options);
+export function validateOnboardingProfile(data: PersonalInfoFormData): ValidationResult {
+  const { errors } = validatePersonalInfoForm(data);
 
   for (const { key, label } of ONBOARDING_REQUIRED_FIELDS) {
     if (errors[key]) continue; // a format error is more specific than "required"

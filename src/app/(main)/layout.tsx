@@ -7,6 +7,7 @@ import AuthWrapper from "@/components/AuthWrapper";
 import ErrorLogger from "@/components/ErrorLogger";
 import AppVersionReporter from "@/components/AppVersionReporter";
 import PresenceReporter from "@/components/PresenceReporter";
+import TimezoneReporter from "@/components/TimezoneReporter";
 import UpdateBanner from "@/components/UpdateBanner";
 import UpdateAvailableBanner from "@/components/UpdateAvailableBanner";
 import EmailMigrationDialog from "@/components/migration/EmailMigrationDialog";
@@ -16,6 +17,7 @@ import NavigationWatchdog from "@/components/NavigationWatchdog";
 import NavigationProgress from "@/components/NavigationProgress";
 import DeepLinkRouter from "@/components/DeepLinkRouter";
 import CreatorRosterPrefetch from "@/components/CreatorRosterPrefetch";
+import SnipController from "@/components/snips/SnipController";
 import LazyProviders from "@/components/LazyProviders";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
@@ -32,6 +34,11 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
               loaded and stays true while clocked out — so it must not sit
               behind anything that reads clock state. Needs nothing but auth. */}
           <PresenceReporter />
+          {/* Outside LazyProviders for the same reason: a user with no timezone
+              reads every time in the app in UTC, and that is true from the
+              first paint — long before any provider that reads clock state has
+              loaded. Needs only auth + the user snapshot, and renders nothing. */}
+          <TimezoneReporter />
           {/* Outside LazyProviders on purpose: it needs no context, and a
               navigation can be clicked (and stall) before the lazily-imported
               providers have finished loading. Mounted on the layout, not in
@@ -64,6 +71,12 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           <Suspense fallback={null}>
             <CreatorRosterPrefetch />
           </Suspense>
+          {/* Outside LazyProviders on purpose: it arms a global keyboard
+              shortcut and a menu-bar/tray item, which have to work with no page
+              open and regardless of clock state — a snip is not a shift
+              activity. It needs nothing but auth + the user snapshot, and it
+              renders nothing. */}
+          <SnipController />
           <LazyProviders>
             <BootLoaderProvider>
               <AuthWrapper>

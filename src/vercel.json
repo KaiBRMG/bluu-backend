@@ -20,6 +20,10 @@
     {
       "path": "/api/cron/leave-reset",
       "schedule": "30 22 * * *"
+    },
+    {
+      "path": "/api/cron/snip-cleanup",
+      "schedule": "15 4 * * *"
     }
   ]
 }

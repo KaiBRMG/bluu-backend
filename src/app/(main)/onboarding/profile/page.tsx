@@ -8,7 +8,6 @@ import { toast } from 'sonner';
 import { useAuth } from '@/components/AuthProvider';
 import { useUserData } from '@/hooks/useUserData';
 import { countryCodes, getFlagEmoji } from '@/lib/countryData';
-import { resolveTimezoneFromAddress } from '@/lib/timezoneData';
 import { validateOnboardingProfile, type PersonalInfoFormData } from '@/lib/validation';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 
@@ -309,9 +308,7 @@ export default function ProfilePage() {
       return;
     }
 
-    const validation = validateOnboardingProfile(formData, {
-      resolveTimezone: resolveTimezoneFromAddress,
-    });
+    const validation = validateOnboardingProfile(formData);
 
     if (!validation.isValid) {
       setErrors(validation.errors);
@@ -335,10 +332,6 @@ export default function ProfilePage() {
 
     try {
       const idToken = await user.getIdToken();
-      // Address is required here, so the timezone always resolves — validation
-      // rejects a country it can't map. Saved in the same write, not a second one.
-      const resolvedTz = resolveTimezoneFromAddress(formData.address);
-
       const profileRes = await fetch('/api/user/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
@@ -358,7 +351,6 @@ export default function ProfilePage() {
           paymentMethod: formData.paymentMethod,
           paymentInfo: formData.paymentInfo,
           userComments: formData.userComments,
-          ...(resolvedTz ?? {}),
         }),
       });
       if (!profileRes.ok) {
@@ -745,7 +737,7 @@ export default function ProfilePage() {
 
         <Section
           title="Where you're based"
-          description="Your country and city set the time zone your shifts are scheduled in."
+          description="Your home address, for the employee record. Your time zone is detected separately, from where you actually are."
         >
           <Field id="street" label="Street address" required error={errors.addressStreet}>
             <Input

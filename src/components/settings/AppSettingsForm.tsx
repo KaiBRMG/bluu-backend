@@ -31,11 +31,7 @@ function getDefaultAdditional(primaryTz: string): string[] {
   );
 }
 
-interface AppSettingsFormProps {
-  onSectionChange: (section: string) => void;
-}
-
-export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProps) {
+export default function AppSettingsForm() {
   const { userData, loading } = useUserData();
   const { user } = useAuth();
 
@@ -138,8 +134,11 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
     setHasChanges(tzChanged || addlChanged || notifChanged || widgetChanged);
   }, [selectedTimezone, additionalTimezones, desktopEnabled, soundEnabled, shiftReminders, screenshotNotifications, timerWidgetEnabled]);
 
-  const addressIsSet = !!(userData?.address?.city && userData?.address?.country);
-  const isDisabled = !addressIsSet && !userData?.timezone;
+  // Detected from the user's IP by `/api/user/timezone` unless they have chosen
+  // one here, which is final — see `TimezoneReporter`. The picker is never
+  // disabled: it used to be locked until an address was filled in, back when
+  // the address was what produced the zone.
+  const isAutoDetected = userData?.timezoneSource !== 'manual';
 
   // Get current selection display
   const selectedOption: TimezoneOption | undefined = timezoneList.find(tz => tz.value === selectedTimezone);
@@ -289,6 +288,9 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
         body: JSON.stringify({
           timezone: selectedTimezone,
           timezoneOffset: offset,
+          // Saving here is the user choosing, which locks IP detection out of
+          // this field for good. The server refuses any other value.
+          timezoneSource: 'manual',
           additionalTimezones: additionalTimezones.filter(Boolean),
           notificationPreferences: { desktopEnabled, soundEnabled, shiftReminders, screenshotNotifications },
           timerWidgetEnabled,
@@ -351,24 +353,18 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
             >
               This is the time zone in which your shifts will be displayed. When coordinating with management staff, please keep in mind their respective time zones, which may include SAST (GMT+2), PHT (GMT+8), and UTC (GMT+0).
             </p>
+            <p
+              className="text-xs italic mt-1"
+              style={{ color: 'var(--foreground-secondary)' }}
+            >
+              {isAutoDetected
+                ? 'Detected automatically from your location. Choosing one here keeps it fixed, even if you travel.'
+                : 'Set by you, so it stays fixed — automatic detection will not change it.'}
+            </p>
           </div>
 
-          {isDisabled && (
-            <p className="text-sm mb-3 text-destructive">
-              Address must first be set in{' '}
-              <Button
-                type="button"
-                variant="link"
-                onClick={() => onSectionChange('personal-info')}
-                className="h-auto p-0 text-sm"
-              >
-                Personal Information
-              </Button>
-            </p>
-          )}
-
           {/* Primary Timezone Dropdown */}
-          <div style={{ opacity: isDisabled ? 0.5 : 1, pointerEvents: isDisabled ? 'none' : 'auto' }}>
+          <div>
             <Popover open={primaryOpen} onOpenChange={setPrimaryOpen}>
               <PopoverTrigger asChild>
                 <button
@@ -639,7 +635,7 @@ export default function AppSettingsForm({ onSectionChange }: AppSettingsFormProp
           <Button
             type="button"
             onClick={handleSave}
-            disabled={!hasChanges || isSubmitting || isDisabled}
+            disabled={!hasChanges || isSubmitting}
           >
             {isSubmitting ? 'Saving...' : 'Save Changes'}
           </Button>

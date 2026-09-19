@@ -119,11 +119,25 @@ export default function GoLoginPage() {
   const searchRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
 
-  // Client-side convenience only. Every admin route behind it re-checks with
-  // `requireGoLoginAdmin` (rule 3), so hiding a button is not the control — and
-  // that helper, rather than a bare claim check, is why this snapshot-derived
-  // flag and the server agree on a renderer that has been open for weeks.
+  // Client-side convenience only. Every admin route behind these re-checks on
+  // the server (rule 3), so hiding a button is not the control — and both flags
+  // are derived from the live `users/{uid}` snapshot rather than from the ID
+  // token, which is why they agree with the server on a renderer that has been
+  // open for weeks (rule 9c: a claim set today does not reach a token issued
+  // last month).
   const isAdmin = userData?.groups?.includes('admin') === true;
+
+  /**
+   * Who sees **Management**: an admin, or anyone granted the
+   * `apps-gologin-management` sub-item on `/admin-portal/sharing` (the indented
+   * row under GoLogin). Mirrors `requireGoLoginManagement` on the server.
+   *
+   * Admins are in regardless of the grant — they run the workspace on the master
+   * token, so revoking the row must not lock the only people who can administer
+   * it out of it.
+   */
+  const canManage =
+    isAdmin || userData?.permittedPageIds?.includes('apps-gologin-management') === true;
 
   /**
    * Sessions that make closing the window a bad idea, named.
@@ -501,7 +515,7 @@ export default function GoLoginPage() {
             <h1 className="text-2xl font-bold tracking-tight text-white">Profiles</h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {isAdmin && (
+            {canManage && (
               <Button variant="outline" size="sm" onClick={() => setManaging(true)}>
                 <Settings2 aria-hidden />
                 Management
@@ -761,7 +775,7 @@ export default function GoLoginPage() {
         )}
       </div>
 
-      {isAdmin && (
+      {canManage && (
         <ManagementDialog
           open={managing}
           onOpenChange={setManaging}

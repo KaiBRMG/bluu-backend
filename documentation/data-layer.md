@@ -81,6 +81,7 @@
 | `onlyfans-meta/{accountId}` | OnlyFans sync freshness marker (server-only) | see [onlyfans-crm.md](onlyfans-crm.md) |
 | `prompt-library/{id}` (+ `/versions/{n}` **subcollection**) | Prompt heads (current text + metadata) and their edit history | see [prompt-library.md](prompt-library.md) |
 | `prompt-library-meta/taxonomy` | Managed category/tag lists for the Prompt Library | see [prompt-library.md](prompt-library.md) |
+| `snips/{shareId}` | Snipping Tool captures. **The doc id IS the public share token**, so a snip id is a secret — never log one or return one to a caller you have not authorised as the owner | see [snipping-tool.md](snipping-tool.md) |
 
 **Subcollections + collection-group indexes:** the `twitterx-*` collections are the first in the repo to use subcollections and `COLLECTION_GROUP` indexes / `fieldOverrides` in `firestore.indexes.json`. See [smm-portal.md](smm-portal.md#indexes-firestoreindexesjson).
 
@@ -118,6 +119,7 @@ Currently exempted (all write-only payload — nothing filters or orders on them
 | `onlyfans-chats` + `messages` | `lastMessageText`, `fan`, `profile`, `text`, `attachments` |
 | `model-submission-sessions`, `model-submission-rate` | `expiresAt` (TTL fields — the TTL policy maintains its own index) |
 | `users` | `lastActiveAt` (presence stamp — the highest-frequency write on the user doc, and nothing queries it; see [user-management.md](user-management.md#last-seen-vs-last-sign-in)) |
+| `users` | `timezoneSource`, `timezoneDetectedAt` (IP timezone detection — read off the doc, never queried; see [user-management.md](user-management.md#0b-timezone--detected-not-declared)) |
 
 **When adding a field, exempt it if nothing queries it** — particularly free text, HTML, arrays of maps, and any timestamp driving a TTL policy.
 

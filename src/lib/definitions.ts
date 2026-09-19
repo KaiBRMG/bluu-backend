@@ -14,6 +14,23 @@ export interface PageDef {
   href: string | null;
   icon: string | null;
   order: number;
+  /**
+   * Set when this page is a **sub-item of another page** rather than a
+   * destination of its own — a capability *inside* a page that an admin grants
+   * separately, like GoLogin's Management dialog.
+   *
+   * A sub-item is an ordinary tier-2 page in every mechanical respect: it has a
+   * `page-permissions/{pageId}` doc, it lands in `permittedPageIds`, and it gets
+   * a row on `/admin-portal/sharing` (indented under its parent). What
+   * `parentPageId` changes is that it is **not navigational** — it carries no
+   * `href`, and the sidebar skips it, because there is nowhere to go. The
+   * surface it unlocks lives behind the parent page and checks the grant itself.
+   *
+   * Holding a sub-item is meaningless without the parent, and nothing enforces
+   * that pairing automatically: grant both, and gate the server route on both
+   * (GoLogin does this with `requireGoLoginAccess` + `requireGoLoginManagement`).
+   */
+  parentPageId?: string;
 }
 
 /**
@@ -94,10 +111,22 @@ export const PAGES: PageDef[] = [
   { pageId: 'apps-ofmanager', title: 'OF Manager', teamspaceId: 'apps', href: null, icon: 'OnlyFans', order: 4 },
   { pageId: 'apps-model-submissions', title: 'Model Submissions', teamspaceId: 'apps', href: '/applications/apps-model-submissions', icon: 'FileUser', order: 3 },
   { pageId: 'apps-prompt-library', title: 'Prompt Library', teamspaceId: 'apps', href: '/applications/apps-prompt-library', icon: 'Astroid', order: 5 },
+  // The page is the *library* — capture itself happens natively, from the tray
+  // item or the global shortcut, with no page open. Holding this page is what
+  // arms both of those (the renderer only pushes the config to Electron when
+  // `permittedPageIds` contains it), so revoking it genuinely disarms the tool
+  // rather than just hiding the list. See documentation/snipping-tool.md.
+  { pageId: 'apps-snipping-tool', title: 'Snipping Tool', teamspaceId: 'apps', href: '/applications/snipping-tool', icon: 'ImageUpscale', order: 8 },
   // GoLogin opens in its own Electron window (like OF Manager), so it has no
   // href — the sidebar special-cases it via SATELLITE_PAGES. Its icon is the
   // brand SVG at /Icons/gologin.svg (no lucide equivalent).
   { pageId: 'apps-gologin', title: 'GoLogin', teamspaceId: 'apps', href: null, icon: 'GoLogin', order: 6 },
+  // A sub-item of GoLogin, not a page: the Management dialog (seats +
+  // assignments) inside the GoLogin window. It was admin-only until 2026-09-19;
+  // it is now grantable on /admin-portal/sharing so the workspace can be run
+  // without handing out the admin claim. Admins keep it unconditionally — see
+  // `requireGoLoginManagement`. No href, so the sidebar skips it.
+  { pageId: 'apps-gologin-management', title: 'Management', teamspaceId: 'apps', href: null, icon: 'Settings2', order: 7, parentPageId: 'apps-gologin' },
 
 ];
 
@@ -111,4 +140,16 @@ export function getPagesByTeamspace(teamspaceId: string): PageDef[] {
 
 export function getPageDef(pageId: string): PageDef | undefined {
   return PAGES.find(p => p.pageId === pageId);
+}
+
+/**
+ * The sub-items of a page, in order. See `PageDef.parentPageId`.
+ */
+export function getChildPages(pageId: string): PageDef[] {
+  return PAGES.filter(p => p.parentPageId === pageId).sort((a, b) => a.order - b.order);
+}
+
+/** A page that is a destination — i.e. everything the sidebar should render. */
+export function isNavigablePage(page: { parentPageId?: string }): boolean {
+  return !page.parentPageId;
 }

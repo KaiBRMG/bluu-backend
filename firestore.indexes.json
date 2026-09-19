@@ -479,6 +479,38 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "snips",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "snips",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "reservedAt",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [
@@ -1557,6 +1589,16 @@
     },
     {
       "collectionGroup": "users",
+      "fieldPath": "timezoneSource",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "timezoneDetectedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
       "fieldPath": "paidLeaveResetYear",
       "indexes": []
     },
@@ -1598,6 +1640,36 @@
     {
       "collectionGroup": "disputes",
       "fieldPath": "resolvedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "snips",
+      "fieldPath": "storagePath",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "snips",
+      "fieldPath": "contentType",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "snips",
+      "fieldPath": "width",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "snips",
+      "fieldPath": "height",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "snips",
+      "fieldPath": "bytes",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "snips",
+      "fieldPath": "retention",
       "indexes": []
     }
   ]

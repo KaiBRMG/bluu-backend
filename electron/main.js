@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, session, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification, systemPreferences, Menu, Tray, clipboard, dialog, screen: electronScreen } = require('electron');
+const { app, BrowserWindow, session, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification, systemPreferences, Menu, Tray, clipboard, dialog, globalShortcut, screen: electronScreen } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fsp = require('fs/promises');
@@ -748,6 +748,473 @@ ipcMain.handle('timeTracking:captureScreenshot', async () => {
   }
 });
 
+// ─── Snipping Tool ───────────────────────────────────────────────────
+//
+// A region capture that starts from a global keyboard shortcut or a menu-bar /
+// tray item, with no app window open, and ends with a PNG handed to the
+// renderer for upload. See documentation/snipping-tool.md.
+//
+// **Nothing is drawn over the user's screen.** The selection surface is a fully
+// transparent window per display: the desktop stays live and visible, the cursor
+// becomes a crosshair, and the only ink on screen is the rectangle being
+// dragged. There is no scrim, no dimming and no frozen photograph of the
+// desktop. A window still has to exist — no OS gives an application a global
+// cursor change or global mouse capture without one — but it displays nothing.
+//
+// **The capture is taken AFTER the selection, not before it.** That ordering is
+// what the transparent surface costs and it is worth being explicit about: the
+// screen is photographed once the rectangle has been cleared and the surfaces
+// hidden, so the selection border never ends up inside its own capture. The
+// price is a ~100ms window in which live content could change under the
+// rectangle; the alternative (freeze first, select over the still) is what this
+// design deliberately replaced.
+//
+// **Main crops; the renderer never sees the full screen.** The surface reports a
+// rectangle and main crops the `NativeImage`, so the only pixels that reach a
+// web context are the ones the user selected. A surface that received the whole
+// capture and cropped it in the page would be a full-screen screen-reader with
+// a `file://` origin — which is also why `snip-preload.js` has no image channel
+// at all.
+//
+// **The renderer owns the upload, not main.** Main has no Firebase session, and
+// the bytes must go straight to Cloud Storage over a signed URL rather than
+// through a Vercel function (rule 9i) — which is a fetch with an ID token on it.
+const SNIP_PAGE = path.join(__dirname, 'snip.html');
+const SNIP_PAGE_URL = pathToFileURL(SNIP_PAGE).href;
+
+/**
+ * How long to wait after hiding the surfaces before photographing the screen.
+ *
+ * Not a guess at a render time — it is a compositor round trip. `win.hide()`
+ * returns immediately; the window is gone from the screen a frame or two later,
+ * and `desktopCapturer` reads what the compositor has, not what Electron has
+ * been told. Too short and the selection border is in its own capture. The page
+ * already clears its marks and waits two animation frames before committing, so
+ * this is the second of two belts.
+ */
+const SNIP_SETTLE_MS = 120;
+
+/**
+ * Pushed by the renderer, never persisted to disk.
+ *
+ * That is deliberate. A cached config would arm a global shortcut and a tray
+ * item at launch, before anyone has signed in and before we know the page
+ * permission still holds — so a revoked user would keep a working capture key
+ * until they next opened the app. Arming only on the renderer's push costs a few
+ * seconds after launch and makes revocation real.
+ */
+let snipConfig = { enabled: false, trayIconEnabled: true, shortcutEnabled: true, shortcut: null };
+let snipTray = null;
+/** The accelerator currently held with the OS, so it can be released exactly. */
+let snipRegisteredShortcut = null;
+/** BrowserWindow[] — one transparent surface per display while a snip is live. */
+let snipOverlays = [];
+/** win.id -> { display } for the surface's own display. */
+const snipOverlayState = new Map();
+/** Guards against a second trigger (a held-down shortcut, a double tray click)
+ *  opening a second set of surfaces over the first. */
+let snipInFlight = false;
+/** Until every surface is on screen, a blur is us showing the next one — not the
+ *  user leaving. See `armSnipOverlays`. */
+let snipArmed = false;
+
+function snipTrayIcon() {
+  const file = process.platform === 'darwin' ? 'snipTemplate.png' : 'snip-win.png';
+  const image = nativeImage.createFromPath(path.join(__dirname, 'public', 'tray', file));
+  // `Template` in the filename is already enough for macOS to re-tint this for
+  // the light/dark menu bar; setting it explicitly means a rename cannot quietly
+  // turn the icon into a black-on-black blob. Windows draws the icon as-is,
+  // which is why that platform gets a white asset instead.
+  if (process.platform === 'darwin' && !image.isEmpty()) image.setTemplateImage(true);
+  return image;
+}
+
+function destroySnipTray() {
+  if (snipTray && !snipTray.isDestroyed()) snipTray.destroy();
+  snipTray = null;
+}
+
+function ensureSnipTray() {
+  if (!snipConfig.enabled || !snipConfig.trayIconEnabled) {
+    destroySnipTray();
+    return;
+  }
+  if (snipTray && !snipTray.isDestroyed()) return;
+
+  const icon = snipTrayIcon();
+  // A Tray built from an empty image is an invisible menu-bar item the user can
+  // neither see nor click — worse than no tray at all.
+  if (icon.isEmpty()) {
+    console.error('[snip] tray icon asset missing — skipping tray');
+    return;
+  }
+
+  snipTray = new Tray(icon);
+  snipTray.setIgnoreDoubleClickEvents(true);
+  snipTray.setToolTip('New snip');
+
+  const menu = Menu.buildFromTemplate([
+    { label: 'New Snip', click: () => { startSnip('tray-menu'); } },
+    { type: 'separator' },
+    {
+      label: 'My Snips',
+      click: () => {
+        revealMainWindow();
+        sendTo(mainWindow, 'snip:navigate', '/applications/snipping-tool');
+      },
+    },
+  ]);
+
+  // Platform split, and it is not cosmetic. On macOS `setContextMenu` makes a
+  // LEFT click open the menu and suppresses the `click` event entirely, so the
+  // one-click capture would be impossible; the menu is popped up manually on
+  // right-click instead. On Windows a context menu is what right-click is for
+  // and `click` still fires, so the standard wiring is correct there.
+  if (process.platform === 'darwin') {
+    snipTray.on('right-click', () => snipTray.popUpContextMenu(menu));
+  } else {
+    snipTray.setContextMenu(menu);
+  }
+  snipTray.on('click', () => { startSnip('tray'); });
+}
+
+/**
+ * Registers (or releases) the global shortcut.
+ *
+ * Returns whether the accelerator is actually held, which the settings dialog
+ * surfaces: `globalShortcut.register` returns **false** when another
+ * application already owns the combination, and silently doing nothing would
+ * leave the user pressing a key that belongs to someone else. It also *throws*
+ * on a malformed accelerator rather than returning false, hence the try —
+ * though `isValidSnipShortcut` on both the client and the API route should mean
+ * a malformed one never reaches here.
+ */
+function applySnipShortcut() {
+  if (snipRegisteredShortcut) {
+    globalShortcut.unregister(snipRegisteredShortcut);
+    snipRegisteredShortcut = null;
+  }
+  if (!snipConfig.enabled || !snipConfig.shortcutEnabled || !snipConfig.shortcut) {
+    return false;
+  }
+  try {
+    const registered = globalShortcut.register(snipConfig.shortcut, () => { startSnip('shortcut'); });
+    if (registered) snipRegisteredShortcut = snipConfig.shortcut;
+    else console.warn('[snip] shortcut already taken by another app:', snipConfig.shortcut);
+    return registered;
+  } catch (err) {
+    console.error('[snip] shortcut registration failed:', err.message);
+    return false;
+  }
+}
+
+/** Take every surface off the screen without destroying it. The capture runs
+ *  between this and `teardownSnip`, so the windows have to stop being on screen
+ *  before their state is thrown away. */
+function hideSnipOverlays() {
+  snipArmed = false;
+  for (const win of snipOverlays) {
+    if (win && !win.isDestroyed() && win.isVisible()) win.hide();
+  }
+}
+
+function teardownSnip() {
+  snipArmed = false;
+  for (const win of snipOverlays) {
+    if (win && !win.isDestroyed()) win.destroy();
+  }
+  snipOverlays = [];
+  snipOverlayState.clear();
+  snipInFlight = false;
+}
+
+/**
+ * Called once every surface is on screen.
+ *
+ * Only *after* this does a blur mean the user left, and only when there is a
+ * single surface: with two displays there are two windows and exactly one can
+ * be key, so treating the non-key one's blur as "user left" would cancel the
+ * snip the moment it opened. On a multi-display setup Escape and right-click
+ * are the escape hatches, and every surface accepts both.
+ */
+function armSnipOverlays() {
+  snipArmed = true;
+  if (snipOverlays.length !== 1) return;
+  const win = snipOverlays[0];
+  if (!win || win.isDestroyed()) return;
+  win.on('blur', () => {
+    if (snipArmed) teardownSnip();
+  });
+}
+
+/**
+ * Photographs one display and returns its `NativeImage`.
+ *
+ * Called AFTER the surfaces are hidden. `desktopCapturer` takes one
+ * `thumbnailSize` for every source, so it is the bounding box of the largest
+ * display in device pixels and each capture is fitted inside it preserving
+ * aspect ratio — which is why the caller reads the returned image's ACTUAL size
+ * rather than assuming `scaleFactor`. That is what makes a mixed-DPI setup (a
+ * Retina laptop beside a 1080p monitor) crop correctly.
+ */
+async function captureDisplay(display) {
+  const displays = electronScreen.getAllDisplays();
+  const box = displays.reduce(
+    (acc, d) => ({
+      width: Math.max(acc.width, Math.round(d.size.width * (d.scaleFactor || 1))),
+      height: Math.max(acc.height, Math.round(d.size.height * (d.scaleFactor || 1))),
+    }),
+    { width: 0, height: 0 },
+  );
+
+  const sources = await desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize: box,
+    fetchWindowIcons: false,
+  });
+  if (sources.length === 0) return null;
+
+  // `display_id` is the reliable pairing; index order is the fallback for
+  // platforms/versions that leave it blank.
+  const index = displays.findIndex(d => d.id === display.id);
+  const match =
+    sources.find(s => s.display_id && String(s.display_id) === String(display.id)) ||
+    sources[index] ||
+    sources[0];
+
+  return match && !match.thumbnail.isEmpty() ? match.thumbnail : null;
+}
+
+async function startSnip(source) {
+  if (!snipConfig.enabled) return { success: false, error: 'disabled' };
+  if (snipInFlight) return { success: false, error: 'busy' };
+  snipInFlight = true;
+
+  try {
+    const displays = electronScreen.getAllDisplays();
+    if (displays.length === 0) throw new Error('no displays');
+
+    /** Resolves once each surface has loaded — see the comment by `loaded.push`. */
+    const loaded = [];
+
+    for (const display of displays) {
+      const win = new BrowserWindow({
+        x: display.bounds.x,
+        y: display.bounds.y,
+        width: display.bounds.width,
+        height: display.bounds.height,
+        frame: false,
+        // The whole design. With an opaque window there is nothing to select
+        // over but a photograph; with this, the user's real desktop stays live
+        // underneath and the only thing they see change is their cursor.
+        transparent: true,
+        backgroundColor: '#00000000',
+        resizable: false,
+        movable: false,
+        minimizable: false,
+        maximizable: false,
+        fullscreenable: false,
+        skipTaskbar: true,
+        hasShadow: false,
+        alwaysOnTop: true,
+        show: false,
+        webPreferences: {
+          preload: path.join(__dirname, 'snip-preload.js'),
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          backgroundThrottling: false,
+        },
+      });
+
+      // `screen-saver` rather than plain alwaysOnTop: the surface has to sit
+      // above the macOS menu bar and the Windows taskbar, or a selection that
+      // runs to the edge of the screen is clipped by chrome the user cannot
+      // move out of the way.
+      win.setAlwaysOnTop(true, 'screen-saver');
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+      // It renders a static local page and needs none of attachWindowBehaviour's
+      // navigation/offline/crash policy — but it must still be unable to
+      // navigate: it is an invisible, always-on-top window watching the mouse.
+      win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      win.webContents.on('will-navigate', (e, url) => {
+        if (url.split('?')[0] !== SNIP_PAGE_URL) e.preventDefault();
+      });
+
+      snipOverlayState.set(win.id, { display });
+      snipOverlays.push(win);
+
+      // Armed BEFORE loadFile, not after. A local file can finish loading in the
+      // same tick, and a listener attached afterwards would miss the event and
+      // leave every surface waiting on the fallback below.
+      loaded.push(new Promise(resolve => {
+        win.webContents.once('did-finish-load', () => resolve());
+        setTimeout(resolve, 3000);
+      }));
+
+      win.loadFile(SNIP_PAGE);
+    }
+
+    if (snipOverlays.length === 0) throw new Error('no surface could be opened');
+
+    await Promise.all(loaded);
+
+    // The user may have quit, or a second trigger may have torn this down, while
+    // those loads were in flight.
+    if (snipOverlays.length === 0) return { success: false, error: 'cancelled' };
+
+    for (const win of snipOverlays) {
+      if (!win.isDestroyed()) win.show();
+    }
+
+    // Exactly one surface can hold the keyboard, so it has to be the one on the
+    // screen the user is actually looking at — otherwise Escape does nothing on
+    // the monitor they are pointing at. The cursor is the best available proxy
+    // for that, and it is where the drag is about to start anyway.
+    const cursorDisplay = electronScreen.getDisplayNearestPoint(electronScreen.getCursorScreenPoint());
+    const live = snipOverlays.filter(w => !w.isDestroyed());
+    const focusTarget =
+      live.find(w => snipOverlayState.get(w.id)?.display.id === cursorDisplay.id) || live[0];
+    if (focusTarget) focusTarget.focus();
+
+    armSnipOverlays();
+    return { success: true };
+  } catch (err) {
+    console.error('[snip] start failed:', err.message, `(from ${source})`);
+    teardownSnip();
+    return { success: false, error: err.message };
+  }
+}
+
+/** Clamp a surface-reported rectangle into the capture it is supposed to be
+ *  inside. The surface is a renderer, so its numbers are untrusted input — and
+ *  `NativeImage.crop` with an out-of-bounds rect returns an empty image. */
+function clampCrop(rect, width, height) {
+  const x = Math.max(0, Math.min(Math.round(rect.x), width - 1));
+  const y = Math.max(0, Math.min(Math.round(rect.y), height - 1));
+  return {
+    x,
+    y,
+    width: Math.max(1, Math.min(Math.round(rect.width), width - x)),
+    height: Math.max(1, Math.min(Math.round(rect.height), height - y)),
+  };
+}
+
+ipcMain.on('snip:region', async (event, rect) => {
+  const win = senderWindow(event);
+  const state = win ? snipOverlayState.get(win.id) : null;
+  // Only a live surface may report a region. Without this check any renderer
+  // that guessed the channel could ask main to photograph the screen and hand
+  // the result to the main window.
+  if (!state) return;
+  if (!rect || !Number.isFinite(rect.x) || !Number.isFinite(rect.y) ||
+      !Number.isFinite(rect.width) || !Number.isFinite(rect.height)) {
+    teardownSnip();
+    return;
+  }
+
+  const { display } = state;
+
+  // Off the screen FIRST. The surfaces are transparent and contribute nothing to
+  // the screen image, but the selection rectangle is real ink — photographing
+  // before hiding would frame every capture in its own blue border. The page has
+  // already cleared its marks and waited two frames; this hides the windows and
+  // waits for the compositor to catch up.
+  hideSnipOverlays();
+  await new Promise(resolve => setTimeout(resolve, SNIP_SETTLE_MS));
+
+  let payload = null;
+  try {
+    const shot = await captureDisplay(display);
+    if (shot) {
+      const shotSize = shot.getSize();
+      // CSS pixels on the surface → device pixels in the capture. Derived from
+      // the capture's ACTUAL size rather than from `scaleFactor`, because
+      // `desktopCapturer` fits each thumbnail inside one requested box and a
+      // display smaller than the largest comes back scaled by something else.
+      const sx = shotSize.width / display.size.width;
+      const sy = shotSize.height / display.size.height;
+
+      const crop = clampCrop(
+        { x: rect.x * sx, y: rect.y * sy, width: rect.width * sx, height: rect.height * sy },
+        shotSize.width,
+        shotSize.height,
+      );
+
+      const cropped = shot.crop(crop);
+      const size = cropped.getSize();
+      payload = {
+        dataBase64: cropped.toPNG().toString('base64'),
+        width: size.width,
+        height: size.height,
+      };
+    }
+  } catch (err) {
+    console.error('[snip] capture failed:', err.message);
+  }
+
+  teardownSnip();
+
+  if (payload) sendTo(mainWindow, 'snip:captured', payload);
+  else sendTo(mainWindow, 'snip:failed', { reason: 'capture' });
+});
+
+ipcMain.on('snip:cancel', (event) => {
+  const win = senderWindow(event);
+  if (!win || !snipOverlayState.has(win.id)) return;
+  teardownSnip();
+});
+
+/**
+ * The renderer's push: "this user holds the page, and these are their settings."
+ *
+ * `enabled` is the page permission, resolved in the renderer against
+ * `permittedPageIds` — main cannot read Firestore. It is not the security
+ * boundary and does not need to be: every route behind the capture (the signed
+ * upload slot, the finalise, the list) re-checks the permission server-side, so
+ * the worst a spoofed `enabled: true` buys is a tray icon and a local crop that
+ * nothing will store.
+ */
+ipcMain.handle('snip:configure', (event, raw = {}) => {
+  // Only the main window configures this. A satellite must not be able to
+  // register a global shortcut or plant a tray item.
+  if (senderWindow(event) !== mainWindow) return { ok: false };
+
+  snipConfig = {
+    enabled: !!raw.enabled,
+    trayIconEnabled: raw.trayIconEnabled !== false,
+    shortcutEnabled: raw.shortcutEnabled !== false,
+    shortcut: typeof raw.shortcut === 'string' && raw.shortcut ? raw.shortcut : null,
+  };
+
+  if (!snipConfig.enabled) teardownSnip();
+  ensureSnipTray();
+  const shortcutRegistered = applySnipShortcut();
+
+  return { ok: true, shortcutRegistered };
+});
+
+ipcMain.handle('snip:start', (event) => {
+  if (senderWindow(event) !== mainWindow) return { success: false, error: 'forbidden' };
+  return startSnip('renderer');
+});
+
+/**
+ * Writes text to the OS clipboard from MAIN.
+ *
+ * `navigator.clipboard.writeText` is permitted in this app, but it requires the
+ * document to be focused — and the whole point of a snip is that it completes
+ * while the user is in another application with the Bluu window hidden. The
+ * renderer would silently fail to copy the one thing the user wants.
+ */
+ipcMain.handle('clipboard:writeText', (_event, text) => {
+  if (typeof text !== 'string' || text.length > 4096) return { success: false };
+  clipboard.writeText(text);
+  return { success: true };
+});
+
+
 // ─── Notifications ───────────────────────────────────────────────────
 // Notifications are routed to a *window*, not to `mainWindow`. A new-DM alert
 // raised by the OF Manager window must focus and navigate that window — routing
@@ -1331,6 +1798,11 @@ const HIDE_ON_CLOSE = process.platform === 'darwin';
 // button. Read by the main window's `close` handler and by `window-all-closed`.
 let isQuitting = false;
 app.on('before-quit', () => { isQuitting = true; });
+
+// A global accelerator outlives the window that registered it, so releasing it
+// is not optional: Electron documents `unregisterAll()` on quit, and skipping it
+// can leave the combination swallowed until the OS notices the process is gone.
+app.on('will-quit', () => { globalShortcut.unregisterAll(); });
 
 // A running GoLogin profile must be stopped, not orphaned: `stop()` syncs the
 // profile back to the provider, and killing the process instead loses whatever
@@ -2606,6 +3078,13 @@ function createWindow() {
     // A live Tray keeps the app alive on macOS, so this is also what lets
     // window-all-closed actually quit.
     teardownTimerWidget();
+    // Same reasoning for the snip tray — and the global shortcut has to go with
+    // it, or the accelerator stays held by a process with no window to deliver a
+    // capture to.
+    destroySnipTray();
+    teardownSnip();
+    snipConfig = { enabled: false, trayIconEnabled: true, shortcutEnabled: true, shortcut: null };
+    applySnipShortcut();
     mainWindow = null;
   });
 

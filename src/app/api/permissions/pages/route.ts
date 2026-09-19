@@ -62,6 +62,10 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
           href: page.href,
           icon: page.icon,
           order: page.order,
+          // Sub-items (PageDef.parentPageId) must carry it through: the sidebar
+          // uses it to skip them, and without it a non-navigational grant would
+          // render as a dead row.
+          parentPageId: page.parentPageId,
           // Grant details aren't needed by the client for rendering; omit for simplicity
           grantedVia: 'group' as const,
         }));

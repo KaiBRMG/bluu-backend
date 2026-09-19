@@ -19,8 +19,8 @@
 | `src/app/api/gologin/launch-token/route.ts` | **Hands the caller's own token to main.** Read its header first |
 | `src/app/api/gologin/session-lock/route.ts` | Claim (authenticated) + admin force-release |
 | `src/app/api/gologin/session-lock/lease/route.ts` | Heartbeat / release, authenticated by the lease secret |
-| `src/app/api/gologin/admin/members/route.ts` | Admin: grant/revoke seats, reconcile a pre-existing workspace |
-| `src/app/api/gologin/admin/assignments/route.ts` | Admin: read the folder tree, add/remove profiles |
+| `src/app/api/gologin/admin/members/route.ts` | Management: grant/revoke seats, reconcile a pre-existing workspace |
+| `src/app/api/gologin/admin/assignments/route.ts` | Management: read the folder tree, add/remove profiles |
 | `electron/main.js` (GoLogin section) | The SDK, the session map, Orbita downloads, the lock lease |
 | `src/hooks/useGoLoginAccount.ts` | Seat + token state for the current operator |
 | `src/hooks/useGoLoginProfiles.ts` | The window's one profile fetch |
@@ -32,7 +32,7 @@
 | `src/app/gologin/_lib/session.ts` | Session labels, the error vocabulary (incl. `invalid-token`) and `TONE_CHIP` |
 | `src/hooks/useAuthFetch.ts` | `ApiError` — carries the route's `code` through the throw |
 | `src/app/gologin/**` | The window: layout, guard, onboarding, list, Management, Orbita gate |
-| `src/lib/definitions.ts` | `apps-gologin` page (Apps teamspace, `href: null`) |
+| `src/lib/definitions.ts` | `apps-gologin` page (Apps teamspace, `href: null`) + its `apps-gologin-management` sub-item |
 
 ## Firestore
 
@@ -158,7 +158,7 @@ The response is checked for a JSON content type before parsing — a Cloudflare 
 Four independent layers:
 
 1. **Electron main process** — the window is not created until main has sent the renderer's ID token to `/api/gologin/access` and got a 200.
-2. **Every API route** re-checks `requireGoLoginAccess(uid)` — the `apps-gologin` page permission, tier 2. The admin assignment routes additionally require **`token.admin`** (tier 3, rule 3): holding the page lets you *use* profiles, not hand them out.
+2. **Every API route** re-checks `requireGoLoginAccess(uid)` — the `apps-gologin` page permission, tier 2. The Management routes (members + assignments) additionally require **`requireGoLoginManagement(token)`**: holding the page lets you *use* profiles, not hand them out. The force-release on the session lock is the one control still gated on `requireGoLoginAdmin` outright.
 3. **`GoLoginGuard`** refuses to render for a user without the page.
 4. **GoLogin itself** — an operator's token can only see what has been shared into their account. A bug in our filtering can show *fewer* profiles, never more.
 
@@ -246,11 +246,18 @@ Detection is on the error *message* because that is all the SDK offers: it throw
 
 **A blocked row carries an admin force-release.** The route and `forceReleaseProfileLock` have existed since the lock did and nothing ever called them, so the only way to free a wedged claim was the Firestore console. The three-minute stale window covers a machine losing power; it does **not** cover a holder whose app is hung, which heartbeats never stop for and teardown never runs for. It is confirmed with an `AlertDialog` that names the holder and states the cost — clearing the lock does not close their browser, so if theirs is still open their session will not be saved back and two people can end up signed into one account. ⚠ The route gates on **`requireGoLoginAdmin`, not a bare `token.admin`**, for the same reason the Management routes do: claims do not reach an already-issued ID token, this renderer runs for weeks (rule 9c), and the button renders off the live `userData.groups` snapshot — a bare claim check would show an admin a control that answers "Admins only".
 
-### Management (admins only): two tabs, one workflow
+### Management (admins, or the Management grant): two tabs, one workflow
 
-A dialog rather than a page: it edits the contents of the list behind it, and the window has no sidebar to navigate back with. The button is gated client-side on `groups.includes('admin')`; both routes behind it are tier 3 (rule 3) because they spend money and grant access to live logged-in accounts.
+A dialog rather than a page: it edits the contents of the list behind it, and the window has no sidebar to navigate back with. It spends money and grants access to live logged-in accounts, so it is never reachable on the `apps-gologin` page permission alone.
 
-⚠ **The server gate is `requireGoLoginAdmin`, not a bare `token.admin` check, and that distinction is load-bearing.** `setCustomUserClaims` does not reach an ID token that has already been issued, and this renderer routinely runs for weeks without a reload (rule 9c). The Management button meanwhile renders off `userData.groups`, which is live over `onSnapshot`. So the two drift, one-directionally and visibly: the button appears and every route behind it answers "Admins only" — reported on 2026-09-11 with the claim correctly set server-side the whole time. The claim is kept as the fast path, with the `admin` group (via the 60s-cached `getUserById`) as the fallback. That is not a weakening — the claim is *derived* from that group — and it collapses the two definitions of "admin" this feature briefly had, since `usesMasterGoLoginToken` already decided master-token access from the group.
+**Who gets in — changed 2026-09-19.** It was admin-only. The problem was not the bar but the *instrument*: the only way to let someone run the GoLogin workspace was to make them a Bluu **admin**, which also hands them user management, the permission map itself, and `GL_API_TOKEN` on their desktop. Management is now its own grant — **`apps-gologin-management`**, a **sub-item** of `apps-gologin` on `/admin-portal/sharing` (the indented row under GoLogin). See [permissions.md](permissions.md#sub-item-pages-a-capability-inside-a-page) for the mechanism.
+
+- Server: `requireGoLoginManagement(token)`, always paired with `requireGoLoginAccess` — Management without the GoLogin page is not a state a route may be reached in.
+- Client: `canManage` in `src/app/gologin/page.tsx` — `isAdmin || permittedPageIds.includes('apps-gologin-management')`.
+- **Admins are in unconditionally, and that is not a convenience.** They run the workspace on the master token (`usesMasterGoLoginToken`), so revoking the Sharing row from them would lock the only people who can administer it out of it. The row is for delegating *to* non-admins.
+- The sub-item is **not** a satellite page and has **no href** — the sidebar skips it. The only thing it changes is whether the Management button renders inside the GoLogin window.
+
+⚠ **Neither half is a bare `token.admin` check, and that distinction is load-bearing.** `setCustomUserClaims` does not reach an ID token that has already been issued, and this renderer routinely runs for weeks without a reload (rule 9c). Both flags meanwhile render off the live `users/{uid}` snapshot (`groups`, `permittedPageIds`). So a raw claim check drifts, one-directionally and visibly: the button appears and every route behind it answers "Admins only" — reported on 2026-09-11 with the claim correctly set server-side the whole time. The claim is kept as the fast path, with the `admin` group (via the 60s-cached `getUserById`) as the fallback, then the page grant. That is not a weakening — the claim is *derived* from that group — and it collapses the two definitions of "admin" this feature briefly had, since `usesMasterGoLoginToken` already decided master-token access from the group.
 
 **Members** is the default tab, because an empty workspace has nothing to assign. It grants and revokes seats, shows the seat budget from the workspace plan, and carries the **Reconcile** action for a pre-existing workspace. Each row says which of four things is true — `Active`, `No token yet`, `Invite pending`, `Seat removed in GoLogin` — because each has a different remedy and a single "inactive" badge would collapse them into one.
 
@@ -352,6 +359,13 @@ Running a macOS-marked profile on Windows is supported and normal. The SDK compu
 
 `apps-gologin` is an ordinary tier-2 page in the Apps teamspace with `href: null`. It has **no `page-permissions` doc until someone grants it** on `/admin-portal/sharing`, and a page with no doc grants nobody — fail-closed.
 
+`apps-gologin-management` is a **sub-item** of it (`parentPageId: 'apps-gologin'`): same tier-2 machinery, same fail-closed default, but no href and no sidebar row — see [permissions.md](permissions.md#sub-item-pages-a-capability-inside-a-page). It gates the Management dialog and its two routes. Granting it without `apps-gologin` does nothing: the routes check both, and without the parent the window never opens.
+
+**Three things Management deliberately does *not* carry with it**, because they are admin authority rather than workspace administration:
+- **The master token.** `usesMasterGoLoginToken` still reads the `admin` group alone, so a non-admin manager launches with their **own** key and sees their **own** folder. `GL_API_TOKEN` never reaches their desktop. They administer the workspace server-side; they do not become the workspace.
+- **Force-release** on a wedged session lock — still `requireGoLoginAdmin`, and still rendered off `groups.includes('admin')`.
+- **The seat exemptions.** A non-admin manager is an ordinary operator to every other part of the model: they appear as a seat candidate, reconciliation matches them, and assignment works on them normally.
+
 ## Scope
 
 Implemented: per-user account linking with folder provisioning and sharing, Orbita install with progress (including mid-launch updates), profile listing with search / faceted folder chips / lazy window / refresh, local launching, a cross-machine session lock, and an admin assignment surface.
@@ -370,7 +384,7 @@ Deliberately **not** implemented: an in-app view of the running browser (built, 
 - [ ] **Never fan out reconciliation.** It is sequential because each member costs two or three provider calls.
 - [ ] **Never map a GoLogin member to a Bluu user on a fuzzy match.** One exact `workEmail` hit or it is reported unmapped — a wrong binding shows one person another person's profiles.
 - [ ] **Never "fix" `recepients`.** It is the provider's spelling; the correct one shares with nobody and still returns 201.
-- [ ] **New GoLogin route → `requireGoLoginAccess(token.uid)` first**, and **`requireGoLoginAdmin(token)`** — not a bare `token.admin` — if it changes who can see what. A raw claim check drifts from the `userData.groups` the buttons render off, and this renderer runs for weeks (rule 9c).
+- [ ] **New GoLogin route → `requireGoLoginAccess(token.uid)` first**, and **`requireGoLoginManagement(token)`** — not a bare `token.admin` — if it changes who can see what. A raw claim check drifts from the live `users/{uid}` snapshot the buttons render off, and this renderer runs for weeks (rule 9c). Reserve `requireGoLoginAdmin` for authority that must not be delegatable (force-release is the only one).
 - [ ] **Never surface a provider error string as the whole answer.** A rejected or revoked token is `invalid-token` and gets its own screen with a route back to the paste field. A Retry button on a dead key is worse than no button.
 - [ ] **Never `window.confirm` or `alert`.** Destructive acts here use shadcn `AlertDialog`, and the threshold is blast radius: one profile no, a folder of them yes, a seat yes, someone else's lock yes.
 - [ ] **Never use the uppercase eyebrow as a section scaffold.** It is the device a *window* names itself with (the list, onboarding, the Orbita gate and the close guard each use it once, correctly). A heading inside a dialog or a panel is a plain `text-xs font-medium text-zinc-400`.

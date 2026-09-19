@@ -8,7 +8,7 @@ import {
   goLoginErrorResponse,
   listGoLoginProfilesForMaster,
   requireGoLoginAccess,
-  requireGoLoginAdmin,
+  requireGoLoginManagement,
 } from '@/lib/services/gologinService';
 import {
   GOLOGIN_ACCOUNTS_COLLECTION,
@@ -19,12 +19,15 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 /**
  * Admin assignment — who can see which profiles.
  *
- * **Tier 3 (admin), not the `apps-gologin` page permission.** This route grants
- * and revokes access to live logged-in accounts, so it sits with the other
- * auth-graph routes under CLAUDE.md rule 3: holding the GoLogin page lets you
- * *use* profiles, not hand them out. `requireGoLoginAdmin` takes the JWT claim
- * as a fast path and falls back to the `admin` group — see its header for why a
- * bare claim check is not enough in a renderer that never reloads.
+ * **Gated on `apps-gologin` *plus* `apps-gologin-management`, or the admin
+ * claim.** This route grants and revokes access to live logged-in accounts, so
+ * holding the GoLogin page alone must never be enough: that lets you *use*
+ * profiles, not hand them out. Until 2026-09-19 the second gate was tier 3
+ * outright; it is now the `apps-gologin-management` sub-item, grantable on
+ * `/admin-portal/sharing` under the GoLogin row, so the workspace can be run
+ * without also handing someone the whole auth graph. Admins are still in
+ * unconditionally — see `requireGoLoginManagement`, which keeps the
+ * claim-then-`admin`-group shape for a renderer that never reloads (rule 9c).
  *
  * Assignment is folder membership and nothing else — see
  * `gologinAccountService.ts` for why the share itself is created once and never
@@ -42,7 +45,7 @@ export const maxDuration = 60;
  * both already cached for 60s.
  */
 export const GET = withAuth(async (req: NextRequest, token: DecodedIdToken) => {
-  const denied = (await requireGoLoginAccess(token.uid)) ?? (await requireGoLoginAdmin(token));
+  const denied = (await requireGoLoginAccess(token.uid)) ?? (await requireGoLoginManagement(token));
   if (denied) return denied;
 
   const force = req.nextUrl.searchParams.get('refresh') === '1';
@@ -137,7 +140,7 @@ const MAX_BATCH = 200;
  * from the 60s memo.
  */
 export const POST = withAuth(async (req: NextRequest, token: DecodedIdToken) => {
-  const denied = (await requireGoLoginAccess(token.uid)) ?? (await requireGoLoginAdmin(token));
+  const denied = (await requireGoLoginAccess(token.uid)) ?? (await requireGoLoginManagement(token));
   if (denied) return denied;
 
   let body: { uid?: unknown; profileIds?: unknown; action?: unknown; sourceFolderId?: unknown };

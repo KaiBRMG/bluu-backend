@@ -279,8 +279,10 @@ export default function Sidebar({ teamspaces, accessiblePages, userData }: Sideb
       >
         {/* Teamspace groups */}
         {sortedTeamspaces.map((ts) => {
+          // `!p.parentPageId` drops sub-items (see PageDef): they are grants on
+          // a capability inside another page, with no href to navigate to.
           const pages = accessiblePages
-            .filter((p) => p.teamspaceId === ts.id)
+            .filter((p) => p.teamspaceId === ts.id && !p.parentPageId)
             .sort((a, b) => a.order - b.order);
           const isOpen = openMap[ts.id] ?? true;
 

@@ -38,6 +38,13 @@ import {
 export const GOLOGIN_PAGE_ID = 'apps-gologin';
 
 /**
+ * The sub-item permission that gates the **Management** surface (seats +
+ * assignments) — a `parentPageId` child of `apps-gologin` in `definitions.ts`,
+ * granted on `/admin-portal/sharing` under the GoLogin row.
+ */
+export const GOLOGIN_MANAGEMENT_PAGE_ID = 'apps-gologin-management';
+
+/**
  * Tier-2 gate for every GoLogin route. Returns a 403 response when denied,
  * null when allowed — same contract as `checkPageAccess`.
  */
@@ -117,6 +124,46 @@ export async function requireGoLoginAdmin(token: {
   if (token.admin === true) return null;
   if (await isGoLoginAdmin(token.uid)) return null;
   return NextResponse.json({ error: 'Admins only.' }, { status: 403 });
+}
+
+/**
+ * Gate for the **Management** surface: admin, *or* the `apps-gologin-management`
+ * sub-item grant.
+ *
+ * Management was tier 3 until 2026-09-19. It is still an authority that spends
+ * money and hands out live logged-in accounts — what changed is that the only
+ * way to delegate it was to make someone a Bluu **admin**, which grants the
+ * whole auth graph (user management, the permission map itself, the GoLogin
+ * master token on their desktop). A page grant is the narrower instrument, and
+ * it is the one an admin can hand out and take back from one screen.
+ *
+ * **Admins stay in unconditionally, and not merely as a convenience.** They run
+ * the workspace on the master token (`usesMasterGoLoginToken`), so an admin
+ * without the sub-item grant would be locked out of a workspace only they can
+ * administer — and revoking a row on the Sharing page would silently do that.
+ *
+ * The admin half keeps `requireGoLoginAdmin`'s claim-then-group shape, for the
+ * reason in its header: `setCustomUserClaims` does not reach an already-issued
+ * ID token and this renderer runs for weeks (rule 9c).
+ *
+ * ⚠ This is the *second* gate, never the first. Callers pair it with
+ * `requireGoLoginAccess`, because holding Management without `apps-gologin` is
+ * not a state anyone should be able to reach through a route.
+ */
+export async function requireGoLoginManagement(token: {
+  uid: string;
+  admin?: unknown;
+}): Promise<NextResponse | null> {
+  if (token.admin === true) return null;
+  if (await isGoLoginAdmin(token.uid)) return null;
+  if (!(await checkPageAccess(token.uid, GOLOGIN_MANAGEMENT_PAGE_ID))) return null;
+  return NextResponse.json(
+    {
+      error: 'You do not have access to GoLogin Management. Ask an admin to grant it.',
+      code: 'not-a-manager',
+    },
+    { status: 403 },
+  );
 }
 
 /** How long a listing is served without touching the provider at all. */

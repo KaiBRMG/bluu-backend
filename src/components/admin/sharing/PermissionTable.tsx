@@ -84,9 +84,51 @@ export default function PermissionTable({
     [groups]
   );
 
-  // Never sort the prop array in place — it is owned by useAdminData's state.
-  const sortedPages = useMemo(
-    () => [...pages].sort((a, b) => a.order - b.order),
+  /**
+   * Pages in render order, each sub-item directly beneath its parent.
+   *
+   * A sub-item (`PageDef.parentPageId`) is a capability inside another page
+   * rather than a destination — GoLogin's Management dialog is the first. It
+   * gets an ordinary row, indented, because it is an ordinary tier-2 grant; the
+   * indent is the only thing saying "this is part of the row above", so it must
+   * not be sorted away from it by `order`.
+   *
+   * An orphan — a sub-item whose parent is not in this teamspace — is rendered
+   * at top level rather than dropped, so a mis-set `parentPageId` shows up as an
+   * odd row instead of a page nobody can grant.
+   *
+   * Never sorts the prop array in place — it is owned by useAdminData's state.
+   */
+  const sortedPages = useMemo(() => {
+    const byOrder = [...pages].sort((a, b) => a.order - b.order);
+    const ids = new Set(byOrder.map((p) => p.pageId));
+    const childrenOf = new Map<string, PageDef[]>();
+    for (const page of byOrder) {
+      if (!page.parentPageId || !ids.has(page.parentPageId)) continue;
+      const list = childrenOf.get(page.parentPageId);
+      if (list) list.push(page);
+      else childrenOf.set(page.parentPageId, [page]);
+    }
+    return byOrder.flatMap((page) =>
+      page.parentPageId && ids.has(page.parentPageId)
+        ? []
+        : [page, ...(childrenOf.get(page.pageId) ?? [])]
+    );
+  }, [pages]);
+
+  /**
+   * The name a row is announced and toasted under.
+   *
+   * "Management" on its own is not a permission anyone can reason about — the
+   * indent says which page it belongs to visually, and this says it everywhere
+   * the indent cannot: aria-labels, and every success/error toast.
+   */
+  const qualifiedTitle = useCallback(
+    (page: PageDef): string => {
+      if (!page.parentPageId) return page.title;
+      const parent = pages.find((p) => p.pageId === page.parentPageId);
+      return parent ? `${parent.title} → ${page.title}` : page.title;
+    },
     [pages]
   );
 
@@ -182,14 +224,14 @@ export default function PermissionTable({
 
       void applyPermissions({
         pageId: page.pageId,
-        pageTitle: page.title,
+        pageTitle: qualifiedTitle(page),
         next,
         previous,
         granted: !currentlyHasAccess,
         subject: groupLabel(group),
       });
     },
-    [applyPermissions, currentPermissions]
+    [applyPermissions, currentPermissions, qualifiedTitle]
   );
 
   const handleUserToggle = useCallback(
@@ -201,14 +243,14 @@ export default function PermissionTable({
 
       void applyPermissions({
         pageId: page.pageId,
-        pageTitle: page.title,
+        pageTitle: qualifiedTitle(page),
         next,
         previous,
         granted: !currentlyHasAccess,
         subject: user.displayName,
       });
     },
-    [applyPermissions, currentPermissions]
+    [applyPermissions, currentPermissions, qualifiedTitle]
   );
 
   return (
@@ -255,6 +297,8 @@ export default function PermissionTable({
               const sharedCount = grantedUids.length;
               const isSaving = savingPages.has(page.pageId);
               const isPickerOpen = openPicker === page.pageId;
+              const isSubItem = !!page.parentPageId;
+              const rowLabel = qualifiedTitle(page);
 
               return (
                 <TableRow
@@ -270,12 +314,27 @@ export default function PermissionTable({
                     scope="row"
                     className="p-2 text-left align-middle text-sm font-medium"
                   >
-                    <span className="flex min-w-0 items-center gap-2">
+                    {/* A sub-item is indented behind an L-rule, the same device
+                        the sidebar uses for nesting. The accessible name still
+                        carries the parent ("GoLogin → Management"), because a
+                        screen reader hears the row header, not the indent. */}
+                    <span
+                      className={`flex min-w-0 items-center gap-2 ${isSubItem ? "pl-4" : ""}`}
+                    >
+                      {isSubItem && (
+                        <span
+                          aria-hidden
+                          className="-mr-1 h-3 w-2 shrink-0 rounded-bl-[3px] border-b border-l border-white/[0.14]"
+                        />
+                      )}
                       <PageIcon
                         name={page.icon ?? undefined}
                         className="size-4 shrink-0 text-zinc-400"
                       />
-                      <span className="truncate" title={page.title}>
+                      <span
+                        className={`truncate ${isSubItem ? "font-normal text-zinc-300" : ""}`}
+                        title={page.title}
+                      >
                         {page.title}
                       </span>
                     </span>
@@ -290,7 +349,7 @@ export default function PermissionTable({
                             checked={hasAccess}
                             onCheckedChange={() => handleGroupToggle(page, g, hasAccess)}
                             disabled={isSaving}
-                            aria-label={`${groupLabel(g)} access to ${page.title}`}
+                            aria-label={`${groupLabel(g)} access to ${rowLabel}`}
                           />
                         </div>
                       </TableCell>
@@ -308,7 +367,7 @@ export default function PermissionTable({
                           size="sm"
                           role="combobox"
                           aria-expanded={isPickerOpen}
-                          aria-label={`Individuals with access to ${page.title}`}
+                          aria-label={`Individuals with access to ${rowLabel}`}
                           disabled={isSaving}
                           className="w-full max-w-[240px] justify-between font-normal"
                         >

@@ -28,6 +28,8 @@ import {
   Share2,
   CalendarCog,
   ClockFading,
+  ImageUpscale,
+  Settings2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -63,6 +65,8 @@ export const ICON_MAP: Record<string, LucideIcon> = {
   Share2,
   CalendarCog,
   ClockFading,
+  ImageUpscale,
+  Settings2,
 };
 
 // Brand icons that have no lucide equivalent are served from /Icons as SVGs.
