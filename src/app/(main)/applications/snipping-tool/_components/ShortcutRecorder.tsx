@@ -57,13 +57,14 @@ export function ShortcutRecorder({
   platform: 'darwin' | 'other';
 }) {
   const [recording, setRecording] = useState(false);
+  const [rejected, setRejected] = useState<string | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   // Recording holds the keyboard, so it must not be possible to walk away and
   // leave it armed — clicking elsewhere ends it, exactly like Escape.
   useEffect(() => {
     if (!recording) return;
-    const stop = () => setRecording(false);
+    const stop = () => { setRecording(false); setRejected(null); };
     window.addEventListener('blur', stop);
     return () => window.removeEventListener('blur', stop);
   }, [recording]);
@@ -71,6 +72,20 @@ export function ShortcutRecorder({
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
       if (!recording) return;
+
+      // **Tab is let through, before anything else is considered.** This used
+      // to `preventDefault()` unconditionally at the top, which ate Tab and
+      // left a keyboard user stuck on this control with no advertised way out
+      // (WCAG 2.1.2). An unmodified Tab now ends recording and moves focus
+      // normally; `Cmd+Shift+Tab` and friends are still recordable, because a
+      // modified Tab is a deliberate combination rather than an attempt to
+      // leave.
+      const bareTab = event.key === 'Tab' && !event.metaKey && !event.ctrlKey && !event.altKey;
+      if (bareTab) {
+        setRecording(false);
+        return;
+      }
+
       event.preventDefault();
       event.stopPropagation();
 
@@ -83,8 +98,19 @@ export function ShortcutRecorder({
       if (['Shift', 'Control', 'Alt', 'Meta', 'OS'].includes(event.key)) return;
 
       const accelerator = acceleratorFrom(event);
-      if (!accelerator || !isValidSnipShortcut(accelerator)) return;
+      if (!accelerator || !isValidSnipShortcut(accelerator)) {
+        // Say why nothing happened. Silence here left the user pressing keys
+        // at a field that kept saying "Press keys…", with no way to tell a
+        // rejected combination from one that was not registering at all.
+        setRejected(
+          accelerator
+            ? 'That combination cannot be used. Try another.'
+            : 'Add ⌘, Ctrl, Alt or Shift to the key.',
+        );
+        return;
+      }
 
+      setRejected(null);
       onChange(accelerator);
       setRecording(false);
       buttonRef.current?.blur();
@@ -93,19 +119,42 @@ export function ShortcutRecorder({
   );
 
   return (
-    <Button
-      ref={buttonRef}
-      type="button"
-      variant="outline"
-      size="sm"
-      disabled={disabled}
-      aria-label={recording ? 'Press a key combination' : `Shortcut: ${formatSnipShortcut(value, platform)}. Click to change.`}
-      onClick={() => setRecording(r => !r)}
-      onKeyDown={handleKeyDown}
-      onBlur={() => setRecording(false)}
-      className="h-7 min-w-[7.5rem] font-mono text-xs"
-    >
-      {recording ? 'Press keys…' : formatSnipShortcut(value, platform)}
-    </Button>
+    <div className="flex min-w-0 flex-col gap-1">
+      <Button
+        ref={buttonRef}
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={disabled}
+        // `aria-pressed` is what carries the armed state to a screen reader.
+        // Swapping `aria-label` on an already-focused button does not reliably
+        // re-announce, so the state used to be visible only to sighted users.
+        aria-pressed={recording}
+        aria-describedby="snip-shortcut-hint"
+        aria-label={
+          recording
+            ? 'Recording a shortcut. Press a key combination, or Escape to cancel.'
+            : `Shortcut: ${formatSnipShortcut(value, platform)}. Click to change.`
+        }
+        onClick={() => { setRecording(r => !r); setRejected(null); }}
+        onKeyDown={handleKeyDown}
+        onBlur={() => { setRecording(false); setRejected(null); }}
+        className="h-7 min-w-[7.5rem] font-mono text-xs"
+      >
+        {recording ? 'Press keys…' : formatSnipShortcut(value, platform)}
+      </Button>
+
+      {/* The escape route, stated rather than assumed (WCAG 2.1.2 wants the
+          exit advertised, not merely present), and the rejection reason in the
+          same slot so the control never changes height. `role="status"` is
+          what makes both reach a screen reader at all. */}
+      <p
+        id="snip-shortcut-hint"
+        role="status"
+        className="min-h-[1rem] text-[11px] text-zinc-400"
+      >
+        {rejected ?? (recording ? 'Esc to cancel · Tab to leave' : '')}
+      </p>
+    </div>
   );
 }

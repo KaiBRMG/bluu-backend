@@ -45,9 +45,12 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
  * POST /api/snips — leg two: turn a reservation whose bytes have landed into a
  * live, linkable snip.
  *
- * The body carries only the id and the capture's pixel dimensions. The byte size
- * is read from the bucket rather than believed from the caller, which also
- * doubles as the proof the PUT actually happened — see `finalizeSnip`.
+ * The body carries only the id, the capture's pixel dimensions and — for a
+ * recording — how long it ran. The byte size is read from the bucket rather
+ * than believed from the caller, which also doubles as the proof the PUT
+ * actually happened, and the **kind is read off the reservation**, not off this
+ * body: the slot was signed for one content type and one path, so a finalise
+ * call must not be able to relabel what landed there. See `finalizeSnip`.
  */
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   const denied = await requireSnippingToolAccess(token.uid);
@@ -60,6 +63,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       String(body?.id ?? ''),
       Number(body?.width),
       Number(body?.height),
+      Number(body?.durationMs),
     );
     // One refusal for every cause — unknown id, someone else's reservation, an
     // upload that never landed. The id is a share token; a route that says which

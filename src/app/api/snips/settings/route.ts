@@ -55,6 +55,13 @@ export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         typeof body.shortcutEnabled === 'boolean' ? body.shortcutEnabled : current.shortcutEnabled,
       shortcut: current.shortcut,
       retention: current.retention,
+      // Written by the selection surface's Video toggle rather than by the
+      // settings dialog — the user sets it at the moment of capture and this
+      // is what makes the choice survive the surface closing.
+      systemAudioEnabled:
+        typeof body.systemAudioEnabled === 'boolean'
+          ? body.systemAudioEnabled
+          : current.systemAudioEnabled,
     };
 
     if (body.shortcut !== undefined) {

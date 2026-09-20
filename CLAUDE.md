@@ -34,9 +34,10 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
                     ┌───────────────────────────────────────────────┐
  System browser  ─►│  Shared snip       /s/[shareId]               │─► UNAUTHENTICATED (same posture;
  (public)           └───────────────────────────────────────────────┘   the doc id IS the token, so a
-                                                                        snip id is a secret. Image is a
-                                                                        302 to a signed Storage URL —
-                                                                        the bytes never cross Vercel)
+                                                                        snip id is a secret. An image OR
+                                                                        a recording; /image and /video
+                                                                        both 302 to a signed Storage URL
+                                                                        — the bytes never cross Vercel)
 
                     ┌───────────────────────────────────────────────┐
  Second Electron ─►│  OF Manager        /of-manager                │─► own window, own layout
@@ -51,8 +52,19 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
                                                                         live desktop, crosshair, a box, no
                                                                         scrim; the screen is photographed
                                                                         AFTER the box is drawn. Main crops,
-                                                                        renderer uploads
+                                                                        renderer uploads. A bottom bar
+                                                                        picks Image (default) or Video
                                                                         — see snipping-tool.md
+ Native surface  ─►  Snip recorder + control bar (no route)      ─► its OWN local window, opened once
+ (main.js only)                                                        the surfaces are DESTROYED. Holds
+                                                                        the MediaRecorder; content-
+                                                                        protected so it is not in the
+                                                                        recording it controls. Chunks
+                                                                        stream to a TEMP FILE and MAIN
+                                                                        PUTs it — the one place main
+                                                                        uploads. A second, CLICK-THROUGH
+                                                                        window outlines the recorded
+                                                                        region — see snipping-tool.md
 
  src/middleware.ts  → rewrites all non-Electron, non-allowlisted page traffic to /desktop-only
  Telegram bot @BluuRockBot → one bot, two audiences: employee alerts + the creator
@@ -71,7 +83,8 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
                 overtime still unassigned + the monthly payday reminder)
                 — see ca-salary.md §11
               + daily snip retention sweep (04:15 UTC): expired snips + their
-                Storage objects, plus upload slots that were never finalised
+                Storage objects (media AND a recording's poster), plus upload
+                slots that were never finalised
                 — see snipping-tool.md
               + daily leave-balance reset (22:30 UTC = 00:30 Harare): unpaid
                 → 4 on the 1st, paid → 10 on 1 Jan. Daily + a per-user period
@@ -220,7 +233,7 @@ Fixing the `AppLayout` hoist is therefore not only the navigation speed-up alrea
 | [ca-salary.md](documentation/ca-salary.md) | **Chat-agent salary & coverage** — the commission/wage engine, the `.xlsx` sales import, month close, creator assignment on shifts, the leave → overtime marketplace, and the eight CA notifications |
 | [campaign-tracking.md](documentation/campaign-tracking.md) | Custom requests vs campaigns, the two archive mechanisms, transfer |
 | [resources.md](documentation/resources.md) | `apps-resources` page (reading **and** managing — there is no separate admin page), `app-resources` collection, the group-based read/write access matrix |
-| [snipping-tool.md](documentation/snipping-tool.md) | **Snipping Tool** — the native region capture (global shortcut + menu-bar/tray item), the transparent selection surface, the public `/s/[shareId]` link, and the auto-delete retention sweep |
+| [snipping-tool.md](documentation/snipping-tool.md) | **Snipping Tool** — the native region capture (global shortcut + menu-bar/tray item), the transparent selection surface, **screen recording with mic/system audio**, the public `/s/[shareId]` link, and the auto-delete retention sweep |
 | [prompt-library.md](documentation/prompt-library.md) | **Prompt Library** — `prompt-library` collection, per-prompt version history + diffing, the client-side search engine, the LLM logo pipeline |
 | [onlyfans-crm.md](documentation/onlyfans-crm.md) | **OF Manager** — the OnlyFans messaging window, the `IOnlyFansClient` adapter seam, the Firestore chat mirror + provider webhook |
 | [gologin.md](documentation/gologin.md) | **GoLogin** — the browser-profile satellite window, per-operator accounts + folder sharing, the cross-machine session lock, the Orbita downloader, and the rate limit that shapes it all (a 429 revokes the API token permanently) |
@@ -258,7 +271,7 @@ Fixing the `AppLayout` hoist is therefore not only the navigation speed-up alrea
 9e. **NEVER call the GoLogin API yourself, and never poll it.** Same prohibition as 9b, different hazard: GoLogin **permanently revokes the API token on a 429** (300 req/min free/trial, 1200 paid), so an overrun is not a throttle you wait out — the key is dead until someone reissues it. Do not `curl` `api.gologin.com` to check a field name; use [the API reference](https://gologin.com/docs/api-reference) or ask the user. In code, the profile walk is sequential, page-capped, memoised **per operator** and floor-limited on refresh — each of those lines is what keeps a token alive. Live "who has this profile open" comes from **Firestore**, never from polling the provider's `isRunning` flag. Operators' personal API keys live encrypted in `gologin-accounts/{uid}` and must **never** be written to `users/{uid}`, which is streamed to the renderer. **Admins operate on the master `GL_API_TOKEN`; every other employee brings their own key** — which is why the master token must be rotated when an admin leaves. See [gologin.md](documentation/gologin.md).
 
 9i. **Minimise Vercel origin traffic — Fast Origin Transfer is this project's most expensive metric.** Rule 9 governs Firestore; this one governs the wire between the CDN and our functions, and it is billed on **both** the request and the response. The fleet currently issues ~61k origin requests a day for a few dozen staff — see the Fast Origin Transfer section above for the measurement. Five standing constraints:
-    - **A signed-URL upload needs the bucket's CORS policy, and it is not in code.** `PUT` is never a simple CORS request, so the browser preflights `storage.googleapis.com` every time; a bucket with no policy fails that preflight and the renderer sees a bare `TypeError: Failed to fetch`. The policy is [`storage-cors.json`](storage-cors.json) at the repo root, applied with `cd src && node scripts/set-storage-cors.js` (**not** `gcloud` — the Cloud SDK is not installed on these machines) — **adding a domain to the app means adding it there too.** Both signed-upload paths (snips, OnlyFans media) depend on it. Applied 2026-09-19; the bucket had no policy at all before that. See [snipping-tool.md](documentation/snipping-tool.md).
+    - **A signed-URL upload needs the bucket's CORS policy, and it is not in code.** `PUT` is never a simple CORS request, so the browser preflights `storage.googleapis.com` every time; a bucket with no policy fails that preflight and the renderer sees a bare `TypeError: Failed to fetch`. The policy is [`storage-cors.json`](storage-cors.json) at the repo root, applied with `cd src && node scripts/set-storage-cors.js` (**not** `gcloud` — the Cloud SDK is not installed on these machines) — **adding a domain to the app means adding it there too.** Both browser-side signed-upload paths (snip **stills**, OnlyFans media) depend on it — a snip **recording** is PUT from the main process over Node's `https`, which has no origin and no preflight, so a failed recording upload is never this. Applied 2026-09-19; the bucket had no policy at all before that. See [snipping-tool.md](documentation/snipping-tool.md).
     - **Never route bulk bytes through a function.** Uploads and downloads of images, video, screenshots, exports or archives go **direct to Cloud Storage over a signed URL**, the way [`/api/onlyfans/media/upload-url`](src/app/api/onlyfans/media/upload-url/route.ts) does — the function signs the slot, the renderer moves the bytes. Never accept a file as a base64 JSON field; base64 is a 33% tax on a payload that should not be crossing Vercel at all. `POST /api/time-tracking/screenshots/upload` is the outstanding violation, not the precedent.
     - **`prefetch={false}` on every navigational `<Link>` in a persistent chrome** — sidebar, top bar, tab strips, any list long enough to fill a viewport. Next prefetches every in-viewport link by default, re-prefetches on the `staleTimes.dynamic` expiry, and an Electron window that is open for weeks turns that into a permanent background poll. Prefetch is for a link a user is about to click, not for a menu.
     - **Every new API route declares its cacheability.** If a response is identical for a cohort for the life of a deployment (config gates, page definitions, LLM logos, static rosters), it carries a `Cache-Control` with `s-maxage` + `stale-while-revalidate` so the CDN answers instead of the function. **A per-user response cannot use that pair** — `private` cancels `s-maxage`; the only lever is the browser cache, `private, max-age=…` + `Vary: Authorization`. If it genuinely cannot be cached, say so in the route's header comment. Silence is how 147 of 155 routes ended up on an unconditional origin round-trip.

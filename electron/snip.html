@@ -9,19 +9,52 @@
     /*
       The selection surface: one per display, sized to that display's bounds.
 
-      IT DRAWS NOTHING. The page is fully transparent and the only ink it ever
-      puts on screen is the selection rectangle while the user is dragging one.
-      What the user sees is their own live desktop, a crosshair cursor, and a box
-      they are drawing — there is no scrim, no dimming, and no photograph of the
-      screen underneath.
+      IT DRAWS ALMOST NOTHING. The page is fully transparent; the only ink it
+      puts on screen is the selection rectangle while the user is dragging one,
+      its size readout, and — on the one surface under the cursor — the mode bar
+      at the bottom. What the user sees is their own live desktop, a crosshair
+      cursor, and a box they are drawing. There is no scrim, no dimming, and no
+      photograph of the screen underneath.
 
       The window still exists, and has to: no OS gives an application a global
-      cursor change or global mouse capture without one. Making it invisible is
-      the whole design — see the snip section of electron/main.js for why the
-      capture is taken AFTER the rectangle is hidden rather than before the
-      surface opens.
+      cursor change or global mouse capture without one. Making it (almost)
+      invisible is the whole design — see the snip section of electron/main.js
+      for why the capture is taken AFTER the rectangle is hidden rather than
+      before the surface opens.
+
+      ## Why there is now a bar, when there deliberately was not
+
+      This file used to carry a standing note that there was no hint pill and no
+      instruction chrome, because the brief was "a cursor and a box". That still
+      holds for *instructions* — nothing here tells the user to drag, or that
+      Escape cancels. What the bar carries is a **choice that cannot be made
+      anywhere else**: whether this capture is a still or a recording, and what
+      audio a recording takes. That choice has to be made before the drag,
+      because the drag is the last thing that happens, and there is no other
+      surface on screen to make it on.
+
+      It is cleared with the marks before the commit, so it is never in the
+      capture — and it is rendered on ONE surface only (the display under the
+      cursor), because two bars on two monitors would be two sets of toggles
+      disagreeing about one capture.
     */
     * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    /*
+      `[hidden]` has to be declared here, and it has to carry `!important`.
+
+      The UA stylesheet's `[hidden] { display: none }` loses to ANY author rule
+      that sets `display`, regardless of specificity — author sheets simply beat
+      the UA sheet. Every control on this bar is `display: flex`, so setting
+      `el.hidden = true` on one did exactly nothing: the System audio toggle
+      stayed on screen in Image mode, and the Image/Video pair failed to hide on
+      a shell too old for recording.
+
+      One rule rather than a `[hidden]` variant per selector. There was already
+      a `.note[hidden]` override here, which was the tell that this needed
+      solving once, globally, instead of being rediscovered per element.
+    */
+    [hidden] { display: none !important; }
 
     html, body {
       width: 100%;
@@ -51,8 +84,8 @@
       background: rgba(59, 130, 246, 0.10);
     }
 
-    /* The live size, pinned to the selection. The one piece of text on screen,
-       and it only exists while a drag is in progress. */
+    /* The live size, pinned to the selection. It only exists while a drag is in
+       progress. */
     #readout {
       position: absolute;
       display: none;
@@ -65,19 +98,180 @@
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
     }
+
+    /*
+      The mode bar. DESIGN.md's dark vocabulary by hand, because this page has no
+      Tailwind and no shadcn: canvas-dark panel, hairline border, Ink Secondary
+      labels, Action Blue Deep for the one filled state. It floats over a live
+      desktop rather than over the app's canvas, so it is opaque and shadowed
+      where an in-app panel would be translucent — a translucent bar over an
+      unknown background is an unreadable bar.
+    */
+    #bar {
+      position: absolute;
+      left: 50%;
+      bottom: 28px;
+      transform: translateX(-50%);
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      padding: 8px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      background: rgba(9, 9, 11, 0.94);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+      cursor: default;
+    }
+    #bar.visible { display: flex; }
+
+    /*
+      Spacing on this bar is a 2px scale with three steps and one job each:
+      2px insets a track inside its own frame, 4px separates controls that
+      belong to the same group, and 12px separates the groups. Nothing uses a
+      value because it "looked about right" — 6px, 7px and 8px were all in use
+      here at one point, which is three indistinguishable values doing one job
+      and reads as noise rather than structure.
+    */
+    .row { display: flex; align-items: center; gap: 4px; }
+
+    /* The Image | Video segmented control. */
+    .seg {
+      display: flex;
+      padding: 2px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .seg button {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 12px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: #a1a1aa;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: default;
+    }
+    .seg button:hover { color: #ffffff; }
+    /* Filled at Action Blue DEEP, not at #3b82f6 — this chip carries white text
+       at 12px, and white on #3b82f6 is 3.68:1. DESIGN.md section 2. */
+    .seg button[aria-pressed="true"] { background: #2563eb; color: #ffffff; }
+    .seg button:focus-visible { outline: 2px solid #3b82f6; outline-offset: 1px; }
+
+    /* An audio toggle: a checkbox that reads as a chip. */
+    .chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 9px;
+      background: transparent;
+      color: #a1a1aa;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: default;
+      white-space: nowrap;
+    }
+    .chip:hover:not([disabled]) { color: #ffffff; border-color: rgba(255, 255, 255, 0.18); }
+    .chip[aria-pressed="true"] {
+      border-color: rgba(59, 130, 246, 0.45);
+      background: rgba(59, 130, 246, 0.14);
+      color: #ffffff;
+    }
+    /* Ink Muted is not a text colour, but this is a disabled affordance — the
+       one thing DESIGN.md does reserve it for. */
+    .chip[disabled] { color: #71717a; border-color: rgba(255, 255, 255, 0.06); }
+    .chip:focus-visible { outline: 2px solid #3b82f6; outline-offset: 1px; }
+
+    .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: currentColor; opacity: 0.45;
+    }
+    .chip[aria-pressed="true"] .dot { background: #3b82f6; opacity: 1; }
+
+    .note {
+      max-width: 340px;
+      padding: 0 4px 2px;
+      color: #a1a1aa;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    /*
+      The divider between "what kind of capture" and "what audio to take".
+
+      This is the one **generous** separation on the bar, and it has to be
+      unmistakably larger than the gap between the controls it divides or it
+      does no work. Against the row's 4px gap, a 12px margin each side puts
+      ~29px between the mode control and the first audio chip while the two
+      chips stay 4px apart — a 7:1 ratio, read instantly.
+
+      An earlier version used 7px here against a 6px row gap. That is the
+      failure this comment exists to prevent: a separation one pixel wider than
+      the thing it separates is not a separation, and the bar read as one
+      undifferentiated run of five controls — which is exactly what it is not.
+      The left side chooses a mode; the right side configures one of them.
+    */
+    .sep {
+      width: 1px;
+      align-self: stretch;
+      margin: 2px 12px;
+      background: rgba(255, 255, 255, 0.10);
+    }
   </style>
 </head>
 <body>
   <div id="selection"></div>
   <div id="readout"></div>
 
+  <div id="bar" role="group" aria-label="Capture mode">
+    <div class="row">
+      <div class="seg" role="group" aria-label="Capture type">
+        <button type="button" id="mode-image" aria-pressed="true">Image</button>
+        <button type="button" id="mode-video" aria-pressed="false">Video</button>
+      </div>
+      <div class="sep" id="audio-sep" hidden></div>
+      <button type="button" class="chip" id="opt-sys" aria-pressed="false" hidden>
+        <span class="dot" aria-hidden="true"></span>System audio
+      </button>
+    </div>
+    <p class="note" id="note" hidden></p>
+  </div>
+
   <script>
     (function () {
       const selection = document.getElementById('selection');
       const readout = document.getElementById('readout');
+      const bar = document.getElementById('bar');
+      const note = document.getElementById('note');
+      const btnImage = document.getElementById('mode-image');
+      const btnVideo = document.getElementById('mode-video');
+      const btnSys = document.getElementById('opt-sys');
+      const audioSep = document.getElementById('audio-sep');
 
       /** Smaller than this is a mis-click, not a selection. */
       const MIN_SIDE = 8;
+
+      const params = new URLSearchParams(window.location.search);
+      const flag = (name) => params.get(name) === '1';
+
+      /** Only the surface under the cursor draws the bar. */
+      const hasControls = flag('controls');
+      /** False on a shell whose main process predates the recorder. */
+      const videoSupported = flag('video');
+      /** System-audio loopback is not available on every platform; main decides
+       *  and tells us, rather than this page guessing from a user agent. */
+      const systemAudioSupported = flag('sysaudio');
+
+      const state = {
+        mode: 'image',
+        system: systemAudioSupported && flag('sys'),
+      };
 
       let origin = null;
       /** Latched at the first cancel/commit so a stray second event — an Escape
@@ -109,12 +303,14 @@
         readout.style.top = (above ? rect.y - 22 : rect.y + rect.height + 6) + 'px';
       }
 
-      /** Take every mark off the screen. Called before committing, because the
-       *  capture happens after this and the rectangle is real ink that would
-       *  otherwise be photographed along with the content inside it. */
+      /** Take every mark off the screen — INCLUDING the bar. Called before
+       *  committing, because the capture happens after this and every pixel
+       *  still on screen is real ink that would be photographed along with the
+       *  content inside the rectangle. */
       function clearMarks() {
         selection.style.display = 'none';
         readout.style.display = 'none';
+        bar.classList.remove('visible');
       }
 
       function cancel() {
@@ -123,6 +319,75 @@
         clearMarks();
         window.snipAPI.cancel();
       }
+
+      // -- The bar ------------------------------------------------------
+
+      function setNote(text) {
+        note.textContent = text || '';
+        note.hidden = !text;
+      }
+
+      function renderBar() {
+        const video = state.mode === 'video';
+        btnImage.setAttribute('aria-pressed', String(!video));
+        btnVideo.setAttribute('aria-pressed', String(video));
+
+        // The audio toggle exists ONLY in Video mode. In Image mode there is
+        // no audio to configure, so a visible-but-inert control would be a
+        // question the user cannot answer.
+        for (const el of [btnSys, audioSep]) el.hidden = !video;
+        btnSys.setAttribute('aria-pressed', String(state.system));
+
+        if (!video) { setNote(''); return; }
+        if (!systemAudioSupported) {
+          btnSys.disabled = true;
+          // Named plainly rather than left as a dead toggle. A control that
+          // does nothing and says nothing reads as a bug in the app.
+          setNote('System audio capture is not available on this platform.');
+          return;
+        }
+        setNote('');
+      }
+
+      function persist() {
+        // Sticky between captures, so the user sets this once rather than every
+        // time the surface opens.
+        window.snipAPI.saveAudioPrefs({ systemAudioEnabled: state.system });
+      }
+
+      btnImage.addEventListener('click', () => { state.mode = 'image'; renderBar(); });
+      btnVideo.addEventListener('click', () => {
+        if (!videoSupported) return;
+        state.mode = 'video';
+        renderBar();
+      });
+
+      btnSys.addEventListener('click', () => {
+        if (!systemAudioSupported) return;
+        state.system = !state.system;
+        renderBar();
+        persist();
+      });
+
+      // A click on the bar must not begin a drag, and must not cancel. The
+      // surface's own handlers are on `document`, so this stops the event
+      // before it gets there rather than testing the target up there.
+      for (const type of ['mousedown', 'mouseup', 'mousemove']) {
+        bar.addEventListener(type, (event) => { event.stopPropagation(); });
+      }
+
+      if (hasControls) {
+        if (!videoSupported) {
+          // Nothing to choose between — an Image-only segmented control is a
+          // label pretending to be a control.
+          btnVideo.hidden = true;
+          btnImage.hidden = true;
+        }
+        renderBar();
+        bar.classList.add('visible');
+      }
+
+      // -- The drag -----------------------------------------------------
 
       document.addEventListener('mousedown', (event) => {
         // Right/middle click cancels — the same escape hatch as Escape, for a
@@ -149,12 +414,18 @@
 
         settled = true;
         clearMarks();
+        const payload = {
+          rect,
+          // A surface with no bar cannot have chosen video, whatever it sends.
+          mode: hasControls && videoSupported ? state.mode : 'image',
+          audio: { system: state.system },
+        };
         // The commit is deferred one frame so the browser has actually painted
         // the cleared state before main hides the window and photographs the
         // screen. Sending in the same tick races our own compositor and can put
         // the selection border into the capture.
         requestAnimationFrame(() => {
-          requestAnimationFrame(() => window.snipAPI.commit(rect));
+          requestAnimationFrame(() => window.snipAPI.commit(payload));
         });
       });
 
@@ -162,7 +433,7 @@
         if (event.key === 'Escape') cancel();
       });
 
-      // NOTE: there is deliberately no `blur` → cancel here. With two displays
+      // NOTE: there is deliberately no `blur` -> cancel here. With two displays
       // there are two surfaces and only one can be key, so a blur handler in the
       // page would cancel the whole snip the moment the second window opened,
       // and again whenever the cursor crossed screens. Main owns that rule,

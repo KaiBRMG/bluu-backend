@@ -11,13 +11,17 @@ import { useUserData } from '@/hooks/useUserData';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { copyText } from '@/lib/copyText';
 import {
+  SNIP_VIDEO_MIN_APP_VERSION,
   SNIPPING_TOOL_MIN_APP_VERSION,
   formatSnipShortcut,
   resolveSnipSettings,
+  snipExpiryLabel,
+  snipRetentionLabel,
 } from '@/lib/snips';
 import { meetsMinVersion } from '@/lib/appVersion';
 import { useAppVersion } from '@/hooks/useAppVersion';
 import type { SnipPage, SnipRow } from '@/types/snips';
+import { PendingUploads } from './_components/PendingUploads';
 import { SnipCard } from './_components/SnipCard';
 import { SnipSettingsPopover } from './_components/SnipSettingsPopover';
 
@@ -219,9 +223,13 @@ export default function SnippingToolPage() {
     setCapturing(true);
     try {
       const result = await api.start();
-      // 'busy' is a second click while the overlay is already up — the tool is
-      // working, so reporting a failure would be wrong.
-      if (!result?.success && result?.error !== 'busy') {
+      if (result?.error === 'recording') {
+        // Not a failure — the tool is busy doing the other thing it does, and
+        // the control bar for it is on screen right now.
+        toast.error('A recording is already running. Stop it first.');
+      } else if (!result?.success && result?.error !== 'busy') {
+        // 'busy' is a second click while the overlay is already up — the tool
+        // is working, so reporting a failure would be wrong.
         toast.error('Could not start a snip.');
       }
     } catch {
@@ -231,10 +239,25 @@ export default function SnippingToolPage() {
     }
   }, []);
 
+  // The description is the EXPIRY, never the URL. Two reasons, and the second
+  // is the load-bearing one:
+  //
+  //  1. The expiry is what the user needs at the moment they are about to hand
+  //     the link over — "Deletes tomorrow" changes whether they send it.
+  //  2. The share URL contains the share token, and the token IS the access
+  //     control (see the spoke). This is a *screenshot tool*: a secret rendered
+  //     on screen for several seconds is a secret that ends up inside somebody's
+  //     next capture or screen share. The rule against printing a token in a log
+  //     or an error message applies just as much to a toast.
   const copyLink = useCallback(async (snip: SnipRow) => {
     const copied = await copyText(snip.shareUrl);
-    if (copied) toast.success('Link copied', { description: snip.shareUrl });
-    else toast.error('Could not copy the link');
+    if (copied) {
+      toast.success('Link copied — anyone with it can view', {
+        description: snip.expiresAt ? snipExpiryLabel(snip.expiresAt) : undefined,
+      });
+    } else {
+      toast.error('Could not copy the link');
+    }
   }, []);
 
   const removeSnip = useCallback(async (snip: SnipRow) => {
@@ -263,11 +286,28 @@ export default function SnippingToolPage() {
   // fails the floor, which is the correct outcome.
   const tooOld = versionStatus === 'resolved' && !meetsMinVersion(version, SNIPPING_TOOL_MIN_APP_VERSION);
 
+  // A SECOND floor, for the video mode only — see `SNIP_VIDEO_MIN_APP_VERSION`.
+  // Deliberately not folded into `tooOld`: a user on 0.13.x keeps their whole
+  // library and every image capture, and is told one line about the mode they
+  // are missing rather than being shut out of a page that works.
+  const canRecord =
+    versionStatus === 'resolved' && meetsMinVersion(version, SNIP_VIDEO_MIN_APP_VERSION);
+
   if (versionStatus === 'checking') {
+    // Shaped to the page it becomes — heading, description lines, then the
+    // grid — so resolving the version swaps content in rather than reflowing
+    // the whole page around a lone bar.
     return (
       <AppLayout>
         <div className="max-w-6xl">
           <Skeleton className="h-8 w-48 rounded-md" />
+          <Skeleton className="mt-2 h-4 w-80 rounded-md" />
+          <Skeleton className="mt-1.5 h-4 w-64 rounded-md" />
+          <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-[13.5rem] rounded-xl" />
+            ))}
+          </div>
         </div>
       </AppLayout>
     );
@@ -300,6 +340,35 @@ export default function SnippingToolPage() {
                 'Capture any part of your screen and share it with a link.'
               )}
             </p>
+            {/* Stated on the page rather than only discovered on the selection
+                surface: the Image/Video toggle is the only place the mode can
+                be chosen, and it lives somewhere the user only sees once they
+                have already started a capture.
+
+                **The audio clause is platform-specific and must stay that way.**
+                There is no microphone in this build at all (see `SnipSettings`
+                — no mic field, and none of the macOS entitlements a mic would
+                need), and system audio is Windows-only. Promising either one to
+                a Mac user produces a silent recording they file as a bug. */}
+            <p className="mt-1.5 text-sm text-zinc-400">
+              {canRecord ? (
+                <>
+                  Switch to <span className="text-zinc-300">Video</span> on the
+                  capture bar to record the region instead
+                  {platform === 'darwin'
+                    ? '. Recordings have no sound.'
+                    : ", with your computer's audio if you turn it on."}
+                </>
+              ) : (
+                <>
+                  Screen recording needs desktop app version{' '}
+                  <span className="tabular-nums text-zinc-300">
+                    {SNIP_VIDEO_MIN_APP_VERSION}
+                  </span>{' '}
+                  or newer. Image capture works as it always has.
+                </>
+              )}
+            </p>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
@@ -309,6 +378,14 @@ export default function SnippingToolPage() {
             </Button>
             <SnipSettingsPopover settings={settings} platform={platform} />
           </div>
+        </div>
+
+        {/* Above the grid, not in it. A recording that never uploaded is a
+            state the user has to resolve, not a row to browse — and it is the
+            only place the app can say "it is not lost". Renders nothing when
+            the queue is empty, which is almost always. */}
+        <div className="mt-6">
+          <PendingUploads timezone={timezone} />
         </div>
 
         <div className="mt-6">
@@ -381,19 +458,29 @@ export default function SnippingToolPage() {
                   </Button>
                 ) : null}
 
-                <p className="text-xs text-zinc-400" aria-live="polite">
-                  {total !== null && total > snips.length ? (
-                    <>
-                      Showing <span className="tabular-nums">{snips.length}</span> of{' '}
-                      <span className="tabular-nums">{total}</span> snips
-                    </>
-                  ) : (
-                    <>
-                      <span className="tabular-nums">{total ?? snips.length}</span>
-                      {(total ?? snips.length) === 1 ? ' snip' : ' snips'}
-                    </>
-                  )}
-                  {settings.retention !== 'never' && ' · deleted automatically once they reach the age set in settings'}
+                {/* The live region wraps the COUNT only. It used to wrap the
+                    retention clause too, so every appended page re-announced
+                    the whole sentence — including a standing policy note that
+                    has not changed and is not news. */}
+                <p className="text-xs text-zinc-400">
+                  <span aria-live="polite">
+                    {total !== null && total > snips.length ? (
+                      <>
+                        Showing <span className="tabular-nums">{snips.length}</span> of{' '}
+                        <span className="tabular-nums">{total}</span> snips
+                      </>
+                    ) : (
+                      <>
+                        <span className="tabular-nums">{total ?? snips.length}</span>
+                        {(total ?? snips.length) === 1 ? ' snip' : ' snips'}
+                      </>
+                    )}
+                  </span>
+                  {/* Names the value instead of pointing at the popover: the
+                      reader should not have to open a panel to learn what the
+                      sentence is telling them. */}
+                  {settings.retention !== 'never' &&
+                    ` · deleted automatically after ${snipRetentionLabel(settings.retention)}`}
                 </p>
               </div>
             </>

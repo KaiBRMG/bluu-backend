@@ -1,8 +1,11 @@
 // electron/main.js
-const { app, BrowserWindow, session, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification, systemPreferences, Menu, Tray, clipboard, dialog, globalShortcut, screen: electronScreen } = require('electron');
+const { app, BrowserWindow, session, shell, nativeImage, ipcMain, powerMonitor, powerSaveBlocker, desktopCapturer, Notification, systemPreferences, Menu, Tray, clipboard, dialog, globalShortcut, webContents, screen: electronScreen } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
+const fs = require('fs');
 const fsp = require('fs/promises');
+const https = require('https');
+const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
@@ -781,6 +784,54 @@ ipcMain.handle('timeTracking:captureScreenshot', async () => {
 // through a Vercel function (rule 9i) — which is a fetch with an ID token on it.
 const SNIP_PAGE = path.join(__dirname, 'snip.html');
 const SNIP_PAGE_URL = pathToFileURL(SNIP_PAGE).href;
+const SNIP_RECORD_PAGE = path.join(__dirname, 'snip-record.html');
+const SNIP_RECORD_PAGE_URL = pathToFileURL(SNIP_RECORD_PAGE).href;
+const SNIP_FRAME_PAGE = path.join(__dirname, 'snip-frame.html');
+
+/**
+ * How far the recording frame is grown beyond the recorded rectangle, per side.
+ *
+ * **This number is the reason the frame is not in the recording.** The window
+ * is the rectangle grown by this much on every side, and `snip-frame.html`
+ * draws its ring in exactly that margin — so the ink is outside the crop by
+ * construction rather than by relying on `setContentProtection`, which behaves
+ * differently across OS versions. Change the ring's thickness in that file and
+ * this has to move with it.
+ */
+const SNIP_FRAME_PX = 3;
+
+/**
+ * The recording caps, mirrored from `src/lib/snips.ts`.
+ *
+ * Duplicated rather than imported, because main is not part of the Next.js
+ * build and cannot import from `src/`. The server re-clamps the duration it is
+ * sent and re-checks the byte size against the object, so these two are the
+ * *user-facing* limits (the bar counts down against them) and not the
+ * enforcement — which is what makes a drift between the copies a cosmetic bug
+ * rather than a hole. Keep them in step anyway.
+ */
+const SNIP_MAX_RECORDING_MS = 10 * 60 * 1000;
+const SNIP_RECORDING_WARN_MS = 60 * 1000;
+
+/**
+ * Whether the platform can hand us the desktop's own audio output.
+ *
+ * Electron's `setDisplayMediaRequestHandler` takes `audio: 'loopback'`, and
+ * that is a **Windows** capability — macOS has no system-level loopback device
+ * without the user installing a virtual audio driver, so asking for it there
+ * yields a stream with no audio track rather than an error. The toggle is
+ * disabled up front instead of failing silently after the take: see the
+ * `sysaudio` flag passed into `snip.html`, and the recorder's own second check
+ * for the case where a platform that claims support still returns no track.
+ */
+const SNIP_SYSTEM_AUDIO_SUPPORTED = process.platform === 'win32';
+
+/** The control bar's window size. The height is a starting value — the page
+ *  measures its own layout and asks for the real one via `snip:rec-place`. */
+const SNIP_BAR_WIDTH = 380;
+const SNIP_BAR_HEIGHT = 56;
+/** Kept clear of the recorded rectangle by this much, when there is room. */
+const SNIP_BAR_GAP = 14;
 
 /**
  * How long to wait after hiding the surfaces before photographing the screen.
@@ -803,7 +854,18 @@ const SNIP_SETTLE_MS = 120;
  * until they next opened the app. Arming only on the renderer's push costs a few
  * seconds after launch and makes revocation real.
  */
-let snipConfig = { enabled: false, trayIconEnabled: true, shortcutEnabled: true, shortcut: null };
+let snipConfig = {
+  enabled: false,
+  trayIconEnabled: true,
+  shortcutEnabled: true,
+  shortcut: null,
+  // The System audio toggle's last state, pushed down with the rest of the
+  // settings so the bar opens where the user left it. Main holds it only to
+  // seed the surface; the durable copy is `users/{uid}.snipSettings`.
+  systemAudioEnabled: false,
+  // Off until a renderer says otherwise — see `snip:configure`.
+  supportsRecording: false,
+};
 let snipTray = null;
 /** The accelerator currently held with the OS, so it can be released exactly. */
 let snipRegisteredShortcut = null;
@@ -1001,11 +1063,26 @@ async function captureDisplay(display) {
 async function startSnip(source) {
   if (!snipConfig.enabled) return { success: false, error: 'disabled' };
   if (snipInFlight) return { success: false, error: 'busy' };
+  // A recording holds the screen in a way a still capture does not: the
+  // selection surfaces are full-screen and always-on-top, so opening a second
+  // set over a live recording would both appear in that recording and leave
+  // the user unable to reach the Stop button underneath them. The shortcut is
+  // global, so this is reachable by a stray keypress rather than only by a
+  // deliberate second click.
+  if (snipRecording) return { success: false, error: 'recording' };
   snipInFlight = true;
 
   try {
     const displays = electronScreen.getAllDisplays();
     if (displays.length === 0) throw new Error('no displays');
+
+    // Resolved BEFORE the surfaces are built, not after. It decides two things
+    // now: which surface takes the keyboard (below) and which one draws the
+    // mode bar — and the bar has to be chosen at `loadFile` time, because it is
+    // a query parameter on the page.
+    const cursorDisplay = electronScreen.getDisplayNearestPoint(
+      electronScreen.getCursorScreenPoint(),
+    );
 
     /** Resolves once each surface has loaded — see the comment by `loaded.push`. */
     const loaded = [];
@@ -1066,7 +1143,22 @@ async function startSnip(source) {
         setTimeout(resolve, 3000);
       }));
 
-      win.loadFile(SNIP_PAGE);
+      // The mode bar is drawn by exactly ONE surface — the display the cursor
+      // is on. Two bars on two monitors would be two sets of toggles
+      // disagreeing about a single capture, and the user would have no way to
+      // tell which one the commit read.
+      const controls = display.id === cursorDisplay.id;
+      win.loadFile(SNIP_PAGE, {
+        query: {
+          controls: controls ? '1' : '0',
+          // Not a constant: an old renderer cannot receive a recording, so a
+          // shell that can make one must not offer it. See
+          // `supportsRecording` in `snip:configure`.
+          video: snipConfig.supportsRecording ? '1' : '0',
+          sysaudio: SNIP_SYSTEM_AUDIO_SUPPORTED ? '1' : '0',
+          sys: snipConfig.systemAudioEnabled ? '1' : '0',
+        },
+      });
     }
 
     if (snipOverlays.length === 0) throw new Error('no surface could be opened');
@@ -1084,8 +1176,8 @@ async function startSnip(source) {
     // Exactly one surface can hold the keyboard, so it has to be the one on the
     // screen the user is actually looking at — otherwise Escape does nothing on
     // the monitor they are pointing at. The cursor is the best available proxy
-    // for that, and it is where the drag is about to start anyway.
-    const cursorDisplay = electronScreen.getDisplayNearestPoint(electronScreen.getCursorScreenPoint());
+    // for that, and it is where the drag is about to start anyway. It is also
+    // the surface carrying the mode bar, which needs focus to be operable.
     const live = snipOverlays.filter(w => !w.isDestroyed());
     const focusTarget =
       live.find(w => snipOverlayState.get(w.id)?.display.id === cursorDisplay.id) || live[0];
@@ -1114,13 +1206,27 @@ function clampCrop(rect, width, height) {
   };
 }
 
-ipcMain.on('snip:region', async (event, rect) => {
+ipcMain.on('snip:region', async (event, commit) => {
   const win = senderWindow(event);
   const state = win ? snipOverlayState.get(win.id) : null;
   // Only a live surface may report a region. Without this check any renderer
   // that guessed the channel could ask main to photograph the screen and hand
   // the result to the main window.
   if (!state) return;
+
+  // The payload grew a mode and an audio map when recording was added; a
+  // bare rectangle is still accepted so the shapes cannot drift apart if one
+  // side is ever updated without the other.
+  const rect = commit && commit.rect ? commit.rect : commit;
+  const mode = commit && commit.mode === 'video' ? 'video' : 'image';
+  const audio = {
+    // Re-checked against the platform here and not merely trusted from the
+    // page: the surface is a renderer, and a loopback request on a platform
+    // that cannot serve one produces a stream that is silently short an audio
+    // track rather than an error.
+    system: SNIP_SYSTEM_AUDIO_SUPPORTED && !!(commit && commit.audio && commit.audio.system),
+  };
+
   if (!rect || !Number.isFinite(rect.x) || !Number.isFinite(rect.y) ||
       !Number.isFinite(rect.width) || !Number.isFinite(rect.height)) {
     teardownSnip();
@@ -1128,6 +1234,18 @@ ipcMain.on('snip:region', async (event, rect) => {
   }
 
   const { display } = state;
+
+  if (mode === 'video') {
+    // The surfaces come down and STAY down for a recording. They are
+    // full-screen and always-on-top, so leaving them up would mean the user
+    // cannot touch the thing they are recording — which is the entire point of
+    // recording a region rather than photographing one.
+    hideSnipOverlays();
+    await new Promise(resolve => setTimeout(resolve, SNIP_SETTLE_MS));
+    teardownSnip();
+    startSnipRecording({ display, rect, audio });
+    return;
+  }
 
   // Off the screen FIRST. The surfaces are transparent and contribute nothing to
   // the screen image, but the selection rectangle is real ink — photographing
@@ -1190,6 +1308,1098 @@ ipcMain.on('snip:cancel', (event) => {
   teardownSnip();
 });
 
+// ─── Screen recording ────────────────────────────────────────────────
+//
+// The still path above is finished the moment `desktopCapturer` returns. A
+// recording is a session, and it is shaped by four constraints that pull in
+// different directions:
+//
+//   1. **The user needs their desktop back.** The selection surfaces are
+//      full-screen and always-on-top, so they are destroyed before recording
+//      starts, and a small control bar takes their place.
+//   2. **The bar cannot be in the recording it controls.** It is marked
+//      content-protected, and positioned outside the recorded rectangle when
+//      there is room — two independent measures, because content protection's
+//      behaviour varies by OS version and a bar that turns into a black box in
+//      the middle of someone's recording is barely better than one that shows.
+//   3. **The stream must not reach remote content.** The recorder is a local
+//      `file://` page with its own preload; the main window — which loads the
+//      deployment — is never handed a desktop stream. That is the same rule
+//      that keeps the selection surface image-free, applied to video.
+//   4. **The bytes must not pass through renderer memory in bulk, or through
+//      Vercel at all** (rule 9i). Chunks stream renderer → main → a temp file
+//      on disk, and main PUTs that file straight to Cloud Storage over a
+//      signed URL the app window fetched. A ten-minute recording never exists
+//      as a single object in any heap.
+//
+// The session ends in exactly one of three ways — uploaded, discarded, or
+// failed — and every one of them runs `clearSnipRecording`, which is the only
+// thing that removes the temp file.
+
+/**
+ * The live recording, or null. At most one at a time.
+ *
+ * `{ window, tempPath, stream, bytes, poster, display, rect, audio, token,
+ *    settled }`
+ */
+let snipRecording = null;
+
+// ─── The durable upload queue ────────────────────────────────────────
+//
+// **A recording that fails to upload must not be lost.** That is the whole
+// reason this is a directory on disk rather than a Map and a temp file.
+//
+// A screenshot is cheap to retake: the failure costs a second and the user
+// still has the thing they were looking at. A ten-minute recording is not —
+// by the time the upload fails the moment is gone, the demo has finished, the
+// bug no longer reproduces. Losing one is losing work, so the bytes are
+// written somewhere durable from the first chunk and stay there until an
+// upload actually succeeds or the user says otherwise.
+//
+// Three properties follow, and each is deliberate:
+//
+//   • **`userData`, not `os.tmpdir()`.** A temp directory is something the OS
+//     is entitled to empty, and on Windows it routinely does. A queued
+//     recording has to survive a reboot.
+//   • **Written straight into the queue**, not moved there on completion.
+//     A crash mid-recording then leaves a playable partial file rather than
+//     nothing at all.
+//   • **A sidecar `.json` per recording**, so the queue survives the process.
+//     The in-memory Map is an index rebuilt from disk at startup, never the
+//     source of truth.
+
+/** `userData/pending-recordings/` — created lazily on first use. */
+let snipQueueDir = null;
+
+function ensureSnipQueueDir() {
+  if (!snipQueueDir) {
+    snipQueueDir = path.join(app.getPath('userData'), 'pending-recordings');
+    fs.mkdirSync(snipQueueDir, { recursive: true });
+  }
+  return snipQueueDir;
+}
+
+const snipQueuePaths = (token) => {
+  const dir = ensureSnipQueueDir();
+  return {
+    video: path.join(dir, `${token}.webm`),
+    poster: path.join(dir, `${token}.png`),
+    meta: path.join(dir, `${token}.json`),
+  };
+};
+
+/**
+ * `token -> metadata`, rebuilt from disk at startup.
+ *
+ * **The renderer is given the token, never the path.** A path handed to the
+ * app window is a path that window can be talked into reading or overwriting;
+ * a token resolves only inside main, and only to a file main itself wrote.
+ * Same reasoning as the download handler's refusal to open a path it did not
+ * create.
+ */
+const snipQueue = new Map();
+
+/**
+ * How long a recording nobody has dealt with is kept.
+ *
+ * Long, because the file is the *backup*: the point of this queue is that a
+ * failed upload is recoverable, and a user who closed their laptop on Friday
+ * must still find their recording on Monday. It is not the 30-minute reaper
+ * this replaced — that deleted exactly the work this is now protecting.
+ *
+ * It is a floor on "we will not fill your disk forever", not a deadline the
+ * user is expected to race.
+ */
+const SNIP_QUEUE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+/** Total queue size before the oldest entries are dropped regardless of age. */
+const SNIP_QUEUE_MAX_BYTES = 4 * 1024 * 1024 * 1024;
+
+function writeSnipQueueMeta(token, patch) {
+  const current = snipQueue.get(token) || {};
+  const next = { ...current, ...patch, token };
+  snipQueue.set(token, next);
+  try {
+    fs.writeFileSync(snipQueuePaths(token).meta, JSON.stringify(next, null, 2));
+  } catch (err) {
+    // The bytes matter more than the bookkeeping: a recording whose sidecar
+    // cannot be written is still a recording on disk, and the startup scan
+    // below reconstructs what it can from the file itself.
+    console.error('[snip] could not write queue metadata:', err.message);
+  }
+  notifySnipQueueChanged();
+  return next;
+}
+
+function removeSnipQueueEntry(token) {
+  const entry = snipQueue.get(token);
+  snipQueue.delete(token);
+  const paths = snipQueuePaths(token);
+  for (const file of [paths.video, paths.poster, paths.meta]) {
+    fsp.unlink(file).catch(() => { /* never existed, or already gone */ });
+  }
+  notifySnipQueueChanged();
+  return entry || null;
+}
+
+/**
+ * What the renderer is allowed to know about the queue.
+ *
+ * No paths. The Snipping Tool page renders these as rows with a Retry, a Save
+ * a copy and a Delete, and none of those needs to know where the file lives.
+ */
+function snipQueueSnapshot() {
+  return [...snipQueue.values()]
+    // Newest first: a failure the user just hit is the one they are looking
+    // for. The retry sweep walks the opposite way, oldest first.
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    .map(entry => ({
+      token: entry.token,
+      createdAt: entry.createdAt || 0,
+      durationMs: entry.durationMs || 0,
+      width: entry.width || 0,
+      height: entry.height || 0,
+      bytes: entry.bytes || 0,
+      hasPoster: !!entry.hasPoster,
+      attempts: entry.attempts || 0,
+      lastError: entry.lastError || null,
+      lastAttemptAt: entry.lastAttemptAt || 0,
+      state: entry.state || 'pending',
+    }));
+}
+
+function notifySnipQueueChanged() {
+  sendTo(mainWindow, 'snip:pending-changed', snipQueueSnapshot());
+}
+
+/**
+ * Rebuilds the queue from disk at startup, and prunes what has aged out.
+ *
+ * A `.webm` with no readable sidecar is still kept — the metadata is a
+ * convenience, the recording is the thing. It comes back with zeroed duration
+ * and dimensions, which the page renders as "unknown"; refusing to list it
+ * would mean deleting a user's work over a missing JSON file.
+ */
+function loadSnipQueue() {
+  let files;
+  try {
+    files = fs.readdirSync(ensureSnipQueueDir());
+  } catch (err) {
+    console.error('[snip] could not read the recording queue:', err.message);
+    return;
+  }
+
+  const now = Date.now();
+  for (const file of files) {
+    if (!file.endsWith('.webm')) continue;
+    const token = file.slice(0, -'.webm'.length);
+    const paths = snipQueuePaths(token);
+
+    let stat;
+    try {
+      stat = fs.statSync(paths.video);
+    } catch {
+      continue;
+    }
+
+    let meta = {};
+    try {
+      meta = JSON.parse(fs.readFileSync(paths.meta, 'utf8'));
+    } catch {
+      // Sidecar missing or corrupt — see the note above.
+    }
+
+    const createdAt = meta.createdAt || stat.mtimeMs;
+    if (now - createdAt > SNIP_QUEUE_TTL_MS) {
+      console.warn('[snip] dropping a queued recording past its retention');
+      snipQueue.set(token, { token });
+      removeSnipQueueEntry(token);
+      continue;
+    }
+
+    snipQueue.set(token, {
+      ...meta,
+      token,
+      createdAt,
+      bytes: stat.size,
+      hasPoster: fs.existsSync(paths.poster),
+      // An entry that was mid-upload when the process died is pending again,
+      // not stuck: the only state that survives a restart is "there are bytes
+      // here that have not been stored".
+      state: meta.state === 'uploading' ? 'pending' : meta.state || 'pending',
+    });
+  }
+
+  // Oldest first out, once the queue is larger than anyone intends to keep.
+  let total = [...snipQueue.values()].reduce((sum, e) => sum + (e.bytes || 0), 0);
+  if (total > SNIP_QUEUE_MAX_BYTES) {
+    const oldest = [...snipQueue.values()].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    for (const entry of oldest) {
+      if (total <= SNIP_QUEUE_MAX_BYTES) break;
+      console.warn('[snip] dropping a queued recording to stay under the queue size cap');
+      total -= entry.bytes || 0;
+      removeSnipQueueEntry(entry.token);
+    }
+  }
+
+  if (snipQueue.size > 0) {
+    console.log(`[snip] ${snipQueue.size} recording(s) waiting to upload`);
+  }
+}
+
+/**
+ * Where the control bar sits: under the recorded rectangle if it fits, above
+ * it if not, and pinned to the bottom of the display when the selection is
+ * tall enough to leave no room for either.
+ *
+ * Content protection is what actually keeps it out of the recording; this is
+ * the belt to that pair of braces, and it is also plain courtesy — a bar
+ * sitting on top of the thing being demonstrated is in the user's way even
+ * when it is invisible to the capture.
+ */
+function snipBarBounds(display, rect, height) {
+  const bounds = display.bounds;
+  const width = SNIP_BAR_WIDTH;
+
+  const below = rect.y + rect.height + SNIP_BAR_GAP;
+  const above = rect.y - SNIP_BAR_GAP - height;
+  let y;
+  if (below + height <= bounds.height) y = below;
+  else if (above >= 0) y = above;
+  else y = bounds.height - height - SNIP_BAR_GAP;
+
+  // Centred on the selection rather than on the display: the user's attention
+  // is on the rectangle, and on an ultrawide the middle of the screen can be a
+  // foot away from it.
+  let x = Math.round(rect.x + rect.width / 2 - width / 2);
+  x = Math.max(0, Math.min(x, bounds.width - width));
+  y = Math.max(0, Math.min(y, bounds.height - height));
+
+  return {
+    x: bounds.x + x,
+    y: bounds.y + Math.round(y),
+    width,
+    height,
+  };
+}
+
+/**
+ * The click-through border marking what is being recorded.
+ *
+ * Two properties make this safe to leave on screen for ten minutes, and both
+ * are non-negotiable:
+ *
+ *   1. **It cannot be clicked.** `setIgnoreMouseEvents(true)` with no
+ *      forwarding, because nothing in it is interactive — every click, drag
+ *      and scroll inside the recorded region goes straight through to whatever
+ *      the user is actually demonstrating. A frame that ate clicks would make
+ *      the region it marks unusable, which is the opposite of the point.
+ *   2. **It is outside the crop.** The window is the rectangle grown by
+ *      `SNIP_FRAME_PX` per side and the ring is drawn in that margin, so the
+ *      border is not in the recording because it is not over it. Content
+ *      protection is the second belt.
+ */
+function createSnipFrame(display, rect) {
+  const bounds = display.bounds;
+  // Clamped to the display. A selection flush against an edge would otherwise
+  // put the window partly offscreen; the frame then overlaps the crop by a few
+  // pixels on that side, which is a far better outcome than no frame at all.
+  const x = Math.max(0, rect.x - SNIP_FRAME_PX);
+  const y = Math.max(0, rect.y - SNIP_FRAME_PX);
+  const width = Math.min(rect.width + SNIP_FRAME_PX * 2, bounds.width - x);
+  const height = Math.min(rect.height + SNIP_FRAME_PX * 2, bounds.height - y);
+
+  const win = new BrowserWindow({
+    x: bounds.x + x,
+    y: bounds.y + y,
+    width,
+    height,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    alwaysOnTop: true,
+    // Never takes focus, so it cannot steal the keyboard from the application
+    // the user went back to.
+    focusable: false,
+    show: false,
+    webPreferences: {
+      // No preload at all. This page has no script and nothing to say to main.
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+    },
+  });
+
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.setIgnoreMouseEvents(true);
+  try {
+    win.setContentProtection(true);
+  } catch {
+    // Geometry already keeps the ring out of the crop; this is the second belt.
+  }
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
+
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed()) win.showInactive();
+  });
+  win.loadFile(SNIP_FRAME_PAGE);
+  return win;
+}
+
+async function startSnipRecording({ display, rect, audio }) {
+  if (snipRecording) return;
+
+  // The same up-front check the still path makes, for the same reason:
+  // `getDisplayMedia` does not throw when macOS has not granted Screen
+  // Recording — it hands back a stream of empty frames — and "you have not
+  // allowed this" needs completely different advice from "that failed".
+  if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted') {
+    sendTo(mainWindow, 'snip:failed', { reason: 'permission' });
+    return;
+  }
+
+  const id = crypto.randomBytes(12).toString('hex');
+  // Straight into the durable queue, not a temp file that is moved on success.
+  // A crash mid-recording then leaves a playable partial rather than nothing.
+  const tempPath = snipQueuePaths(id).video;
+
+  let stream;
+  try {
+    stream = fs.createWriteStream(tempPath);
+    // A write stream with no `error` listener throws its errors at the process,
+    // and a disk filling up mid-recording would take the whole app with it.
+    // The recording is lost either way; the app must not be.
+    stream.on('error', (err) => {
+      console.error('[snip] writing the recording failed:', err.message);
+      if (snipRecording && snipRecording.stream === stream) {
+        clearSnipRecording();
+        sendTo(mainWindow, 'snip:failed', { reason: 'storage' });
+      }
+    });
+  } catch (err) {
+    console.error('[snip] could not open a temp file for the recording:', err.message);
+    sendTo(mainWindow, 'snip:failed', { reason: 'storage' });
+    return;
+  }
+
+  const bounds = snipBarBounds(display, rect, SNIP_BAR_HEIGHT);
+  const win = new BrowserWindow({
+    ...bounds,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    alwaysOnTop: true,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'snip-record-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      // NOT sandboxed, unlike the selection surface. `MediaRecorder` and
+      // `AudioContext` are ordinary web APIs and work fine in a sandbox — but
+      // the page needs no Node either way, so this stays as tight as the
+      // surface and differs only where it has to.
+      sandbox: true,
+      backgroundThrottling: false,
+    },
+  });
+
+  // Above the menu bar and the taskbar, like the selection surface: a bar the
+  // OS chrome can cover is a Stop button the user cannot reach.
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  // **Click-through everywhere except the bar itself.**
+  //
+  // A transparent window still swallows clicks on its transparent pixels, so
+  // without this the bar's shadow margin and the transparent wedges outside
+  // its rounded corners would be dead zones sitting on top of the user's
+  // desktop — invisible, and eating clicks on whatever they are recording.
+  //
+  // `forward: true` is what makes it recoverable: mouse *move* events still
+  // reach the page while clicks pass through, so the page can see the cursor
+  // arrive over the bar and ask for interactivity back (`snip:rec-interactive`
+  // below). Without forwarding, the bar would be permanently unclickable.
+  win.setIgnoreMouseEvents(true, { forward: true });
+
+  // **The bar must not appear in the recording it is making.** On Windows 10
+  // 2004+ this excludes the window from capture entirely; on macOS it sets
+  // `NSWindowSharingNone`. On an older Windows it renders as a black rectangle
+  // in the capture instead of being absent — which is why `snipBarBounds`
+  // keeps it outside the recorded region whenever the geometry allows.
+  try {
+    win.setContentProtection(true);
+  } catch (err) {
+    console.warn('[snip] content protection unavailable:', err.message);
+  }
+
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (e, url) => {
+    if (url.split('?')[0] !== SNIP_RECORD_PAGE_URL) e.preventDefault();
+  });
+
+  snipRecording = {
+    id,
+    window: win,
+    frame: createSnipFrame(display, rect),
+    tempPath,
+    stream,
+    bytes: 0,
+    poster: null,
+    display,
+    rect,
+    audio,
+    settled: false,
+  };
+
+  win.once('ready-to-show', () => {
+    // `showInactive`, not `show`. The user committed a rectangle and is about
+    // to go and use the thing they are recording; an always-on-top bar that
+    // grabs focus as it appears steals the first keystroke of the take. It is
+    // still focusable — clicking Stop focuses it, and from there the controls
+    // are keyboard-reachable.
+    if (!win.isDestroyed()) win.showInactive();
+  });
+
+  win.webContents.once('did-finish-load', () => {
+    if (win.isDestroyed()) return;
+    sendTo(win, 'snip:rec-start', {
+      rect,
+      // CSS pixels. The recorder derives its own scale from the stream's real
+      // resolution against these, exactly as the still path derives it from
+      // the thumbnail's real size — never from `scaleFactor`.
+      display: { width: display.size.width, height: display.size.height },
+      audio,
+      limits: { maxMs: SNIP_MAX_RECORDING_MS, warnMs: SNIP_RECORDING_WARN_MS },
+    });
+
+    // **`getDisplayMedia` requires transient user activation, and an IPC
+    // message does not carry one.** This window was opened by main and shown
+    // with `showInactive`, so nothing has ever been clicked in it — the user's
+    // actual gesture was a drag in a different window that has since been
+    // destroyed, and activation does not travel between windows.
+    //
+    // `executeJavaScript`'s second argument synthesises that activation, which
+    // is the whole reason the start is invoked this way rather than run
+    // straight out of the message handler above. The page keeps a 400ms
+    // fallback in case this never lands.
+    win.webContents
+      .executeJavaScript('window.__snipBeginCapture && window.__snipBeginCapture()', true)
+      .catch((err) => {
+        // Not fatal — the page's own fallback still fires. Logged because a
+        // recording that then fails on activation would otherwise have no
+        // explanation anywhere.
+        console.error('[snip] could not start the capture with a user gesture:', err.message);
+      });
+  });
+
+  // The window going away without a `done` or a `discard` is a crash or a
+  // force-quit. The temp file is ours to clean up either way.
+  win.on('closed', () => {
+    if (snipRecording && snipRecording.window === win && !snipRecording.settled) {
+      console.error('[snip] the recorder window closed mid-recording');
+      sendTo(mainWindow, 'snip:failed', { reason: 'recorder-lost' });
+      clearSnipRecording();
+    }
+  });
+
+  win.loadFile(SNIP_RECORD_PAGE);
+}
+
+/**
+ * Tears the session down and removes the temp file.
+ *
+ * Called on every exit from a recording — uploaded, discarded, failed, window
+ * lost. `keepFile` is passed only by the handoff to the upload queue, which
+ * takes ownership of the file rather than letting this delete it.
+ */
+function clearSnipRecording(keepFile = false) {
+  const recording = snipRecording;
+  snipRecording = null;
+  if (!recording) return;
+
+  recording.settled = true;
+  // Guarded, not try/caught. A second `end()` on an already-ended stream emits
+  // an asynchronous `error` — which a try/catch here would NOT see, and an
+  // unhandled stream error takes the main process down. `snip:rec-done` ends
+  // the stream itself (it has to wait for the flush before the file is read),
+  // and then calls this.
+  if (!recording.stream.writableEnded) {
+    try { recording.stream.end(); } catch { /* already closed */ }
+  }
+  if (recording.window && !recording.window.isDestroyed()) recording.window.destroy();
+  // The frame goes with the session, always. An always-on-top border left on
+  // screen after a recording ended would be unremovable from the user's side —
+  // it is click-through and unfocusable, so there is nothing to close.
+  if (recording.frame && !recording.frame.isDestroyed()) recording.frame.destroy();
+  if (!keepFile) {
+    fsp.unlink(recording.tempPath).catch(() => { /* never created, or already gone */ });
+  }
+}
+
+/** Only the live recorder window may drive the channels below. */
+function recordingFrom(event) {
+  const win = senderWindow(event);
+  if (!snipRecording || !win || win !== snipRecording.window) return null;
+  return snipRecording;
+}
+
+ipcMain.on('snip:rec-chunk', (event, buffer) => {
+  const recording = recordingFrom(event);
+  if (!recording || recording.settled) return;
+  const chunk = Buffer.from(buffer);
+  recording.bytes += chunk.length;
+  recording.stream.write(chunk);
+});
+
+ipcMain.on('snip:rec-poster', (event, buffer) => {
+  const recording = recordingFrom(event);
+  if (!recording) return;
+  // Held in memory rather than written beside the video: it is one PNG of a
+  // single frame, it is uploaded in the same breath as the recording, and a
+  // second temp file is a second thing that can be left behind.
+  recording.poster = Buffer.from(buffer);
+});
+
+/**
+ * The page reporting whether the cursor is over the bar itself.
+ *
+ * This is the other half of the `setIgnoreMouseEvents(true, {forward: true})`
+ * above: the window is click-through by default so the user can work on the
+ * desktop underneath it, and becomes clickable only while the pointer is
+ * actually on the bar. `forward` keeps mouse-move events flowing to the page
+ * so it can tell us when that happens.
+ *
+ * Forwarding stays on in BOTH states. Dropping it while interactive would mean
+ * the page never sees the pointer leave, and the bar would keep swallowing
+ * clicks for the rest of the recording.
+ */
+ipcMain.on('snip:rec-interactive', (event, interactive) => {
+  const recording = recordingFrom(event);
+  if (!recording) return;
+  const win = recording.window;
+  if (!win || win.isDestroyed()) return;
+  win.setIgnoreMouseEvents(!interactive, { forward: true });
+});
+
+/** Mirrors pause/resume onto the frame, which has no script of its own. */
+ipcMain.on('snip:rec-state', (event, state) => {
+  const recording = recordingFrom(event);
+  if (!recording) return;
+  const frame = recording.frame;
+  if (!frame || frame.isDestroyed()) return;
+  const paused = state === 'paused';
+  frame.webContents
+    .executeJavaScript(
+      `document.documentElement.setAttribute('data-state', ${JSON.stringify(paused ? 'paused' : 'recording')})`,
+    )
+    .catch(() => { /* the frame is going away; the colour no longer matters */ });
+});
+
+ipcMain.on('snip:rec-place', (event, box) => {
+  const recording = recordingFrom(event);
+  if (!recording || !box) return;
+  const height = Math.max(SNIP_BAR_HEIGHT, Math.min(Math.round(Number(box.height) || 0), 240));
+  const win = recording.window;
+  if (!win || win.isDestroyed()) return;
+  win.setBounds(snipBarBounds(recording.display, recording.rect, height));
+});
+
+ipcMain.on('snip:rec-done', (event, summary) => {
+  const recording = recordingFrom(event);
+  if (!recording || recording.settled) return;
+
+  const { poster, bytes, id } = recording;
+  const durationMs = Math.max(0, Math.round(Number(summary && summary.durationMs) || 0));
+  const width = Math.max(1, Math.round(Number(summary && summary.width) || 0));
+  const height = Math.max(1, Math.round(Number(summary && summary.height) || 0));
+
+  // The write stream has to be flushed and closed before anything reads the
+  // file — a PUT that starts while the last cluster is still buffered uploads
+  // a truncated WebM, and a truncated WebM plays right up to the point it was
+  // cut and then stops, which is the kind of corruption nobody notices until
+  // the recipient does.
+  recording.settled = true;
+  recording.stream.end(() => {
+    if (bytes <= 0) {
+      console.error('[snip] the recording produced no data');
+      sendTo(mainWindow, 'snip:failed', { reason: 'empty-recording' });
+      // Nothing to keep, so nothing to queue. An empty file is not work.
+      snipQueue.set(id, { token: id });
+      removeSnipQueueEntry(id);
+      return;
+    }
+    // The poster is written beside the video rather than held in memory: the
+    // queue has to survive a restart, and a thumbnail that only exists in this
+    // process would be lost on the retry that matters most.
+    if (poster) {
+      try {
+        fs.writeFileSync(snipQueuePaths(id).poster, poster);
+      } catch (err) {
+        console.error('[snip] could not write the poster frame:', err.message);
+      }
+    }
+
+    writeSnipQueueMeta(id, {
+      createdAt: Date.now(),
+      durationMs,
+      width,
+      height,
+      bytes,
+      hasPoster: !!poster && fs.existsSync(snipQueuePaths(id).poster),
+      attempts: 0,
+      lastError: null,
+      state: 'pending',
+    });
+
+    sendTo(mainWindow, 'snip:recorded', {
+      token: id,
+      durationMs,
+      width,
+      height,
+      bytes,
+      hasPoster: !!poster && fs.existsSync(snipQueuePaths(id).poster),
+    });
+  });
+
+  clearSnipRecording(true);
+});
+
+ipcMain.on('snip:rec-discard', (event) => {
+  if (!recordingFrom(event)) return;
+  clearSnipRecording();
+});
+
+ipcMain.on('snip:rec-failed', (event, payload) => {
+  const recording = recordingFrom(event);
+  if (!recording) return;
+  let reason = payload && typeof payload.reason === 'string' ? payload.reason : 'unknown';
+  if (payload && payload.detail) console.error(`[snip] recording failed (${reason}):`, payload.detail);
+  else console.error(`[snip] recording failed (${reason})`);
+
+  // The page reports what `getDisplayMedia` told it, and that is not enough to
+  // diagnose with: an empty grant from OUR OWN handler rejects with exactly the
+  // same `NotAllowedError` as the OS refusing screen capture. Main knows which
+  // it was, so main corrects the reason rather than letting the renderer guess.
+  if (reason === 'screen-permission' && recording.denied) {
+    reason = recording.denied;
+  } else if (reason === 'screen-permission' && process.platform !== 'darwin') {
+    // **Windows has no per-app Screen Recording permission at all.** There is
+    // no setting to turn on and nothing to open, so telling a Windows user to
+    // grant one sends them looking for a switch that does not exist. macOS is
+    // the only platform where this reason is actionable.
+    reason = 'stream-refused';
+  }
+
+  clearSnipRecording();
+  sendTo(mainWindow, 'snip:failed', { reason });
+});
+
+/**
+ * Uploading a recording, from MAIN.
+ *
+ * **Main uploads, and this is the one place in the app where that is true.**
+ * Everywhere else the renderer PUTs its own bytes; here it cannot, for three
+ * reasons that all point the same way. The file is on disk and the renderer
+ * has no path to it (deliberately). A ten-minute recording read into renderer
+ * memory to be PUT is a few hundred megabytes in a heap that is also running
+ * the app. And streaming it from disk means the peak memory of an upload is
+ * one socket buffer, whatever the recording's length.
+ *
+ * The signed URL is the capability — minted by an authenticated route against
+ * the caller's own page permission and quota — so main is not deciding
+ * anything here beyond "send these bytes there".
+ */
+/**
+ * One HTTPS request, with the body either a Buffer, a file slice, or nothing.
+ *
+ * Deliberately low level: every caller below needs the status AND specific
+ * response headers (`Location` to start a session, `Range` to resume one), so
+ * a helper that only reported success would have to be unwrapped again.
+ */
+function snipRequest({ url, method, headers, body, filePath, start, end }) {
+  return new Promise((resolve) => {
+    let target;
+    try {
+      target = new URL(url);
+    } catch {
+      resolve({ ok: false, status: 0, error: 'The upload URL was not valid' });
+      return;
+    }
+    // A signed Storage URL is always https. Accepting anything else would make
+    // this a general-purpose file exfiltration primitive driven by whatever
+    // the renderer passed in.
+    if (target.protocol !== 'https:') {
+      resolve({ ok: false, status: 0, error: 'The upload URL was not https' });
+      return;
+    }
+
+    const request = https.request(target, { method, headers }, (response) => {
+      // Drained rather than ignored: an undrained response holds the socket
+      // open and fills the agent's pool.
+      response.resume();
+      response.on('end', () => {
+        const status = response.statusCode || 0;
+        resolve({
+          ok: status >= 200 && status < 300,
+          status,
+          headers: response.headers,
+          error: status >= 200 && status < 300 ? null : `HTTP ${status}`,
+        });
+      });
+    });
+
+    request.on('error', (err) => {
+      resolve({ ok: false, status: 0, error: err.message || 'The connection failed' });
+    });
+
+    if (filePath) {
+      const source = fs.createReadStream(filePath, { start, end });
+      source.on('error', () => {
+        request.destroy();
+        resolve({ ok: false, status: 0, error: 'The recording file could not be read' });
+      });
+      source.pipe(request);
+    } else {
+      request.end(body);
+    }
+  });
+}
+
+/**
+ * Whether a failure is worth trying again.
+ *
+ * The distinction matters more here than in most places: retrying a 403 burns
+ * minutes of a user's upload allowance to arrive at the same refusal, while
+ * *not* retrying a dropped socket throws away a recording over a blip. So the
+ * rule is narrow and explicit — transport failures, rate limits and 5xx are
+ * transient; every other 4xx is the server telling us something a retry
+ * cannot change (a bad signature, an expired session, a refused size).
+ */
+function isRetryableUploadFailure(status) {
+  if (status === 0) return true; // socket error, DNS, offline
+  if (status === 408 || status === 429) return true;
+  return status >= 500;
+}
+
+const SNIP_UPLOAD_MAX_ATTEMPTS = 5;
+/** 8 MiB. Must be a multiple of 256 KiB — GCS rejects a chunk that is not. */
+const SNIP_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
+
+const snipBackoffMs = (attempt) =>
+  Math.min(30_000, 1000 * 2 ** attempt) + Math.floor(Math.random() * 500);
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * PUTs a small object in one request, with retries. Used for the poster.
+ */
+async function putSmallFile(uploadUrl, contentType, body) {
+  for (let attempt = 0; attempt < SNIP_UPLOAD_MAX_ATTEMPTS; attempt++) {
+    const result = await snipRequest({
+      url: uploadUrl,
+      method: 'PUT',
+      headers: { 'Content-Type': contentType, 'Content-Length': body.length },
+      body,
+    });
+    if (result.ok) return { success: true };
+    if (!isRetryableUploadFailure(result.status)) {
+      return { success: false, error: result.error };
+    }
+    if (attempt < SNIP_UPLOAD_MAX_ATTEMPTS - 1) await delay(snipBackoffMs(attempt));
+  }
+  return { success: false, error: 'The upload kept failing' };
+}
+
+/**
+ * Uploads a recording to Cloud Storage as a **resumable** session.
+ *
+ * This is the hardening the whole queue exists to make possible, and the
+ * reason it is not a single `PUT`: a plain PUT of 300 MB is one indivisible
+ * request, so an interruption at 95% costs every byte already sent. On a
+ * connection bad enough to drop it once, retrying the whole thing is a loop
+ * that may never finish.
+ *
+ * The protocol, and what each step is defending against:
+ *
+ *   1. **POST the signed initiation URL** with `x-goog-resumable: start` —
+ *      that header is part of the v4 signature, so it is not optional. The
+ *      bucket answers `201` with a session URI in `Location`.
+ *   2. **PUT 8 MiB chunks** with `Content-Range: bytes a-b/total`. A `308`
+ *      means "stored, keep going" and carries a `Range` header saying exactly
+ *      how much the bucket actually holds — which is the number we continue
+ *      from, rather than assuming our own arithmetic was right.
+ *   3. **On a transient failure, probe and continue.** `PUT` with
+ *      `Content-Range: bytes * /total` and an empty body asks the bucket where
+ *      it got to. That is what turns a dropped connection into a few seconds
+ *      lost instead of the whole file.
+ *
+ * `onProgress` reports bytes confirmed *by the bucket*, never bytes written to
+ * the socket — a chunk in flight when the connection dies was not stored, and
+ * a progress bar that counts it would go backwards.
+ */
+async function uploadRecordingResumable(uploadUrl, filePath, totalBytes, onProgress) {
+  const start = await snipRequest({
+    url: uploadUrl,
+    method: 'POST',
+    headers: {
+      'x-goog-resumable': 'start',
+      'Content-Type': 'video/webm',
+      'Content-Length': 0,
+    },
+  });
+  if (!start.ok) {
+    return {
+      success: false,
+      error: `Could not start the upload (${start.error})`,
+      retryable: isRetryableUploadFailure(start.status),
+    };
+  }
+
+  const sessionUri = start.headers && start.headers.location;
+  if (!sessionUri) {
+    return { success: false, error: 'The upload session had no location', retryable: false };
+  }
+
+  let offset = 0;
+  let attempt = 0;
+
+  while (offset < totalBytes) {
+    const end = Math.min(offset + SNIP_UPLOAD_CHUNK_BYTES, totalBytes) - 1;
+    const result = await snipRequest({
+      url: sessionUri,
+      method: 'PUT',
+      headers: {
+        'Content-Length': end - offset + 1,
+        'Content-Range': `bytes ${offset}-${end}/${totalBytes}`,
+      },
+      filePath,
+      start: offset,
+      end,
+    });
+
+    // 200/201 = the whole object is stored. 308 = this chunk landed, continue.
+    if (result.ok) {
+      if (onProgress) onProgress(totalBytes, totalBytes);
+      return { success: true };
+    }
+
+    if (result.status === 308) {
+      attempt = 0;
+      offset = parseResumeOffset(result.headers, offset, end);
+      if (onProgress) onProgress(offset, totalBytes);
+      continue;
+    }
+
+    if (!isRetryableUploadFailure(result.status)) {
+      return { success: false, error: result.error, retryable: false };
+    }
+
+    attempt += 1;
+    if (attempt >= SNIP_UPLOAD_MAX_ATTEMPTS) {
+      return { success: false, error: result.error, retryable: true };
+    }
+    await delay(snipBackoffMs(attempt));
+
+    // Ask the bucket where it actually got to rather than assuming the failed
+    // chunk stored nothing — a connection that died after the body was sent
+    // but before the response arrived may well have stored all of it.
+    const probe = await snipRequest({
+      url: sessionUri,
+      method: 'PUT',
+      headers: { 'Content-Length': 0, 'Content-Range': `bytes */${totalBytes}` },
+    });
+    if (probe.ok) {
+      if (onProgress) onProgress(totalBytes, totalBytes);
+      return { success: true };
+    }
+    if (probe.status === 308) {
+      offset = parseResumeOffset(probe.headers, offset, offset - 1);
+      if (onProgress) onProgress(offset, totalBytes);
+    }
+  }
+
+  return { success: true };
+}
+
+/**
+ * `Range: bytes=0-8388607` -> the next byte to send.
+ *
+ * Falls back to the optimistic offset when the header is absent, which GCS
+ * does when it holds nothing yet. Never moves backwards: a malformed header
+ * must not rewind an upload that is already further along.
+ */
+function parseResumeOffset(headers, currentOffset, assumedEnd) {
+  const range = headers && headers.range;
+  const match = typeof range === 'string' ? /bytes=\d+-(\d+)/.exec(range) : null;
+  const confirmed = match ? Number(match[1]) + 1 : assumedEnd + 1;
+  return Math.max(currentOffset, Number.isFinite(confirmed) ? confirmed : currentOffset);
+}
+
+ipcMain.handle('snip:uploadRecording', async (event, options = {}) => {
+  if (senderWindow(event) !== mainWindow) return { success: false, error: 'forbidden' };
+
+  const token = options.token;
+  const entry = snipQueue.get(token);
+  // An unknown token is a recording that was already uploaded, already
+  // discarded, aged out, or never existed. All four are the same answer.
+  if (!entry) return { success: false, error: 'That recording is no longer available' };
+
+  const paths = snipQueuePaths(token);
+  let totalBytes;
+  try {
+    totalBytes = fs.statSync(paths.video).size;
+  } catch {
+    // The row outlived its bytes. Clear it rather than offering a Retry that
+    // can never succeed.
+    removeSnipQueueEntry(token);
+    return { success: false, error: 'That recording is no longer on disk' };
+  }
+
+  writeSnipQueueMeta(token, {
+    state: 'uploading',
+    attempts: (entry.attempts || 0) + 1,
+    lastAttemptAt: Date.now(),
+    lastError: null,
+  });
+
+  const result = options.resumable === false
+    ? await putSmallFile(options.uploadUrl, 'video/webm', fs.readFileSync(paths.video))
+    : await uploadRecordingResumable(options.uploadUrl, paths.video, totalBytes, (sent, total) => {
+        sendTo(mainWindow, 'snip:upload-progress', { token, sent, total });
+      });
+
+  if (!result.success) {
+    // **The file stays.** This is the whole point of the queue: a failed
+    // upload is a recording the user still has, not work they have lost. The
+    // page lists it with its error and a Retry.
+    writeSnipQueueMeta(token, {
+      state: 'failed',
+      lastError: result.error || 'The upload failed',
+    });
+    return { success: false, error: result.error, retryable: result.retryable !== false };
+  }
+
+  // The poster is best-effort and its failure must not fail the upload: a
+  // recording with no thumbnail is a row the grid renders a placeholder for,
+  // where a failed recording is work the user has to redo.
+  let posterUploaded = false;
+  if (options.posterUploadUrl && entry.hasPoster) {
+    try {
+      const poster = await putSmallFile(
+        options.posterUploadUrl,
+        'image/png',
+        fs.readFileSync(paths.poster),
+      );
+      posterUploaded = poster.success;
+      if (!poster.success) console.warn('[snip] poster upload failed:', poster.error);
+    } catch (err) {
+      console.warn('[snip] poster could not be read:', err.message);
+    }
+  }
+
+  // Only now are the local bytes redundant \u2014 they are in the bucket.
+  removeSnipQueueEntry(token);
+  return { success: true, posterUploaded };
+});
+
+/**
+ * The renderer could not finalise, so the local copy is no longer wanted.
+ *
+ * Distinct from a failed upload: this is called when the slot itself was
+ * refused (quota, a revoked page permission) or the user chose to discard.
+ * A failed *transfer* keeps its file; a refused *reservation* has nowhere to
+ * go and keeping it would grow a queue of recordings that can never upload.
+ */
+ipcMain.handle('snip:discardRecording', (event, token) => {
+  if (senderWindow(event) !== mainWindow) return { success: false };
+  removeSnipQueueEntry(token);
+  return { success: true };
+});
+
+/** Everything waiting to upload, for the Snipping Tool page. */
+ipcMain.handle('snip:listPendingRecordings', (event) => {
+  if (senderWindow(event) !== mainWindow) return [];
+  return snipQueueSnapshot();
+});
+
+/**
+ * Writes a queued recording somewhere the user chose \u2014 the escape hatch for
+ * a recording that will not upload at all.
+ *
+ * `copyFile`, not a read into memory and a write back out: this is the path
+ * for the largest files the app ever handles, and the whole reason it exists
+ * is that something has already gone wrong.
+ *
+ * The renderer names no path. It asks for a save, main shows the native
+ * dialog, and the destination is whatever the user picked.
+ */
+ipcMain.handle('snip:savePendingRecording', async (event, token) => {
+  if (senderWindow(event) !== mainWindow) return { success: false };
+  const entry = snipQueue.get(token);
+  if (!entry) return { success: false, error: 'That recording is no longer available' };
+
+  const stamp = new Date(entry.createdAt || Date.now())
+    .toISOString()
+    .slice(0, 19)
+    .replace(/[:T]/g, '-');
+
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save recording',
+    defaultPath: path.join(app.getPath('downloads'), `bluu-recording-${stamp}.webm`),
+    filters: [{ name: 'WebM video', extensions: ['webm'] }],
+  });
+  if (canceled || !filePath) return { success: false, canceled: true };
+
+  try {
+    await fsp.copyFile(snipQueuePaths(token).video, filePath);
+  } catch (err) {
+    console.error('[snip] could not save the recording:', err.message);
+    return { success: false, error: 'The recording could not be written there' };
+  }
+  // Deliberately does NOT remove the queue entry. The user asked for a copy,
+  // not for the upload to be abandoned \u2014 those are different intentions and
+  // conflating them would quietly throw away the retry.
+  return { success: true, filePath };
+});
+
+/**
+ * The microphone's status, and the screen's, for the selection surface's audio
+ * toggles.
+ *
+ * `getMediaAccessStatus` is documented for macOS and Windows; on Linux and on
+ * older builds it can throw rather than return, and a throw here would take
+ * out the toggle rather than the answer.
+ */
+/** The Video toggles, relayed to the app window — the only side holding a
+ *  Firebase session and therefore the only side that can persist them. */
+ipcMain.on('snip:audio-prefs', (event, prefs) => {
+  const win = senderWindow(event);
+  if (!win || !snipOverlayState.has(win.id)) return;
+  const next = {
+    systemAudioEnabled: SNIP_SYSTEM_AUDIO_SUPPORTED && !!(prefs && prefs.systemAudioEnabled),
+  };
+  // Held in main too, so a second capture in the same app session opens with
+  // the right toggle even before the write round-trips through Firestore.
+  snipConfig.systemAudioEnabled = next.systemAudioEnabled;
+  sendTo(mainWindow, 'snip:audio-prefs', next);
+});
+
 /**
  * The renderer's push: "this user holds the page, and these are their settings."
  *
@@ -1210,9 +2420,34 @@ ipcMain.handle('snip:configure', (event, raw = {}) => {
     trayIconEnabled: raw.trayIconEnabled !== false,
     shortcutEnabled: raw.shortcutEnabled !== false,
     shortcut: typeof raw.shortcut === 'string' && raw.shortcut ? raw.shortcut : null,
+    // `=== true`, matching `resolveSnipSettings`: the one opt-in field.
+    systemAudioEnabled: SNIP_SYSTEM_AUDIO_SUPPORTED && raw.systemAudioEnabled === true,
+    /**
+     * **Capability negotiation, and it runs the OTHER way to the version
+     * floor.**
+     *
+     * The floor in `src/lib/snips.ts` protects a new renderer from an old
+     * shell. This protects a new shell from an **old renderer** — the case
+     * rule 9c makes normal here, because a page bundle can be weeks older than
+     * the app around it.
+     *
+     * Without it, a shell that can record would offer the Video toggle to a
+     * renderer with no `snip:recorded` listener: the user would select Video,
+     * record for two minutes, press Stop, and nothing at all would happen —
+     * no upload, no error, and a temp file nobody collects. Main cannot read
+     * the renderer's version, so the renderer declares the capability instead
+     * and the Video toggle is drawn only when it does.
+     */
+    supportsRecording: raw.supportsRecording === true,
   };
 
-  if (!snipConfig.enabled) teardownSnip();
+  if (!snipConfig.enabled) {
+    teardownSnip();
+    // Losing the page permission mid-recording stops the recording. Letting it
+    // run to completion would upload through routes that will now refuse it,
+    // and leave the user watching a control bar for a file with nowhere to go.
+    clearSnipRecording();
+  }
   ensureSnipTray();
   const shortcutRegistered = applySnipShortcut();
 
@@ -1521,8 +2756,20 @@ ipcMain.handle('app:getVersions', () => ({
   arch: process.arch,
 }));
 
-// IPC handler to open System Settings for screen recording access (macOS).
-// On Windows, triggers a getSources call which prompts the user.
+/**
+ * Opens System Settings at Screen Recording — **on macOS, which is the only
+ * platform where that sentence means anything.**
+ *
+ * On Windows this runs a 1x1 `getSources` call and returns success, and the
+ * comment here used to say that "prompts the user". It does not: Windows has
+ * no per-app screen-recording permission, so there is no prompt, no settings
+ * page, and nothing for the user to grant. The call is a no-op that reports
+ * success, which is exactly why **no caller may offer this as an "Open
+ * Settings" button off macOS** — the user presses it, nothing happens, and
+ * they reasonably conclude the app is broken. `SnipController` guards on the
+ * platform for this reason; onboarding calls it unconditionally but only to
+ * unlock its Next button, never as a promise that a window will open.
+ */
 ipcMain.handle('permissions:requestScreenAccess', async () => {
   if (process.platform === 'darwin') {
     shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
@@ -3107,7 +4354,23 @@ function createWindow() {
     // capture to.
     destroySnipTray();
     teardownSnip();
-    snipConfig = { enabled: false, trayIconEnabled: true, shortcutEnabled: true, shortcut: null };
+    // A live recording outliving the window that would upload it is a control
+    // bar floating over a desktop with nothing behind it, so that stops.
+    //
+    // **The queue does NOT.** It used to be emptied here, which was exactly
+    // backwards: a user quitting the app is the single most likely moment for
+    // an upload to be cut short, and deleting the queue at that point would
+    // destroy the recordings this whole mechanism exists to protect. They stay
+    // on disk and are offered again at next launch.
+    clearSnipRecording();
+    snipConfig = {
+      enabled: false,
+      trayIconEnabled: true,
+      shortcutEnabled: true,
+      shortcut: null,
+      systemAudioEnabled: false,
+      supportsRecording: false,
+    };
     applySnipShortcut();
     mainWindow = null;
   });
@@ -3258,8 +4521,14 @@ function registerPowerListeners() {
 
 app.whenReady().then(() => {
   // Deny renderer permission requests we never need (geolocation, camera,
-  // microphone, etc.). Screen capture goes through desktopCapturer, not
-  // getUserMedia, so it is unaffected.
+  // microphone, etc.).
+  //
+  // That used to end "screen capture goes through desktopCapturer, not
+  // getUserMedia, so it is unaffected", which stopped being true the day
+  // recording landed: a *still* capture is still `desktopCapturer` in main and
+  // needs no permission here, but a **recording** calls `getDisplayMedia` in
+  // the recorder window and is gated by this handler. See
+  // `recorderMediaAllowed`.
   //
   // `clipboard-sanitized-write` is the ONE exception: navigator.clipboard
   // .writeText() routes through this handler, so a blanket deny silently breaks
@@ -3268,12 +4537,180 @@ app.whenReady().then(() => {
   // `clipboard-read`, which stays denied (pasting an image goes through the
   // explicit `clipboard:readImage` IPC instead).
   const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write']);
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) =>
-    callback(ALLOWED_PERMISSIONS.has(permission)));
+
+  /**
+   * The recording exception — and **this gate runs BEFORE
+   * `setDisplayMediaRequestHandler`, not instead of it.**
+   *
+   * That ordering is the whole reason this exists, and missing it is a
+   * genuinely silent failure: `getDisplayMedia` asks for a permission *here*
+   * first, and only if it is granted does Chromium go on to ask the
+   * display-media handler which source to hand over. A deny at this layer
+   * rejects the call with `NotAllowedError` while the handler below —
+   * including every one of its `console.error` branches — never runs at all.
+   *
+   * ## `mediaTypes` is the discriminator, and `media` is the permission
+   *
+   * Both of the recorder's calls arrive here as **`'media'`**. There is a
+   * `display-capture` permission in the API and it is accepted below, but it
+   * is not what this build asks for — verified from a real failure log, which
+   * read `permission 'media' denied` on a screen capture. Gating screen
+   * capture on `display-capture` alone therefore blocks every recording.
+   *
+   * So the window and the session are the boundary, and `mediaTypes` refines
+   * the one decision worth refining:
+   *
+   * | Call | `mediaTypes` | Rule |
+   * |---|---|---|
+   * | `getDisplayMedia`, video only | `['video']` | allow |
+   * | `getDisplayMedia` + system audio | `['video','audio']` | allow |
+   * | anything audio-only | `['audio']` | **refuse** |
+   *
+   * **Audio-only is refused outright, because this build has no microphone.**
+   * The recorder never calls `getUserMedia`, so an audio-only request from it
+   * would mean something is asking for a device the feature does not use —
+   * refuse it and let the next pass open it deliberately. A request carrying
+   * video is a display capture: the recorder page never asks for a camera, and
+   * the source is still chosen by main below, so granting it here grants no
+   * particular screen.
+   *
+   * Everything outside the live recorder window is refused, which is what
+   * keeps the app window — remote content from the deployment — from ever
+   * reaching a microphone or a desktop stream.
+   */
+  const recorderMediaAllowed = (requester, details) => {
+    const recording = snipRecording;
+    const recorder = recording && recording.window;
+    if (!recorder || recorder.isDestroyed() || requester !== recorder.webContents) return false;
+
+    const types = details && details.mediaTypes;
+    // An absent `mediaTypes` is the synchronous check path, which does not
+    // carry one. The window and session scoping above already hold.
+    if (!types || types.length === 0) return true;
+    // No microphone in this build — see the table above.
+    if (types.every(type => type === 'audio')) return false;
+    return types.every(type => type === 'audio' || type === 'video');
+  };
+
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    if ((permission === 'media' || permission === 'display-capture') &&
+        recorderMediaAllowed(webContents, details)) {
+      callback(true);
+      return;
+    }
+    // Logged rather than denied in silence. These two are the permissions a
+    // recording depends on, so a refusal here is the difference between a
+    // working feature and one that fails with no explanation anywhere.
+    if (permission === 'display-capture' || permission === 'media') {
+      // The mediaTypes are in the log because they are the discriminator, and
+      // the first version of this omitted them — which turned a one-line
+      // diagnosis ("it asked for video and we only allowed audio") into
+      // several rounds of guessing. Never log the permission without them.
+      const types = details && details.mediaTypes;
+      console.error(
+        `[snip] permission '${permission}' denied —`,
+        `mediaTypes=[${(types || []).join(',')}]`,
+        !snipRecording
+          ? 'no recording in flight'
+          : snipRecording.window && webContents === snipRecording.window.webContents
+            ? 'from the recorder, but audio-only requests are refused (no microphone in this build)'
+            : 'request did not come from the live recorder window',
+      );
+    }
+    callback(ALLOWED_PERMISSIONS.has(permission));
+  });
   // Chromium also asks synchronously (permissions.query / the write path in some
   // versions), which bypasses the request handler entirely.
-  session.defaultSession.setPermissionCheckHandler((_wc, permission) =>
-    ALLOWED_PERMISSIONS.has(permission));
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) => {
+    if ((permission === 'media' || permission === 'display-capture') &&
+        recorderMediaAllowed(webContents, details)) {
+      return true;
+    }
+    return ALLOWED_PERMISSIONS.has(permission);
+  });
+
+  /**
+   * `getDisplayMedia` — and the point of it is that the **renderer never names
+   * a source**.
+   *
+   * The recorder page calls `getDisplayMedia({ video: true })` with no id and
+   * no picker; main resolves which display to hand over from the session it
+   * started, so a page that somehow ran this call could not choose a screen it
+   * was not already sent there to record. Any other window asking is refused
+   * outright — which is what keeps the app window, loaded from the
+   * deployment, from ever holding a desktop stream.
+   */
+  session.defaultSession.setDisplayMediaRequestHandler(
+    (request, callback) => {
+      const recorder = snipRecording && snipRecording.window;
+      // Identity, not just the URL. `webContents.fromFrame` resolves the
+      // requesting frame back to the window it belongs to, so this is an
+      // object comparison against the recorder we opened rather than a string
+      // comparison against a URL a page could in principle reach on its own.
+      // The URL is still checked as the fallback for the case that lookup
+      // returns nothing.
+      let asking = null;
+      try {
+        asking = request.frame ? webContents.fromFrame(request.frame) : null;
+      } catch {
+        // A detached frame throws rather than returning null. Falling through
+        // to the URL check is right, and letting this throw would be much
+        // worse than refusing: the handler would never call `callback`, and
+        // `getDisplayMedia` would hang forever with the bar stuck on Starting.
+        asking = null;
+      }
+      const isRecorder = asking
+        ? !recorder?.isDestroyed() && asking === recorder.webContents
+        : request.frame?.url === SNIP_RECORD_PAGE_URL;
+      if (!recorder || recorder.isDestroyed() || !isRecorder) {
+        // An empty grant is how this API says no — and the page cannot tell
+        // that refusal apart from the OS denying screen capture, because both
+        // surface as the same `NotAllowedError`. Recording WHY here is what
+        // stops a Windows user being sent to a permission screen that does not
+        // exist. See the `denied` handling in `snip:rec-failed`.
+        console.error(
+          '[snip] display-media request refused:',
+          !recorder ? 'no live recording' : recorder.isDestroyed() ? 'recorder destroyed' : 'not the recorder window',
+        );
+        if (snipRecording) snipRecording.denied = 'stream-refused';
+        callback({});
+        return;
+      }
+
+      const target = snipRecording.display;
+      desktopCapturer
+        .getSources({ types: ['screen'], fetchWindowIcons: false })
+        .then((sources) => {
+          if (sources.length === 0) {
+            console.error('[snip] desktopCapturer returned no screen sources');
+            if (snipRecording) snipRecording.denied = 'no-sources';
+            callback({});
+            return;
+          }
+          const index = electronScreen.getAllDisplays().findIndex(d => d.id === target.id);
+          const source =
+            sources.find(s => s.display_id && String(s.display_id) === String(target.id)) ||
+            sources[index] ||
+            sources[0];
+          callback({
+            video: source,
+            // Windows only — see `SNIP_SYSTEM_AUDIO_SUPPORTED`. `'loopback'`
+            // rather than `'loopbackWithMute'`: muting the desktop while
+            // recording it would silence the thing the user is demonstrating
+            // for the person sitting in front of it.
+            ...(snipRecording.audio.system ? { audio: 'loopback' } : {}),
+          });
+        })
+        .catch((err) => {
+          console.error('[snip] could not resolve a display source:', err.message);
+          if (snipRecording) snipRecording.denied = 'no-sources';
+          callback({});
+        });
+    },
+    // The OS picker would ask the user to choose a screen they have already
+    // chosen by dragging a rectangle on one.
+    { useSystemPicker: false },
+  );
 
   // Spellcheck language. macOS uses the OS spellchecker and rejects this call,
   // so it is best-effort.
@@ -3282,6 +4719,10 @@ app.whenReady().then(() => {
   } catch {
     // macOS — the system spellchecker picks the language itself.
   }
+
+  // Rebuilt before any window exists, so the first `snip:pending-changed` the
+  // renderer asks for already has the previous session's failures in it.
+  loadSnipQueue();
 
   registerDownloadHandler();
   registerPowerListeners();

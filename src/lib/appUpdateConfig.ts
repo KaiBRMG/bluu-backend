@@ -196,9 +196,13 @@ export const APP_UPDATE: AppUpdateConfig = {
   // mac: null,
 
   // win: null,
-  win: { latestVersion: '0.13.0', compulsory: false, allUsers: false, uids: [], groups: ['smm'] },
+  win: { latestVersion: '0.13.0', compulsory: false, allUsers: true, uids: [], groups: [] },
 
-  downloadUrl: `${PUBLIC_APP_ORIGIN}/download`,
+  // `/update`, not `/download`: this link is only ever opened for someone who
+  // ALREADY has the app, so it must not put the one-time certificate sequence in
+  // front of them. `/download` remains the first-install page, and `/update`
+  // links back to it for the reader who arrived here on a fresh machine.
+  downloadUrl: `${PUBLIC_APP_ORIGIN}/update`,
 
   // The session timer widget. Ships armed alongside the v0.10.1 code: see above,
   // it cannot fire before that build exists, so there is nothing to stage.

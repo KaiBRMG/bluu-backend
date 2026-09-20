@@ -35,6 +35,22 @@ export const SNIPPING_TOOL_PAGE_ID = 'apps-snipping-tool';
  */
 export const SNIPPING_TOOL_MIN_APP_VERSION = '0.13.0';
 
+/**
+ * The installed build that added **screen recording**.
+ *
+ * Deliberately a *second* floor rather than a bump of the one above. Raising
+ * `SNIPPING_TOOL_MIN_APP_VERSION` would lock a user on 0.13.x out of the library
+ * they already have — their existing snips, their links, their settings — to
+ * withhold a mode they never had. So the page floor stays where it is and this
+ * one gates the video *mode* alone: an older shell simply never draws the
+ * Image/Video toggle on its selection surface, and the page says why.
+ *
+ * Like the floor above it is `>=` and set once. It must name the build that
+ * actually shipped `electron/snip-record.html` and the recorder plumbing in
+ * `main.js`, not the one it was planned for.
+ */
+export const SNIP_VIDEO_MIN_APP_VERSION = '0.14.0';
+
 // ─── Share tokens ────────────────────────────────────────────────────
 
 /**
@@ -67,13 +83,86 @@ export { SHARE_ID_ALPHABET };
 
 export const SNIP_STORAGE_PREFIX = 'snips';
 
-/** PNG only. The overlay crops from a `nativeImage`, so there is one producer
- *  and exactly one format — an allowlist with one entry is still an allowlist. */
+// ─── Kind ────────────────────────────────────────────────────────────
+
+/**
+ * A snip is a still or a recording.
+ *
+ * **Absent means `image`.** Every row written before recording existed has no
+ * `kind` field, and there are live share links pointing at them — so the reader
+ * defaults rather than the writer backfilling. `resolveSnipKind` is the single
+ * place that decision is made; do not re-inline `kind ?? 'image'`.
+ */
+export type SnipKind = 'image' | 'video';
+
+export function resolveSnipKind(value: unknown): SnipKind {
+  return value === 'video' ? 'video' : 'image';
+}
+
+/** PNG for a still, and for a recording's poster frame. The overlay crops from
+ *  a `nativeImage` and the recorder exports a canvas, so there is one format —
+ *  an allowlist with one entry is still an allowlist. */
 export const SNIP_CONTENT_TYPE = 'image/png';
+
+/**
+ * WebM for a recording, and the container is **fixed here** because the signed
+ * upload slot pins it into the signature — Storage rejects a PUT whose
+ * `Content-Type` disagrees with what was signed. The recorder picks its codecs
+ * inside this container (VP9 first, VP8 as the fallback); it must never pick a
+ * different container without this constant and the slot moving with it.
+ */
+export const SNIP_VIDEO_CONTENT_TYPE = 'video/webm';
 
 /** A full-resolution capture of a 6K display lands well under this; a request
  *  claiming more is not a screenshot. */
 export const MAX_SNIP_BYTES = 25 * 1024 * 1024;
+
+/**
+ * The ceiling on one recording.
+ *
+ * Ten minutes at the recorder's own bitrate ceiling (5 Mbps video + 128 kbps
+ * audio) is ~385 MB, so this is the number the duration cap is derived from
+ * rather than an independent guess — raise one and the other has to move.
+ */
+export const MAX_SNIP_VIDEO_BYTES = 400 * 1024 * 1024;
+
+/**
+ * The hard stop on a recording, enforced in the recorder window itself.
+ *
+ * A cap is not optional here: the surfaces come down the moment recording
+ * starts, so a user who forgets the control bar is on screen would otherwise
+ * fill their disk and their quota with a recording nobody asked to keep. At ten
+ * minutes the recorder stops itself and uploads what it has — stopping and
+ * keeping is always better than stopping and discarding.
+ */
+export const MAX_SNIP_RECORDING_MS = 10 * 60 * 1000;
+
+/** How long before the cap the control bar starts warning. */
+export const SNIP_RECORDING_WARN_MS = 60 * 1000;
+
+/** `93_000` → `1:33`, `3_723_000` → `1:02:03`. Used by the control bar, the
+ *  library card and the public page, so it lives with the other shared values. */
+export function formatSnipDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const seconds = total % 60;
+  const minutes = Math.floor(total / 60) % 60;
+  const hours = Math.floor(total / 3600);
+  const mm = hours > 0 ? String(minutes).padStart(2, '0') : String(minutes);
+  const ss = String(seconds).padStart(2, '0');
+  return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+/** `1536` → `1.5 MB`. Whole-number KB, one decimal past it.
+ *
+ *  Shared rather than per-component: the library card and the pending-upload
+ *  panel sit on the same screen and print the same field, so two copies of the
+ *  rounding rule is two places for them to start disagreeing about what
+ *  `1048000` is. */
+export function formatSnipBytes(bytes: number): string {
+  if (bytes <= 0) return '—';
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 // ─── Retention ───────────────────────────────────────────────────────
 
@@ -118,6 +207,71 @@ export function snipExpiryMs(createdAtMs: number, retention: SnipRetention): num
   const date = new Date(createdAtMs);
   date.setUTCMonth(date.getUTCMonth() + months);
   return date.getTime();
+}
+
+/**
+ * `Deletes in 2 months`, `Deletes tomorrow`, `Expired`.
+ *
+ * **A duration rather than a date, because the date was answering a question
+ * nobody asked.** "Deletes 2027-03-20" makes the reader do the arithmetic,
+ * and the thing they actually want to know before handing a link to someone
+ * is *how long it will keep working*.
+ *
+ * It also sidesteps a problem the date had. An expiry is the moment the sweep
+ * passes it, which is a server-side fact — so rendering it as a calendar day
+ * meant picking a timezone to be wrong in, and the old code sliced the ISO
+ * string specifically to avoid claiming it was the viewer's local date. A
+ * duration is true in every zone at once.
+ *
+ * The unit is the largest that still says something useful, and it steps up
+ * rather than reporting "in 12 months".
+ *
+ * **`numeric: 'auto'` for days and below, `'always'` above.** Auto is what
+ * turns "in 1 day" into "tomorrow", which is how people talk. But at month
+ * and year scale it produces "next month" and "next year", and those are
+ * vague exactly where precision matters: "deletes next year" read on 20
+ * December could mean eleven days. A retention warning has to state a
+ * duration, so those two say "in 1 month" and "in 1 year".
+ */
+export function snipExpiryLabel(iso: string, nowMs: number = Date.now()): string {
+  const expiry = new Date(iso).getTime();
+  if (!Number.isFinite(expiry)) return '';
+
+  const diff = expiry - nowMs;
+  // The library lists every `ready` row, and expiry is enforced on READ rather
+  // than by the listing query — so a row past its date but not yet swept does
+  // appear here. "Deletes soon" would be a lie: the link is already dead.
+  if (diff <= 0) return 'Expired';
+
+  const MINUTE = 60_000;
+  const HOUR = 60 * MINUTE;
+  const DAY = 24 * HOUR;
+  // 30.44 — the mean month. Whole-month arithmetic would drift against the
+  // calendar months `snipExpiryMs` actually adds.
+  const MONTH = 30.44 * DAY;
+
+  const relative = (
+    value: number,
+    unit: Intl.RelativeTimeFormatUnit,
+    numeric: 'auto' | 'always' = 'auto',
+  ) => {
+    try {
+      return new Intl.RelativeTimeFormat('en', { numeric }).format(value, unit);
+    } catch {
+      // A locked-down engine must not take the card down with it.
+      return `in ${value} ${unit}${value === 1 ? '' : 's'}`;
+    }
+  };
+
+  if (diff < HOUR) return `Deletes ${relative(Math.max(1, Math.round(diff / MINUTE)), 'minute')}`;
+  if (diff < DAY) return `Deletes ${relative(Math.round(diff / HOUR), 'hour')}`;
+  if (diff < 30 * DAY) return `Deletes ${relative(Math.round(diff / DAY), 'day')}`;
+
+  const months = Math.round(diff / MONTH);
+  // `always` from here up — see the note above on "next month".
+  // Steps up rather than saying "in 12 months", which nobody says out loud.
+  if (months < 12) return `Deletes ${relative(Math.max(1, months), 'month', 'always')}`;
+  return `Deletes ${relative(Math.round(diff / (365 * DAY)), 'year', 'always')}`;
 }
 
 // ─── Keyboard shortcut ───────────────────────────────────────────────
@@ -208,6 +362,20 @@ export interface SnipSettings {
   shortcutEnabled: boolean;
   shortcut: string;
   retention: SnipRetention;
+  /**
+   * Whether Video mode's System audio toggle was last left on.
+   *
+   * **Defaults OFF, which is the one place in this map that "absent" does not
+   * mean "on".** Every other setting here is a convenience the user would want
+   * by default; this one records the desktop's own output. Opt-in, and sticky
+   * afterwards so the choice survives the surface closing.
+   *
+   * There is deliberately **no microphone setting.** Narration is not in this
+   * pass at all — see the note on `SnipSettings` consumers in
+   * documentation/snipping-tool.md. When it returns it needs its own field, an
+   * Info.plist usage string and an entitlement, none of which ship today.
+   */
+  systemAudioEnabled: boolean;
 }
 
 export const DEFAULT_SNIP_SETTINGS: SnipSettings = {
@@ -215,6 +383,7 @@ export const DEFAULT_SNIP_SETTINGS: SnipSettings = {
   shortcutEnabled: true,
   shortcut: DEFAULT_SNIP_SHORTCUT,
   retention: DEFAULT_SNIP_RETENTION,
+  systemAudioEnabled: false,
 };
 
 /**
@@ -230,6 +399,8 @@ export function resolveSnipSettings(raw: Partial<SnipSettings> | undefined | nul
     shortcutEnabled: raw?.shortcutEnabled !== false,
     shortcut: isValidSnipShortcut(raw?.shortcut) ? raw!.shortcut! : DEFAULT_SNIP_SHORTCUT,
     retention: isSnipRetention(raw?.retention) ? raw.retention : DEFAULT_SNIP_RETENTION,
+    // `=== true`, not `!== false` — the one opt-in field. See `SnipSettings`.
+    systemAudioEnabled: raw?.systemAudioEnabled === true,
   };
 }
 

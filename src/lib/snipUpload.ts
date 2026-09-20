@@ -74,6 +74,109 @@ export async function uploadSnip(
 }
 
 /**
+ * Uploads one finished recording and returns the live snip.
+ *
+ * Same three legs as `uploadSnip` and the same reasoning behind the middle one
+ * — but the middle leg runs **in the main process**, not here, and that is the
+ * whole difference:
+ *
+ *   1. `POST /api/snips/upload-url` → reserve an id, sign the video slot and
+ *      (because the kind is `video`) the poster slot beside it
+ *   2. `snip.uploadRecording` → MAIN streams the temp file to Cloud Storage
+ *   3. `POST /api/snips`            → finalise; the server reads the real size
+ *                                      off the object rather than trusting us
+ *
+ * Leg 2 cannot be a `fetch` from here. The recording is a file on disk that
+ * this context deliberately has no path to, and reading a ten-minute capture
+ * into renderer memory to PUT it would put a few hundred megabytes in the
+ * same heap that is running the app. Main pipes it from disk, so the peak cost
+ * of an upload is one socket buffer regardless of how long the recording ran.
+ *
+ * **A failure does not lose the recording.** Main keeps it in an on-disk queue
+ * in `userData` until an upload actually succeeds, so a dropped connection, a
+ * crash or a quit costs a retry rather than the take. Leg 2 is itself a
+ * resumable session that continues from the bucket's confirmed offset, so an
+ * interruption at 95% does not restart at zero. The only thing that discards
+ * a file is leg 1 being *refused* — quota, size, a revoked page permission —
+ * because that recording has nowhere it could ever go.
+ */
+export async function uploadSnipRecording(
+  idToken: string,
+  recording: {
+    token: string;
+    durationMs: number;
+    width: number;
+    height: number;
+    bytes: number;
+    hasPoster: boolean;
+  },
+): Promise<SnipRow> {
+  const api = window.electronAPI?.snip;
+  if (!api?.uploadRecording) {
+    // Unreachable in practice — a `snip:recorded` event can only arrive from a
+    // shell that has this handler — but the bridge is typed optional for a
+    // renderer older than its shell (rule 9c), and an unchecked call here
+    // would be a TypeError instead of a message.
+    throw new Error('This version of the desktop app cannot upload recordings.');
+  }
+
+  const slotRes = await fetch('/api/snips/upload-url', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bytes: recording.bytes, kind: 'video' }),
+  });
+  if (!slotRes.ok) {
+    // The slot is the first thing that can refuse — quota, size, a revoked
+    // page permission. The file is main's, so tell it to let go of it rather
+    // than leaving a temp file for a recording that will never be stored.
+    // `Promise.resolve(...)` — the method is optional, and `.catch` on the
+    // `undefined` that `?.()` yields would throw rather than swallow.
+    await Promise.resolve(api.discardRecording?.(recording.token)).catch(() => {});
+    throw new Error(await errorMessage(slotRes, 'Could not start the upload'));
+  }
+  const { id, uploadUrl, resumable, posterUploadUrl } = (await slotRes.json()) as {
+    id: string;
+    uploadUrl: string;
+    resumable?: boolean;
+    posterUploadUrl?: string;
+  };
+
+  const put = await api.uploadRecording({
+    token: recording.token,
+    uploadUrl,
+    resumable: resumable !== false,
+    // Only offered when there is a poster to send. A slot signed and never
+    // used is swept with the reservation, so an absent poster costs nothing.
+    ...(recording.hasPoster && posterUploadUrl ? { posterUploadUrl } : {}),
+  });
+  if (!put.success) {
+    // **Deliberately does not discard.** The recording is still in main's
+    // on-disk queue with its error recorded, which is the entire point: a
+    // transfer that failed is work the user still has, and the Snipping Tool
+    // page offers it back with a Retry. Only a refused *reservation* (above)
+    // throws the file away, because that one has nowhere to go.
+    throw new Error(put.error || 'The recording could not be uploaded');
+  }
+
+  const finalRes = await fetch('/api/snips', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id,
+      width: recording.width,
+      height: recording.height,
+      durationMs: recording.durationMs,
+    }),
+  });
+  if (!finalRes.ok) {
+    throw new Error(await errorMessage(finalRes, 'The recording could not be saved'));
+  }
+
+  const { snip } = (await finalRes.json()) as { snip: SnipRow };
+  return snip;
+}
+
+/**
  * `atob` in a loop rather than `fetch('data:...')`.
  *
  * A data URL of a multi-megabyte PNG is a multi-megabyte string handed to the

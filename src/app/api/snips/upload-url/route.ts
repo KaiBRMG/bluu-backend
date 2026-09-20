@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
+import { resolveSnipKind } from '@/lib/snips';
 import {
   SnipQuotaError,
   createSnipUploadSlot,
@@ -26,7 +27,15 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
 
   try {
     const body = await request.json().catch(() => null);
-    const slot = await createSnipUploadSlot(token.uid, Number(body?.bytes));
+    // The kind decides the content type the signature pins, the object's
+    // extension, the byte ceiling, and whether a second slot is signed for the
+    // poster — so it is resolved once here and never re-read from the finalise
+    // call, which reads it back off the reservation instead.
+    const slot = await createSnipUploadSlot(
+      token.uid,
+      Number(body?.bytes),
+      resolveSnipKind(body?.kind),
+    );
     if (!slot) {
       return NextResponse.json({ error: 'That capture is not a valid size' }, { status: 400 });
     }

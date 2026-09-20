@@ -1649,6 +1649,21 @@
     },
     {
       "collectionGroup": "snips",
+      "fieldPath": "posterPath",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "snips",
+      "fieldPath": "kind",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "snips",
+      "fieldPath": "durationMs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "snips",
       "fieldPath": "contentType",
       "indexes": []
     },

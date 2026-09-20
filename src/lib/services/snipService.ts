@@ -8,15 +8,20 @@ import { PUBLIC_APP_ORIGIN } from '@/lib/publicOrigin';
 import {
   DEFAULT_SNIP_SETTINGS,
   MAX_SNIP_BYTES,
+  MAX_SNIP_RECORDING_MS,
+  MAX_SNIP_VIDEO_BYTES,
   SHARE_ID_ALPHABET,
   SHARE_ID_LENGTH,
   SNIP_CONTENT_TYPE,
   SNIP_PUBLIC_PREFIX,
   SNIP_STORAGE_PREFIX,
+  SNIP_VIDEO_CONTENT_TYPE,
   SNIPPING_TOOL_PAGE_ID,
   isValidSnipId,
+  resolveSnipKind,
   resolveSnipSettings,
   snipExpiryMs,
+  type SnipKind,
   type SnipRetention,
   type SnipSettings,
 } from '@/lib/snips';
@@ -77,8 +82,30 @@ export function snipShareUrl(id: string): string {
   return `${PUBLIC_APP_ORIGIN}${SNIP_PUBLIC_PREFIX}/${id}`;
 }
 
+/**
+ * The still: the capture itself for an image snip, the poster frame for a
+ * recording. Both are PNGs behind the same route, which is why one path serves
+ * them — the route resolves `storagePath` vs `posterPath` from the row.
+ */
 function snipImageUrl(id: string): string {
   return `${PUBLIC_APP_ORIGIN}/api/public/snip/${id}/image`;
+}
+
+/**
+ * The recording. A **separate** route from `/image`, not a query parameter on
+ * it, for two unrelated reasons that point the same way: `/image` is the URL
+ * already sitting in Slack unfurls and browser caches for every snip ever
+ * shared, so its meaning must not shift underneath them; and a `<video src>`
+ * issues range requests where an `<img src>` issues one GET, which is a
+ * different traffic shape worth being able to see separately in the logs.
+ */
+function snipVideoUrl(id: string): string {
+  return `${PUBLIC_APP_ORIGIN}/api/public/snip/${id}/video`;
+}
+
+/** The public URL for whichever of the two the row actually is. */
+function snipMediaUrl(id: string, kind: SnipKind): string {
+  return kind === 'video' ? snipVideoUrl(id) : snipImageUrl(id);
 }
 
 // ─── Settings ────────────────────────────────────────────────────────
@@ -171,8 +198,19 @@ async function restampRetention(uid: string, retention: SnipRetention): Promise<
 export async function createSnipUploadSlot(
   uid: string,
   bytes: number,
-): Promise<{ id: string; uploadUrl: string } | null> {
-  if (!Number.isFinite(bytes) || bytes <= 0 || bytes > MAX_SNIP_BYTES) return null;
+  kind: SnipKind = 'image',
+): Promise<{
+  id: string;
+  uploadUrl: string;
+  resumable: boolean;
+  posterUploadUrl?: string;
+} | null> {
+  // The two kinds have their own ceilings and they are an order of magnitude
+  // apart: a still that claims 40 MB is not a still, while a ten-minute
+  // recording legitimately is. Sharing one limit would mean either refusing
+  // real recordings or waving through absurd screenshots.
+  const maxBytes = kind === 'video' ? MAX_SNIP_VIDEO_BYTES : MAX_SNIP_BYTES;
+  if (!Number.isFinite(bytes) || bytes <= 0 || bytes > maxBytes) return null;
 
   const count = await adminDb
     .collection(COLLECTION)
@@ -193,7 +231,14 @@ export async function createSnipUploadSlot(
   // Older snips still carry `snips/{uid}/{id}.png`; every read and delete path
   // resolves `storagePath` from the document rather than rebuilding it, so both
   // layouts work and no migration is required.
-  const storagePath = `${SNIP_STORAGE_PREFIX}/${id}.png`;
+  const video = kind === 'video';
+  const contentType = video ? SNIP_VIDEO_CONTENT_TYPE : SNIP_CONTENT_TYPE;
+  const storagePath = `${SNIP_STORAGE_PREFIX}/${id}.${video ? 'webm' : 'png'}`;
+  // A recording's poster is a second object under the same token. It shares the
+  // row's lifetime exactly — every delete path below removes both — so it needs
+  // no id of its own, and deriving the name means a poster can never be orphaned
+  // by a row whose path it does not match.
+  const posterPath = video ? `${SNIP_STORAGE_PREFIX}/${id}-poster.png` : null;
 
   // The pending row is what makes the object reachable before the renderer
   // confirms the upload — without it, a PUT that succeeds and a finalise that
@@ -202,22 +247,69 @@ export async function createSnipUploadSlot(
   await adminDb.collection(COLLECTION).doc(id).set({
     ownerUid: uid,
     storagePath,
-    contentType: SNIP_CONTENT_TYPE,
+    contentType,
+    kind,
+    ...(posterPath ? { posterPath } : {}),
     status: 'pending',
     reservedAt: FieldValue.serverTimestamp(),
   });
 
-  const [uploadUrl] = await adminStorage
-    .bucket()
-    .file(storagePath)
-    .getSignedUrl({
+  const bucket = adminStorage.bucket();
+  const sign = (path: string, type: string) =>
+    bucket.file(path).getSignedUrl({
       version: 'v4',
       action: 'write',
       expires: Date.now() + SIGNED_WRITE_TTL_MS,
-      contentType: SNIP_CONTENT_TYPE,
+      contentType: type,
     });
 
-  return { id, uploadUrl };
+  /**
+   * A recording is signed for a **resumable** session, not a single PUT.
+   *
+   * This is the difference between "a long upload survives a bad connection"
+   * and "a long upload starts again from zero every time the wifi blinks". A
+   * plain `PUT` of 300 MB is one indivisible request: interrupt it at 95% and
+   * every byte has to be sent again, which on a connection bad enough to drop
+   * it once is a loop that may never terminate. A resumable session is
+   * chunked, and an interrupted one is continued from the offset the bucket
+   * confirms it already holds.
+   *
+   * The URL returned here is the **initiation** endpoint: main POSTs to it
+   * with `x-goog-resumable: start` and gets a session URI back in `Location`.
+   * `extensionHeaders` is not optional — that header is part of the v4
+   * signature, so a POST without it is rejected as a signature mismatch.
+   *
+   * The poster stays a simple signed `write`: it is one small PNG, and a
+   * resumable session for 80 KB is pure overhead.
+   */
+  const signResumable = (path: string, type: string) =>
+    bucket.file(path).getSignedUrl({
+      version: 'v4',
+      action: 'resumable',
+      expires: Date.now() + SIGNED_WRITE_TTL_MS,
+      contentType: type,
+      extensionHeaders: { 'x-goog-resumable': 'start' },
+    });
+
+  // Both slots are signed here rather than the poster getting a round-trip of
+  // its own. The recorder holds the poster from the moment recording starts and
+  // the two uploads are back to back; a second call would be a second
+  // authenticated origin request (rule 9i) for a URL we can mint in the same
+  // breath as the first.
+  const [[uploadUrl], poster] = await Promise.all([
+    video ? signResumable(storagePath, contentType) : sign(storagePath, contentType),
+    posterPath ? sign(posterPath, SNIP_CONTENT_TYPE) : Promise.resolve(null),
+  ]);
+
+  return {
+    id,
+    uploadUrl,
+    // Named so the caller cannot mistake one protocol for the other. Main
+    // branches on this rather than on the kind, because the kind is a product
+    // fact and this is a wire fact.
+    resumable: video,
+    ...(poster ? { posterUploadUrl: poster[0] } : {}),
+  };
 }
 
 export class SnipQuotaError extends Error {
@@ -241,6 +333,7 @@ export async function finalizeSnip(
   id: string,
   width: number,
   height: number,
+  durationMs?: number,
 ): Promise<SnipRow | null> {
   if (!isValidSnipId(id)) return null;
   if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
@@ -255,16 +348,53 @@ export async function finalizeSnip(
   // user's row.
   if (!data || data.ownerUid !== uid || data.status !== 'pending') return null;
 
-  const file = adminStorage.bucket().file(data.storagePath);
+  // The kind is read off the RESERVATION, never off the request body. The slot
+  // was signed for one content type and one path from that decision; letting the
+  // finalise call rename it would mean a row claiming to be a recording over an
+  // object that is a PNG, or the reverse.
+  const kind = resolveSnipKind(data.kind);
+  const video = kind === 'video';
+
+  const bucket = adminStorage.bucket();
+  const file = bucket.file(data.storagePath);
   const [exists] = await file.exists();
   if (!exists) return null;
   const [metadata] = await file.getMetadata();
   const bytes = Number(metadata.size ?? 0);
-  if (!Number.isFinite(bytes) || bytes <= 0 || bytes > MAX_SNIP_BYTES) {
+  const maxBytes = video ? MAX_SNIP_VIDEO_BYTES : MAX_SNIP_BYTES;
+  if (!Number.isFinite(bytes) || bytes <= 0 || bytes > maxBytes) {
     // Oversized or empty: the object is the only evidence, so remove it rather
-    // than leave an unreferenced blob behind a row we are about to refuse.
-    await file.delete({ ignoreNotFound: true }).catch(() => {});
+    // than leave an unreferenced blob behind a row we are about to refuse. The
+    // poster goes with it — a poster for a recording that will not exist is the
+    // orphan this whole path is trying not to create.
+    await Promise.all([
+      file.delete({ ignoreNotFound: true }).catch(() => {}),
+      data.posterPath
+        ? bucket.file(data.posterPath).delete({ ignoreNotFound: true }).catch(() => {})
+        : Promise.resolve(),
+    ]);
     return null;
+  }
+
+  // Clamped rather than refused. The duration is the recorder's own wall clock
+  // and the only source there is — the container's is not readable without
+  // parsing the WebM — so a nonsense value costs a wrong caption, not a wrong
+  // file, and refusing the upload over it would throw away a recording the user
+  // has already waited for.
+  const duration = video
+    ? Math.min(Math.max(Math.round(Number(durationMs) || 0), 0), MAX_SNIP_RECORDING_MS)
+    : null;
+
+  // A recording whose poster PUT failed is still a recording. The row simply
+  // drops the field, `imageUrl` comes back null, and the card renders its
+  // placeholder — far better than refusing to save the video over its thumbnail.
+  let posterPath: string | null = data.posterPath ?? null;
+  if (posterPath) {
+    const [posterExists] = await bucket
+      .file(posterPath)
+      .exists()
+      .catch(() => [false] as [boolean]);
+    if (!posterExists) posterPath = null;
   }
 
   const retention = (await getSnipSettings(uid)).retention;
@@ -277,6 +407,8 @@ export async function finalizeSnip(
     height,
     bytes,
     retention,
+    ...(duration == null ? {} : { durationMs: duration }),
+    ...(data.posterPath && !posterPath ? { posterPath: FieldValue.delete() } : {}),
     createdAt: Timestamp.fromDate(createdAt),
     // Absent, never null, under a `never` retention — see `restampRetention`.
     ...(expiresMs == null ? {} : { expiresAt: Timestamp.fromMillis(expiresMs) }),
@@ -287,11 +419,14 @@ export async function finalizeSnip(
     id,
     createdAt: createdAt.toISOString(),
     expiresAt: expiresMs == null ? null : new Date(expiresMs).toISOString(),
+    kind,
+    durationMs: duration,
     width,
     height,
     bytes,
     shareUrl: snipShareUrl(id),
-    imageUrl: snipImageUrl(id),
+    imageUrl: video && !posterPath ? null : snipImageUrl(id),
+    mediaUrl: snipMediaUrl(id, kind),
   };
 }
 // ─── Reads ───────────────────────────────────────────────────────────
@@ -331,15 +466,22 @@ function parseSnipCursor(cursor: string): { ms: number; id: string } | null {
 
 function toSnipRow(doc: FirebaseFirestore.QueryDocumentSnapshot): SnipRow {
   const d = doc.data();
+  const kind = resolveSnipKind(d.kind);
   return {
     id: doc.id,
     createdAt: d.createdAt?.toDate?.()?.toISOString() ?? new Date(0).toISOString(),
     expiresAt: d.expiresAt?.toDate?.()?.toISOString() ?? null,
+    kind,
+    durationMs: typeof d.durationMs === 'number' ? d.durationMs : null,
     width: d.width ?? 0,
     height: d.height ?? 0,
     bytes: d.bytes ?? 0,
     shareUrl: snipShareUrl(doc.id),
-    imageUrl: snipImageUrl(doc.id),
+    // An image is always its own still. A recording has one only if its poster
+    // landed — `posterPath` is deleted at finalise when it did not, so its
+    // presence here is the answer rather than an assumption about the object.
+    imageUrl: kind === 'video' && !d.posterPath ? null : snipImageUrl(doc.id),
+    mediaUrl: snipMediaUrl(doc.id, kind),
   };
 }
 
@@ -432,14 +574,21 @@ export async function getPublicSnip(id: string): Promise<PublicSnip | null> {
   if (expiresMs && expiresMs <= Date.now()) return null;
 
   const owner = await getUserById(d.ownerUid).catch(() => null);
+  const kind = resolveSnipKind(d.kind);
 
   return {
     id,
     createdAt: d.createdAt?.toDate?.()?.toISOString() ?? new Date(0).toISOString(),
+    kind,
+    // Shown as a caption, and it is the one number that lets a recipient decide
+    // whether to press play — but note what it still is not: a byte size. How
+    // large the file is remains the owner's business.
+    durationMs: typeof d.durationMs === 'number' ? d.durationMs : null,
     width: d.width ?? 0,
     height: d.height ?? 0,
     sharedBy: owner?.displayName?.trim() || null,
-    imageUrl: snipImageUrl(id),
+    imageUrl: kind === 'video' && !d.posterPath ? null : snipImageUrl(id),
+    mediaUrl: snipMediaUrl(id, kind),
   };
 }
 
@@ -452,7 +601,18 @@ export async function getPublicSnip(id: string): Promise<PublicSnip | null> {
  * image endpoint is reachable on its own, so it cannot lean on the page having
  * checked.
  */
-export async function getSnipImageRedirect(id: string): Promise<string | null> {
+export async function getSnipMediaRedirect(
+  id: string,
+  /**
+   * `'still'` is the PNG a page renders in an `<img>` — the capture for an
+   * image snip, the poster frame for a recording. `'video'` is the WebM.
+   *
+   * The two are separate **routes** but one resolver, because every liveness
+   * rule above has to hold identically for both: a deleted snip must stop
+   * serving its poster at the same instant it stops serving its video.
+   */
+  want: 'still' | 'video' = 'still',
+): Promise<string | null> {
   if (!isValidSnipId(id)) return null;
 
   const snap = await adminDb.collection(COLLECTION).doc(id).get();
@@ -462,9 +622,23 @@ export async function getSnipImageRedirect(id: string): Promise<string | null> {
   const expiresMs = d.expiresAt?.toDate?.()?.getTime?.();
   if (expiresMs && expiresMs <= Date.now()) return null;
 
+  const kind = resolveSnipKind(d.kind);
+  // Asking the video route for a still, or the image route for a recording, is
+  // a caller that has the wrong URL for this row — one 404, like every other
+  // refusal here, rather than quietly serving the other object.
+  const path =
+    want === 'video'
+      ? kind === 'video'
+        ? d.storagePath
+        : null
+      : kind === 'video'
+        ? d.posterPath ?? null
+        : d.storagePath;
+  if (!path) return null;
+
   const [url] = await adminStorage
     .bucket()
-    .file(d.storagePath)
+    .file(path)
     .getSignedUrl({
       version: 'v4',
       action: 'read',
@@ -491,9 +665,23 @@ export async function deleteSnip(uid: string, id: string): Promise<boolean> {
   const d = snap.data();
   if (!d || d.ownerUid !== uid) return false;
 
-  await adminStorage.bucket().file(d.storagePath).delete({ ignoreNotFound: true });
+  const bucket = adminStorage.bucket();
+  // Both objects, and the poster's failure must not block the row. A poster
+  // left behind is an unreachable thumbnail; a row left behind is a live link
+  // to a recording the user asked to delete, which is the failure that matters.
+  await bucket.file(d.storagePath).delete({ ignoreNotFound: true });
+  if (d.posterPath) {
+    await bucket.file(d.posterPath).delete({ ignoreNotFound: true }).catch(() => {});
+  }
   await ref.delete();
   return true;
+}
+
+/** Every object one row owns — the media, plus a recording's poster. */
+function snipObjectPaths(doc: FirebaseFirestore.QueryDocumentSnapshot): string[] {
+  return [doc.get('storagePath'), doc.get('posterPath')].filter(
+    (path): path is string => typeof path === 'string' && path.length > 0,
+  );
 }
 
 /** Every snip a user owns, for the account-deletion cascade (rule 6). */
@@ -503,8 +691,10 @@ export async function deleteAllSnipsForUser(uid: string): Promise<number> {
 
   const bucket = adminStorage.bucket();
   await Promise.all(
-    snap.docs.map(doc =>
-      bucket.file(doc.get('storagePath')).delete({ ignoreNotFound: true }).catch(() => {}),
+    snap.docs.flatMap(doc =>
+      snipObjectPaths(doc).map(path =>
+        bucket.file(path).delete({ ignoreNotFound: true }).catch(() => {}),
+      ),
     ),
   );
 
@@ -549,18 +739,20 @@ export async function sweepExpiredSnips(limit = 500): Promise<{ expired: number;
   if (docs.length === 0) return { expired: 0, abandoned: 0 };
 
   await Promise.all(
-    docs.map(doc => {
-      const storagePath = doc.get('storagePath');
-      if (!storagePath) return Promise.resolve();
-      return bucket
-        .file(storagePath)
-        .delete({ ignoreNotFound: true })
-        .catch(err => {
-          // One unreachable object must not abort the sweep — the row stays and
-          // the next run retries it.
-          console.error('[snips] object delete failed', doc.id, err?.message);
-        });
-    }),
+    docs.flatMap(doc =>
+      snipObjectPaths(doc).map(path =>
+        bucket
+          .file(path)
+          .delete({ ignoreNotFound: true })
+          .catch(err => {
+            // One unreachable object must not abort the sweep — the row stays
+            // and the next run retries it. The id is a share token, so it is
+            // NOT logged; the storage path names the object well enough to find
+            // it and is the same secret, which is why only the message is kept.
+            console.error('[snips] object delete failed:', err?.message);
+          }),
+      ),
+    ),
   );
 
   const writer = adminDb.bulkWriter();

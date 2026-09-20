@@ -44,7 +44,8 @@
 - `/auth` — OAuth flow pages run in the system browser during login; must be reachable without Electron.
 - `/creator` — external creator interface. It runs inside **Telegram's webview**, whose user agent is not Electron, so the allowlist entry is what makes the Mini App resolve at all. Note that reaching the page is not the same as getting in: without a valid `initData` the shell renders "Open in Telegram" and no session is minted.
 - `/desktop-only` — the "use the desktop app" landing page itself.
-- `/download` — public installer/download page; users need it before they have the desktop app.
+- `/download` — public installer/download page; users need it before they have the desktop app. Carries the one-time Windows certificate step.
+- `/update` — the same page with the certificate step and the walkthrough removed, for someone who already has the app. `APP_UPDATE.downloadUrl` points **here**, and the Windows update prompt opens it in the system browser, so it needs the allowlist for the same reason `/download` does.
 - `/p` — **shared prompts.** The whole point of the link is that it resolves for someone without the desktop app; a recipient rewritten to `/desktop-only` would make sharing useless. Read-only, and reachable only with the 160-bit share token in the path. See [prompt-library.md](prompt-library.md#sharing-a-prompt).
 - `/raffle` — browser-accessible raffle page.
 

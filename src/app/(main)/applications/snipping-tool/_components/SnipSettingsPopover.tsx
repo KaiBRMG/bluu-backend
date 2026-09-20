@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Settings2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -47,16 +47,36 @@ export function SnipSettingsPopover({
   // Local mirror so a toggle flips under the cursor rather than after a round
   // trip, reconciled from the prop whenever the server's answer lands.
   const [draft, setDraft] = useState(settings);
-  const [saving, setSaving] = useState(false);
+  // WHICH field is saving, not whether one is. A single boolean disabled all
+  // four controls on any save, so changing retention froze the shortcut and
+  // both switches for a round trip that had nothing to do with them.
+  const [savingKey, setSavingKey] = useState<keyof SnipSettings | null>(null);
 
-  useEffect(() => setDraft(settings), [settings]);
+  // CONTENT-compared, not identity-compared — the `usePermissions` pattern.
+  // `settings` is memoised on `userData?.snipSettings`, a nested object off the
+  // `onSnapshot` payload, so its identity changes every time anything rewrites
+  // `users/{uid}` — and presence does that every ten minutes. Keying this
+  // effect on the object alone re-set the draft on a timer, which at best was
+  // wasted renders and at worst stomped an in-flight optimistic edit with the
+  // pre-save value. The page above this one documents avoiding exactly this
+  // trap (rule 9i); this is the other half of it.
+  const fingerprint = `${settings.trayIconEnabled}|${settings.shortcutEnabled}|${settings.shortcut}|${settings.retention}|${settings.systemAudioEnabled}`;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  useEffect(() => { setDraft(settingsRef.current); }, [fingerprint]);
 
   const save = useCallback(
     async (patch: Partial<SnipSettings>) => {
-      const previous = draft;
-      const optimistic = { ...draft, ...patch };
-      setDraft(optimistic);
-      setSaving(true);
+      const key = Object.keys(patch)[0] as keyof SnipSettings;
+      let previous: SnipSettings = settingsRef.current;
+      // Functional update: `draft` is not a dependency of this callback any
+      // more, so the identity of `save` is stable across keystrokes rather
+      // than changing on every draft edit.
+      setDraft(current => {
+        previous = current;
+        return { ...current, ...patch };
+      });
+      setSavingKey(key);
       try {
         const idToken = await auth.currentUser?.getIdToken();
         if (!idToken) throw new Error('Session expired — sign in again.');
@@ -97,10 +117,10 @@ export function SnipSettingsPopover({
         setDraft(previous);
         toast.error(error instanceof Error ? error.message : 'Could not save that setting');
       } finally {
-        setSaving(false);
+        setSavingKey(null);
       }
     },
-    [draft],
+    [],
   );
 
   const trayLabel = platform === 'darwin' ? 'Menu bar icon' : 'Taskbar tray icon';
@@ -128,7 +148,7 @@ export function SnipSettingsPopover({
             <Switch
               id="snip-tray"
               checked={draft.trayIconEnabled}
-              disabled={saving}
+              disabled={savingKey === 'trayIconEnabled'}
               onCheckedChange={checked => save({ trayIconEnabled: checked })}
             />
           </div>
@@ -143,7 +163,7 @@ export function SnipSettingsPopover({
             <Switch
               id="snip-shortcut"
               checked={draft.shortcutEnabled}
-              disabled={saving}
+              disabled={savingKey === 'shortcutEnabled'}
               onCheckedChange={checked => save({ shortcutEnabled: checked })}
             />
           </div>
@@ -152,14 +172,14 @@ export function SnipSettingsPopover({
             <ShortcutRecorder
               value={draft.shortcut}
               platform={platform}
-              disabled={saving || !draft.shortcutEnabled}
+              disabled={savingKey === 'shortcut' || !draft.shortcutEnabled}
               onChange={accelerator => save({ shortcut: accelerator })}
             />
             {draft.shortcut !== DEFAULT_SNIP_SHORTCUT && (
               <Button
                 variant="ghost"
                 size="xs"
-                disabled={saving || !draft.shortcutEnabled}
+                disabled={savingKey === 'shortcut' || !draft.shortcutEnabled}
                 className="text-zinc-400 hover:text-zinc-200"
                 onClick={() => save({ shortcut: DEFAULT_SNIP_SHORTCUT })}
               >
@@ -169,10 +189,10 @@ export function SnipSettingsPopover({
           </div>
 
           <div className="flex flex-col gap-1.5 border-t border-white/[0.07] pt-4">
-            <Label htmlFor="snip-retention" className="text-xs text-zinc-400">Auto Delete</Label>
+            <Label htmlFor="snip-retention" className="text-xs text-zinc-400">Auto-delete</Label>
             <Select
               value={draft.retention}
-              disabled={saving}
+              disabled={savingKey === 'retention'}
               onValueChange={value => save({ retention: value as SnipRetention })}
             >
               <SelectTrigger id="snip-retention" className="h-8 border-zinc-700 bg-zinc-800 text-sm">
@@ -186,10 +206,15 @@ export function SnipSettingsPopover({
                 ))}
               </SelectContent>
             </Select>
+            {/* The re-stamp is the consequence a user cannot see from here,
+                and it used to live ONLY in the toast that fires on change —
+                so anyone who set this and looked away never learned it had
+                re-dated their whole library. It is a standing fact about the
+                setting, so it belongs on the card. */}
             <p className="text-[11px] text-zinc-400">
               {draft.retention === 'never'
                 ? 'Snips are kept until you delete them.'
-                : 'Snips and their links are deleted permanently once they reach this age.'}
+                : 'Snips and their links are deleted permanently once they reach this age. This applies to snips you already have, counted from when each was taken.'}
             </p>
           </div>
         </div>

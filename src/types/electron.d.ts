@@ -186,6 +186,28 @@ export interface DeepLinkRoute {
   at: number;
 }
 
+/**
+ * A recording sitting in main's on-disk upload queue.
+ *
+ * No path — the renderer identifies one by `token` and asks main to act on it.
+ * `state` is `pending` (never attempted, or attempted before a restart),
+ * `uploading`, or `failed` with `lastError` set.
+ */
+export interface PendingRecording {
+  token: string;
+  /** Epoch ms. */
+  createdAt: number;
+  durationMs: number;
+  width: number;
+  height: number;
+  bytes: number;
+  hasPoster: boolean;
+  attempts: number;
+  lastError: string | null;
+  lastAttemptAt: number;
+  state: 'pending' | 'uploading' | 'failed';
+}
+
 interface ElectronAPI {
   isElectron: boolean;
   auth: {
@@ -328,6 +350,13 @@ interface ElectronAPI {
       trayIconEnabled: boolean;
       shortcutEnabled: boolean;
       shortcut: string;
+      /** Seeds the selection surface's System audio toggle. Optional because a
+       *  renderer newer than its shell must still be able to arm the shortcut. */
+      systemAudioEnabled?: boolean;
+      /** Whether THIS renderer can receive a finished recording. A new shell
+       *  hides the Video toggle unless it is true, so an old page bundle
+       *  cannot start a recording it has no listener for (rule 9c). */
+      supportsRecording?: boolean;
     }) => Promise<{ ok: boolean; shortcutRegistered?: boolean }>;
     start: () => Promise<{ success: boolean; error?: string }>;
     /** The cropped region only — never the full screen. */
@@ -346,12 +375,97 @@ interface ElectronAPI {
      *                    a monitor unplugged or a resolution change inside the
      *                    settle window.
      *  • `crop`        — the crop or PNG encode threw.
-     *  • `unknown`     — anything else.
+     *
+     * Recording adds five more, all arriving on the same channel because they
+     * are the same thing from the user's side — they drew a box and got
+     * nothing:
+     *  • `screen-permission` — the OS denied screen capture. **macOS only**;
+     *                        main rewrites this to `stream-refused` elsewhere,
+     *                        because no other platform has a permission to grant.
+     *  • `stream-refused`  — `getDisplayMedia` was refused by our own handler,
+     *                        or the OS produced no screen source. NOT a
+     *                        permission — never offer an "Open Settings" action.
+     *  • `recorder-lost`   — the recorder window died mid-take.
+     *  • `empty-recording` — it ran but produced no data.
+     *  • `encoder`         — no usable WebM encoder, or MediaRecorder threw.
+     *  • `storage`         — no temp file could be opened for the recording.
+     *  • `unknown`         — anything else.
      */
     onFailed?: (callback: (payload: { reason: string }) => void) => void;
     removeCapturedListeners: () => void;
     onNavigate: (callback: (href: string) => void) => void;
     removeNavigateListeners: () => void;
+
+    /**
+     * A recording has finished and is sitting in a temp file main owns.
+     *
+     * `token` is an opaque handle, **not a path** — the renderer cannot read
+     * the file and cannot name one. It hands the token back to
+     * `uploadRecording` along with a signed slot, and main streams the bytes
+     * to Cloud Storage itself.
+     */
+    onRecorded?: (
+      callback: (payload: {
+        token: string;
+        durationMs: number;
+        width: number;
+        height: number;
+        bytes: number;
+        hasPoster: boolean;
+      }) => void,
+    ) => void;
+    removeRecordedListeners?: () => void;
+    /**
+     * Streams the recording (and its poster) to the signed slots, from main.
+     * Bulk bytes never cross this context or a Vercel function — rule 9i.
+     *
+     * `resumable` selects the protocol: a video slot is a resumable session
+     * (chunked, and continued from the bucket's confirmed offset after an
+     * interruption), anything else is a single PUT. **A failure here does not
+     * destroy the recording** — it stays in main's on-disk queue and comes
+     * back from `listPendingRecordings`.
+     */
+    uploadRecording?: (options: {
+      token: string;
+      uploadUrl: string;
+      resumable?: boolean;
+      posterUploadUrl?: string;
+    }) => Promise<{
+      success: boolean;
+      error?: string;
+      posterUploaded?: boolean;
+      /** False when retrying cannot help (a refused signature, a bad size). */
+      retryable?: boolean;
+    }>;
+    /** Delete a queued recording for good. A failed *transfer* keeps its file;
+     *  this is for when there is nowhere for it to go, or the user said so. */
+    discardRecording?: (token: string) => Promise<{ success: boolean }>;
+
+    /**
+     * Recordings still waiting to upload, failures included.
+     *
+     * The queue is a directory in `userData`, so this survives a quit, a crash
+     * and a reboot. It is what the Snipping Tool page lists so a failed
+     * upload is visible and retryable rather than silently lost.
+     */
+    listPendingRecordings?: () => Promise<PendingRecording[]>;
+    onPendingChanged?: (callback: (list: PendingRecording[]) => void) => void;
+    removePendingListeners?: () => void;
+    /** Bytes confirmed by the bucket, not bytes written to the socket. */
+    onUploadProgress?: (
+      callback: (progress: { token: string; sent: number; total: number }) => void,
+    ) => void;
+    /** Write a queued recording somewhere the user picks. Main shows the
+     *  native dialog; the renderer never names a path. */
+    savePendingRecording?: (
+      token: string,
+    ) => Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }>;
+    /** The System audio toggle changed on the selection surface; this window
+     *  holds the session, so it persists it. */
+    onAudioPrefs?: (
+      callback: (prefs: { systemAudioEnabled: boolean }) => void,
+    ) => void;
+    removeAudioPrefsListeners?: () => void;
   };
   /** Saving to disk. Always via a native save dialog; the renderer never names
    *  a path, and only paths written this session can be revealed or opened. */

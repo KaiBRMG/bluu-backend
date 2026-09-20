@@ -2,6 +2,16 @@
   "detector": {
     "ignoreRules": [],
     "ignoreFiles": [],
-    "ignoreValues": []
+    "ignoreValues": [
+      {
+        "rule": "pulsing-dot",
+        "value": "*",
+        "files": [
+          "electron/snip-record.html"
+        ],
+        "createdAt": "2026-09-20T11:52:34.351Z",
+        "reason": "Claude: the dot IS the live indicator for an in-flight screen recording, not decorative liveness. It is tied to genuinely changing state (it goes static grey the moment MediaRecorder.pause() fires and red again on resume), it never carries the state alone (a 'Recording'/'Paused' text label and a running duration counter sit beside it), and it honours prefers-reduced-motion. A record light is the domain-appropriate motion case the rule carves out."
+      }
+    ]
   }
 }

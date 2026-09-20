@@ -215,6 +215,72 @@ contextBridge.exposeInMainWorld('electronAPI', {
     removeNavigateListeners: () => {
       ipcRenderer.removeAllListeners('snip:navigate');
     },
+
+    // ── Recording ──────────────────────────────────────────────────
+    //
+    // Note what is absent, and deliberately: there is no `onRecordingChunk`,
+    // no stream, and no file path. A recording is captured in its own local
+    // window, streamed to a temp file by MAIN, and PUT to Cloud Storage BY
+    // MAIN from that file. This context is told only that one is ready, and
+    // hands back the signed URL to send it to.
+    //
+    // The app window loads remote content from the deployment, so every one of
+    // those is a boundary rather than a convenience: a desktop stream here
+    // would make any script on the page a screen recorder, and a path here
+    // would be a path that page could be talked into naming.
+
+    /** A finished recording is waiting. `token` is an opaque handle main
+     *  resolves to a temp file — never a path. */
+    onRecorded: (callback) => {
+      ipcRenderer.on('snip:recorded', (_event, payload) => callback(payload));
+    },
+    removeRecordedListeners: () => {
+      ipcRenderer.removeAllListeners('snip:recorded');
+    },
+
+    /** Hand main a signed slot and let it stream the file there. Resolves
+     *  `{ success, error?, posterUploaded }`. */
+    uploadRecording: (options) => ipcRenderer.invoke('snip:uploadRecording', options),
+
+    /** Drop a finished recording without uploading it — the slot could not be
+     *  signed, or the user's session is gone. */
+    /** Drop a queued recording for good — the slot could not be signed, or the
+     *  user chose to delete it. A failed *transfer* keeps its file; this is
+     *  for the cases where there is nowhere for it to go. */
+    discardRecording: (token) => ipcRenderer.invoke('snip:discardRecording', token),
+
+    /**
+     * Recordings still waiting to upload, including ones that have failed.
+     *
+     * The queue lives on disk in `userData`, so this survives a quit, a crash
+     * and a reboot — a failed upload is a recording the user still has, and
+     * the Snipping Tool page lists these with a Retry.
+     */
+    listPendingRecordings: () => ipcRenderer.invoke('snip:listPendingRecordings'),
+    /** Fires whenever the queue changes, so the page never polls. */
+    onPendingChanged: (callback) => {
+      ipcRenderer.on('snip:pending-changed', (_event, list) => callback(list));
+    },
+    removePendingListeners: () => {
+      ipcRenderer.removeAllListeners('snip:pending-changed');
+      ipcRenderer.removeAllListeners('snip:upload-progress');
+    },
+    /** Bytes confirmed *by the bucket* during a resumable upload. */
+    onUploadProgress: (callback) => {
+      ipcRenderer.on('snip:upload-progress', (_event, p) => callback(p));
+    },
+    /** The escape hatch: write a queued recording somewhere the user picks.
+     *  Main shows the native dialog; the renderer never names a path. */
+    savePendingRecording: (token) => ipcRenderer.invoke('snip:savePendingRecording', token),
+
+    /** The Video toggles were changed on the selection surface. The app window
+     *  is the only side with a Firebase session, so it does the writing. */
+    onAudioPrefs: (callback) => {
+      ipcRenderer.on('snip:audio-prefs', (_event, prefs) => callback(prefs));
+    },
+    removeAudioPrefsListeners: () => {
+      ipcRenderer.removeAllListeners('snip:audio-prefs');
+    },
   },
 
   // Saving files. The renderer never names a path: main shows a native save

@@ -21,8 +21,8 @@
  * the page has been seen, and that the certificate was actually downloaded here
  * — because a visitor who looked once and left has *not* done the crucial step,
  * and demoting it for them would be the one failure this flow exists to prevent.
- * The certificate is therefore never hidden, only folded: "Installing on a new
- * machine?" reopens the full sequence.
+ * The certificate is therefore never hidden, only folded: "First time installing
+ * Bluu Backend?" reopens the full sequence.
  *
  * The Mac decision has a wrong answer with a long tail: the x64 `.dmg` carries
  * no arch suffix, so an Apple Silicon user who takes it runs under Rosetta and
@@ -368,7 +368,7 @@ export default function DownloadPage() {
 
                   <Collapsible className="rounded-xl border border-white/[0.08]">
                     <CollapsibleTrigger className="group/cert flex w-full items-center justify-between gap-4 rounded-xl px-4 py-3 text-left text-[14px] font-medium text-white/70 transition-colors duration-150 hover:text-white focus-visible:ring-2 focus-visible:ring-[#00b8f5]/50 focus-visible:outline-none">
-                      Installing on a new machine? Set up the certificate first
+                      First time installing Bluu Backend? Install the certificate
                       <ChevronDown
                         aria-hidden
                         className="size-4 flex-none text-white/50 transition-transform duration-200 group-data-[state=open]/cert:rotate-180"
@@ -400,7 +400,7 @@ export default function DownloadPage() {
                         </h2>
                         <p className="text-[14px] leading-relaxed text-white/60">
                           Windows blocks the app until this is trusted. Once per
-                          machine.
+                          machine — updating later skips this step.
                         </p>
                       </div>
                       <DownloadButton

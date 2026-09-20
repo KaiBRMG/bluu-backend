@@ -1,8 +1,10 @@
 import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
 import { getPublicSnip } from '@/lib/services/snipService';
+import { formatSnipDuration } from '@/lib/snips';
 import { SnipImage } from '../_components/SnipImage';
 import { SnipTimestamp } from '../_components/SnipTimestamp';
+import { SnipVideo } from '../_components/SnipVideo';
 
 /**
  * The public read-only view of a shared snip.
@@ -52,6 +54,8 @@ async function SharedSnipContent({ params }: { params: Promise<{ shareId: string
   // which tokens once existed.
   if (!snip) notFound();
 
+  const isVideo = snip.kind === 'video';
+
   return (
     <>
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -67,19 +71,43 @@ async function SharedSnipContent({ params }: { params: Promise<{ shareId: string
           className="h-10 w-auto"
         />
 
+        {/* "Anyone with this link", not just "read only". The token in the URL
+            IS the access control — there is no sign-in and no membership check
+            — so "read only" alone described the recipient's *capability* while
+            implying a restriction on *who* that does not exist. A person
+            deciding whether to forward this needs the true answer. */}
         <span className="rounded-full border border-white/[0.07] px-2.5 py-0.5 text-[11px] font-medium text-zinc-400">
-          Shared screenshot · read only
+          Anyone with this link · read only
         </span>
       </div>
 
-      {/* The picture is the page. Everything else is a caption for it, which is
+      {/* The page had no heading at all: its only title was the <title> tag and
+          a pill, so a screen reader landing on a forwarded link got no outline
+          (WCAG 2.4.6, 1.3.1). Visually hidden because the capture itself is the
+          page's visible title — a heading drawn above it would compete with the
+          thing the recipient came to look at. */}
+      <h1 className="sr-only">
+        Shared {isVideo ? 'recording' : 'screenshot'}
+        {snip.sharedBy ? ` from ${snip.sharedBy}` : ''}
+      </h1>
+
+      {/* The capture is the page. Everything else is a caption for it, which is
           why the attribution sits below rather than competing above. */}
-      <SnipImage
-        src={snip.imageUrl}
-        width={snip.width}
-        height={snip.height}
-        alt="Shared screenshot"
-      />
+      {isVideo ? (
+        <SnipVideo
+          src={snip.mediaUrl}
+          poster={snip.imageUrl}
+          width={snip.width}
+          height={snip.height}
+        />
+      ) : (
+        <SnipImage
+          src={snip.mediaUrl}
+          width={snip.width}
+          height={snip.height}
+          alt={snip.sharedBy ? `Screenshot shared by ${snip.sharedBy}` : 'Shared screenshot'}
+        />
+      )}
 
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-400">
         {snip.sharedBy && (
@@ -93,6 +121,12 @@ async function SharedSnipContent({ params }: { params: Promise<{ shareId: string
             component by necessity: the server has no idea where the visitor is.
             See `SnipTimestamp` for why it renders UTC first. */}
         <SnipTimestamp iso={snip.createdAt} />
+        {isVideo && snip.durationMs != null && (
+          <>
+            <span aria-hidden>·</span>
+            <span className="tabular-nums">{formatSnipDuration(snip.durationMs)}</span>
+          </>
+        )}
         {snip.width > 0 && snip.height > 0 && (
           <>
             <span aria-hidden>·</span>

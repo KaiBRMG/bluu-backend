@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';" />
+  <title>Recording area</title>
+  <style>
+    /*
+      The border that marks what is being recorded.
+
+      Once the rectangle is committed the selection surfaces are destroyed, so
+      without this there is nothing on screen saying which part of the display
+      is live — the user is recording blind. This window draws that boundary
+      and does nothing else: no script, no preload, no IPC, no interactivity.
+
+      ## It sits OUTSIDE the recorded region, by construction
+
+      Main sizes this window to the recorded rectangle **grown by
+      `SNIP_FRAME_PX` on every side**, and the ink below occupies exactly that
+      grown ring. The recorded region is the window's interior, which is fully
+      transparent. So the border is not in the recording because it is not on
+      top of it — `setContentProtection` is the second belt, not the first.
+      Change the ring's thickness here and `SNIP_FRAME_PX` has to move with it,
+      or the border starts appearing in captures.
+
+      ## Red, where the selection rectangle is blue
+
+      Not decoration, and not a second accent. Blue meant "you are choosing a
+      region"; red means "this region is live". It is the same hue as the
+      control bar's state light, so the two read as one signal, and it is the
+      convention every OS-level recording indicator already uses.
+
+      The dark outline outside the red is the same trick the selection
+      rectangle uses: this floats over content nobody controls — a white
+      document, a dark terminal, a photograph — and whichever of the two a
+      given background swallows, the other survives.
+    */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+    }
+
+    #frame {
+      position: absolute;
+      /* 1px in from the window edge, leaving that pixel to the outline below. */
+      inset: 1px;
+      border: 2px solid #f87171;
+      /* Drawn OUTSIDE the border box, so it fills the remaining 1px of the
+         ring rather than eating into the recorded region. */
+      outline: 1px solid rgba(0, 0, 0, 0.55);
+    }
+
+    /* A recording that is paused is still reserving the region, but it is not
+       capturing — so the frame goes quiet rather than disappearing. Main sets
+       the attribute; there is no script in this page to do it. */
+    :root[data-state="paused"] #frame {
+      border-color: #a1a1aa;
+    }
+  </style>
+</head>
+<body>
+  <div id="frame"></div>
+</body>
+</html>

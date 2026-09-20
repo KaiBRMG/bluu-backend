@@ -19,6 +19,10 @@ const BROWSER_ALLOWED_PREFIXES = [
   // is that it opens for a recipient who does not have the desktop app.
   // Read-only, and reachable only with the 160-bit token in the path.
   '/s',
+  // The update landing page. `APP_UPDATE.downloadUrl` points here, and the
+  // Windows update prompt opens it in the SYSTEM browser via shell.openExternal
+  // — so it has to resolve without the Electron user agent, same as '/download'.
+  '/update',
   // Onboarding links the terms of use out to the system browser (Electron routes
   // target=_blank through shell.openExternal), so it must resolve without the
   // Electron user agent. Public, read-only, no user data.

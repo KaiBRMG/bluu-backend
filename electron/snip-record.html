@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; media-src blob: mediastream:; img-src blob: data:;" />
+  <title>Recording</title>
+  <style>
+    /*
+      The recording control bar — and, invisibly, the recorder itself.
+
+      It replaces the selection surface's Image/Video toggle the moment the
+      rectangle is committed: same place on screen, same vocabulary, different
+      contents. The user reads it as the bar changing; it is in fact a whole
+      new window, because the selection surface is full-screen and always-on-top
+      and leaving that up would mean the user could not touch the thing they
+      are recording.
+
+      DESIGN.md's dark vocabulary by hand (no Tailwind here, same as snip.html):
+      canvas-dark panel, hairline border, Ink Secondary labels, Action Blue Deep
+      for the one filled control. Opaque rather than translucent because it
+      floats over a live desktop, not over the app's own canvas.
+    */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    /*
+      The UA sheet's `[hidden] { display: none }` loses to any author rule that
+      sets `display`, so declare it here with `!important`. Only `#note` uses
+      the attribute today and it is a block element that would have hidden
+      anyway — this is here so the next control added to the bar (which will
+      be `display: flex`, like every other one) does not silently refuse to
+      hide. That exact bug shipped on the selection surface; see snip.html.
+    */
+    [hidden] { display: none !important; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+      font-family: "Google Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      cursor: default;
+    }
+
+    #bar {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin: 4px;
+      padding: 7px 8px;
+      border-radius: 13px;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      background: rgba(9, 9, 11, 0.94);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+      /* The whole bar is a drag handle, so a user can move it off whatever it
+         is covering. Every control below re-enables pointer interaction. */
+      -webkit-app-region: drag;
+    }
+
+    .row { display: flex; align-items: center; gap: 6px; }
+
+    /*
+      The state light. Red while running, Ink Secondary while paused — this is
+      the one pixel that answers "is it still recording?" from across a desk,
+      so it is the only saturated thing on the bar and it carries a text label
+      beside it rather than standing alone (DESIGN.md: colour is never the sole
+      carrier of state).
+    */
+    .light {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: #f87171;
+      box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.18);
+      animation: pulse 1.6s ease-in-out infinite;
+      flex: none;
+    }
+    body[data-state="paused"] .light {
+      background: #a1a1aa;
+      box-shadow: none;
+      animation: none;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+    @media (prefers-reduced-motion: reduce) { .light { animation: none; } }
+
+    #elapsed {
+      min-width: 52px;
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    body[data-state="paused"] #elapsed { color: #a1a1aa; }
+
+    #state-label {
+      color: #a1a1aa;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+    }
+
+    .spacer { flex: 1 1 auto; min-width: 8px; }
+
+    button {
+      -webkit-app-region: no-drag;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 11px;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 9px;
+      background: transparent;
+      color: #a1a1aa;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: default;
+      white-space: nowrap;
+    }
+    button:hover:not([disabled]) { color: #ffffff; border-color: rgba(255, 255, 255, 0.18); }
+    button:focus-visible { outline: 2px solid #3b82f6; outline-offset: 1px; }
+    button[disabled] { color: #71717a; border-color: rgba(255, 255, 255, 0.06); }
+
+    /*
+      Stop is the primary action — it is what the user came back to the bar to
+      press — so it is the one filled control, at Action Blue Deep because it
+      carries white text. Everything else stays a quiet outline.
+    */
+    #btn-stop { background: #2563eb; border-color: #2563eb; color: #ffffff; }
+    #btn-stop:hover:not([disabled]) { background: #1d4ed8; border-color: #1d4ed8; }
+
+    /* Destructive, and tinted only on intent — a permanently red bin beside a
+       live recording reads as an alarm. */
+    #btn-discard:hover:not([disabled]) {
+      color: #f87171;
+      border-color: rgba(248, 113, 113, 0.45);
+      background: rgba(248, 113, 113, 0.10);
+    }
+
+    .glyph { width: 13px; height: 13px; flex: none; }
+
+    #note {
+      -webkit-app-region: no-drag;
+      padding: 0 2px;
+      color: #a1a1aa;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    /* Approaching the cap is a warning, not an error: the recording is fine,
+       it is simply about to end itself. */
+    #note.warn { color: #fb923c; }
+  </style>
+</head>
+<body data-state="starting">
+  <div id="bar">
+    <div class="row">
+      <span class="light" aria-hidden="true"></span>
+      <span id="elapsed" role="timer" aria-live="off">0:00</span>
+      <span id="state-label">Starting</span>
+      <span class="spacer"></span>
+
+      <button type="button" id="btn-pause" disabled aria-label="Pause recording">
+        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" />
+        </svg>
+        <span id="pause-label">Pause</span>
+      </button>
+
+      <button type="button" id="btn-stop" disabled aria-label="Stop recording and upload">
+        <svg class="glyph" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <rect x="6" y="6" width="12" height="12" rx="1.5" />
+        </svg>
+        Stop
+      </button>
+
+      <button type="button" id="btn-discard" aria-label="Discard recording without uploading">
+        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" />
+        </svg>
+      </button>
+    </div>
+
+    <p id="note" hidden></p>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      const body = document.body;
+      const elElapsed = document.getElementById('elapsed');
+      const elState = document.getElementById('state-label');
+      const elNote = document.getElementById('note');
+      const btnPause = document.getElementById('btn-pause');
+      const btnPauseLabel = document.getElementById('pause-label');
+      const btnStop = document.getElementById('btn-stop');
+      const btnDiscard = document.getElementById('btn-discard');
+
+      // ── Encoding policy ───────────────────────────────────────────────
+      //
+      // "Smallest file that still reads" is the brief, and for screen content
+      // the three levers that matter are, in order: the codec, the pixel count,
+      // and the bitrate. Frame rate is deliberately NOT one of them — screen
+      // recordings are mostly static with occasional fast scrolls, so a modern
+      // codec spends almost nothing on a still frame and dropping to 15fps buys
+      // little while making every scroll look broken.
+
+      /**
+       * VP9 first. On screen content it is roughly 30-40% smaller than VP8 at
+       * the same perceptual quality, and the sharp-edged text and flat fills
+       * that make up a UI are exactly what its intra prediction is good at.
+       *
+       * The container is fixed at `video/webm` by the signed upload slot
+       * (`SNIP_VIDEO_CONTENT_TYPE`) — Storage rejects a PUT whose content type
+       * disagrees with what was signed — so every candidate here must be WebM.
+       * Adding an MP4 candidate means moving that constant and the slot with it.
+       */
+      const MIME_CANDIDATES = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+      ];
+
+      const FPS = 30;
+
+      /**
+       * The output pixel ceiling, ~2.5MP — a little above 1080p.
+       *
+       * A full-screen selection on a Retina display is 5MP or more, and encoding
+       * it at native resolution doubles the bitrate to preserve detail nobody
+       * can see on the other end of a share link. Below this the capture is kept
+       * at its native size: downscaling small, sharp text is the one thing that
+       * genuinely hurts a screen recording, so scaling is a ceiling, never a
+       * default.
+       */
+      const MAX_OUTPUT_AREA = 1920 * 1080 * 1.25;
+
+      /**
+       * Bits per pixel per frame. 0.05 is generous for screen content (film
+       * would want 0.1+) and is what keeps a 1080p30 recording near 3 Mbps
+       * rather than the 8 Mbps a naive default produces.
+       */
+      const BITS_PER_PIXEL = 0.05;
+      const MIN_VIDEO_BPS = 500 * 1000;
+      const MAX_VIDEO_BPS = 5 * 1000 * 1000;
+
+      /** Chunk cadence. Long enough not to spam IPC, short enough that a crash
+       *  loses a couple of seconds rather than the whole take. */
+      const TIMESLICE_MS = 2000;
+
+      /** The frame the poster is taken from. Not the first: the selection
+       *  surface has only just come off the screen and the compositor may still
+       *  be settling, so frame zero is the one most likely to catch a ghost of
+       *  our own UI. A third of a second in, it is the user's desktop. */
+      const POSTER_FRAME = 10;
+
+      // ── State ─────────────────────────────────────────────────────────
+
+      let config = null;
+      let recorder = null;
+      let displayStream = null;
+      let canvasTrack = null;
+      let rafId = 0;
+
+      /** Wall-clock milliseconds actually recorded, pause excluded. */
+      let accumulatedMs = 0;
+      let runningSince = 0;
+      let paused = false;
+      /** Latched at the first stop/discard so a double click, or an auto-stop
+       *  racing a user's click, cannot finish twice. */
+      let settled = false;
+      let posterSent = false;
+      let frameCount = 0;
+      let lastDrawAt = 0;
+      let outputWidth = 0;
+      let outputHeight = 0;
+
+      /**
+       * Chunks are sent through a promise chain, not straight from the event.
+       *
+       * `Blob.arrayBuffer()` is async, so two `ondataavailable` events in quick
+       * succession can resolve out of order — and a WebM file whose clusters
+       * arrive transposed is a file no player will open. The chain costs
+       * nothing and makes the ordering a property of the code rather than of
+       * the scheduler.
+       */
+      let chunkChain = Promise.resolve();
+
+      function elapsedMs() {
+        return accumulatedMs + (runningSince ? performance.now() - runningSince : 0);
+      }
+
+      function formatDuration(ms) {
+        const total = Math.max(0, Math.round(ms / 1000));
+        const seconds = String(total % 60).padStart(2, '0');
+        const minutes = Math.floor(total / 60) % 60;
+        const hours = Math.floor(total / 3600);
+        return hours > 0
+          ? hours + ':' + String(minutes).padStart(2, '0') + ':' + seconds
+          : minutes + ':' + seconds;
+      }
+
+      function setNote(text, warn) {
+        elNote.textContent = text || '';
+        elNote.hidden = !text;
+        elNote.classList.toggle('warn', !!warn);
+        // The window is sized by main, which cannot see the layout — so the
+        // page measures itself and asks. Without this the note is clipped.
+        requestAnimationFrame(() => {
+          try {
+            window.recorderAPI.place({ height: Math.ceil(document.getElementById('bar').getBoundingClientRect().height) + 8 });
+          } catch { /* main is gone; nothing to resize */ }
+        });
+      }
+
+      function setState(next) {
+        body.dataset.state = next;
+        // The region frame is a separate, script-free window, so main mirrors
+        // the state onto it for us.
+        try { window.recorderAPI.state(next); } catch { /* main is gone */ }
+        elState.textContent =
+          next === 'recording' ? 'Recording' :
+          next === 'paused' ? 'Paused' :
+          next === 'finishing' ? 'Finishing' : 'Starting';
+      }
+
+      // ── The clock ─────────────────────────────────────────────────────
+
+      let warned = false;
+      setInterval(() => {
+        if (settled || !config) return;
+        const ms = elapsedMs();
+        elElapsed.textContent = formatDuration(ms);
+
+        const remaining = config.limits.maxMs - ms;
+        if (remaining <= config.limits.warnMs && !warned && !paused) {
+          warned = true;
+          setNote('Recording stops automatically in ' + formatDuration(Math.max(0, remaining)) + '.', true);
+        }
+        // The cap stops and KEEPS the recording. Discarding at the limit would
+        // throw away ten minutes of someone's work to enforce a number they
+        // never saw.
+        if (remaining <= 0) finish('limit');
+      }, 250);
+
+      // ── Start ─────────────────────────────────────────────────────────
+
+      /** Latched so the two paths into `beginCapture` below cannot both run. */
+      let startRequested = false;
+
+      async function beginCapture() {
+        if (startRequested || !config || settled) return;
+        startRequested = true;
+        try {
+          await start();
+        } catch (error) {
+          fail(classify(error), error && error.message);
+        }
+      }
+
+      /**
+       * Main calls this via `executeJavaScript(..., userGesture: true)`.
+       *
+       * **`getDisplayMedia` requires transient user activation**, and this
+       * window has none: it was opened by the main process and shown with
+       * `showInactive`, so nobody has clicked anything in it. The user *did*
+       * gesture — they dragged a rectangle — but that happened in a different
+       * window that no longer exists, and activation does not travel. Calling
+       * it straight out of the IPC message rejects before it reaches any of
+       * our handlers. Executing it under a synthesised gesture from main is
+       * what makes the call legal.
+       */
+      window.__snipBeginCapture = () => { beginCapture(); };
+
+      window.recorderAPI.onStart((payload) => {
+        config = payload;
+        // The safety net, not the path. If main's `executeJavaScript` never
+        // lands, starting without activation is still better than a bar that
+        // sits at "Starting" forever — and on a platform that does not enforce
+        // activation it simply works. The latch makes the race harmless.
+        setTimeout(beginCapture, 400);
+      });
+
+      function classify(error) {
+        const name = error && error.name;
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') return 'screen-permission';
+        if (name === 'NotFoundError' || name === 'NotReadableError') return 'no-sources';
+        // `getDisplayMedia` throws this when it is called without transient
+        // user activation. Distinct from every other cause because it is
+        // entirely our own plumbing's fault and nothing the user can act on —
+        // see `__snipBeginCapture`.
+        if (name === 'InvalidStateError') return 'no-activation';
+        return 'unknown';
+      }
+
+      function fail(reason, detail) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        try { window.recorderAPI.failed({ reason, detail: detail || null }); } catch { /* gone */ }
+      }
+
+      async function start() {
+        // The video source is chosen in MAIN, by `setDisplayMediaRequestHandler`
+        // — this page never names a display and never sees a source id. It
+        // cannot ask for a screen it was not sent here to record.
+        displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: !!config.audio.system,
+        });
+
+        const videoTrack = displayStream.getVideoTracks()[0];
+        if (!videoTrack) throw Object.assign(new Error('no video track'), { name: 'NotFoundError' });
+
+        // A display unplugged, or the OS revoking the share, ends the track.
+        // Keeping what was recorded is strictly better than losing it.
+        videoTrack.addEventListener('ended', () => finish('source-ended'));
+
+        const systemAudio = displayStream.getAudioTracks();
+        if (config.audio.system && systemAudio.length === 0) {
+          // Asked for and not delivered. Said plainly, because the user chose
+          // it — discovering it afterwards means the take is wasted.
+          setNote('System audio could not be captured. Recording continues without it.', true);
+        }
+
+        const video = document.createElement('video');
+        video.srcObject = displayStream;
+        video.muted = true;
+        video.playsInline = true;
+        await video.play();
+        // `videoWidth` is zero until metadata lands, and every crop number
+        // below is derived from it.
+        if (!video.videoWidth) {
+          await new Promise((resolve) => {
+            video.addEventListener('loadedmetadata', resolve, { once: true });
+            setTimeout(resolve, 2000);
+          });
+        }
+        const captureWidth = video.videoWidth || 0;
+        const captureHeight = video.videoHeight || 0;
+        if (!captureWidth || !captureHeight) {
+          throw Object.assign(new Error('empty capture'), { name: 'NotReadableError' });
+        }
+
+        // CSS pixels on the selection surface -> device pixels in the stream.
+        // Derived from the stream's ACTUAL size rather than from `scaleFactor`,
+        // exactly as the still path derives it from the thumbnail's real size:
+        // a mixed-DPI setup is the case that breaks every other assumption.
+        const sx = captureWidth / config.display.width;
+        const sy = captureHeight / config.display.height;
+        const crop = clamp(
+          {
+            x: config.rect.x * sx,
+            y: config.rect.y * sy,
+            width: config.rect.width * sx,
+            height: config.rect.height * sy,
+          },
+          captureWidth,
+          captureHeight,
+        );
+
+        // Even dimensions: chroma subsampling halves each axis, and an odd
+        // side is where encoders either refuse or quietly pad.
+        const fit = Math.min(1, Math.sqrt(MAX_OUTPUT_AREA / (crop.width * crop.height)));
+        outputWidth = Math.max(2, Math.round((crop.width * fit) / 2) * 2);
+        outputHeight = Math.max(2, Math.round((crop.height * fit) / 2) * 2);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = outputWidth;
+        canvas.height = outputHeight;
+        const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+        ctx.imageSmoothingQuality = 'high';
+
+        // `captureStream(0)` = frames only when asked for. The draw loop below
+        // owns the cadence, which is what makes the output a steady 30fps
+        // regardless of what the display's refresh rate happens to be.
+        const canvasStream = canvas.captureStream(0);
+        canvasTrack = canvasStream.getVideoTracks()[0];
+
+        // System audio only — there is no microphone in this build, so there
+        // is never more than one audio source and nothing to mix. When
+        // narration returns, this is where an AudioContext graph belongs.
+        const tracks = [canvasTrack].concat(systemAudio);
+
+        const mimeType = MIME_CANDIDATES.find(
+          (type) => window.MediaRecorder && MediaRecorder.isTypeSupported(type),
+        );
+        if (!mimeType) throw new Error('no supported encoder');
+
+        const pixels = outputWidth * outputHeight;
+        const videoBitsPerSecond = Math.max(
+          MIN_VIDEO_BPS,
+          Math.min(MAX_VIDEO_BPS, Math.round(pixels * FPS * BITS_PER_PIXEL)),
+        );
+
+        recorder = new MediaRecorder(new MediaStream(tracks), {
+          mimeType,
+          videoBitsPerSecond,
+          // Opus. 128k when the desktop's own output is in the mix (music,
+          // a call, a video), 96k for a single voice — above which Opus
+          // stops meaningfully improving on speech.
+          audioBitsPerSecond: systemAudio.length > 0 ? 128000 : 96000,
+        });
+
+        recorder.ondataavailable = (event) => {
+          if (!event.data || event.data.size === 0) return;
+          const blob = event.data;
+          chunkChain = chunkChain
+            .then(() => blob.arrayBuffer())
+            .then((buffer) => { window.recorderAPI.chunk(buffer); })
+            .catch(() => { /* main is gone; the temp file is already orphaned */ });
+        };
+        recorder.onerror = () => fail('encoder', 'MediaRecorder error');
+        recorder.onstop = () => {
+          // The tracks are stopped HERE, not beside the `stop()` call that led
+          // here. Killing the canvas and audio sources while the encoder is
+          // still flushing its final buffer truncates the last chunk — and a
+          // truncated WebM plays right up to the cut and then stops, which is
+          // the kind of corruption only the recipient notices.
+          stopTracks();
+          // Every queued chunk has to reach main before the file is closed,
+          // or the last two seconds are cut off mid-cluster.
+          chunkChain.then(() => {
+            window.recorderAPI.done({
+              durationMs: Math.round(accumulatedMs),
+              width: outputWidth,
+              height: outputHeight,
+            });
+          });
+        };
+
+        recorder.start(TIMESLICE_MS);
+        runningSince = performance.now();
+        setState('recording');
+        btnPause.disabled = false;
+        btnStop.disabled = false;
+
+        const drawIntervalMs = 1000 / FPS;
+        const draw = () => {
+          rafId = requestAnimationFrame(draw);
+          if (paused) return;
+          const now = performance.now();
+          // Throttled rather than drawn every rAF: on a 120Hz display that
+          // would encode four times the frames for no visible gain.
+          if (now - lastDrawAt < drawIntervalMs - 1) return;
+          lastDrawAt = now;
+          try {
+            ctx.drawImage(
+              video,
+              crop.x, crop.y, crop.width, crop.height,
+              0, 0, outputWidth, outputHeight,
+            );
+            canvasTrack.requestFrame();
+          } catch {
+            return;
+          }
+          frameCount += 1;
+          if (!posterSent && frameCount >= POSTER_FRAME) {
+            posterSent = true;
+            canvas.toBlob(
+              (blob) => {
+                if (!blob) return;
+                blob.arrayBuffer()
+                  .then((buffer) => window.recorderAPI.poster(buffer))
+                  .catch(() => { /* the grid falls back to a placeholder */ });
+              },
+              'image/png',
+            );
+          }
+        };
+        rafId = requestAnimationFrame(draw);
+      }
+
+      function clamp(rect, width, height) {
+        const x = Math.max(0, Math.min(Math.round(rect.x), width - 1));
+        const y = Math.max(0, Math.min(Math.round(rect.y), height - 1));
+        return {
+          x,
+          y,
+          width: Math.max(2, Math.min(Math.round(rect.width), width - x)),
+          height: Math.max(2, Math.min(Math.round(rect.height), height - y)),
+        };
+      }
+
+      // ── Finish ────────────────────────────────────────────────────────
+
+      function finish(reason) {
+        if (settled) return;
+        settled = true;
+        if (runningSince) {
+          accumulatedMs += performance.now() - runningSince;
+          runningSince = 0;
+        }
+        setState('finishing');
+        btnPause.disabled = true;
+        btnStop.disabled = true;
+        btnDiscard.disabled = true;
+        setNote(reason === 'limit'
+          ? 'Time limit reached — uploading what was recorded.'
+          : reason === 'source-ended'
+            ? 'The screen stopped being available — uploading what was recorded.'
+            : 'Uploading…');
+
+        if (recorder && recorder.state !== 'inactive') {
+          // `onstop` stops the tracks and sends `done` once the queued chunks
+          // have landed. Nothing here may tear the sources down first.
+          recorder.stop();
+        } else {
+          stopTracks();
+          window.recorderAPI.done({
+            durationMs: Math.round(accumulatedMs),
+            width: outputWidth,
+            height: outputHeight,
+          });
+        }
+      }
+
+      function discard() {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        window.recorderAPI.discard('user');
+      }
+
+      function stopTracks() {
+        cancelAnimationFrame(rafId);
+        if (displayStream) {
+          for (const track of displayStream.getTracks()) track.stop();
+        }
+        if (canvasTrack) canvasTrack.stop();
+      }
+
+      function cleanup() {
+        if (recorder && recorder.state !== 'inactive') {
+          // Detached first: a stop we are discarding must not fire the handler
+          // that tells main a recording is ready to upload.
+          recorder.onstop = null;
+          recorder.ondataavailable = null;
+          try { recorder.stop(); } catch { /* already down */ }
+        }
+        stopTracks();
+      }
+
+      // ── Controls ──────────────────────────────────────────────────────
+
+      btnPause.addEventListener('click', () => {
+        if (!recorder || settled) return;
+        if (paused) {
+          paused = false;
+          runningSince = performance.now();
+          recorder.resume();
+          setState('recording');
+          btnPauseLabel.textContent = 'Pause';
+          btnPause.setAttribute('aria-label', 'Pause recording');
+          return;
+        }
+        paused = true;
+        accumulatedMs += performance.now() - runningSince;
+        runningSince = 0;
+        recorder.pause();
+        setState('paused');
+        btnPauseLabel.textContent = 'Resume';
+        btnPause.setAttribute('aria-label', 'Resume recording');
+      });
+
+      btnStop.addEventListener('click', () => finish('user'));
+      btnDiscard.addEventListener('click', discard);
+
+      /*
+        Hand interactivity back only while the cursor is actually on the bar.
+
+        The window is click-through by default (`setIgnoreMouseEvents(true,
+        {forward: true})` in main) so that everything around the bar — its
+        shadow margin, the transparent wedges outside its rounded corners, and
+        the whole rest of the window — passes clicks to the desktop underneath.
+        Forwarded mouse-move events are what let these two fire at all.
+
+        `bar`, not `document`: the document fills the window, so listening
+        there would re-enable the dead zones this exists to eliminate.
+      */
+      const barEl = document.getElementById('bar');
+      barEl.addEventListener('mouseenter', () => window.recorderAPI.interactive(true));
+      barEl.addEventListener('mouseleave', () => window.recorderAPI.interactive(false));
+
+      // There is deliberately NO Escape-to-discard here, unlike the selection
+      // surface. On that surface Escape costs a drag; here it would silently
+      // throw away a recording the user has been making for ten minutes, and
+      // this window takes focus whenever it is clicked. Discarding is a button
+      // you have to aim at.
+
+      // Tell main how tall the bar actually is, once, before anything else
+      // changes it.
+      setNote('');
+    })();
+  </script>
+</body>
+</html>

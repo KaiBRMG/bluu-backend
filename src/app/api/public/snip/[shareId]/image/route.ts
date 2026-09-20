@@ -1,9 +1,16 @@
 import { NextResponse } from 'next/server';
-import { getSnipImageRedirect } from '@/lib/services/snipService';
+import { getSnipMediaRedirect } from '@/lib/services/snipService';
 
 /**
- * GET /api/public/snip/{shareId}/image — the snip's picture, for anyone holding
- * the link.
+ * GET /api/public/snip/{shareId}/image — the snip's **still**, for anyone
+ * holding the link: the capture itself for an image snip, the poster frame for
+ * a recording.
+ *
+ * The recording's own bytes are served by the sibling `/video` route, not by a
+ * parameter here. This URL is the one already sitting in Slack unfurls, browser
+ * caches and OG previews for every snip ever shared, so what it means must not
+ * shift underneath them — and a recording with no poster 404s here exactly like
+ * any other refusal.
  *
  * **It redirects; it does not stream.** A 302 to a freshly signed Cloud Storage
  * URL means the megabytes travel bucket → recipient and never bucket → function
@@ -20,7 +27,7 @@ import { getSnipImageRedirect } from '@/lib/services/snipService';
  * **Unauthenticated by design**, exactly like `/p/[shareId]`: the 160-bit token
  * in the path *is* the access control. Three things follow, and all three are
  * load-bearing:
- *   • `getSnipImageRedirect` re-checks liveness itself — this endpoint is
+ *   • `getSnipMediaRedirect` re-checks liveness itself — this endpoint is
  *     reachable without the page, so it cannot lean on the page having checked.
  *   • One 404 for every refusal (unknown, deleted, pending, expired), so a
  *     stranger cannot probe which tokens exist.
@@ -35,7 +42,7 @@ export async function GET(
 ) {
   const { shareId } = await params;
 
-  const url = await getSnipImageRedirect(shareId).catch(() => null);
+  const url = await getSnipMediaRedirect(shareId, 'still').catch(() => null);
   if (!url) {
     return new NextResponse('Not found', {
       status: 404,
