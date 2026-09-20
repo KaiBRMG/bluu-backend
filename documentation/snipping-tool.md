@@ -191,7 +191,15 @@ On the page, the sentinel and the "Load more" button are **the same element**: s
 
 ## The public page shows a name and nothing else
 
-`getPublicSnip` is the whole of what an anonymous visitor can see: the image, the date, the dimensions, and the owner's `displayName`. **No uid, no email, no avatar, no storage path, no retention, no byte size.** A forwarded link must not become a staff directory entry. Keep it that way when extending the projection.
+`getPublicSnip` is the whole of what an anonymous visitor can see: the image, the timestamp, the dimensions, and the owner's `displayName`. **No uid, no email, no avatar, no storage path, no retention, no byte size.** A forwarded link must not become a staff directory entry. Keep it that way when extending the projection.
+
+### The timestamp is the viewer's local time, resolved in their browser
+
+The page is a server component and a public link can be opened by anyone, anywhere, with no account — so there is no stored zone to read. [`SnipTimestamp`](../src/app/s/_components/SnipTimestamp.tsx) takes it from `Intl.DateTimeFormat().resolvedOptions().timeZone` instead, and renders `2026-09-20 16:32 GMT+2`. The zone name is not decoration: a bare wall-clock time on a link that crosses timezones is worse than no time at all, because the recipient cannot tell whose afternoon it was.
+
+**This is a different source from the owner's library, deliberately.** `SnipCard` formats in the viewer's *account* timezone (`useViewerTimezone`) because there the viewer is a signed-in employee whose zone is a known fact about them (rule 9g). On the public page there is no account, so the browser is the authority. Same presentation, two sources — don't collapse them.
+
+It uses **`useSyncExternalStore`**, whose server snapshot is UTC and whose client snapshot is the local zone. That is the hook's exact purpose: a value that legitimately differs between server and client, without a hydration mismatch. Reading the zone in a `useEffect` + `setState` trips `react-hooks/set-state-in-effect`, and `suppressHydrationWarning` is worse — it hides the mismatch instead of avoiding it, and would silence real ones in the same subtree.
 
 **Neither the public page nor the owner's library links to the image URL**, and that is a rule, not an oversight. `imageUrl` is a 302 to a signed Storage URL, so *navigating* to it (rather than loading it as an `<img src>`) lands the browser on `storage.googleapis.com/...` with the signed credential sitting in the address bar and the session history. Two things leak there: the object path, and a bearer URL that stays valid for its full hour — outliving the snip being deleted, which is precisely what the indirection below exists to prevent.
 

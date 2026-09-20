@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
 import { getPublicSnip } from '@/lib/services/snipService';
 import { SnipImage } from '../_components/SnipImage';
+import { SnipTimestamp } from '../_components/SnipTimestamp';
 
 /**
  * The public read-only view of a shared snip.
@@ -51,8 +52,6 @@ async function SharedSnipContent({ params }: { params: Promise<{ shareId: string
   // which tokens once existed.
   if (!snip) notFound();
 
-  const created = new Date(snip.createdAt);
-
   return (
     <>
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -89,10 +88,11 @@ async function SharedSnipContent({ params }: { params: Promise<{ shareId: string
             <span aria-hidden>·</span>
           </>
         )}
-        {/* A fixed, locale-independent format. This renders on the server and
-            hydrates on the client, and `toLocaleDateString` would disagree
-            between the two whenever their locales differ. */}
-        <span className="tabular-nums">{created.toISOString().slice(0, 10)}</span>
+        {/* Date AND time, in the VIEWER's timezone — resolved in their browser,
+            because a public link has no account to read a zone from. Client
+            component by necessity: the server has no idea where the visitor is.
+            See `SnipTimestamp` for why it renders UTC first. */}
+        <SnipTimestamp iso={snip.createdAt} />
         {snip.width > 0 && snip.height > 0 && (
           <>
             <span aria-hidden>·</span>

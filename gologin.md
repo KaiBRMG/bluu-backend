@@ -11,4 +11,10 @@ Create a new subitem in src\app\(main)\admin-portal\sharing in the GoLogin secti
 - Profile item option: Share Profile -- this can open the 'Members & Access' dialog and route to Profile access.
 - New button at the top: 'New Profile' -- must open a large centered dialog to create a new profile.
 
+Creating a profile:
+- GoLogin provides many configurable parameters but not all is needed.
+- When creating a new profile, the following must be configurable: profile name, add to one or more folders (optional), OS (Win 10, Win 11, Mac M1, Mac Intel), Proxy or without proxy, IP Address+Port+Username+Password (if proxy). Also include a ping proxy button and show the results.
+- All other information can stay as the default. 
+- It's important that profiles are correctly configured as an incorrectly configured one could cause a ban on whatever social media account is used within the profile. So for this reason you must make sure the implementation is sound and correct. Consult documentation extensively where you are unsure, and prompt me if there is any uncertainty.
+
 ** Read GoLogin documentation: [https://gologin.com/docs/api-reference] -- actually read it, don't make assumptions.
