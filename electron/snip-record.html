@@ -139,6 +139,56 @@
 
     .glyph { width: 13px; height: 13px; flex: none; }
 
+    /*
+      ── Compact ────────────────────────────────────────────────────────────
+      The selection left no room beside it, so main has placed this window
+      INSIDE the recorded rectangle, in its bottom-left corner. Everything
+      here exists to make that intrusion as small as it can be: the duration,
+      three icon buttons, and the state light.
+
+      What goes, and why each is safe to lose:
+        · The state LABEL ("Recording" / "Paused") — the light still carries
+          it, and so does the pause button, which reads Resume when paused.
+        · The button TEXT — every one of them keeps its `aria-label`, so the
+          keyboard and screen-reader paths are unchanged.
+        · The NOTE row — it is the only thing here that can grow the bar
+          vertically, which is exactly what must not happen inside the shot.
+          The cap warning is not lost: it moves onto the duration, which turns
+          orange (`data-warn`), so the one number still on screen carries it.
+
+      The light, the duration and the bar's own padding stay `-webkit-app-region:
+      drag`, so a user whose corner is covering something can still move it.
+    */
+    body[data-compact="1"] #bar {
+      /* Not stretched to the window: the window is sized to the widest the
+         compact bar can get, and the slack either side is transparent and
+         click-through. */
+      width: fit-content;
+      gap: 0;
+      padding: 5px 7px;
+      border-radius: 11px;
+    }
+    body[data-compact="1"] .row { gap: 5px; }
+    body[data-compact="1"] #state-label,
+    body[data-compact="1"] #pause-label,
+    body[data-compact="1"] #stop-label,
+    body[data-compact="1"] .spacer,
+    body[data-compact="1"] #note { display: none; }
+    body[data-compact="1"] #elapsed {
+      min-width: 0;
+      padding-right: 2px;
+      font-size: 12px;
+    }
+    /* Square, glyph-only. `gap` would otherwise reserve space for the label
+       that is no longer there and leave every button lopsided. */
+    body[data-compact="1"] button {
+      gap: 0;
+      padding: 5px;
+      border-radius: 8px;
+    }
+    /* The cap warning, with nowhere to put a sentence. */
+    body[data-compact="1"][data-warn="1"] #elapsed { color: #fb923c; }
+
     #note {
       -webkit-app-region: no-drag;
       padding: 0 2px;
@@ -171,7 +221,7 @@
         <svg class="glyph" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <rect x="6" y="6" width="12" height="12" rx="1.5" />
         </svg>
-        Stop
+        <span id="stop-label">Stop</span>
       </button>
 
       <button type="button" id="btn-discard" aria-label="Discard recording without uploading">
@@ -306,6 +356,10 @@
         elNote.textContent = text || '';
         elNote.hidden = !text;
         elNote.classList.toggle('warn', !!warn);
+        // Compact hides the note row entirely, so the warning has to land
+        // somewhere that is still on screen — the duration.
+        if (warn) body.dataset.warn = '1';
+        else delete body.dataset.warn;
         // The window is sized by main, which cannot see the layout — so the
         // page measures itself and asks. Without this the note is clipped.
         requestAnimationFrame(() => {
@@ -376,6 +430,21 @@
 
       window.recorderAPI.onStart((payload) => {
         config = payload;
+        // Main decides this, not the page: only main knows the display's work
+        // area and whether the bar had anywhere to go outside the rectangle.
+        // Set before anything measures, so the very first `place()` reports
+        // the compact height and the bar never paints full-width inside the
+        // shot for a frame.
+        if (payload && payload.compact) {
+          body.dataset.compact = '1';
+          requestAnimationFrame(() => {
+            try {
+              window.recorderAPI.place({
+                height: Math.ceil(document.getElementById('bar').getBoundingClientRect().height) + 8,
+              });
+            } catch { /* main is gone; nothing to resize */ }
+          });
+        }
         // The safety net, not the path. If main's `executeJavaScript` never
         // lands, starting without activation is still better than a bar that
         // sits at "Starting" forever — and on a platform that does not enforce

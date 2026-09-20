@@ -832,6 +832,17 @@ const SNIP_BAR_WIDTH = 380;
 const SNIP_BAR_HEIGHT = 56;
 /** Kept clear of the recorded rectangle by this much, when there is room. */
 const SNIP_BAR_GAP = 14;
+/**
+ * The compact bar's window width.
+ *
+ * Used when the selection leaves no room outside it — a full-screen recording
+ * being the normal case. The bar then sits INSIDE the rectangle, collapsed to
+ * the state light, the duration and three icon buttons, so it covers as little
+ * of the thing being demonstrated as possible. The page sets its own width to
+ * `fit-content` in that mode; this is the window it draws into, and the slack
+ * is transparent and click-through.
+ */
+const SNIP_BAR_COMPACT_WIDTH = 216;
 
 /**
  * How long to wait after hiding the surfaces before photographing the screen.
@@ -1548,36 +1559,94 @@ function loadSnipQueue() {
 }
 
 /**
- * Where the control bar sits: under the recorded rectangle if it fits, above
- * it if not, and pinned to the bottom of the display when the selection is
- * tall enough to leave no room for either.
+ * The display's work area, in that display's own coordinates.
  *
- * Content protection is what actually keeps it out of the recording; this is
- * the belt to that pair of braces, and it is also plain courtesy — a bar
- * sitting on top of the thing being demonstrated is in the user's way even
- * when it is invisible to the capture.
+ * `display.bounds` is the panel; `display.workArea` subtracts the OS chrome —
+ * the Windows taskbar, the macOS Dock and menu bar. Placing against `bounds`
+ * is what put the control bar *underneath the taskbar* on a full-screen
+ * recording: the bar is `screen-saver` always-on-top, but so is the taskbar,
+ * and the taskbar wins. A Stop button the user cannot reach is the worst
+ * failure this window has, because the recording keeps running.
  */
-function snipBarBounds(display, rect, height) {
-  const bounds = display.bounds;
-  const width = SNIP_BAR_WIDTH;
+function displayWorkArea(display) {
+  const b = display.bounds;
+  const wa = display.workArea || b;
+  const left = wa.x - b.x;
+  const top = wa.y - b.y;
+  return { left, top, right: left + wa.width, bottom: top + wa.height };
+}
 
+/**
+ * Whether the bar can sit clear of the recorded rectangle at all.
+ *
+ * **Deliberately measured against `SNIP_BAR_HEIGHT` rather than the bar's
+ * current height, and decided once per recording.** The page grows the bar
+ * when it shows a note and asks to be re-placed; if this predicate moved with
+ * that height, a bar that only just fits would flip to compact, shrink,
+ * discover it now fits, expand, and oscillate for the length of the take.
+ */
+function snipBarFitsOutside(display, rect) {
+  const wa = displayWorkArea(display);
   const below = rect.y + rect.height + SNIP_BAR_GAP;
-  const above = rect.y - SNIP_BAR_GAP - height;
-  let y;
-  if (below + height <= bounds.height) y = below;
-  else if (above >= 0) y = above;
-  else y = bounds.height - height - SNIP_BAR_GAP;
+  const above = rect.y - SNIP_BAR_GAP - SNIP_BAR_HEIGHT;
+  return below + SNIP_BAR_HEIGHT <= wa.bottom || above >= wa.top;
+}
 
-  // Centred on the selection rather than on the display: the user's attention
-  // is on the rectangle, and on an ultrawide the middle of the screen can be a
-  // foot away from it.
-  let x = Math.round(rect.x + rect.width / 2 - width / 2);
-  x = Math.max(0, Math.min(x, bounds.width - width));
-  y = Math.max(0, Math.min(y, bounds.height - height));
+/**
+ * Where the control bar sits.
+ *
+ * Outside the recorded rectangle whenever the geometry allows: under it if it
+ * fits, above it if not, always within the work area. When the selection
+ * leaves room for neither — a full-screen recording, which is the common case
+ * — the bar moves INSIDE the rectangle, to its **bottom-left corner**, in the
+ * compact layout.
+ *
+ * Inside is the lesser evil, and only because both of the reasons for staying
+ * outside survive it. Content protection is what actually keeps the bar out of
+ * the capture, and it does not care where the window is. The other reason is
+ * courtesy — not covering what is being demonstrated — which is why the inside
+ * placement is compact, cornered, and draggable rather than a 380px slab in
+ * the middle of the shot. The alternative, pinning it to the bottom of the
+ * panel, put it behind the taskbar where it could not be clicked at all.
+ *
+ * Bottom-left rather than bottom-right: a right-hand corner collides with
+ * Windows notification toasts and the macOS notification stack, which are also
+ * always-on-top and would cover the Stop button.
+ */
+function snipBarBounds(display, rect, height, compact) {
+  const bounds = display.bounds;
+  const wa = displayWorkArea(display);
+  const width = compact ? SNIP_BAR_COMPACT_WIDTH : SNIP_BAR_WIDTH;
+
+  let x;
+  let y;
+
+  if (compact) {
+    x = rect.x + SNIP_BAR_GAP;
+    y = rect.y + rect.height - height - SNIP_BAR_GAP;
+  } else {
+    const below = rect.y + rect.height + SNIP_BAR_GAP;
+    const above = rect.y - SNIP_BAR_GAP - height;
+    if (below + height <= wa.bottom) y = below;
+    else if (above >= wa.top) y = above;
+    // Reached only when a note has grown the bar past the gap it was placed
+    // in; `snipBarFitsOutside` has already ruled out the genuinely tight case.
+    else y = wa.bottom - height;
+
+    // Centred on the selection rather than on the display: the user's
+    // attention is on the rectangle, and on an ultrawide the middle of the
+    // screen can be a foot away from it.
+    x = Math.round(rect.x + rect.width / 2 - width / 2);
+  }
+
+  // Clamped to the WORK AREA, never the panel, so no branch above can land the
+  // bar under the taskbar or the Dock.
+  x = Math.max(wa.left, Math.min(Math.round(x), wa.right - width));
+  y = Math.max(wa.top, Math.min(Math.round(y), wa.bottom - height));
 
   return {
     x: bounds.x + x,
-    y: bounds.y + Math.round(y),
+    y: bounds.y + y,
     width,
     height,
   };
@@ -1692,7 +1761,10 @@ async function startSnipRecording({ display, rect, audio }) {
     return;
   }
 
-  const bounds = snipBarBounds(display, rect, SNIP_BAR_HEIGHT);
+  // Decided once, here, from the geometry alone — see `snipBarFitsOutside` for
+  // why it must not be re-derived from the bar's live height.
+  const barCompact = !snipBarFitsOutside(display, rect);
+  const bounds = snipBarBounds(display, rect, SNIP_BAR_HEIGHT, barCompact);
   const win = new BrowserWindow({
     ...bounds,
     frame: false,
@@ -1764,6 +1836,7 @@ async function startSnipRecording({ display, rect, audio }) {
     display,
     rect,
     audio,
+    barCompact,
     settled: false,
   };
 
@@ -1786,6 +1859,10 @@ async function startSnipRecording({ display, rect, audio }) {
       display: { width: display.size.width, height: display.size.height },
       audio,
       limits: { maxMs: SNIP_MAX_RECORDING_MS, warnMs: SNIP_RECORDING_WARN_MS },
+      // The selection left no room beside it, so the bar is sitting inside the
+      // recorded rectangle and collapses to duration + three icon buttons.
+      // Main owns this decision because only main knows the work area.
+      compact: barCompact,
     });
 
     // **`getDisplayMedia` requires transient user activation, and an IPC
@@ -1917,7 +1994,7 @@ ipcMain.on('snip:rec-place', (event, box) => {
   const height = Math.max(SNIP_BAR_HEIGHT, Math.min(Math.round(Number(box.height) || 0), 240));
   const win = recording.window;
   if (!win || win.isDestroyed()) return;
-  win.setBounds(snipBarBounds(recording.display, recording.rect, height));
+  win.setBounds(snipBarBounds(recording.display, recording.rect, height, recording.barCompact));
 });
 
 ipcMain.on('snip:rec-done', (event, summary) => {
