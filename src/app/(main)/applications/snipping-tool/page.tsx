@@ -334,41 +334,29 @@ export default function SnippingToolPage() {
                   <span className="font-mono text-zinc-300">
                     {formatSnipShortcut(settings.shortcut, platform)}
                   </span>
-                  . The link is copied for you.
+                  . The link is copied to your clipboard after upload.
                 </>
               ) : (
                 'Capture any part of your screen and share it with a link.'
               )}
             </p>
-            {/* Stated on the page rather than only discovered on the selection
-                surface: the Image/Video toggle is the only place the mode can
-                be chosen, and it lives somewhere the user only sees once they
-                have already started a capture.
+            {/* Shown ONLY to a shell too old to record — there is deliberately
+                no second description line for everyone else (DESIGN.md: one).
 
-                **The audio clause is platform-specific and must stay that way.**
-                There is no microphone in this build at all (see `SnipSettings`
-                — no mic field, and none of the macOS entitlements a mic would
-                need), and system audio is Windows-only. Promising either one to
-                a Mac user produces a silent recording they file as a bug. */}
-            <p className="mt-1.5 text-sm text-zinc-400">
-              {canRecord ? (
-                <>
-                  Switch to <span className="text-zinc-300">Video</span> on the
-                  capture bar to record the region instead
-                  {platform === 'darwin'
-                    ? '. Recordings have no sound.'
-                    : ", with your computer's audio if you turn it on."}
-                </>
-              ) : (
-                <>
-                  Screen recording needs desktop app version{' '}
-                  <span className="tabular-nums text-zinc-300">
-                    {SNIP_VIDEO_MIN_APP_VERSION}
-                  </span>{' '}
-                  or newer. Image capture works as it always has.
-                </>
-              )}
-            </p>
+                It has to stay for this case: `SNIP_VIDEO_MIN_APP_VERSION` is a
+                separate floor from the page's own, so a 0.13.x user keeps their
+                whole library and simply never gets the Image/Video toggle. With
+                nothing said here, the toggle is just absent and there is no
+                surface anywhere that explains why. */}
+            {!canRecord && (
+              <p className="mt-1.5 text-sm text-zinc-400">
+                Screen recording needs desktop app version{' '}
+                <span className="tabular-nums text-zinc-300">
+                  {SNIP_VIDEO_MIN_APP_VERSION}
+                </span>{' '}
+                or newer. Image capture works as it always has.
+              </p>
+            )}
           </div>
 
           <div className="flex shrink-0 items-center gap-2">

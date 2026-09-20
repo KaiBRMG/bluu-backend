@@ -103,35 +103,70 @@ export function PendingUploads({ timezone }: {
     void refresh();
   };
 
-  const anyFailed = items.some(item => item.state === 'failed');
+  // **Counted per state, never the whole list against a boolean.** The header
+  // used to test "does ANY item say failed?" and then print the count of ALL
+  // items beside the words "did not upload" — so one stale failure relabelled
+  // every row in the panel, including a recording that was uploading
+  // successfully at that moment. A headline that contradicts the row beneath
+  // it is why a working upload looked broken.
+  const failedCount = items.filter(item => item.state === 'failed').length;
+  const uploadingCount = items.filter(item => item.state === 'uploading').length;
+  const waitingCount = items.length - failedCount - uploadingCount;
+  const anyFailed = failedCount > 0;
+
+  // Only a failure is a warning. An upload in progress wearing an orange alert
+  // panel is the interface raising an alarm about itself working.
+  const tone = anyFailed
+    ? {
+        section: 'border-orange-400/25 bg-orange-400/[0.06]',
+        divider: 'border-orange-400/20',
+        icon: 'text-orange-400',
+      }
+    : {
+        section: 'border-white/[0.07] bg-white/[0.025]',
+        divider: 'border-white/[0.06]',
+        icon: 'text-zinc-400',
+      };
+
+  const StatusIcon = anyFailed ? AlertTriangle : Video;
+
+  const headline = [
+    failedCount > 0 && `${failedCount} recording${failedCount === 1 ? '' : 's'} did not upload`,
+    uploadingCount > 0 && `${uploadingCount} uploading`,
+    waitingCount > 0 && `${waitingCount} waiting to upload`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <section
-      className="mb-6 rounded-xl border border-orange-400/25 bg-orange-400/[0.06]"
-      aria-label="Recordings waiting to upload"
+      className={cn('mb-6 rounded-xl border', tone.section)}
+      aria-label={anyFailed ? 'Recordings that did not upload' : 'Recordings waiting to upload'}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-orange-400/20 px-4 py-3">
+      <div className={cn('flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3', tone.divider)}>
         <div className="flex items-start gap-2.5">
-          {/* Orange, not red: nothing is lost. The file is on this machine and
-              the action is a retry — red would say "destroyed". */}
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-orange-400" aria-hidden />
+          {/* Orange, not red, when something has failed: nothing is lost. The
+              file is on this machine and the action is a retry — red would say
+              "destroyed". Neutral when nothing has. */}
+          <StatusIcon className={cn('mt-0.5 size-4 shrink-0', tone.icon)} aria-hidden />
           <div>
-            <h2 className="text-sm font-semibold text-zinc-100">
-              {anyFailed
-                ? `${items.length} recording${items.length === 1 ? '' : 's'} did not upload`
-                : `${items.length} recording${items.length === 1 ? '' : 's'} waiting to upload`}
-            </h2>
+            <h2 className="text-sm font-semibold text-zinc-100">{headline}</h2>
             <p className="mt-0.5 text-xs text-zinc-400">
-              {/* The reassurance is the most important sentence here. */}
-              Saved on this computer and retried automatically. Nothing has been
-              lost — you can also save a copy before deleting.
+              {/* The reassurance is the most important sentence here — but only
+                  when there is something to be reassured about. */}
+              {anyFailed
+                ? 'Saved on this computer and retried automatically. Nothing has been lost — you can also save a copy before deleting.'
+                : 'Saved on this computer until the upload finishes.'}
             </p>
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={retryAll} className="shrink-0">
-          <RefreshCw className="size-3.5" />
-          Retry now
-        </Button>
+        {/* Nothing to retry while the only thing here is already in flight. */}
+        {(failedCount > 0 || waitingCount > 0) && (
+          <Button variant="outline" size="sm" onClick={retryAll} className="shrink-0">
+            <RefreshCw className="size-3.5" />
+            Retry now
+          </Button>
+        )}
       </div>
 
       <ul className="divide-y divide-white/[0.06]">
@@ -166,12 +201,18 @@ export function PendingUploads({ timezone }: {
                       <span className="tabular-nums"> — {Math.round(pct * 100)}%</span>
                     )}
                   </p>
-                ) : item.lastError ? (
-                  // The real error, not a euphemism. The person reading this
-                  // is deciding whether to retry or to save a copy and give
-                  // up, and "something went wrong" does not help them choose.
+                ) : item.state === 'failed' ? (
+                  // Leads with the state, then the real error — not a
+                  // euphemism. The person reading this is deciding whether to
+                  // retry or to save a copy and give up, and "something went
+                  // wrong" does not help them choose. The state word is here
+                  // rather than only in the header because a panel can hold a
+                  // failed row and an uploading row at the same time, and a
+                  // row has to be readable on its own.
                   <p className="mt-1 text-[11px] text-orange-300">
-                    {item.lastError}
+                    <span className="font-medium">Did not upload</span>
+                    <span aria-hidden> — </span>
+                    {item.lastError || 'The upload failed'}
                     {item.attempts > 1 && (
                       <span className="text-zinc-400"> · {item.attempts} attempts</span>
                     )}

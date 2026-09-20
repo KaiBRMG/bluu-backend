@@ -115,6 +115,34 @@ function recencyMeta(user: AdminFullUser): { label: string; title: string } | nu
   return null;
 }
 
+/**
+ * The installed desktop build, on the meta line as a code (DESIGN.md §2 — an
+ * identifier there takes `font-mono`). It is written by `AppVersionReporter`
+ * once per app start, so it is absent for anyone who has not opened the app
+ * since that shipped and for anyone who has never signed in — and "absent" is
+ * shown rather than skipped, because "which build is this person on?" is a
+ * question whose blank answer is itself the finding when chasing an update.
+ * Anyone still unprompted for onboarding has no build at all, so the invited
+ * section says nothing.
+ */
+function versionMeta(user: AdminFullUser): { label: string; title: string } | null {
+  const platform =
+    user.appPlatform === 'darwin' ? 'macOS' : user.appPlatform === 'win32' ? 'Windows' : null;
+  if (!user.appVersion) {
+    return {
+      label: 'v—',
+      title:
+        'No app version reported. This user has not opened the desktop app since version reporting shipped.',
+    };
+  }
+  return {
+    label: `v${user.appVersion}`,
+    title: platform
+      ? `Installed desktop build on ${platform}.`
+      : 'Installed desktop build.',
+  };
+}
+
 function EmployeeRow({
   user,
   groups,
@@ -142,6 +170,7 @@ function EmployeeRow({
     .filter(Boolean) as AdminGroup[];
   const telegramLinked = !!user.telegram?.userId;
   const recency = recencyMeta(user);
+  const version = stage === 'invited' ? null : versionMeta(user);
 
   const copyEmail = async () => {
     try {
@@ -278,6 +307,17 @@ function EmployeeRow({
                   </span>
                 </>
               )
+            )}
+            {version && (
+              <>
+                <MetaDot />
+                <span
+                  className="shrink-0 font-mono tabular-nums"
+                  title={version.title}
+                >
+                  {version.label}
+                </span>
+              </>
             )}
           </span>
         </span>
