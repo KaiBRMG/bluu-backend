@@ -21,8 +21,8 @@ import { cn } from '@/lib/utils';
  * Import — turn an image the user already has into a snip.
  *
  * The point is the *link*, not the file: everything the Snipping Tool gives a
- * capture (a 160-bit share token, a public page, the owner's retention window,
- * the quota, a card in the library) is exactly what someone wants for a picture
+ * capture (a share token, a public page, the owner's retention window, the
+ * quota, a card in the library) is exactly what someone wants for a picture
  * that did not come from the snipper — a mock-up a designer sent, a photo of a
  * screen, something saved out of another app. Routing it through the same
  * reservation rather than inventing a second kind of row is what makes all of

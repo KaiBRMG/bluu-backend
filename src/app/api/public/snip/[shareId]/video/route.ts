@@ -12,9 +12,9 @@ import { getSnipMediaRedirect } from '@/lib/services/snipService';
  * screenshot is one or two, and proxying it would bill every play twice over.
  *
  * **Unauthenticated by design**, exactly like `/image` and `/p/[shareId]`: the
- * 160-bit token in the path *is* the access control. `getSnipMediaRedirect`
- * re-checks liveness itself, and every refusal — unknown token, deleted,
- * pending, expired, or an image snip asked for its video — is the same 404, so
+ * token in the path *is* the access control. `getSnipMediaRedirect` re-checks
+ * liveness itself, and every refusal — unknown token, deleted, pending,
+ * expired, or an image snip asked for its video — is the same 404, so
  * a stranger cannot probe which tokens exist or what kind they are.
  *
  * ## `no-store`, knowing what it costs

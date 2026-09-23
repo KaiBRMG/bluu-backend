@@ -91,16 +91,60 @@ export const SNIP_MIC_MIN_APP_VERSION = '0.14.2';
  * URLs, so its share token has to be a separate, later-minted secret. A snip is
  * *born* shared — nothing addresses it by any other id, and no internal surface
  * prints one — so a separate index would be a second document and a second read
- * per public page view for no gain. The doc id carries the same ~160 bits.
+ * per public page view for no gain. The doc id carries the token itself.
  *
  * The consequence to keep in mind: **a snip id is a secret.** It must never be
  * logged, put in an error message, or returned by any route that has not
  * authorised the caller as the owner.
  */
 const SHARE_ID_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789';
-export const SHARE_ID_LENGTH = 32;
 
-const SHARE_ID_RE = new RegExp(`^[${SHARE_ID_ALPHABET}]{${SHARE_ID_LENGTH}}$`);
+/**
+ * The length of a **newly minted** id: 16 characters over a 32-symbol alphabet
+ * = **80 bits**. Only `mintSnipId` reads this — nothing validates against it,
+ * which is what lets it change without stranding anything already issued.
+ *
+ * It was 32 (160 bits), which made the shared link 66 characters. 80 bits is
+ * the standard bar for an unauthenticated capability URL, and the extra 80 was
+ * buying nothing: the token is the *only* access control on `/s/[shareId]`, and
+ * with a 500-snip-per-user cap the whole corpus is on the order of 10^5 rows,
+ * so hitting **any** of them takes ~6x10^18 guesses — millions of years even at
+ * a request rate that path would never survive.
+ *
+ * **Do not widen the alphabet to shorten it further.** `mintSnipId`'s
+ * `randomBytes(...) % 32` is unbiased only because 256 divides evenly by 32; a
+ * 36- or 58-symbol alphabet reintroduces modulo bias and forces a rejection
+ * loop. Length is the free dial here, symbol count is not.
+ */
+export const SHARE_ID_LENGTH = 16;
+
+/**
+ * What a token is **accepted** at — deliberately a range, not `SHARE_ID_LENGTH`.
+ *
+ * Every id minted before 2026-09-23 is 32 characters, and those links are
+ * already out in chat threads and browser histories where nothing can reach
+ * them. They keep working for free, because the length was never load-bearing
+ * anywhere else: the token *is* the document id, so every lookup is a
+ * `doc(id).get()` that never sees a length, and every object path is read off
+ * the row (`storagePath` / `posterPath`) rather than rebuilt from the id. This
+ * regex is the only thing in the codebase that ever knew the length — which is
+ * why there is no migration and no backfill.
+ *
+ * Accepting a range does not weaken anything. This is a cheap-rejection filter
+ * whose job is to avoid a Firestore read on obvious junk; the security is the
+ * search space of *minted* ids, and a guessed 16-character string still has to
+ * land on a real document.
+ *
+ * The floor may only rise once no `snips` row carries a shorter id, and the
+ * ceiling may only drop once no 32-character row has survived retention. Both
+ * are facts to check against the collection, not dates to wait out.
+ */
+const SHARE_ID_MIN_LENGTH = 16;
+const SHARE_ID_MAX_LENGTH = 32;
+
+const SHARE_ID_RE = new RegExp(
+  `^[${SHARE_ID_ALPHABET}]{${SHARE_ID_MIN_LENGTH},${SHARE_ID_MAX_LENGTH}}$`
+);
 
 export function isValidSnipId(value: unknown): value is string {
   return typeof value === 'string' && SHARE_ID_RE.test(value);

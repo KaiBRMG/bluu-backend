@@ -24,7 +24,7 @@ import { getSnipMediaRedirect } from '@/lib/services/snipService';
  * and revocable from the inside — deleting the snip kills it instantly, where a
  * handed-out signed URL would keep working until its own expiry.
  *
- * **Unauthenticated by design**, exactly like `/p/[shareId]`: the 160-bit token
+ * **Unauthenticated by design**, exactly like `/p/[shareId]`: the share token
  * in the path *is* the access control. Three things follow, and all three are
  * load-bearing:
  *   • `getSnipMediaRedirect` re-checks liveness itself — this endpoint is

@@ -69,11 +69,14 @@ export function requireSnippingToolAccess(uid: string): Promise<NextResponse | n
 // ─── Share ids ───────────────────────────────────────────────────────
 
 /**
- * ~160 bits of share token, which is also the document id.
+ * 80 bits of share token, which is also the document id. Ids minted before
+ * 2026-09-23 are 160 bits (32 characters) and remain valid — see
+ * `SHARE_ID_MIN_LENGTH` in `lib/snips.ts` for why nothing had to migrate.
  *
  * `randomBytes(...) % 32` is unbiased here and only because the alphabet is
  * exactly 32 characters — 256 divides evenly by it. Changing the alphabet's
  * length reintroduces modulo bias and this has to become a rejection loop.
+ * Shortening `SHARE_ID_LENGTH` is safe; widening the alphabet is not.
  */
 function mintSnipId(): string {
   const bytes = randomBytes(SHARE_ID_LENGTH);
@@ -241,7 +244,7 @@ export async function createSnipUploadSlot(
   const id = mintSnipId();
   // **No uid in the path.** The object is reachable by signed URL, and a signed
   // URL is a place a uid can end up visible — in an address bar, a referrer, a
-  // pasted link. `id` is already 160 bits of unguessable, globally unique token,
+  // pasted link. `id` is already 80 bits of unguessable, globally unique token,
   // so a per-user folder bought nothing except that exposure. Ownership lives on
   // the Firestore doc (`ownerUid`), which is where it is actually enforced.
   //

@@ -389,10 +389,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // 24b. Snipping Tool captures. Doc id = the 160-bit share token, which is
-    // ALSO the public link — so a client-readable collection would be a list of
-    // every live share link in the company, and a `where('ownerUid','==',uid)`
-    // rule would not help: the ids are the secret, not the bodies.
+    // 24b. Snipping Tool captures. Doc id = the share token (80 bits; rows minted
+    // before 2026-09-23 are 160), which is ALSO the public link — so a client-
+    // readable collection would be a list of every live share link in the
+    // company, and a `where('ownerUid','==',uid)` rule would not help: the
+    // ids are the secret, not the bodies.
     //
     // Every path in and out is the Admin SDK: the page reads through
     // `/api/snips` (page permission + `ownerUid`), the public page through

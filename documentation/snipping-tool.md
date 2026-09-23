@@ -43,7 +43,7 @@
 
 Storage rules are never consulted on any leg; **these routes are the authorisation.**
 
-**The object path carries no uid, deliberately.** It used to be `snips/{uid}/{shareId}.png`, and that leaked: a signed URL is a place a path becomes *visible* — an address bar, a referrer, a pasted link — so the owner's Firebase uid travelled with every image. `shareId` is already 160 bits of globally unique token, so the per-user folder bought nothing but that exposure. Ownership is enforced on the Firestore document (`ownerUid`), which is the only place it was ever checked.
+**The object path carries no uid, deliberately.** It used to be `snips/{uid}/{shareId}.png`, and that leaked: a signed URL is a place a path becomes *visible* — an address bar, a referrer, a pasted link — so the owner's Firebase uid travelled with every image. `shareId` is already an unguessable, globally unique token, so the per-user folder bought nothing but that exposure. Ownership is enforced on the Firestore document (`ownerUid`), which is the only place it was ever checked.
 
 Snips created before this change still carry the old path. Nothing needs migrating: **every read and delete resolves `storagePath` from the document** rather than rebuilding it from a uid, so both layouts work. The one place that did rebuild it was the account-deletion cascade's `bucket.deleteFiles({ prefix: 'snips/{uid}/' })`, which now calls `deleteAllSnipsForUser` instead — per-document, and correct for both layouts.
 
@@ -672,7 +672,7 @@ A capture completes without asking the user anything — that is the point of th
 
 ## Import
 
-An image the user already has, given everything a capture gets: a 160-bit share token, a public page, their retention window, the quota, a card. That is the point of the feature — the *link*, not the file — and it is why an import goes through the **same** reservation rather than a second kind of row. Nothing downstream needed to learn about it.
+An image the user already has, given everything a capture gets: a share token, a public page, their retention window, the quota, a card. That is the point of the feature — the *link*, not the file — and it is why an import goes through the **same** reservation rather than a second kind of row. Nothing downstream needed to learn about it.
 
 Two things travel in leg one that a capture never sends: `source: 'import'` (which the card's badge reads back) and `contentType`.
 
@@ -710,7 +710,18 @@ A snip's token is its **document id**, unlike the prompt library, where `prompt-
 
 **That includes the UI.** Both copy paths (`SnipController.announce` and the library page's `copyLink`) used to put the full `shareUrl` in the success toast's description. This is a *screenshot tool*: a token rendered on screen for several seconds is a token that ends up inside somebody's next capture or screen share. Both now show the **expiry** instead — which is the fact the user needs at the moment they are about to hand the link over, and is not a secret. The toast title says `Link copied — anyone with it can view`, because nothing else on the owner's surface ever told them the link is unauthenticated.
 
-32 characters over a 32-symbol alphabet ≈ 160 bits. `randomBytes % 32` is unbiased **only because the alphabet is exactly 32 long** — 256 divides evenly by it. Changing the alphabet's length reintroduces modulo bias and `mintSnipId` has to become a rejection loop.
+**16 characters over a 32-symbol alphabet = 80 bits**, which makes the shared link `https://bluu-backend.vercel.app/s/<16>` — 50 characters. It was 32 characters (160 bits) until 2026-09-23. The extra 80 bits were buying nothing: the token is the *only* access control on the public routes, the per-user cap of 500 puts the whole corpus on the order of 10^5 rows, and hitting **any** of them therefore takes ~6×10^18 guesses — millions of years even at a request rate the route would never survive. 80 bits is the standard bar for an unauthenticated capability URL. Below ~12 characters (60 bits) it stops being one, and nothing on `/s/[shareId]` or the two media routes is rate-limited, so there is no second line of defence to lean on.
+
+**Old links keep working, and nothing was migrated.** Length was never load-bearing anywhere except one regex: the token *is* the document id, so every lookup is a `doc(id).get()` that never sees a length, and every object path is read off the row (`storagePath` / `posterPath`) rather than rebuilt from the id — the same property that let the `snips/{uid}/` prefix be dropped without a migration. So [`snips.ts`](../src/lib/snips.ts) separates the two lengths it used to conflate:
+
+| Constant | Meaning |
+|---|---|
+| `SHARE_ID_LENGTH` = 16 | What `mintSnipId` **mints**. Only the minter reads it |
+| `SHARE_ID_MIN_LENGTH` = 16 / `SHARE_ID_MAX_LENGTH` = 32 | What `isValidSnipId` **accepts**. The range is what keeps every pre-2026-09-23 link alive |
+
+Accepting a range weakens nothing: `isValidSnipId` is a cheap-rejection filter whose job is to avoid a Firestore read on obvious junk, and the security is the search space of *minted* ids — a guessed 16-character string still has to land on a real document. Narrow the range only against facts about the collection, never a date: raise the floor once no row carries a shorter id, drop the ceiling once no 32-character row has survived retention.
+
+**Do not widen the alphabet to shorten the token further.** `randomBytes % 32` is unbiased **only because the alphabet is exactly 32 long** — 256 divides evenly by it. A 36- or 58-symbol alphabet reintroduces modulo bias and `mintSnipId` has to become a rejection loop. Length is the free dial; symbol count is not.
 
 ## The version floor: 0.13.0
 

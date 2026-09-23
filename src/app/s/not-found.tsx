@@ -33,9 +33,24 @@ export default function SharedSnipNotFound() {
     <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-5 py-10 sm:px-8">
       {/* The same lockup, in the same place, as a link that works. A reader who
           has been sent two links should not have to work out whether this is
-          even the same product. */}
+          even the same product.
+
+          **`self-start` is load-bearing, not tidying.** This `<img>` is a direct
+          child of a `flex flex-col` main, so it is a flex item — and the default
+          `align-items: stretch` stretches it across the full column while `h-10`
+          holds the height, which smears the lockup into a 5xl-wide band. `w-auto`
+          cannot win that: the stretch sets the used width and `auto` resolves
+          from it. The working `/s/[shareId]` page escapes this only because its
+          logo sits inside a nested `items-start` row. Same trap the `/download`
+          brief records for buttons in a `flex-col`. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/logo/HQ2.webp" alt="Bluu Rock" width={1374} height={868} className="h-10 w-auto" />
+      <img
+        src="/logo/HQ2.webp"
+        alt="Bluu Rock"
+        width={1374}
+        height={868}
+        className="h-10 w-auto self-start"
+      />
 
       <div className="max-w-xl">
         <h1 className="text-2xl font-bold tracking-tight">This link is no longer available</h1>
