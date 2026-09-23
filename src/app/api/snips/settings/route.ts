@@ -5,6 +5,7 @@ import { handleApiError } from '@/lib/middleware/apiHelpers';
 import {
   isSnipRetention,
   isValidSnipShortcut,
+  normaliseSnipMicDeviceId,
   type SnipSettings,
 } from '@/lib/snips';
 import {
@@ -62,6 +63,25 @@ export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         typeof body.systemAudioEnabled === 'boolean'
           ? body.systemAudioEnabled
           : current.systemAudioEnabled,
+      // Whether a finished upload takes the clipboard. Read by
+      // `SnipController`, which is in the renderer — so unlike the two toggles
+      // above it arms nothing native and needs no push to Electron.
+      autoCopyEnabled:
+        typeof body.autoCopyEnabled === 'boolean'
+          ? body.autoCopyEnabled
+          : current.autoCopyEnabled,
+      // Written by the selection surface's Microphone toggle and picker, the
+      // same way `systemAudioEnabled` is — the user sets them at the moment of
+      // capture, and this is what makes the choice survive the surface closing.
+      micEnabled:
+        typeof body.micEnabled === 'boolean' ? body.micEnabled : current.micEnabled,
+      // Normalised, never stored raw: it ends up in a `getUserMedia`
+      // constraint, and an id that matches no device has to degrade to the
+      // system default rather than to a failed capture.
+      micDeviceId:
+        body.micDeviceId === undefined
+          ? current.micDeviceId
+          : normaliseSnipMicDeviceId(body.micDeviceId),
     };
 
     if (body.shortcut !== undefined) {

@@ -547,10 +547,17 @@ export default function TermsPage() {
               operating system and crash reports.
             </Term>
             <Term label="What we do NOT do:">
-              We do not log keystrokes or capture what you type. We do not access your camera or
-              microphone. We do not read your files, your browsing history, your email, or any
+              We do not log keystrokes or capture what you type. We do not access your camera.
+              We do not read your files, your browsing history, your email, or any
               other application&rsquo;s data. We do not track your physical location. We do not
-              monitor you outside a Clocked In session.
+              monitor you outside a Clocked In session.{' '}
+              <strong className="font-semibold text-zinc-200">
+                Your microphone is never part of monitoring.
+              </strong>{' '}
+              It is used in one place only: the Snipping Tool, when you yourself turn the
+              Microphone option on to narrate a screen recording you are choosing to make.
+              It is off by default, it is never opened while you are simply Clocked In, and
+              your operating system shows its own recording indicator whenever it is live.
             </Term>
             <Term label="Access and storage:">
               Monitoring data is stored in our private, access-controlled infrastructure,

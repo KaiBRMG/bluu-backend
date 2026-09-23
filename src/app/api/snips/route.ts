@@ -64,6 +64,10 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       Number(body?.width),
       Number(body?.height),
       Number(body?.durationMs),
+      // Import only — the dropped file already has a name, and throwing it away
+      // to make the user retype it on the card would be gratuitous. A capture
+      // sends nothing here and is titled (if ever) through PATCH.
+      { title: body?.title },
     );
     // One refusal for every cause — unknown id, someone else's reservation, an
     // upload that never landed. The id is a share token; a route that says which

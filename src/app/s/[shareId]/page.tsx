@@ -86,10 +86,41 @@ async function SharedSnipContent({ params }: { params: Promise<{ shareId: string
           (WCAG 2.4.6, 1.3.1). Visually hidden because the capture itself is the
           page's visible title — a heading drawn above it would compete with the
           thing the recipient came to look at. */}
-      <h1 className="sr-only">
-        Shared {isVideo ? 'recording' : 'screenshot'}
-        {snip.sharedBy ? ` from ${snip.sharedBy}` : ''}
-      </h1>
+      {/* The owner's own title becomes the page's heading when there is one —
+          which is the whole reason for letting them write one. It is drawn
+          rather than `sr-only` in that case: a caption the sender chose is not
+          competing with the capture, it is telling the recipient what they are
+          looking at, and it saves the covering message that would otherwise
+          have to travel beside the link. With no title the heading stays
+          visually hidden and the capture is the page's visible title, as
+          before — a generated "Shared recording" drawn above every snip would
+          be chrome that says nothing. */}
+      {snip.title ? (
+        <div className="flex flex-col gap-1.5">
+          <h1 className="text-xl font-semibold tracking-tight text-white">{snip.title}</h1>
+          {snip.description && (
+            // `whitespace-pre-line`, because a description is allowed to be a
+            // paragraph and the newlines the sender typed are the only
+            // structure it has. Capped at a readable measure rather than
+            // running the full width of a 5xl page.
+            <p className="max-w-[70ch] whitespace-pre-line text-sm text-zinc-400">
+              {snip.description}
+            </p>
+          )}
+        </div>
+      ) : (
+        <>
+          <h1 className="sr-only">
+            Shared {isVideo ? 'recording' : 'screenshot'}
+            {snip.sharedBy ? ` from ${snip.sharedBy}` : ''}
+          </h1>
+          {snip.description && (
+            <p className="max-w-[70ch] whitespace-pre-line text-sm text-zinc-400">
+              {snip.description}
+            </p>
+          )}
+        </>
+      )}
 
       {/* The capture is the page. Everything else is a caption for it, which is
           why the attribution sits below rather than competing above. */}
@@ -99,13 +130,23 @@ async function SharedSnipContent({ params }: { params: Promise<{ shareId: string
           poster={snip.imageUrl}
           width={snip.width}
           height={snip.height}
+          // The recorder's own wall clock. A `MediaRecorder` WebM states no
+          // duration in its container, so without this the player has nothing
+          // to draw a timeline against — see `SnipVideo`.
+          durationMs={snip.durationMs}
         />
       ) : (
         <SnipImage
           src={snip.mediaUrl}
           width={snip.width}
           height={snip.height}
-          alt={snip.sharedBy ? `Screenshot shared by ${snip.sharedBy}` : 'Shared screenshot'}
+          // The sender's own title is a far better description of the picture
+          // than anything generated from who shared it, so it is preferred when
+          // there is one.
+          alt={
+            snip.title ||
+            (snip.sharedBy ? `Screenshot shared by ${snip.sharedBy}` : 'Shared screenshot')
+          }
         />
       )}
 

@@ -1628,6 +1628,16 @@
       "indexes": []
     },
     {
+      "collectionGroup": "users",
+      "fieldPath": "snipSettings.micEnabled",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "snipSettings.micDeviceId",
+      "indexes": []
+    },
+    {
       "collectionGroup": "versions",
       "fieldPath": "text",
       "indexes": []
@@ -1685,6 +1695,21 @@
     {
       "collectionGroup": "snips",
       "fieldPath": "retention",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "snips",
+      "fieldPath": "source",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "snips",
+      "fieldPath": "title",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "snips",
+      "fieldPath": "description",
       "indexes": []
     }
   ]

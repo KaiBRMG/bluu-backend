@@ -74,6 +74,111 @@ export async function uploadSnip(
 }
 
 /**
+ * Uploads a file the user dropped on the library page, and returns the live
+ * snip.
+ *
+ * The same three legs as `uploadSnip`, and deliberately the *same* legs rather
+ * than a route of its own: an import is a snip whose bytes came from disk
+ * instead of from `desktopCapturer`, so it wants the same reservation, the same
+ * quota, the same retention stamp and the same share token. The only two
+ * differences travel in leg one — `source: 'import'` (which the card's badge
+ * reads back) and `contentType`, because a dropped JPEG has to be stored and
+ * served as a JPEG rather than being re-encoded into the PNG the capture path
+ * always produces.
+ *
+ * **The bytes go straight to Cloud Storage**, exactly as a capture's do, which
+ * is the whole reason this is worth doing properly: a photo dropped in here is
+ * routinely larger than any screenshot the tool takes, and routing it through a
+ * function would be rule 9i's worst case with none of the excuses.
+ *
+ * Dimensions are read in the browser before the upload, because the server has
+ * no way to get them — it never sees the file, and probing the object would
+ * mean downloading it back through a function. A file whose dimensions cannot
+ * be read is refused here rather than finalised with zeros, since `width` and
+ * `height` are what reserve the box on the public page.
+ *
+ * **Stills only.** There is no video import: a recording carries a durable
+ * on-disk queue, a poster frame and a resumable session, and none of that
+ * applies to a file that is already sitting on the user's machine.
+ */
+export async function importSnip(
+  idToken: string,
+  file: File,
+  dimensions: { width: number; height: number },
+  /**
+   * Bytes sent, 0–1. Optional, and only the PUT leg reports — the two JSON
+   * legs either side of it are a few hundred bytes each and a bar that jumped
+   * 0 → 2% → 100% would describe the wrong thing.
+   */
+  onProgress?: (fraction: number) => void,
+): Promise<SnipRow> {
+  const slotRes = await fetch('/api/snips/upload-url', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bytes: file.size, kind: 'image', source: 'import', contentType: file.type }),
+  });
+  if (!slotRes.ok) {
+    throw new Error(await errorMessage(slotRes, 'Could not start the upload'));
+  }
+  const { id, uploadUrl } = (await slotRes.json()) as { id: string; uploadUrl: string };
+
+  // **`XMLHttpRequest`, not `fetch`, and only here.** An import is a file the
+  // user chose off their own disk and can be two orders of magnitude larger
+  // than a screen capture, so "Uploading…" with no number is a dialog that
+  // looks hung. `fetch` still has no upload-progress event that ships
+  // everywhere; XHR's `upload.onprogress` does. The request is otherwise
+  // identical — same signed URL, same pinned content type, same preflight.
+  const status = await new Promise<number>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open('PUT', uploadUrl, true);
+    // Must match what the slot was signed for exactly — Storage rejects the
+    // PUT otherwise. See the CORS note in `uploadSnip` for why a rejection
+    // here arrives with no status at all.
+    request.setRequestHeader('Content-Type', file.type);
+    request.upload.onprogress = event => {
+      if (!onProgress || !event.lengthComputable || event.total <= 0) return;
+      onProgress(Math.min(1, event.loaded / event.total));
+    };
+    request.onload = () => resolve(request.status);
+    // A refused preflight and a dropped connection both land here with status
+    // 0 and no body — the XHR equivalent of `fetch`'s bare `TypeError`.
+    request.onerror = () => reject(new Error('network'));
+    request.onabort = () => reject(new Error('network'));
+    request.send(file);
+  }).catch(() => {
+    throw new Error(
+      typeof navigator !== 'undefined' && navigator.onLine === false
+        ? 'You are offline — the image was not uploaded.'
+        : 'Storage rejected the upload (CORS). The bucket needs its CORS policy applied — see storage-cors.json.',
+    );
+  });
+  if (status < 200 || status >= 300) {
+    throw new Error(`The upload did not complete (${status})`);
+  }
+  // The bytes are in the bucket; the finalise below is the only thing left.
+  onProgress?.(1);
+
+  const finalRes = await fetch('/api/snips', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id,
+      width: dimensions.width,
+      height: dimensions.height,
+      // The file already has a name and it is the only thing about this snip
+      // the user has actually written. The server normalises and caps it.
+      title: file.name.replace(/\.[^.]+$/, ''),
+    }),
+  });
+  if (!finalRes.ok) {
+    throw new Error(await errorMessage(finalRes, 'The image could not be saved'));
+  }
+
+  const { snip } = (await finalRes.json()) as { snip: SnipRow };
+  return snip;
+}
+
+/**
  * Uploads one finished recording and returns the live snip.
  *
  * Same three legs as `uploadSnip` and the same reasoning behind the middle one

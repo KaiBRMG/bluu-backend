@@ -22,13 +22,14 @@ import {
   type SnipSettings,
 } from '@/lib/snips';
 import { ShortcutRecorder } from './ShortcutRecorder';
+import { SnipMicrophoneField } from './SnipMicrophoneField';
 
 /**
  * The settings card behind the page's gear button.
  *
  * A `Popover`, not a dialog — DESIGN.md's "don't reach for a modal first". These
- * are four preferences that a user adjusts while looking at their snips, not a
- * task that deserves to take the screen.
+ * are preferences a user adjusts while looking at their snips, not a task that
+ * deserves to take the screen.
  *
  * **Every change saves immediately**, with no Save button. The toggles arm
  * native surfaces (a tray item, a global accelerator) whose effect is instantly
@@ -60,7 +61,10 @@ export function SnipSettingsPopover({
   // wasted renders and at worst stomped an in-flight optimistic edit with the
   // pre-save value. The page above this one documents avoiding exactly this
   // trap (rule 9i); this is the other half of it.
-  const fingerprint = `${settings.trayIconEnabled}|${settings.shortcutEnabled}|${settings.shortcut}|${settings.retention}|${settings.systemAudioEnabled}`;
+  // Every field in `SnipSettings` belongs in here. One left out is a field
+  // whose change made in another window — or on the capture bar, which is how
+  // the microphone ones are set — never reconciles the draft.
+  const fingerprint = `${settings.trayIconEnabled}|${settings.shortcutEnabled}|${settings.shortcut}|${settings.retention}|${settings.systemAudioEnabled}|${settings.autoCopyEnabled}|${settings.micEnabled}|${settings.micDeviceId}`;
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   useEffect(() => { setDraft(settingsRef.current); }, [fingerprint]);
@@ -187,6 +191,37 @@ export function SnipSettingsPopover({
               </Button>
             )}
           </div>
+
+          <div className="flex items-start justify-between gap-4 border-t border-white/[0.07] pt-4">
+            <div className="min-w-0">
+              <Label htmlFor="snip-autocopy" className="text-xs text-zinc-400">
+                Auto-copy to clipboard
+              </Label>
+              {/* States what turning it OFF costs, because that is the choice
+                  being made here — the on state is the one the tool has always
+                  had and needs no explaining. */}
+              <p className="mt-0.5 text-[11px] text-zinc-400">
+                {draft.autoCopyEnabled
+                  ? 'The share link is copied as soon as an upload finishes.'
+                  : 'Uploads still happen — the link waits on the card until you copy it.'}
+              </p>
+            </div>
+            <Switch
+              id="snip-autocopy"
+              checked={draft.autoCopyEnabled}
+              disabled={savingKey === 'autoCopyEnabled'}
+              onCheckedChange={checked => save({ autoCopyEnabled: checked })}
+            />
+          </div>
+
+          {/* Status, not a toggle. The Microphone toggle itself lives on the
+              capture bar beside System audio, because narration is a
+              per-recording choice; what belongs here is whether this machine
+              will allow a microphone at all — the thing a user cannot fix from
+              a bar that vanishes the moment they start dragging, and the thing
+              they come looking for after a recording came out silent. Renders
+              nothing where there is no such permission to read. */}
+          <SnipMicrophoneField />
 
           <div className="flex flex-col gap-1.5 border-t border-white/[0.07] pt-4">
             <Label htmlFor="snip-retention" className="text-xs text-zinc-400">Auto-delete</Label>

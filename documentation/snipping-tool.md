@@ -8,7 +8,7 @@
 |---|---|
 | `electron/main.js` (§ Snipping Tool) | Global shortcut, tray item, transparent selection surfaces, the post-selection capture + crop |
 | `electron/snip.html` | The selection surface — fully transparent; drag, readout, Escape, and the **Image/Video mode bar** |
-| `electron/snip-preload.js` | The surface's bridge. Commit/cancel, the mic permission probe, and deliberately **no image or media channel** |
+| `electron/snip-preload.js` | The surface's bridge. Commit/cancel, a microphone **status read** and a settings hand-off, and deliberately **no image or media channel** |
 | `electron/snip-record.html` | The **recorder**: the control bar the user sees while recording, and the page holding the `MediaRecorder` |
 | `electron/snip-record-preload.js` | The recorder's bridge. Chunks out, never bytes back |
 | `electron/preload.js` (`snip`, `clipboard.writeText`) | The main window's bridge |
@@ -18,6 +18,11 @@
 | `src/app/(main)/applications/snipping-tool/_components/PendingUploads.tsx` | Recordings that have not uploaded — the visible half of the durable queue |
 | `src/lib/services/snipService.ts` | Everything server-side: tokens, slots, projections, retention, the sweep |
 | `src/app/(main)/applications/snipping-tool/` | The library page + settings popover + shortcut recorder |
+| `src/app/(main)/applications/snipping-tool/_components/SnipDetailsDialog.tsx` | Title + description, written after the fact |
+| `src/app/(main)/applications/snipping-tool/_components/SnipMicrophoneField.tsx` | The microphone's **permission** state and the way to fix it |
+| `src/app/(main)/applications/snipping-tool/_components/SnipImportDialog.tsx` | **Import** — an image from disk, given a share link |
+| `src/lib/snipSounds.ts` | The shutter and the recording cue. Played by the renderer; main has no audio |
+| `src/app/s/_components/SnipVideo.tsx` | The public **player** — own controls, because the file states no duration |
 | `src/app/s/[shareId]/` | The **public** page |
 | `src/app/s/not-found.tsx` | What a recipient sees when a link has expired, been deleted or never existed |
 | `src/app/api/snips/*` | Owner-facing routes (page permission + `ownerUid`) |
@@ -27,12 +32,12 @@
 
 ## Firestore
 
-- `snips/{shareId}` — **the document id IS the public share token.** Admin-SDK only (`firestore.rules` §24b). `kind` (`image` | `video`, **absent reads as `image`**), `durationMs` and `posterPath` were added with recording; all three are unqueried and carry `"indexes": []` overrides (rule 9).
-- `users/{uid}.snipSettings` — `{ trayIconEnabled, shortcutEnabled, shortcut, retention, systemAudioEnabled }`. The last is the **only** field in that map where absent means OFF (`=== true`, not `!== false`): every other setting is a convenience, this one records the desktop's own output. There is deliberately no microphone field — see the Audio section.
+- `snips/{shareId}` — **the document id IS the public share token.** Admin-SDK only (`firestore.rules` §24b). `kind` (`image` | `video`, **absent reads as `image`**), `durationMs` and `posterPath` were added with recording; `source` (`capture` | `import`, **absent reads as `capture`**), `title` and `description` came with Import and the details dialog. All six are unqueried and carry `"indexes": []` overrides (rule 9).
+- `users/{uid}.snipSettings` — `{ trayIconEnabled, shortcutEnabled, shortcut, retention, systemAudioEnabled, autoCopyEnabled, micEnabled, micDeviceId }`. `systemAudioEnabled` and `micEnabled` are the **two** fields in that map where absent means OFF (`=== true`, not `!== false`): every other setting is a convenience, while those two record the desktop's own output and the room the user is sitting in. `autoCopyEnabled` follows the normal `!== false` rule — absent is on, which is the behaviour the tool shipped with. `micDeviceId` is a **preference, not a promise**: a Chromium device id is per-origin and per-machine, so one that matches nothing falls back to the system default — see the Audio section.
 
 ## Storage
 
-- `snips/{shareId}.png` — a still, written by a v4 signed URL from the renderer, read by a v4 signed URL through the image route.
+- `snips/{shareId}.png` — a still, written by a v4 signed URL from the renderer, read by a v4 signed URL through the image route. An **imported** still keeps its own type and extension (`.jpg`, `.webp`, `.gif`) from the `SNIP_IMPORT_TYPES` allowlist; every read and delete resolves `storagePath` off the document, so nothing downstream had to learn about it.
 - `snips/{shareId}.webm` — a recording, written by a v4 signed URL **from the main process** (see below), read through the video route.
 - `snips/{shareId}-poster.png` — a recording's poster frame. Derived from the id rather than given one of its own, so it shares the row's lifetime exactly and cannot be orphaned by a path that no longer matches.
 
@@ -196,9 +201,40 @@ The user reads that as *the bar changing*: the Image/Video toggle they were just
 Two independent measures, because neither is sufficient alone:
 
 1. **`win.setContentProtection(true)`.** On Windows 10 2004+ this excludes the window from screen capture entirely; on macOS it sets `NSWindowSharingNone`. On an older Windows it renders the window as a **black rectangle** in the capture rather than omitting it — which is why there is a second measure.
-2. **`snipBarBounds` keeps it outside the recorded rectangle** whenever the geometry allows: under the selection if it fits, above it if not, pinned to the bottom of the display when the selection leaves room for neither. It is centred on the *selection*, not on the display, because on an ultrawide the middle of the screen can be a foot from where the user is looking.
+2. **`snipBarBounds` keeps it outside the recorded rectangle** whenever the geometry allows: under the selection if it fits, above it if not. It is centred on the *selection*, not on the display, because on an ultrawide the middle of the screen can be a foot from where the user is looking. When the selection leaves room for neither, the bar goes **inside** the rectangle — see below.
 
 The bar is also `-webkit-app-region: drag` in its entirety, so a user whose selection genuinely fills the screen can move it off whatever it is covering. And it is shown with **`showInactive`**, not `show` — an always-on-top window that grabs focus as it appears eats the first keystroke of the take.
+
+### When there is no room outside: the compact bar, bottom-left, inside the shot
+
+**Everything is measured against `display.workArea`, never `display.bounds`.** That was a real bug: a full-screen recording fell through to "pinned to the bottom of the display", which on Windows is *behind the taskbar*. The bar is `alwaysOnTop` at `'screen-saver'` level — so is the taskbar, and the taskbar wins. The result was a recording the user could not stop, which is the worst failure this window has, because it keeps running. `displayWorkArea()` converts the work area into display-relative coordinates and every branch clamps to it.
+
+Once the taskbar is excluded there is genuinely nowhere outside the rectangle to put a 380px bar on a full-screen selection, so the bar moves **inside** it, to the **bottom-left corner**, in a compact layout.
+
+Inside is acceptable only because both reasons for staying outside survive it:
+
+- **It still cannot appear in the capture.** `setContentProtection` is what actually excludes it, and that does not care where the window sits. Placement was always the belt, not the braces.
+- **The courtesy reason is answered by the layout, not the position.** A 380px slab in the middle of a demo is in the way; a cornered, icon-only bar is roughly a sixth of the area, and the whole thing is still a drag handle so the user can move it.
+
+**Bottom-left, not bottom-right.** The right-hand corner is where Windows notification toasts and the macOS notification stack appear — both always-on-top, both perfectly capable of covering the Stop button.
+
+#### What compact drops, and where each thing went
+
+| Dropped | Where the information went |
+|---|---|
+| The state label (`Recording` / `Paused`) | The state light, and the pause button, which reads Resume when paused |
+| Button text (`Pause`, `Stop`) | The glyphs. Every button keeps its `aria-label`, so the keyboard and screen-reader paths are identical in both modes |
+| The note row | **The duration**, which turns orange via `data-warn`. The note is the only element that can grow the bar *vertically*, which is exactly what must not happen inside the shot — so the one-minute cap warning moves onto the number that is already there |
+
+What stays is the state light, the duration, and Pause / Stop / Discard as icons. The light stays because it is the one pixel that answers "is it still recording?" from across a desk, and it costs 9px.
+
+**Button order is identical in both modes** (pause, stop, discard). Re-ordering between layouts would mean the muscle memory a user builds on one recording is wrong on the next.
+
+#### The compact decision is made once, and must stay that way
+
+`snipBarFitsOutside()` measures against **`SNIP_BAR_HEIGHT`**, not the bar's live height, and main latches the answer onto the session as `barCompact` before the window is created. This is load-bearing. The page measures its own layout and asks to be re-placed whenever a note changes its height; if the compact predicate moved with that height, a bar that only just fits would flip to compact, shrink, discover it now fits, expand, and oscillate for the length of the take.
+
+Main owns the decision because **only main knows the work area** — the page has no idea where the taskbar is. It travels to the page in the `snip:rec-start` payload as `compact`, which is an existing main→renderer channel, so this needed no new preload surface.
 
 ### The stream never reaches remote content
 
@@ -211,7 +247,7 @@ Three main-process guards hold that:
 | Guard | What it does |
 |---|---|
 | `setDisplayMediaRequestHandler` | Resolves the requesting frame back to a window with `webContents.fromFrame` and **refuses anything that is not the live recorder**. It also picks the source itself, so the page never names a display and cannot choose a screen it was not sent there to record. |
-| `setPermissionRequestHandler` / `…CheckHandler` | `recorderMediaAllowed`: the live recorder window and an in-flight session, or nothing. The desktop stream arrives as `'media'`, so `mediaTypes` refines it — **audio-only is refused outright**, because this build has no microphone. See the two gates below. |
+| `setPermissionRequestHandler` / `…CheckHandler` | `recorderMediaAllowed`: the live recorder window and an in-flight session, or nothing. The desktop stream arrives as `'media'`, so `mediaTypes` refines it — **audio-only is allowed only when `snipRecording.audio.mic` is set**, so a window can open the microphone for the one take it was opened to make and no other. `surfaceMayListDevices` adds a *check-only* grant so the selection surface can read device labels. See the two gates below. |
 | `snip-record-preload.js` | Chunks go **out**. There is no channel that sends this page anything. |
 
 ### The bytes: renderer → main → disk → GCS
@@ -256,21 +292,92 @@ It is taken at the **tenth drawn frame**, not the first — the selection surfac
 
 A poster is **best-effort throughout**. If its PUT fails, `finalizeSnip` deletes `posterPath` from the row, `imageUrl` comes back `null`, and the card renders a quiet placeholder. Refusing to save a recording over its thumbnail would be the wrong trade in every case.
 
-### Audio: system audio only. There is no microphone.
+### Audio: system audio, a microphone, and one mixer between them
 
-**Narration was deliberately cut from this pass**, and the cut is thorough rather than hidden behind a disabled toggle — there is no mic chip, no `micEnabled` setting, no permission probe, no `getUserMedia` call, and no macOS usage string or entitlement. A half-shipped capability is one that fails in the field; when narration returns it needs all of those together, in one deliberate change.
+Two sources, and they are available on opposite platforms — which is the fact that shapes every control here.
 
-Three consequences to know before re-adding it:
+| | macOS | Windows |
+|---|---|---|
+| **System audio** | no system-level loopback without a virtual audio driver | `audio: 'loopback'` from the display-media handler |
+| **Microphone** | yes | yes |
 
-- `recorderMediaAllowed` **refuses every audio-only request**, because the recorder never calls `getUserMedia` and an audio-only request from it would mean something is asking for a device the feature does not use.
-- The recorder has **no audio graph**. With one possible source there is nothing to mix, so the system-audio track is passed straight to the `MediaRecorder`. An `AudioContext` + `MediaStreamDestination` belongs at that line when a second source exists.
-- `entitlements.mac.plist` has no `com.apple.security.device.audio-input` and `mac.extendInfo` has no `NSMicrophoneUsageDescription`. Without **both**, macOS does not refuse a microphone request — it terminates the app.
+So `SNIP_SYSTEM_AUDIO_SUPPORTED` is Windows-only and `SNIP_MIC_SUPPORTED` is both. A macOS user's recordings went from silent to narrated; a Windows user can now have both sources at once.
 
-**System audio** is `audio: 'loopback'` from the display-media handler, and **Windows only** (`SNIP_SYSTEM_AUDIO_SUPPORTED`). macOS has no system-level loopback without the user installing a virtual audio driver, and asking for it there yields a stream that is silently short an audio track rather than an error. The toggle is therefore **disabled up front with a line of text** — and the recorder *still* checks for the missing track afterwards, because a platform that claims support and delivers nothing is the failure that costs a whole take.
+#### The mixer exists only when there are two sources
 
-The toggle **only appears in Video mode**. In Image mode there is no audio to configure, so a visible-but-inert control would be a question the user cannot answer. It defaults off, and is sticky between captures via `snipSettings.systemAudioEnabled`.
+`MediaRecorder` encodes **one** audio track. Hand it two and it takes one and silently drops the other — which presents as "the microphone did not work". So when system audio and a microphone are both live they are summed through a single `AudioContext` into one `MediaStreamDestination`.
 
-**The library page's description of video must stay platform-true, and this is the thing that goes wrong.** It shipped reading "record the region instead, **with your microphone or system audio**" — a microphone that does not exist anywhere in the product, offered alongside system audio to macOS users who cannot have that either. The result is a user recording a narrated demo, getting silence, and filing it as a bug. The copy now branches on `platform`: macOS reads "Recordings have no sound", Windows reads "with your computer's audio if you turn it on". **If narration ever returns, this sentence is part of that change** — not a follow-up.
+**The single-source paths deliberately do not go through the graph.** A lone track passed straight to the recorder keeps its native form, avoids a resample, and leaves the common case with nothing that can fail; an `AudioContext` that refuses to start would otherwise take down a recording that never needed one.
+
+`audioBitsPerSecond` still branches on system audio, not on the microphone: 128k whenever the desktop's own output is in the mix, 96k for narration alone, which is where Opus stops improving on speech.
+
+#### Echo cancellation is not optional on Windows
+
+`getUserMedia` asks for `echoCancellation`, `noiseSuppression` and `autoGainControl`. The first earns its place specifically when system audio is on: the speakers are playing the very thing being recorded and the microphone hears it, so without cancellation the file carries an echo of the desktop audio half a beat late.
+
+#### The device is a preference, never a promise
+
+`micDeviceId` is a Chromium device id — **per-origin and per-machine**. The same account on a second laptop holds one that matches nothing. Two places handle that, and both are needed:
+
+- the picker drops an unmatched id back to "System default" when it renders (`resolveSnipMicDevice`);
+- the recorder asks for `deviceId: { exact: … }` and, on the `OverconstrainedError` that a since-unplugged device produces, **retries with the default and says so in the bar**. `exact` rather than a soft preference is deliberate: a soft constraint silently falls back, so a user recording from a specific interface would get the laptop lid microphone with no indication of it.
+
+#### The microphone is released explicitly
+
+Its tracks are not part of `displayStream`, so `stopTracks` stops them by hand and closes the `AudioContext`. A track left open keeps the OS recording indicator lit — an orange dot in the macOS menu bar — long after the take finished, which reads as the app still listening.
+
+### Detecting, prompting and guiding: where each one happens, and why not elsewhere
+
+This is the part that is easy to get wrong, and the shape is forced by two facts that have nothing to do with each other.
+
+**Fact one: macOS stops prompting once it has been told no.** `systemPreferences.askForMediaAccess` resolves with the *existing* status and shows **no alert** after access has been refused. A UI with a single "Allow microphone" button therefore does nothing at all for exactly the users who need it — no dialog, no error, no explanation. That is why `SnipMicPermission` carries all five OS values rather than a boolean, and why the status read (`permissions:microphoneStatus`) is a separate call from the request.
+
+**Fact two: the selection surface cannot survive taking focus.** It is full-screen and always-on-top, and on a single-display setup `armSnipOverlays` cancels the snip on blur. Anything that raises a window — a TCC prompt, the Settings app — destroys the surface it was called from.
+
+Those two together decide the whole layout:
+
+| | Detect | Prompt | Guide |
+|---|---|---|---|
+| **Selection surface** (`snip.html`) | yes — status on open, re-read whenever the chip is touched | **never** | note per status; an Open Settings button that **cancels the snip** as it hands off |
+| **`startSnipRecording`** (main) | yes | **yes** — macOS, `not-determined` only | passes `micNote` to the bar when access was refused |
+| **Settings card** (`SnipMicrophoneField`) | yes — and **re-reads on window focus** | yes | Allow / Open settings, chosen from the status |
+
+Three consequences worth stating flatly:
+
+- **`snip-preload.js` has no `requestMic`, and that omission is load-bearing.** The prompt happens in `startSnipRecording`, *after* the surfaces are destroyed — which is also the only point at which it can be raised without the dialog landing inside the recording.
+- **The surface's Open Settings button cancels the snip on purpose.** The Settings window would otherwise be underneath a full-screen overlay and unreachable. On one display the blur would tear it down anyway; doing it explicitly makes the behaviour identical on two, where it would not be. The note says so *before* the click, because the surface is gone immediately after it.
+- **A refused microphone never costs the recording.** `startSnipRecording` drops the microphone, records anyway and sends a note the bar shows for the length of the take. Refusing to capture the screen because a microphone was unavailable would be the same bad trade the system-audio path already declines to make.
+
+**"Open Settings" is offered on both platforms here**, which is the exact inverse of the screen-capture rule below — Windows has no per-app Screen Recording permission, but it very much has a microphone one (`ms-settings:privacy-microphone`, one global switch for all win32 apps). Do not copy the macOS-only guard from that path onto this one.
+
+### The surface may read device labels, and nothing else
+
+The picker has to list real device names before the drag — a dropdown reading "Microphone 1 / Microphone 2" is one nobody can use — and Chromium withholds `enumerateDevices` labels from a context whose microphone permission is not granted.
+
+`surfaceMayListDevices` is the narrowest way to give it those names: it is wired into `setPermissionCheckHandler` **only**, so `getUserMedia` from the surface is still refused by the request handler. Four properties contain what is left, and they are why this is acceptable on a window that watches the whole screen:
+
+- it is a **local `file://` page we ship**, not remote content;
+- its CSP is `default-src 'none'` with **no `connect-src`** — nothing it could capture has anywhere to go;
+- `snip-preload.js` has no media channel and no file channel, so nothing reaches main either;
+- navigation away from `snip.html` is blocked.
+
+It is scoped in time and intent as well: only while a surface is on screen, and only when the user has the microphone toggle on.
+
+**That intent scoping reads main's own `snipConfig.micEnabled`, which makes the write ordering load-bearing.** `snip:audio-prefs` is therefore an `invoke`/`handle` pair, not a `send`, and the surface **awaits `persist()` before it enumerates**. Getting this backwards shipped a real bug: toggling the microphone off and back on reported *"No microphone was found"* on a machine with a working one, because the enumeration ran against a main process that still believed the toggle was off. Chromium's behaviour is what made it hard to see — a context without microphone permission is handed a **full set of `audioinput` entries whose `deviceId` and `label` are both empty strings**, not an empty list, so filtering on `deviceId` silently produced "no devices". It only reproduced on a re-enable, because a surface opened with the microphone already on had `snipConfig.micEnabled` set from `snip:configure` at launch.
+
+Two defences now, and the second is what keeps a regression diagnosable:
+
+- **Order:** `await persist()` → `refreshMic()`. Do not reorder them; the comment at that call site says so.
+- **Evidence:** `refreshDevices` counts `audioinput` entries **before** filtering on `deviceId`. Entries present with every id blank means the permission was refused, not that the hardware is absent — that sets `micDevicesBlocked`, logs it, and says *"The microphone list could not be read. Recording will still use your default microphone."* rather than sending the user to check a cable for a fault that is ours. Enumeration is also skipped entirely while the toggle is off, so the gate working as designed never logs as a failure.
+
+**`recorderMediaAllowed` now allows audio-only, but only for a session that asked for narration** (`snipRecording.audio.mic`). Simply dropping the old blanket refusal would have been too wide — it would give the recorder window a standing microphone capability for every take, including silent ones. A window may open the microphone only for the one recording it was opened to make.
+
+### macOS needs two things, and neither ships without the other
+
+- `com.apple.security.device.audio-input` in **both** `entitlements.mac.plist` and `entitlements.mac.inherit.plist` (the helper processes are where `getUserMedia` actually runs).
+- `NSMicrophoneUsageDescription` in `mac.extendInfo` — a block that did not exist before this change.
+
+**A missing usage string is not a refusal: TCC terminates the process** the moment the microphone is requested. Treat the two as one change.
 
 ### Two gates stand in front of `getDisplayMedia`, and both failed silently
 
@@ -299,11 +406,13 @@ discriminator**:
 |---|---|---|
 | `getDisplayMedia`, video only | `['video']` | allow |
 | `getDisplayMedia` + system audio | `['video','audio']` | allow |
-| anything audio-only | `['audio']` | **refuse** |
+| the microphone, narration requested | `['audio']` | allow |
+| anything audio-only, narration NOT requested | `['audio']` | **refuse** |
 
-Audio-only is refused outright: this build has no microphone, the recorder
-never calls `getUserMedia`, and a request for a device the feature does not use
-is one to turn down rather than wave through. A request carrying video is a
+Audio-only is allowed only for a session that committed to narration
+(`snipRecording.audio.mic`, set by main from the committed selection and cleared
+outright when the OS has denied access). Dropping the refusal entirely would
+give the recorder a standing microphone capability on every take. A request carrying video is a
 display capture: the
 recorder page never asks for a camera, and the source is still chosen by main,
 so granting the permission grants no particular screen. Everything outside the
@@ -452,6 +561,13 @@ A **refused reservation** — quota, size, a revoked page permission. That recor
 
 Each row shows duration, size, dimensions, when it was recorded, and **the real error** — the person reading it is deciding between retrying and saving a copy, and "something went wrong" does not help them choose. The timestamp is formatted in the **viewer's timezone**, from the `timezone` prop the page passes down; it used to fall back to `toISOString()` past a day, which is a UTC calendar date on a panel sitting directly above cards rendered in the viewer's zone.
 
+**The header counts each state separately, and the panel is only orange when something actually failed.** This was a real defect: the headline tested "does *any* item say failed?" and then printed the count of *all* items beside the words "did not upload". One stale failed recording therefore relabelled every row in the panel — including a recording that was uploading successfully at that moment — so a working upload looked broken, and the obvious reading was that the *current* upload had failed. It now reads `1 recording did not upload · 1 uploading`, and each row states its own status (`Did not upload — <error>` / `Uploading — 42%` / `Waiting to upload`) so a row is legible without the header.
+
+Two things follow from that and are worth keeping:
+
+- **A failed entry persists on its own.** `loadSnipQueue()` rebuilds the map from disk at startup and `snipQueueSnapshot()` filters nothing, so a failure from a previous session is listed the moment the page mounts — it does not need another upload to bring it into view. If it only *appeared* alongside one, that was the miscount above, not the queue.
+- **`state` is the discriminator, never `lastError`.** Nothing resets a `failed` entry to `pending`; the next attempt moves it straight to `uploading` and clears `lastError`. So `state === 'failed'` is reliable, and a row's `createdAt` is what tells a user whether they are looking at today's recording or last week's.
+
 **Retry is one control, in the panel header, and it retries the whole queue** — `bluu:snip-retry-uploads`, which `SnipController` answers because it owns the one-at-a-time upload lock, so the panel asks rather than uploading itself. There is deliberately no per-row retry: the drain is sequential and oldest-first, so a per-row button could not honour "this one first" without breaking that ordering. *(This paragraph previously described three per-row actions including Retry; that was never what the component did.)*
 
 Each row then carries two actions of its own: **Save a copy** (`snip:savePendingRecording` → native dialog → `copyFile`; deliberately does *not* clear the queue entry, because wanting a copy and abandoning the upload are different intentions), and **Delete** behind a confirm, since that file is the only copy. The confirm's action is `variant="destructive"` — the default resolves `--primary` to near-white in this app, which would give it the same weight as Cancel on the one dialog that destroys the last copy of something.
@@ -469,6 +585,25 @@ Like the still path's, these deliberately ignore `notificationPreferences.deskto
 ### The kind is decided at reservation and never re-read from the finalise call
 
 `POST /api/snips/upload-url` takes `kind` and, from it, pins the content type into the signature, chooses the object's extension, picks the byte ceiling, and decides whether a poster slot is signed. `finalizeSnip` then reads the kind back **off the reservation**, never off its own request body — otherwise a finalise call could relabel a PNG as a recording, or the reverse, over an object it did not write.
+
+### Narration has its own version floor — and it is the ONLY thing in its release that needs one
+
+`SNIP_MIC_MIN_APP_VERSION` (`0.15.0`) is a **third** floor, for the same reason the second is not a bump of the first: raising `SNIP_VIDEO_MIN_APP_VERSION` would take screen recording away from a user on 0.14.x in order to withhold an audio source they never had.
+
+**What is gated, and what deliberately is not.** Five things shipped in 0.15.0 and only one of them can be gated honestly:
+
+| Feature | Needs a build? | Why |
+|---|---|---|
+| **Microphone narration** | **yes — floored** | The toggle and picker are drawn by `snip.html` from flags main supplies, the permission status comes over IPC, and macOS needs an entitlement plus an Info.plist string that only a signed build carries |
+| Auto-copy to clipboard | no | Renderer-side setting, read by `SnipController` |
+| Title + description | no | Firestore field, API route, React dialog |
+| Import | no | Browser → signed URL → finalise; no IPC on the path at all |
+| The public player | no | `/s/[shareId]` has no Electron anywhere near it |
+| The two sound effects | no — **and left ungated on purpose** | No UI to gate, and they degrade to something rather than nothing: the shutter falls back to `snip:captured` (the same capture, a PNG encode later) and the recording cue is simply absent. A version notice about a sound would be a notice about a thing the user cannot miss |
+
+Gating the other four would withhold working features to enforce a version that has nothing to do with them — which is the same mistake as folding the video floor into the page floor.
+
+**Enforced in two places, like the others.** The library page renders one line when `canRecord && !canNarrate` — mutually exclusive with the video line, so the header never carries two version notices — and [`SnipMicrophoneField`](../src/app/(main)/applications/snipping-tool/_components/SnipMicrophoneField.tsx) checks the floor itself, because it is mounted in the settings popover rather than by the page. Its `permissions.microphoneStatus` feature detection is the second belt.
 
 ### Video mode has its own version floor
 
@@ -498,6 +633,69 @@ The second one is the easier to miss, because the instinct is to treat the shell
 **Old rows need no migration.** `kind` is absent on every snip taken before this, and `resolveSnipKind` defaults it to `'image'` on read rather than anything backfilling it — there are live share links pointing at those rows.
 
 **A finished recording is reaped if nobody collects it.** `SNIP_FINISHED_TTL_MS` (30 minutes) deletes the temp file of a recording that was never uploaded or discarded. Nothing should ever reach it; it exists because every way that does — a renderer that crashes mid-upload, a navigation that tears the listener down, an old bundle with no handler — otherwise leaves hundreds of megabytes in the user's temp directory forever. It is generous on purpose: it races a real upload, and reaping a file mid-PUT would turn a slow success into a failure. Claiming a token (`releaseFinishedRecording`) cancels the timer, so a slow upload cannot be shot in the back by its own reaper.
+
+---
+
+## Auto-copy: the clipboard is a setting now
+
+The link going on the clipboard the moment an upload lands is the tool's whole deliverable for most captures — the snip is taken *in order* to be pasted a second later — so it stays **on by default** (`autoCopyEnabled`, absent reads as on, the normal `!== false` rule).
+
+It is a setting for the user who keeps something else on their clipboard while they work and does not want a capture quietly replacing it. Turning it off changes nothing about the upload: the snip is stored, the link exists, and the card's link button still copies it.
+
+Three things to keep straight, because they are three different questions:
+
+| | Writes the clipboard? |
+|---|---|
+| A capture the user just took, auto-copy **on** | yes |
+| A capture the user just took, auto-copy **off** | no — the toast says where the link is instead, and does not read like a failure |
+| The **background drain** (mount, `online`) | **never**, regardless of the setting |
+
+The drain's rule predates this and is unchanged: an upload the user did not ask for must not take their clipboard either way. The setting only narrows the interactive case further.
+
+**`SnipController` reads it through a ref, not a closure.** `announce` is a dependency of both upload handlers and of the drain, and those are dependencies of the effect that subscribes to main's channels — where `removeCapturedListeners` is a `removeAllListeners`. A setting the user can flip must not sit in that chain, or toggling it tears the capture listener out and re-registers it.
+
+**The OS notification says `Upload Complete` and nothing else.** It used to branch its *title* on whether the clipboard write landed, which made the system toast a second, competing account of what had happened — and with auto-copy off that account was simply wrong. The one thing always true at that point is that the upload finished; the body line carries the rest.
+
+---
+
+## Title and description
+
+A capture completes without asking the user anything — that is the point of the tool — so there is no moment at which a name could be requested. Both fields are therefore written **after the fact**, from the library card, through `PATCH /api/snips/{snipId}` → `updateSnipDetails`.
+
+**Both are shown on the public page, and the dialog says so.** That is the reason for writing one: a shared link carrying "Checkout crash on step 3" above it is a link the recipient can act on without a covering message. It does also mean this is the one route by which a user can put arbitrary text on an unauthenticated page — it is their own text on their own snip, it is normalised and length-capped **server-side** (`normaliseSnipTitle` / `normaliseSnipDescription`, not the dialog's copy of them), and both render as text nodes.
+
+- A titled snip's title becomes the public page's **visible `<h1>`**. An untitled one keeps the `sr-only` heading exactly as before — a generated "Shared recording" drawn above every capture would be chrome that says nothing.
+- An emptied field is **deleted, not set to null**, the same convention `expiresAt` follows.
+- The route forwards only the keys the caller actually sent, so a request naming a title cannot silently clear a description it never mentioned.
+- The page applies the **server's** returned row, never its own draft: a title of three spaces has to come back absent rather than sit in the grid as a saved value.
+- `SnipCard` uses the title as the row's name in every `aria-label`, falling back to the timestamp — otherwise a screen reader's action list is three buttons called "Copy the link to Untitled".
+
+## Import
+
+An image the user already has, given everything a capture gets: a 160-bit share token, a public page, their retention window, the quota, a card. That is the point of the feature — the *link*, not the file — and it is why an import goes through the **same** reservation rather than a second kind of row. Nothing downstream needed to learn about it.
+
+Two things travel in leg one that a capture never sends: `source: 'import'` (which the card's badge reads back) and `contentType`.
+
+- **The content type is an allowlist lookup, never a passthrough.** `SNIP_IMPORT_TYPES` is PNG / JPEG / WebP / GIF. The v4 signature pins whatever it is told and the public image route 302s a browser straight at the object, so a free-text value here would be a way to have us sign a slot for `text/html` on our own bucket. **Deliberately no SVG** for the same reason: an SVG is a script-bearing document served from a `storage.googleapis.com` origin.
+- **Dimensions are read in the browser** (`readImageSize`, `createImageBitmap` with an `<img>` fallback), because nothing downstream can — the server never sees the bytes, and probing the object would mean pulling it back through a function. A file that will not decode is **refused** rather than finalised with zeros: `width`/`height` are what reserve the picture's shape on the public page.
+- **The filename becomes the title**, passed to `finalizeSnip` and normalised there. The file already has a name and it is the only thing about the snip the user has written.
+- **Stills only.** A recording carries a durable on-disk queue, a poster frame and a resumable session, none of which mean anything for a file already on disk — and a video import would have to answer "how long is it?" with no recorder's wall clock to ask.
+- The badge is the **attribute chip** recipe (greyscale, `rounded-md`, DESIGN.md §5) — an attribute the row carries, not a state it is in. It answers the one question a mixed grid raises and nothing more, which is also why `source` is **not** in the public projection: how a file reached the library is the owner's business.
+
+## The two sounds
+
+`image_capture.wav` at the shutter, `recording_start.wav` as a recording begins. Both live in `src/public/` and both are played by the **renderer** ([`snipSounds.ts`](../src/lib/snipSounds.ts)) — main has no audio output, and the alternatives are a spawned process per shutter.
+
+**The timing is the whole feature, and it is why each has its own main→renderer event rather than reusing one that already existed.**
+
+| Event | Emitted | Why there and not later |
+|---|---|---|
+| `snip:shutter` | the instant `desktopCapturer` returns, **before** the crop and the PNG encode | A large capture spends 100ms+ in `toPNG()` plus base64. A shutter after that reads as lag rather than as confirmation — and `snip:captured`, the obvious hook, is on the far side of it |
+| `snip:rec-started` | **before the recorder window is even opened** | On Windows a recording can be taking the desktop's own output by loopback. A cue played once `MediaRecorder` is running is the first thing on the recording's soundtrack. Window creation plus `getDisplayMedia` is several hundred ms of head start |
+
+**The shutter degrades, and the latch is how.** A shell older than 0.14.2 has no `snip:shutter` channel (rule 9c cuts both ways), so `SnipController` falls back to playing on `snip:captured` — late, but present. `shutterHeardRef` stops the two firing together on a shell that does have it, and `onFailed` clears the latch so a capture that shuttered and then failed to crop does not silence the next one.
+
+Failure is silent by design: autoplay policy, a muted device, a missing asset. None is worth a toast over a capture that is working.
 
 ---
 
@@ -597,7 +795,26 @@ It uses **`useSyncExternalStore`**, whose server snapshot is UTC and whose clien
 
 So: the owner's card opens `shareUrl` (the public page — which also shows them what a recipient sees), and the public page's image is **not wrapped in a link at all**. If a "view full size" affordance is ever wanted back, it needs to be a client-side zoom, not an anchor to the image route.
 
-**The same rule covers the recording**, and the browser's own `<video controls>` respects it — the built-in controls play, scrub and fullscreen in place, and none of them navigate. Do not add a download button: it would be an anchor to the video route, which is the leak this paragraph exists to prevent. A recipient who needs the file can still save it from the player's own menu, which follows the redirect without ever showing the target.
+**The same rule covers the recording.** The player's controls play, scrub and fullscreen in place, and none of them navigate. Do not add a download button: it would be an anchor to the video route, which is the leak this paragraph exists to prevent. A recipient who needs the file can still save it from the element's own menu, which follows the redirect without ever showing the target.
+
+### The player is ours, and the reason is the file, not taste
+
+It was the browser's, deliberately, and the note that said so is worth understanding before anyone puts it back.
+
+**A `MediaRecorder` WebM states no duration.** The recorder writes the EBML header before it knows how long the take will run and never returns to patch `Segment > Info > Duration`, so the element is handed what looks exactly like an open-ended stream — and renders what it renders for one: no end time, a scrub bar with nowhere to scrub to, and no way to jump back ten seconds. That is the symptom people report as "it plays like a live stream", and the browser is not wrong about what it was given.
+
+Two things fix it and both are in [`SnipVideo`](../src/app/s/_components/SnipVideo.tsx):
+
+1. **The duration is already ours.** `durationMs` is the recorder's own wall clock, stored on the row and projected to the public page, so the timeline is correct on first paint — before a metadata request has even landed, and for a file whose container will never say.
+2. **The browser is made to resolve it too.** `resolveDuration` seeks to `1e101` once, which walks the element to the last cluster; it then fires `durationchange` with the real length and becomes **seekable**. A duration we merely *displayed* would give the bar an end without making it reachable, which is the half that matters. It costs one extra range request on open, paid once. The seek target is absurd on purpose: any finite guess could fall short on a long take and would resolve the duration to the guess.
+
+Once the controls are ours, **playback speed is a control** (`SNIP_PLAYBACK_RATES`, 0.5×–2×) rather than an item buried in a context menu not every browser offers — which is the other thing a recipient of a ten-minute screen recording wants.
+
+**The accessibility the UA sheet gave away for free is re-paid explicitly**, because that was the real cost of leaving it. Every control is a real `Button` with a label; the scrubber and the volume are shadcn `Slider`s; and the surface takes the usual player keys (space/k, ←/→, m, f), which it has to, because a `<video>` without `controls` is not focusable and the UA's own key handling left with the chrome.
+
+**`thumbProps` on `Slider` exists for this.** Radix puts `role="slider"` on the **Thumb**, so an `aria-label` spread onto the Root — which is what the shadcn wrapper's `...props` does — never reaches the element a screen reader announces. A video scrubber sitting on top of the picture has nowhere to put an external `<label>`, and `aria-valuetext` matters for the same reason: without it the bar reads "0.4 of 132", a number of nothing.
+
+**Scrubbing commits, it does not track.** `onValueChange` moves the bar, `onValueCommit` moves the media. Seeking per pointer-move would be a range request — and therefore a redirect invocation — per pixel dragged.
 
 The still is served through `/api/public/snip/{id}/image` and a recording through `/api/public/snip/{id}/video`. Both **302 to a freshly signed URL** rather than streaming the object. That indirection is what makes the URL a recipient holds permanent to the outside (a Slack unfurl, a browser cache, an OG preview) and revocable from the inside — deleting the snip kills it immediately, where a handed-out signed URL would keep working until its own expiry. Both the redirect and the 404 are `no-store`; a cached redirect would outlive its target *and* survive the delete.
 
@@ -700,4 +917,10 @@ One transparent surface per display, each covering that display's bounds.
 - **The page is gated on app version 0.13.0** in two places — see the version-floor section above. It is a **floor, set once**: `0.14.0` and everything after it passes, so routine releases never touch it. **Video mode has its own second floor at `0.14.0`** and is gated separately, so a 0.13.x user keeps their library.
 - **This needs an Electron build** (rule 14, the two-push dance): `electron/main.js`, `preload.js` and two new files changed. A renderer on an older shell degrades cleanly — `window.electronAPI.snip` is absent, every call site feature-detects, and the page says to update.
 - **Recording needed a second build (0.14.0)**, and it adds three files to `electron/package.json`'s `files[]` — `snip-record.html`, `snip-record-preload.js` and `snip-frame.html`. A file left out of that list is absent from the packaged app and the feature fails only in production, which is the worst place to find out.
-- **No microphone ships in 0.14.0.** The entitlements plists and `mac.extendInfo` are deliberately unchanged from 0.13.0, so this release needs no new macOS capability. Re-adding narration means re-adding `com.apple.security.device.audio-input` AND `NSMicrophoneUsageDescription` together — without the usage string macOS does not refuse the request, it terminates the app.
+- **The sounds needed a third build (0.14.2)**, and it is the smallest possible one: two `sendTo(mainWindow, …)` lines in `main.js` and two listeners in `preload.js`. No new files, so `files[]` is untouched. Everything else in this pass — auto-copy, title/description, Import, the public player — is web only and ships on a plain Vercel deploy; a user on an older shell gets all of it, and only loses the shutter's *precision* (it falls back to `snip:captured`) and the recording cue entirely. There is deliberately **no new version floor**: nothing here is unusable on 0.14.0, and a floor would withhold four working features to enforce a sound.
+- **`SnipSettingsPopover`'s fingerprint has to grow with the settings map.** It content-compares five — now six — field values rather than the object, because the object's identity changes every time presence rewrites `users/{uid}`. A field added to `SnipSettings` and left out of that string is a field whose external change never reconciles the draft.
+- **The public page's `<video>` no longer uses native `controls`.** That was a documented decision and it was reversed for a documented reason — a `MediaRecorder` WebM states no duration, so the browser renders it as a live stream. See "The player is ours" above before changing it back.
+- **Narration ships in 0.15.0, on both platforms**, and it is the first release that needs a new macOS capability: `com.apple.security.device.audio-input` in both entitlements plists and `NSMicrophoneUsageDescription` in a new `mac.extendInfo` block. **Neither may ship without the other** — a missing usage string does not produce a refusal, it terminates the app.
+- **Never raise a permission prompt from the selection surface.** It is full-screen and always-on-top, and on a single display `armSnipOverlays` cancels the snip on blur — so a TCC dialog there destroys the surface that asked for it and resolves into a window that no longer exists. `snip-preload.js` deliberately exposes no `requestMic`.
+- **The "Open Settings" asymmetry runs the other way for the microphone.** Screen Recording has no Windows permission, so that button is macOS-only. The microphone is grantable on both (`ms-settings:privacy-microphone`), so gating it on macOS would hide the only route a Windows user has.
+- **The microphone status is never cached.** Every surface, every toggle and every focus of the settings card re-reads it. A status read once at launch is how a user who has just granted access is still told they have not.

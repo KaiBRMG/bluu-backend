@@ -202,9 +202,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onFailed: (callback) => {
       ipcRenderer.on('snip:failed', (_event, payload) => callback(payload));
     },
+    /**
+     * The screen has just been photographed — emitted before the crop and the
+     * PNG encode, which is the difference between a shutter sound that
+     * confirms and one that lags. Carries no payload: it is a moment, not data.
+     */
+    onShutter: (callback) => {
+      ipcRenderer.on('snip:shutter', () => callback());
+    },
+    /** A recording is starting, sent before the recorder window is even opened
+     *  so a cue cannot end up inside the recording's own system audio. */
+    onRecordingStarted: (callback) => {
+      ipcRenderer.on('snip:rec-started', () => callback());
+    },
     removeCapturedListeners: () => {
       ipcRenderer.removeAllListeners('snip:captured');
       ipcRenderer.removeAllListeners('snip:failed');
+      ipcRenderer.removeAllListeners('snip:shutter');
+      ipcRenderer.removeAllListeners('snip:rec-started');
     },
     // The tray's "My Snips" item — main asks the renderer to navigate rather
     // than loading a URL itself, so the App Router transition is a normal
@@ -366,6 +381,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     requestNotification: () => ipcRenderer.invoke('permissions:requestNotification'),
     // TEMPORARY: one-time stale-TCC repair for existing users (see CLAUDE.md).
     resetScreenCapture: () => ipcRenderer.invoke('permissions:resetScreenCapture'),
+
+    /**
+     * The microphone, for the Snipping Tool's settings card.
+     *
+     * Permission plumbing only — this window is remote content from the
+     * deployment and is never granted media access, so none of these can
+     * open a device. `micStatus` reads the OS, `requestMic` prompts on macOS
+     * (or opens settings where a prompt would show nothing), and
+     * `openMicSettings` is the explicit route for an already-denied user.
+     */
+    microphoneStatus: () => ipcRenderer.invoke('permissions:microphoneStatus'),
+    requestMicrophoneAccess: () => ipcRenderer.invoke('permissions:requestMicrophoneAccess'),
+    openMicrophoneSettings: () => ipcRenderer.invoke('permissions:openMicrophoneSettings'),
   },
 
   // Auto-updater (macOS only; the main process no-ops elsewhere)

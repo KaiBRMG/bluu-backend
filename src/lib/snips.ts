@@ -51,6 +51,35 @@ export const SNIPPING_TOOL_MIN_APP_VERSION = '0.13.0';
  */
 export const SNIP_VIDEO_MIN_APP_VERSION = '0.14.0';
 
+/**
+ * The installed build that added **microphone narration**.
+ *
+ * A *third* floor, for the same reason the second one exists rather than a
+ * bump: raising `SNIP_VIDEO_MIN_APP_VERSION` would take screen recording away
+ * from a user on 0.14.x to withhold an audio source they never had.
+ *
+ * **Narration is the only thing in its release that needs a floor**, and that
+ * is worth stating because four other features shipped beside it. Auto-copy,
+ * the title/description fields, Import and the public player are all renderer
+ * or server work: they reach a user on any shell the moment Vercel deploys, and
+ * gating them would withhold working features to enforce a version they do not
+ * need. The microphone cannot arrive that way — the toggle and the device
+ * picker are drawn by `snip.html` from flags main supplies, the permission
+ * status comes over IPC, and macOS additionally needs an entitlement and an
+ * Info.plist usage string that only a signed build carries.
+ *
+ * The two sound effects are the one thing deliberately left ungated. They have
+ * no UI to gate, and they degrade to something rather than nothing: the shutter
+ * falls back to `snip:captured` (the same capture, a PNG encode later) and the
+ * recording cue is simply absent. A version floor over a sound would be a
+ * notice about a thing the user has no way to miss.
+ *
+ * Like the two above it is `>=` and set once. It must name the build that
+ * actually ships the microphone plumbing in `main.js` and the macOS
+ * capability, not the one it was planned for.
+ */
+export const SNIP_MIC_MIN_APP_VERSION = '0.15.0';
+
 // ─── Share tokens ────────────────────────────────────────────────────
 
 /**
@@ -103,6 +132,201 @@ export function resolveSnipKind(value: unknown): SnipKind {
  *  a `nativeImage` and the recorder exports a canvas, so there is one format —
  *  an allowlist with one entry is still an allowlist. */
 export const SNIP_CONTENT_TYPE = 'image/png';
+
+// ─── Source ──────────────────────────────────────────────────────────
+
+/**
+ * Where a snip's bytes came from.
+ *
+ * **Absent means `capture`** — every row written before Import existed was one,
+ * and there are live share links pointing at them, so the reader defaults rather
+ * than a backfill writing the field. Same discipline as `resolveSnipKind`.
+ *
+ * It is display-only on the owner's surfaces (the "Imported" badge) and is
+ * deliberately **not** projected to the public page: how a file reached the
+ * library is the owner's business, not the recipient's.
+ */
+export type SnipSource = 'capture' | 'import';
+
+export function resolveSnipSource(value: unknown): SnipSource {
+  return value === 'import' ? 'import' : 'capture';
+}
+
+/**
+ * The image types Import accepts, and the extension each object is stored under.
+ *
+ * **An allowlist, not a sniff.** The upload slot pins the content type into the
+ * v4 signature, so this map is what a caller is allowed to make us sign — a
+ * free-text `contentType` would let someone have us sign a slot for
+ * `text/html`, which is an object the image route would then 302 a browser
+ * straight at.
+ *
+ * Deliberately no SVG: an SVG is a script-bearing document, and the image route
+ * hands out a signed URL on `storage.googleapis.com` that a browser will happily
+ * execute it from. There is no video here either — Import is stills only; a
+ * recording has a durable queue, a poster and a resumable session behind it, and
+ * none of that applies to a file the user already has on disk.
+ */
+export const SNIP_IMPORT_TYPES: Readonly<Record<string, string>> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+};
+
+/** For the file picker's `accept`, and for the drop zone's own check. */
+export const SNIP_IMPORT_ACCEPT = Object.keys(SNIP_IMPORT_TYPES).join(',');
+
+export function isSnipImportType(value: unknown): value is string {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(SNIP_IMPORT_TYPES, value);
+}
+
+/** `image/jpeg` → `jpg`. PNG for anything unrecognised, which cannot happen
+ *  behind `isSnipImportType` but keeps the path total. */
+export function snipImportExtension(contentType: string): string {
+  return SNIP_IMPORT_TYPES[contentType] ?? 'png';
+}
+
+// ─── Title & description ─────────────────────────────────────────────
+
+/**
+ * A snip has no name of its own — the picture is its identity — so these are
+ * both optional and both added *after* the fact, from the library card.
+ *
+ * The caps are short on purpose. The title sits on a card in a three-column
+ * grid and on the public page above the capture; a title that wraps to four
+ * lines is a caption competing with the thing it captions.
+ */
+export const SNIP_TITLE_MAX = 80;
+export const SNIP_DESCRIPTION_MAX = 500;
+
+/**
+ * Trims, collapses newlines out of a title, caps the length, and turns "nothing
+ * left" into `null` so the caller can `FieldValue.delete()` rather than store an
+ * empty string.
+ *
+ * Shared by the dialog (so the counter and the save agree) and by the API route,
+ * because the dialog is not the authority on what gets stored.
+ */
+export function normaliseSnipTitle(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const clean = value.replace(/\s+/g, ' ').trim().slice(0, SNIP_TITLE_MAX);
+  return clean.length > 0 ? clean : null;
+}
+
+/** Same, but newlines survive — a description is allowed to be a paragraph. */
+export function normaliseSnipDescription(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const clean = value.replace(/\r\n/g, '\n').trim().slice(0, SNIP_DESCRIPTION_MAX);
+  return clean.length > 0 ? clean : null;
+}
+
+// ─── Microphone ──────────────────────────────────────────────────────
+
+/**
+ * What the OS says about our access to the microphone.
+ *
+ * These are `systemPreferences.getMediaAccessStatus('microphone')`'s own five
+ * values, carried through unchanged rather than collapsed into a boolean —
+ * because **each one needs different words and a different button**, and that
+ * is the whole of what makes the prompting flow graceful rather than a dead
+ * toggle:
+ *
+ * | Status | What it means | What we offer |
+ * |---|---|---|
+ * | `granted` | usable now | nothing; just record |
+ * | `not-determined` | never asked | **macOS:** ask in-app (the OS prompt). **Windows:** nothing to prompt — try it |
+ * | `denied` | the user (or an admin) said no | **Open Settings.** macOS will NOT re-prompt — see `askForMediaAccess` |
+ * | `restricted` | policy/parental controls forbid it | say so; there is no button that helps |
+ * | `unknown` | the platform cannot answer (Linux, old builds) | treat as "try it and see" |
+ *
+ * The critical one is `denied`. On macOS `askForMediaAccess` resolves with the
+ * existing status **without showing an alert** once access has been refused
+ * once, so an app that keeps calling it presents a button that silently does
+ * nothing. That is the single most common way this flow is got wrong.
+ */
+export type SnipMicPermission =
+  | 'granted'
+  | 'denied'
+  | 'not-determined'
+  | 'restricted'
+  | 'unknown';
+
+export function resolveSnipMicPermission(value: unknown): SnipMicPermission {
+  return value === 'granted' || value === 'denied' || value === 'not-determined' ||
+    value === 'restricted'
+    ? value
+    : 'unknown';
+}
+
+/** One audio input, as the selection surface's picker lists it. */
+export interface SnipMicDevice {
+  /** Chromium's per-origin id. `''` is never used here — the default is
+   *  represented by the absence of a selection, not by a sentinel device. */
+  deviceId: string;
+  /** Empty until the permission is granted: Chromium withholds device labels
+   *  from a context that has not been allowed the microphone. A picker showing
+   *  "Microphone 1 / Microphone 2" is the symptom of enumerating too early. */
+  label: string;
+}
+
+/**
+ * A stored `micDeviceId`, cleaned.
+ *
+ * Chromium device ids are 64 hex characters, plus the two reserved names
+ * `default` and `communications`. Rather than pin that shape — it is a browser
+ * implementation detail and has changed before — this bounds the length and
+ * refuses anything that is not a plain token, which is enough to keep junk out
+ * of Firestore and out of a `getUserMedia` constraint.
+ */
+export function normaliseSnipMicDeviceId(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const clean = value.trim();
+  if (clean.length === 0 || clean.length > 256) return '';
+  return /^[A-Za-z0-9+/=_-]+$/.test(clean) ? clean : '';
+}
+
+/**
+ * The device to actually open, given what was stored and what exists now.
+ *
+ * **A stored id is a preference, never a promise.** The id is per-origin and
+ * per-machine, so the same user on a second laptop — or on the same laptop
+ * after unplugging a headset — holds an id that matches nothing. Returning
+ * `''` there means `getUserMedia` takes the system default, which is the
+ * behaviour a person expects from every other app they own: their microphone
+ * still works, it is simply the default one again.
+ */
+export function resolveSnipMicDevice(
+  storedId: string,
+  devices: ReadonlyArray<SnipMicDevice>,
+): string {
+  const wanted = normaliseSnipMicDeviceId(storedId);
+  if (!wanted) return '';
+  return devices.some(device => device.deviceId === wanted) ? wanted : '';
+}
+
+/**
+ * Whether this platform has a microphone permission worth checking.
+ *
+ * `getMediaAccessStatus` is documented for macOS and Windows only, so anywhere
+ * else the answer is `unknown` and the right move is to try rather than to
+ * gate. Note this is the **opposite shape** to screen capture, where macOS has
+ * a permission and Windows has none: the microphone is a real, grantable
+ * permission on both, which is why the "Open Settings" button here is NOT
+ * macOS-only the way the screen-recording one is.
+ */
+export const SNIP_MIC_PLATFORMS = ['darwin', 'win32'] as const;
+
+// ─── Playback ────────────────────────────────────────────────────────
+
+/**
+ * The speeds the public player offers.
+ *
+ * A short list rather than a slider: these are screen recordings, and the two
+ * things a recipient actually wants are "skim this faster" and "what did that
+ * click do" — 0.5 and 2 cover both ends and the rest are the steps in between.
+ */
+export const SNIP_PLAYBACK_RATES: readonly number[] = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 /**
  * WebM for a recording, and the container is **fixed here** because the signed
@@ -370,12 +594,51 @@ export interface SnipSettings {
    * by default; this one records the desktop's own output. Opt-in, and sticky
    * afterwards so the choice survives the surface closing.
    *
-   * There is deliberately **no microphone setting.** Narration is not in this
-   * pass at all — see the note on `SnipSettings` consumers in
-   * documentation/snipping-tool.md. When it returns it needs its own field, an
-   * Info.plist usage string and an entitlement, none of which ship today.
+   * The microphone is a separate field (`micEnabled` below), not a mode of
+   * this one. They are independent sources on opposite platforms — loopback is
+   * Windows-only, the microphone works on both — and a recording may carry
+   * either, both or neither.
    */
   systemAudioEnabled: boolean;
+  /**
+   * Whether a finished upload puts the share link on the clipboard.
+   *
+   * **Default ON — it is the behaviour the tool shipped with**, and for most
+   * users the clipboard *is* the deliverable: the snip is taken in order to be
+   * pasted somewhere a second later. Turning it off is for the user who keeps
+   * something else on their clipboard while they work and does not want a
+   * capture quietly replacing it; the upload still happens and the link is
+   * still one click away on the card.
+   *
+   * `!== false` like the rest of the map — absent reads as on.
+   *
+   * Note it only governs the *interactive* path. The background drain never
+   * touches the clipboard regardless (see `SnipController.announce`), because
+   * an upload the user did not ask for must not take it either way.
+   */
+  autoCopyEnabled: boolean;
+  /**
+   * Whether Video mode's **Microphone** toggle was last left on.
+   *
+   * **Opt-in (`=== true`), like `systemAudioEnabled` and for a stronger
+   * reason.** System audio records the machine's own output; this records the
+   * room the person is sitting in. A default-on microphone is the one setting
+   * in this product that could capture something the user did not intend to
+   * capture, so absent means off and it stays off until they say otherwise.
+   */
+  micEnabled: boolean;
+  /**
+   * Which input device, or `''` for the system default.
+   *
+   * A Chromium `deviceId`, which is **per-origin and not stable across
+   * machines** — it is a hash keyed to the browsing context. Storing it on the
+   * user doc rather than on the device is a deliberate trade: the common case
+   * is one person on one laptop, where it survives restarts and is exactly
+   * what they want; on a second machine it simply will not match any device
+   * and `resolveSnipMicDevice` falls back to the default rather than failing.
+   * Never treat a stored id as proof a device exists.
+   */
+  micDeviceId: string;
 }
 
 export const DEFAULT_SNIP_SETTINGS: SnipSettings = {
@@ -384,6 +647,9 @@ export const DEFAULT_SNIP_SETTINGS: SnipSettings = {
   shortcut: DEFAULT_SNIP_SHORTCUT,
   retention: DEFAULT_SNIP_RETENTION,
   systemAudioEnabled: false,
+  autoCopyEnabled: true,
+  micEnabled: false,
+  micDeviceId: '',
 };
 
 /**
@@ -401,6 +667,11 @@ export function resolveSnipSettings(raw: Partial<SnipSettings> | undefined | nul
     retention: isSnipRetention(raw?.retention) ? raw.retention : DEFAULT_SNIP_RETENTION,
     // `=== true`, not `!== false` — the one opt-in field. See `SnipSettings`.
     systemAudioEnabled: raw?.systemAudioEnabled === true,
+    autoCopyEnabled: raw?.autoCopyEnabled !== false,
+    // `=== true` — the second opt-in field, and the stricter of the two. See
+    // `SnipSettings.micEnabled`.
+    micEnabled: raw?.micEnabled === true,
+    micDeviceId: normaliseSnipMicDeviceId(raw?.micDeviceId),
   };
 }
 

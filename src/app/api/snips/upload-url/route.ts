@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
-import { resolveSnipKind } from '@/lib/snips';
+import { resolveSnipKind, resolveSnipSource } from '@/lib/snips';
 import {
   SnipQuotaError,
   createSnipUploadSlot,
@@ -31,13 +31,30 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     // extension, the byte ceiling, and whether a second slot is signed for the
     // poster — so it is resolved once here and never re-read from the finalise
     // call, which reads it back off the reservation instead.
+    // An import names its own content type; a capture never does. The service
+    // looks that name up in the `SNIP_IMPORT_TYPES` allowlist rather than
+    // trusting it — the v4 signature pins whatever it is given, and the public
+    // image route 302s a browser straight at the object, so a free-text type
+    // here would be a way to have us sign a slot for `text/html` on our bucket.
+    const source = resolveSnipSource(body?.source);
     const slot = await createSnipUploadSlot(
       token.uid,
       Number(body?.bytes),
       resolveSnipKind(body?.kind),
+      source === 'import'
+        ? { source, contentType: typeof body?.contentType === 'string' ? body.contentType : '' }
+        : {},
     );
     if (!slot) {
-      return NextResponse.json({ error: 'That capture is not a valid size' }, { status: 400 });
+      return NextResponse.json(
+        {
+          error:
+            source === 'import'
+              ? 'That file is not a supported image, or is too large'
+              : 'That capture is not a valid size',
+        },
+        { status: 400 },
+      );
     }
     return NextResponse.json(slot, {
       headers: { 'Cache-Control': 'no-store' },

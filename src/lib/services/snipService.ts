@@ -17,13 +17,19 @@ import {
   SNIP_STORAGE_PREFIX,
   SNIP_VIDEO_CONTENT_TYPE,
   SNIPPING_TOOL_PAGE_ID,
+  isSnipImportType,
   isValidSnipId,
+  normaliseSnipDescription,
+  normaliseSnipTitle,
   resolveSnipKind,
   resolveSnipSettings,
+  resolveSnipSource,
   snipExpiryMs,
+  snipImportExtension,
   type SnipKind,
   type SnipRetention,
   type SnipSettings,
+  type SnipSource,
 } from '@/lib/snips';
 import type { PublicSnip, SnipPage, SnipRow } from '@/types/snips';
 
@@ -199,6 +205,17 @@ export async function createSnipUploadSlot(
   uid: string,
   bytes: number,
   kind: SnipKind = 'image',
+  /**
+   * Import only. `source: 'import'` records how the row was created (the card's
+   * badge) and `contentType` names which of the allowlisted image types the
+   * signature should pin — a dropped JPEG has to be stored and served as one.
+   *
+   * **The content type is looked up in `SNIP_IMPORT_TYPES`, never taken as
+   * given.** The v4 signature pins whatever it is told, and the public image
+   * route 302s a browser straight at the object — so a free-text value here
+   * would be a way to have us sign a slot for `text/html` on our own bucket.
+   */
+  options: { source?: SnipSource; contentType?: string } = {},
 ): Promise<{
   id: string;
   uploadUrl: string;
@@ -232,8 +249,16 @@ export async function createSnipUploadSlot(
   // resolves `storagePath` from the document rather than rebuilding it, so both
   // layouts work and no migration is required.
   const video = kind === 'video';
-  const contentType = video ? SNIP_VIDEO_CONTENT_TYPE : SNIP_CONTENT_TYPE;
-  const storagePath = `${SNIP_STORAGE_PREFIX}/${id}.${video ? 'webm' : 'png'}`;
+  // An import is the only path that may name its own type, and only from the
+  // allowlist. A capture is always the PNG the crop produced, so it never
+  // consults the request at all.
+  const imported = !video && options.source === 'import';
+  const importType =
+    imported && isSnipImportType(options.contentType) ? options.contentType : null;
+  if (imported && !importType) return null;
+  const contentType = video ? SNIP_VIDEO_CONTENT_TYPE : (importType ?? SNIP_CONTENT_TYPE);
+  const extension = video ? 'webm' : importType ? snipImportExtension(importType) : 'png';
+  const storagePath = `${SNIP_STORAGE_PREFIX}/${id}.${extension}`;
   // A recording's poster is a second object under the same token. It shares the
   // row's lifetime exactly — every delete path below removes both — so it needs
   // no id of its own, and deriving the name means a poster can never be orphaned
@@ -249,6 +274,9 @@ export async function createSnipUploadSlot(
     storagePath,
     contentType,
     kind,
+    // Absent means `capture` (see `resolveSnipSource`), so only an import
+    // writes the field — nothing has to backfill the rows that came before it.
+    ...(imported ? { source: 'import' as const } : {}),
     ...(posterPath ? { posterPath } : {}),
     status: 'pending',
     reservedAt: FieldValue.serverTimestamp(),
@@ -334,6 +362,14 @@ export async function finalizeSnip(
   width: number,
   height: number,
   durationMs?: number,
+  /**
+   * Import only, and it is the one place a title is set at creation: the file
+   * the user dropped already has a name, and discarding it to make them retype
+   * it on the card afterwards would be gratuitous. A capture has no name to
+   * take, so it arrives here without one and gets its title (if ever) from
+   * `updateSnipDetails`.
+   */
+  options: { title?: unknown } = {},
 ): Promise<SnipRow | null> {
   if (!isValidSnipId(id)) return null;
   if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
@@ -397,6 +433,8 @@ export async function finalizeSnip(
     if (!posterExists) posterPath = null;
   }
 
+  const title = normaliseSnipTitle(options.title);
+
   const retention = (await getSnipSettings(uid)).retention;
   const createdAt = new Date();
   const expiresMs = snipExpiryMs(createdAt.getTime(), retention);
@@ -407,6 +445,7 @@ export async function finalizeSnip(
     height,
     bytes,
     retention,
+    ...(title ? { title } : {}),
     ...(duration == null ? {} : { durationMs: duration }),
     ...(data.posterPath && !posterPath ? { posterPath: FieldValue.delete() } : {}),
     createdAt: Timestamp.fromDate(createdAt),
@@ -421,6 +460,9 @@ export async function finalizeSnip(
     expiresAt: expiresMs == null ? null : new Date(expiresMs).toISOString(),
     kind,
     durationMs: duration,
+    title,
+    description: null,
+    source: resolveSnipSource(data.source),
     width,
     height,
     bytes,
@@ -473,6 +515,9 @@ function toSnipRow(doc: FirebaseFirestore.QueryDocumentSnapshot): SnipRow {
     expiresAt: d.expiresAt?.toDate?.()?.toISOString() ?? null,
     kind,
     durationMs: typeof d.durationMs === 'number' ? d.durationMs : null,
+    title: typeof d.title === 'string' ? d.title : null,
+    description: typeof d.description === 'string' ? d.description : null,
+    source: resolveSnipSource(d.source),
     width: d.width ?? 0,
     height: d.height ?? 0,
     bytes: d.bytes ?? 0,
@@ -584,6 +629,11 @@ export async function getPublicSnip(id: string): Promise<PublicSnip | null> {
     // whether to press play — but note what it still is not: a byte size. How
     // large the file is remains the owner's business.
     durationMs: typeof d.durationMs === 'number' ? d.durationMs : null,
+    // The owner's own caption, and the only owner-authored text on this page.
+    // `source` is deliberately NOT here — whether a file was captured or
+    // imported is a fact about the owner's workflow, not about the snip.
+    title: typeof d.title === 'string' ? d.title : null,
+    description: typeof d.description === 'string' ? d.description : null,
     width: d.width ?? 0,
     height: d.height ?? 0,
     sharedBy: owner?.displayName?.trim() || null,
@@ -645,6 +695,62 @@ export async function getSnipMediaRedirect(
       expires: Date.now() + SIGNED_READ_TTL_MS,
     });
   return url;
+}
+
+// ─── Details (title & description) ───────────────────────────────────
+
+/**
+ * Names a snip the user already has.
+ *
+ * **After the fact, and that is the only time it can be.** A capture happens
+ * while the user is in another application and the whole design of the tool is
+ * that it finishes without asking them anything — so there is no moment at
+ * which a title could be requested. The card is where they are looking when
+ * they next think about the snip, so the card is where this lives.
+ *
+ * Returns the updated row rather than `true`, so the page applies the server's
+ * answer instead of trusting its own draft — the normalisers here (not the
+ * dialog's) decide what "empty" is, and a title of three spaces has to come
+ * back as `null` rather than sitting in the UI as a saved value.
+ *
+ * Only the keys present in `patch` are touched: the dialog writes both together
+ * today, but an update that always wrote both would mean a future caller
+ * clearing a description it never asked about.
+ *
+ * An emptied field is **deleted, not set to null** — the same rule the rest of
+ * this file follows for `expiresAt`. Nothing queries these (they carry
+ * `"indexes": []` overrides per rule 9), so the reason is smaller here than it
+ * is there, but one convention for "this field is not set" is worth more than
+ * two.
+ */
+export async function updateSnipDetails(
+  uid: string,
+  id: string,
+  patch: { title?: unknown; description?: unknown },
+): Promise<SnipRow | null> {
+  if (!isValidSnipId(id)) return null;
+
+  const ref = adminDb.collection(COLLECTION).doc(id);
+  const snap = await ref.get();
+  const data = snap.data();
+  // Ownership, per row, exactly as `deleteSnip` does it. The page permission
+  // says the caller may have snips; it says nothing about this one.
+  if (!data || data.ownerUid !== uid || data.status !== 'ready') return null;
+
+  const update: Record<string, unknown> = {};
+  if ('title' in patch) {
+    const title = normaliseSnipTitle(patch.title);
+    update.title = title ?? FieldValue.delete();
+  }
+  if ('description' in patch) {
+    const description = normaliseSnipDescription(patch.description);
+    update.description = description ?? FieldValue.delete();
+  }
+  // Nothing to write is not a failure — the dialog can be saved unchanged.
+  if (Object.keys(update).length > 0) await ref.update(update);
+
+  const after = await ref.get();
+  return toSnipRow(after as FirebaseFirestore.QueryDocumentSnapshot);
 }
 
 // ─── Delete ──────────────────────────────────────────────────────────

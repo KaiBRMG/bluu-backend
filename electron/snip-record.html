@@ -311,6 +311,9 @@
       let config = null;
       let recorder = null;
       let displayStream = null;
+      let micStream = null;
+      /** The mixer, and ONLY when there are two sources to mix. See `start`. */
+      let audioContext = null;
       let canvasTrack = null;
       let rafId = 0;
 
@@ -494,6 +497,73 @@
           setNote('System audio could not be captured. Recording continues without it.', true);
         }
 
+        /*
+          ── The microphone ────────────────────────────────────────────────
+
+          Opened HERE, in the recorder, and nowhere else. The selection surface
+          can name devices but is refused `getUserMedia`; this window is the
+          only one main authorises for an audio-only capture, and only when the
+          committed selection asked for narration (`recorderMediaAllowed`).
+
+          The permission itself was already resolved by main before this window
+          existed, so nothing below can raise an OS prompt into the recording.
+          What is left here is the device: it may have been unplugged between
+          the surface listing it and this call.
+        */
+        const micTracks = [];
+        if (config.audio.mic) {
+          const constraints = {
+            // All three on, and the first one earns its place on Windows
+            // specifically: with system audio on loopback, the speakers are
+            // playing the very thing being recorded and the microphone hears
+            // it. Without cancellation that lands in the file as an echo of
+            // the desktop audio, half a beat late.
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          };
+          try {
+            micStream = await navigator.mediaDevices.getUserMedia({
+              audio: config.audio.micDeviceId
+                // `exact`, not a bare id: a soft preference silently falls back
+                // to the default device, so a user recording from a specific
+                // interface would get the laptop lid mic and no indication of
+                // it. We would rather fail here and retry visibly, below.
+                ? Object.assign({ deviceId: { exact: config.audio.micDeviceId } }, constraints)
+                : constraints,
+            });
+          } catch (error) {
+            // The named device is gone — unplugged since the surface listed
+            // it, which is the single likeliest microphone failure there is.
+            // Falling back to the default beats losing narration entirely, and
+            // the note says which microphone the user actually got.
+            if (config.audio.micDeviceId) {
+              try {
+                micStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+                setNote('That microphone is unavailable — using the default one.', true);
+              } catch {
+                micStream = null;
+              }
+            } else {
+              micStream = null;
+            }
+          }
+          if (micStream) {
+            for (const track of micStream.getAudioTracks()) micTracks.push(track);
+          }
+          if (micTracks.length === 0) {
+            // Asked for and not delivered, said for the same reason the system
+            // audio line above is said: a user who wanted narration has to
+            // find out now, not on playback.
+            setNote('No microphone could be opened. Recording continues without narration.', true);
+          }
+        } else if (config.micNote) {
+          // Main dropped the microphone before this window opened, because the
+          // OS had denied or restricted access. It carries the reason down so
+          // the bar can state it for the length of the take.
+          setNote(config.micNote, true);
+        }
+
         const video = document.createElement('video');
         video.srcObject = displayStream;
         video.muted = true;
@@ -548,10 +618,33 @@
         const canvasStream = canvas.captureStream(0);
         canvasTrack = canvasStream.getVideoTracks()[0];
 
-        // System audio only — there is no microphone in this build, so there
-        // is never more than one audio source and nothing to mix. When
-        // narration returns, this is where an AudioContext graph belongs.
-        const tracks = [canvasTrack].concat(systemAudio);
+        /*
+          Two sources need a mixer; one does not.
+
+          `MediaRecorder` encodes ONE audio track. Handing it two — the
+          desktop's output and a voice — records whichever it takes first and
+          silently drops the other, which is the failure mode that looks like
+          "the mic did not work". So when both exist they are summed through a
+          single `AudioContext` into one destination track.
+
+          The single-source paths deliberately do NOT go through the graph.
+          Passing a lone track straight to the recorder keeps it in its native
+          form, avoids a resample, and leaves the common case with nothing that
+          can fail — an `AudioContext` that refuses to start would otherwise
+          take down a recording that never needed one.
+        */
+        let audioTracks;
+        if (systemAudio.length > 0 && micTracks.length > 0) {
+          audioContext = new AudioContext();
+          const destination = audioContext.createMediaStreamDestination();
+          audioContext.createMediaStreamSource(new MediaStream(systemAudio)).connect(destination);
+          audioContext.createMediaStreamSource(new MediaStream(micTracks)).connect(destination);
+          audioTracks = destination.stream.getAudioTracks();
+        } else {
+          audioTracks = systemAudio.concat(micTracks);
+        }
+
+        const tracks = [canvasTrack].concat(audioTracks);
 
         const mimeType = MIME_CANDIDATES.find(
           (type) => window.MediaRecorder && MediaRecorder.isTypeSupported(type),
@@ -567,9 +660,11 @@
         recorder = new MediaRecorder(new MediaStream(tracks), {
           mimeType,
           videoBitsPerSecond,
-          // Opus. 128k when the desktop's own output is in the mix (music,
-          // a call, a video), 96k for a single voice — above which Opus
-          // stops meaningfully improving on speech.
+          // Opus. 128k whenever the desktop's own output is in the mix (music,
+          // a call, a video), 96k for a single voice — above which Opus stops
+          // meaningfully improving on speech. Narration alone therefore stays
+          // at 96k; narration *over* system audio is no longer speech-only and
+          // takes the higher rate.
           audioBitsPerSecond: systemAudio.length > 0 ? 128000 : 96000,
         });
 
@@ -697,6 +792,18 @@
         cancelAnimationFrame(rafId);
         if (displayStream) {
           for (const track of displayStream.getTracks()) track.stop();
+        }
+        // The microphone must be released explicitly. Its tracks are not part
+        // of `displayStream`, and a live one left open keeps the OS recording
+        // indicator lit — on macOS an orange dot in the menu bar — long after
+        // the take has finished, which reads as the app still listening.
+        if (micStream) {
+          for (const track of micStream.getTracks()) track.stop();
+          micStream = null;
+        }
+        if (audioContext) {
+          audioContext.close().catch(() => {});
+          audioContext = null;
         }
         if (canvasTrack) canvasTrack.stop();
       }

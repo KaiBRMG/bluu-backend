@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Link2, Play, Trash2, Video } from 'lucide-react';
+import { Link2, Pencil, Play, Trash2, Video } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -23,12 +23,16 @@ export function SnipCard({
   timezone,
   onCopy,
   onDelete,
+  onEdit,
 }: {
   snip: SnipRow;
   /** Resolved by `useViewerTimezone` upstream — never a raw `users` value (rule 9g). */
   timezone: string;
   onCopy: (snip: SnipRow) => void;
   onDelete: (snip: SnipRow) => Promise<void>;
+  /** Opens the title/description dialog. The page owns it, so one dialog is
+   *  mounted for the whole grid rather than one per card. */
+  onEdit: (snip: SnipRow) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -52,6 +56,19 @@ export function SnipCard({
   );
   const taken = stamp.format(new Date(snip.createdAt)).replace(',', '');
   const isVideo = snip.kind === 'video';
+  const isImported = snip.source === 'import';
+  // The title is the row's name when it has one; the timestamp is the fallback,
+  // and stays the identifier in every `aria-label` either way so a screen
+  // reader's action list cannot end up with three buttons called "Copy the link
+  // to Untitled".
+  const label = snip.title || `the ${isVideo ? 'recording' : 'snip'} taken ${taken}`;
+  // The badge below sits INSIDE the anchor, and an `aria-label` replaces an
+  // element's contents for assistive tech rather than adding to them — so the
+  // word "Imported" was painted and never announced. The one distinction the
+  // badge exists to draw was invisible to exactly the users who cannot see the
+  // badge. It goes into the name instead, once, on the control that carries
+  // the row's identity.
+  const linkLabel = `Open the shared page for ${label}${isImported ? ' (imported)' : ''}`;
   // A recording has a poster unless its upload failed. Either way the grid
   // shows a still and never a `<video>`: 24 media elements in a scrolling grid
   // is 24 pipelines and 24 range-request storms, for cells the user is only
@@ -76,7 +93,7 @@ export function SnipCard({
         target="_blank"
         rel="noreferrer"
         className="relative flex h-40 items-center justify-center overflow-hidden border-b border-white/[0.07] bg-black/30 transition-colors hover:bg-black/20 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50"
-        aria-label={`Open the shared page for the ${isVideo ? 'recording' : 'snip'} taken ${taken}`}
+        aria-label={linkLabel}
         title="Open shared page"
       >
         {/* A raw <img>, for the same reason the public page uses one: next/image
@@ -105,6 +122,20 @@ export function SnipCard({
           <span className="px-3 text-center text-xs text-zinc-400">Preview unavailable</span>
         )}
 
+        {isImported && (
+          // An attribute the row CARRIES, not a state it is in — so greyscale
+          // and `rounded-md`, per DESIGN.md §5's attribute chip. It answers the
+          // one question a mixed grid raises ("why is there a photo in my
+          // screenshots?") and nothing more, which is also why it is absent
+          // from the public page: how a file got here is the owner's business.
+          <span
+            aria-hidden
+            className="pointer-events-none absolute left-1.5 top-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-medium text-zinc-200 ring-1 ring-white/15"
+          >
+            Imported
+          </span>
+        )}
+
         {isVideo && (
           // Two marks, because each answers a different question at a glance:
           // the play badge says "this one moves", the duration says whether it
@@ -130,6 +161,14 @@ export function SnipCard({
 
       <div className="flex items-center justify-between gap-2 px-3 py-2.5">
         <div className="min-w-0">
+          {/* The title, when there is one, outranks the meta line — a snip that
+              has been named is one the user named in order to find it again,
+              and a 2026-09-23 · 1280 × 720 line is not what they will scan for. */}
+          {snip.title && (
+            <p className="truncate text-sm font-medium text-zinc-200" title={snip.title}>
+              {snip.title}
+            </p>
+          )}
           <p className="truncate text-xs text-zinc-400">
             <span className="tabular-nums">{taken}</span>
             <span aria-hidden> · </span>
@@ -162,7 +201,7 @@ export function SnipCard({
             variant="ghost"
             size="icon"
             className="size-7 text-zinc-400 hover:text-zinc-200"
-            aria-label={`Copy the link to the ${isVideo ? 'recording' : 'snip'} taken ${taken}`}
+            aria-label={`Copy the link to ${label}`}
             onClick={() => onCopy(snip)}
           >
             <Link2 className="size-4" />
@@ -170,8 +209,17 @@ export function SnipCard({
           <Button
             variant="ghost"
             size="icon"
+            className="size-7 text-zinc-400 hover:text-zinc-200"
+            aria-label={`Edit the title and description of ${label}`}
+            onClick={() => onEdit(snip)}
+          >
+            <Pencil className="size-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             className="size-7 text-zinc-400 hover:text-destructive"
-            aria-label={`Delete the ${isVideo ? 'recording' : 'snip'} taken ${taken}`}
+            aria-label={`Delete ${label}`}
             onClick={() => setConfirming(true)}
           >
             <Trash2 className="size-4" />
@@ -185,7 +233,9 @@ export function SnipCard({
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this {isVideo ? 'recording' : 'snip'}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Delete {snip.title ? `“${snip.title}”` : `this ${isVideo ? 'recording' : 'snip'}`}?
+            </AlertDialogTitle>
             <AlertDialogDescription>
               The {isVideo ? 'recording' : 'image'} is deleted permanently and the
               link stops working for anyone you have already sent it to. This

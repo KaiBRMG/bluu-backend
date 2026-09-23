@@ -13,5 +13,19 @@
        team ID as the app bundle, so strict library validation rejects them. -->
   <key>com.apple.security.cs.disable-library-validation</key>
   <true/>
+
+  <!-- The microphone, for the Snipping Tool's narration.
+
+       Under the Hardened Runtime this is what permits the process to open an
+       audio input at all; it is the same key the App Sandbox uses, and it is
+       required here even though this app is not sandboxed.
+
+       It is only half of what macOS needs. `NSMicrophoneUsageDescription` in
+       the Info.plist (see `mac.extendInfo` in package.json) is the other half,
+       and its absence is not a refusal -- TCC TERMINATES the process the
+       moment the microphone is requested. Neither of these two may ship
+       without the other. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
 </dict>
 </plist>

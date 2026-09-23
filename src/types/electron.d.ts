@@ -353,6 +353,15 @@ interface ElectronAPI {
       /** Seeds the selection surface's System audio toggle. Optional because a
        *  renderer newer than its shell must still be able to arm the shortcut. */
       systemAudioEnabled?: boolean;
+      /** Seeds the selection surface's Microphone toggle and its device
+       *  picker. Optional for the same reason as the line above: a renderer
+       *  newer than its shell must still be able to arm the shortcut.
+       *
+       *  Note this seeds the *preference*, never the permission — main reads
+       *  the OS status fresh for every surface, so a grant made in System
+       *  Settings since the last capture is picked up immediately. */
+      micEnabled?: boolean;
+      micDeviceId?: string;
       /** Whether THIS renderer can receive a finished recording. A new shell
        *  hides the Video toggle unless it is true, so an old page bundle
        *  cannot start a recording it has no listener for (rule 9c). */
@@ -392,6 +401,15 @@ interface ElectronAPI {
      *  • `unknown`         — anything else.
      */
     onFailed?: (callback: (payload: { reason: string }) => void) => void;
+    /**
+     * The shutter: the screen has just been photographed, ahead of the crop and
+     * the PNG encode. Optional — a shell older than this has no such channel,
+     * and the renderer falls back to `onCaptured` (late, but present).
+     */
+    onShutter?: (callback: () => void) => void;
+    /** A recording is starting, sent before the recorder window opens so a cue
+     *  cannot land inside the recording's own system audio. */
+    onRecordingStarted?: (callback: () => void) => void;
     removeCapturedListeners: () => void;
     onNavigate: (callback: (href: string) => void) => void;
     removeNavigateListeners: () => void;
@@ -460,10 +478,18 @@ interface ElectronAPI {
     savePendingRecording?: (
       token: string,
     ) => Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }>;
-    /** The System audio toggle changed on the selection surface; this window
-     *  holds the session, so it persists it. */
+    /** An audio choice changed on the selection surface — System audio, the
+     *  Microphone toggle, or the input device. This window holds the session,
+     *  so it is the one that persists them.
+     *
+     *  `micEnabled` and `micDeviceId` are optional on the wire: a shell older
+     *  than 0.15.0 sends neither, and `resolveSnipSettings` defaults both. */
     onAudioPrefs?: (
-      callback: (prefs: { systemAudioEnabled: boolean }) => void,
+      callback: (prefs: {
+        systemAudioEnabled: boolean;
+        micEnabled?: boolean;
+        micDeviceId?: string;
+      }) => void,
     ) => void;
     removeAudioPrefsListeners?: () => void;
   };
@@ -522,6 +548,40 @@ interface ElectronAPI {
      * feature-detect; absent on older installed builds. See CLAUDE.md removal note.
      */
     resetScreenCapture?: () => Promise<{ success: boolean; alreadyReset?: boolean; error?: string }>;
+
+    /**
+     * The microphone, for the Snipping Tool's settings card.
+     *
+     * Optional throughout — an installed shell older than 0.15.0 has none of
+     * these, and every call site feature-detects (rule 9c).
+     *
+     * **`microphoneStatus` is why there are three of these rather than one.**
+     * A lone "request" call cannot tell "never asked" from "refused", and on
+     * macOS those need opposite treatment: the first shows an OS prompt, the
+     * second shows nothing at all, because `askForMediaAccess` resolves with
+     * the existing status and suppresses the alert once access has been
+     * denied. A UI wired only to `request` is therefore a button that silently
+     * does nothing for exactly the users who need it to work.
+     */
+    microphoneStatus?: () => Promise<{
+      /** False where the platform has no microphone permission to read. */
+      supported: boolean;
+      status: 'granted' | 'denied' | 'not-determined' | 'restricted' | 'unknown';
+      /** macOS only. Windows gates every win32 app behind one global switch,
+       *  so there is nothing to prompt and the only move is the settings page. */
+      canPrompt: boolean;
+    }>;
+    /** Prompts where a prompt would actually be shown; otherwise opens the OS
+     *  settings page. `prompted` / `settingsOpened` say which happened, so the
+     *  caller can update its copy honestly rather than guessing. */
+    requestMicrophoneAccess?: () => Promise<{
+      status: 'granted' | 'denied' | 'not-determined' | 'restricted' | 'unknown';
+      prompted: boolean;
+      settingsOpened: boolean;
+    }>;
+    /** The OS page where microphone access is granted. Exists on **both**
+     *  platforms, unlike `requestScreenAccess` — see its note in main.js. */
+    openMicrophoneSettings?: () => Promise<{ success: boolean }>;
   };
   /**
    * macOS auto-update. `getPending`/`onAvailable`/`download` land in v0.8.0 —

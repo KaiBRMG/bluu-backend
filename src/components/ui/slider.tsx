@@ -11,8 +11,22 @@ function Slider({
   value,
   min = 0,
   max = 100,
+  thumbProps,
   ...props
-}: React.ComponentProps<typeof SliderPrimitive.Root>) {
+}: React.ComponentProps<typeof SliderPrimitive.Root> & {
+  /**
+   * Props for the thumb(s) — in practice `aria-label` and `aria-valuetext`.
+   *
+   * Radix puts `role="slider"` on the **Thumb**, not on the Root, so an
+   * `aria-label` spread onto the Root (which is what `...props` does) never
+   * reaches the element a screen reader actually announces. Without this the
+   * only way to label one is an external `<label>`, which several of this
+   * app's sliders have nowhere to put — a video scrubber sitting on top of the
+   * picture is the clear case. `aria-valuetext` matters for the same reason:
+   * "0.4 of 132" is a number of nothing until it is told the unit.
+   */
+  thumbProps?: React.ComponentProps<typeof SliderPrimitive.Thumb>
+}) {
   const _values = React.useMemo(
     () =>
       Array.isArray(value)
@@ -53,6 +67,7 @@ function Slider({
         <SliderPrimitive.Thumb
           data-slot="slider-thumb"
           key={index}
+          {...thumbProps}
           className="border-primary bg-background ring-ring/50 block size-4 shrink-0 rounded-full border shadow-sm transition-[color,box-shadow] hover:ring-4 focus-visible:ring-4 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
         />
       ))}

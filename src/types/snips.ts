@@ -1,4 +1,4 @@
-import type { SnipKind, SnipRetention } from '@/lib/snips';
+import type { SnipKind, SnipRetention, SnipSource } from '@/lib/snips';
 
 /**
  * A snip as the **owner's** page sees it.
@@ -18,6 +18,19 @@ export interface SnipRow {
   kind: SnipKind;
   /** Recordings only; null for a still. */
   durationMs: number | null;
+  /**
+   * Owner-written, added after the fact from the library card — a capture has
+   * no name at the moment it is taken, so there is nowhere to ask for one.
+   *
+   * Null when never set. **Both of these are shown on the public page**, which
+   * is the point of writing them: a shared link with "Checkout crash on step 3"
+   * above it is a link the recipient can act on without a covering message.
+   */
+  title: string | null;
+  description: string | null;
+  /** `capture` for the native snipper, `import` for a file the user dropped in.
+   *  Owner-facing only — never projected to the public page. */
+  source: SnipSource;
   width: number;
   height: number;
   bytes: number;
@@ -64,6 +77,10 @@ export interface PublicSnip {
   createdAt: string;
   kind: SnipKind;
   durationMs: number | null;
+  /** The owner's own caption, or null. Note what is NOT here: `source`. How a
+   *  file reached the library is the owner's business, not the recipient's. */
+  title: string | null;
+  description: string | null;
   width: number;
   height: number;
   /** The owner's `displayName`, or null if the account no longer resolves. */
@@ -83,6 +100,11 @@ export interface SnipDocument {
   posterPath?: string;
   contentType: string;
   kind?: SnipKind;
+  /** Absent reads as `capture` — see `resolveSnipSource`. */
+  source?: SnipSource;
+  /** Absent when the owner never wrote one; never stored as an empty string. */
+  title?: string;
+  description?: string;
   durationMs?: number;
   width: number;
   height: number;

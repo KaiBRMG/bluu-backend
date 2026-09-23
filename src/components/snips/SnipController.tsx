@@ -12,6 +12,11 @@ import {
   resolveSnipSettings,
   snipExpiryLabel,
 } from '@/lib/snips';
+import {
+  SNIP_CAPTURE_SOUND,
+  SNIP_RECORDING_SOUND,
+  playSnipSound,
+} from '@/lib/snipSounds';
 import { uploadSnip, uploadSnipRecording } from '@/lib/snipUpload';
 import type { SnipRow } from '@/types/snips';
 
@@ -57,7 +62,25 @@ export default function SnipController() {
   // a primitive, so the effects below fire only when the value actually changes.
   const enabled = !!userData?.permittedPageIds?.includes(SNIPPING_TOOL_PAGE_ID);
   const settings = resolveSnipSettings(userData?.snipSettings);
-  const { trayIconEnabled, shortcutEnabled, shortcut, systemAudioEnabled } = settings;
+  const {
+    trayIconEnabled,
+    shortcutEnabled,
+    shortcut,
+    systemAudioEnabled,
+    autoCopyEnabled,
+    micEnabled,
+    micDeviceId,
+  } = settings;
+
+  // Read through a ref rather than closed over. `announce` is a dependency of
+  // both upload handlers and of the drain, and those in turn are dependencies
+  // of the `useEffect` that subscribes to main's channels — where
+  // `removeCapturedListeners` is a `removeAllListeners`. Putting a setting that
+  // the user can flip into that chain would tear the capture listener out and
+  // re-register it on every toggle, which is the one subscription in this file
+  // that must be made once.
+  const autoCopyRef = useRef(autoCopyEnabled);
+  autoCopyRef.current = autoCopyEnabled;
 
   // ── 1. Arm / disarm the shell ──────────────────────────────────────
   useEffect(() => {
@@ -73,6 +96,13 @@ export default function SnipController() {
         shortcutEnabled,
         shortcut,
         systemAudioEnabled,
+        // Seeds the selection surface's Microphone toggle and its device
+        // picker, so the bar opens where the user left it. The *permission*
+        // is never seeded from here — main reads it from the OS on every
+        // surface, because a grant made in System Settings since the last
+        // capture has to be picked up immediately.
+        micEnabled,
+        micDeviceId,
         // Capability negotiation, and it protects the OPPOSITE case to the
         // version floor. The floor keeps a new renderer off an old shell;
         // this keeps a NEW shell from offering Video to an OLD renderer —
@@ -94,7 +124,15 @@ export default function SnipController() {
         // An IPC failure here costs the shortcut, not the app. The in-page
         // "New Snip" button still works.
       });
-  }, [enabled, trayIconEnabled, shortcutEnabled, shortcut, systemAudioEnabled]);
+  }, [
+    enabled,
+    trayIconEnabled,
+    shortcutEnabled,
+    shortcut,
+    systemAudioEnabled,
+    micEnabled,
+    micDeviceId,
+  ]);
 
   // ── 2. Upload a capture ────────────────────────────────────────────
 
@@ -150,17 +188,36 @@ export default function SnipController() {
       const recording = snip.kind === 'video';
       const noun = recording ? 'Recording' : 'Snip';
 
-      const copied = interactive ? await copyText(snip.shareUrl) : false;
+      // Two conditions, and they are not the same one. `interactive` asks
+      // whether the user is waiting on this upload at all; `autoCopyEnabled`
+      // is their standing choice about whether a finished one takes the
+      // clipboard. The background drain never copies regardless — an upload
+      // nobody asked for must not replace what they have copied — so the
+      // setting only ever narrows the interactive case further.
+      const copied =
+        interactive && autoCopyRef.current ? await copyText(snip.shareUrl) : false;
 
       if (interactive) {
-        toast.success(copied ? 'Link copied — anyone with it can view' : `${noun} saved`, {
-          id: toastId,
-          description: copied
-            ? snip.expiresAt
-              ? snipExpiryLabel(snip.expiresAt)
-              : undefined
-            : 'Open Snipping Tool to copy the link.',
-        });
+        toast.success(
+          copied
+            ? 'Link copied — anyone with it can view'
+            : autoCopyRef.current
+              ? `${noun} saved`
+              : `${noun} uploaded`,
+          {
+            id: toastId,
+            description: copied
+              ? snip.expiresAt
+                ? snipExpiryLabel(snip.expiresAt)
+                : undefined
+              : autoCopyRef.current
+                ? 'Open Snipping Tool to copy the link.'
+                : // Not a failure, so it must not read like one. Auto-copy is
+                  // off by the user's own choice, and the card is one click
+                  // away — saying where the link is beats apologising.
+                  'Auto-copy is off — copy the link from Snipping Tool.',
+          },
+        );
       } else if (toastId !== undefined) {
         // Nothing should be left spinning: an automatic pass that borrowed a
         // toast id still has to resolve it.
@@ -170,9 +227,14 @@ export default function SnipController() {
       window.electronAPI?.notifications?.show?.({
         id: `snip-${snip.id}`,
         playSound: false,
-        title: copied ? 'Link copied to clipboard' : `${noun} saved`,
+        // **One title for every outcome.** It used to branch on whether the
+        // clipboard write landed, which made the OS toast a second, competing
+        // account of what happened — and with auto-copy off that account was
+        // simply wrong. The thing that is always true at this point is that
+        // the upload finished; the detail line carries the rest.
+        title: 'Upload Complete',
         body: copied
-          ? `Paste anywhere to share this ${recording ? 'recording' : 'screenshot'}.`
+          ? `The link is on your clipboard — paste anywhere to share this ${recording ? 'recording' : 'screenshot'}.`
           : 'Open Snipping Tool to copy the link.',
         actionUrl: '/applications/snipping-tool',
       });
@@ -367,13 +429,40 @@ export default function SnipController() {
     };
   }, [drainQueue]);
 
+  /**
+   * Whether the shell told us the shutter fired.
+   *
+   * A shell older than this change has no `snip:shutter` channel (rule 9c — a
+   * renderer and the app around it update independently, in both directions).
+   * There the sound falls back to `snip:captured`, which is the same capture a
+   * PNG encode later — late, but present. The latch is what stops the two
+   * firing together on a shell that does have the channel.
+   */
+  const shutterHeardRef = useRef(false);
+
   // `handleCapture` is stable (no deps), so this subscribes once and does not
   // re-register on every render. That matters: `removeCapturedListeners` is a
   // `removeAllListeners`, so a churning subscription would race itself.
   useEffect(() => {
     const api = window.electronAPI?.snip;
     if (!api?.onCaptured) return;
-    api.onCaptured(handleCapture);
+    // The shutter, at the moment the screen is actually photographed — main
+    // emits this the instant `desktopCapturer` returns, ahead of the crop and
+    // the PNG encode. See `src/lib/snipSounds.ts` for why the renderer is the
+    // one that plays it.
+    api.onShutter?.(() => {
+      shutterHeardRef.current = true;
+      playSnipSound(SNIP_CAPTURE_SOUND);
+    });
+    // Before the recorder window even opens, which on Windows matters: system
+    // audio is captured by loopback, so a cue played after `MediaRecorder`
+    // starts would be the first thing on the recording's own soundtrack.
+    api.onRecordingStarted?.(() => { playSnipSound(SNIP_RECORDING_SOUND); });
+    api.onCaptured(capture => {
+      if (!shutterHeardRef.current) playSnipSound(SNIP_CAPTURE_SOUND);
+      shutterHeardRef.current = false;
+      void handleCapture(capture);
+    });
     api.onRecorded?.(handleRecorded);
     // The screen is photographed after the box is drawn, so a capture failure
     // costs the user work they have already done. Saying nothing would look
@@ -381,6 +470,9 @@ export default function SnipController() {
     // better, because the most common cause on macOS is a permission that no
     // amount of retrying will grant.
     api.onFailed?.(payload => {
+      // A shutter that fired and then failed to crop must not leave the latch
+      // set, or the next capture on a shell with no shutter channel is silent.
+      shutterHeardRef.current = false;
       // Screen Recording, from either path — the still capture's up-front
       // check or the recorder's stream request. Retrying cannot fix it, which
       // is why this is the one failure that carries an action instead of an

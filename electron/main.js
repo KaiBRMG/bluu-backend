@@ -826,6 +826,65 @@ const SNIP_RECORDING_WARN_MS = 60 * 1000;
  */
 const SNIP_SYSTEM_AUDIO_SUPPORTED = process.platform === 'win32';
 
+/**
+ * Whether this platform has a microphone permission we can read and act on.
+ *
+ * **Note the shape is the INVERSE of screen capture, and of system audio.**
+ * Screen Recording is a macOS permission that Windows does not have at all
+ * (which is why "Open Settings" is macOS-only there — see
+ * `permissions:requestScreenAccess`), and loopback system audio is a Windows
+ * capability macOS lacks. The microphone is a real, grantable permission on
+ * **both**, so neither the toggle nor the settings deep link may be gated on
+ * one platform the way those two are.
+ *
+ * `getMediaAccessStatus` is documented for macOS and Windows only; anywhere
+ * else it can throw rather than answer, and the honest result there is
+ * `unknown` — try the capture and let it fail loudly rather than pre-emptively
+ * disabling a control on a platform we cannot interrogate.
+ */
+const SNIP_MIC_SUPPORTED = process.platform === 'darwin' || process.platform === 'win32';
+
+/**
+ * The OS's current answer about the microphone, never cached.
+ *
+ * Caching this would be the classic bug in the flow: the user goes to System
+ * Settings, grants access, comes back — and the app still says denied because
+ * it asked once at launch. Every caller reads it fresh, and it is cheap.
+ */
+function micAccessStatus() {
+  if (!SNIP_MIC_SUPPORTED) return 'unknown';
+  try {
+    return systemPreferences.getMediaAccessStatus('microphone') || 'unknown';
+  } catch (err) {
+    // A platform or an Electron build that cannot answer must not take the
+    // toggle down with it.
+    console.warn('[snip] could not read microphone access status:', err.message);
+    return 'unknown';
+  }
+}
+
+/**
+ * Opens the OS page where microphone access is actually granted.
+ *
+ * **Both platforms have one**, which is the substantive difference from
+ * `permissions:requestScreenAccess` — there is no dead-button problem here and
+ * no reason to hide the control off macOS.
+ */
+function openMicrophoneSettings() {
+  if (process.platform === 'darwin') {
+    shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone');
+    return true;
+  }
+  if (process.platform === 'win32') {
+    // Windows 10/11 gate every win32 application behind one global switch
+    // rather than a per-app prompt, so this is the *only* way a Windows user
+    // can grant it — there is nothing to ask them in-app.
+    shell.openExternal('ms-settings:privacy-microphone');
+    return true;
+  }
+  return false;
+}
+
 /** The control bar's window size. The height is a starting value — the page
  *  measures its own layout and asks for the real one via `snip:rec-place`. */
 const SNIP_BAR_WIDTH = 380;
@@ -874,6 +933,11 @@ let snipConfig = {
   // settings so the bar opens where the user left it. Main holds it only to
   // seed the surface; the durable copy is `users/{uid}.snipSettings`.
   systemAudioEnabled: false,
+  // The Microphone toggle and the chosen input, same treatment as the line
+  // above: seeded from the user doc, held here only so the next surface opens
+  // where the user left it.
+  micEnabled: false,
+  micDeviceId: '',
   // Off until a renderer says otherwise — see `snip:configure`.
   supportsRecording: false,
 };
@@ -1168,6 +1232,15 @@ async function startSnip(source) {
           video: snipConfig.supportsRecording ? '1' : '0',
           sysaudio: SNIP_SYSTEM_AUDIO_SUPPORTED ? '1' : '0',
           sys: snipConfig.systemAudioEnabled ? '1' : '0',
+          // The microphone's three facts: whether the platform has a
+          // permission at all, what the OS says right now, and whether the
+          // user last left the toggle on. Read fresh per surface — a user who
+          // granted access in System Settings since the last capture must not
+          // meet a stale "denied".
+          mic: SNIP_MIC_SUPPORTED ? '1' : '0',
+          micstate: micAccessStatus(),
+          micon: snipConfig.micEnabled ? '1' : '0',
+          micdev: snipConfig.micDeviceId || '',
         },
       });
     }
@@ -1236,6 +1309,16 @@ ipcMain.on('snip:region', async (event, commit) => {
     // that cannot serve one produces a stream that is silently short an audio
     // track rather than an error.
     system: SNIP_SYSTEM_AUDIO_SUPPORTED && !!(commit && commit.audio && commit.audio.system),
+    // Same discipline for the microphone. This flag is not merely a
+    // preference by the time it reaches `recorderMediaAllowed` — it is what
+    // authorises the recorder window to make an audio-only `getUserMedia`
+    // call at all, so it must be decided in main from the platform and not
+    // taken on trust from a renderer.
+    mic: SNIP_MIC_SUPPORTED && !!(commit && commit.audio && commit.audio.mic),
+    micDeviceId:
+      typeof (commit && commit.audio && commit.audio.micDeviceId) === 'string'
+        ? commit.audio.micDeviceId.slice(0, 256)
+        : '',
   };
 
   if (!rect || !Number.isFinite(rect.x) || !Number.isFinite(rect.y) ||
@@ -1272,6 +1355,14 @@ ipcMain.on('snip:region', async (event, commit) => {
     const { shot, error } = await captureDisplay(display);
     if (error) failure = error;
     if (shot) {
+      // **The shutter, at the moment the screen is actually photographed.**
+      // Emitted here rather than alongside `snip:captured` below, because the
+      // crop plus `toPNG()` plus base64 is a hundred milliseconds or more on a
+      // large capture — and a shutter that lands after that reads as the app
+      // lagging rather than as confirmation that the shot was taken. Main has
+      // no audio output of its own, so the app window plays it; see
+      // `src/lib/snipSounds.ts`.
+      sendTo(mainWindow, 'snip:shutter', {});
       const shotSize = shot.getSize();
       // CSS pixels on the surface → device pixels in the capture. Derived from
       // the capture's ACTUAL size rather than from `scaleFactor`, because
@@ -1737,6 +1828,68 @@ async function startSnipRecording({ display, rect, audio }) {
     return;
   }
 
+  /**
+   * **The microphone is resolved here — before the recorder window exists, and
+   * therefore before a single frame is encoded.**
+   *
+   * That placement is the whole of the "permissions are checked BEFORE the
+   * recording" rule applied to narration, and it matters more here than it did
+   * for screen capture: a macOS TCC prompt is a modal that appears over
+   * whatever is on screen, so one triggered *after* `MediaRecorder` starts is
+   * a prompt that ends up in the recording — and a user who only discovers the
+   * refusal afterwards has lost the take.
+   *
+   * Three outcomes, and **none of them abandons the recording**:
+   *
+   *  - `granted` — carry on with the mic.
+   *  - `not-determined` on macOS — ask now (`askForMediaAccess`, which is
+   *    macOS-only). The user answers a modal while nothing is being captured.
+   *    On Windows there is nothing to ask: access is one global switch for all
+   *    win32 apps, so we try and let the recorder report a missing track.
+   *  - `denied` / `restricted` — drop the mic, record anyway, and hand the
+   *    recorder a note so the bar says so **while the take is still running**.
+   *    Refusing to record because a microphone is unavailable would throw away
+   *    the screen capture the user actually asked for, which is the same trade
+   *    the system-audio path already refuses to make.
+   *
+   * The `denied` branch is the one that has to be right. On macOS
+   * `askForMediaAccess` resolves with the *existing* status and shows no alert
+   * once access has been refused, so calling it again here would look like a
+   * prompt that does nothing. The route back is System Settings, which the
+   * selection surface offers before the drag and the bar names afterwards.
+   */
+  let micNote = null;
+  if (audio.mic) {
+    let status = micAccessStatus();
+    if (status === 'not-determined' && process.platform === 'darwin') {
+      try {
+        // Shows the OS prompt. Requires `NSMicrophoneUsageDescription` in the
+        // Info.plist — without it macOS does not refuse this call, it
+        // terminates the process. See `mac.extendInfo` in package.json.
+        await systemPreferences.askForMediaAccess('microphone');
+      } catch (err) {
+        console.error('[snip] microphone prompt failed:', err.message);
+      }
+      status = micAccessStatus();
+    }
+    if (status === 'denied' || status === 'restricted') {
+      audio.mic = false;
+      micNote =
+        status === 'restricted'
+          ? 'Microphone access is restricted on this device. Recording without it.'
+          : 'Microphone access is turned off. Recording without it.';
+      console.warn(`[snip] microphone unavailable (${status}) — recording without narration`);
+    }
+  }
+
+  // **Before the recorder window exists**, and that ordering is load-bearing
+  // on Windows: a recording can be taking the desktop's own output by loopback,
+  // so a cue played once `MediaRecorder` is running is the first thing on the
+  // recording's soundtrack. Everything between here and the first encoded frame
+  // — window creation, `getDisplayMedia`, the canvas loop spinning up — is
+  // several hundred milliseconds of head start.
+  sendTo(mainWindow, 'snip:rec-started', {});
+
   const id = crypto.randomBytes(12).toString('hex');
   // Straight into the durable queue, not a temp file that is moved on success.
   // A crash mid-recording then leaves a playable partial rather than nothing.
@@ -1858,6 +2011,10 @@ async function startSnipRecording({ display, rect, audio }) {
       // the thumbnail's real size — never from `scaleFactor`.
       display: { width: display.size.width, height: display.size.height },
       audio,
+      // Set only when the microphone was asked for and could not be had. The
+      // bar shows it for the length of the take, because a user who wanted
+      // narration needs to find out now rather than on playback.
+      micNote,
       limits: { maxMs: SNIP_MAX_RECORDING_MS, warnMs: SNIP_RECORDING_WARN_MS },
       // The selection left no room beside it, so the bar is sitting inside the
       // recorded rectangle and collapses to duration + three icon buttons.
@@ -2465,16 +2622,36 @@ ipcMain.handle('snip:savePendingRecording', async (event, token) => {
  */
 /** The Video toggles, relayed to the app window — the only side holding a
  *  Firebase session and therefore the only side that can persist them. */
-ipcMain.on('snip:audio-prefs', (event, prefs) => {
+/**
+ * `handle`, not `on`, because the surface must be able to WAIT for this.
+ *
+ * `snipConfig.micEnabled` is not only a preference: `surfaceMayListDevices`
+ * reads it to decide whether this surface may see device labels at all. So the
+ * page has to know main has applied the change before it enumerates, or it
+ * enumerates against the old answer and gets a list with every `deviceId`
+ * blanked — indistinguishable, from the page, from a machine with no
+ * microphone. That was a real bug: toggling the microphone off and back on
+ * reported "No microphone was found" on a machine with a working one.
+ */
+ipcMain.handle('snip:audio-prefs', (event, prefs) => {
   const win = senderWindow(event);
-  if (!win || !snipOverlayState.has(win.id)) return;
+  if (!win || !snipOverlayState.has(win.id)) return { ok: false };
   const next = {
     systemAudioEnabled: SNIP_SYSTEM_AUDIO_SUPPORTED && !!(prefs && prefs.systemAudioEnabled),
+    micEnabled: SNIP_MIC_SUPPORTED && !!(prefs && prefs.micEnabled),
+    micDeviceId:
+      typeof (prefs && prefs.micDeviceId) === 'string' ? prefs.micDeviceId.slice(0, 256) : '',
   };
   // Held in main too, so a second capture in the same app session opens with
   // the right toggle even before the write round-trips through Firestore.
   snipConfig.systemAudioEnabled = next.systemAudioEnabled;
+  snipConfig.micEnabled = next.micEnabled;
+  snipConfig.micDeviceId = next.micDeviceId;
   sendTo(mainWindow, 'snip:audio-prefs', next);
+  // Acknowledged so the caller can sequence against it. The relay to the app
+  // window above is still fire-and-forget — that one only persists to
+  // Firestore and nothing waits on it.
+  return { ok: true };
 });
 
 /**
@@ -2499,6 +2676,9 @@ ipcMain.handle('snip:configure', (event, raw = {}) => {
     shortcut: typeof raw.shortcut === 'string' && raw.shortcut ? raw.shortcut : null,
     // `=== true`, matching `resolveSnipSettings`: the one opt-in field.
     systemAudioEnabled: SNIP_SYSTEM_AUDIO_SUPPORTED && raw.systemAudioEnabled === true,
+    // `=== true` as well — the microphone records the room, so absent is off.
+    micEnabled: SNIP_MIC_SUPPORTED && raw.micEnabled === true,
+    micDeviceId: typeof raw.micDeviceId === 'string' ? raw.micDeviceId.slice(0, 256) : '',
     /**
      * **Capability negotiation, and it runs the OTHER way to the version
      * floor.**
@@ -2859,6 +3039,68 @@ ipcMain.handle('permissions:requestScreenAccess', async () => {
     return { success: false };
   }
 });
+
+/**
+ * The microphone's current status, read fresh from the OS.
+ *
+ * Deliberately separate from the request below, because **the two questions
+ * have different answers and different buttons.** A surface that only ever
+ * calls "request" cannot tell "never asked" from "refused", and on macOS those
+ * need opposite treatment — the first shows a prompt, the second can only be
+ * fixed in System Settings.
+ */
+ipcMain.handle('permissions:microphoneStatus', () => ({
+  supported: SNIP_MIC_SUPPORTED,
+  status: micAccessStatus(),
+  // macOS is the only platform with an in-app prompt. Windows gates every
+  // win32 app behind one global switch, so the only move there is the settings
+  // deep link — which is why the caller needs to know which it is getting
+  // rather than inferring it from the platform a second time.
+  canPrompt: process.platform === 'darwin',
+}));
+
+/**
+ * Ask for the microphone, or send the user where it can be granted.
+ *
+ * **The `denied` branch is the one that makes this graceful.** On macOS
+ * `askForMediaAccess` resolves with the existing status and shows **no alert**
+ * once access has been refused — so an implementation that simply always calls
+ * it presents a button that appears to do nothing, which is the most common
+ * way this flow is got wrong. Once denied, the only route is System Settings,
+ * and this opens it rather than pretending otherwise.
+ *
+ * Windows has no per-app prompt at all, so it goes straight to settings.
+ */
+ipcMain.handle('permissions:requestMicrophoneAccess', async () => {
+  if (!SNIP_MIC_SUPPORTED) return { status: 'unknown', prompted: false, settingsOpened: false };
+
+  const before = micAccessStatus();
+  if (before === 'granted') return { status: before, prompted: false, settingsOpened: false };
+
+  if (before === 'not-determined' && process.platform === 'darwin') {
+    try {
+      await systemPreferences.askForMediaAccess('microphone');
+    } catch (err) {
+      console.error('[snip] microphone prompt failed:', err.message);
+    }
+    const after = micAccessStatus();
+    // A refusal at the prompt lands on `denied`, and from here on only
+    // System Settings can change it. Reported honestly so the caller can swap
+    // its button rather than offering the same prompt again.
+    return { status: after, prompted: true, settingsOpened: false };
+  }
+
+  // `denied`, `restricted`, `unknown`, or any status on Windows: there is
+  // nothing to prompt, so open the place it is actually granted.
+  const settingsOpened = openMicrophoneSettings();
+  return { status: before, prompted: false, settingsOpened };
+});
+
+/** The settings page on its own, for a caller that has already decided the
+ *  status needs the user to go there. */
+ipcMain.handle('permissions:openMicrophoneSettings', () => ({
+  success: openMicrophoneSettings(),
+}));
 
 // IPC handler to trigger a test notification (prompts OS permission on first run)
 ipcMain.handle('permissions:requestNotification', async () => {
@@ -4643,13 +4885,19 @@ app.whenReady().then(() => {
    * | `getDisplayMedia` + system audio | `['video','audio']` | allow |
    * | anything audio-only | `['audio']` | **refuse** |
    *
-   * **Audio-only is refused outright, because this build has no microphone.**
-   * The recorder never calls `getUserMedia`, so an audio-only request from it
-   * would mean something is asking for a device the feature does not use —
-   * refuse it and let the next pass open it deliberately. A request carrying
-   * video is a display capture: the recorder page never asks for a camera, and
-   * the source is still chosen by main below, so granting it here grants no
-   * particular screen.
+   * **Audio-only is allowed only for a session that asked for narration.**
+   * The recorder's `getUserMedia({ audio })` call for the microphone arrives
+   * here as `['audio']`, and the obvious change — dropping the old blanket
+   * refusal — would be too wide: it would give the recorder window a standing
+   * microphone capability for every take, including the ones recording silent
+   * screen content. So the gate is `snipRecording.audio.mic`, which main sets
+   * from the committed selection (never from a renderer's say-so) and clears
+   * outright when the OS has denied access. A window may open the microphone
+   * only for the one recording it was opened to make.
+   *
+   * A request carrying video is a display capture: the recorder page never
+   * asks for a camera, and the source is still chosen by main below, so
+   * granting it here grants no particular screen.
    *
    * Everything outside the live recorder window is refused, which is what
    * keeps the app window — remote content from the deployment — from ever
@@ -4664,9 +4912,47 @@ app.whenReady().then(() => {
     // An absent `mediaTypes` is the synchronous check path, which does not
     // carry one. The window and session scoping above already hold.
     if (!types || types.length === 0) return true;
-    // No microphone in this build — see the table above.
-    if (types.every(type => type === 'audio')) return false;
+    // The microphone, and ONLY for a session that committed to narration.
+    if (types.every(type => type === 'audio')) return recording.audio.mic === true;
     return types.every(type => type === 'audio' || type === 'video');
+  };
+
+  /**
+   * The selection surface may read device **labels**, and nothing else.
+   *
+   * The microphone picker has to list real device names before the drag — a
+   * dropdown reading "Microphone 1 / Microphone 2" is a picker nobody can use
+   * — and Chromium withholds `enumerateDevices` labels from any context whose
+   * microphone permission is not granted. This is the narrowest way to give
+   * the surface those names.
+   *
+   * **It is a `check`, never a `request`.** The request handler below does not
+   * call this, so `getUserMedia` from the selection surface is still refused;
+   * the surface enumerates and never opens a stream. Four properties contain
+   * what is left, and they are why this is acceptable on a window that watches
+   * the whole screen:
+   *
+   *  - it is a **local `file://` page we ship**, not remote content;
+   *  - its CSP is `default-src 'none'` with **no `connect-src`**, so nothing
+   *    it could capture has anywhere to go — no fetch, no socket, no beacon;
+   *  - `snip-preload.js` has no media channel and no file channel, so nothing
+   *    can be handed back to main either;
+   *  - navigation away from `snip.html` is blocked, so the page cannot be
+   *    turned into a different page.
+   *
+   * It is also scoped in time and intent: only while a surface is actually on
+   * screen, and only when the user has the microphone toggle on.
+   */
+  const surfaceMayListDevices = (requester, details) => {
+    if (!snipConfig.micEnabled || snipOverlays.length === 0) return false;
+    const surface = snipOverlays.find(
+      win => !win.isDestroyed() && win.webContents === requester,
+    );
+    if (!surface) return false;
+    const types = details && details.mediaTypes;
+    // Audio only. A surface asking for video is the case this whole window is
+    // designed to make impossible, and it must not ride in on this.
+    return !types || types.length === 0 || types.every(type => type === 'audio');
   };
 
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
@@ -4690,7 +4976,7 @@ app.whenReady().then(() => {
         !snipRecording
           ? 'no recording in flight'
           : snipRecording.window && webContents === snipRecording.window.webContents
-            ? 'from the recorder, but audio-only requests are refused (no microphone in this build)'
+            ? 'from the recorder, but this session did not ask for narration (audio-only is gated on audio.mic)'
             : 'request did not come from the live recorder window',
       );
     }
@@ -4703,6 +4989,10 @@ app.whenReady().then(() => {
         recorderMediaAllowed(webContents, details)) {
       return true;
     }
+    // Device labels for the selection surface's microphone picker. Check only
+    // — the request handler above never consults this, so the surface can name
+    // devices and still cannot open one. See `surfaceMayListDevices`.
+    if (permission === 'media' && surfaceMayListDevices(webContents, details)) return true;
     return ALLOWED_PERMISSIONS.has(permission);
   });
 

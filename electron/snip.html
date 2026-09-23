@@ -194,6 +194,85 @@
     }
     .chip[aria-pressed="true"] .dot { background: #3b82f6; opacity: 1; }
 
+    /*
+      The microphone chip carries a GLYPH rather than the `.dot` the system
+      audio chip uses, and the two are deliberately different marks.
+
+      A dot is a state light: on or off. The microphone needs to say more than
+      that — it can be on, off, or unavailable because the OS has not granted
+      it — and a slashed mic is the one drawing every user already reads as
+      "this input is not live". Colour alone could not carry the third state
+      (DESIGN.md: colour is never the sole carrier), and a second dot in a
+      different hue beside the first would read as two instances of one thing.
+    */
+    .mic-glyph { width: 13px; height: 13px; flex: none; opacity: 0.55; }
+    .chip[aria-pressed="true"] .mic-glyph { opacity: 1; color: #3b82f6; }
+    .chip[data-blocked="1"] .mic-glyph { opacity: 1; color: #fb923c; }
+
+    /*
+      The device picker.
+
+      A native `<select>`, and that is the right call on this surface rather
+      than a laziness: its popup is rendered by the OS, ABOVE an always-on-top
+      transparent window that a custom dropdown would have to escape by hand —
+      and it arrives with keyboard support, type-ahead and screen-reader
+      semantics that would otherwise all have to be rebuilt on a page whose CSP
+      forbids every library that might have helped.
+
+      It only exists while the microphone is on, so it never occupies the bar
+      for a user who is not narrating.
+    */
+    .device {
+      max-width: 190px;
+      padding: 6px 8px;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 9px;
+      background: rgba(255, 255, 255, 0.05);
+      color: #e4e4e7;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: default;
+      /* The UA arrow is drawn in the platform's own colour, which on Windows
+         is near-black on our near-black bar. */
+      -webkit-appearance: none;
+      appearance: none;
+      background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 6px center;
+      background-size: 13px 13px;
+      padding-right: 24px;
+      text-overflow: ellipsis;
+    }
+    .device:focus-visible { outline: 2px solid #3b82f6; outline-offset: 1px; }
+    .device[disabled] { color: #71717a; }
+    /* The options themselves are an OS popup, so they need their own ground —
+       they do not inherit the bar's. */
+    .device option { background: #18181b; color: #e4e4e7; }
+
+    /*
+      The one action on this bar that is not a toggle: the way out of a denied
+      microphone. Outlined in warning orange rather than filled — nothing has
+      gone wrong yet, the user simply cannot narrate until they grant access,
+      and a red or a filled blue control here would outrank Image/Video.
+    */
+    .grant {
+      display: flex;
+      align-items: center;
+      padding: 6px 12px;
+      border: 1px solid rgba(251, 146, 60, 0.45);
+      border-radius: 9px;
+      background: rgba(251, 146, 60, 0.10);
+      color: #fb923c;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: default;
+      white-space: nowrap;
+    }
+    .grant:hover { background: rgba(251, 146, 60, 0.18); color: #fdba74; }
+    .grant:focus-visible { outline: 2px solid #3b82f6; outline-offset: 1px; }
+
     .note {
       max-width: 340px;
       padding: 0 4px 2px;
@@ -239,6 +318,29 @@
       <button type="button" class="chip" id="opt-sys" aria-pressed="false" hidden>
         <span class="dot" aria-hidden="true"></span>System audio
       </button>
+      <button type="button" class="chip" id="opt-mic" aria-pressed="false" hidden>
+        <svg class="mic-glyph" id="mic-glyph-on" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true">
+          <rect x="9" y="2" width="6" height="11" rx="3" />
+          <path d="M5 10a7 7 0 0 0 14 0M12 17v5" />
+        </svg>
+        <svg class="mic-glyph" id="mic-glyph-off" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true" hidden>
+          <path d="M15 5a3 3 0 0 0-6 0v4m0 3a3 3 0 0 0 5 2" />
+          <path d="M5 10a7 7 0 0 0 10.5 6M19 10a7 7 0 0 1-1 3.5M12 17v5" />
+          <path d="M3 3l18 18" />
+        </svg>
+        <span id="mic-label">Microphone</span>
+      </button>
+      <!-- Only while the microphone is ON. A picker for a device nobody is
+           recording from is a control with nothing to configure. -->
+      <select class="device" id="mic-device" aria-label="Microphone input" hidden></select>
+      <!-- Only while access is missing. It replaces the picker rather than
+           sitting beside it, because until this is resolved there is nothing
+           to pick from. -->
+      <button type="button" class="grant" id="mic-grant" hidden></button>
     </div>
     <p class="note" id="note" hidden></p>
   </div>
@@ -253,6 +355,12 @@
       const btnVideo = document.getElementById('mode-video');
       const btnSys = document.getElementById('opt-sys');
       const audioSep = document.getElementById('audio-sep');
+      const btnMic = document.getElementById('opt-mic');
+      const micLabel = document.getElementById('mic-label');
+      const micGlyphOn = document.getElementById('mic-glyph-on');
+      const micGlyphOff = document.getElementById('mic-glyph-off');
+      const micDevice = document.getElementById('mic-device');
+      const micGrant = document.getElementById('mic-grant');
 
       /** Smaller than this is a mis-click, not a selection. */
       const MIN_SIDE = 8;
@@ -268,9 +376,37 @@
        *  and tells us, rather than this page guessing from a user agent. */
       const systemAudioSupported = flag('sysaudio');
 
+      /** False on a platform with no microphone permission to read (Linux). */
+      const micSupported = flag('mic');
+
       const state = {
         mode: 'image',
         system: systemAudioSupported && flag('sys'),
+        mic: micSupported && flag('micon'),
+        /**
+         * The OS's answer, seeded by main at window creation and re-read on
+         * every interaction.
+         *
+         * **Never cached beyond one interaction.** The whole point of the
+         * grant button is that the user leaves, changes a setting, and comes
+         * back — so a status read once at load and trusted afterwards is a
+         * surface that keeps telling a user who has just granted access that
+         * they have not.
+         */
+        micStatus: params.get('micstate') || 'unknown',
+        micDeviceId: params.get('micdev') || '',
+        devices: [],
+        /**
+         * Set when `enumerateDevices` returned audio inputs whose ids were
+         * blanked — i.e. the hardware is there and the permission is not.
+         *
+         * This distinction exists because conflating the two produced a real
+         * bug that was impossible to diagnose from the UI: a blocked
+         * enumeration is indistinguishable from absent hardware if you only
+         * count the devices that survive filtering, so the surface confidently
+         * told people with working microphones that none was found.
+         */
+        micDevicesBlocked: false,
       };
 
       let origin = null;
@@ -327,20 +463,101 @@
         note.hidden = !text;
       }
 
+      /**
+       * The microphone's states, and what each one offers.
+       *
+       * This is the whole "graceful" part of the flow, so it is written as one
+       * function rather than scattered across handlers. The rule it enforces:
+       * **every state either works or names a way out of itself.** There is no
+       * branch that leaves a toggle which silently does nothing, which is what
+       * a permission-gated control degrades into if it only ever checks a
+       * boolean.
+       *
+       *   granted         -> live chip, plus the device picker
+       *   not-determined  -> togglable; turning it on is what asks
+       *   denied          -> slashed glyph, orange, and an Open Settings button
+       *   restricted      -> disabled, with a sentence; no button would help
+       *   unknown         -> togglable and optimistic; let the recorder report
+       */
+      function renderMic(video) {
+        const blocked = state.micStatus === 'denied' || state.micStatus === 'restricted';
+        const on = state.mic && !blocked;
+
+        btnMic.hidden = !video || !micSupported;
+        btnMic.setAttribute('aria-pressed', String(on));
+        btnMic.disabled = state.micStatus === 'restricted';
+        if (blocked) btnMic.dataset.blocked = '1';
+        else delete btnMic.dataset.blocked;
+
+        // The slashed glyph means "cannot", never merely "off" -- off is
+        // already carried by the unpressed chip, and using one mark for both
+        // would make an available microphone look broken.
+        micGlyphOn.hidden = blocked;
+        micGlyphOff.hidden = !blocked;
+        micLabel.textContent = state.micStatus === 'restricted' ? 'Mic restricted' : 'Microphone';
+
+        // The picker, only while there is something to pick from.
+        micDevice.hidden = !video || !on || state.devices.length === 0;
+        // And the way out, only while the user has actually asked for a
+        // microphone. Gated on `state.mic` for the same reason the note is:
+        // the two appear and disappear together, and an orange button with no
+        // sentence beside it is an alarm about nothing. A user who has the mic
+        // off is not blocked on anything.
+        //
+        // `restricted` gets no button either, because there is none that would
+        // help — a policy decided it, and the note says so instead.
+        micGrant.hidden =
+          !video || !micSupported || !state.mic || !blocked || state.micStatus === 'restricted';
+        micGrant.textContent = 'Open Settings';
+      }
+
+      function micNote() {
+        if (!micSupported || !state.mic) return '';
+        if (state.micStatus === 'restricted') {
+          return 'Microphone access is restricted on this device, so recordings will have no narration.';
+        }
+        if (state.micStatus === 'denied') {
+          // Names the place, because on both platforms that is now the ONLY
+          // route -- macOS shows no second prompt once access has been refused.
+          return 'Microphone access is turned off. Open Settings allows it — this snip closes, so press the shortcut again afterwards.';
+        }
+        if (state.micStatus === 'not-determined') {
+          return 'Your microphone will be requested when the recording starts.';
+        }
+        if (state.micStatus === 'granted' && state.micDevicesBlocked) {
+          // The hardware is present and the OS has allowed us; something on our
+          // side refused the device list. Never say "no microphone was found"
+          // here — that sends the user to check a cable when the fault is ours,
+          // and recording will in fact still capture the default input.
+          return 'The microphone list could not be read. Recording will still use your default microphone.';
+        }
+        if (state.micStatus === 'granted' && state.devices.length === 0) {
+          return 'No microphone was found. The recording will continue without narration.';
+        }
+        return '';
+      }
+
       function renderBar() {
         const video = state.mode === 'video';
         btnImage.setAttribute('aria-pressed', String(!video));
         btnVideo.setAttribute('aria-pressed', String(video));
 
-        // The audio toggle exists ONLY in Video mode. In Image mode there is
+        // The audio toggles exist ONLY in Video mode. In Image mode there is
         // no audio to configure, so a visible-but-inert control would be a
         // question the user cannot answer.
         for (const el of [btnSys, audioSep]) el.hidden = !video;
         btnSys.setAttribute('aria-pressed', String(state.system));
+        renderMic(video);
 
         if (!video) { setNote(''); return; }
+
+        btnSys.disabled = !systemAudioSupported;
+        // One note line, and both sources can have something to say. The
+        // microphone wins when it does, because its message is actionable
+        // ("open settings") where the platform one is merely a fact.
+        const mic = micNote();
+        if (mic) { setNote(mic); return; }
         if (!systemAudioSupported) {
-          btnSys.disabled = true;
           // Named plainly rather than left as a dead toggle. A control that
           // does nothing and says nothing reads as a bug in the app.
           setNote('System audio capture is not available on this platform.');
@@ -349,10 +566,127 @@
         setNote('');
       }
 
+      /**
+       * Re-read the OS status, then the device list.
+       *
+       * Called on every touch of the microphone control and whenever the
+       * window regains focus -- the latter is what closes the loop on "go to
+       * System Settings and come back", which is otherwise exactly where these
+       * flows break: the user grants access, returns, and the app is still
+       * showing the refusal it cached at load.
+       */
+      async function refreshMic() {
+        if (!micSupported || !window.snipAPI.micStatus) return;
+        try {
+          const info = await window.snipAPI.micStatus();
+          state.micStatus = info && info.status ? info.status : 'unknown';
+        } catch {
+          state.micStatus = 'unknown';
+        }
+        await refreshDevices();
+        renderBar();
+      }
+
+      /**
+       * List the audio inputs.
+       *
+       * Labels are populated only once the permission is granted -- Chromium
+       * withholds them otherwise, which is why this runs AFTER the status read
+       * and why a picker built before the grant reads "Microphone 1,
+       * Microphone 2". Main allows this window the permission *check* for
+       * exactly this call; it is still refused `getUserMedia`, so nothing here
+       * can open a device.
+       */
+      async function refreshDevices() {
+        // `state.mic` is part of the condition, not just the status. Main
+        // only permits the label read while the toggle is ON, so enumerating
+        // with it off is both pointless — there is no picker to fill — and
+        // actively misleading: it would come back blocked every time and log
+        // a failure that is really just the gate working as designed.
+        if (!state.mic || state.micStatus !== 'granted' || !navigator.mediaDevices) {
+          state.devices = [];
+          state.micDevicesBlocked = false;
+          renderDevices();
+          return;
+        }
+        try {
+          const all = await navigator.mediaDevices.enumerateDevices();
+          // Counted BEFORE the filter, because the count is the evidence.
+          // Chromium hands a context without microphone permission a full set
+          // of `audioinput` entries whose `deviceId` and `label` are both
+          // empty strings — so filtering first throws away the one signal that
+          // tells "permission withheld" apart from "no hardware".
+          const inputs = all.filter((device) => device.kind === 'audioinput');
+          state.devices = inputs
+            .filter((device) => device.deviceId)
+            .map((device) => ({ deviceId: device.deviceId, label: device.label }));
+          state.micDevicesBlocked = inputs.length > 0 && state.devices.length === 0;
+          if (state.micDevicesBlocked) {
+            // Logged as well as shown. This is our own plumbing failing — main
+            // gates the label permission on `snipConfig.micEnabled` — and a
+            // failure the user can see and nobody can diagnose is the worst of
+            // both.
+            console.error(
+              '[snip] microphone devices enumerated with blank ids —',
+              'the label permission was refused for this surface',
+            );
+          }
+        } catch {
+          state.devices = [];
+          state.micDevicesBlocked = false;
+        }
+        renderDevices();
+      }
+
+      function renderDevices() {
+        micDevice.textContent = '';
+        // "System default" is a real, selectable choice rather than an empty
+        // first row -- it is what most people want, and it is the one option
+        // that stays correct when they plug a headset in tomorrow.
+        const fallback = document.createElement('option');
+        fallback.value = '';
+        fallback.textContent = 'System default';
+        micDevice.appendChild(fallback);
+
+        let matched = false;
+        for (const device of state.devices) {
+          const option = document.createElement('option');
+          option.value = device.deviceId;
+          // A label can still be empty on some platforms even with permission.
+          option.textContent = device.label || 'Microphone';
+          if (device.deviceId === state.micDeviceId) matched = true;
+          micDevice.appendChild(option);
+        }
+        // **A stored id is a preference, not a promise.** It is per-machine, so
+        // the same account on a second laptop holds one that matches nothing;
+        // falling back to the default there keeps the mic working instead of
+        // failing on a constraint nobody can see.
+        if (!matched) state.micDeviceId = '';
+        micDevice.value = state.micDeviceId;
+      }
+
+      /**
+       * Sticky between captures, so the user sets these once rather than every
+       * time the surface opens.
+       *
+       * **Returns a promise, and the microphone path awaits it.** This is not
+       * only persistence: main gates the device-label permission on its own
+       * copy of `micEnabled` (`surfaceMayListDevices`), so enumerating before
+       * main has applied the change returns a list with every `deviceId`
+       * blanked — which reads, from here, exactly like a machine with no
+       * microphone. Callers that do not enumerate afterwards may ignore the
+       * promise; the rejection is swallowed here either way, because losing a
+       * preference must never surface as an error over the capture the user is
+       * in the middle of.
+       */
       function persist() {
-        // Sticky between captures, so the user sets this once rather than every
-        // time the surface opens.
-        window.snipAPI.saveAudioPrefs({ systemAudioEnabled: state.system });
+        return Promise.resolve(
+          window.snipAPI.saveAudioPrefs({
+            systemAudioEnabled: state.system,
+            micEnabled: state.mic,
+            micDeviceId: state.micDeviceId,
+          }),
+        ).catch(() => {});
       }
 
       btnImage.addEventListener('click', () => { state.mode = 'image'; renderBar(); });
@@ -360,6 +694,10 @@
         if (!videoSupported) return;
         state.mode = 'video';
         renderBar();
+        // Entering Video is the first moment the microphone controls are on
+        // screen, so it is the first moment their state has to be true. The
+        // seed from main is already a beat old by now.
+        void refreshMic();
       });
 
       btnSys.addEventListener('click', () => {
@@ -367,6 +705,88 @@
         state.system = !state.system;
         renderBar();
         persist();
+      });
+
+      /**
+       * Turning the microphone ON is what asks for it.
+       *
+       * Deliberately not a separate "allow microphone" step the user has to
+       * find first. The toggle is the intent, so the intent is what triggers
+       * the request -- which on macOS at `not-determined` is the OS prompt,
+       * and everywhere else is a status read that tells us which of the three
+       * unhappy states we are in.
+       *
+       * Turning it OFF never prompts and never checks. Switching a thing off
+       * should not make the operating system ask the user a question.
+       */
+      btnMic.addEventListener('click', async () => {
+        if (!micSupported || state.micStatus === 'restricted') return;
+
+        if (state.mic) {
+          state.mic = false;
+          renderBar();
+          persist();
+          return;
+        }
+
+        state.mic = true;
+        renderBar();
+        // **Persist FIRST, and await it.** Main gates this window's access to
+        // device labels on its own `snipConfig.micEnabled`, so it has to have
+        // applied the toggle before the enumeration below runs. Enumerating
+        // first returned a list with every `deviceId` blanked, which the page
+        // could only read as "no microphone" — the exact symptom of toggling
+        // the microphone off and back on. Do not reorder these two.
+        await persist();
+        // A STATUS READ, never a prompt. Raising the macOS permission dialog
+        // from this window would take focus, and on a single-display setup a
+        // blur here tears the whole snip down (`armSnipOverlays`) — the user
+        // would lose their selection to a question they had not answered yet.
+        // The prompt belongs after the surfaces are destroyed, which is where
+        // `startSnipRecording` raises it.
+        await refreshMic();
+      });
+
+      micDevice.addEventListener('change', () => {
+        state.micDeviceId = micDevice.value;
+        persist();
+      });
+
+      /**
+       * The way out of a refusal.
+       *
+       * It opens the OS page on BOTH platforms, which is the substantive
+       * difference from the screen-recording flow -- there, Windows has no
+       * per-app permission at all and an "Open Settings" button would be a
+       * button that does nothing. The microphone is grantable on both, so this
+       * control is never dead.
+       *
+       * Note it does NOT re-call the prompt. Once access has been refused
+       * macOS resolves `askForMediaAccess` with the existing status and shows
+       * no alert, so a button wired to that would appear broken -- which is
+       * the single most common way this flow is got wrong.
+       */
+      micGrant.addEventListener('click', () => {
+        if (window.snipAPI.openMicSettings) {
+          window.snipAPI.openMicSettings().catch(() => {});
+        }
+        /*
+          **And cancel the snip, deliberately.**
+
+          This surface is full-screen and always-on-top, so the Settings window
+          we just opened is underneath it and unreachable — the user would be
+          looking at a window they cannot click. On a single display the blur
+          would tear the snip down anyway (`armSnipOverlays`); doing it
+          explicitly makes the behaviour identical on two displays, where it
+          would not.
+
+          It is not a loss of work: nothing has been captured, the toggle is
+          already persisted, and the note above this button has told them to
+          allow access and press the shortcut again. The alternative — holding
+          a transparent overlay over the settings page they were just sent to —
+          is the one thing that would be genuinely broken.
+        */
+        cancel();
       });
 
       // A click on the bar must not begin a drag, and must not cancel. The
@@ -418,7 +838,14 @@
           rect,
           // A surface with no bar cannot have chosen video, whatever it sends.
           mode: hasControls && videoSupported ? state.mode : 'image',
-          audio: { system: state.system },
+          audio: {
+            system: state.system,
+            // Main re-checks both against the platform and, for the mic,
+            // against the OS permission -- this is a preference, not an
+            // authorisation. See `recorderMediaAllowed`.
+            mic: state.mic && state.micStatus !== 'denied' && state.micStatus !== 'restricted',
+            micDeviceId: state.micDeviceId,
+          },
         };
         // The commit is deferred one frame so the browser has actually painted
         // the cleared state before main hides the window and photographs the

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ImageUpscale } from 'lucide-react';
+import { ImageUpscale, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import AppLayout from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ import { useUserData } from '@/hooks/useUserData';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { copyText } from '@/lib/copyText';
 import {
+  SNIP_MIC_MIN_APP_VERSION,
   SNIP_VIDEO_MIN_APP_VERSION,
   SNIPPING_TOOL_MIN_APP_VERSION,
   formatSnipShortcut,
@@ -18,11 +19,14 @@ import {
   snipExpiryLabel,
   snipRetentionLabel,
 } from '@/lib/snips';
+import { importSnip } from '@/lib/snipUpload';
 import { meetsMinVersion } from '@/lib/appVersion';
 import { useAppVersion } from '@/hooks/useAppVersion';
 import type { SnipPage, SnipRow } from '@/types/snips';
 import { PendingUploads } from './_components/PendingUploads';
 import { SnipCard } from './_components/SnipCard';
+import { SnipDetailsDialog } from './_components/SnipDetailsDialog';
+import { SnipImportDialog } from './_components/SnipImportDialog';
 import { SnipSettingsPopover } from './_components/SnipSettingsPopover';
 
 /**
@@ -85,6 +89,11 @@ export default function SnippingToolPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [capturing, setCapturing] = useState(false);
+  const [importing, setImporting] = useState(false);
+  // One dialog for the whole grid, holding the row being edited — not one
+  // mounted per card, which on a 24-cell page would be 24 `Dialog` portals for
+  // a surface at most one of them ever opens.
+  const [editing, setEditing] = useState<SnipRow | null>(null);
   // Seeded from the user agent rather than defaulting to `other`: the IPC answer
   // arrives a tick later, and until it does a Mac would render the shortcut as
   // "Ctrl + Shift + S" in the page's own description — wrong, and prominent.
@@ -249,6 +258,12 @@ export default function SnippingToolPage() {
   //     on screen for several seconds is a secret that ends up inside somebody's
   //     next capture or screen share. The rule against printing a token in a log
   //     or an error message applies just as much to a toast.
+  //
+  // **This copies whether or not auto-copy is on.** That setting governs what
+  // happens automatically once an upload finishes; this button is the user
+  // asking, and a preference about unattended behaviour must never disable an
+  // explicit request. It is also what makes turning auto-copy off safe — the
+  // link stays one click away on every card.
   const copyLink = useCallback(async (snip: SnipRow) => {
     const copied = await copyText(snip.shareUrl);
     if (copied) {
@@ -259,6 +274,72 @@ export default function SnippingToolPage() {
       toast.error('Could not copy the link');
     }
   }, []);
+
+  /** Writes a title and a description onto a snip the user already has. */
+  const saveDetails = useCallback(
+    async (snip: SnipRow, values: { title: string; description: string }) => {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error('Session expired — sign in again.');
+      const res = await fetch(`/api/snips/${snip.id}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      });
+      if (!res.ok) {
+        let message = 'Could not save those details';
+        // Guarded: a non-JSON error body (an HTML 500, a proxy timeout) would
+        // otherwise throw a SyntaxError that replaces the real failure.
+        try {
+          const body = await res.json();
+          if (typeof body?.error === 'string' && body.error) message = body.error;
+        } catch {}
+        throw new Error(message);
+      }
+      // The SERVER's row, not the draft — its normalisers decide what "empty"
+      // is, and a title of three spaces has to come back as absent rather than
+      // sit in the grid as a saved value.
+      const { snip: saved } = (await res.json()) as { snip: SnipRow };
+      setSnips(prev => (prev ? prev.map(s => (s.id === saved.id ? saved : s)) : prev));
+      toast.success('Details saved');
+    },
+    [],
+  );
+
+  /**
+   * Import — an image the user already has, given the same treatment as a
+   * capture: a reservation, a share token, a retention stamp and a card.
+   *
+   * The new row is prepended rather than the list reloaded, exactly as a fresh
+   * capture is (`bluu:snip-created` above) — a reload would re-fetch a page the
+   * user is already looking at to move one row to the top of it (rule 9i).
+   */
+  const handleImport = useCallback(
+    async (
+      file: File,
+      dimensions: { width: number; height: number },
+      onProgress?: (fraction: number) => void,
+    ) => {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error('Session expired — sign in again.');
+      const snip = await importSnip(idToken, file, dimensions, onProgress);
+
+      setSnips(prev => (prev ? [snip, ...prev] : [snip]));
+      setTotal(t => (t === null ? t : t + 1));
+
+      // Same rule the capture path follows: the link goes on the clipboard
+      // only if the user has auto-copy on, and the toast never claims a copy
+      // it did not make.
+      const copied = settings.autoCopyEnabled ? await copyText(snip.shareUrl) : false;
+      toast.success(copied ? 'Imported — link copied' : 'Image imported', {
+        description: copied
+          ? snip.expiresAt
+            ? snipExpiryLabel(snip.expiresAt)
+            : undefined
+          : 'Use the link button on its card to copy the share link.',
+      });
+    },
+    [settings.autoCopyEnabled],
+  );
 
   const removeSnip = useCallback(async (snip: SnipRow) => {
     try {
@@ -292,6 +373,13 @@ export default function SnippingToolPage() {
   // are missing rather than being shut out of a page that works.
   const canRecord =
     versionStatus === 'resolved' && meetsMinVersion(version, SNIP_VIDEO_MIN_APP_VERSION);
+
+  // A THIRD floor, for narration alone — see `SNIP_MIC_MIN_APP_VERSION`. Kept
+  // separate from `canRecord` for the same reason that one is separate from
+  // `tooOld`: a 0.14.x user keeps screen recording and is told one line about
+  // the audio source they are missing, rather than losing a mode that works.
+  const canNarrate =
+    versionStatus === 'resolved' && meetsMinVersion(version, SNIP_MIC_MIN_APP_VERSION);
 
   if (versionStatus === 'checking') {
     // Shaped to the page it becomes — heading, description lines, then the
@@ -334,7 +422,14 @@ export default function SnippingToolPage() {
                   <span className="font-mono text-zinc-300">
                     {formatSnipShortcut(settings.shortcut, platform)}
                   </span>
-                  . The link is copied to your clipboard after upload.
+                  .{' '}
+                  {/* Conditional, because the sentence was a standing promise
+                      the Auto-copy setting can now make false — and a
+                      description that lies about what the tool just did is
+                      worse than one that says less. */}
+                  {settings.autoCopyEnabled
+                    ? 'The link is copied to your clipboard after upload.'
+                    : 'Copy each link from its card — auto-copy is off.'}
                 </>
               ) : (
                 'Capture any part of your screen and share it with a link.'
@@ -357,12 +452,34 @@ export default function SnippingToolPage() {
                 or newer. Image capture works as it always has.
               </p>
             )}
+            {/* Mutually exclusive with the line above, so the header never
+                carries two version notices: a shell too old to record is not
+                also told what it is missing inside recording. Everything else
+                in this release — auto-copy, titles, Import, the shared player —
+                needs no build and is deliberately not mentioned here. */}
+            {canRecord && !canNarrate && (
+              <p className="mt-1.5 text-sm text-zinc-400">
+                Recording with your microphone needs desktop app version{' '}
+                <span className="tabular-nums text-zinc-300">
+                  {SNIP_MIC_MIN_APP_VERSION}
+                </span>{' '}
+                or newer. Everything else here works as it does now.
+              </p>
+            )}
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
             <Button onClick={startCapture} disabled={capturing}>
               <ImageUpscale className="size-4" />
               New Snip
+            </Button>
+            {/* Secondary to New Snip, and beside it rather than in the settings
+                popover: importing is something a user *does* on this page, not
+                a preference they set. `outline` keeps the primary action the
+                one the page is named after. */}
+            <Button variant="outline" onClick={() => setImporting(true)}>
+              <Upload className="size-4" />
+              Import
             </Button>
             <SnipSettingsPopover settings={settings} platform={platform} />
           </div>
@@ -412,6 +529,7 @@ export default function SnippingToolPage() {
                     timezone={timezone}
                     onCopy={copyLink}
                     onDelete={removeSnip}
+                    onEdit={setEditing}
                   />
                 ))}
                 {/* The next page arriving, in the shape it will arrive in. The
@@ -475,6 +593,20 @@ export default function SnippingToolPage() {
           )}
         </div>
       </div>
+
+      <SnipImportDialog
+        open={importing}
+        onOpenChange={setImporting}
+        onImport={handleImport}
+      />
+      {/* `editing` is both the open flag and the payload: closing clears the
+          row, so there is no way for the dialog to be open with nothing in it. */}
+      <SnipDetailsDialog
+        snip={editing}
+        open={editing !== null}
+        onOpenChange={open => { if (!open) setEditing(null); }}
+        onSave={saveDetails}
+      />
     </AppLayout>
   );
 }

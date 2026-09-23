@@ -1,6 +1,6 @@
 {
   "name": "bluu-backend",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "description": "Bluu Rock MGMT SaaS",
   "author": "BluuRockMGMT",
   "private": true,
@@ -60,6 +60,9 @@
       "notarize": true,
       "entitlements": "build-assets/macos/entitlements.mac.plist",
       "entitlementsInherit": "build-assets/macos/entitlements.mac.inherit.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Bluu Backend uses your microphone only to record narration when you turn the Microphone option on while capturing a screen recording. It is never used at any other time."
+      },
       "target": [
         {
           "target": "dmg",
