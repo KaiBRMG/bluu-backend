@@ -56,7 +56,7 @@ export function SnipMicrophoneField() {
 
   const read = useCallback(async () => {
     const api = window.electronAPI?.permissions;
-    // Feature-detected: an installed shell older than 0.15.0 has no
+    // Feature-detected: an installed shell older than 0.14.2 has no
     // microphone bridge at all (rule 9c). There the field renders nothing
     // rather than claiming a problem it cannot diagnose.
     if (!api?.microphoneStatus) {

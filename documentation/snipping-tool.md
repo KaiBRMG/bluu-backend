@@ -588,9 +588,9 @@ Like the still path's, these deliberately ignore `notificationPreferences.deskto
 
 ### Narration has its own version floor — and it is the ONLY thing in its release that needs one
 
-`SNIP_MIC_MIN_APP_VERSION` (`0.15.0`) is a **third** floor, for the same reason the second is not a bump of the first: raising `SNIP_VIDEO_MIN_APP_VERSION` would take screen recording away from a user on 0.14.x in order to withhold an audio source they never had.
+`SNIP_MIC_MIN_APP_VERSION` (`0.14.2`) is a **third** floor, for the same reason the second is not a bump of the first: raising `SNIP_VIDEO_MIN_APP_VERSION` would take screen recording away from a user on 0.14.x in order to withhold an audio source they never had.
 
-**What is gated, and what deliberately is not.** Five things shipped in 0.15.0 and only one of them can be gated honestly:
+**What is gated, and what deliberately is not.** Five things shipped in 0.14.2 and only one of them can be gated honestly:
 
 | Feature | Needs a build? | Why |
 |---|---|---|
@@ -920,7 +920,7 @@ One transparent surface per display, each covering that display's bounds.
 - **The sounds needed a third build (0.14.2)**, and it is the smallest possible one: two `sendTo(mainWindow, …)` lines in `main.js` and two listeners in `preload.js`. No new files, so `files[]` is untouched. Everything else in this pass — auto-copy, title/description, Import, the public player — is web only and ships on a plain Vercel deploy; a user on an older shell gets all of it, and only loses the shutter's *precision* (it falls back to `snip:captured`) and the recording cue entirely. There is deliberately **no new version floor**: nothing here is unusable on 0.14.0, and a floor would withhold four working features to enforce a sound.
 - **`SnipSettingsPopover`'s fingerprint has to grow with the settings map.** It content-compares five — now six — field values rather than the object, because the object's identity changes every time presence rewrites `users/{uid}`. A field added to `SnipSettings` and left out of that string is a field whose external change never reconciles the draft.
 - **The public page's `<video>` no longer uses native `controls`.** That was a documented decision and it was reversed for a documented reason — a `MediaRecorder` WebM states no duration, so the browser renders it as a live stream. See "The player is ours" above before changing it back.
-- **Narration ships in 0.15.0, on both platforms**, and it is the first release that needs a new macOS capability: `com.apple.security.device.audio-input` in both entitlements plists and `NSMicrophoneUsageDescription` in a new `mac.extendInfo` block. **Neither may ship without the other** — a missing usage string does not produce a refusal, it terminates the app.
+- **Narration ships in 0.14.2, on both platforms**, and it is the first release that needs a new macOS capability: `com.apple.security.device.audio-input` in both entitlements plists and `NSMicrophoneUsageDescription` in a new `mac.extendInfo` block. **Neither may ship without the other** — a missing usage string does not produce a refusal, it terminates the app.
 - **Never raise a permission prompt from the selection surface.** It is full-screen and always-on-top, and on a single display `armSnipOverlays` cancels the snip on blur — so a TCC dialog there destroys the surface that asked for it and resolves into a window that no longer exists. `snip-preload.js` deliberately exposes no `requestMic`.
 - **The "Open Settings" asymmetry runs the other way for the microphone.** Screen Recording has no Windows permission, so that button is macOS-only. The microphone is grantable on both (`ms-settings:privacy-microphone`), so gating it on macOS would hide the only route a Windows user has.
 - **The microphone status is never cached.** Every surface, every toggle and every focus of the settings card re-reads it. A status read once at launch is how a user who has just granted access is still told they have not.

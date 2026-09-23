@@ -20,9 +20,14 @@
 
        It is only half of what macOS needs. `NSMicrophoneUsageDescription` in
        the Info.plist (see `mac.extendInfo` in package.json) is the other half,
-       and its absence is not a refusal -- TCC TERMINATES the process the
+       and its absence is not a refusal: TCC TERMINATES the process the
        moment the microphone is requested. Neither of these two may ship
-       without the other. -->
+       without the other.
+
+       Keep every dash in this file single. XML forbids the sequence of two
+       hyphens inside a comment, and Apple's parser reports it only as
+       "AMFIUnserializeXML: syntax error near line N" during codesign, which
+       names neither the file nor the cause. -->
   <key>com.apple.security.device.audio-input</key>
   <true/>
 </dict>

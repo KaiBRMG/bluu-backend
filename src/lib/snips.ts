@@ -78,7 +78,7 @@ export const SNIP_VIDEO_MIN_APP_VERSION = '0.14.0';
  * actually ships the microphone plumbing in `main.js` and the macOS
  * capability, not the one it was planned for.
  */
-export const SNIP_MIC_MIN_APP_VERSION = '0.15.0';
+export const SNIP_MIC_MIN_APP_VERSION = '0.14.2';
 
 // ─── Share tokens ────────────────────────────────────────────────────
 

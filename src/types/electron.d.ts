@@ -483,7 +483,7 @@ interface ElectronAPI {
      *  so it is the one that persists them.
      *
      *  `micEnabled` and `micDeviceId` are optional on the wire: a shell older
-     *  than 0.15.0 sends neither, and `resolveSnipSettings` defaults both. */
+     *  than 0.14.2 sends neither, and `resolveSnipSettings` defaults both. */
     onAudioPrefs?: (
       callback: (prefs: {
         systemAudioEnabled: boolean;
@@ -552,7 +552,7 @@ interface ElectronAPI {
     /**
      * The microphone, for the Snipping Tool's settings card.
      *
-     * Optional throughout — an installed shell older than 0.15.0 has none of
+     * Optional throughout — an installed shell older than 0.14.2 has none of
      * these, and every call site feature-detects (rule 9c).
      *
      * **`microphoneStatus` is why there are three of these rather than one.**
