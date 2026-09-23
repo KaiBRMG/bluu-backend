@@ -1,11 +1,12 @@
 "use client";
 
-import { IconDotsVertical, IconLogout, IconSettings } from "@tabler/icons-react";
+import { IconDotsVertical, IconLogout, IconRefresh, IconSettings } from "@tabler/icons-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { auth } from "@/firebase-config";
 import { clearPermissionsCache } from "@/lib/permissionsCache";
 import { useTimeTrackingContext } from "@/contexts/TimeTrackingContext";
+import CheckForUpdateDialog from "@/components/CheckForUpdateDialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -48,6 +49,9 @@ export function NavUser({ user }: NavUserProps) {
   const { clockOutAndFlush } = useTimeTrackingContext();
   // Desktop-only: the version comes from the Electron shell, so it stays empty in a browser.
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  // The manual update check. Mounted lazily — the dialog runs a network check on
+  // open, so it must not exist until the user actually asks.
+  const [updateOpen, setUpdateOpen] = useState(false);
 
   useEffect(() => {
     window.electronAPI?.app?.getVersion?.()
@@ -115,6 +119,13 @@ export function NavUser({ user }: NavUserProps) {
                 Settings
               </Link>
             </DropdownMenuItem>
+            {/* Always available, on both platforms, clocked in or out — it only
+                reads the GitHub releases feed. The dialog owns the answer and
+                every no-update state; see `CheckForUpdateDialog`. */}
+            <DropdownMenuItem onClick={() => setUpdateOpen(true)}>
+              <IconRefresh />
+              Check for Update
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={handleSignOut} className="text-red-400">
               <IconLogout />
               Sign out
@@ -122,6 +133,12 @@ export function NavUser({ user }: NavUserProps) {
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
+
+      {/* Outside the DropdownMenu on purpose: the menu unmounts its content on
+          close, which would tear the dialog down the moment it opened. */}
+      {updateOpen && (
+        <CheckForUpdateDialog open={updateOpen} onOpenChange={setUpdateOpen} />
+      )}
     </SidebarMenu>
   );
 }

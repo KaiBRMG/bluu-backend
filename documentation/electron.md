@@ -362,9 +362,41 @@ The shell exposes its version so the fleet can be tracked and nudged:
 - `app.getVersion()` → attached to `active_sessions` (at clock-in, via `/api/time-tracking/start`) and every `/api/bugs` report (via `src/lib/appVersion.ts` + `bugReporter`). Gives a live view of who is on which build.
 - **Persisted per user** → `users/{uid}.appVersion` / `.appPlatform` / `.appVersionUpdatedAt`, so the build survives clock-out and is visible for users who never clock in. Written by [`AppVersionReporter`](../src/components/AppVersionReporter.tsx) (mounted in `(main)/layout.tsx`) via `POST /api/user/app-version`. **Write-on-change only:** the reporter compares `getAppInfo()` against the `useUserData()` snapshot it already has and posts nothing on a normal start-up — no extra read, and one write per update. Machine-reported, so the field is deliberately *not* on the `/api/user/update` whitelist. Surfaced in User Management → user detail, under the email.
 
-`src/components/UpdateAvailableBanner.tsx` (in `(main)/layout.tsx`) owns every update prompt. It separates **policy** (what the user is told) from **delivery** (what the button does) — the two are decided independently, and conflating them is the easiest way to break this component.
+### Two surfaces, and the difference is push vs pull
 
-### Policy — `src/lib/appUpdateConfig.ts` is the only gate
+There are **two** ways a user learns about an update, and they read different sources on purpose. Mixing them up is the failure this split exists to prevent.
+
+| | **Push** — [`UpdateAvailableBanner`](../src/components/UpdateAvailableBanner.tsx) | **Pull** — [`CheckForUpdateDialog`](../src/components/CheckForUpdateDialog.tsx) |
+|---|---|---|
+| Question | "Is anybody being **told** to update?" | "Am I on the latest version?" |
+| Trigger | automatic, clocked-out only | the **Check for Update** item in the user menu |
+| Source of truth | `APP_UPDATE` ([`appUpdateConfig.ts`](../src/lib/appUpdateConfig.ts)) — a **policy** | the **GitHub releases feed** via `/api/app-update/latest` — a **fact** |
+| Platform reach | only a platform with a non-`null` entry, only a matching cohort | always, both platforms, every user |
+| Can be silent | yes — `null` is the resting state | never: it always answers |
+
+**`APP_UPDATE` cannot answer the pull question, and this is why.** `win` is `null` most of the time, and `null` means "we are not nudging Windows" — never "there is nothing newer". A manual check answered from the config would tell a Windows user on v0.12.0 they are current while v0.14.2 sits on the releases page. So the dialog reads the releases feed, the same source `electron-updater` reads and the same place the installers are actually uploaded to.
+
+**`electron/package.json` is not the source either**, despite being where the version is authored. That file is bumped *before* the tag is pushed and long before Actions finishes notarizing — the exact window rule 14 exists to protect. A release is real when its assets are on the releases page.
+
+**What `appUpdateConfig.ts` is for, after this:** pushing — **forced** (`compulsory`) updates and **persistent dismissible** prompts, with cohort staging. That is still the only thing that can *block* a user, and rule 14's two-push ordering still governs it in full. It is not consulted by the dialog except for `downloadUrl`.
+
+#### `/api/app-update/latest`
+
+Unauthenticated, CDN-cached (`public, s-maxage=600, stale-while-revalidate=3600`) — the response is a public version number identical for every caller, so one origin hit serves the fleet (rule 9i). Its sibling `/api/app-update` is `no-store` and cohort-resolved; these are opposites for good reasons, both written into their headers.
+
+Three brakes on GitHub's 60-requests/hour-per-IP unauthenticated limit: that CDN header, a module-level memo in a warm lambda, and an optional server-only `GITHUB_TOKEN` (5,000/hour). **A failure never guesses** — it answers `{ version: null, status: 'unavailable' }` and the dialog says it could not check, rather than reporting "up to date" when nobody actually looked.
+
+#### The dialog's four outcomes
+
+**Up to date** · **Update available** · **Couldn't check** (feed unreachable, *or* a build too old to report `app.getVersion()` — nothing to compare either way) · **Desktop app only** (opened in a browser).
+
+Delivery on the "available" outcome follows the **same hard platform rule as the banner** (below): macOS asks the shell to re-check (`updater.check()`), polls `getPending()` for 45s and then offers a real **Download and install** with a progress bar — and is **never** shown a download link. Windows opens `downloadUrl`. Every `updater.*` call is feature-detected *and* `catch`-guarded, because on Windows the preload exposes the methods while `registerAutoUpdater` registers no handler, so the `invoke` rejects.
+
+**Checking is always allowed, including mid-shift** — it is a read. **Installing** ends the shift: the shell's `updater:before-install` handler in `TimeTrackingContext` clocks the user out and flushes first, so no time is lost, and the dialog says so *before* the button rather than after.
+
+`src/components/UpdateAvailableBanner.tsx` (in `(main)/layout.tsx`) owns every **pushed** update prompt. It separates **policy** (what the user is told) from **delivery** (what the button does) — the two are decided independently, and conflating them is the easiest way to break this component.
+
+### Policy — `src/lib/appUpdateConfig.ts` is the only gate on a *pushed* prompt
 
 ```ts
 APP_UPDATE = {
@@ -502,7 +534,8 @@ The reset repairs the **next** scheduled capture, not the one that just failed. 
 
 ### Windows: manual updates
 
-- Windows is signed only with a **self-generated** certificate, which `electron-updater` cannot validate, so auto-update is darwin-gated and the workflow is unchanged. Windows users update via the `UpdateAvailableBanner` nudge.
+- Windows is signed only with a **self-generated** certificate, which `electron-updater` cannot validate, so auto-update is darwin-gated and the workflow is unchanged. Windows users update via the `UpdateAvailableBanner` nudge, or by asking — **Check for Update** in the user menu works on Windows and reads the releases feed directly, which is the only way that platform ever learns it is behind while `APP_UPDATE.win` is `null`.
+- **`registerAutoUpdater` returns early on Windows**, so none of the `updater:*` handlers are registered there at all. The preload still exposes `electronAPI.updater.*`, so those calls **reject** rather than no-op — every renderer call site must `catch`, not merely feature-detect.
 
 ## Gotchas checklist
 

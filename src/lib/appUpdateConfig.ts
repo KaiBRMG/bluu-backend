@@ -1,7 +1,25 @@
 /**
- * Desktop app update config — the single gate for **every** Electron update
- * prompt, on both platforms. If this file doesn't target a platform, users on
- * that platform are never prompted, full stop. Nothing else decides.
+ * Desktop app update config — the single gate for every **pushed** Electron
+ * update prompt, on both platforms. If this file doesn't target a platform,
+ * users on that platform are never *nudged*, full stop. Nothing else decides
+ * that.
+ *
+ * ▸ **It is NOT the answer to "is there a newer version?"** — and since the
+ *   **Check for Update** menu item shipped, that is a question the app answers
+ *   somewhere else. A `null` platform entry here means "we are not nudging that
+ *   OS", never "there is nothing newer"; `win` is `null` most of the time while
+ *   releases keep shipping. The *fact* about what has been released comes from
+ *   the GitHub releases feed via `/api/app-update/latest`, read by
+ *   [`CheckForUpdateDialog`](../components/CheckForUpdateDialog.tsx). Never
+ *   answer a manual check from this file — it would tell a Windows user on
+ *   v0.12.0 that they are current.
+ *
+ * ▸ **What this file is for, precisely: pushing.** Two things, and only these —
+ *   a **forced** update (`compulsory: true`, which blocks the app) and a
+ *   **persistent dismissible** prompt, either one stageable by cohort. It is the
+ *   only thing in the product that can lock a user out of a build, which is why
+ *   cross-cutting rule 14's two-push ordering governs it in full and does not
+ *   govern the manual check at all.
  *
  * ▸ **Per-platform.** A release rarely matters to both OSes equally: v0.8.0 is
  *   what gives macOS auto-update, and is irrelevant to Windows. Set that
@@ -192,11 +210,11 @@ export const APP_UPDATE: AppUpdateConfig = {
   // set `allUsers: false` and list uids or group slugs instead — see
   // `UpdateCohort`. `allUsers: false` with both lists empty prompts nobody.
 
-  mac: { latestVersion: '0.14.2', compulsory: false, allUsers: false, uids: ['VoRCp0wmgvSgKG8yzxOyMyZ4cSv1'], groups: [] },
+  mac: { latestVersion: '0.14.2', compulsory: false, allUsers: false, uids: [], groups: ['OFAM'] },
   // mac: null,
 
   // win: null,
-  win: { latestVersion: '0.14.2', compulsory: false, allUsers: false, uids: ['VoRCp0wmgvSgKG8yzxOyMyZ4cSv1'], groups: [] },
+  win: { latestVersion: '0.14.2', compulsory: false, allUsers: false, uids: [], groups: ['OFAM'] },
 
   // `/update`, not `/download`: this link is only ever opened for someone who
   // ALREADY has the app, so it must not put the one-time certificate sequence in
