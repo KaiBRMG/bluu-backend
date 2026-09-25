@@ -6,7 +6,8 @@ import { notifications } from '@/lib/notificationContent';
 import { CA_LEAVE_ALERT_RECIPIENT_UID, formatNameList, notifyUsers } from '@/lib/services/caNotifications';
 import { queueCoverageNotice, recordLeaveWithdrawal } from '@/lib/services/coverageNotices';
 import { revertOccurrenceCoverage } from '@/lib/services/leaveCoverage';
-import { LEAVE_ALLOTMENT, LEAVE_BALANCE_FIELD, resolveLeaveBalances } from '@/lib/leave/leaveBalance';
+import { leaveRefund, remainingOf } from '@/lib/leave/leaveBalance';
+import { recordLeaveLedgerEntry } from '@/lib/services/leaveLedger';
 import { formatDayLabelWithWeekday, toDayKey } from '@/lib/salary/salaryDate';
 import { pluralise } from '@/lib/salary/salaryFormat';
 import type { DecodedIdToken } from 'firebase-admin/auth';
@@ -16,8 +17,9 @@ import type { LeaveRequestDocument, UserDocument } from '@/types/firestore';
 //
 // Withdrawing a leave request. Two very different operations behind one verb:
 //
-// - A **pending or denied** request is just a row going away. Nobody has acted
-//   on it, so nothing else changes and nobody is told.
+// - A **pending or denied** request is a row going away. Nobody has acted on it,
+//   so nobody is told — the only other effect is a pending request's day going
+//   back on the balance (a denied one was refunded at denial).
 // - An **approved** one has already moved the world: the shift occurrence was
 //   tombstoned and every creator the agent was covering was posted to the
 //   overtime board, where somebody may now be assigned and being paid to cover
@@ -56,35 +58,42 @@ export const DELETE = withAuth(async (
 
     // ── The refund, and only where one is owed ──
     //
-    // Approval is what spends a day, so withdrawal refunds one **only** for an
-    // approved request. A pending or denied request never cost anything, and the
-    // old code refunding both is what let an agent gain a day by requesting
-    // leave and immediately withdrawing it.
+    // Requesting takes a day, so withdrawing a **pending or approved** request
+    // gives it back. A denied one was refunded at denial and gives back nothing
+    // — refunding it again is how an agent would gain a day. `leaveRefund` reads
+    // the marker the request carries rather than its status, and declines when a
+    // reset has happened since the day was taken (the reset already restored
+    // the allotment).
     //
-    // Transactional for the same reason the deduction is: the refund is computed
-    // from the value read inside it, so a withdrawal racing the monthly reset
-    // cannot write back a pre-reset number.
-    const balanceField = LEAVE_BALANCE_FIELD[leave.leaveType];
-
+    // Transactional, reading the leave and the user inside it: the refund is
+    // computed from values read in the same operation, so a withdrawal racing a
+    // denial or a month's finalisation cannot refund twice or write back a pre-reset
+    // number.
     await adminDb.runTransaction(async tx => {
       const userRef = adminDb.collection('users').doc(leave.userId);
+      const [freshLeaveSnap, userSnap] = await Promise.all([tx.get(leaveRef), tx.get(userRef)]);
+      const freshLeave = freshLeaveSnap.data() as LeaveRequestDocument | undefined;
+      if (!freshLeave) return;
 
-      if (wasApproved) {
-        const userSnap = await tx.get(userRef);
-        const balances = resolveLeaveBalances(userSnap.data() as UserDocument | undefined);
-        const remaining = leave.leaveType === 'paid' ? balances.paid : balances.unpaid;
-
-        // Capped at the allotment. A day approved in March and withdrawn in
-        // April belongs to a period that has already been reset — refunding it
-        // would push the new month above four days for an absence that never
-        // happened. The cap costs the agent nothing they still hold and stops
-        // the balance ratcheting upward across resets.
-        tx.update(userRef, {
-          [balanceField]: Math.min(remaining + 1, LEAVE_ALLOTMENT[leave.leaveType]),
-        });
-      }
+      const freshUser = userSnap.data() as UserDocument | undefined;
+      const before = remainingOf(freshUser, freshLeave.leaveType);
+      const refund = leaveRefund(freshUser, freshLeave);
+      if (refund) tx.update(userRef, refund);
 
       tx.delete(leaveRef);
+      // The request document is gone after this; the ledger entry is what
+      // keeps the withdrawal visible in Coverage → History.
+      recordLeaveLedgerEntry(tx, {
+        leaveId: freshLeave.leaveId,
+        userId: freshLeave.userId,
+        leaveType: freshLeave.leaveType,
+        occurrenceStart: freshLeave.occurrenceStart,
+        action: 'withdrawn',
+        before,
+        after: refund ? before + 1 : before,
+        actorUid: token.uid,
+        priorStatus: freshLeave.status,
+      });
     });
 
     invalidateUserCache(leave.userId);

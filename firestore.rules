@@ -183,6 +183,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 13b. Leave ledger — balance changes made by leave requests (Coverage →
+    // History). Read and written only through the Admin SDK
+    // (`/api/shifts/leave/*`), which gates on shift-management / ca-admin.
+    match /leave-ledger/{entryId} {
+      allow read, write: if false;
+    }
+
     // 14. Campaign tracking
     // CA agents and managers read all entries; creators read only their own.
     // All writes via Admin SDK (API routes).

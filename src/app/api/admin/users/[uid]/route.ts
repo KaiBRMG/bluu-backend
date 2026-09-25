@@ -199,6 +199,7 @@ export const DELETE = withAuth(async (
       deleteQueryDocs(adminDb.collection('screenshots').where('userId', '==', targetUid)),
       deleteQueryDocs(adminDb.collection('shifts').where('userId', '==', targetUid)),
       deleteQueryDocs(adminDb.collection('leave_requests').where('userId', '==', targetUid)),
+      deleteQueryDocs(adminDb.collection('leave-ledger').where('userId', '==', targetUid)),
       deleteQueryDocs(adminDb.collection('notifications').where('userId', '==', targetUid)),
       deleteQueryDocs(adminDb.collection('bugs').where('uid', '==', targetUid)),
       // Rule 6 — a new per-user collection joins the cascade. Snips are also

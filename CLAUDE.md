@@ -72,6 +72,8 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
  CA salary → sales imported from .xlsx → ca-sales; every figure DERIVED on read
               (engine: src/lib/salary) — see ca-salary.md. Leave approval releases
               creator accounts to an overtime board that creates the shifts that pay.
+              FINALISING a month is what resets leave (unpaid → 4; a December
+              also resets paid → 10) — there is no calendar reset cron.
  Firestore + Storage (Firebase Admin SDK) ← services (src/lib/services) ← API routes (src/app/api)
  Client hooks (src/hooks) ← contexts (src/contexts) ← React 19 / Next 16 App Router UI
  functions/ → generateThumbnail (Storage trigger) + daily stale-session cleanup
@@ -86,9 +88,6 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
                 Storage objects (media AND a recording's poster), plus upload
                 slots that were never finalised
                 — see snipping-tool.md
-              + daily leave-balance reset (22:30 UTC = 00:30 Harare): unpaid
-                → 4 on the 1st, paid → 10 on 1 Jan. Daily + a per-user period
-                marker, so a missed run self-heals — see ca-salary.md §6
               (scheduled work that must send a notification lives HERE, not in
                functions/ — copy lives only in notificationContent.ts; work
                needing src/lib services or types belongs here too)

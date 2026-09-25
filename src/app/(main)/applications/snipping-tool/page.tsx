@@ -312,6 +312,10 @@ export default function SnippingToolPage() {
    * The new row is prepended rather than the list reloaded, exactly as a fresh
    * capture is (`bluu:snip-created` above) — a reload would re-fetch a page the
    * user is already looking at to move one row to the top of it (rule 9i).
+   *
+   * One call per file; the dialog runs a batch through it in order and reports
+   * the successes once, to `handleImported`, so a batch of eight is one toast
+   * and one clipboard write rather than eight of each.
    */
   const handleImport = useCallback(
     async (
@@ -325,18 +329,42 @@ export default function SnippingToolPage() {
 
       setSnips(prev => (prev ? [snip, ...prev] : [snip]));
       setTotal(t => (t === null ? t : t + 1));
+      return snip;
+    },
+    [],
+  );
 
-      // Same rule the capture path follows: the link goes on the clipboard
-      // only if the user has auto-copy on, and the toast never claims a copy
-      // it did not make.
-      const copied = settings.autoCopyEnabled ? await copyText(snip.shareUrl) : false;
-      toast.success(copied ? 'Imported — link copied' : 'Image imported', {
-        description: copied
-          ? snip.expiresAt
-            ? snipExpiryLabel(snip.expiresAt)
-            : undefined
-          : 'Use the link button on its card to copy the share link.',
-      });
+  const handleImported = useCallback(
+    async (imported: SnipRow[]) => {
+      if (imported.length === 0) return;
+      // Same rule the capture path follows: the links go on the clipboard only
+      // if the user has auto-copy on, and the toast never claims a copy it did
+      // not make. A batch copies every link, one per line, in import order.
+      const copied = settings.autoCopyEnabled
+        ? await copyText(imported.map(s => s.shareUrl).join('\n'))
+        : false;
+
+      if (imported.length === 1) {
+        const [snip] = imported;
+        toast.success(copied ? 'Imported — link copied' : 'Image imported', {
+          description: copied
+            ? snip.expiresAt
+              ? snipExpiryLabel(snip.expiresAt)
+              : undefined
+            : 'Use the link button on its card to copy the share link.',
+        });
+        return;
+      }
+      toast.success(
+        copied
+          ? `${imported.length} images imported — links copied`
+          : `${imported.length} images imported`,
+        {
+          description: copied
+            ? 'One link per line, in the order they were imported.'
+            : 'Use the link button on each card to copy its share link.',
+        },
+      );
     },
     [settings.autoCopyEnabled],
   );
@@ -598,6 +626,7 @@ export default function SnippingToolPage() {
         open={importing}
         onOpenChange={setImporting}
         onImport={handleImport}
+        onImported={handleImported}
       />
       {/* `editing` is both the open flag and the payload: closing clears the
           row, so there is no way for the dialog to be open with nothing in it. */}

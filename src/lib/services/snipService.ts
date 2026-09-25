@@ -112,6 +112,14 @@ function snipVideoUrl(id: string): string {
   return `${PUBLIC_APP_ORIGIN}/api/public/snip/${id}/video`;
 }
 
+/**
+ * The link-preview image (`og:image`) — a small JPEG re-encode of the still,
+ * because chat clients drop full-size previews. See `snipPreviewService`.
+ */
+export function snipPreviewUrl(id: string): string {
+  return `${PUBLIC_APP_ORIGIN}/api/public/snip/${id}/preview`;
+}
+
 /** The public URL for whichever of the two the row actually is. */
 function snipMediaUrl(id: string, kind: SnipKind): string {
   return kind === 'video' ? snipVideoUrl(id) : snipImageUrl(id);
@@ -666,6 +674,33 @@ export async function getSnipMediaRedirect(
    */
   want: 'still' | 'video' = 'still',
 ): Promise<string | null> {
+  const object = await resolveLiveSnipObject(id, want);
+  if (!object) return null;
+
+  const [url] = await adminStorage
+    .bucket()
+    .file(object.path)
+    .getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      expires: Date.now() + SIGNED_READ_TTL_MS,
+    });
+  return url;
+}
+
+/**
+ * The Storage path of a live snip's still or recording (plus the row's kind),
+ * or null.
+ *
+ * The one place the liveness rules for the public media routes live — the
+ * redirects above and the link-preview route (`snipPreviewService`) both come
+ * through here, so a deleted or expired snip stops serving every one of them at
+ * the same instant.
+ */
+export async function resolveLiveSnipObject(
+  id: string,
+  want: 'still' | 'video',
+): Promise<{ path: string; kind: SnipKind } | null> {
   if (!isValidSnipId(id)) return null;
 
   const snap = await adminDb.collection(COLLECTION).doc(id).get();
@@ -687,17 +722,7 @@ export async function getSnipMediaRedirect(
       : kind === 'video'
         ? d.posterPath ?? null
         : d.storagePath;
-  if (!path) return null;
-
-  const [url] = await adminStorage
-    .bucket()
-    .file(path)
-    .getSignedUrl({
-      version: 'v4',
-      action: 'read',
-      expires: Date.now() + SIGNED_READ_TTL_MS,
-    });
-  return url;
+  return typeof path === 'string' && path ? { path, kind } : null;
 }
 
 // ─── Details (title & description) ───────────────────────────────────

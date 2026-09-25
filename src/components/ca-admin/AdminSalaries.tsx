@@ -26,7 +26,7 @@ import { CommissionLadder } from '@/components/salary/CommissionLadder';
 import { useAuth } from '@/components/AuthProvider';
 import { useSalaryMonth } from '@/hooks/useSalaryMonth';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
-import { formatMonthLabel } from '@/lib/salary/salaryDate';
+import { addMonths, formatMonthLabel } from '@/lib/salary/salaryDate';
 import { formatHours, formatPercent, formatRelative, formatUsd, pluralise } from '@/lib/salary/salaryFormat';
 import type { SalaryMonthTotals, SalaryTierProgress } from '@/lib/salary/salaryTypes';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
@@ -447,7 +447,21 @@ function FinaliseControl({
 
       setOpen(false);
       setReason('');
-      toast.success(finalising ? 'Month finalised' : 'Month reopened');
+      if (finalising) {
+        const body = (await res.json().catch(() => null)) as {
+          leaveReset?: { unpaid: boolean; paid: boolean } | null;
+        } | null;
+        const reset = body?.leaveReset;
+        toast.success(
+          reset?.paid
+            ? 'Month finalised. Leave reset to 4 unpaid days and 10 paid days.'
+            : reset?.unpaid
+              ? 'Month finalised. Unpaid leave reset to 4 days.'
+              : 'Month finalised. Leave was already reset for the next month.',
+        );
+      } else {
+        toast.success('Month reopened. Leave balances are unchanged.');
+      }
       onDone();
     } catch {
       setError('Could not reach the server. Check your connection and try again.');
@@ -476,6 +490,14 @@ function FinaliseControl({
                   <span className="font-semibold tabular-nums text-foreground">{formatUsd(data.totals.salary)}</span>.
                   Further sales imports for this agent and month will be refused and no figure can be edited. The agent
                   is not notified automatically — let them know yourself.
+                  <span className="mt-2 block">
+                    {/* The reset is the side effect an admin can't see from the
+                        grid, so it is named before they confirm. Unused days do
+                        not carry over — the balance is set, not topped up. */}
+                    Their unpaid leave resets to 4 days for {formatMonthLabel(addMonths(month, 1))}
+                    {month.endsWith('-12') && <>, and paid leave resets to 10 days for {Number(month.slice(0, 4)) + 1}</>}.
+                    Unused days don&apos;t carry over.
+                  </span>
                 </>
               ) : (
                 <>

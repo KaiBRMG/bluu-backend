@@ -2,13 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
-import { getUserById } from '@/lib/services/userService';
-import { resolveLeaveBalances } from '@/lib/leave/leaveBalance';
+import { getUserById, invalidateUserCache } from '@/lib/services/userService';
+import { isBalanceCharged, leaveCharge, remainingOf } from '@/lib/leave/leaveBalance';
+import { recordLeaveLedgerEntry } from '@/lib/services/leaveLedger';
 import { notifications } from '@/lib/notificationContent';
 import { CA_LEAVE_ALERT_RECIPIENT_UID, notifyUsers } from '@/lib/services/caNotifications';
 import { formatDayLabelWithWeekday, toDayKey } from '@/lib/salary/salaryDate';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-import type { LeaveRequestDocument } from '@/types/firestore';
+import type { LeaveRequestDocument, UserDocument } from '@/types/firestore';
+
+/** A refusal raised inside the transaction, answered with its message rather than a 500. */
+class LeaveRefusal extends Error {
+  constructor(message: string, readonly status: 400 | 409) {
+    super(message);
+  }
+}
 
 function serialiseLeave(doc: LeaveRequestDocument) {
   return {
@@ -152,63 +160,87 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'Paid leave is not enabled for this user' }, { status: 400 });
     }
 
-    // ── The balance check, against what is left *after* everything already in
-    //    flight ──
+    // ── Requesting takes the day ──
     //
-    // A request no longer spends the balance; approval does (see the approve
-    // route). That is the right model — a request an admin never gets to must
-    // not hold someone's days hostage, and a denied request should cost nothing
-    // — but it means the balance alone is not what an agent has left to spend.
-    // Four pending requests against four days is fully committed, and checking
-    // only `remaining` would let them queue a fifth.
+    // The balance an agent sees is what they can still ask for, so a request
+    // comes off it immediately; a denial or a withdrawal gives it back (see the
+    // approve and DELETE routes, and `leaveBalance.ts`).
     //
-    // So the gate is `remaining - pending`. The pending count is the same
-    // indexed `userId` query the duplicate check below needs anyway.
-    const ownRequests = await adminDb
-      .collection('leave_requests')
-      .where('userId', '==', token.uid)
-      .get();
-
-    const requests = ownRequests.docs.map(d => d.data() as LeaveRequestDocument);
-
-    // Duplicate check: one request per shift occurrence per user.
-    if (requests.some(r => r.shiftId === shiftId && r.occurrenceStart === occurrenceStart)) {
-      return NextResponse.json({ error: 'Leave request already exists for this shift occurrence' }, { status: 409 });
-    }
-
-    const balances = resolveLeaveBalances(user);
-    const remaining = leaveType === 'paid' ? balances.paid : balances.unpaid;
-    const pending = requests.filter(r => r.status === 'pending' && r.leaveType === leaveType).length;
-    const uncommitted = remaining - pending;
-
-    if (uncommitted <= 0) {
-      const label = leaveType === 'paid' ? 'paid' : 'unpaid';
-      return NextResponse.json(
-        {
-          error:
-            pending > 0
-              ? `You have ${remaining} ${label} ${remaining === 1 ? 'day' : 'days'} left and ${pending} ${pending === 1 ? 'request' : 'requests'} already awaiting approval.`
-              : `No ${label} leave remaining.`,
-        },
-        { status: 400 },
-      );
-    }
-
+    // A **transaction** reading the user document and the agent's own requests
+    // inside it, so the duplicate check, the balance check and the deduction are
+    // one operation. Two requests landing together cannot both see "1 left" and
+    // both take it.
     const leaveRef = adminDb.collection('leave_requests').doc();
     const leaveId = leaveRef.id;
+    const userRef = adminDb.collection('users').doc(token.uid);
+    const label = leaveType === 'paid' ? 'paid' : 'unpaid';
 
-    await leaveRef.set({
-      leaveId,
-      shiftId,
-      occurrenceStart,
-      userId: token.uid,
-      leaveType,
-      status: 'pending',
-      requestedAt: FieldValue.serverTimestamp(),
-      resolvedAt: null,
-      resolvedBy: null,
-      reason: trimmedReason || null,
-    });
+    try {
+      await adminDb.runTransaction(async tx => {
+        const [userSnap, ownRequests] = await Promise.all([
+          tx.get(userRef),
+          tx.get(adminDb.collection('leave_requests').where('userId', '==', token.uid)),
+        ]);
+        const freshUser = userSnap.data() as UserDocument | undefined;
+        const requests = ownRequests.docs.map(d => d.data() as LeaveRequestDocument);
+
+        // Duplicate check: one request per shift occurrence per user.
+        if (requests.some(r => r.shiftId === shiftId && r.occurrenceStart === occurrenceStart)) {
+          throw new LeaveRefusal('Leave request already exists for this shift occurrence', 409);
+        }
+
+        // Requests made before charging moved to request time are pending
+        // without having taken a day; they will take it at approval, so they
+        // still count against what is left. Zero once those have been decided.
+        const legacyPending = requests.filter(
+          r => r.status === 'pending' && r.leaveType === leaveType && !isBalanceCharged(r),
+        ).length;
+        const remaining = remainingOf(freshUser, leaveType);
+
+        if (remaining - legacyPending <= 0) {
+          throw new LeaveRefusal(
+            legacyPending > 0
+              ? `You have ${remaining} ${label} ${remaining === 1 ? 'day' : 'days'} left and ${legacyPending} ${legacyPending === 1 ? 'request' : 'requests'} already awaiting approval.`
+              : `No ${label} leave remaining.`,
+            400,
+          );
+        }
+
+        const charge = leaveCharge(freshUser, leaveType);
+        tx.update(userRef, charge.userUpdate);
+        tx.set(leaveRef, {
+          leaveId,
+          shiftId,
+          occurrenceStart,
+          userId: token.uid,
+          leaveType,
+          status: 'pending',
+          requestedAt: FieldValue.serverTimestamp(),
+          resolvedAt: null,
+          resolvedBy: null,
+          reason: trimmedReason || null,
+          ...charge.leaveUpdate,
+        });
+        recordLeaveLedgerEntry(tx, {
+          leaveId,
+          userId: token.uid,
+          leaveType,
+          occurrenceStart,
+          action: 'requested',
+          before: remaining,
+          after: remaining - 1,
+          actorUid: token.uid,
+        });
+      });
+    } catch (txErr) {
+      if (txErr instanceof LeaveRefusal) {
+        return NextResponse.json({ error: txErr.message }, { status: txErr.status });
+      }
+      throw txErr;
+    }
+
+    // Rule 2: the balance on the user document just moved.
+    invalidateUserCache(token.uid);
 
     // Tell the person who approves leave that there is something to approve.
     //

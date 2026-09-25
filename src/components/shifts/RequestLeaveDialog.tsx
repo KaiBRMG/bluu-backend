@@ -239,7 +239,8 @@ export function RequestLeaveDialog({ target, onClose, onSubmit }: RequestLeaveDi
               <span className="tabular-nums text-foreground">
                 {remainingAfter} day{remainingAfter === 1 ? '' : 's'} of {leaveType} leave
               </span>{' '}
-              remaining. Approving it frees your accounts that day for someone else to cover.
+              remaining. The day comes back if this is rejected. Approving it frees your accounts that day for
+              someone else to cover.
             </p>
           )}
 

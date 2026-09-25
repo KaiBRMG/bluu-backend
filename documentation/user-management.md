@@ -153,7 +153,7 @@ A user's timezone drives every time the product renders: shift times, salary day
 ### Removed by the handler
 - `users/{uid}`, group membership (`groups/*.members`), page-permission entries (`page-permissions/*.users.{uid}`), `active_sessions/{uid}`.
 - **The login allowlist entry** `auth-emails/{normalisedEmail}` (`releaseEmailClaim`). The email is read off the doc *before* it is deleted. Leaving the claim behind would keep the address pointing at a dead uid: re-registering that person would fail with "email already taken", and a login attempt would resolve to a doc that no longer exists.
-- Every doc **owned** by the user (`userId`/`uid` field) in: `time_entries`, legacy `time-entries`, `screenshots`, `shifts`, `leave_requests`, `notifications`, `bugs`.
+- Every doc **owned** by the user (`userId`/`uid` field) in: `time_entries`, legacy `time-entries`, `screenshots`, `shifts`, `leave_requests`, `leave-ledger`, `notifications`, `bugs`.
 - Storage: `screenshots/{uid}/` prefix (full-size + thumbnails) and `profile-photos/{uid}/`.
 - The **Firebase Auth account** (`adminAuth.deleteUser(uid)`, tolerant of `auth/user-not-found`). **Why it matters:** deleting only the Firestore doc leaves an orphaned login — the user could sign in again, get the *same* uid back, and silently recreate their doc ("resurrection"). Deleting the Auth account closes that. The mirror failure (Auth account deleted but doc left behind) is what produces **duplicate** `users` docs for one email — see [auth.md](auth.md#login-identity--duplicate-account-prevention).
 

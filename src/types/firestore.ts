@@ -141,17 +141,16 @@ export interface UserDocument {
   remainingUnpaidLeave?: number;
   remainingPaidLeave?: number;
   /**
-   * The leave periods this user's balances were last reset for — `YYYY-MM` for
+   * The leave periods this user's balances currently belong to — `YYYY-MM` for
    * unpaid, a year for paid.
    *
-   * Written only by the daily reset cron (`/api/cron/leave-reset`) and by user
-   * creation. They are what makes the reset idempotent: the job asks "which
-   * period is this user stamped for", never "what day is it today", so a missed
-   * run catches up and a double run does nothing. See
+   * Written only by `finalizeMonth` (finalising month M stamps M+1, and a
+   * December also stamps the next year). They only move forward, which is what
+   * makes a re-finalise after a reopen a no-op for leave. Refunds compare against
+   * them too. See `computeFinalizationReset` in
    * [`leaveBalance.ts`](../lib/leave/leaveBalance.ts).
    *
-   * Nothing queries either field — the cron filters in memory over a cohort it
-   * already had to fetch — so both are index-exempt (rule 9).
+   * Nothing queries either field, so both are index-exempt (rule 9).
    */
   unpaidLeaveResetMonth?: string;
   paidLeaveResetYear?: number;
@@ -332,6 +331,39 @@ export interface LeaveRequestDocument {
    */
   releasedShiftId?: string | null;
   releasedOccurrenceStart?: number | null;
+  /**
+   * The day this request holds against the balance, and which reset period it
+   * was taken from (`unpaidLeaveResetMonth` / `paidLeaveResetYear` as a string,
+   * or `null` when the user had no stamp). Written when the day is taken — at
+   * request time, or at approval for a request made before charging moved
+   * there — and cleared when it is given back. `chargedPeriod` is what stops a
+   * refund landing in a period that has already been reset. Index-exempt
+   * (rule 9). See `leaveBalance.ts`.
+   */
+  balanceCharged?: boolean;
+  chargedPeriod?: string | null;
+}
+
+// ─── Leave ledger ───────────────────────────────────────────────────
+
+export type LeaveLedgerAction = 'requested' | 'approved' | 'denied' | 'withdrawn';
+
+/**
+ * `leave-ledger/{entryId}` — one balance change made by a leave request. Written
+ * inside the transaction that moves the balance. See `leaveLedger.ts`.
+ */
+export interface LeaveLedgerDocument {
+  entryId: string;
+  leaveId: string;
+  userId: string;
+  leaveType: 'paid' | 'unpaid';
+  occurrenceStart: number;
+  action: LeaveLedgerAction;
+  balanceBefore: number;
+  balanceAfter: number;
+  actorUid: string;
+  at: Timestamp;
+  priorStatus?: string;
 }
 
 // ─── Group ──────────────────────────────────────────────────────────

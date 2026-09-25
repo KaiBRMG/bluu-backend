@@ -183,8 +183,9 @@ An admin with the **admin claim** finalises a month:
 - Every derived figure is frozen into `ca-salary-months/{userId}_{month}`.
 - Later sales imports for that agent-month are refused; no override can be written.
 - **The agent is notified** (`salaryFinalized`) — see §11. Reopening is silent, deliberately.
+- **The agent's leave resets**, in the same transaction: unpaid → 4 for the next month, and on a December paid → 10 for the next year. Assigned, not added. See §6, *The reset*.
 
-Reopening keeps the frozen `days` — that is the record of what was paid — and appends to `history`. Again, nobody is notified automatically.
+Reopening keeps the frozen `days` — that is the record of what was paid — and appends to `history`. Again, nobody is notified automatically. It **does not touch leave**, and a re-finalise after it is a no-op for leave, because the reset stamp only moves forward.
 
 ---
 
@@ -359,26 +360,56 @@ Claiming happens in a popover off the day cell: a month cell is ~90px and the de
 
 **[`src/lib/leave/leaveBalance.ts`](../src/lib/leave/leaveBalance.ts) is the only place the allotments are written down, and `resolveLeaveBalances` is the only sanctioned way to read a balance off a user document.** Both matter: the numbers were previously spelled out at six call sites, and two of them disagreed — `AdminLeave` and `UserDetailContent` read a missing balance as `4`/`10` while the request route, `LeaveBalanceCard` and `RequestLeaveDialog` read the same missing field as `0`. An admin and the agent saw different numbers for one person. `resolveLeaveBalances` also gates the paid figure on `hasPaidLeave`, because `remainingPaidLeave` holds `10` whether or not the entitlement is switched on.
 
-- **Unpaid: 4 days, reset on the 1st of each month.** **Paid: 10 days, reset on 1 January**, for users with `hasPaidLeave`. A reset **assigns** the allotment — balances do not carry over.
+- **Unpaid: 4 days per salary month. Paid: 10 days per year**, for users with `hasPaidLeave`. **Both reset only when payroll finalises the agent's month**, never on a calendar date (see *The reset* below). A reset **assigns** the allotment, so balances do not carry over.
 - **The period boundary is `Africa/Harare`**, the same as §7's salary day, so a day off cannot land in one month's roster and spend another month's balance. The period keys come from `salaryDate.ts` for exactly that reason.
 
-**Approval spends the day. Requesting does not.** This was the other way round and was wrong in three ways: a request an admin never got to held the balance hostage indefinitely, a denied request needed a refund to undo a charge it should never have made, and requesting-then-withdrawing refunded a day that was never spent. Now:
+**Requesting takes the day. A denial or a withdrawal gives it back.** The balance an agent sees is therefore what they can still ask for: a pending request is already off it, rather than being a second number to subtract in their head. (An earlier version charged at approval. It was reversed on 2026-09-25 because agents saw a balance that did not move when they asked for time off.)
 
 | Transition | Balance effect |
 |---|---|
-| Request created | none — but the request counts against what is left |
-| Approved | **−1**, in a transaction |
-| Denied | none |
-| Approved leave withdrawn | **+1**, capped at the allotment |
-| Pending or denied request withdrawn | none |
+| Request created | **−1**, in a transaction; refused at zero |
+| Approved | none |
+| Denied | **+1** (see the period rule below) |
+| Pending or approved request withdrawn | **+1** (same rule) |
+| Denied request withdrawn | none — it was refunded at denial |
 
-- **The request gate is `remaining − pending`, not `remaining`.** Since a request no longer spends anything, the balance alone is not what an agent has left to commit; four pending requests against four days is fully spent, and checking only the balance would let them queue a fifth.
-- **Every mutation is a `runTransaction`, reading the user document inside it.** The old code paired an unrelated read with a blind `FieldValue.increment(-1)`, so two requests landing together both saw "1 left" and both decremented — a balance that could go negative.
-- **An approval against a zero balance is refused (409), never clamped.** Approving leave an agent cannot afford is a payroll decision: it either grants a day the company did not, or (clamped) records an absence against a balance that never moved. The message names the fix — raise the balance in CA Admin → Leave — so the override leaves a trail.
-- **The withdrawal refund is capped at the allotment**, so a day approved in March and withdrawn in April cannot push the new month above four.
-- **Both approval call sites must surface the refusal.** `useAdminLeaveQueue` and `ShiftCard` both POST to the approve route (§6 — `ShiftCard` is the one that gets forgotten). `ShiftCard` used to ignore the response entirely, which would have made a refusal look identical to a successful denial.
+- **A request records that it took a day, and from which period.** `balanceCharged` / `chargedPeriod` on `leave_requests` (both index-exempt, rule 9). `chargedPeriod` is the user's reset stamp (`unpaidLeaveResetMonth` / `paidLeaveResetYear`) at the time of the charge, not the wall clock, because the stamp changes at exactly the moment finalisation assigns a fresh allotment. Refunds go through `leaveRefund` and are decided by the marker, never by `status`.
+- **No refund across a reset.** A day taken from September's four and denied on 2 October does not come back, because the reset already restored October to four. If the period is still current, the refund is **uncapped**: it returns exactly the day that was taken, and a cap would swallow days an admin granted above the allotment. If the period is unknown (a legacy approval, or a user with no stamp), the refund is capped at the allotment.
+- **Legacy requests.** Requests made before this change carry no marker. `isBalanceCharged` treats an unmarked **approved** request as charged, since the old flow charged at approval, and an unmarked pending or denied one as not charged. An unmarked pending request is charged **when it is approved** (the old rule, including the 409 at zero) and counts against the request gate until then. The branch goes dead once the old queue has drained.
+- **Every mutation is a `runTransaction`, reading the user document (and on request, the agent's own requests) inside it.** The old code paired an unrelated read with a blind `FieldValue.increment(-1)`, so two requests landing together both saw "1 left" and both decremented, and the balance could go negative. A deny racing a withdrawal can't refund twice, because both read the marker inside the transaction.
+- **Both approval call sites must surface a refusal.** `useAdminLeaveQueue` and `ShiftCard` both POST to the approve route (§6; `ShiftCard` is the one that gets forgotten). A legacy approval can still 409 at zero, and a double-decide 409s.
 
-**The reset is a daily cron with a stored marker, not a job scheduled for the 1st.** [`/api/cron/leave-reset`](../src/app/api/cron/leave-reset/route.ts) runs every day at 22:30 UTC (00:30 Harare) and resets a user when their `unpaidLeaveResetMonth` / `paidLeaveResetYear` stamp is not the current period. A date test would make correctness depend on the job firing on one specific day — a missed run silently skips a month for everyone, which is the failure the whole mechanism exists to prevent. The marker makes it **idempotent** (a second run the same day writes nothing) and **self-healing** (a run missed for three days catches up on the fourth). A user with no stamp and an existing balance is *stamped without being reset*, so the first run after deploy does not undo an admin's hand-set value. Both marker fields are index-exempt (rule 9); the cohort is `permittedPageIds array-contains 'time-tracking'`, which needs no new index. It notifies nobody, deliberately — see the route's own comment.
+### The leave ledger and Coverage → History
+
+**Every balance change a leave request makes is written to `leave-ledger` inside the same transaction that makes it** ([`leaveLedger.ts`](../src/lib/services/leaveLedger.ts)). One entry per step (`requested` / `approved` / `denied` / `withdrawn`), carrying the balance before and after as values read in the transaction, so the ledger and the balance cannot disagree. It exists because nothing else remembers. A balance is one number, and a withdrawal **deletes** its request document.
+
+**Coverage → History** ([`LeaveHistory.tsx`](../src/components/ca-admin/LeaveHistory.tsx), served by [`GET /api/shifts/leave/history`](../src/app/api/shifts/leave/history/route.ts), same access tier as the queue) lists every approved, denied or withdrawn request with its outcome and trail, e.g. *Unpaid balance 4 → 3 requested · 3 → 4 denied*. The route merges two sources by `leaveId`:
+- `leave_requests` for decided requests, including those from before the ledger, which render "not recorded" for the balance;
+- the ledger alone for withdrawals, whose documents are gone.
+
+Both queries are bounded (400 requests, 600 entries) and names resolve in one `getAll`. It is uncached (rule 9i: the queue beside it writes it), and it fetches only while the tab is open.
+
+**The trail does not cover every way a balance moves.** The finalisation reset and hand edits in CA Admin → Leave change balances without a request and write no entry. The page states this in a footnote. If those ever need a history, give them their own ledger action rather than inferring them from gaps.
+
+### Leave on the salary grid
+
+`SalaryDayResult.leave` (`('paid' | 'unpaid')[]`) marks days with **approved** leave, rendered as a greyscale **Paid leave / Unpaid leave** attribute chip in `SalaryDayTable`. Both the agent's and the payroll view get it, because they are the same component. The marker is **attached on read by `buildSalaryMonth`**, never by the engine (rule 9f: the engine does not price leave), and it is applied to a finalised snapshot too. It replaces anything the snapshot stored, because leave can still be withdrawn after payday. Days are attributed by `toDayKey(occurrenceStart)`, the same "the day the shift starts" rule shifts are paid by. It costs one extra query per single-agent month read (`userId` + `status` equality, served by single-field indexes) and is non-fatal. `buildSalaryMonthForUsers` (roster, overview, import) does not attach it, because none of those render days.
+
+**The chip marks leave; it does not pay it.** Paid leave currently adds nothing to the salary.
+
+**The reset: finalising a month is what resets leave.** `finalizeMonth` ([`caSalaryService.ts`](../src/lib/services/caSalaryService.ts)) applies [`computeFinalizationReset`](../src/lib/leave/leaveBalance.ts) in the **same transaction** that freezes the month, so a month can't be paid with its reset lost, or reset without being paid:
+
+| Finalised | Unpaid | Paid |
+|---|---|---|
+| Any month M | **set to 4** for M+1; `unpaidLeaveResetMonth = M+1` | unchanged |
+| December of year Y | **set to 4** for January Y+1 | **set to 10** for Y+1 (users with `hasPaidLeave`); `paidLeaveResetYear = Y+1` |
+
+- **Assigned, never added.** Unused days are lost, so an agent who took nothing in September still has 4 for October, not 8.
+- **The stamp only moves forward.** A reset applies only when the new period is later than the stored stamp. **Reopening and re-finalising** is therefore a no-op for leave and doesn't hand back days used since the first finalise. **Finalising out of order** (September after October) doesn't wind the balance back. A user with no stamp is reset.
+- **Paid leave is stamped even without `hasPaidLeave`**, so switching the entitlement on mid-year doesn't trigger a reset nobody granted.
+- **Until a month is finalised, the agent is still spending the previous period's balance**, however far into the new calendar month it is. That is the intended behaviour: payroll closing the month is what hands out the next allotment. Refunds follow the same stamp, so a day taken before a finalisation and denied after it is not refunded on top of the fresh 4.
+- The finalise dialog names the reset before confirming, and the toast reports what actually happened (including "already reset" on a re-finalise). Nothing is sent to the agent for it; the existing `salaryFinalized` notification is the only message.
+- **There is no calendar cron any more.** `/api/cron/leave-reset` (daily, 22:30 UTC) was removed on 2026-09-25. Leave is a CA-only feature (the request dialog and balance card live on the CA dashboard), so an employee with no salary month never has a balance to reset.
 
 ---
 
@@ -415,6 +446,7 @@ Two rules, and both are load-bearing:
 | `ca-coverage-offers` | `{shiftId}_{start}_{creatorId}` | One account needing cover |
 | `ca-coverage-notices` | `{kind}__{uid}__{day}` | Coalescing queue for the two coverage notifications (§11) |
 | `ca-coverage-withdrawals` | `{leaveId}` | A cancelled absence, for the Coverage band (§11) |
+| `leave-ledger` | auto | One balance change made by a leave request, for Coverage → History (§6). Only `at` (ordered) and `userId` (the delete cascade) are indexed |
 | `ca-salary-tier-notices` | `{uid}_{month}` | The commission band an agent was last told about (§11) |
 | `ca-notification-latches` | `payday-{month}` | Once-a-month guard on the payday reminder (§11) |
 | `creator-subaccounts` | auto-id | A creator's secondary account, assignable as a peer |
@@ -425,7 +457,7 @@ Two rules, and both are load-bearing:
 
 `disputes` gained `resolvedAt` (§10) — written only on a terminal verdict, queried by nothing, index-exempt.
 
-New fields on `shifts`: `creatorIds`, `overtimeCreatorIds`, `isOvertime`, `coverageOfferId`, `paysWage`. Only `creatorIds` is queried (one `array-contains`, by the sub-account delete guard); the rest are index-exempt (rule 9). `leave_requests` gained `releasedShiftId` / `releasedOccurrenceStart` (§6) on the same terms.
+New fields on `shifts`: `creatorIds`, `overtimeCreatorIds`, `isOvertime`, `coverageOfferId`, `paysWage`. Only `creatorIds` is queried (one `array-contains`, by the sub-account delete guard); the rest are index-exempt (rule 9). `leave_requests` gained `releasedShiftId` / `releasedOccurrenceStart` and `balanceCharged` / `chargedPeriod` (§6) on the same terms.
 
 ---
 
@@ -458,7 +490,8 @@ Helpers: [`salaryAuth.ts`](../src/lib/salary/salaryAuth.ts).
                 creator leaderboard, payroll share, attention band
   Salaries      roster → one agent's editable month
   Sales data    .xlsx upload with dry-run preview, import history
-  Coverage      leave approvals → offer board → assign
+  Coverage      leave approvals → offer board → assign · History (outcomes
+                + balance trail)
   Rates         tiers, wage table, grace, deduction, rate basis
   Disputes      the admin desk — bulk bar, all filters (unchanged)
 
@@ -612,7 +645,7 @@ Three calls worth not re-litigating:
 | [`caSalaryService.ts`](../src/lib/services/caSalaryService.ts) | Firestore + the assembler |
 | [`caCoverageService.ts`](../src/lib/services/caCoverageService.ts) | Offers, claims, assignment |
 | [`leaveCoverage.ts`](../src/lib/services/leaveCoverage.ts) | Leave approval → release, and withdrawal → revert. `resolveLiveOccurrence` re-resolves a pinned request against the live roster first — see §6 |
-| [`leave/leaveBalance.ts`](../src/lib/leave/leaveBalance.ts) | The leave allotments, the one sanctioned balance reader (`resolveLeaveBalances`), the reset period keys, and the pure `computeLeaveReset` the cron applies — see §6 |
+| [`leave/leaveBalance.ts`](../src/lib/leave/leaveBalance.ts) | The leave allotments, the one sanctioned balance reader (`resolveLeaveBalances`), charging/refunding a request, and the pure `computeFinalizationReset` that `finalizeMonth` applies — see §6 |
 | [`leaveMatch.ts`](../src/lib/utils/leaveMatch.ts) | The tiered leave ↔ occurrence matcher, shared by the release, the admin week view and the agent calendar |
 | [`caNotifications.ts`](../src/lib/services/caNotifications.ts) | Recipients, delivery, the tier gate and the payday latch |
 | [`coverageNotices.ts`](../src/lib/services/coverageNotices.ts) | The coalescing queue and the withdrawal record |

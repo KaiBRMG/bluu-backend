@@ -1,5 +1,5 @@
 /**
- * Leave balances: the allotments, the defaults, and the reset periods.
+ * Leave balances: the allotments, the defaults, and the finalisation reset.
  *
  * One module because the same three numbers were previously spelled out at six
  * call sites and **two of them disagreed**. `AdminLeave` and `UserDetailContent`
@@ -16,31 +16,25 @@
  *
  * ## The entitlement
  *
- * - **Unpaid leave: 4 days, resetting on the 1st of every month.**
- * - **Paid leave: 10 days, resetting on 1 January**, and only for users with
- *   `hasPaidLeave`.
+ * - **Unpaid leave: 4 days per salary month.**
+ * - **Paid leave: 10 days per year**, and only for users with `hasPaidLeave`.
+ *
+ * **Balances reset when payroll finalises a month, not on a calendar date.**
+ * Finalising an agent's month grants the *next* month's four unpaid days;
+ * finalising their **December** also grants the next year's ten paid days. See
+ * `computeFinalizationReset` below.
  *
  * Balances do not carry over. A reset is an assignment to the allotment, not an
  * increment, so an unused month does not compound into a fortnight.
- *
- * ## The day boundary is Africa/Harare, deliberately
- *
- * A leave month has to start when the salary month starts, or an agent can take
- * a day off that lands in September's roster and spends October's balance. The
- * period keys therefore come from [`salaryDate.ts`](../salary/salaryDate.ts),
- * whose fixed-offset arithmetic is only correct because that zone has no DST
- * (CLAUDE.md rule 9f). Do not swap these for `Intl` on the viewer's timezone:
- * the entitlement is a company fact, not a local one, and an agent in Manila
- * must not get their reset sixteen hours before an agent in Cape Town.
  */
 
-import { currentMonthKey, monthOfDay, currentDayKey } from '@/lib/salary/salaryDate';
+import { addMonths, type SalaryMonthKey } from '@/lib/salary/salaryDate';
 import type { UserDocument } from '@/types/firestore';
 
-/** Unpaid days granted on the 1st of each month. */
+/** Unpaid days granted each time a salary month is finalised. */
 export const UNPAID_LEAVE_DAYS_PER_MONTH = 4;
 
-/** Paid days granted on 1 January, for users with `hasPaidLeave`. */
+/** Paid days granted when a December is finalised, for users with `hasPaidLeave`. */
 export const PAID_LEAVE_DAYS_PER_YEAR = 10;
 
 export type LeaveType = 'paid' | 'unpaid';
@@ -57,26 +51,6 @@ export const LEAVE_ALLOTMENT: Record<LeaveType, number> = {
   unpaid: UNPAID_LEAVE_DAYS_PER_MONTH,
 };
 
-/**
- * The reset periods the given instant falls in.
- *
- * `month` is the unpaid period (`YYYY-MM`); `year` is the paid one. Both are
- * salary-calendar values, so they change at 00:00 Africa/Harare.
- */
-export function leaveResetPeriods(now: number = Date.now()): { month: string; year: number } {
-  const month = currentMonthKey(now);
-  return { month, year: Number(month.slice(0, 4)) };
-}
-
-/** The unpaid-leave period a given day key belongs to. */
-export function unpaidPeriodOfDay(day: string): string {
-  return monthOfDay(day);
-}
-
-/** The unpaid-leave period the current salary day belongs to. */
-export function currentUnpaidPeriod(now: number = Date.now()): string {
-  return unpaidPeriodOfDay(currentDayKey(now));
-}
 
 /**
  * What a user document actually says about leave, with the defaults applied once.
@@ -115,76 +89,166 @@ function clampDays(value: unknown, fallback: number): number {
   return Math.max(0, Math.floor(value));
 }
 
+// ─── Charging and refunding a request ─────────────────────────────────────────
+//
+// **Requesting takes the day; a denial or a withdrawal gives it back.** The
+// balance an agent sees is therefore what they can still ask for — a pending
+// request is already off it, rather than being a second number they have to
+// subtract in their head.
+//
+// A request records *that* it took a day (`balanceCharged`) and *from which
+// period* (`chargedPeriod`, the user's reset stamp at the time). The period is
+// what makes a refund safe across a reset: a day taken from September's four
+// and denied after September was finalised must not come back, because the
+// finalisation already restored the balance to four — refunding it would hand
+// out a fifth day.
+
+type ResetStamps = {
+  unpaidLeaveResetMonth?: unknown;
+  paidLeaveResetYear?: unknown;
+};
+
+type LeaveUser = Pick<UserDocument, 'hasPaidLeave' | 'remainingUnpaidLeave' | 'remainingPaidLeave'> & ResetStamps;
+
+type ChargeableLeave = {
+  leaveType: LeaveType;
+  status: string;
+  balanceCharged?: boolean;
+  chargedPeriod?: string | null;
+};
+
 /**
- * The balance updates a user needs to bring them into the current period, or
- * `null` when they are already current.
- *
- * Pure, so the cron that calls it per user is testable without Firestore, and so
- * the "did anything change" decision is made before a write rather than by one.
- *
- * ## Why a stored marker rather than "it is the 1st, so reset"
- *
- * A date check resets whoever happens to be processed while the clock says the
- * 1st, which makes correctness depend on the cron firing — a missed run silently
- * skips a month, and a double run double-resets. The marker makes the job
- * **idempotent and self-healing**: re-running it the same day is a no-op, and a
- * run that was missed for three days still catches up on the fourth, because the
- * question is "which period is this user stamped for", not "what day is it".
- *
- * ## A user with no marker is stamped, not reset
- *
- * `seedOnly` covers the one case where those differ: a user created mid-period
- * has no marker and no balance, and resetting them to the allotment would be
- * indistinguishable from stamping them — until an admin has already adjusted
- * their balance by hand, at which point the first cron run would quietly undo
- * it. Seeding writes the marker and leaves any existing balance alone.
+ * The reset period a user's balance of this type currently belongs to — their
+ * stored stamp, not the wall clock. The stamp changes at exactly the moment a
+ * fresh allotment is assigned (when a salary month is finalised), which the
+ * calendar says nothing about.
  */
-export function computeLeaveReset(
-  user: Pick<UserDocument, 'hasPaidLeave' | 'remainingUnpaidLeave' | 'remainingPaidLeave'> & {
-    unpaidLeaveResetMonth?: string;
-    paidLeaveResetYear?: number;
-  },
-  periods: { month: string; year: number },
+export function balancePeriodOf(user: ResetStamps | null | undefined, type: LeaveType): string | null {
+  const stamp = type === 'paid' ? user?.paidLeaveResetYear : user?.unpaidLeaveResetMonth;
+  return typeof stamp === 'string' || typeof stamp === 'number' ? String(stamp) : null;
+}
+
+/**
+ * Whether a request is currently holding a day of the balance.
+ *
+ * Requests made before charging moved to request time carry no marker: the old
+ * flow took the day at **approval**, so an unmarked approved request holds one
+ * and an unmarked pending or denied request does not.
+ */
+export function isBalanceCharged(leave: ChargeableLeave): boolean {
+  if (typeof leave.balanceCharged === 'boolean') return leave.balanceCharged;
+  return leave.status === 'approved';
+}
+
+/** The balance a request can spend, read through `resolveLeaveBalances`. */
+export function remainingOf(user: LeaveUser | null | undefined, type: LeaveType): number {
+  const balances = resolveLeaveBalances(user);
+  return type === 'paid' ? balances.paid : balances.unpaid;
+}
+
+/**
+ * The writes that take one day for a request: the user update and the marker
+ * for the leave document. The caller has already checked `remainingOf > 0`.
+ */
+export function leaveCharge(
+  user: LeaveUser | null | undefined,
+  type: LeaveType,
+): { userUpdate: Record<string, number>; leaveUpdate: { balanceCharged: true; chargedPeriod: string | null } } {
+  return {
+    userUpdate: { [LEAVE_BALANCE_FIELD[type]]: remainingOf(user, type) - 1 },
+    leaveUpdate: { balanceCharged: true, chargedPeriod: balancePeriodOf(user, type) },
+  };
+}
+
+/**
+ * The user update that gives a request's day back, or `null` when nothing is
+ * owed — the request never took one, or a reset has happened since it did.
+ *
+ * When the period it was taken from is known and still current, the day goes
+ * back uncapped: it is exactly the day that was taken, and capping it would
+ * swallow days an admin granted above the allotment. When the period is unknown
+ * (a legacy approval, or a user who had no stamp), the refund is capped at the
+ * allotment — the conservative guess, and the rule this code used before the
+ * period was recorded.
+ */
+export function leaveRefund(
+  user: LeaveUser | null | undefined,
+  leave: ChargeableLeave,
+): Record<string, number> | null {
+  if (!isBalanceCharged(leave)) return null;
+
+  const type = leave.leaveType;
+  const next = remainingOf(user, type) + 1;
+  const charged = typeof leave.chargedPeriod === 'string' ? leave.chargedPeriod : null;
+  const current = balancePeriodOf(user, type);
+
+  if (charged !== null && current !== null) {
+    return charged === current ? { [LEAVE_BALANCE_FIELD[type]]: next } : null;
+  }
+  return { [LEAVE_BALANCE_FIELD[type]]: Math.min(next, LEAVE_ALLOTMENT[type]) };
+}
+
+// ─── The reset: triggered by finalising a salary month ────────────────────────
+
+/**
+ * The balance updates finalising `finalizedMonth` owes this agent, or `null`
+ * when they are already reset for what comes next.
+ *
+ * - **Every month:** unpaid leave is assigned `4` for the month *after* the one
+ *   finalised, and `unpaidLeaveResetMonth` is stamped with that month.
+ * - **December:** paid leave is also assigned `10` for the following year (for
+ *   users with `hasPaidLeave`), and `paidLeaveResetYear` is stamped with it.
+ *
+ * **Assigned, never added.** Days an agent did not use are gone, not carried
+ * over. So finalising a month in which someone took no leave still leaves them
+ * with 4, not 8.
+ *
+ * ## Why the stamp, and why it only moves forward
+ *
+ * The stamp records which period the current balance belongs to. A reset
+ * applies only when that period is **later** than the stored stamp, and that
+ * one comparison covers the awkward cases:
+ * - **Reopen and finalise again** is a no-op. The stamp already says "October",
+ *   so days the agent has used since the first finalise are not handed back.
+ * - **Finalising out of order** is a no-op for the earlier month. Finalising
+ *   September after October must not reset them back to a September balance.
+ * - **Refunds use the same stamp** (`balancePeriodOf` → `leaveRefund`), so a day
+ *   taken before a reset and denied after it is not refunded on top of the fresh
+ *   allotment.
+ *
+ * A user with no stamp (never reset) is reset. Their first finalised month is
+ * the first point at which an allotment is owed on these rules.
+ *
+ * Paid leave is stamped even for users without the entitlement. Switching
+ * `hasPaidLeave` on mid-year therefore does not trigger a reset nobody granted.
+ * The allotment at that moment is the admin's call.
+ *
+ * Pure, so it is testable without Firestore. The caller writes the result in
+ * the same transaction as the finalised month.
+ */
+export function computeFinalizationReset(
+  user: ResetStamps & Pick<UserDocument, 'hasPaidLeave'> | null | undefined,
+  finalizedMonth: SalaryMonthKey,
 ): Record<string, string | number> | null {
   const updates: Record<string, string | number> = {};
 
-  const storedMonth = typeof user.unpaidLeaveResetMonth === 'string' ? user.unpaidLeaveResetMonth : null;
-  if (storedMonth !== periods.month) {
-    updates.unpaidLeaveResetMonth = periods.month;
-    // Seed rather than reset when we have never stamped this user: see above.
-    const seedOnly = storedMonth === null && typeof user.remainingUnpaidLeave === 'number';
-    if (!seedOnly) updates.remainingUnpaidLeave = UNPAID_LEAVE_DAYS_PER_MONTH;
+  const nextMonth = addMonths(finalizedMonth, 1);
+  const storedMonth = typeof user?.unpaidLeaveResetMonth === 'string' ? user.unpaidLeaveResetMonth : null;
+  // `YYYY-MM` compares correctly as a string.
+  if (storedMonth === null || storedMonth < nextMonth) {
+    updates.remainingUnpaidLeave = UNPAID_LEAVE_DAYS_PER_MONTH;
+    updates.unpaidLeaveResetMonth = nextMonth;
   }
 
-  // Paid leave resets only for users who have it. Someone without the
-  // entitlement is stamped anyway, so switching it on mid-year does not hand
-  // them a reset they were not owed — they get the allotment at the switch,
-  // which is the admin's decision to make, not the cron's.
-  const storedYear = typeof user.paidLeaveResetYear === 'number' ? user.paidLeaveResetYear : null;
-  if (storedYear !== periods.year) {
-    updates.paidLeaveResetYear = periods.year;
-    const seedOnly = storedYear === null && typeof user.remainingPaidLeave === 'number';
-    if (user.hasPaidLeave === true && !seedOnly) {
-      updates.remainingPaidLeave = PAID_LEAVE_DAYS_PER_YEAR;
+  if (finalizedMonth.endsWith('-12')) {
+    const nextYear = Number(finalizedMonth.slice(0, 4)) + 1;
+    const storedYear = typeof user?.paidLeaveResetYear === 'number' ? user.paidLeaveResetYear : null;
+    if (storedYear === null || storedYear < nextYear) {
+      updates.paidLeaveResetYear = nextYear;
+      if (user?.hasPaidLeave === true) updates.remainingPaidLeave = PAID_LEAVE_DAYS_PER_YEAR;
     }
   }
 
   return Object.keys(updates).length > 0 ? updates : null;
 }
 
-/**
- * The fields a newly created user needs so their first period is not a reset.
- *
- * Spread into the `users` document at creation. Without it a new user has no
- * balance and no marker, which is the state that made the two defaults in this
- * codebase disagree in the first place.
- */
-export function initialLeaveFields(now: number = Date.now()): Record<string, string | number> {
-  const periods = leaveResetPeriods(now);
-  return {
-    remainingUnpaidLeave: UNPAID_LEAVE_DAYS_PER_MONTH,
-    remainingPaidLeave: PAID_LEAVE_DAYS_PER_YEAR,
-    unpaidLeaveResetMonth: periods.month,
-    paidLeaveResetYear: periods.year,
-  };
-}

@@ -7,7 +7,8 @@ import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
 import { sendTelegramNotification } from '@/lib/services/telegramService';
 import { releaseOccurrenceForCoverage } from '@/lib/services/leaveCoverage';
-import { LEAVE_BALANCE_FIELD, resolveLeaveBalances } from '@/lib/leave/leaveBalance';
+import { isBalanceCharged, leaveCharge, leaveRefund, remainingOf } from '@/lib/leave/leaveBalance';
+import { recordLeaveLedgerEntry } from '@/lib/services/leaveLedger';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { LeaveRequestDocument, UserDocument } from '@/types/firestore';
 
@@ -83,55 +84,76 @@ export const POST = withAuth(async (
       ? notifications.leaveApproved(leaveLabel, dateStr)
       : notifications.leaveDenied(leaveLabel, dateStr);
 
-    // ── Approval is what spends the balance ──
+    // ── The request already took the day; denial gives it back ──
     //
-    // A **transaction**, not a batch, and this is the whole point of the change.
-    // The old flow decremented at request time with a blind
-    // `FieldValue.increment(-1)` after an unrelated read, so two requests landing
-    // together both saw "1 left" and both decremented — a balance that could go
-    // negative and a day nobody was entitled to. Reading the user document
-    // *inside* the transaction is what makes the check and the write one
-    // operation.
+    // Requesting is what spends the balance (see the request route). So an
+    // approval normally leaves the balance alone, and a denial refunds the day
+    // the request took — through `leaveRefund`, which declines when a reset has
+    // happened since, because the reset already restored the allotment.
     //
-    // Denial costs nothing, because nothing was ever taken: there is no refund
-    // path left to get wrong.
-    const balanceField = LEAVE_BALANCE_FIELD[leave.leaveType];
-
+    // A **transaction**, reading the leave and the user document inside it, so
+    // the status check, the balance read and the write are one operation.
     try {
       await adminDb.runTransaction(async tx => {
         const userRef = adminDb.collection('users').doc(leave.userId);
-        const freshLeave = await tx.get(leaveRef);
+        const [freshLeaveSnap, userSnap] = await Promise.all([tx.get(leaveRef), tx.get(userRef)]);
+        const freshLeave = freshLeaveSnap.data() as LeaveRequestDocument | undefined;
+        const freshUser = userSnap.data() as UserDocument | undefined;
 
         // Re-checked inside the transaction: the status test above ran before it
         // opened, so two admins clicking Approve at once both passed it.
-        if ((freshLeave.data() as LeaveRequestDocument | undefined)?.status !== 'pending') {
+        if (!freshLeave || freshLeave.status !== 'pending') {
           throw new LeaveConflict('That request has already been decided.');
         }
 
-        if (action === 'approve') {
-          const userSnap = await tx.get(userRef);
-          const balances = resolveLeaveBalances(userSnap.data() as UserDocument | undefined);
-          const remaining = leave.leaveType === 'paid' ? balances.paid : balances.unpaid;
+        const leaveUpdate: Record<string, unknown> = {
+          status: action === 'approve' ? 'approved' : 'denied',
+          resolvedAt: FieldValue.serverTimestamp(),
+          resolvedBy: token.uid,
+        };
 
+        const before = remainingOf(freshUser, leave.leaveType);
+        let after = before;
+
+        if (action === 'deny') {
+          const refund = leaveRefund(freshUser, freshLeave);
+          if (refund) {
+            tx.update(userRef, refund);
+            after = before + 1;
+          }
+          leaveUpdate.balanceCharged = false;
+        } else if (!isBalanceCharged(freshLeave)) {
+          // A request made before charging moved to request time never took its
+          // day, so approval takes it — the old rule, kept for those requests
+          // until the queue has drained.
+          //
           // Refused rather than clamped. Approving leave the agent cannot afford
           // is a payroll decision — it either costs the company a day it did not
           // grant, or (clamped at zero) silently records an absence against a
           // balance that never moved. An admin who means to allow it can raise
           // the balance in CA Admin → Leave and approve again, which leaves a
           // trail; a clamp leaves none.
-          if (remaining <= 0) {
+          if (before <= 0) {
             throw new LeaveConflict(
               `${targetUser.displayName ?? 'That agent'} has no ${leaveLabel} leave remaining. Adjust their balance in CA Admin → Leave to approve this.`,
             );
           }
-
-          tx.update(userRef, { [balanceField]: remaining - 1 });
+          const charge = leaveCharge(freshUser, leave.leaveType);
+          tx.update(userRef, charge.userUpdate);
+          Object.assign(leaveUpdate, charge.leaveUpdate);
+          after = before - 1;
         }
 
-        tx.update(leaveRef, {
-          status: action === 'approve' ? 'approved' : 'denied',
-          resolvedAt: FieldValue.serverTimestamp(),
-          resolvedBy: token.uid,
+        tx.update(leaveRef, leaveUpdate);
+        recordLeaveLedgerEntry(tx, {
+          leaveId: leave.leaveId,
+          userId: leave.userId,
+          leaveType: leave.leaveType,
+          occurrenceStart: leave.occurrenceStart,
+          action: action === 'approve' ? 'approved' : 'denied',
+          before,
+          after,
+          actorUid: token.uid,
         });
       });
     } catch (txErr) {
@@ -141,15 +163,17 @@ export const POST = withAuth(async (
       throw txErr;
     }
 
+    // A denial refunds, and a legacy approval charges — either way the balance
+    // may have moved (rule 2). Straight after the commit, so a notification
+    // failure below cannot leave the cache holding the old balance.
+    invalidateUserCache(leave.userId);
+
     // The notification is outside the transaction on purpose: a transaction that
     // retries would write the notification once per attempt.
     const batch = adminDb.batch();
     addNotificationToBatch(batch, leave.userId, content);
     await batch.commit();
     await sendTelegramNotification([leave.userId], content);
-
-    // Invalidate user cache after batch commit so balance reads are fresh
-    invalidateUserCache(leave.userId);
 
     // Approving leave releases the shift in one step: the occurrence is
     // tombstoned and each creator the agent was covering is posted to the

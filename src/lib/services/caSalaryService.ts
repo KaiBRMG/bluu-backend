@@ -26,6 +26,8 @@ import { serialiseShift } from '../utils/shiftSerialise';
 import { computeTimeWorked } from '../utils/shiftAttendance';
 import { computeSalaryMonth, DEFAULT_SALARY_CONFIG, sumMonth } from '../salary/salaryEngine';
 import { monthKeyRange, toDayKey, type SalaryDayKey, type SalaryMonthKey } from '../salary/salaryDate';
+import { computeFinalizationReset } from '../leave/leaveBalance';
+import { invalidateUserCache } from './userService';
 import type {
   SalaryConfig,
   SalaryDayInput,
@@ -40,7 +42,9 @@ import type {
   CaSalaryConfigDocument,
   CaSalaryMonthDocument,
   CaSalaryOverrideDocument,
+  LeaveRequestDocument,
   ShiftDocument,
+  UserDocument,
   TimeEntryLedgerDocument,
   ActiveSessionDocument,
 } from '@/types/firestore';
@@ -376,11 +380,18 @@ export async function getFinalizedMonthsFor(userIds: string[], month: SalaryMont
 }
 
 /**
- * Freeze a month at its current computed values.
+ * Freeze a month at its current computed values, and reset the agent's leave.
  *
  * The snapshot is taken here rather than by the caller so the thing written is
  * provably what the engine produced — a caller passing its own numbers is how a
  * payout record ends up disagreeing with the grid it was read from.
+ *
+ * **Finalising is what resets leave.** Unpaid leave goes to 4 for the next
+ * month, and on a December paid leave also goes to 10 for the next year. The
+ * reset is assigned, not added (`computeFinalizationReset`). It is written in
+ * the **same transaction** as the frozen month, so a month cannot end up paid
+ * with its reset lost, or reset without being paid. A re-finalise after a
+ * reopen is a no-op for leave, because the stamp only moves forward.
  */
 export async function finalizeMonth(params: {
   userId: string;
@@ -388,7 +399,7 @@ export async function finalizeMonth(params: {
   actorUid: string;
   actorName: string;
   reason?: string;
-}): Promise<CaSalaryMonthDocument> {
+}): Promise<{ month: CaSalaryMonthDocument; leaveReset: Record<string, string | number> | null }> {
   const { userId, month, actorUid, actorName, reason } = params;
 
   const computed = await buildSalaryMonth(userId, month, { ignoreFinalized: true });
@@ -412,9 +423,24 @@ export async function finalizeMonth(params: {
     updatedAt: FieldValue.serverTimestamp(),
   };
 
-  await adminDb.collection(MONTHS).doc(monthId(userId, month)).set(doc, { merge: true });
-  const snap = await adminDb.collection(MONTHS).doc(monthId(userId, month)).get();
-  return snap.data() as CaSalaryMonthDocument;
+  const monthRef = adminDb.collection(MONTHS).doc(monthId(userId, month));
+  const userRef = adminDb.collection('users').doc(userId);
+
+  const leaveReset = await adminDb.runTransaction(async tx => {
+    const userSnap = await tx.get(userRef);
+    const updates = userSnap.exists
+      ? computeFinalizationReset(userSnap.data() as UserDocument, month)
+      : null;
+    tx.set(monthRef, doc, { merge: true });
+    if (updates) tx.update(userRef, updates);
+    return updates;
+  });
+
+  // Rule 2: the balance on the user document just moved.
+  if (leaveReset) invalidateUserCache(userId);
+
+  const snap = await monthRef.get();
+  return { month: snap.data() as CaSalaryMonthDocument, leaveReset };
 }
 
 /**
@@ -515,6 +541,58 @@ function foldSales(sales: SalarySale[]): Map<SalaryDayKey, { gross: number; coun
   return byDay;
 }
 
+/**
+ * Approved leave in a month, by salary day.
+ *
+ * A **read-time annotation**, not an engine input: the engine does not price
+ * leave, and an approved absence has already removed its shift from the roster
+ * (the occurrence is tombstoned), so without this the day simply reads as a day
+ * not worked. Attributed by `toDayKey(occurrenceStart)` — the same "the day the
+ * shift starts on" rule the shifts themselves are paid by.
+ *
+ * Applied to a finalised snapshot too, and replacing whatever it stored: leave
+ * can still be withdrawn after a month is paid, and the marker should say what
+ * is true now. One query on two equality filters, which single-field indexes
+ * serve (rule 9).
+ */
+async function getApprovedLeaveByDay(
+  userId: string,
+  month: SalaryMonthKey,
+): Promise<Map<SalaryDayKey, Array<'paid' | 'unpaid'>>> {
+  const snap = await adminDb
+    .collection('leave_requests')
+    .where('userId', '==', userId)
+    .where('status', '==', 'approved')
+    .get();
+
+  const byDay = new Map<SalaryDayKey, Array<'paid' | 'unpaid'>>();
+  for (const doc of snap.docs) {
+    const leave = doc.data() as LeaveRequestDocument;
+    const day = toDayKey(leave.occurrenceStart);
+    if (day.slice(0, 7) !== month) continue;
+    const types = byDay.get(day) ?? [];
+    if (!types.includes(leave.leaveType)) types.push(leave.leaveType);
+    byDay.set(day, types);
+  }
+  return byDay;
+}
+
+function withLeave(
+  result: SalaryMonthResult,
+  leaveByDay: Map<SalaryDayKey, Array<'paid' | 'unpaid'>>,
+): SalaryMonthResult {
+  return {
+    ...result,
+    days: result.days.map(day => {
+      // Replace rather than keep a stored value: see `getApprovedLeaveByDay`.
+      const leave = leaveByDay.get(day.day);
+      const rest = { ...day };
+      delete rest.leave;
+      return leave ? { ...rest, leave } : rest;
+    }),
+  };
+}
+
 export interface BuildSalaryMonthOptions {
   /** Recompute even when the month is finalised — only `finalizeMonth` should pass this. */
   ignoreFinalized?: boolean;
@@ -538,11 +616,18 @@ export async function buildSalaryMonth(
 ): Promise<SalaryMonthResult> {
   const now = options.now ?? Date.now();
   const config = options.config ?? (await getSalaryConfig());
+  // Started now, awaited at each return, so it runs alongside everything below.
+  // Non-fatal: a marker that could not be read must not take down a payslip,
+  // and the catch also keeps an early throw below from orphaning a rejection.
+  const leavePromise = getApprovedLeaveByDay(userId, month).catch(err => {
+    console.error('[caSalaryService] leave overlay failed', err);
+    return new Map<SalaryDayKey, Array<'paid' | 'unpaid'>>();
+  });
 
   if (!options.ignoreFinalized) {
     const frozen = await getFinalizedMonth(userId, month);
     if (frozen) {
-      return {
+      return withLeave({
         userId,
         month,
         days: frozen.days as SalaryMonthResult['days'],
@@ -553,7 +638,7 @@ export async function buildSalaryMonth(
         finalizedAt: frozen.finalizedAt?.toDate?.()?.toISOString() ?? null,
         finalizedBy: frozen.finalizedBy ?? null,
         finalizedByName: frozen.finalizedByName ?? null,
-      };
+      }, await leavePromise);
     }
   }
 
@@ -602,7 +687,7 @@ export async function buildSalaryMonth(
 
   // A month that was finalised and then reopened keeps its record; surface the
   // reopen so the UI can say "previously paid" rather than implying it never was.
-  return result;
+  return withLeave(result, await leavePromise);
 }
 
 /**

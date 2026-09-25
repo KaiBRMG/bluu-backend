@@ -183,6 +183,12 @@ export interface SalaryDayResult {
   /** Which fields an admin replaced, and what the engine would otherwise have said. */
   overrides: Partial<Record<SalaryOverrideField, SalaryOverrideEntry & { computed: number }>>;
   note?: string | null;
+  /**
+   * Approved leave taken on this day, by type. **Display only** — the engine
+   * does not price leave. Attached on read by `buildSalaryMonth`, never by
+   * `computeSalaryMonth`, so it is absent on the roster/overview paths.
+   */
+  leave?: Array<'paid' | 'unpaid'>;
 }
 
 export interface SalaryTierProgress {

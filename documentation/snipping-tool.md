@@ -28,6 +28,7 @@
 | `src/app/api/snips/*` | Owner-facing routes (page permission + `ownerUid`) |
 | `src/app/api/public/snip/[shareId]/image` | Unauthenticated 302 to a signed Storage URL — the still (image, or a recording's poster) |
 | `src/app/api/public/snip/[shareId]/video` | The same, for a recording's WebM |
+| `src/app/api/public/snip/[shareId]/preview` | The **link-preview** image (`og:image`) — a ≤1200px JPEG re-encode of the still, play-badged for a recording (`snipPreviewService.ts`) |
 | `src/app/api/cron/snip-cleanup` | Daily retention sweep (`src/vercel.json`) |
 
 ## Firestore
@@ -680,6 +681,8 @@ Two things travel in leg one that a capture never sends: `source: 'import'` (whi
 - **Dimensions are read in the browser** (`readImageSize`, `createImageBitmap` with an `<img>` fallback), because nothing downstream can — the server never sees the bytes, and probing the object would mean pulling it back through a function. A file that will not decode is **refused** rather than finalised with zeros: `width`/`height` are what reserve the picture's shape on the public page.
 - **The filename becomes the title**, passed to `finalizeSnip` and normalised there. The file already has a name and it is the only thing about the snip the user has written.
 - **Stills only.** A recording carries a durable on-disk queue, a poster frame and a resumable session, none of which mean anything for a file already on disk — and a video import would have to answer "how long is it?" with no recorder's wall clock to ask.
+- **Several files per import, uploaded sequentially.** Picker (`multiple`) and drop both take every file. Each is validated up front, then run through the same three legs **one at a time** — so the readout ("Uploading 2 of 5… 40%") describes one real transfer, and a full quota (`409` → `SnipQuotaFullError`) stops the batch instead of racing every remaining file into the same refusal. A failed file does not stop the rest; the dialog stays open listing each failure by name and closes itself only when everything landed. The page gets **one** `onImported(snips)` per batch — one toast, and with auto-copy on, one clipboard write holding every link, one per line.
+- **The drop target exists once, on `DialogContent`.** A second `onDrop` on the inner dashed button fired `handle` twice via bubbling and imported every file dropped on the box twice. An `inFlightRef` backs this up — `busy` is state, so two calls in the same event both read it as false.
 - The badge is the **attribute chip** recipe (greyscale, `rounded-md`, DESIGN.md §5) — an attribute the row carries, not a state it is in. It answers the one question a mixed grid raises and nothing more, which is also why `source` is **not** in the public projection: how a file reached the library is the owner's business.
 
 ## The two sounds
@@ -830,6 +833,15 @@ Once the controls are ours, **playback speed is a control** (`SNIP_PLAYBACK_RATE
 The still is served through `/api/public/snip/{id}/image` and a recording through `/api/public/snip/{id}/video`. Both **302 to a freshly signed URL** rather than streaming the object. That indirection is what makes the URL a recipient holds permanent to the outside (a Slack unfurl, a browser cache, an OG preview) and revocable from the inside — deleting the snip kills it immediately, where a handed-out signed URL would keep working until its own expiry. Both the redirect and the 404 are `no-store`; a cached redirect would outlive its target *and* survive the delete.
 
 **The video route pays a known price for that**, stated here so nobody reaches for the obvious fix without deciding it is acceptable. A `<video>` does not fetch once: the browser issues **range requests** as the viewer plays and seeks, and it re-resolves the original URL rather than reusing the target of an uncacheable redirect — so each one is another invocation. The bodies still never cross Vercel (what repeats is a header-only 302, expensive in invocations and negligible in Fast Origin Transfer, which is the metric rule 9i is actually about), and caching the redirect would break the one guarantee the indirection exists for. If the invocation count ever becomes the problem, the fix is a longer signed read TTL plus an `s-maxage` strictly shorter than it, accepting a bounded window in which a deleted recording still plays.
+
+### Link previews (WhatsApp, Telegram, Slack…)
+
+`/s/[shareId]` exports `generateMetadata`: `og:title` is the owner's title (else "Screenshot/Screen recording from {sharedBy}"), `og:description` their description (else sharer · duration), and `og:image` is **`/api/public/snip/{id}/preview`, not `/image`**. The original still is a full-resolution PNG, often several MB, and **WhatsApp silently drops an `og:image` over ~600 KB** — so the preview route re-encodes it with `sharp` to a ≤1200px JPEG (~100–250 KB), and for a recording composites a play badge onto the poster. That is the one public route that returns bytes rather than a 302; it is a small derivative fetched a handful of times per paste, the source bytes come from GCS rather than over Fast Origin Transfer, and a stored derivative would be a third object every delete path and the sweep would have to learn. It follows the same rules as its siblings: liveness re-checked via `resolveLiveSnipObject`, one 404 for everything, `no-store` on both outcomes, and it never logs the id.
+
+- **No `og:video`, deliberately.** No chat client plays a WebM inline from it, and a half-supported player tag degrades some clients' card. The badged poster is the signal.
+- **The bots get the tags in `<head>`** because Next blocks metadata for UAs in `HTML_LIMITED_BOT_UA_RE` (WhatsApp, Slackbot, facebookexternalhit, Twitterbot — which `TelegramBot (like TwitterBot)` also matches). Adding a platform that matches none of those needs `htmlLimitedBots` in `next.config.ts`, which *replaces* the default list.
+- `generateMetadata` and the page body share one Firestore read through React `cache()`. A refusal returns `{}`, so a dead link unfurls as the layout's generic title and says nothing about what was there.
+- Platforms cache their own copy: a snip deleted after being pasted may still show its old preview in that chat. The link itself stops resolving.
 
 ---
 

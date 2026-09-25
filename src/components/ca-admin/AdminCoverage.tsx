@@ -18,6 +18,7 @@ import {
   type LeaveDecisionResult,
 } from '@/hooks/useAdminLeaveQueue';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
+import { LeaveHistory } from './LeaveHistory';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
 import { formatRelative, pluralise } from '@/lib/salary/salaryFormat';
@@ -34,6 +35,9 @@ import { formatRelative, pluralise } from '@/lib/salary/salaryFormat';
  *    creators is not something to discover later.
  * 2. **Cover to assign.** Released accounts with agents' names against them.
  *    Assigning creates the overtime shift and pays it correctly.
+ *
+ * Plus **History** — decided and withdrawn leave with each request's balance
+ * trail, from `leave-ledger` (see `LeaveHistory.tsx`).
  *
  * ## The in-shift / outside-shift distinction is shown, not asked
  *
@@ -92,6 +96,7 @@ export default function AdminCoverage() {
             )}
           </TabsTrigger>
           <TabsTrigger value="assigned">Assigned</TabsTrigger>
+          <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
         <TabsContent value="leave" className="mt-4">
@@ -125,6 +130,12 @@ export default function AdminCoverage() {
               ))}
             </ul>
           )}
+        </TabsContent>
+
+        {/* Mounted only while selected (Radix), so opening it after deciding a
+            request in the queue is what refreshes it. */}
+        <TabsContent value="history" className="mt-4">
+          <LeaveHistory />
         </TabsContent>
       </Tabs>
     </div>

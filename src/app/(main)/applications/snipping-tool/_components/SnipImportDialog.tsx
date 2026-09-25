@@ -15,7 +15,12 @@ import {
   formatSnipBytes,
   isSnipImportType,
 } from '@/lib/snips';
+import { SnipQuotaFullError } from '@/lib/snipUpload';
 import { cn } from '@/lib/utils';
+import type { SnipRow } from '@/types/snips';
+
+type BatchProgress = { index: number; total: number; fraction: number };
+type ImportFailure = { name: string; reason: string };
 
 /**
  * Import — turn an image the user already has into a snip.
@@ -38,64 +43,119 @@ import { cn } from '@/lib/utils';
  * the server never sees the bytes (they go straight to Cloud Storage over a
  * signed URL, rule 9i), and they are what reserve the picture's shape on the
  * public page before it loads.
+ *
+ * **Several files at once, uploaded one after another.** In order rather than
+ * in parallel so the progress readout describes one real transfer, and so a
+ * full quota stops the batch at the file it refused instead of racing the rest
+ * of it into the same refusal. A file that fails does not stop the others; the
+ * dialog stays open listing what did not make it, and closes by itself only
+ * when everything did.
  */
 export function SnipImportDialog({
   open,
   onOpenChange,
   onImport,
+  onImported,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Uploads and returns once the row exists. Errors are surfaced here. */
+  /** Uploads one file and returns once the row exists. Errors are surfaced here. */
   onImport: (
     file: File,
     dimensions: { width: number; height: number },
     onProgress?: (fraction: number) => void,
-  ) => Promise<void>;
+  ) => Promise<SnipRow>;
+  /** Once per batch, with every row that was created, in order. */
+  onImported: (snips: SnipRow[]) => void | Promise<void>;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<BatchProgress>({ index: 0, total: 0, fraction: 0 });
+  const [failures, setFailures] = useState<ImportFailure[]>([]);
+  const [batchSize, setBatchSize] = useState(0);
+
+  // `busy` is state, so two calls inside one event both read it as false. The
+  // ref flips synchronously and is the real one-batch-at-a-time guard.
+  const inFlightRef = useRef(false);
 
   const handle = useCallback(
-    async (file: File | undefined | null) => {
-      setError(null);
-      if (!file) return;
+    async (fileList: FileList | File[] | undefined | null) => {
+      if (inFlightRef.current) return;
+      const files = Array.from(fileList ?? []);
+      if (files.length === 0) return;
+      setFailures([]);
+      setBatchSize(files.length);
+
       // Checked against the same allowlist the API route resolves against, so
       // an unsupported file is refused here rather than after an upload that
       // the signed slot was never going to accept.
-      if (!isSnipImportType(file.type)) {
-        setError('That file type is not supported. Use a PNG, JPEG, WebP or GIF.');
-        return;
+      const rejected: ImportFailure[] = [];
+      const accepted: File[] = [];
+      for (const file of files) {
+        if (!isSnipImportType(file.type)) {
+          rejected.push({ name: file.name, reason: 'Not a PNG, JPEG, WebP or GIF.' });
+        } else if (file.size <= 0 || file.size > MAX_SNIP_BYTES) {
+          rejected.push({ name: file.name, reason: `Must be under ${formatSnipBytes(MAX_SNIP_BYTES)}.` });
+        } else {
+          accepted.push(file);
+        }
       }
-      if (file.size <= 0 || file.size > MAX_SNIP_BYTES) {
-        setError(`Images must be under ${formatSnipBytes(MAX_SNIP_BYTES)}.`);
+      if (accepted.length === 0) {
+        setFailures(rejected);
         return;
       }
 
+      inFlightRef.current = true;
       setBusy(true);
-      setProgress(0);
+      const imported: SnipRow[] = [];
+      const failed: ImportFailure[] = [...rejected];
       try {
-        const dimensions = await readImageSize(file);
-        if (!dimensions) {
-          // Refused rather than finalised with zeros: width and height are what
-          // reserve the box on the public page, and a file the browser cannot
-          // decode is one the recipient's browser probably cannot either.
-          setError('That image could not be read. It may be corrupt.');
-          return;
+        for (let i = 0; i < accepted.length; i++) {
+          const file = accepted[i];
+          setProgress({ index: i, total: accepted.length, fraction: 0 });
+          const dimensions = await readImageSize(file);
+          if (!dimensions) {
+            // Refused rather than finalised with zeros: width and height are what
+            // reserve the box on the public page, and a file the browser cannot
+            // decode is one the recipient's browser probably cannot either.
+            failed.push({ name: file.name, reason: 'Could not be read. It may be corrupt.' });
+            continue;
+          }
+          try {
+            imported.push(
+              await onImport(file, dimensions, fraction =>
+                setProgress({ index: i, total: accepted.length, fraction }),
+              ),
+            );
+          } catch (err) {
+            failed.push({
+              name: file.name,
+              reason: err instanceof Error ? err.message : 'Could not be imported.',
+            });
+            if (err instanceof SnipQuotaFullError) {
+              // Every remaining reservation would get the same answer.
+              for (const rest of accepted.slice(i + 1)) {
+                failed.push({ name: rest.name, reason: 'Not attempted — the snip quota is full.' });
+              }
+              break;
+            }
+          }
         }
-        await onImport(file, dimensions, setProgress);
-        onOpenChange(false);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'That image could not be imported');
       } finally {
+        inFlightRef.current = false;
         setBusy(false);
       }
+
+      if (imported.length > 0) await onImported(imported);
+      setFailures(failed);
+      if (failed.length === 0) onOpenChange(false);
     },
-    [onImport, onOpenChange],
+    [onImport, onImported, onOpenChange],
   );
+
+  const overall =
+    progress.total > 0 ? (progress.index + progress.fraction) / progress.total : 0;
 
   return (
     <Dialog open={open} onOpenChange={next => { if (!busy) onOpenChange(next); }}>
@@ -114,14 +174,14 @@ export function SnipImportDialog({
         onDrop={event => {
           event.preventDefault();
           setDragging(false);
-          if (!busy) void handle(event.dataTransfer.files?.[0]);
+          if (!busy) void handle(event.dataTransfer.files);
         }}
       >
         <DialogHeader>
-          <DialogTitle>Import an image</DialogTitle>
+          <DialogTitle>Import images</DialogTitle>
           <DialogDescription>
-            It gets a share link, a card and the same auto-delete window as a
-            capture. PNG, JPEG, WebP or GIF, up to {formatSnipBytes(MAX_SNIP_BYTES)}.
+            Each one gets a share link, a card and the same auto-delete window as
+            a capture. PNG, JPEG, WebP or GIF, up to {formatSnipBytes(MAX_SNIP_BYTES)} each.
           </DialogDescription>
         </DialogHeader>
 
@@ -134,16 +194,9 @@ export function SnipImportDialog({
           type="button"
           disabled={busy}
           onClick={() => inputRef.current?.click()}
-          onDragOver={event => {
-            event.preventDefault();
-            if (!busy) setDragging(true);
-          }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={event => {
-            event.preventDefault();
-            setDragging(false);
-            if (!busy) void handle(event.dataTransfer.files?.[0]);
-          }}
+          // No drag handlers here: `drop` bubbles, so a copy on this button ran
+          // `handle` a second time via DialogContent's and imported the file
+          // twice whenever it landed on the box. The dialog-wide target covers it.
           className={cn(
             'flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-10 text-center transition-colors duration-[120ms]',
             'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
@@ -159,12 +212,15 @@ export function SnipImportDialog({
           <Upload className="size-5 text-zinc-400" aria-hidden />
           <span className="text-sm text-zinc-300">
             {busy
-              ? `Uploading… ${Math.round(progress * 100)}%`
-              : 'Drop an image here, or click to choose one'}
+              ? progress.total > 1
+                ? `Uploading ${progress.index + 1} of ${progress.total}… ${Math.round(progress.fraction * 100)}%`
+                : `Uploading… ${Math.round(progress.fraction * 100)}%`
+              : 'Drop images here, or click to choose'}
           </span>
           {/* A track, not a spinner. The number above is the fact; this is the
               shape of it, so a stalled upload is visible as a bar that stops
-              rather than a spinner that keeps turning either way. */}
+              rather than a spinner that keeps turning either way. The bar is
+              the whole batch; the number is the file in flight. */}
           {busy && (
             <span
               aria-hidden
@@ -172,7 +228,7 @@ export function SnipImportDialog({
             >
               <span
                 className="block h-full rounded-full bg-action-blue transition-[width] duration-[120ms] ease-out"
-                style={{ width: `${Math.max(2, Math.round(progress * 100))}%` }}
+                style={{ width: `${Math.max(2, Math.round(overall * 100))}%` }}
               />
             </span>
           )}
@@ -182,22 +238,41 @@ export function SnipImportDialog({
           ref={inputRef}
           type="file"
           accept={SNIP_IMPORT_ACCEPT}
+          multiple
           className="sr-only"
-          // Cleared after every pick so choosing the same file twice in a row
-          // still fires `change`.
+          // Copied out, then cleared, so choosing the same files twice in a row
+          // still fires `change` — clearing empties the live FileList.
           onChange={event => {
-            const file = event.target.files?.[0];
+            const files = Array.from(event.target.files ?? []);
             event.target.value = '';
-            void handle(file);
+            void handle(files);
           }}
         />
 
-        {error && (
+        {failures.length > 0 && (
           // Inline and in the dialog, not a toast: the user is looking right
           // here, and the fix is to pick a different file in this same panel.
-          <p className="text-sm text-destructive" role="alert">
-            {error}
-          </p>
+          // Anything that did import is already in the library behind it.
+          <div className="text-sm text-destructive" role="alert">
+            {batchSize === 1 ? (
+              <p>{failures[0].reason}</p>
+            ) : (
+              <>
+                <p>
+                  {failures.length} of {batchSize} could not be imported:
+                </p>
+                <ul className="mt-1.5 max-h-40 space-y-1 overflow-y-auto">
+                  {failures.map((failure, i) => (
+                    <li key={i} className="break-words">
+                      <span className="text-zinc-300">{failure.name}</span>
+                      {' — '}
+                      {failure.reason}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
         )}
       </DialogContent>
     </Dialog>

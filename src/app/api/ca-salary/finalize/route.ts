@@ -66,7 +66,15 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         return NextResponse.json({ error: 'This month is already finalised.' }, { status: 409 });
       }
 
-      const frozen = await finalizeMonth({ userId, month, actorUid: token.uid, actorName, reason: trimmedReason });
+      // Also resets the agent's leave (unpaid every month, paid on December) in
+      // the same transaction — see `finalizeMonth`.
+      const { month: frozen, leaveReset } = await finalizeMonth({
+        userId,
+        month,
+        actorUid: token.uid,
+        actorName,
+        reason: trimmedReason,
+      });
 
       // After the freeze and never fatal: the month is locked whether or not the
       // message lands, and a failed notification must not read as a failed
@@ -80,7 +88,17 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         label: 'salaryFinalized',
       });
 
-      return NextResponse.json({ status: 'finalized', totals: frozen.totals });
+      return NextResponse.json({
+        status: 'finalized',
+        totals: frozen.totals,
+        // What the finalisation did to leave, so payroll's toast can say so.
+        leaveReset: leaveReset
+          ? {
+              unpaid: 'remainingUnpaidLeave' in leaveReset,
+              paid: 'remainingPaidLeave' in leaveReset,
+            }
+          : null,
+      });
     }
 
     if (!already) {

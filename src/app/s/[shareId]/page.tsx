@@ -1,6 +1,7 @@
-import { Suspense } from 'react';
+import { Suspense, cache } from 'react';
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { getPublicSnip } from '@/lib/services/snipService';
+import { getPublicSnip, snipPreviewUrl, snipShareUrl } from '@/lib/services/snipService';
 import { formatSnipDuration } from '@/lib/snips';
 import { SnipImage } from '../_components/SnipImage';
 import { SnipTimestamp } from '../_components/SnipTimestamp';
@@ -27,6 +28,74 @@ import { SnipVideo } from '../_components/SnipVideo';
  * and only the snip streams in. Both `params` and the Firestore read therefore
  * live in `SharedSnipContent`, never in the default export.
  */
+/**
+ * One read per request, shared by `generateMetadata` and the page body — both
+ * need the row, and without this the unfurl would cost two Firestore reads.
+ */
+const loadSnip = cache(getPublicSnip);
+
+/**
+ * The link preview — what WhatsApp, Telegram, Slack and iMessage draw when the
+ * link is pasted. Without it every snip unfurls as the generic layout title and
+ * no picture, and the recipient has to open the link to learn what it is.
+ *
+ * `og:image` is the `/preview` route, not `/image`: the original still is a
+ * full-resolution PNG that WhatsApp drops for being too large. A recording
+ * previews as its poster with a play badge; there is deliberately no
+ * `og:video`, because no chat client plays a WebM inline and a half-supported
+ * player tag degrades some clients' card to a bare link.
+ *
+ * Preview bots get these tags in `<head>` because Next blocks metadata for the
+ * UAs in `HTML_LIMITED_BOT_UA_RE` (WhatsApp, Twitterbot — which Telegram's
+ * `TelegramBot (like TwitterBot)` also matches — Slackbot, facebookexternalhit…).
+ * Every refusal returns `{}`, so the layout's generic title stands and a dead
+ * link's preview says nothing about what was there.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ shareId: string }>;
+}): Promise<Metadata> {
+  const { shareId } = await params;
+  const snip = await loadSnip(shareId);
+  if (!snip) return {};
+
+  const isVideo = snip.kind === 'video';
+  const noun = isVideo ? 'Screen recording' : 'Screenshot';
+  const title = snip.title || (snip.sharedBy ? `${noun} from ${snip.sharedBy}` : `Shared ${noun.toLowerCase()}`);
+
+  const facts = [
+    snip.title && snip.sharedBy ? `Shared by ${snip.sharedBy}` : null,
+    isVideo && snip.durationMs != null ? formatSnipDuration(snip.durationMs) : null,
+  ].filter(Boolean);
+  const description =
+    snip.description?.replace(/\s+/g, ' ').slice(0, 200) ||
+    (facts.length ? facts.join(' · ') : `${noun} shared from Bluu Rock MGMT`);
+
+  // A recording without a poster has no still to show — the card goes out as
+  // text only rather than pointing at a URL that 404s.
+  const images = snip.imageUrl ? [{ url: snipPreviewUrl(snip.id), alt: title }] : undefined;
+
+  return {
+    title: `${title} · Bluu Rock`,
+    description,
+    openGraph: {
+      type: 'website',
+      siteName: 'Bluu Rock',
+      url: snipShareUrl(snip.id),
+      title,
+      description,
+      images,
+    },
+    twitter: {
+      card: images ? 'summary_large_image' : 'summary',
+      title,
+      description,
+      images: images?.map((i) => i.url),
+    },
+  };
+}
+
 export default function SharedSnipPage({
   params,
 }: {
@@ -47,7 +116,7 @@ export default function SharedSnipPage({
 
 async function SharedSnipContent({ params }: { params: Promise<{ shareId: string }> }) {
   const { shareId } = await params;
-  const snip = await getPublicSnip(shareId);
+  const snip = await loadSnip(shareId);
 
   // One 404 for every refusal — unknown token, deleted snip, expired snip, an
   // upload that never completed. Distinguishing them would tell a stranger

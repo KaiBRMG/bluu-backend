@@ -46,6 +46,10 @@ import type {
  * means sales landed on a day with no shift on record — the hours (and so the
  * wage) could not be derived, which is a data problem, not a zero.
  *
+ * Beside them, greyscale attribute chips: `OT` for overtime, and **Paid leave**
+ * / **Unpaid leave** for a day with approved leave (`day.leave`, attached on
+ * read by `buildSalaryMonth` — the engine does not price leave).
+ *
  * ## Multi-shift days expand
  *
  * `Accts` and `$/hr` are **day-level roll-ups**, and on a day with more than one
@@ -424,6 +428,21 @@ function DayRow({
               OT
             </span>
           )}
+
+          {/* Approved leave, on the same greyscale attribute chip as OT and for
+              the same reason: it is a fact the day carries, not a problem. It
+              is what explains a dimmed, empty row — the shift was released when
+              the leave was approved, so without it the day reads as a day not
+              worked. Spelled out rather than abbreviated: "PL"/"UL" is one
+              letter apart and this is someone's pay. */}
+          {day.leave?.map(type => (
+            <span
+              key={type}
+              className="shrink-0 rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-zinc-300"
+            >
+              {type === 'paid' ? 'Paid leave' : 'Unpaid leave'}
+            </span>
+          ))}
         </span>
       </th>
 

@@ -72,6 +72,7 @@
 | `content-planning/{id}` | Content planning entries | |
 | `groups/{groupId}` | Group membership (`.members`) incl. `groups/admin` | |
 | `leave_requests/{id}` | Leave requests | |
+| `leave-ledger/{id}` | Balance changes made by leave requests (Coverage → History) | see [ca-salary.md](ca-salary.md) §6 |
 | `notifications/{docId}`, `notifications-batches/{batchId}` | Notification system | see [notifications.md](notifications.md) |
 | `bugs/{id}` | Bug reports | |
 | `twitterx-accounts/{id}` | SMM Twitter/X accounts | see [smm-portal.md](smm-portal.md) |

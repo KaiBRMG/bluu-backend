@@ -73,6 +73,9 @@ export async function uploadSnip(
   return snip;
 }
 
+/** The owner's snip quota is full; every further reservation will be refused. */
+export class SnipQuotaFullError extends Error {}
+
 /**
  * Uploads a file the user dropped on the library page, and returns the live
  * snip.
@@ -118,7 +121,10 @@ export async function importSnip(
     body: JSON.stringify({ bytes: file.size, kind: 'image', source: 'import', contentType: file.type }),
   });
   if (!slotRes.ok) {
-    throw new Error(await errorMessage(slotRes, 'Could not start the upload'));
+    const message = await errorMessage(slotRes, 'Could not start the upload');
+    // 409 is the reservation's quota refusal — typed so a batch import can stop
+    // rather than spend a request per remaining file on the same answer.
+    throw slotRes.status === 409 ? new SnipQuotaFullError(message) : new Error(message);
   }
   const { id, uploadUrl } = (await slotRes.json()) as { id: string; uploadUrl: string };
 

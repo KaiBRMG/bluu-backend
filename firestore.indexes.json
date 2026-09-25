@@ -1275,6 +1275,61 @@
       "indexes": []
     },
     {
+      "collectionGroup": "leave-ledger",
+      "fieldPath": "action",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "leave-ledger",
+      "fieldPath": "actorUid",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "leave-ledger",
+      "fieldPath": "balanceAfter",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "leave-ledger",
+      "fieldPath": "balanceBefore",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "leave-ledger",
+      "fieldPath": "entryId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "leave-ledger",
+      "fieldPath": "leaveId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "leave-ledger",
+      "fieldPath": "leaveType",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "leave-ledger",
+      "fieldPath": "occurrenceStart",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "leave-ledger",
+      "fieldPath": "priorStatus",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "leave_requests",
+      "fieldPath": "balanceCharged",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "leave_requests",
+      "fieldPath": "chargedPeriod",
+      "indexes": []
+    },
+    {
       "collectionGroup": "leave_requests",
       "fieldPath": "reason",
       "indexes": []
