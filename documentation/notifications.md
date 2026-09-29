@@ -97,6 +97,7 @@ Every row below is **automated** — fired by a handler on an event, never sent 
 | Dispute — admin rejected | `notifications.disputeAdminRejected(reasons, count)` | the dispute's `createdBy` — **coalesced** | `disputes/[disputeId]/admin-approval` **and** `disputes/bulk-approval` queue · `cron/ca-notifications` sends |
 | Content request completed | `notifications.contentPlanCompleted(stageName, contentSummary)` | `groups/OFAM.members` | `content-planning/[id]/creator-complete` |
 | Model application received | `notifications.modelSubmissionReceived(applicantName, location)` | every user whose `permittedPageIds` contains `apps-model-submissions` | `model-submissions/submit` |
+| Creator onboarding completed | `notifications.creatorOnboardingCompleted(name, stageName)` | every user whose `permittedPageIds` contains `creators-onboarding` (+ Telegram) | `join/[token]/complete` |
 | Desktop app updated | `notifications.releaseNote(version)` | each user as they reach `APP_UPDATE.releaseNote.version` | `user/app-version` |
 | OF media cache hit its size threshold | `notifications.ofMediaCacheCritical(sizeLabel, periodLabel)` | **one named maintainer** — see below | `cron/onlyfans-media-usage` |
 | OF video renditions on an unrecognised host | `notifications.ofVideoSourceHostUnrecognised(host)` | **one named maintainer** — see below | `onlyfans/chats/[chatId]/messages` (via `after()`) |

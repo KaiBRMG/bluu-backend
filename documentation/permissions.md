@@ -142,5 +142,5 @@ Access is still real for a universal page — it is just enforced by the page's 
 ## Rules for new pages
 
 - Add the page to `src/lib/definitions.ts` (that's what makes it exist) — `PAGES` for a permissioned page, `UNIVERSAL_PAGES` for an org-wide one, `PAGES` with a `parentPageId` for a capability inside another page (see above).
-- Gate its route with `checkPageAccess(token.uid, '<pageId>')` (tier 2) unless it's general reference data (tier 1) or auth-graph/account-state (tier 3).
+- Gate its route with `checkPageAccess(token.uid, '<pageId>')` (tier 2) — or an array, `checkPageAccess(uid, ['a', 'b'])`, for an action offered from several pages that already expose the same record (any one grants access) unless it's general reference data (tier 1) or auth-graph/account-state (tier 3).
 - The sidebar renders from `users/{uid}.permittedPageIds` — no extra client wiring needed once resolution runs.

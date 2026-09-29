@@ -11,7 +11,8 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useModelSubmissions, useSubmissionDetail } from '@/hooks/useModelSubmissions';
 import { SUBMISSION_STATUS_META } from '@/lib/modelSubmissions';
 import { PUBLIC_APP_ORIGIN } from '@/lib/publicOrigin';
-import type { SubmissionStatus } from '@/types/modelSubmission';
+import type { ModelSubmissionSummary, SubmissionStatus } from '@/types/modelSubmission';
+import { InvitePromptCard } from './components/InvitePromptCard';
 import { SubmissionCard } from './components/SubmissionCard';
 import { SubmissionDetail } from './components/SubmissionDetail';
 
@@ -32,7 +33,20 @@ const EMPTY_COPY: Record<Filter, string> = {
 };
 
 export default function ModelSubmissionsAdminPage() {
-  const { submissions, error, setStatus } = useModelSubmissions();
+  const { submissions, error, setStatus, sendInvite } = useModelSubmissions();
+  // The "email them their onboarding link?" card. Raised by an approval, from
+  // the grid or from the detail dialog, for an applicant not yet invited.
+  const [invitePrompt, setInvitePrompt] = useState<ModelSubmissionSummary | null>(null);
+
+  const decide = (id: string, status: SubmissionStatus) => {
+    void setStatus(id, status);
+    const submission = submissions?.find((s) => s.id === id);
+    if (status === 'approved' && submission && !submission.onboardingInvitedAt) {
+      setInvitePrompt(submission);
+    } else if (invitePrompt?.id === id) {
+      setInvitePrompt(null);
+    }
+  };
   const [filter, setFilter] = useState<Filter>('new');
   const [query, setQuery] = useState('');
   const debouncedQuery = useDebouncedValue(query, 200);
@@ -88,7 +102,8 @@ export default function ModelSubmissionsAdminPage() {
               >
                 public form
               </a>
-              . Page through the photos, then approve or reject.
+              . Page through the photos, then approve or reject — approving offers to email the
+              applicant their onboarding link.
             </p>
           </div>
           <div className="relative w-full sm:w-64">
@@ -163,7 +178,8 @@ export default function ModelSubmissionsAdminPage() {
                 key={submission.id}
                 submission={submission}
                 onOpen={() => setOpenId(submission.id)}
-                onSetStatus={(status) => void setStatus(submission.id, status)}
+                onSetStatus={(status) => decide(submission.id, status)}
+                onInvite={() => setInvitePrompt(submission)}
               />
             ))}
           </div>
@@ -179,10 +195,24 @@ export default function ModelSubmissionsAdminPage() {
         }}
         onSetStatus={(status) => {
           if (!openId) return;
-          void setStatus(openId, status);
+          decide(openId, status);
           setOpenId(null);
         }}
       />
+
+      {invitePrompt && (
+        <InvitePromptCard
+          // Keyed so a second approval resets the card's own sending state.
+          key={invitePrompt.id}
+          name={invitePrompt.name}
+          resend={!!invitePrompt.onboardingInvitedAt}
+          onDismiss={() => setInvitePrompt(null)}
+          onSend={async () => {
+            const ok = await sendInvite(invitePrompt.id);
+            if (ok) setInvitePrompt(null);
+          }}
+        />
+      )}
     </AppLayout>
   );
 }

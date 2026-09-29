@@ -9,6 +9,10 @@ const BROWSER_ALLOWED_PREFIXES = [
   // The public model application form. Handed out as a link to prospective
   // models, who have no desktop app — it must resolve in a normal browser.
   '/model-submissions',
+  // An approved applicant's personal onboarding form, linked from the
+  // "Welcome to BLUU ROCK" email. Opened in a phone browser by someone with no
+  // desktop app; the 160-bit secret in the path is the access control.
+  '/join',
   // Shared prompts. The whole point of the link is that it resolves for someone
   // who does not have the desktop app — a recipient rewritten to /desktop-only
   // would make sharing useless. Read-only, and reachable only with the 160-bit

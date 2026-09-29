@@ -487,7 +487,8 @@ Helpers: [`salaryAuth.ts`](../src/lib/salary/salaryAuth.ts).
 
 /ca-portal/admin            (tabbed)
   Overview      the month above the roster — agent × creator matrix,
-                creator leaderboard, payroll share, attention band
+                agent profitability, creator leaderboard, payroll share,
+                attention band
   Salaries      roster → one agent's editable month
   Sales data    .xlsx upload with dry-run preview, import history
   Coverage      leave approvals → offer board → assign · History (outcomes
@@ -604,11 +605,12 @@ write per dismissal would be a document update to say "I saw that".
 
 The **first** tab of CA Admin and its landing view. Payroll answers "what do I pay this agent"; Overview answers the two questions that only exist one level up — **which creators the money came from**, and **whether any of it rests on one person**. It is the individual sales report's `By creator` breakdown lifted to the whole roster, which is the read that breakdown could never give: an agent's own top creator says nothing about whether that creator has anyone else on them.
 
-Four parts, in reading order:
+Five parts, in reading order:
 
-- **Header strip** — gross, payroll cost, **payroll share of gross**, hours, agents earning. Payroll share is the only figure on this surface that appears nowhere else, and it is why the strip earns its space: gross and payroll each mean something only next to the other.
+- **Header strip** — gross, payroll cost, **payroll share of gross**, **profit after pay**, hours, agents earning. Payroll share and profit are the figures on this surface that appear nowhere else, and they are why the strip earns its space: gross and payroll each mean something only next to the other.
 - **Attention band** — the ways a month is quietly wrong, rolled up across the roster: days with sales but no shift, agents with no sales at all, creators with exactly one agent earning on them, creators that earned last month and nothing this month, and admin-edited days. Takes the *attention needed* tint and **no motion** (DESIGN.md §5). Each line **names its rows**, not just a count. It states plainly when there is nothing to check — a check that vanishes when it passes is indistinguishable from one that never ran.
 - **Agent × creator matrix** — gross per intersection, shaded against **one scale shared by the whole grid** so a cell reads both along its row (this agent's earners) and down its column (who carries this creator). Per-row scaling would destroy the second read, which is the one not available anywhere else. Ten creator columns, the rest folded, expandable. The agent column is sticky; the grid scrolls sideways at the 1024px floor and a matrix whose row labels scroll away is unreadable.
+- **Profitability by agent** — each agent's net revenue, pay, **profit** (net − salary), margin and profit per paid hour, ranked by profit, with an All-agents foot. Loss-making agents (with sales) are also named in the attention band.
 - **Creator leaderboard** — gross, share, sales, **agents covering**, and the month-over-month move. A creator at 30% of the month with one agent on them is a very different fact from the same 30% split four ways.
 
 **The agent sub-label is a roster fact, not a sales one.** Under each name in the matrix sits how many accounts that agent *works* — `accountCount`, the distinct `creatorIds` across their own shifts for the month. It used to be `Object.keys(byCreator).length`, the number of creators that produced sales, which reported an agent on four accounts as "1 creator" in a month where one of them sold. The bars along the row already say which creators earned; the sub-label is the denominator you read them against, so it must not be the same number.
@@ -626,6 +628,8 @@ Three calls worth not re-litigating:
 - **The matrix shades, the leaderboard bars.** Both ramp from the same Action Blue token against the same kind of shared scale. A bar inside an ~80px matrix column degenerates into a two-pixel sliver beside a right-aligned number, so the matrix uses a tint; the leaderboard's rows are wide enough to keep the sales report's bar-behind-the-row idiom.
 
 **Read budget.** `GET /api/ca-salary/overview` reads the month's sales **once** and passes them to `buildSalaryMonthForUsers` via its `salesByUser` option, which would otherwise query them again — so the matrix and the totals are built from the same rows, cannot disagree, and cost one query between them. The previous month adds exactly one more query, for sales only. Creator photos cost nothing: the client joins the roster from `useCreators` (a module-level shared store) on the **folded stage name**, since sales carry a creator *name* typed into the export, not a creator id. A name that matches no creator still renders — `CreatorAvatar` hashes its initials colour from that same string (rule 7), so an unrecognised creator looks like a creator rather than a rendering failure.
+
+**Profitability is net − salary, and both sides come off the month result.** Net, not gross: the platform's cut (`deductionRate`, default 20%) never reaches the agency, so a margin on gross overstates every agent by that much. Salary, not wage: commission is also something we pay. Both are read from `buildSalaryMonthForUsers`'s totals rather than from the live sales rows, so it costs **no extra read** and a finalised month compares frozen net with frozen pay — the one pairing on this tab that does not mix live and frozen figures (below). `Per hour` divides by payable hours, because the total alone ranks an agent on 40 hours level with one on 160. It says nothing about the creator's own split or any other agency cost; it is the agent's contribution after their pay, not the agency's bottom line.
 
 **A finalised month shows live revenue against frozen payroll, on purpose.** Its `totals` come from the snapshot while its sales rows stay live, so a late import moves the revenue columns and not the payroll ones. That is the honest pairing — the header strip says how many months are frozen.
 
@@ -649,7 +653,7 @@ Three calls worth not re-litigating:
 | [`leaveMatch.ts`](../src/lib/utils/leaveMatch.ts) | The tiered leave ↔ occurrence matcher, shared by the release, the admin week view and the agent calendar |
 | [`caNotifications.ts`](../src/lib/services/caNotifications.ts) | Recipients, delivery, the tier gate and the payday latch |
 | [`coverageNotices.ts`](../src/lib/services/coverageNotices.ts) | The coalescing queue and the withdrawal record |
-| [`AdminOverview.tsx`](../src/components/ca-admin/AdminOverview.tsx) | The Overview tab — the matrix, the leaderboard and the attention band |
+| [`AdminOverview.tsx`](../src/components/ca-admin/AdminOverview.tsx) | The Overview tab — the matrix, agent profitability, the leaderboard and the attention band |
 | [`CommissionLadder.tsx`](../src/components/salary/CommissionLadder.tsx) | The stepped scale, drawn as steps |
 | [`SalaryDayTable.tsx`](../src/components/salary/SalaryDayTable.tsx) | The month grid, read-only and editable |
 | [`useLeaveRequests.ts`](../src/hooks/useLeaveRequests.ts) | **Module-level shared store**, like `useCreators`. The CA dashboard mounts it twice by design (balance card + calendar); per-instance state meant two identical requests on mount and a badge that went stale while the calendar beside it refreshed. Exports `invalidateLeaveRequestsCache` for writers on other surfaces — see §6. |

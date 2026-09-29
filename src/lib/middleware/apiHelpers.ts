@@ -13,13 +13,40 @@ import type { NotificationContent } from '@/lib/notificationContent';
  */
 export async function checkPageAccess(
   uid: string,
-  requiredPageId: string,
+  requiredPageId: string | readonly string[],
 ): Promise<NextResponse | null> {
+  // An array means ANY of these pages grants access — for an action offered
+  // from more than one page that each already expose the same record.
+  const required = typeof requiredPageId === 'string' ? [requiredPageId] : requiredPageId;
   const caller = await getUserById(uid);
-  if (!caller?.permittedPageIds?.includes(requiredPageId)) {
+  if (!required.some((pageId) => caller?.permittedPageIds?.includes(pageId))) {
     return NextResponse.json({ error: 'Access denied' }, { status: 403 });
   }
   return null;
+}
+
+// ─── Request bodies ─────────────────────────────────────────────────
+
+/**
+ * Reads a JSON body with a hard size cap. Returns the parsed value, or the
+ * 413 / 400 response to send back. An empty body parses as `{}`.
+ */
+export async function readJsonBody(
+  request: Request,
+  maxBytes: number,
+): Promise<{ ok: true; body: unknown } | { ok: false; response: NextResponse }> {
+  const tooLarge = () => ({
+    ok: false as const,
+    response: NextResponse.json({ error: 'Too much at once' }, { status: 413 }),
+  });
+  if (Number(request.headers.get('content-length') ?? 0) > maxBytes) return tooLarge();
+  const raw = await request.text();
+  if (raw.length > maxBytes) return tooLarge();
+  try {
+    return { ok: true, body: raw ? JSON.parse(raw) : {} };
+  } catch {
+    return { ok: false, response: NextResponse.json({ error: 'Invalid request' }, { status: 400 }) };
+  }
 }
 
 // ─── Error handling ─────────────────────────────────────────────────

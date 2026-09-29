@@ -28,6 +28,10 @@ const nextConfig: NextConfig = {
     return [
       { source: '/admin/:path*', destination: '/admin-portal/:path*', permanent: false },
       { source: '/creators/:path*', destination: '/creator-portal/:path*', permanent: false },
+      // Model Submissions moved into the Creator Portal on 2026-09-28. Every
+      // "New Model Application" notification already sent carries the old
+      // actionUrl, so it must keep resolving. 307 for the same reason as above.
+      { source: '/applications/apps-model-submissions', destination: '/creator-portal/model-submissions', permanent: false },
     ];
   },
 

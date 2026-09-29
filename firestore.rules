@@ -341,6 +341,22 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 21b. Creator onboarding + hello@ enquiries (the recruiting funnel after
+    // approval). `creator-onboarding` holds an approved applicant's onboarding
+    // answers — content limits, persona, earnings — and a hash of their link
+    // secret; `creator-inquiries` logs every email hello@bluurock.com received.
+    // Both are Admin-SDK-only, same posture as model-submissions: the public
+    // form writes through /api/join/[token] (token-gated), staff read through
+    // /api/creator-onboarding* and /api/creator-inquiries*, which check the
+    // 'creators-onboarding' page permission first.
+    match /creator-onboarding/{submissionId} {
+      allow read, write: if false;
+    }
+
+    match /creator-inquiries/{emailId} {
+      allow read, write: if false;
+    }
+
     // 22. OnlyFans CRM (OF Manager)
     // `onlyfans-chats` is a MIRROR of the third-party provider's chat list, kept
     // fresh by the provider webhook and the sync route. The OF Manager window

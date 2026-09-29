@@ -64,6 +64,7 @@ export const GET = withAuth<{ id: string }>(async (_request, token: DecodedIdTok
       reviewedByName: name,
       reviewedAt: doc.reviewedAt,
       reviewNote: doc.reviewNote,
+      onboardingInvitedAt: doc.onboardingInvitedAt,
     };
 
     return NextResponse.json({ submission: detail });

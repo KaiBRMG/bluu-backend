@@ -515,6 +515,41 @@
   ],
   "fieldOverrides": [
     {
+      "collectionGroup": "creator-inquiries",
+      "fieldPath": "messageId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-inquiries",
+      "fieldPath": "reasons",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-inquiries",
+      "fieldPath": "snippet",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-inquiries",
+      "fieldPath": "subject",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-onboarding",
+      "fieldPath": "answers",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-onboarding",
+      "fieldPath": "cursor",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-onboarding",
+      "fieldPath": "tokenHash",
+      "indexes": []
+    },
+    {
       "collectionGroup": "admin_notification_batches",
       "fieldPath": "sentViaTelegram",
       "indexes": []

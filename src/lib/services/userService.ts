@@ -351,6 +351,19 @@ export async function getUserById(uid: string): Promise<any> {
 }
 
 /**
+ * `uid → displayName` for a set of uids, in ONE batched `getAll` (never N+1).
+ * Missing users are left out; callers decide what an unknown uid renders as.
+ */
+export async function displayNamesFor(uids: (string | null | undefined)[]): Promise<Map<string, string>> {
+  const unique = [...new Set(uids.filter((u): u is string => !!u))];
+  const names = new Map<string, string>();
+  if (unique.length === 0) return names;
+  const snaps = await adminDb.getAll(...unique.map((uid) => adminDb.collection('users').doc(uid)));
+  for (const snap of snaps) if (snap.exists) names.set(snap.id, snap.data()?.displayName ?? 'Unknown');
+  return names;
+}
+
+/**
  * Invalidates the in-process user cache for a given UID.
  * Call this after any write to the user document so the next getUserById
  * call fetches fresh data from Firestore.

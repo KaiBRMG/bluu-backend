@@ -118,7 +118,38 @@ export function useModelSubmissions() {
     [authFetch, reload, submissions],
   );
 
-  return { submissions, error, reload, setStatus };
+  /**
+   * Emails the applicant their welcome + personal onboarding link (or rotates
+   * and re-sends it). Resolves true on success; failures toast and resolve
+   * false so the prompt can stay open for a retry.
+   */
+  const sendInvite = useCallback(
+    async (id: string): Promise<boolean> => {
+      try {
+        const data = await authFetch('/api/creator-onboarding/invite', {
+          method: 'POST',
+          body: JSON.stringify({ submissionId: id }),
+        });
+        const stamp = new Date().toISOString();
+        setSubmissions((prev) => {
+          const next = prev?.map((s) => (s.id === id ? { ...s, onboardingInvitedAt: stamp } : s)) ?? null;
+          if (next) setCache(LIST_CACHE_KEY, next);
+          return next;
+        });
+        detailCache.delete(id);
+        toast.success(data?.resent ? 'Onboarding link re-sent' : 'Welcome email sent', {
+          description: data?.to ? `To ${data.to}` : undefined,
+        });
+        return true;
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Could not send the email');
+        return false;
+      }
+    },
+    [authFetch],
+  );
+
+  return { submissions, error, reload, setStatus, sendInvite };
 }
 
 /**

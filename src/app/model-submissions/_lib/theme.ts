@@ -29,6 +29,18 @@ export const STAGE_GROUND = {
 } as const;
 
 /**
+ * The onboarding pass (`/join`) — an OPAQUE laminate, the one solid object on
+ * this surface. Opaque because it is a physical thing handed to the creator,
+ * and because the stage wash must not bleed through the name printed on it.
+ * `PASS_SURFACE` sits one step above the ground (#08090b); white text on it
+ * reads 17.9:1 and `white/60` 8.1:1.
+ */
+export const PASS_SURFACE = '#12171d';
+export const PASS_EDGE = 'rgba(255,255,255,0.12)';
+/** The initials outline embossed on the pass — just visible, never read as text. */
+export const PASS_EMBOSS = 'rgba(255,255,255,0.2)';
+
+/**
  * Field chrome. 16px text is deliberate, not a rounding error: anything smaller
  * makes iOS Safari zoom the viewport on focus and the applicant loses their
  * place in the form.

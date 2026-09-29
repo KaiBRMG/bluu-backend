@@ -59,6 +59,7 @@ export const GET = withAuth(async (_request: NextRequest, token: DecodedIdToken)
           thumbs,
           reviewedByName: d.reviewedBy ? names.get(d.reviewedBy) ?? 'Unknown' : null,
           reviewedAt: d.reviewedAt,
+          onboardingInvitedAt: d.onboardingInvitedAt,
         };
       }),
     );

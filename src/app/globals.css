@@ -561,6 +561,70 @@ input[type="date"].form-input {
   }
 }
 
+/* ─── The onboarding pass (/join — DESIGN.md §8) ─────────────────────
+   The personal onboarding link's signature object: a laminate pass with the
+   creator's name on it. Three beats, all scoped to that one card:
+
+   - `pass-drop`  — it is handed over once, on arrival: falls a short way from
+     above and settles at its resting tilt. 560ms ease-out-expo, no bounce.
+     Starts VISIBLE (transform only) — the page's one authored entrance, so
+     nothing else on the welcome animates in beside it.
+   - `pass-sheen` — one specular sweep across the laminate as it lands. White
+     at low alpha — a material highlight, not a colour; it plays once and the
+     layer rests fully transparent.
+   - `pass-stamp` — the completion stamp presses onto the pass (scale down
+     into place) when the form is submitted.
+
+   Base styles are the FINAL state, and the global reduced-motion reset
+   collapses all three, so the pass is correct if nothing ever animates. */
+.pass-drop {
+  animation: pass-drop 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes pass-drop {
+  from {
+    transform: translateY(-28px) rotate(-7deg);
+  }
+}
+
+.pass-sheen {
+  opacity: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.16) 45%,
+    rgba(255, 255, 255, 0.05) 52%,
+    transparent 64%
+  );
+  background-size: 250% 100%;
+  animation: pass-sheen 1100ms cubic-bezier(0.22, 1, 0.36, 1) 380ms both;
+}
+
+@keyframes pass-sheen {
+  0% {
+    opacity: 1;
+    background-position: 120% 0;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    background-position: -30% 0;
+  }
+}
+
+.pass-stamp {
+  animation: pass-stamp 420ms cubic-bezier(0.22, 1, 0.36, 1) 260ms both;
+}
+
+@keyframes pass-stamp {
+  from {
+    opacity: 0;
+    transform: rotate(-14deg) scale(1.6);
+  }
+}
+
 /* ─── Session walkthrough ribbon ──────────────────────────────────────
    The state ribbon in the timesheet walkthrough dialog draws left-to-right
    as it appears. It conveys the one thing the bar is about — that this is a

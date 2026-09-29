@@ -1,42 +1,560 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-22T00:00:00Z",
+  "generatedAt": "2026-09-28T21:08:03.029Z",
   "title": "Design System: Bluu Backend",
   "extensions": {
     "colorMeta": {
-      "canvas": { "role": "neutral", "displayName": "Canvas (Near-Black)", "canonical": "#0A0A0A", "tonalRamp": ["#000000", "#0a0a0a", "#141414", "#1f1f1f", "#2a2a2a", "#404040", "#6b7280", "#9ca3af"] },
-      "surface": { "role": "neutral", "displayName": "Reading Surface", "canonical": "#171717", "tonalRamp": ["#0a0a0a", "#111111", "#171717", "#1f1f1f", "#262626", "#333333", "#4a4a4a", "#666666"] },
-      "action-blue": { "role": "primary", "displayName": "Action Blue", "canonical": "#3b82f6", "tonalRamp": ["#172554", "#1e3a8a", "#1d4ed8", "#2563eb", "#3b82f6", "#60a5fa", "#93c5fd", "#dbeafe"] },
-      "status-green": { "role": "tertiary", "displayName": "Success Green", "canonical": "#4ade80", "tonalRamp": ["#052e16", "#14532d", "#166534", "#15803d", "#22c55e", "#4ade80", "#86efac", "#dcfce7"] },
-      "status-orange": { "role": "tertiary", "displayName": "Pending Orange", "canonical": "#fb923c", "tonalRamp": ["#431407", "#7c2d12", "#9a3412", "#c2410c", "#f97316", "#fb923c", "#fdba74", "#ffedd5"] },
-      "status-red": { "role": "tertiary", "displayName": "Owed Red", "canonical": "#f87171", "tonalRamp": ["#450a0a", "#7f1d1d", "#991b1b", "#b91c1c", "#ef4444", "#f87171", "#fca5a5", "#fee2e2"] },
-      "status-zinc": { "role": "neutral", "displayName": "Archived Zinc", "canonical": "#a1a1aa", "tonalRamp": ["#18181b", "#27272a", "#3f3f46", "#52525b", "#71717a", "#a1a1aa", "#d4d4d8", "#f4f4f5"] }
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Canvas",
+        "canonical": "#09090b",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ]
+      },
+      "sidebar": {
+        "role": "neutral",
+        "displayName": "Sidebar Rail",
+        "canonical": "#18181b",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Reading Surface",
+        "canonical": "#171717",
+        "tonalRamp": [
+          "#0a0a0a",
+          "#111111",
+          "#171717",
+          "#1f1f1f",
+          "#2a2a2a",
+          "#404040",
+          "#737373",
+          "#a3a3a3"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#27272a",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#d4d4d8",
+          "#e4e4e7",
+          "#f4f4f5",
+          "#ffffff"
+        ]
+      },
+      "ink-secondary": {
+        "role": "neutral",
+        "displayName": "Ink Secondary",
+        "canonical": "#a1a1aa",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ]
+      },
+      "ink-muted": {
+        "role": "neutral",
+        "displayName": "Ink Muted (non-text marks only)",
+        "canonical": "#71717a",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#2a2a2a",
+        "tonalRamp": [
+          "#0a0a0a",
+          "#111111",
+          "#171717",
+          "#1f1f1f",
+          "#2a2a2a",
+          "#404040",
+          "#737373",
+          "#a3a3a3"
+        ]
+      },
+      "action-blue": {
+        "role": "primary",
+        "displayName": "Action Blue",
+        "canonical": "#3b82f6",
+        "tonalRamp": [
+          "#172554",
+          "#1e3a8a",
+          "#1d4ed8",
+          "#2563eb",
+          "#3b82f6",
+          "#60a5fa",
+          "#93c5fd",
+          "#dbeafe"
+        ]
+      },
+      "action-blue-deep": {
+        "role": "primary",
+        "displayName": "Action Blue Deep (filled step)",
+        "canonical": "#2563eb",
+        "tonalRamp": [
+          "#172554",
+          "#1e3a8a",
+          "#1d4ed8",
+          "#2563eb",
+          "#3b82f6",
+          "#60a5fa",
+          "#93c5fd",
+          "#dbeafe"
+        ]
+      },
+      "status-green": {
+        "role": "tertiary",
+        "displayName": "Success Green",
+        "canonical": "#4ade80",
+        "tonalRamp": [
+          "#052e16",
+          "#14532d",
+          "#166534",
+          "#15803d",
+          "#22c55e",
+          "#4ade80",
+          "#86efac",
+          "#dcfce7"
+        ]
+      },
+      "status-blue": {
+        "role": "tertiary",
+        "displayName": "Info Blue",
+        "canonical": "#60a5fa",
+        "tonalRamp": [
+          "#172554",
+          "#1e3a8a",
+          "#1d4ed8",
+          "#2563eb",
+          "#3b82f6",
+          "#60a5fa",
+          "#93c5fd",
+          "#dbeafe"
+        ]
+      },
+      "status-orange": {
+        "role": "tertiary",
+        "displayName": "Pending Orange",
+        "canonical": "#fb923c",
+        "tonalRamp": [
+          "#431407",
+          "#7c2d12",
+          "#9a3412",
+          "#c2410c",
+          "#f97316",
+          "#fb923c",
+          "#fdba74",
+          "#ffedd5"
+        ]
+      },
+      "status-yellow": {
+        "role": "tertiary",
+        "displayName": "Attention Yellow",
+        "canonical": "#facc15",
+        "tonalRamp": [
+          "#422006",
+          "#713f12",
+          "#854d0e",
+          "#a16207",
+          "#ca8a04",
+          "#facc15",
+          "#fde047",
+          "#fef9c3"
+        ]
+      },
+      "status-red": {
+        "role": "tertiary",
+        "displayName": "Owed Red",
+        "canonical": "#f87171",
+        "tonalRamp": [
+          "#450a0a",
+          "#7f1d1d",
+          "#991b1b",
+          "#b91c1c",
+          "#ef4444",
+          "#f87171",
+          "#fca5a5",
+          "#fee2e2"
+        ]
+      },
+      "status-zinc": {
+        "role": "neutral",
+        "displayName": "Archived Zinc",
+        "canonical": "#a1a1aa",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ]
+      },
+      "creator-void": {
+        "role": "neutral",
+        "displayName": "Deep Ink Void (portal)",
+        "canonical": "#050b12",
+        "tonalRamp": [
+          "#050b12",
+          "#0a121b",
+          "#131d27",
+          "#1e2934",
+          "#293440",
+          "#80878e",
+          "#b1b8c0",
+          "#f4f7fa"
+        ]
+      },
+      "creator-ground": {
+        "role": "neutral",
+        "displayName": "Deep Ink Ground (portal)",
+        "canonical": "#0a121b",
+        "tonalRamp": [
+          "#050b12",
+          "#0a121b",
+          "#131d27",
+          "#1e2934",
+          "#293440",
+          "#80878e",
+          "#b1b8c0",
+          "#f4f7fa"
+        ]
+      },
+      "creator-surface": {
+        "role": "neutral",
+        "displayName": "Deep Ink Surface (portal)",
+        "canonical": "#131d27",
+        "tonalRamp": [
+          "#050b12",
+          "#0a121b",
+          "#131d27",
+          "#1e2934",
+          "#293440",
+          "#80878e",
+          "#b1b8c0",
+          "#f4f7fa"
+        ]
+      },
+      "creator-raised": {
+        "role": "neutral",
+        "displayName": "Deep Ink Raised (portal)",
+        "canonical": "#1e2934",
+        "tonalRamp": [
+          "#050b12",
+          "#0a121b",
+          "#131d27",
+          "#1e2934",
+          "#293440",
+          "#80878e",
+          "#b1b8c0",
+          "#f4f7fa"
+        ]
+      },
+      "creator-line": {
+        "role": "neutral",
+        "displayName": "Deep Ink Line (portal)",
+        "canonical": "#293440",
+        "tonalRamp": [
+          "#050b12",
+          "#0a121b",
+          "#131d27",
+          "#1e2934",
+          "#293440",
+          "#80878e",
+          "#b1b8c0",
+          "#f4f7fa"
+        ]
+      },
+      "creator-ink": {
+        "role": "neutral",
+        "displayName": "Portal Ink",
+        "canonical": "#f4f7fa",
+        "tonalRamp": [
+          "#050b12",
+          "#0a121b",
+          "#131d27",
+          "#1e2934",
+          "#293440",
+          "#80878e",
+          "#b1b8c0",
+          "#f4f7fa"
+        ]
+      },
+      "creator-ink-secondary": {
+        "role": "neutral",
+        "displayName": "Portal Ink Secondary",
+        "canonical": "#b1b8c0",
+        "tonalRamp": [
+          "#050b12",
+          "#0a121b",
+          "#131d27",
+          "#1e2934",
+          "#293440",
+          "#80878e",
+          "#b1b8c0",
+          "#f4f7fa"
+        ]
+      },
+      "creator-ink-muted": {
+        "role": "neutral",
+        "displayName": "Portal Ink Muted",
+        "canonical": "#80878e",
+        "tonalRamp": [
+          "#050b12",
+          "#0a121b",
+          "#131d27",
+          "#1e2934",
+          "#293440",
+          "#80878e",
+          "#b1b8c0",
+          "#f4f7fa"
+        ]
+      },
+      "creator-accent": {
+        "role": "primary",
+        "displayName": "Bluu Azure",
+        "canonical": "#00b8f5",
+        "tonalRamp": [
+          "#032533",
+          "#04405a",
+          "#006a93",
+          "#0090c8",
+          "#00b8f5",
+          "#4dccf8",
+          "#99e1fb",
+          "#e0f6fe"
+        ]
+      },
+      "creator-accent-deep": {
+        "role": "primary",
+        "displayName": "Bluu Azure Deep",
+        "canonical": "#0090c8",
+        "tonalRamp": [
+          "#032533",
+          "#04405a",
+          "#006a93",
+          "#0090c8",
+          "#00b8f5",
+          "#4dccf8",
+          "#99e1fb",
+          "#e0f6fe"
+        ]
+      },
+      "creator-urgency-late": {
+        "role": "tertiary",
+        "displayName": "Late Coral (portal urgency)",
+        "canonical": "#f9746d",
+        "tonalRamp": [
+          "#3d0f0d",
+          "#6b1c18",
+          "#9a2c25",
+          "#c9443b",
+          "#f0584f",
+          "#f9746d",
+          "#fbaaa5",
+          "#fee4e2"
+        ]
+      },
+      "creator-urgency-done": {
+        "role": "tertiary",
+        "displayName": "Done Emerald (portal)",
+        "canonical": "#4bc680",
+        "tonalRamp": [
+          "#0b2a18",
+          "#12472a",
+          "#1a6a3f",
+          "#238f55",
+          "#2fae6a",
+          "#4bc680",
+          "#8ddcae",
+          "#dcf5e6"
+        ]
+      },
+      "creator-urgency-warn": {
+        "role": "tertiary",
+        "displayName": "Warn Amber (portal)",
+        "canonical": "#edb345",
+        "tonalRamp": [
+          "#3a2606",
+          "#62400b",
+          "#8d5c10",
+          "#b87817",
+          "#dd9a2b",
+          "#edb345",
+          "#f5d18e",
+          "#fcf0d9"
+        ]
+      }
     },
     "typographyMeta": {
-      "display": { "displayName": "Display", "purpose": "Stat and hero numbers in summary tiles. Always tabular-nums." },
-      "title": { "displayName": "Title", "purpose": "Dialog titles, card titles, section headers." },
-      "body": { "displayName": "Body", "purpose": "Default text, set on body and inherited everywhere. 14px / 500." },
-      "label": { "displayName": "Label", "purpose": "Field labels above inputs, meta, captions." },
-      "eyebrow": { "displayName": "Eyebrow", "purpose": "Sidebar section headers only — uppercase, 0.06em tracking, low opacity." },
-      "code": { "displayName": "Code / ID", "purpose": "IDs and codes (CR0001). font-mono, tabular-nums." }
+      "display": {
+        "displayName": "Display",
+        "purpose": "Stat and hero numbers in summary tiles. Always tabular-nums. The console's ceiling outside the Instrument (time-tracking clock) and Earnings (CA salary) steps."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Dialog titles, card titles, section headers."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default text, set on body and inherited everywhere. 14px / 500. Prose caps at 65–75ch."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field labels above inputs, meta and captions, in Ink Secondary."
+      },
+      "eyebrow": {
+        "displayName": "Eyebrow",
+        "purpose": "Sidebar section headers (and the satellite window's section title) only — uppercase, 0.06em tracking. A single-use device, not a per-section scaffold."
+      },
+      "code": {
+        "displayName": "Code / ID",
+        "purpose": "IDs and codes (CR0001). font-mono, tabular-nums."
+      }
     },
     "shadows": [
-      { "name": "no-shadow", "value": "none", "purpose": "Default. Depth is built from white overlays and hairline borders, never box-shadow." },
-      { "name": "overlay-lift", "value": "background rgba(255,255,255,0.025) → 0.055 (hover) → 0.08 (active)", "purpose": "The only elevation mechanism — a lighter white overlay, not a shadow." },
-      { "name": "network-backdrop", "value": "backdrop-filter: blur(2px); background rgba(0,0,0,0.75)", "purpose": "Exception, not a pattern: the full-screen network-loss overlay only." }
+      {
+        "name": "no-shadow",
+        "value": "none",
+        "purpose": "Default. Depth is built from white overlays and hairline borders, never box-shadow."
+      },
+      {
+        "name": "overlay-lift",
+        "value": "background rgba(255,255,255,0.025) → 0.055 (hover) → 0.08 (active); border rgba(255,255,255,0.07)",
+        "purpose": "The only elevation mechanism in the console — a lighter white overlay, not a shadow."
+      },
+      {
+        "name": "network-backdrop",
+        "value": "backdrop-filter: blur(2px); background rgba(0,0,0,0.75)",
+        "purpose": "Exception, not a pattern: the full-screen network-loss overlay only."
+      },
+      {
+        "name": "pass-edge",
+        "value": "inset 0 0 0 1px rgba(255,255,255,0.12)",
+        "purpose": "§8 /join only: the edge of the pass and the persona card — an inset ring doing a hairline's job on an opaque object, not a drop shadow."
+      }
     ],
     "motion": [
-      { "name": "ease-standard", "value": "120ms ease-out", "purpose": "Global transition on background-color, border-color, color, opacity for all interactive elements." },
-      { "name": "sidebar-collapse", "value": "250ms ease-out", "purpose": "Sidebar width and nav-item padding/opacity transitions." },
-      { "name": "row-press", "value": "hover:brightness-110 active:scale-[0.98]", "purpose": "Tappable list/kanban rows on press." }
+      {
+        "name": "ease-standard",
+        "value": "120ms ease-out",
+        "purpose": "Global transition on background-color, border-color, color, opacity for all interactive elements."
+      },
+      {
+        "name": "sidebar-collapse",
+        "value": "250ms ease-out",
+        "purpose": "Sidebar width and nav-item padding/opacity transitions."
+      },
+      {
+        "name": "row-press",
+        "value": "hover:brightness-110 active:scale-[0.98]",
+        "purpose": "Tappable rows that carry their own fill. Transparent rows step through the overlay recipe instead."
+      },
+      {
+        "name": "session-ribbon-draw",
+        "value": "260ms cubic-bezier(0.22, 1, 0.36, 1), scaleX from the left",
+        "purpose": "The timesheet walkthrough's state ribbon draws in as one span."
+      },
+      {
+        "name": "notification-bell-strike",
+        "value": "420ms, ±9°",
+        "purpose": "The tray's one authored beat — only when a notification arrives while the app is open."
+      },
+      {
+        "name": "onboard-completion",
+        "value": "seal 380ms, tick draws along its path, 6px rise on a 60–80ms stagger, ~660ms total",
+        "purpose": "The console's one celebration (/onboarding/done), shared by §8's thank-you screen. §8's step screens use .onboard-rise per screen."
+      },
+      {
+        "name": "pf-seal",
+        "value": "~380–520ms cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "§7 creator portal completion seal — the portal's one authored motion moment."
+      },
+      {
+        "name": "pass-drop",
+        "value": "560ms cubic-bezier(0.16, 1, 0.3, 1); from translateY(-28px) rotate(-7deg); transform only",
+        "purpose": "§8 /join: the pass handed over on arrival — the landing's single authored entrance."
+      },
+      {
+        "name": "pass-sheen",
+        "value": "1100ms cubic-bezier(0.22, 1, 0.36, 1), 380ms delay, one sweep",
+        "purpose": "§8 /join: a white specular sweep across the pass as it lands; rests transparent."
+      },
+      {
+        "name": "pass-stamp",
+        "value": "420ms cubic-bezier(0.22, 1, 0.36, 1), 260ms delay; from rotate(-14deg) scale(1.6)",
+        "purpose": "§8 /join: the 'Onboarded' stamp presses onto the pass at completion."
+      }
     ],
     "breakpoints": [
-      { "name": "lg", "value": "1024px" }
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      }
     ],
     "zIndex": [
-      { "name": "z-overlay", "value": "50", "purpose": "Dropdowns, popovers, dialogs — matches Tailwind z-50." },
-      { "name": "z-banner", "value": "60", "purpose": "Persistent app banners (update-download / update-available), above the overlays." },
-      { "name": "z-toast", "value": "70", "purpose": "Transient toasts — the top layer, above the banner." }
+      {
+        "name": "z-overlay",
+        "value": "50",
+        "purpose": "Dropdowns, popovers, dialogs — matches Tailwind z-50."
+      },
+      {
+        "name": "z-banner",
+        "value": "60",
+        "purpose": "Persistent app banners, bulk action bars, the navigation progress hairline and non-modal prompt cards — above the overlays."
+      },
+      {
+        "name": "z-toast",
+        "value": "70",
+        "purpose": "Transient toasts — the top layer, above the banner."
+      }
     ]
   },
   "components": [
@@ -44,41 +562,41 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "The one Action Blue voice — primary actions only.",
+      "description": "The one Action Blue voice — primary actions only. Filled blue carrying white ink uses Action Blue Deep; the lighter hue is for tints and marks.",
       "html": "<button class=\"ds-btn-primary\">Save changes</button>",
-      "css": ".ds-btn-primary { background: #3b82f6; color: #fff; padding: 8px 16px; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background-color 120ms ease-out, opacity 120ms ease-out; } .ds-btn-primary:hover { background: #2563eb; } .ds-btn-primary:focus-visible { outline: 2px solid #60a5fa; outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }"
+      "css": ".ds-btn-primary { background: #2563eb; color: #fff; padding: 8px 16px; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background-color 120ms ease-out, opacity 120ms ease-out; } .ds-btn-primary:hover { background: #1d4ed8; } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(147,197,253,0.5); } .ds-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }"
     },
     {
       "name": "Ghost Button",
       "kind": "button",
       "refersTo": "button-ghost",
-      "description": "Icon/text actions in dense tables and cards.",
-      "html": "<button class=\"ds-btn-ghost\">Dismiss</button>",
-      "css": ".ds-btn-ghost { background: transparent; color: #9ca3af; padding: 8px 16px; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: color 120ms ease-out, background-color 120ms ease-out; } .ds-btn-ghost:hover { color: #d4d4d8; background: rgba(255,255,255,0.055); } .ds-btn-ghost:focus-visible { outline: 2px solid #52525b; outline-offset: 2px; }"
+      "description": "Icon/text actions in dense tables and cards, and every secondary 'Not now' / 'Back'.",
+      "html": "<button class=\"ds-btn-ghost\">Not now</button>",
+      "css": ".ds-btn-ghost { background: transparent; color: #a1a1aa; padding: 8px 16px; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: color 120ms ease-out, background-color 120ms ease-out; } .ds-btn-ghost:hover { color: #fff; background: rgba(255,255,255,0.055); } .ds-btn-ghost:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(147,197,253,0.5); }"
     },
     {
       "name": "Text Input",
       "kind": "input",
       "refersTo": "input",
-      "description": "The shared inputClass — dark field, hairline border, border-shift focus.",
+      "description": "The shared inputClass — dark field, hairline border, border-shift focus with no glow.",
       "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Search requests\" />",
-      "css": ".ds-input { width: 100%; background: #27272a; border: 1px solid #3f3f46; border-radius: 10px; padding: 8px 12px; font-size: 14px; color: #fff; transition: border-color 120ms ease-out, background-color 120ms ease-out; } .ds-input::placeholder { color: #71717a; } .ds-input:focus { outline: none; border-color: #71717a; background: rgba(255,255,255,0.08); } .ds-input.error { border-color: #ef4444; }"
+      "css": ".ds-input { width: 100%; background: #27272a; border: 1px solid #3f3f46; border-radius: 10px; padding: 8px 12px; font-size: 14px; color: #fff; transition: border-color 120ms ease-out; } .ds-input::placeholder { color: #71717a; } .ds-input:focus { outline: none; border-color: #71717a; } .ds-input.error { border-color: #ef4444; }"
     },
     {
       "name": "Status Pill",
       "kind": "chip",
       "refersTo": "status-pill",
-      "description": "Tinted state chip — foreground -400, fill /10. Import color from campaignTracking.ts.",
+      "description": "Tinted state chip — foreground -400, fill /10, border /30. Import the hue from campaignTracking.ts.",
       "html": "<span class=\"ds-status-pill\">In Progress</span>",
-      "css": ".ds-status-pill { display: inline-flex; align-items: center; border-radius: 9999px; padding: 2px 8px; font-size: 12px; font-weight: 500; color: #60a5fa; background: rgba(59,130,246,0.10); }"
+      "css": ".ds-status-pill { display: inline-flex; align-items: center; border-radius: 9999px; border: 1px solid rgba(96,165,250,0.3); padding: 2px 8px; font-size: 12px; font-weight: 500; color: #60a5fa; background: rgba(59,130,246,0.10); }"
     },
     {
-      "name": "Status Dot",
-      "kind": "custom",
-      "refersTo": "status-pill",
-      "description": "Compact status indicator for dense lists and kanban rows.",
-      "html": "<span class=\"ds-status-dot\"></span>",
-      "css": ".ds-status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: #60a5fa; }"
+      "name": "Attribute Chip",
+      "kind": "chip",
+      "refersTo": "attribute-chip",
+      "description": "A free-form label a record carries, not a state it is in. Greyscale always, square-ish so it never reads as a status pill.",
+      "html": "<span class=\"ds-attr-chip\">Google Doc</span>",
+      "css": ".ds-attr-chip { display: inline-flex; align-items: center; border-radius: 8px; padding: 2px 6px; font-size: 11px; font-weight: 500; color: #d4d4d8; background: rgba(255,255,255,0.08); }"
     },
     {
       "name": "Summary Widget Card",
@@ -86,7 +604,7 @@
       "refersTo": "widget-card",
       "description": "Compact dashboard tile: label + big tabular metric. Tightened padding.",
       "html": "<div class=\"ds-widget\"><span class=\"ds-widget-label\">Owed this cycle</span><span class=\"ds-widget-metric\">$12,480</span></div>",
-      "css": ".ds-widget { display: flex; flex-direction: column; gap: 8px; background: #171717; border: 1px solid #2a2a2a; border-radius: 14px; padding: 16px; } .ds-widget-label { font-size: 12px; font-weight: 500; color: #9ca3af; } .ds-widget-metric { font-size: 24px; font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }"
+      "css": ".ds-widget { display: flex; flex-direction: column; gap: 8px; background: #171717; border: 1px solid #2a2a2a; border-radius: 14px; padding: 16px; } .ds-widget-label { font-size: 12px; font-weight: 500; color: #a1a1aa; } .ds-widget-metric { font-size: 24px; font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }"
     },
     {
       "name": "Kanban Row",
@@ -94,36 +612,99 @@
       "refersTo": "widget-card",
       "description": "The dense, monospaced, tappable leaf row — the signature line of the system.",
       "html": "<button class=\"ds-kanban-row\"><span class=\"ds-status-dot\"></span><span class=\"ds-kanban-code\">CR0042</span><span class=\"ds-kanban-amount\">$240</span></button>",
-      "css": ".ds-kanban-row { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: rgba(255,255,255,0.04); border: none; border-left: 2px solid rgba(255,255,255,0.14); border-radius: 8px; padding: 6px 8px; cursor: pointer; transition: filter 120ms ease-out, transform 120ms ease-out; } .ds-kanban-row:hover { filter: brightness(1.1); } .ds-kanban-row:active { transform: scale(0.98); } .ds-kanban-code { font-family: 'Google Sans', monospace; font-size: 12px; font-variant-numeric: tabular-nums; color: #fff; } .ds-kanban-amount { margin-left: auto; font-size: 12px; color: #9ca3af; font-variant-numeric: tabular-nums; } @media (prefers-reduced-motion: reduce) { .ds-kanban-row { transition: none; } .ds-kanban-row:active { transform: none; } }"
+      "css": ".ds-kanban-row { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: rgba(255,255,255,0.04); border: none; border-left: 2px solid rgba(255,255,255,0.14); border-radius: 8px; padding: 6px 8px; cursor: pointer; transition: filter 120ms ease-out, transform 120ms ease-out; } .ds-kanban-row:hover { filter: brightness(1.1); } .ds-kanban-row:active { transform: scale(0.98); } .ds-kanban-row:focus-visible { outline: none; box-shadow: inset 0 0 0 3px rgba(147,197,253,0.5); } .ds-status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: #60a5fa; } .ds-kanban-code { font-family: 'Google Sans', monospace; font-size: 12px; font-variant-numeric: tabular-nums; color: #fff; } .ds-kanban-amount { margin-left: auto; font-size: 12px; color: #a1a1aa; font-variant-numeric: tabular-nums; } @media (prefers-reduced-motion: reduce) { .ds-kanban-row { transition: none; } .ds-kanban-row:active { transform: none; } }"
     },
     {
       "name": "Sidebar Nav Item",
       "kind": "nav",
       "refersTo": "button-ghost",
-      "description": "The 260px navigation rail item — hover/active use white overlays.",
+      "description": "The 260px navigation rail item — hover/active use white overlays, active steps to 600.",
       "html": "<a class=\"ds-nav-item active\"><span class=\"ds-nav-icon\"></span><span>Custom Requests</span></a>",
-      "css": ".ds-nav-item { display: flex; align-items: center; gap: 8px; padding: 4px 8px; margin: 0 6px; border-radius: 4px; font-size: 14px; font-weight: 500; color: #fff; cursor: pointer; transition: background-color 120ms ease-out; } .ds-nav-item:hover { background: rgba(255,255,255,0.055); } .ds-nav-item.active { background: rgba(255,255,255,0.08); font-weight: 600; } .ds-nav-icon { width: 18px; height: 18px; flex-shrink: 0; opacity: 0.65; border-radius: 4px; background: currentColor; } .ds-nav-item.active .ds-nav-icon { opacity: 1; }"
+      "css": ".ds-nav-item { display: flex; align-items: center; gap: 8px; padding: 4px 8px; margin: 0 6px; border-radius: 4px; font-size: 14px; font-weight: 500; color: #fff; cursor: pointer; transition: background-color 120ms ease-out; } .ds-nav-item:hover { background: rgba(255,255,255,0.055); } .ds-nav-item.active { background: rgba(255,255,255,0.08); font-weight: 600; } .ds-nav-item:focus-visible { outline: none; box-shadow: inset 0 0 0 3px rgba(147,197,253,0.5); } .ds-nav-icon { width: 18px; height: 18px; flex-shrink: 0; opacity: 0.65; border-radius: 4px; background: currentColor; } .ds-nav-item.active .ds-nav-icon { opacity: 1; }"
+    },
+    {
+      "name": "Non-modal Prompt Card",
+      "kind": "card",
+      "refersTo": "widget-card",
+      "description": "Optional follow-up to an action the user just took (InvitePromptCard). Pinned bottom-right on --z-banner, opaque, never takes focus.",
+      "html": "<div class=\"ds-prompt\" role=\"region\" aria-live=\"polite\"><p class=\"ds-prompt-title\">Email Maya their onboarding link?</p><p class=\"ds-prompt-desc\">Sends a personal link to the address on their application.</p><div class=\"ds-prompt-actions\"><button class=\"ds-prompt-ghost\">Not now</button><button class=\"ds-prompt-primary\">Send email</button></div></div>",
+      "css": ".ds-prompt { width: min(24rem, calc(100vw - 2rem)); background: #171717; border: 1px solid #2a2a2a; border-radius: 14px; padding: 16px; } .ds-prompt-title { margin: 0; font-size: 14px; font-weight: 600; color: #fff; } .ds-prompt-desc { margin: 4px 0 0; font-size: 12px; line-height: 1.6; color: #a1a1aa; } .ds-prompt-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; } .ds-prompt-ghost, .ds-prompt-primary { height: 32px; padding: 0 12px; border-radius: 6px; border: none; font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color 120ms ease-out, color 120ms ease-out; } .ds-prompt-ghost { background: transparent; color: #a1a1aa; } .ds-prompt-ghost:hover { color: #fff; background: rgba(255,255,255,0.055); } .ds-prompt-primary { background: #2563eb; color: #fff; } .ds-prompt-primary:hover { background: #1d4ed8; } .ds-prompt-ghost:focus-visible, .ds-prompt-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(147,197,253,0.5); }"
+    },
+    {
+      "name": "Onboarding Pass (§8 /join)",
+      "kind": "custom",
+      "refersTo": "creator-accent",
+      "description": "The public skin's one opaque object: a laminate credential with the creator's name, sized in container units so it scales as one card. Returns punched at set breaks and stamped at completion.",
+      "html": "<article class=\"ds-pass\"><span class=\"ds-pass-slot\"></span><div class=\"ds-pass-body\"><p class=\"ds-pass-name\">Maya Okafor</p><dl class=\"ds-pass-fields\"><div><dt>Role</dt><dd>Creator</dd></div><div><dt>Status</dt><dd>Approved</dd></div><div><dt>Issued</dt><dd>28 Sept 2026</dd></div><div><dt>Pass no.</dt><dd>BR-4F2A</dd></div></dl></div><div class=\"ds-pass-band\"><span>Onboarding</span><span>Non-transferable</span></div></article>",
+      "css": ".ds-pass { container-type: inline-size; width: 17rem; aspect-ratio: 5 / 7; display: flex; flex-direction: column; overflow: hidden; border-radius: 22px; background: #12171d; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12); transform: rotate(-2deg); transition: transform 200ms ease-out; color: #fff; font-family: 'Google Sans', sans-serif; } .ds-pass:hover { transform: perspective(900px) rotateY(4deg) rotateX(-2deg); } .ds-pass-slot { display: block; margin: 16px auto 0; width: 56px; height: 10px; border-radius: 9999px; background: #08090b; box-shadow: inset 0 1px 2px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.12); } .ds-pass-body { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 7cqw 6cqw; } .ds-pass-name { margin: 0; font-size: 11cqw; line-height: 1.02; font-weight: 600; letter-spacing: -0.03em; } .ds-pass-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 3cqw 16px; margin: 6cqw 0 0; padding-top: 4cqw; border-top: 1px solid rgba(255,255,255,0.12); } .ds-pass-fields dt { font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.6); } .ds-pass-fields dd { margin: 0; font-size: max(0.8125rem, 4.4cqw); font-weight: 600; font-variant-numeric: tabular-nums; } .ds-pass-band { display: flex; justify-content: space-between; gap: 12px; padding: 3.5cqw 7cqw; background: #00b8f5; color: #04141c; font-size: max(9px, 3cqw); font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; } @media (prefers-reduced-motion: reduce) { .ds-pass, .ds-pass:hover { transition: none; transform: rotate(-2deg); } }"
     }
   ],
   "narrative": {
     "northStar": "The Quiet Instrument",
-    "overview": "Bluu Rock MGMT is a dark, dense operations console for an internal team — one they live inside for eight hours a day. The design philosophy is total deference: chrome recedes to near-black, type is small, spacing is tight, and the data is the interface. It borrows its posture from Notion and Linear — an instrument panel, not a marketing site. Color is rationed like a signal, never spent as decoration: the interface is greyscale by default and reaches for hue only when hue means a status, a priority, or a category. Depth is built from layered translucent-white overlays on a dark ground, not from drop shadows. Motion is fast and almost subliminal: 120ms ease-out on color and opacity, a small scale/brightness nudge on press. This system explicitly rejects the SaaS marketing look — no gradient heroes, no glassmorphism, no oversized display type, no color used for mood.",
+    "overview": "Bluu Backend is a dark, dense operations console for an internal team — not a product anyone is meant to be delighted by, but one they live inside for eight hours a day. The design philosophy is total deference: chrome recedes to near-black, type is small, spacing is tight, and the data is the interface. It borrows its posture from Notion and Linear — an instrument panel, not a marketing site. Every surface exists to hold information legibly; nothing exists to be admired.\n\nColor is rationed like a signal, never spent as decoration. The interface is greyscale by default — near-black canvas, translucent white overlays, hairline borders — and reaches for hue only when hue means something: a status, a priority, a category. Depth is built from layered translucent-white overlays on a dark ground, not from drop shadows. Motion is fast and almost subliminal: 120ms ease-out on color and opacity, a small scale/brightness nudge on press, and nothing that bounces, slides far, or asks to be watched. This system explicitly rejects the SaaS marketing look: no gradient heroes, no glassmorphism-as-decoration, no oversized display type, no color used for mood. If a screen looks like it wants to sell you something, it is wrong.\n\nThe canonical reference implementation is src/app/(main)/creator-portal/custom-requests/page.tsx — when in doubt, mirror it. Its overview widgets are the house style for every dashboard and summary surface (the Signature widget pattern).",
     "keyCharacteristics": [
       "Near-black canvas (#0A0A0A), low-chroma surfaces, 14px base type, tight spacing.",
       "Greyscale by default; color is strictly semantic (status / priority / category).",
       "Soft elevation from translucent white overlays + hairline borders — never shadows.",
       "Every number is tabular-nums; every code/ID is font-mono.",
-      "Fast, subtle motion: 120ms ease-out; hover:brightness-110 active:scale-[0.98] on tappable rows."
+      "Fast, subtle motion: 120ms ease-out; tappable rows step through the overlay recipe (transparent rows) or hover:brightness-110 active:scale-[0.98] (rows that carry their own fill) — see Interaction / Motion."
     ],
     "rules": [
-      { "name": "The One Voice Rule", "body": "Action Blue is the only non-semantic color on any screen, and it marks the primary action or current selection — nothing else. Its scarcity is what makes it read.", "section": "colors" },
-      { "name": "The Semantic-Only Rule", "body": "Color is forbidden as decoration. If a green, orange, or red pixel does not encode a status, priority, or category, remove it. Pull every state color from campaignTracking.ts; never hardcode a themeable hex.", "section": "colors" },
-      { "name": "The Overlay-Not-Grey Rule", "body": "Interior surfaces are translucent white on the dark ground, not solid greys — this is what gives the soft, layered depth.", "section": "colors" },
-      { "name": "The Tabular Rule", "body": "Every count, amount, and metric uses tabular-nums; every code or ID (CR0001) uses font-mono text-xs. Numbers must align in columns — always.", "section": "typography" },
-      { "name": "The One-Family Rule", "body": "Google Sans carries the entire UI. Never introduce a display or accent typeface; hierarchy comes from weight, size, and color, never from a second family.", "section": "typography" },
-      { "name": "The No-Shadow Rule", "body": "Depth comes from a lighter overlay and a hairline border, never from a box-shadow. If a surface needs to lift, raise its white overlay opacity — do not add a shadow.", "section": "elevation" },
-      { "name": "The Hairline Rule", "body": "Every border is a single hairline: #2a2a2a on opaque surfaces, rgba(255,255,255,0.07) on overlays. No heavy dividers, no double borders.", "section": "elevation" },
-      { "name": "The Named-Layer Rule", "body": "Stacking order is expressed with the --z-* scale (--z-overlay < --z-banner < --z-toast), never a literal like z-[9999]. A raw magic z-index is drift — replace it with the layer whose name matches its role.", "section": "elevation" }
+      {
+        "name": "The One Voice Rule",
+        "body": "Action Blue is the only non-semantic color on any screen, and it marks the primary action or current selection — nothing else. Its scarcity is what makes it read.",
+        "section": "colors"
+      },
+      {
+        "name": "The Semantic-Only Rule",
+        "body": "Color is forbidden as decoration. If a green, orange, or red pixel does not encode a status, priority, or category, remove it. Pull every state color from campaignTracking.ts; never hardcode a themeable hex.",
+        "section": "colors"
+      },
+      {
+        "name": "The Overlay-Not-Grey Rule",
+        "body": "Interior surfaces are translucent white on the dark ground, not solid greys — this is what gives the soft, layered depth (see Elevation).",
+        "section": "colors"
+      },
+      {
+        "name": "The One De-emphasis Rule",
+        "body": "(supersedes the former Muted-on-Tint Rule). There is one step below Ink for text: Ink Secondary (text-zinc-400 / --foreground-secondary). Ink Muted was previously documented as safe on the near-black canvas; measured, it is 4.12:1 there and fails everywhere else too, so there is no ground on which it is a legal text colour. Use Ink Secondary on canvas, on sidebar, on overlay surfaces and on state tints alike, and never stack opacity on top of it — double de-emphasis is what pushes text under the floor.",
+        "section": "colors"
+      },
+      {
+        "name": "The One-Grey Rule",
+        "body": "A surface picks one token for de-emphasised text and uses it throughout. Mixing text-muted-foreground (#9f9fa9) with text-zinc-400 (#a1a1aa) and text-zinc-500 (#71717a) inside one component — which is how the OF Manager window drifted — makes three greys for one role and hides the failing one among the passing ones.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Every count, amount, and metric uses tabular-nums; every code or ID (CR0001) uses font-mono text-xs. Numbers must align in columns — always.",
+        "section": "typography"
+      },
+      {
+        "name": "The One-Family Rule",
+        "body": "Google Sans carries the entire UI. Never introduce a display or accent typeface; hierarchy comes from weight, size, and color, never from a second family.",
+        "section": "typography"
+      },
+      {
+        "name": "The No-Shadow Rule",
+        "body": "Depth comes from a lighter overlay and a hairline border, never from a box-shadow. If a surface needs to lift, raise its white overlay opacity — do not add a shadow.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Hairline Rule",
+        "body": "Every border is a single hairline: #2a2a2a on opaque surfaces, rgba(255,255,255,0.07) on overlays. No heavy dividers, no double borders.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Named-Layer Rule",
+        "body": "Stacking order is expressed with the --z-* scale (--z-overlay < --z-banner < --z-toast), never a literal like z-[9999]. A raw magic z-index is drift — replace it with the layer whose name matches its role.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Avatar Seed Rule",
+        "body": "Every fallback avatar is derived from displayName (getAvatarColor(displayName || 'User') + getInitials(displayName)), exactly as AppLayout and NavUser do it. getAvatarColor hashes the string it is given, so seeding from any other value — a full name, an email, a nickname in form state — changes both the initials and the colour, and the same person appears as two different avatars across screens. Display a fuller name as text if the surface calls for it, but always seed the avatar from displayName. What the rule actually protects is that one identity hashes to one colour everywhere; on a record that has no displayName field at all (Growth Tracking's accounts have only handle — see AccountAvatar in growthUi.tsx), seed from that record's own stable identity instead. The failure mode to avoid is the same either way: seeding from something that can change (a caption, a form draft) makes the same entity render as two different avatars.",
+        "section": "components"
+      }
     ],
     "dos": [
       "Do keep the canvas near-black (#0A0A0A) and let chrome recede — the data is the interface.",
@@ -131,19 +712,22 @@
       "Do pull every status/priority color from campaignTracking.ts and apply the -400 text / /10 fill / /30 border triad.",
       "Do put tabular-nums on every count, amount, and metric, and font-mono text-xs on every code/ID (CR0001).",
       "Do use only src/components/ui components, only @tabler/icons-react / lucide-react icons, and only Avatar for images.",
-      "Do shape Skeletons to the final layout, write empty states as one quiet text-muted-foreground line, and toast every mutation outcome.",
-      "Do keep motion to 120ms transitions and hover:brightness-110 active:scale-[0.98] on tappable rows.",
+      "Do shape Skeletons to the final layout, write empty states as one quiet text-zinc-400 line, and toast every mutation outcome.",
+      "Do keep motion to 120ms transitions, and pick the right row idiom: the overlay steps for transparent rows, hover:brightness-110 active:scale-[0.98] for rows with their own fill.",
+      "Do give a filtered-empty state a way out of itself, and reveal hover-only actions on :focus-within too.",
       "Do stack app surfaces with the --z-* scale (--z-overlay < --z-banner < --z-toast) via var(--z-*).",
       "Do make it read like custom-requests/page.tsx. If it doesn't, reconcile."
     ],
     "donts": [
       "Don't add drop shadows for depth — raise the white overlay instead (The No-Shadow Rule).",
       "Don't use color as decoration; if a colored pixel doesn't encode state, category, or the one Action Blue voice, remove it (The Semantic-Only Rule).",
+      "Don't hash a free-form string to a colour palette. Mapping an open-ended label — a type, a tag, an author — onto N hues looks semantic and encodes nothing: the hue is unlearnable, it changes if the string is edited, and N of them at once is a rainbow on a greyscale console. The Resources page shipped ten such hues and they were removed wholesale. Open-ended labels are Attribute chips; only a closed vocabulary with a meaning per value earns a hue, from campaignTracking.ts.",
+      "Don't put a border around an empty state, a single sentence, or a lone control — a box implies contents.",
       "Don't hardcode a themeable hex — use the CSS variables / Tailwind tokens.",
       "Don't introduce another component library, hand-roll a primitive that exists in src/components/ui, or use icons outside @tabler/icons-react / lucide-react.",
       "Don't use a raw <img> — always Avatar.",
-      "Don't reach for a modal first, drop a spinner into the middle of a layout, or ship an illustration empty state.",
-      "Don't introduce a second font family, oversized display type, gradient text/heros, or glassmorphism — this is not a marketing site.",
+      "Don't reach for a modal first, drop a spinner into the middle of a layout, or ship an \"illustration\" empty state.",
+      "Don't introduce a second font family, oversized display type (the only exceptions are the time-tracking Instrument step and the CA-salary Earnings step — see § Typography), gradient text/heros, or glassmorphism — this is not a marketing site.",
       "Don't use a colored side-stripe as a decorative accent; the only left-border in the system is the kanban row's functional border-l-2 overlay edge.",
       "Don't reach for a magic z-[9999]; use the semantic --z-* layer whose name matches the role (The Named-Layer Rule)."
     ]

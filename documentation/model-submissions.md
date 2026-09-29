@@ -1,6 +1,6 @@
 # Model Submissions
 
-> The public model application form (`/model-submissions`) and the internal review queue (`/applications/apps-model-submissions`). This is the **only unauthenticated write path in the project**, and it collects the most sensitive data we hold — read the [Abuse & security model](#abuse--security-model) before changing any of it.
+> The public model application form (`/model-submissions`) and the internal review queue (Creator Portal → Model Submissions, `/creator-portal/model-submissions` — moved from `/applications/apps-model-submissions` on 2026-09-28, which now redirects; the pageId is still `apps-model-submissions`). What happens **after** approval — the welcome email, the personal onboarding form and the hello@ enquiry triage — is in [creator-onboarding.md](creator-onboarding.md). This is the **only unauthenticated write path in the project**, and it collects the most sensitive data we hold — read the [Abuse & security model](#abuse--security-model) before changing any of it.
 
 ## Dependencies / Interacting Files
 
@@ -22,7 +22,7 @@
 | `src/app/api/model-submissions/admin/route.ts` | Review queue (page permission) |
 | `src/app/api/model-submissions/admin/[id]/route.ts` | Full record + approve/reject (page permission) |
 | `src/hooks/useModelSubmissions.ts` | `useModelSubmissions` (queue) + `useSubmissionDetail` (one record) |
-| `src/app/(main)/applications/apps-model-submissions/` | The review page + `SubmissionCard` / `SubmissionDetail` |
+| `src/app/(main)/creator-portal/model-submissions/` | The review page + `SubmissionCard` / `SubmissionDetail` / `InvitePromptCard` |
 | `src/middleware.ts` | `/model-submissions` is browser-allowlisted (applicants have no desktop app) |
 | `tests/firestore-rules/firestore-rules.test.ts` | §21 — asserts every path is client-denied |
 
@@ -210,6 +210,7 @@ Product register, console house style. Cards, not a table, because the decision 
 - **Detail dialog** — full record beside a viewer with arrow-key paging and a thumbnail rail. This is the only place the earnings screenshots and contact details appear. Social pages render as one link per platform (stored URLs, so nothing is reconstructed), with a single copy control on the section heading that hands over `socialLinks` as a block; a record from before the per-platform fields falls back to rendering that block as text.
 - **Image strategy** — thumbnails are 480px **WebP**, `loading="lazy"`, `decoding="async"`, with intrinsic `width`/`height` so the grid never shifts. Full-size renders load **only** for the photo being looked at. Opening a record costs one large image, not thirteen.
 - **Copy controls** — every handle and link in the detail view carries a copy button. Handles copy the **resolved URL** (`https://t.me/…`), not the bare handle, so it pastes straight into a browser or a message; social links copy as one block. The icon confirms in place for ~1.6s as well as toasting, so the feedback is where the eye already is.
+- **Approving offers the onboarding email.** An approval raises `InvitePromptCard` (non-modal, never steals focus) asking whether to email the applicant their onboarding link; approved cards carry an **Invite / Invited** action for later or a re-send. The list carries `onboardingInvitedAt` for this. See [creator-onboarding.md](creator-onboarding.md#approval--the-welcome-email).
 - **Status writes are optimistic** — the card flips immediately and rolls back with an error toast if the server refuses. A reviewer moving through a queue should never wait on a round trip.
 
 ### Image caching (why the grid used to flicker)

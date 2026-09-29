@@ -99,6 +99,14 @@ export const PAGES: PageDef[] = [
   // Creator Portal
   { pageId: 'creators-custom-requests', title: 'Custom Requests', teamspaceId: 'creator-portal', href: '/creator-portal/custom-requests', icon: 'ImagePlay', order: 0 },
   { pageId: 'creators-content-planning', title: 'Content Planning', teamspaceId: 'creator-portal', href: '/creator-portal/content-planning', icon: 'CalendarCheck', order: 1 },
+  // Moved here from Apps on 2026-09-28, beside the Onboarding page it feeds.
+  // The pageId keeps its old `apps-` prefix ON PURPOSE: it is the key of the
+  // `page-permissions` doc and of every user's `permittedPageIds` entry, so
+  // renaming it would silently revoke the page from everyone who holds it.
+  // `/applications/apps-model-submissions` survives as a redirect (next.config).
+  { pageId: 'apps-model-submissions', title: 'Model Submissions', teamspaceId: 'creator-portal', href: '/creator-portal/model-submissions', icon: 'FileUser', order: 2 },
+  // Approved applicants' personal onboarding forms, and the hello@ Inbox.
+  { pageId: 'creators-onboarding', title: 'Onboarding', teamspaceId: 'creator-portal', href: '/creator-portal/onboarding', icon: 'ClipboardCheck', order: 3 },
 
   // Apps
   { pageId: 'time-tracking', title: 'Time Tracking', teamspaceId: 'apps', href: '/applications/time-tracking', icon: 'ClockFading', order: 0 },
@@ -109,7 +117,6 @@ export const PAGES: PageDef[] = [
   // so it deliberately has no href — the sidebar special-cases this pageId.
   // Its icon is the brand SVG at /Icons/onlyfans.svg (no lucide equivalent).
   { pageId: 'apps-ofmanager', title: 'OF Manager', teamspaceId: 'apps', href: null, icon: 'OnlyFans', order: 4 },
-  { pageId: 'apps-model-submissions', title: 'Model Submissions', teamspaceId: 'apps', href: '/applications/apps-model-submissions', icon: 'FileUser', order: 3 },
   { pageId: 'apps-prompt-library', title: 'Prompt Library', teamspaceId: 'apps', href: '/applications/apps-prompt-library', icon: 'Astroid', order: 5 },
   // The page is the *library* — capture itself happens natively, from the tray
   // item or the global shortcut, with no page open. Holding this page is what

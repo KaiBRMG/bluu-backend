@@ -28,6 +28,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SUBMISSION_STATUS_META } from '@/lib/modelSubmissions';
+import { telegramUrl, whatsappUrl } from '@/lib/creatorOnboarding';
 import { cn } from '@/lib/utils';
 import type {
   ModelSubmissionDetail,
@@ -387,10 +388,10 @@ export function SubmissionDetail({
                       label="Telegram"
                       // The full URL, not the bare handle: it pastes straight
                       // into a browser or a message and stays clickable.
-                      copy={`https://t.me/${detail.telegram}`}
+                      copy={telegramUrl(detail.telegram)}
                       copyLabel="Telegram link"
                     >
-                      <ExternalLink href={`https://t.me/${detail.telegram}`}>
+                      <ExternalLink href={telegramUrl(detail.telegram)}>
                         <IconBrandTelegram className="size-3.5" />@{detail.telegram}
                       </ExternalLink>
                     </Detail>
@@ -400,7 +401,7 @@ export function SubmissionDetail({
                     <Detail label="WhatsApp" copy={detail.whatsapp} copyLabel="WhatsApp number">
                       {/* wa.me takes the number without its `+`. Stored E.164,
                           so the link and the copied value never disagree. */}
-                      <ExternalLink href={`https://wa.me/${detail.whatsapp.replace(/\D/g, '')}`}>
+                      <ExternalLink href={whatsappUrl(detail.whatsapp)}>
                         <IconBrandWhatsapp className="size-3.5" />
                         {detail.whatsapp}
                       </ExternalLink>

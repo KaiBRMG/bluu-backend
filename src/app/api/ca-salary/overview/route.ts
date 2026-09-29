@@ -2,7 +2,9 @@
  * GET /api/ca-salary/overview?month=YYYY-MM
  *
  * The whole month in one response: what every chat agent earned, which creator
- * they earned it on, and what the month cost to run.
+ * they earned it on, what the month cost to run, and what each agent returned
+ * once they were paid (net revenue − salary). Profitability costs no extra read:
+ * both sides come off the month result the payroll figures already use.
  *
  * The payroll roster answers "what do I pay each agent"; this answers the two
  * questions that only exist above the roster — **where does the revenue come
@@ -218,6 +220,13 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         displayName: (agent.displayName ?? agent.uid) as string,
         photoURL: (agent.photoURL ?? null) as string | null,
         gross: result?.totals.grossEarnings ?? 0,
+        /**
+         * Gross less the platform deduction — the revenue side of the agent's
+         * profitability. Read off the same month result as `salary`, never off
+         * the live sales rows, so a finalised month compares frozen revenue
+         * against frozen pay rather than a late import against what was paid.
+         */
+        net: result?.totals.netEarnings ?? 0,
         commission: result?.totals.commission ?? 0,
         wage: result?.totals.wage ?? 0,
         salary: result?.totals.salary ?? 0,
@@ -264,7 +273,14 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       round2(agentRows.reduce((total, row) => total + pick(row), 0));
 
     const gross = sum(r => r.gross);
+    const net = sum(r => r.net);
     const payroll = sum(r => r.salary);
+    // The platform cut the net figures were taken at, so the client can say so.
+    // Every open month shares the live config; a finalised one froze its own,
+    // which is why this prefers an open month when there is one.
+    const results = [...months.values()];
+    const deductionRate =
+      (results.find(r => r.status === 'open') ?? results[0])?.config.deductionRate ?? null;
     const previousGross = round2([...previousGrossByAgent.values()].reduce((t, v) => t + v, 0));
 
     // ── What is worth interrupting for ────────────────────────────────
@@ -327,9 +343,13 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       totals: {
         gross,
         previousGross,
+        net,
+        deductionRate,
         commission: sum(r => r.commission),
         wage: sum(r => r.wage),
         payroll,
+        /** Net revenue left after paying the agents — the roster's profitability. */
+        profit: round2(net - payroll),
         hours: sum(r => r.hours),
         saleCount: agentRows.reduce((total, row) => total + row.saleCount, 0),
         agentCount: agentRows.length,

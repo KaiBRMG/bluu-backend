@@ -63,6 +63,8 @@ interface OverviewAgent {
   displayName: string;
   photoURL: string | null;
   gross: number;
+  /** Gross less the platform deduction — what the agent actually brought in. */
+  net: number;
   commission: number;
   wage: number;
   salary: number;
@@ -99,9 +101,14 @@ interface OverviewResponse {
   totals: {
     gross: number;
     previousGross: number;
+    net: number;
+    /** The platform cut behind `net`, 0–1. `null` only when there are no agents. */
+    deductionRate: number | null;
     commission: number;
     wage: number;
     payroll: number;
+    /** `net − payroll`. */
+    profit: number;
     hours: number;
     saleCount: number;
     agentCount: number;
@@ -131,10 +138,11 @@ export default function AdminOverview({ month, onMonthChange }: { month: string;
     async (force = false) => {
       if (!user) return;
 
-      // v2: the agent rows gained `accountCount`/`coverAccountCount`. A v1 entry
-      // is shape-incompatible — the sub-label would render "undefined accounts"
-      // off it — so the version is bumped rather than the fields defaulted.
-      const key = `bluu_ca_overview_v2:${user.uid}:${month}`;
+      // v3: agent rows and totals gained `net`/`profit`. Each bump is because an
+      // older entry is shape-incompatible — v1 rendered "undefined accounts",
+      // v2 would render NaN profit — so the version moves rather than the fields
+      // being defaulted.
+      const key = `bluu_ca_overview_v3:${user.uid}:${month}`;
       if (!force) {
         const cached = getCache<OverviewResponse>(key, CACHE_TTL_MS);
         if (cached) {
@@ -232,11 +240,12 @@ function Overview({ data }: { data: OverviewResponse }) {
     <div className="space-y-5">
       <HeadlineStrip data={data} />
 
-      <AttentionBand attention={attention} totals={totals} previousMonth={data.previousMonth} />
+      <AttentionBand attention={attention} totals={totals} agents={agents} previousMonth={data.previousMonth} />
 
       {hasRevenue ? (
         <>
           <EarningsMatrix agents={agents} creators={creators} month={data.month} />
+          <AgentProfitability agents={agents} totals={totals} />
           <CreatorLeaderboard creators={creators} totalGross={totals.gross} previousMonth={data.previousMonth} />
         </>
       ) : (
@@ -252,14 +261,16 @@ function Overview({ data }: { data: OverviewResponse }) {
   );
 }
 
-// ─── The five numbers ────────────────────────────────────────────────
+// ─── The headline numbers ────────────────────────────────────────────
 
 /**
  * What the month earned and what it cost, read before anything is filtered.
  *
- * Payroll share is the one figure here that is not on any other screen, and it
- * is the reason the strip is worth its space: gross and payroll each mean
- * something only next to the other.
+ * Payroll share and profit are the figures here that are not on any other
+ * screen, and they are the reason the strip is worth its space: gross and
+ * payroll each mean something only next to the other. Profit is taken on
+ * **net**, not gross — the platform's cut never reaches us, so a margin on
+ * gross would overstate every agent by that much.
  */
 function HeadlineStrip({ data }: { data: OverviewResponse }) {
   const { totals } = data;
@@ -267,7 +278,7 @@ function HeadlineStrip({ data }: { data: OverviewResponse }) {
 
   return (
     <section className={cn('rounded-xl p-4', SURFACE)} aria-label="Month totals">
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-5">
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
         <Metric
           label="Gross revenue"
           value={formatUsd(totals.gross)}
@@ -289,6 +300,19 @@ function HeadlineStrip({ data }: { data: OverviewResponse }) {
           label="Payroll share"
           value={share === null ? '—' : `${share.toFixed(1)}%`}
           meta={<span className="text-xs text-zinc-400">{share === null ? 'No revenue yet' : 'of gross revenue'}</span>}
+        />
+        <Metric
+          label="Profit after pay"
+          value={formatUsd(totals.profit)}
+          emphasis
+          valueClassName={signedMoneyClass(totals.profit)}
+          meta={
+            <span className="text-xs text-zinc-400">
+              {totals.net > 0
+                ? `${((totals.profit / totals.net) * 100).toFixed(1)}% of ${formatUsd(totals.net, { cents: false })} net`
+                : 'No net revenue yet'}
+            </span>
+          }
         />
         <Metric
           label="Hours worked"
@@ -314,16 +338,20 @@ function Metric({
   value,
   meta,
   emphasis,
+  valueClassName,
 }: {
   label: string;
   value: string;
   meta?: React.ReactNode;
   emphasis?: boolean;
+  valueClassName?: string;
 }) {
   return (
     <div className="min-w-0">
       <dt className="text-xs text-zinc-400">{label}</dt>
-      <dd className={cn('mt-0.5 font-semibold tabular-nums', emphasis ? 'text-xl' : 'text-lg')}>{value}</dd>
+      <dd className={cn('mt-0.5 font-semibold tabular-nums', emphasis ? 'text-xl' : 'text-lg', valueClassName)}>
+        {value}
+      </dd>
       {meta && <div className="mt-0.5">{meta}</div>}
     </div>
   );
@@ -376,13 +404,23 @@ function Delta({ current, previous, month }: { current: number; previous: number
 function AttentionBand({
   attention,
   totals,
+  agents,
   previousMonth,
 }: {
   attention: OverviewResponse['attention'];
   totals: OverviewResponse['totals'];
+  agents: OverviewAgent[];
   previousMonth: string;
 }) {
   const findings: Array<{ key: string; text: React.ReactNode }> = [];
+
+  // Agents paid more than they brought in. Only those with sales: an agent with
+  // none is already named by the no-sales line below, and naming them twice
+  // makes one fact look like two.
+  const lossMaking = agents
+    .filter(a => a.saleCount > 0 && a.net - a.salary < 0)
+    .map(a => ({ name: a.displayName, profit: a.net - a.salary }))
+    .sort((a, b) => a.profit - b.profit);
 
   if (totals.missingShiftDays > 0) {
     findings.push({
@@ -394,6 +432,22 @@ function AttentionBand({
           </strong>{' '}
           — hours could not be derived, so the hourly pay on those days is probably wrong. Open the agent in Payroll to
           see which.
+        </>
+      ),
+    });
+  }
+
+  if (lossMaking.length > 0) {
+    findings.push({
+      key: 'loss-making',
+      text: (
+        <>
+          <strong className="font-medium text-foreground">
+            {pluralise(lossMaking.length, 'agent')} paid more than they brought in
+          </strong>{' '}
+          — {lossMaking.slice(0, 4).map(a => `${a.name} (${formatUsd(a.profit, { cents: false })})`).join(', ')}
+          {lossMaking.length > 4 && `, and ${lossMaking.length - 4} more`}. Net revenue did not cover their pay this
+          month.
         </>
       ),
     });
@@ -480,8 +534,8 @@ function AttentionBand({
   if (findings.length === 0) {
     return (
       <p className={cn('rounded-lg px-3 py-2 text-sm text-zinc-400', SURFACE)}>
-        Nothing to check — every agent has sales, every day with sales has a shift, and no creator is resting on a
-        single agent.
+        Nothing to check — every agent has sales and covers their pay, every day with sales has a shift, and no creator
+        is resting on a single agent.
       </p>
     );
   }
@@ -636,15 +690,7 @@ function EarningsMatrix({
                     className="sticky left-0 z-10 bg-content-bg px-3 py-2 text-left font-normal before:absolute before:inset-0 before:bg-white/[0.055] before:opacity-0 before:transition-opacity before:duration-[120ms] group-hover:before:opacity-100"
                   >
                     <span className="relative flex items-center gap-2">
-                      <Avatar className="size-6 shrink-0">
-                        <AvatarImage src={agent.photoURL ?? undefined} alt="" />
-                        <AvatarFallback
-                          className="text-[10px] font-medium text-white"
-                          style={{ backgroundColor: getAvatarColor(agent.displayName) }}
-                        >
-                          {getInitials(agent.displayName)}
-                        </AvatarFallback>
-                      </Avatar>
+                      <AgentAvatar agent={agent} />
                       <span className="min-w-0">
                         <span className="block max-w-[11rem] truncate font-medium">{agent.displayName}</span>
                         <span className="text-xs text-zinc-400">
@@ -758,6 +804,168 @@ function BarCell({ value, scale }: { value: number | undefined; scale: number })
         {formatUsdCompact(value)}
       </span>
     </td>
+  );
+}
+
+// ─── What each agent returns ─────────────────────────────────────────
+
+/** `12.3%` / `−4.0%`, or `—` when there is no revenue to take a share of. */
+function formatMargin(profit: number, net: number): string {
+  if (net <= 0) return '—';
+  const pct = (profit / net) * 100;
+  return `${pct < 0 ? '−' : ''}${Math.abs(pct).toFixed(1)}%`;
+}
+
+const PROFIT_COLUMNS: Array<{ label: string; title: string }> = [
+  { label: 'Net revenue', title: 'Gross less the platform deduction' },
+  { label: 'Pay', title: 'Commission + hourly wage: the agent’s full salary for the month' },
+  { label: 'Profit', title: 'Net revenue minus pay' },
+  { label: 'Margin', title: 'Profit as a share of net revenue' },
+  { label: 'Per hour', title: 'Profit divided by the hours the agent was paid for' },
+];
+
+/**
+ * Each agent's net revenue against what they cost, and the difference.
+ *
+ * Profit is **net − salary**: net because the platform's cut never reaches the
+ * agency, and salary because it is the whole of what an agent is paid
+ * (commission + hourly). Both sides come off the same month result, so a
+ * finalised month compares frozen revenue with frozen pay — never a late import
+ * against a payout that has already gone.
+ *
+ * `Per hour` is there because agents work very different hours: $900 over 40
+ * hours and $900 over 160 are not the same agent, and the total alone ranks
+ * them equal.
+ *
+ * The bar behind the name is the leaderboard's idiom, scaled to the largest
+ * absolute profit on the roster. A loss ramps red — the one meaning red has on
+ * this page — and loss-making agents are also named in the attention band.
+ */
+function AgentProfitability({
+  agents,
+  totals,
+}: {
+  agents: OverviewAgent[];
+  totals: OverviewResponse['totals'];
+}) {
+  const rows = useMemo(
+    () =>
+      agents
+        .map(agent => ({ agent, profit: Math.round((agent.net - agent.salary) * 100) / 100 }))
+        .sort((a, b) => b.profit - a.profit),
+    [agents],
+  );
+  const max = Math.max(...rows.map(r => Math.abs(r.profit)), 1);
+
+  const deduction =
+    totals.deductionRate === null
+      ? 'the platform deduction'
+      : `the platform’s ${Number((totals.deductionRate * 100).toFixed(1))}%`;
+
+  return (
+    <section className="space-y-2.5">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h3 className="text-sm font-semibold tracking-tight">Profitability by agent</h3>
+        <p className="text-xs text-zinc-400">Net revenue (gross less {deduction}) minus everything the agent is paid.</p>
+      </div>
+
+      <div
+        tabIndex={0}
+        role="region"
+        aria-label="Profitability by agent, scrollable"
+        className={cn(
+          'overflow-x-auto rounded-lg border',
+          HAIRLINE,
+          'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50',
+        )}
+      >
+        <table className="w-full min-w-[690px] border-collapse text-sm">
+          <thead>
+            <tr className={cn('border-b', HAIRLINE)}>
+              <th scope="col" className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                Agent
+              </th>
+              {PROFIT_COLUMNS.map(({ label, title }) => (
+                <th
+                  key={label}
+                  scope="col"
+                  title={title}
+                  className="px-3 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-zinc-400"
+                >
+                  {label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody className="divide-y divide-white/[0.045]">
+            {rows.map(({ agent, profit }) => (
+              <tr key={agent.uid} className="transition-colors duration-[120ms] hover:bg-white/[0.055]">
+                <th scope="row" className="relative px-3 py-2 text-left font-normal">
+                  <span
+                    aria-hidden
+                    className={cn(
+                      'absolute inset-y-1 left-1 rounded-sm',
+                      profit < 0 ? 'bg-red-400/[0.12]' : 'bg-action-blue/[0.12]',
+                    )}
+                    style={{ width: `calc(${(Math.abs(profit) / max) * 100}% - 0.5rem)` }}
+                  />
+                  <span className="relative flex items-center gap-2">
+                    <AgentAvatar agent={agent} />
+                    <span className="min-w-0">
+                      <span className="block max-w-[14rem] truncate font-medium">{agent.displayName}</span>
+                      <span className="text-xs text-zinc-400">
+                        {agent.hours > 0 ? formatHours(agent.hours) : 'No hours'}
+                        {agent.status === 'finalized' && ' · finalised'}
+                      </span>
+                    </span>
+                  </span>
+                </th>
+
+                <td
+                  className={cn('whitespace-nowrap px-3 py-2 text-right tabular-nums', signedMoneyClass(agent.net))}
+                  title={`${formatUsd(agent.gross)} gross`}
+                >
+                  {formatUsd(agent.net)}
+                </td>
+                <td
+                  className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-zinc-400"
+                  title={`${formatUsd(agent.commission)} commission + ${formatUsd(agent.wage)} hourly`}
+                >
+                  {formatUsd(agent.salary)}
+                </td>
+                <td className={cn('whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums', signedMoneyClass(profit))}>
+                  {formatUsd(profit)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-zinc-400">{formatMargin(profit, agent.net)}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-zinc-400">
+                  {agent.hours > 0 ? `${formatUsd(profit / agent.hours)}/h` : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+
+          <tfoot>
+            <tr className="border-t border-white/[0.12] bg-white/[0.02] font-semibold">
+              <th scope="row" className="px-3 py-2.5 text-left text-[11px] uppercase tracking-wide text-zinc-400">
+                All agents
+              </th>
+              <td className={cn('whitespace-nowrap px-3 py-2.5 text-right tabular-nums', signedMoneyClass(totals.net))}>
+                {formatUsd(totals.net)}
+              </td>
+              <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{formatUsd(totals.payroll)}</td>
+              <td className={cn('whitespace-nowrap px-3 py-2.5 text-right tabular-nums', signedMoneyClass(totals.profit))}>
+                {formatUsd(totals.profit)}
+              </td>
+              <td className="px-3 py-2.5 text-right tabular-nums">{formatMargin(totals.profit, totals.net)}</td>
+              <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">
+                {totals.hours > 0 ? `${formatUsd(totals.profit / totals.hours)}/h` : '—'}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -901,6 +1109,23 @@ function CreatorLeaderboard({
         </table>
       </div>
     </section>
+  );
+}
+
+// ─── Agent avatar ────────────────────────────────────────────────────
+
+/** Seeded from `displayName`, per the Avatar Seed Rule (DESIGN.md §5). */
+function AgentAvatar({ agent }: { agent: Pick<OverviewAgent, 'displayName' | 'photoURL'> }) {
+  return (
+    <Avatar className="size-6 shrink-0">
+      <AvatarImage src={agent.photoURL ?? undefined} alt="" />
+      <AvatarFallback
+        className="text-[10px] font-medium text-white"
+        style={{ backgroundColor: getAvatarColor(agent.displayName) }}
+      >
+        {getInitials(agent.displayName)}
+      </AvatarFallback>
+    </Avatar>
   );
 }
 

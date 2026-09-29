@@ -28,6 +28,11 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
  System browser  ─►│  Model application /model-submissions         │─► UNAUTHENTICATED (session token
  (public)           └───────────────────────────────────────────────┘   + rate limit + sharp validation)
                     ┌───────────────────────────────────────────────┐
+ System browser  ─►│  Creator onboarding /join/[token]             │─► UNAUTHENTICATED (the 160-bit link
+ (approved           └───────────────────────────────────────────────┘   secret IS the credential; only its
+  applicant)                                                             hash is stored; autosaves per field)
+                                                                        — see creator-onboarding.md
+                    ┌───────────────────────────────────────────────┐
  System browser  ─►│  Shared prompt     /p/[shareId]               │─► UNAUTHENTICATED (160-bit share
  (public)           └───────────────────────────────────────────────┘   token IS the access control;
                                                                         read-only projection, no names)
@@ -66,6 +71,11 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
                                                                         window outlines the recorded
                                                                         region — see snipping-tool.md
 
+ hello@bluurock.com → Gmail auto-forward → Resend receiving → /api/email/inbound
+              (rules-only triage; genuine enquiries get the form link, the rest
+              are logged on Creator Portal → Onboarding → Inbox). Approval on
+              Model Submissions offers the "Welcome to BLUU ROCK 🎉" email with
+              the /join link — see creator-onboarding.md
  src/middleware.ts  → rewrites all non-Electron, non-allowlisted page traffic to /desktop-only
  Telegram bot @BluuRockBot → one bot, two audiences: employee alerts + the creator
               Mini App. Webhook at /api/telegram/webhook — see telegram.md
@@ -236,6 +246,7 @@ Fixing the `AppLayout` hoist is therefore not only the navigation speed-up alrea
 | [prompt-library.md](documentation/prompt-library.md) | **Prompt Library** — `prompt-library` collection, per-prompt version history + diffing, the client-side search engine, the LLM logo pipeline |
 | [onlyfans-crm.md](documentation/onlyfans-crm.md) | **OF Manager** — the OnlyFans messaging window, the `IOnlyFansClient` adapter seam, the Firestore chat mirror + provider webhook |
 | [gologin.md](documentation/gologin.md) | **GoLogin** — the browser-profile satellite window, per-operator accounts + folder sharing, the cross-machine session lock, the Orbita downloader, and the rate limit that shapes it all (a 429 revokes the API token permanently) |
+| [creator-onboarding.md](documentation/creator-onboarding.md) | **Recruiting after the application** — hello@ inbound triage (Resend receiving + the rules-only spam filter), the approval → welcome email, the personal `/join/[token]` onboarding form (question model, autosave, tracks), and Creator Portal → Onboarding |
 | [model-submissions.md](documentation/model-submissions.md) | The **public** application form `/model-submissions` (the project's only unauthenticated write path), its abuse model, and the `apps-model-submissions` review queue |
 | [boot-loading-screen.md](documentation/boot-loading-screen.md) | `BootLoaderProvider`, `useBootPhase`, home-widget gating |
 | [user-management.md](documentation/user-management.md) | Archiving vs deleting users, name resolution, profile pictures |

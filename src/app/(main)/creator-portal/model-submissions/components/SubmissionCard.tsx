@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { IconCheck, IconChevronLeft, IconChevronRight, IconPhotoOff, IconX } from '@tabler/icons-react';
+import { IconCheck, IconChevronLeft, IconChevronRight, IconMail, IconMailCheck, IconPhotoOff, IconX } from '@tabler/icons-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -13,6 +13,8 @@ interface SubmissionCardProps {
   submission: ModelSubmissionSummary;
   onOpen: () => void;
   onSetStatus: (status: SubmissionStatus) => void;
+  /** Raises the "email their onboarding link?" card. Approved cards only. */
+  onInvite: () => void;
 }
 
 /**
@@ -22,7 +24,7 @@ interface SubmissionCardProps {
  * yes or no" — never needs the detail view. Opening the record is for the
  * cases where the photos alone don't settle it.
  */
-export function SubmissionCard({ submission, onOpen, onSetStatus }: SubmissionCardProps) {
+export function SubmissionCard({ submission, onOpen, onSetStatus, onInvite }: SubmissionCardProps) {
   const [index, setIndex] = useState(0);
   const photos = submission.thumbs;
   const meta = SUBMISSION_STATUS_META[submission.status];
@@ -198,6 +200,33 @@ export function SubmissionCard({ submission, onOpen, onSetStatus }: SubmissionCa
             <span className="truncate text-xs text-zinc-400">
               {submission.reviewedByName ? `by ${submission.reviewedByName}` : 'Reviewed'}
             </span>
+            {/* The onboarding email, for an approved applicant. Its label is
+                the state: "Invite" until it has gone, "Invited" after (a click
+                then offers to re-send). Text beside the icon, never the icon
+                alone — the two glyphs differ by one small tick. */}
+            {submission.status === 'approved' && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onInvite}
+                title={
+                  submission.onboardingInvitedAt
+                    ? `Onboarding email sent ${new Date(submission.onboardingInvitedAt).toLocaleDateString()} — click to re-send`
+                    : 'Email their onboarding link'
+                }
+                className={cn(
+                  'ml-auto h-7 shrink-0 gap-1 px-2 text-xs',
+                  submission.onboardingInvitedAt ? 'text-green-400 hover:text-green-300' : 'text-zinc-300 hover:text-white',
+                )}
+              >
+                {submission.onboardingInvitedAt ? (
+                  <IconMailCheck className="size-3.5" />
+                ) : (
+                  <IconMail className="size-3.5" />
+                )}
+                {submission.onboardingInvitedAt ? 'Invited' : 'Invite'}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"

@@ -64,12 +64,16 @@ TELEGRAM_BOT_TOKEN         # the bot: employee alerts, the creator Mini App — 
 TELEGRAM_WEBHOOK_SECRET    # authenticates every /api/telegram/webhook delivery; unset = refuse all
 GL_API_TOKEN               # GoLogin MASTER workspace token — folder/share admin only, never leaves the server
 GL_TOKEN_ENC_KEY           # 32 bytes base64 — encrypts operators' personal GoLogin keys (see gologin.md)
+RESEND_API_KEY             # Resend, SENDING-ONLY key — every email the app sends (see creator-onboarding.md)
+RESEND_INBOUND_API_KEY     # Resend, FULL-ACCESS key — only reads a received email's body; falls back to RESEND_API_KEY
+RESEND_WEBHOOK_SECRET      # whsec_… — verifies the email.received webhook at /api/email/inbound; unset = 503
 ```
 
 - `NEXT_PUBLIC_*` are client-exposed by Next convention. Everything else is **server-only**.
 - The `TELEGRAM_*` pair is read **only** by `src/lib/services/telegramService.ts` and `telegramLinkService.ts` (server). Never import either from a client component — `src/lib/telegramConfig.ts` holds the public names a component may need. `TG_BOT_TEST_ID` was retired when real account linking landed; see [telegram.md](telegram.md).
 - `GL_API_TOKEN` and `GL_TOKEN_ENC_KEY` are read **only** under `src/lib/gologin/` and `src/lib/services/gologin*` (server) — `src/lib/gologin/types.ts` is the client-safe half. The master token **never leaves the server**; what `/api/gologin/launch-token` hands to the Electron main process is the *calling operator's own* GoLogin key, decrypted per launch and never written to disk or sent to a renderer. See [gologin.md](gologin.md#the-token-still-has-to-reach-the-desktop--but-it-is-a-much-smaller-token-now).
 - The `ONLYFANS*` keys are read **only** under `src/lib/onlyfans/` (server). Importing that folder from a client component would leak the key into the bundle — see [onlyfans-crm.md](onlyfans-crm.md).
+- The `RESEND_*` keys are read **only** by `src/lib/email/resend.ts` and `src/app/api/email/inbound/route.ts` (server). Two keys on purpose: the sending-only key is the one most code paths hold, and the full-access key lives in exactly one — see [creator-onboarding.md](creator-onboarding.md#email).
 - Resources are served from the Firestore `app-resources` collection (no external integration) — see [resources.md](resources.md).
 
 ## 5. Portal Topology

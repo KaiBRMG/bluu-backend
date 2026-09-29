@@ -75,6 +75,8 @@ export interface ModelSubmissionDocument extends ModelSubmissionFields {
   reviewedBy: string | null;
   reviewedAt: string | null;
   reviewNote: string;
+  /** ISO — when the welcome + onboarding email was last sent. Null = never. */
+  onboardingInvitedAt: string | null;
 }
 
 /** List-view shape: no storage paths, thumbnails only, no free-text bulk. */
@@ -92,6 +94,8 @@ export interface ModelSubmissionSummary {
   thumbs: SubmissionPhotoUrls[];
   reviewedByName: string | null;
   reviewedAt: string | null;
+  /** ISO — when the welcome + onboarding email was last sent. Null = never. */
+  onboardingInvitedAt: string | null;
 }
 
 /** Detail-view shape: every field plus signed URLs for every photo. */
@@ -105,4 +109,5 @@ export interface ModelSubmissionDetail extends ModelSubmissionFields {
   reviewedByName: string | null;
   reviewedAt: string | null;
   reviewNote: string;
+  onboardingInvitedAt: string | null;
 }

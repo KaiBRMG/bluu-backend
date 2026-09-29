@@ -561,6 +561,7 @@ function mapDoc(doc: FirebaseFirestore.DocumentSnapshot): ModelSubmissionDocumen
     reviewedBy: typeof d.reviewedBy === 'string' ? d.reviewedBy : null,
     reviewedAt: d.reviewedAt?.toDate?.()?.toISOString() ?? null,
     reviewNote: d.reviewNote ?? '',
+    onboardingInvitedAt: d.onboardingInvitedAt?.toDate?.()?.toISOString() ?? null,
   };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */

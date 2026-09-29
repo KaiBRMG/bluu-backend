@@ -180,7 +180,15 @@ export const notifications = {
     title: '🌟 New Model Application',
     message: `${applicantName} from ${location} has applied. Review their photos and details to approve or reject.`,
     type: 'action',
-    actionUrl: '/applications/apps-model-submissions',
+    actionUrl: '/creator-portal/model-submissions',
+  }),
+
+  /** An approved applicant finished their personal onboarding form. */
+  creatorOnboardingCompleted: (name: string, stageName: string): NotificationContent => ({
+    title: '🎉 Onboarding Completed',
+    message: `${name}${stageName ? ` (${stageName})` : ''} finished their onboarding form. Their Telegram and answers are ready — reach out to get them set up.`,
+    type: 'action',
+    actionUrl: '/creator-portal/onboarding',
   }),
 
   // ─── OF Manager operations ────────────────────────────────────────────────────

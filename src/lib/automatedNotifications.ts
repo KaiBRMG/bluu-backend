@@ -390,6 +390,17 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     content: notifications.modelSubmissionReceived('{applicantName}', '{city}, {country}'),
     telegramEnabled: true,
   },
+  {
+    id: 'creatorOnboardingCompleted',
+    category: 'Model Submissions',
+    event: 'Creator onboarding completed',
+    trigger:
+      'An approved applicant submits the personal onboarding form they were emailed (/join/[token]). Fires once — a completed form is locked.',
+    recipients: 'Every user with permission for the Creator Portal → Onboarding page',
+    sources: ['src/app/api/join/[token]/complete/route.ts'],
+    content: notifications.creatorOnboardingCompleted('{name}', '{stageName}'),
+    telegramEnabled: true,
+  },
 
   // ─── OF Manager ───────────────────────────────────────────────────────────
   // Both of these are operational diagnostics rather than workflow events, and
