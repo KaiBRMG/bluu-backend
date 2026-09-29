@@ -32,6 +32,8 @@ const nextConfig: NextConfig = {
       // "New Model Application" notification already sent carries the old
       // actionUrl, so it must keep resolving. 307 for the same reason as above.
       { source: '/applications/apps-model-submissions', destination: '/creator-portal/model-submissions', permanent: false },
+      // Creator Management moved into the Creator Portal on 2026-09-29.
+      { source: '/admin-portal/creator-management', destination: '/creator-portal/creator-management', permanent: false },
     ];
   },
 

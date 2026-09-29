@@ -15,6 +15,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
+import { invalidateAdminCreatorsCache } from '@/app/api/admin/creators/route';
 import { handleApiError, checkPageAccess } from '@/lib/middleware/apiHelpers';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -84,6 +85,7 @@ export const PATCH = withAuth(async (
     if (typeof body.isArchived === 'boolean') patch.isArchived = body.isArchived;
 
     await ref.update(patch);
+    invalidateAdminCreatorsCache();
     return NextResponse.json({ success: true });
   } catch (err) {
     return handleApiError(err, 'admin/creators/subaccounts PATCH');
@@ -133,6 +135,7 @@ export const DELETE = withAuth(async (
     }
 
     await ref.delete();
+    invalidateAdminCreatorsCache();
     return NextResponse.json({ success: true });
   } catch (err) {
     return handleApiError(err, 'admin/creators/subaccounts DELETE');

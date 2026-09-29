@@ -4,6 +4,16 @@ import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
+import type { CreatorSubAccountDocument } from '@/types/firestore';
+
+/** What the Creator Management table renders for each sub-account row. */
+interface AdminSubAccountSummary {
+  subAccountId: string;
+  label: string;
+  stageName: string;
+  OFID: string;
+  isArchived: boolean;
+}
 
 const CACHE_TTL_MS = 30_000;
 let cache: { data: Record<string, unknown>[]; expiresAt: number } | null = null;
@@ -17,7 +27,30 @@ async function fetchCreators() {
     return cache.data;
   }
 
-  const snapshot = await adminDb.collection('creators').get();
+  // Sub-accounts ride along so the table can list them under their parent
+  // without one request per row — one collection read for all of them.
+  const [snapshot, subSnap] = await Promise.all([
+    adminDb.collection('creators').get(),
+    adminDb.collection('creator-subaccounts').get(),
+  ]);
+
+  const subAccountsByParent = new Map<string, AdminSubAccountSummary[]>();
+  for (const doc of subSnap.docs) {
+    const sub = doc.data() as CreatorSubAccountDocument;
+    const list = subAccountsByParent.get(sub.parentCreatorId) ?? [];
+    list.push({
+      subAccountId: doc.id,
+      label: sub.label,
+      stageName: sub.stageName,
+      OFID: sub.OFID ?? '',
+      isArchived: sub.isArchived === true,
+    });
+    subAccountsByParent.set(sub.parentCreatorId, list);
+  }
+  for (const list of subAccountsByParent.values()) {
+    list.sort((a, b) => a.stageName.localeCompare(b.stageName));
+  }
+
   const creators = snapshot.docs.map(doc => {
     // `telegramLinkTokenHash` is pulled out rather than sent: it is only a hash,
     // but it is a pointer to a live invite and the admin table has no use for
@@ -35,6 +68,7 @@ async function fetchCreators() {
             linkedAt: telegram.linkedAt?.toDate?.()?.toISOString() ?? null,
           }
         : null,
+      subAccounts: subAccountsByParent.get(doc.id) ?? [],
     };
   });
 

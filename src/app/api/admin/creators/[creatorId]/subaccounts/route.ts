@@ -14,6 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
+import { invalidateAdminCreatorsCache } from '@/app/api/admin/creators/route';
 import { handleApiError, checkPageAccess } from '@/lib/middleware/apiHelpers';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -105,6 +106,7 @@ export const POST = withAuth(async (
       updatedAt: FieldValue.serverTimestamp(),
     });
 
+    invalidateAdminCreatorsCache();
     return NextResponse.json({ success: true, subAccountId: ref.id });
   } catch (err) {
     return handleApiError(err, 'admin/creators/subaccounts POST');

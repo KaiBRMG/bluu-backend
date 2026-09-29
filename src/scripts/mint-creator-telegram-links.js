@@ -9,7 +9,7 @@
 //
 // Prints one connection link per creator, for you to send by hand. This is the
 // bulk counterpart to the "Copy Telegram link" row action on
-// /admin-portal/creator-management — same service, same tokens, same 7-day
+// /creator-portal/creator-management — same service, same tokens, same 7-day
 // single-use rules; the page is for one creator, this is for onboarding the
 // whole roster at once.
 //

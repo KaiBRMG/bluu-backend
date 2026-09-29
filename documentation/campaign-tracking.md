@@ -100,7 +100,7 @@ Shared UI (`TransferDialog`, `ConfirmDialog`) lives in `src/components/campaign/
 
 The route is the *only* writer worth caring about. It runs under `withCreatorAuth`, takes the creator id from `token.uid` (no client-supplied identifier), validates the string against the runtime's tz database via `isValidTimezone`, and writes exactly one field on exactly that creator's own doc.
 
-**The admin UI reports it, it does not set it.** [`/admin-portal/creator-management`](src/app/(main)/admin-portal/creator-management/page.tsx) renders `defaultTimezone` read-only ("Not detected yet" until first sign-in) and no longer sends it on create or update. An admin-picked value would be silently overwritten at the creator's next sign-in, which is worse than not offering the field. `defaultTimezone` remains in the route's `ALLOWED_UPDATE_FIELDS` as an API-level escape hatch for a bad detection — but expect it to be re-detected.
+**The admin UI reports it, it does not set it.** [`/creator-portal/creator-management`](src/app/(main)/creator-portal/creator-management/page.tsx) renders `defaultTimezone` read-only ("Not detected yet" until first sign-in) and no longer sends it on create or update. An admin-picked value would be silently overwritten at the creator's next sign-in, which is worse than not offering the field. `defaultTimezone` remains in the route's `ALLOWED_UPDATE_FIELDS` as an API-level escape hatch for a bad detection — but expect it to be re-detected.
 
 ### One overdue helper
 

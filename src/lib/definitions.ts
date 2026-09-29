@@ -74,7 +74,6 @@ export const PAGES: PageDef[] = [
   { pageId: 'sharing', title: 'Sharing', teamspaceId: 'admin-portal', href: '/admin-portal/sharing', icon: 'Share2', order: 1 },
   { pageId: 'shift-management', title: 'Shift Management', teamspaceId: 'admin-portal', href: '/admin-portal/shift-management', icon: 'CalendarCog', order: 2 },
   { pageId: 'admin-notifications', title: 'Notifications', teamspaceId: 'admin-portal', href: '/admin-portal/notifications', icon: 'BellPlus', order: 3 },
-  { pageId: 'admin-creator-management', title: 'Creator Management', teamspaceId: 'admin-portal', href: '/admin-portal/creator-management', icon: 'UserStar', order: 4 },
   // Resource Management was merged into the Resources app page (apps-resources)
   // on 2026-08-26 — management is gated by group there, not by a separate page.
 
@@ -107,6 +106,11 @@ export const PAGES: PageDef[] = [
   { pageId: 'apps-model-submissions', title: 'Model Submissions', teamspaceId: 'creator-portal', href: '/creator-portal/model-submissions', icon: 'FileUser', order: 2 },
   // Approved applicants' personal onboarding forms, and the hello@ Inbox.
   { pageId: 'creators-onboarding', title: 'Onboarding', teamspaceId: 'creator-portal', href: '/creator-portal/onboarding', icon: 'ClipboardCheck', order: 3 },
+  // Moved here from the Admin Portal on 2026-09-29. The pageId keeps its
+  // `admin-` prefix for the same reason as `apps-model-submissions` above —
+  // it is the permission key, and the five /api/admin/creators routes gate on
+  // it by name. `/admin-portal/creator-management` survives as a redirect.
+  { pageId: 'admin-creator-management', title: 'Creator Management', teamspaceId: 'creator-portal', href: '/creator-portal/creator-management', icon: 'UserStar', order: 4 },
 
   // Apps
   { pageId: 'time-tracking', title: 'Time Tracking', teamspaceId: 'apps', href: '/applications/time-tracking', icon: 'ClockFading', order: 0 },

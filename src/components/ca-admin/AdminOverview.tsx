@@ -818,8 +818,9 @@ function formatMargin(profit: number, net: number): string {
 
 const PROFIT_COLUMNS: Array<{ label: string; title: string }> = [
   { label: 'Net revenue', title: 'Gross less the platform deduction' },
-  { label: 'Pay', title: 'Commission + hourly wage: the agent’s full salary for the month' },
-  { label: 'Profit', title: 'Net revenue minus pay' },
+  { label: 'Commission', title: 'Commission on the agent’s net sales' },
+  { label: 'Wage', title: 'Hourly wage for the hours the agent was paid for' },
+  { label: 'Profit', title: 'Net revenue minus commission and wage' },
   { label: 'Margin', title: 'Profit as a share of net revenue' },
   { label: 'Per hour', title: 'Profit divided by the hours the agent was paid for' },
 ];
@@ -879,7 +880,7 @@ function AgentProfitability({
           'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50',
         )}
       >
-        <table className="w-full min-w-[690px] border-collapse text-sm">
+        <table className="w-full min-w-[780px] border-collapse text-sm">
           <thead>
             <tr className={cn('border-b', HAIRLINE)}>
               <th scope="col" className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
@@ -928,11 +929,11 @@ function AgentProfitability({
                 >
                   {formatUsd(agent.net)}
                 </td>
-                <td
-                  className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-zinc-400"
-                  title={`${formatUsd(agent.commission)} commission + ${formatUsd(agent.wage)} hourly`}
-                >
-                  {formatUsd(agent.salary)}
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-zinc-400">
+                  {formatUsd(agent.commission)}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-zinc-400">
+                  {formatUsd(agent.wage)}
                 </td>
                 <td className={cn('whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums', signedMoneyClass(profit))}>
                   {formatUsd(profit)}
@@ -953,7 +954,8 @@ function AgentProfitability({
               <td className={cn('whitespace-nowrap px-3 py-2.5 text-right tabular-nums', signedMoneyClass(totals.net))}>
                 {formatUsd(totals.net)}
               </td>
-              <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{formatUsd(totals.payroll)}</td>
+              <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{formatUsd(totals.commission)}</td>
+              <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{formatUsd(totals.wage)}</td>
               <td className={cn('whitespace-nowrap px-3 py-2.5 text-right tabular-nums', signedMoneyClass(totals.profit))}>
                 {formatUsd(totals.profit)}
               </td>

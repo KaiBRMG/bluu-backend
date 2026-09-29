@@ -91,7 +91,7 @@ User opens the link, presses Start
 
 Two surfaces, same service and same rules:
 
-- **One creator** — the `⋯` row menu on `/admin-portal/creator-management` → "Copy Telegram link", straight to the clipboard.
+- **One creator** — the `⋯` row menu on `/creator-portal/creator-management` → "Copy Telegram link", straight to the clipboard.
 - **The whole roster** — `cd src && node scripts/mint-creator-telegram-links.js`, which prints one link per creator for sending by hand. `--dry-run` first; already-connected creators are skipped unless you pass `--all`.
 
 **Minting revokes**, so re-running the script over creators you have already sent links to invalidates what you sent — that is why the skip is the default.
@@ -192,7 +192,7 @@ Its `web_app` URL must be on a domain registered for the bot in BotFather, which
 
 ### Admin surface
 
-`/admin-portal/creator-management` shows a **Telegram** column — `Connected`/`@handle` in green, `Not connected` in orange (warning, not neutral: an unconnected creator cannot sign in at all). The row menu offers "Copy Telegram link" (which becomes "Copy **new** Telegram link" once one is issued — pressing it revokes the previous) and "Disconnect Telegram".
+`/creator-portal/creator-management` shows a **Telegram** column — `Connected`/`@handle` in green, `Not connected` in orange (warning, not neutral: an unconnected creator cannot sign in at all). The row menu offers "Copy Telegram link" (which becomes "Copy **new** Telegram link" once one is issued — pressing it revokes the previous) and "Disconnect Telegram".
 
 ---
 

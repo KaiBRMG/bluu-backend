@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { Fragment, useState, useEffect, useRef, useCallback } from 'react';
 import { getAuth } from 'firebase/auth';
 import AppLayout from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -19,13 +19,14 @@ import {
   Card, CardHeader, CardTitle, CardContent, CardFooter,
 } from "@/components/ui/card";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { MoreHorizontal, UserCircle, Copy, Check, Info } from "lucide-react";
+import { MoreHorizontal, UserCircle, Copy, Check, Info, ChevronRight, CornerDownRight } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { timezoneLabel } from "@/lib/timezone";
 import { toast } from "sonner";
 import { CreatorAvatar } from '@/components/creators/CreatorChip';
 import { SubAccountsDialog } from '@/components/admin/creators/SubAccountsDialog';
 import { useRefreshCreators } from '@/hooks/useCreators';
+import { cn } from '@/lib/utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,17 @@ interface Creator {
    *  Telegram is the only way into the creator portal, this doubles as "can
    *  this creator actually sign in yet?". */
   telegram?: { username: string | null; linkedAt: string | null } | null;
+  /** Other accounts this creator runs, archived ones included. Projected by
+   *  GET /api/admin/creators so the table needs no request per row. */
+  subAccounts: SubAccountSummary[];
+}
+
+interface SubAccountSummary {
+  subAccountId: string;
+  label: string;
+  stageName: string;
+  OFID: string;
+  isArchived: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -337,6 +349,19 @@ function CreatorTable({
   list, onEdit, onToggleActive, onArchive, onRestore, onDelete,
   onTelegramLink, onTelegramDisconnect, onManageSubAccounts,
 }: CreatorTableProps) {
+  // Tracks the *collapsed* rows rather than the expanded ones, so every creator
+  // — including one added after mount — starts expanded.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+
+  const toggle = (uid: string) => {
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
+  };
+
   if (list.length === 0) {
     return (
       <div className="rounded-lg p-8 text-center mt-4" style={{ background: 'var(--sidebar-background)', border: '1px solid var(--border-subtle)' }}>
@@ -350,6 +375,7 @@ function CreatorTable({
       <Table>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-8"><span className="sr-only">Expand</span></TableHead>
             <TableHead className="w-12"></TableHead>
             <TableHead>Stage Name</TableHead>
             <TableHead>Email</TableHead>
@@ -391,88 +417,169 @@ function CreatorTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {list.map(creator => (
-            <TableRow key={creator.uid}>
-              <TableCell>
-                <CreatorAvatar
-                  creatorId={creator.uid}
-                  name={creator.stageName}
-                  photoURL={creator.photoURL}
-                  className="size-8 text-xs"
-                />
-              </TableCell>
-              <TableCell className="font-medium">{creator.stageName}</TableCell>
-              <TableCell className="text-muted-foreground">{creator.userEmail}</TableCell>
-              <TableCell className="text-muted-foreground">{creator.OFID}</TableCell>
-              <TableCell>
-                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                  creator.isActive
-                    ? 'bg-green-500/10 text-green-400'
-                    : 'bg-zinc-500/10 text-zinc-400'
-                }`}>
-                  {creator.isActive ? 'Active' : 'Inactive'}
-                </span>
-              </TableCell>
-              <TableCell>
-                {creator.telegram ? (
-                  <span className="inline-flex items-center rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-400">
-                    {creator.telegram.username ? `@${creator.telegram.username}` : 'Connected'}
-                  </span>
-                ) : (
-                  // Orange, not zinc: for a creator this is "awaiting action",
-                  // not a neutral resting state — they cannot get in until it
-                  // changes. STATUS_COLORS' warning triad.
-                  <span className="inline-flex items-center rounded-full bg-orange-500/10 px-2 py-0.5 text-xs font-medium text-orange-400">
-                    Not connected
-                  </span>
-                )}
-              </TableCell>
-              <TableCell>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8">
-                      <MoreHorizontal className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => onEdit(creator)}>
-                      Edit
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => onManageSubAccounts(creator)}>
-                      Sub-accounts
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => onTelegramLink(creator)}>
-                      {creator.telegram ? 'Copy new Telegram link' : 'Copy Telegram link'}
-                    </DropdownMenuItem>
-                    {creator.telegram && (
-                      <DropdownMenuItem onClick={() => onTelegramDisconnect(creator)}>
-                        Disconnect Telegram
-                      </DropdownMenuItem>
+          {list.map(creator => {
+            const subAccounts = creator.subAccounts ?? [];
+            const hasSubAccounts = subAccounts.length > 0;
+            const expanded = hasSubAccounts && !collapsed.has(creator.uid);
+            return (
+              <Fragment key={creator.uid}>
+                <TableRow>
+                  <TableCell className="pr-0">
+                    {hasSubAccounts && (
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-expanded={expanded}
+                        aria-label={`${expanded ? 'Hide' : 'Show'} ${creator.stageName}'s sub-accounts`}
+                        className="text-zinc-400"
+                        onClick={() => toggle(creator.uid)}
+                      >
+                        <ChevronRight
+                          aria-hidden
+                          className={cn('transition-transform duration-150', expanded && 'rotate-90')}
+                        />
+                      </Button>
                     )}
-                    <DropdownMenuItem onClick={() => onToggleActive(creator)}>
-                      {creator.isActive ? 'Deactivate' : 'Reactivate'}
-                    </DropdownMenuItem>
-                    {!creator.isArchived && (
-                      <DropdownMenuItem onClick={() => onArchive(creator)}>
-                        Archive
-                      </DropdownMenuItem>
+                  </TableCell>
+                  <TableCell>
+                    <CreatorAvatar
+                      creatorId={creator.uid}
+                      name={creator.stageName}
+                      photoURL={creator.photoURL}
+                      className="size-8 text-xs"
+                    />
+                  </TableCell>
+                  <TableCell className="font-medium">
+                    {creator.stageName}
+                    {hasSubAccounts && !expanded && (
+                      <span className="ml-2 text-xs font-normal text-zinc-400">
+                        +{subAccounts.length} sub-account{subAccounts.length === 1 ? '' : 's'}
+                      </span>
                     )}
-                    {creator.isArchived && (
-                      <DropdownMenuItem onClick={() => onRestore(creator)}>
-                        Restore
-                      </DropdownMenuItem>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{creator.userEmail}</TableCell>
+                  <TableCell className="text-muted-foreground">{creator.OFID}</TableCell>
+                  <TableCell>
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                      creator.isActive
+                        ? 'bg-green-500/10 text-green-400'
+                        : 'bg-zinc-500/10 text-zinc-400'
+                    }`}>
+                      {creator.isActive ? 'Active' : 'Inactive'}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    {creator.telegram ? (
+                      <span className="inline-flex items-center rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-400">
+                        {creator.telegram.username ? `@${creator.telegram.username}` : 'Connected'}
+                      </span>
+                    ) : (
+                      // Orange, not zinc: for a creator this is "awaiting action",
+                      // not a neutral resting state — they cannot get in until it
+                      // changes. STATUS_COLORS' warning triad.
+                      <span className="inline-flex items-center rounded-full bg-orange-500/10 px-2 py-0.5 text-xs font-medium text-orange-400">
+                        Not connected
+                      </span>
                     )}
-                    <DropdownMenuItem
-                      className="text-destructive focus:text-destructive"
-                      onClick={() => onDelete(creator)}
-                    >
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </TableCell>
-            </TableRow>
-          ))}
+                  </TableCell>
+                  <TableCell>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <MoreHorizontal className="w-4 h-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => onEdit(creator)}>
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => onManageSubAccounts(creator)}>
+                          Sub-accounts
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => onTelegramLink(creator)}>
+                          {creator.telegram ? 'Copy new Telegram link' : 'Copy Telegram link'}
+                        </DropdownMenuItem>
+                        {creator.telegram && (
+                          <DropdownMenuItem onClick={() => onTelegramDisconnect(creator)}>
+                            Disconnect Telegram
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem onClick={() => onToggleActive(creator)}>
+                          {creator.isActive ? 'Deactivate' : 'Reactivate'}
+                        </DropdownMenuItem>
+                        {!creator.isArchived && (
+                          <DropdownMenuItem onClick={() => onArchive(creator)}>
+                            Archive
+                          </DropdownMenuItem>
+                        )}
+                        {creator.isArchived && (
+                          <DropdownMenuItem onClick={() => onRestore(creator)}>
+                            Restore
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onClick={() => onDelete(creator)}
+                        >
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                </TableRow>
+
+                {/* Sub-accounts are assignable peers of their parent for shifts and
+                    pay, but they have no login — hence no email, status or Telegram
+                    of their own. Managed through the parent's Sub-accounts dialog. */}
+                {expanded && subAccounts.map(sub => (
+                  <TableRow key={sub.subAccountId} className={cn(sub.isArchived && 'opacity-60')}>
+                    <TableCell className="pr-0" />
+                    <TableCell>
+                      <span className="flex items-center gap-1.5">
+                        <CornerDownRight aria-hidden className="size-3.5 shrink-0 text-zinc-500" />
+                        <CreatorAvatar
+                          creatorId={sub.subAccountId}
+                          name={sub.stageName}
+                          photoURL={creator.photoURL}
+                          className="size-6 text-[10px]"
+                        />
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-sm">{sub.stageName}</TableCell>
+                    <TableCell />
+                    <TableCell className="text-muted-foreground">{sub.OFID}</TableCell>
+                    <TableCell>
+                      {sub.isArchived && (
+                        <span className="inline-flex items-center rounded-full bg-zinc-500/10 px-2 py-0.5 text-xs font-medium text-zinc-400">
+                          Archived
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell />
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label={`Actions for ${sub.stageName}`}
+                          >
+                            <MoreHorizontal className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => onManageSubAccounts(creator)}>
+                            Manage sub-accounts
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </Fragment>
+            );
+          })}
         </TableBody>
       </Table>
     </div>
