@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
+import { Timestamp } from 'firebase-admin/firestore';
 import {
   GROWTH_POSTS,
+  POST_LIST_HISTORY_LIMIT,
   checkGrowthAccess,
   getGrowthPost,
+  serializeGrowthPost,
 } from '@/lib/services/growthPostsService';
+import { isReadHalted } from '@/lib/growth/metrics';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
@@ -63,12 +67,39 @@ export const PATCH = withAuth(async (
     }
 
     const ref = adminDb.collection(GROWTH_POSTS).doc(tweetId);
-    if (!(await ref.get()).exists) {
+    const snap = await ref.get();
+    if (!snap.exists) {
       return NextResponse.json({ error: 'Post not found' }, { status: 404 });
     }
 
-    await ref.update({ isActive: body.isActive });
-    return NextResponse.json({ success: true });
+    // Stopping or resuming is a person deciding about this post, so it clears
+    // an automatic "Stopped after repeated failures" state. A Stopped post was
+    // parked on the frozen `nextRefreshAt` sentinel to drop it out of the queue;
+    // it is made due now so resuming actually reads it, and the next reading
+    // puts it back on its age's rung of the ladder (or freezes it, if it is
+    // past thirty days — the ordinary behaviour).
+    // Trimmed like the list payload: the response replaces this post's row there.
+    const post = serializeGrowthPost(snap, POST_LIST_HISTORY_LIMIT);
+    const changed = body.isActive !== post.isActive;
+    const unpark = changed && isReadHalted(post) ? Timestamp.now() : null;
+    const update = {
+      isActive: body.isActive,
+      ...(changed ? { consecutiveFailures: 0 } : {}),
+      ...(unpark ? { nextRefreshAt: unpark } : {}),
+    };
+    await ref.update(update);
+
+    // The post as it now stands, so the client replaces its row rather than
+    // re-deriving these side effects — the reset rule lives only here.
+    return NextResponse.json({
+      success: true,
+      post: {
+        ...post,
+        isActive: body.isActive,
+        ...(changed ? { consecutiveFailures: 0 } : {}),
+        ...(unpark ? { nextRefreshAt: unpark.toDate().toISOString() } : {}),
+      },
+    });
   } catch (error) {
     return handleApiError(error, 'PATCH /api/smm/growth/posts/[tweetId]');
   }

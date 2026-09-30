@@ -59,6 +59,14 @@ export const maxDuration = 120;
  *     accumulated hundreds of tracked posts cannot turn one click into a
  *     hundred-result bill.
  *
+ * ── This is also how a Stopped account is restarted ─────────────────────────
+ * After `MAX_CONSECUTIVE_FAILURES` failed reads the cron skips an account (and
+ * its posts) rather than paying for another empty result. The route does NOT
+ * refuse a Stopped account — a person clicking here is exactly the decision to
+ * spend one more read on it. A success clears the streak and the account is
+ * back on the nightly schedule; a failure extends the streak and it stays put.
+ * The cooldown still applies, so "retry until it works" stays bounded.
+ *
  * ── The two calls run concurrently, and settle independently ────────────────
  * They are different actors writing different collections with nothing shared
  * between them, so there is no ordering to preserve and `Promise.allSettled`
@@ -144,11 +152,14 @@ export const POST = withAuth(async (
     } else {
       // `latest` is deliberately left alone by `recordScrapeFailures`: a failed
       // read means "we do not know today's number", not "it dropped to zero".
+      // Only an empty result is the account's own failure and extends its
+      // streak; a scraper that fell over says nothing about the account.
       await recordScrapeFailures(
         [account.id],
         profile.status === 'rejected'
           ? 'The follower scrape failed on a manual refresh.'
           : 'The scraper returned nothing for this account on a manual refresh. It may have been renamed, or made private.',
+        profile.status === 'fulfilled',
       );
     }
 
@@ -173,7 +184,7 @@ export const POST = withAuth(async (
 
       const missed = tracked.filter((p) => !byId.has(p.id));
       await recordPostFailures(
-        missed.map((p) => ({ id: p.id, postedAt: p.postedAt })),
+        missed,
         'The scraper returned nothing for this post. It may have been deleted, or the account may have been made private.',
       );
 

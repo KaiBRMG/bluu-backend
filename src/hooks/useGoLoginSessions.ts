@@ -51,14 +51,28 @@ export function useGoLoginSessions() {
   }, [api]);
 
   const launch = useCallback(
-    async (profileId: string) => {
+    async (profileId: string, name?: string) => {
+      // Named in every failure: several launches can be in flight, and "GoLogin
+      // could not start this profile" does not say which one.
+      const label = name ? `${name}: ` : '';
       if (!api) {
         toast.error(sessionErrorMessage('unsupported'));
         return false;
       }
+      // Optimistic `starting`, set on the click rather than when main first
+      // broadcasts. Until then the button still said Launch and took a second
+      // click — which, on a list, can land on a different row.
+      setSessions((prev) => ({
+        ...prev,
+        [profileId]: { ...prev[profileId], profileId, status: 'starting', error: null },
+      }));
+      const fail = (error: string | null | undefined) =>
+        setSessions((prev) => ({ ...prev, [profileId]: { profileId, status: 'failed', error: error ?? null } }));
+
       const idToken = await auth.currentUser?.getIdToken();
       if (!idToken) {
-        toast.error(sessionErrorMessage('unauthenticated'));
+        fail('unauthenticated');
+        toast.error(label + sessionErrorMessage('unauthenticated'));
         return false;
       }
       // The device id distinguishes the same person on two machines, which is
@@ -67,6 +81,8 @@ export function useGoLoginSessions() {
       const result = await api.launch(idToken, profileId, getDeviceId());
       if (result?.session) {
         setSessions((prev) => ({ ...prev, [profileId]: result.session as GoLoginSession }));
+      } else if (!result?.success) {
+        fail(result?.error);
       }
       if (!result?.success) {
         // A launch is a slow, occasional action whose failure is otherwise only
@@ -75,9 +91,10 @@ export function useGoLoginSessions() {
         // next move is to go and ask that person.
         const holder = result?.holder?.displayName;
         toast.error(
-          result?.error === 'in-use' && holder
-            ? `${holder} has this profile open.`
-            : sessionErrorMessage(result?.error),
+          label +
+            (result?.error === 'in-use' && holder
+              ? `${holder} has this profile open.`
+              : sessionErrorMessage(result?.error)),
         );
         return false;
       }

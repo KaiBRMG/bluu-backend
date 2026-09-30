@@ -4,7 +4,10 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { cn } from '@/lib/utils';
-import { formatCount } from '@/lib/growth/metrics';
+import {
+  STOPPED_HINT, STOPPED_SUMMARY, formatCount, readProblemOf,
+} from '@/lib/growth/metrics';
+import { StoppedBadge } from './growthUi';
 import {
   REFRESH_STATE_LABEL,
   ageHoursOf,
@@ -249,15 +252,24 @@ export function RefreshStatePill({
   post,
   now,
 }: {
-  post: Pick<GrowthPost, 'postedAt' | 'isActive'>;
+  post: Pick<GrowthPost, 'postedAt' | 'isActive' | 'consecutiveFailures' | 'lastReadError'>;
   now?: Date;
 }) {
+  // Switched off by a person. Not "Stopped": that word belongs to the automatic
+  // state below, and two different states sharing one word is how a reader
+  // concludes the system stopped something they turned off themselves.
   if (!post.isActive) {
     return (
       <span className="shrink-0 rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[11px] font-medium text-zinc-300">
-        Stopped
+        Not refreshing
       </span>
     );
+  }
+
+  // Given up on after repeated failed reads — the queue skips it until a manual
+  // refresh succeeds. It replaces the rung, which no longer describes anything.
+  if (readProblemOf(post) === 'stopped') {
+    return <StoppedBadge subject="post" error={post.lastReadError} className="shrink-0" />;
   }
 
   const state: RefreshState = refreshStateFor(ageHoursOf(post.postedAt, now));
@@ -296,6 +308,37 @@ const LADDER_LABEL: Record<RefreshState, string> = {
  * healthy, loud only when a read has failed — a status pill on every row trains
  * people to stop reading the column, which is the column's only job.
  */
+/**
+ * The schedule half of a post's live line — when it was last read and when it
+ * is read next — shared by the open post card and the standalone post sheet so
+ * the two cannot state a post's schedule differently.
+ *
+ * A Stopped post's `nextRefreshAt` is parked on the frozen sentinel, so the
+ * countdown would claim "no more refreshes": true of the schedule, but not why
+ * and not how to undo it. It says Stopped instead, with the way out beneath.
+ */
+export function PostScheduleLine({ post }: { post: GrowthPost }) {
+  const stopped = readProblemOf(post) === 'stopped';
+  return (
+    <div className="min-w-0 space-y-0.5">
+      <p className="text-[11px] text-zinc-400">
+        Refreshed <ReadFreshness post={post} className="inline" />
+      </p>
+      <p className="text-sm text-zinc-200">
+        {stopped ? STOPPED_SUMMARY : post.isActive ? (
+          <>
+            Next refresh{' '}
+            <RefreshCountdown to={post.nextRefreshAt} prefix="in " className="font-medium text-white" />
+          </>
+        ) : (
+          'No further refreshes scheduled'
+        )}
+      </p>
+      {stopped && <p className="text-[11px] text-zinc-400">{STOPPED_HINT}</p>}
+    </div>
+  );
+}
+
 export function ReadFreshness({
   post,
   className,

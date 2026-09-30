@@ -78,8 +78,10 @@ export const POST = withAuth(async (
 
     // Stamped whether or not the target resolved: the call was billed either
     // way, so a post that has been deleted must not become a free retry loop.
+    // A miss extends the post's failure streak; this route is also how a
+    // Stopped post is retried, so a hit (above) is what clears it.
     await recordPostFailures(
-      byId.has(tweetId) ? [] : [{ id: tweetId, postedAt: post.postedAt }],
+      byId.has(tweetId) ? [] : [post],
       'The scraper returned nothing for this post. It may have been deleted, or the account may have been made private.',
     );
     await stampManualSync(tweetId);

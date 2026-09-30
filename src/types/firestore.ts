@@ -95,6 +95,12 @@ export interface UserDocument {
    */
   gologinEmail?: string;
   gologinLinkedAt?: Timestamp;
+  /**
+   * Profiles this person pinned in the GoLogin window — Bluu's own "Pinned"
+   * folder, per person, not GoLogin's shared `isPinned` flag. Written only by
+   * `POST /api/gologin/pins`; exempt from indexing (nothing queries it).
+   */
+  gologinPinnedProfileIds?: string[];
 
   address?: {
     street?: string;
@@ -137,6 +143,11 @@ export interface UserDocument {
   additionalTimezones?: string[];
   // Notion document IDs the user has pinned to their home dashboard (max 10).
   pinnedResources?: string[];
+  /**
+   * `growth-accounts` ids pinned to the Growth Tracking home widget, in pin
+   * order. At most 5 — enforced in `/api/user/update`. Index-exempt.
+   */
+  pinnedGrowthAccounts?: string[];
   hasPaidLeave?: boolean;
   remainingUnpaidLeave?: number;
   remainingPaidLeave?: number;
@@ -1219,8 +1230,30 @@ export interface GrowthAccount {
    * Nothing queries it; exempted from indexing in `firestore.indexes.json`.
    */
   lastManualRefreshAt: string | null;
+  /**
+   * Failed follower reads in a row, reset to 0 by any successful read and by
+   * stopping or resuming tracking. At `MAX_CONSECUTIVE_FAILURES` (see
+   * `lib/growth/metrics.ts`) the nightly cron skips the account and the UI marks
+   * it **Stopped** — every failed read is still billed. Only per-account
+   * failures count; a whole run failing does not. Index-exempt.
+   */
+  consecutiveFailures: number;
   addedBy: string;
   addedTime: string | null;
+}
+
+/**
+ * One pinned account as `GET /api/smm/growth/pinned` ships it to the home widget
+ * — a projection of `GrowthAccount` down to what the widget renders (rule 9i).
+ */
+export interface PinnedGrowthAccount
+  extends Pick<
+    GrowthAccount,
+    | 'id' | 'platform' | 'handle' | 'profilePictureUrl' | 'isActive'
+    | 'lastScrapeStatus' | 'lastScrapeError' | 'consecutiveFailures'
+  > {
+  /** The last 30 days of follower readings, `YYYY-MM-DD` → `{ followers }`. */
+  days: Record<string, GrowthSnapshot>;
 }
 
 /** Serialised growth-accounts/{id}/series/{YYYY} doc, flattened for the client. */
@@ -1312,6 +1345,13 @@ export interface GrowthPost {
   lastManualSyncAt: string | null;
   /** How many billed readings this post has cost so far. */
   readCount: number;
+  /**
+   * Failed reads in a row — the post-level twin of
+   * `GrowthAccount.consecutiveFailures`. At the limit the post's `nextRefreshAt`
+   * is parked on the frozen sentinel so the refresh queue skips it, and the UI
+   * marks it **Stopped** until a manual refresh succeeds. Index-exempt.
+   */
+  consecutiveFailures: number;
   addedBy: string;
   addedTime: string | null;
 }

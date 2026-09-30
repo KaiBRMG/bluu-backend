@@ -4,8 +4,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import { normalizeEmail } from '@/lib/authEmail';
 import {
   goLoginErrorResponse,
-  requireGoLoginAccess,
-  requireGoLoginManagement,
+  requireGoLoginAccessAnd,
 } from '@/lib/services/gologinService';
 import {
   addGoLoginMember,
@@ -30,12 +29,12 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
  * seat also creates their folder and scopes them to it, in one call — see
  * `addGoLoginMember`.
  *
- * **Gated on `apps-gologin` *plus* `apps-gologin-management`, or the admin
- * claim** — this spends money and grants access to live logged-in accounts, so
- * the GoLogin page on its own is never enough. The second gate was tier 3
- * outright until 2026-09-19; it is now the `apps-gologin-management` sub-item,
- * granted on `/admin-portal/sharing` under the GoLogin row. Admins remain in
- * unconditionally — see `requireGoLoginManagement`.
+ * **Gated on `apps-gologin` *plus* the Add & Remove Members capability
+ * (`apps-gologin-members`), or admin** — this spends money and grants access to
+ * live logged-in accounts, so the GoLogin page on its own is never enough. It
+ * was the single `apps-gologin-management` grant until 2026-09-30; that is now
+ * four separately grantable capabilities on `/admin-portal/sharing`. Admins
+ * remain in unconditionally — see `requireGoLoginCapability`.
  *
  * Note this route does **not** call `requireGoLoginMember` on the caller. A
  * manager must be able to add the *first* member, including themselves, from a
@@ -51,7 +50,7 @@ export const maxDuration = 120;
  * Firestore reads.
  */
 export const GET = withAuth(async (req: NextRequest, token: DecodedIdToken) => {
-  const denied = (await requireGoLoginAccess(token.uid)) ?? (await requireGoLoginManagement(token));
+  const denied = await requireGoLoginAccessAnd(token, 'members');
   if (denied) return denied;
 
   const force = req.nextUrl.searchParams.get('refresh') === '1';
@@ -136,7 +135,7 @@ export const GET = withAuth(async (req: NextRequest, token: DecodedIdToken) => {
  * map by hand.
  */
 export const POST = withAuth(async (req: NextRequest, token: DecodedIdToken) => {
-  const denied = (await requireGoLoginAccess(token.uid)) ?? (await requireGoLoginManagement(token));
+  const denied = await requireGoLoginAccessAnd(token, 'members');
   if (denied) return denied;
 
   let body: { uid?: unknown; email?: unknown; action?: unknown };
@@ -183,7 +182,7 @@ export const POST = withAuth(async (req: NextRequest, token: DecodedIdToken) => 
  * adopts it again, so a mistaken removal is fully reversible.
  */
 export const DELETE = withAuth(async (req: NextRequest, token: DecodedIdToken) => {
-  const denied = (await requireGoLoginAccess(token.uid)) ?? (await requireGoLoginManagement(token));
+  const denied = await requireGoLoginAccessAnd(token, 'members');
   if (denied) return denied;
 
   const uid = req.nextUrl.searchParams.get('uid')?.trim();

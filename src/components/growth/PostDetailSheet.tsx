@@ -20,10 +20,12 @@ import {
 } from '@/components/ui/alert-dialog';
 import { SEGMENT_ITEM_CLASS } from './growthUi';
 import {
-  AnimatedCount, PostAuthorAvatar, ReadFreshness, RefreshCountdown, RefreshStatePill,
+  AnimatedCount, PostAuthorAvatar, PostScheduleLine, RefreshStatePill,
   VelocityValue, useSlowTick,
 } from './postUi';
-import { formatCompact, formatCount } from '@/lib/growth/metrics';
+import {
+  formatCompact, formatCount,
+} from '@/lib/growth/metrics';
 import {
   MANUAL_SYNC_COOLDOWN_MS,
   METRIC_LABEL,
@@ -261,21 +263,7 @@ function PostDetailBody({
             reading now. Grouped because they answer one question:
             "how current is what I am looking at?" */}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-white/[0.04] px-3 py-2.5">
-          <div className="space-y-0.5">
-            <p className="text-[11px] text-zinc-400">
-              Refreshed <ReadFreshness post={post} className="inline" />
-            </p>
-            <p className="text-sm text-zinc-200">
-              {post.isActive ? (
-                <>
-                  Next refresh{' '}
-                  <RefreshCountdown to={post.nextRefreshAt} prefix="in " className="font-medium text-white" />
-                </>
-              ) : (
-                'No further refreshes scheduled'
-              )}
-            </p>
-          </div>
+          <PostScheduleLine post={post} />
           <Button
             variant="outline"
             size="sm"

@@ -107,6 +107,20 @@ export function growthAccountId(platform: GrowthPlatform, handleNormalized: stri
   return `${platform}_${handleNormalized}`;
 }
 
+/**
+ * Whether a string is shaped like a `growthAccountId` — for validating ids that
+ * arrive from a client (the home widget's pins). Shape only: it says nothing
+ * about whether the account exists.
+ */
+export function isGrowthAccountId(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const cut = value.indexOf('_');
+  const handle = value.slice(cut + 1);
+  return cut > 0
+    && (GROWTH_PLATFORMS as readonly string[]).includes(value.slice(0, cut))
+    && handle.length > 0 && handle.length <= 100 && !handle.includes('/');
+}
+
 /** Profile URL for display/linking — always the canonical form. */
 export function profileUrlFor(platform: GrowthPlatform, handle: string): string {
   return platform === 'facebook'

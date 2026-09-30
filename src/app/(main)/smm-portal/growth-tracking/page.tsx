@@ -17,29 +17,38 @@ import { PostsTab } from '@/components/growth/PostsTab';
 import { useGrowthTracking } from '@/hooks/useGrowthTracking';
 import { useGrowthPosts } from '@/hooks/useGrowthPosts';
 import {
-  RANGE_DAYS, RANGE_LABEL, deltaFor, isStale, rangeStart,
+  MAX_CONSECUTIVE_FAILURES, RANGE_DAYS, RANGE_LABEL, deltaFor, isReadHalted, isStale, rangeStart,
   type GrowthRange,
 } from '@/lib/growth/metrics';
 import { DEFAULT_SPIKE_THRESHOLD, signalsFor, spikePercent } from '@/lib/growth/signals';
 import { PLATFORM_LABEL, type GrowthPlatform } from '@/lib/growth/platform';
-import { GROWTH_CATEGORIES, type GrowthCategory } from '@/lib/growth/category';
+import type { GrowthCategory } from '@/lib/growth/category';
+import { GrowthCategoriesProvider } from '@/components/growth/GrowthCategoriesProvider';
+import { usePinnedGrowthAccounts } from '@/hooks/usePinnedGrowthAccounts';
 import type { GrowthAccount } from '@/types/firestore';
 
 /**
- * One filter row, two kinds of facet. Platform and category are single-select
+ * One filter row, three kinds of facet. Platform and category are single-select
  * together rather than two independent dimensions: the roster's categories are
  * already platform-shaped in practice (the Facebook pages are their own
  * category), so two rows of chips would mostly produce empty intersections and
  * a second thing to reset.
+ *
+ * `stopped` is the third: the accounts the nightly read has given up on after
+ * repeated failures. It lives in the same row because "which of these needs
+ * someone to look at it" is a way of narrowing the roster like any other — and
+ * it is the one facet whose every member is waiting on a person.
  */
 type RosterFilter =
   | { kind: 'all' }
   | { kind: 'platform'; platform: GrowthPlatform }
-  | { kind: 'category'; category: GrowthCategory };
+  | { kind: 'category'; category: GrowthCategory }
+  | { kind: 'stopped' };
 
 function matchesFilter(account: GrowthAccount, filter: RosterFilter): boolean {
   if (filter.kind === 'all') return true;
   if (filter.kind === 'platform') return account.platform === filter.platform;
+  if (filter.kind === 'stopped') return isReadHalted(account);
   return account.category === filter.category;
 }
 
@@ -94,9 +103,16 @@ type View =
  */
 export default function GrowthTrackingPage() {
   const {
-    accounts, seriesById, loading, error, refresh,
-    addAccount, setTracking, setTrackPosts, setCategory, deleteAccount, refreshAccount,
+    accounts, seriesById, categories, loading, error, refresh,
+    addAccount, setTracking, setTrackPosts, setCategory, createCategory, deleteAccount,
+    refreshAccount,
   } = useGrowthTracking();
+
+  const { pinned, isPinned, togglePin, prune } = usePinnedGrowthAccounts();
+  const togglePinFor = useCallback(
+    (account: GrowthAccount) => { void togglePin(account.id, account.handle); },
+    [togglePin],
+  );
 
   // A separate collection on a separate cadence, so a separate hook and a
   // separate cache entry: the follower series changes once a night, tracked
@@ -109,10 +125,19 @@ export default function GrowthTrackingPage() {
    * The open account, by id rather than by document, so a refresh that replaces
    * the roster array does not leave the panel showing the copy that was current
    * when it opened.
+   *
+   * Seeded from `?account=<id>` — the home widget links here. Read from
+   * `window.location` in the initialiser rather than through `useSearchParams`,
+   * which would demand a Suspense boundary for a value needed exactly once. No
+   * hydration risk: the server renders `null`, and on the client the id only
+   * resolves to an open panel once the roster has loaded (`openAccountDoc`), so
+   * both first renders draw the same closed sheet.
    */
-  const [openAccountId, setOpenAccountId] = useState<string | null>(null);
+  const [openAccountId, setOpenAccountId] = useState<string | null>(() => (
+    typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('account')
+  ));
   const [range, setRange] = useState<GrowthRange>('30d');
-  const [filter, setFilter] = useState<RosterFilter>({ kind: 'all' });
+  const [chosenFilter, setFilter] = useState<RosterFilter>({ kind: 'all' });
   const [query, setQuery] = useState('');
   const [threshold, setThreshold] = useState(DEFAULT_SPIKE_THRESHOLD);
 
@@ -169,6 +194,18 @@ export default function GrowthTrackingPage() {
     setOpenAccountId(account.id);
   }, []);
 
+  /**
+   * Strip `?account=` once it has seeded `openAccountId` (above), so a reload or
+   * a back-navigation does not re-open a panel that was since closed.
+   */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('account')) return;
+    params.delete('account');
+    const rest = params.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);
+  }, []);
+
   const backToOverview = useCallback(() => setView({ name: 'overview' }), []);
 
   /**
@@ -208,6 +245,14 @@ export default function GrowthTrackingPage() {
     [accounts],
   );
 
+  // A pinned account that has since been deleted renders nowhere, so its star
+  // can never be clicked off. Only the loaded, error-free roster is trusted to
+  // say an account is gone — an empty list mid-load would unpin everything.
+  useEffect(() => {
+    if (loading || error || accounts.length === 0) return;
+    if (pinned.some((id) => !accountsById.has(id))) void prune(new Set(accountsById.keys()));
+  }, [loading, error, accounts.length, accountsById, pinned, prune]);
+
   /**
    * The Overview is the **active** roster, not the whole ledger.
    *
@@ -224,6 +269,47 @@ export default function GrowthTrackingPage() {
    * for a stopped one reached from Manage accounts.
    */
   const roster = useMemo(() => accounts.filter((a) => a.isActive), [accounts]);
+
+  /**
+   * Accounts the nightly read has given up on. Its chip only appears when this
+   * is non-zero, like the category chips: a chip reading "0" leads nowhere.
+   */
+  const stoppedCount = useMemo(() => roster.filter(isReadHalted).length, [roster]);
+
+  /**
+   * Only the categories the roster actually uses get a chip. A chip reading "0"
+   * is a filter that leads somewhere empty, and the vocabulary is fixed in code
+   * rather than in the data — so an unused one means "nothing is filed here",
+   * not "you have not looked yet".
+   */
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<GrowthCategory, number>();
+    for (const account of roster) {
+      if (account.category) counts.set(account.category, (counts.get(account.category) ?? 0) + 1);
+    }
+    // Registry order — built-ins first, then created ones oldest first — so a
+    // new category's chip appears at the end rather than reshuffling the row.
+    return categories
+      .filter((c) => counts.has(c.name))
+      .map((c) => [c.name, counts.get(c.name)!] as const);
+  }, [roster, categories]);
+
+  /**
+   * The filter in force: the chosen one, for as long as its chip is still
+   * rendered — otherwise All. A category or Stopped chip disappears when the
+   * last account leaves it (re-filed, or refreshed back to life), and a filter
+   * still pointing at a chip that is gone would leave an empty grid with nothing
+   * lit to click. Derived, not corrected in an effect; the platform chips always
+   * render, so they always stand.
+   */
+  const filter = useMemo<RosterFilter>(() => {
+    const stands = chosenFilter.kind === 'stopped'
+      ? stoppedCount > 0
+      : chosenFilter.kind === 'category'
+        ? categoryCounts.some(([name]) => name === chosenFilter.category)
+        : true;
+    return stands ? chosenFilter : { kind: 'all' };
+  }, [chosenFilter, stoppedCount, categoryCounts]);
 
   /** The chip-filtered roster. */
   const visible = useMemo(
@@ -277,20 +363,6 @@ export default function GrowthTrackingPage() {
   );
 
   /**
-   * Only the categories the roster actually uses get a chip. A chip reading "0"
-   * is a filter that leads somewhere empty, and the vocabulary is fixed in code
-   * rather than in the data — so an unused one means "nothing is filed here",
-   * not "you have not looked yet".
-   */
-  const categoryCounts = useMemo(() => {
-    const counts = new Map<GrowthCategory, number>();
-    for (const account of roster) {
-      if (account.category) counts.set(account.category, (counts.get(account.category) ?? 0) + 1);
-    }
-    return GROWTH_CATEGORIES.filter((c) => counts.has(c)).map((c) => [c, counts.get(c)!] as const);
-  }, [roster]);
-
-  /**
    * Staleness is measured against the newest successful read across the whole
    * roster, not per account: one page going private is a per-account failure the
    * manage view reports, whereas *nothing* having been read since Tuesday means
@@ -335,11 +407,14 @@ export default function GrowthTrackingPage() {
 
   return (
     <AppLayout>
+      <GrowthCategoriesProvider categories={categories} createCategory={createCategory}>
       <div ref={mainRef} className="max-w-7xl space-y-4">
         {view.name === 'posts' ? (
           <SubView title="Tracked posts" onBack={backToOverview}>
             <PostsTab
               posts={activePosts}
+              accounts={accounts}
+              onOpenAccount={openAccount}
               spend={posts.spend}
               loading={posts.loading}
               error={posts.error}
@@ -474,6 +549,21 @@ export default function GrowthTrackingPage() {
                         {category}
                       </FilterChip>
                     ))}
+                    {/* A state, not a grouping — so after its own hairline, and
+                        in the red the Stopped badge on each of its cards wears. */}
+                    {stoppedCount > 0 && (
+                      <>
+                        <span className="mx-1 h-4 w-px bg-white/[0.12]" aria-hidden />
+                        <FilterChip
+                          status="stopped"
+                          active={filter.kind === 'stopped'}
+                          onClick={() => setFilter({ kind: 'stopped' })}
+                          count={stoppedCount}
+                        >
+                          Stopped
+                        </FilterChip>
+                      </>
+                    )}
                   </div>
                   <ToggleGroup
                     type="single"
@@ -537,19 +627,33 @@ export default function GrowthTrackingPage() {
                     )}
                   </p>
                 ) : (
-                  <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr))]">
-                    {cards.map((card) => (
-                      <AccountCard
-                        key={card.account.id}
-                        account={card.account}
-                        days={card.days}
-                        from={from}
-                        delta={card.delta}
-                        spikePercent={card.spikePercent}
-                        onOpen={openAccount}
-                      />
-                    ))}
-                  </div>
+                  <>
+                    {/* Said once, above the cards it describes, rather than on
+                        each of them — every one of these needs the same act. */}
+                    {filter.kind === 'stopped' && (
+                      <p className="max-w-[70ch] text-sm text-zinc-400">
+                        These failed {MAX_CONSECUTIVE_FAILURES} reads in a row, so the nightly read
+                        skips them — each failed read was still billed. Open one and use{' '}
+                        <span className="text-zinc-300">Refresh now</span> to try it again, or stop
+                        tracking it.
+                      </p>
+                    )}
+                    <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr))]">
+                      {cards.map((card) => (
+                        <AccountCard
+                          key={card.account.id}
+                          account={card.account}
+                          days={card.days}
+                          from={from}
+                          delta={card.delta}
+                          spikePercent={card.spikePercent}
+                          pinned={isPinned(card.account.id)}
+                          onOpen={openAccount}
+                          onTogglePin={togglePinFor}
+                        />
+                      ))}
+                    </div>
+                  </>
                 )}
               </>
             )}
@@ -576,8 +680,11 @@ export default function GrowthTrackingPage() {
           onSetTracking={handleSetTracking}
           onSetCategory={setCategory}
           onRefreshAccount={handleRefreshAccount}
+          pinned={openAccountDoc ? isPinned(openAccountDoc.id) : false}
+          onTogglePin={togglePinFor}
         />
       </div>
+      </GrowthCategoriesProvider>
     </AppLayout>
   );
 }

@@ -319,6 +319,25 @@ function ImportPreview({
         </div>
       )}
 
+      {/* Shift attribution changes which day — and at a month's end, which
+          month — a sale is paid in. Said up front, because it is the one way
+          this preview can disagree with the source sheet's own dates. */}
+      {(!!result.shiftAttributed || !!result.restamped) && (
+        <p className="text-sm text-zinc-400">
+          {!!result.shiftAttributed && (
+            <>
+              {pluralise(result.shiftAttributed, 'sale')} made after midnight on an overnight shift{' '}
+              {result.shiftAttributed === 1 ? 'counts' : 'count'} on the day the shift started
+              {!!result.shiftAttributedToPreviousMonth &&
+                ` — ${result.shiftAttributedToPreviousMonth} of them in the previous month`}
+              .{' '}
+            </>
+          )}
+          {!!result.restamped &&
+            `${pluralise(result.restamped, 'already-recorded sale')} will move to the day ${result.restamped === 1 ? 'its' : 'their'} shift started.`}
+        </p>
+      )}
+
       {/* The skip list is the whole reason this preview exists — never collapse
           it behind a disclosure. */}
       {result.skipped.length > 0 && (

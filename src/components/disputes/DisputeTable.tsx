@@ -73,14 +73,6 @@ interface DisputeTableProps {
 
 const REASON_MAX = 50;
 
-/**
- * shadcn's checked state paints `--primary`, which renders near-white in this
- * theme (DESIGN.md §2) — so a checked box reads as "disabled" rather than "on".
- * Selection is exactly what Action Blue is for (the One Voice Rule), and the
- * trailing `!` is needed to beat the primitive's own same-specificity rule.
- */
-const SELECT_BOX_CLASS =
-  'data-[state=checked]:bg-[#2563eb]! data-[state=checked]:border-[#2563eb]! data-[state=checked]:text-white!';
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -116,6 +108,7 @@ function ApprovalBadge({ value }: { value: ApprovalStatus }) {
 import { UserChip } from '@/components/UserChip';
 import { DisputeCreatorChip } from './disputeUi';
 import { safeTimezone } from '@/lib/utils/timezone';
+import { SELECT_BOX_CLASS } from '@/lib/surfaces';
 
 // ─── CommentCell — truncated trigger + hover card with full comment ───
 

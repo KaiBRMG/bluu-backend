@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { CircleSlashIcon, ExternalLinkIcon, Loader2Icon, RefreshCwIcon } from 'lucide-react';
+import { CircleSlashIcon, ExternalLinkIcon, Loader2Icon, RefreshCwIcon, StarIcon } from 'lucide-react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { Accordion } from '@/components/ui/accordion';
 import {
@@ -17,17 +17,18 @@ import {
   ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig,
 } from '@/components/ui/chart';
 import {
-  AccountAvatar, CategorySelect, DeltaValue, PlatformChip, SEGMENT_ITEM_CLASS,
-  ScrapeFailedBadge, SpikeBadge,
+  AccountAvatar, DeltaValue, PlatformChip, SEGMENT_ITEM_CLASS,
+  ReadProblemBadge, SpikeBadge,
 } from './growthUi';
+import { CategorySelect } from './CategorySelect';
 import { RefreshCountdown, useSlowTick } from './postUi';
 import { Button } from '@/components/ui/button';
 import { TrackPostBar } from './TrackPostBar';
 import { PostCard, STRIP_METRICS, type PostCardFigures } from './PostCard';
 import { useTrackPosts } from './useTrackPosts';
 import {
-  MANUAL_REFRESH_COOLDOWN_MS, RANGE_DAYS, RANGE_LABEL, deltaFor, formatCompact, formatCount,
-  pointsFor, rangeStart,
+  MANUAL_REFRESH_COOLDOWN_MS, RANGE_DAYS, RANGE_LABEL, STOPPED_HINT, STOPPED_SUMMARY, deltaFor,
+  formatCompact, formatCount, pointsFor, rangeStart, readProblemOf,
   type DayMap, type GrowthRange, type SeriesPoint,
 } from '@/lib/growth/metrics';
 import { spikePercent } from '@/lib/growth/signals';
@@ -84,18 +85,19 @@ const chartConfig = { followers: { label: 'Followers', color: '#3b82f6' } } sati
  * header, because it is the only thing that explains why the chart below it has
  * a flat tail, and folding it away would leave stale numbers looking current.
  *
- * ── One window, one meaning, for everything on the panel ────────────────────
- * The **Window** control lives in the header rather than beside the chart,
- * because it is not the chart's control: it scopes the follower delta and chart
- * *and* every post card's change figure and sparkline. One picker that means the
- * same thing wherever its effect lands is the whole reason it sits above all of
- * it. It seeds from the roster's range and diverges freely; nothing is written
- * back, because one account's useful window has nothing to do with the grid's.
+ * ── The window is the follower section's, and posts ignore it ──────────────
+ * The **Window** control scopes the follower delta and chart only, and sits on
+ * that section's rail. It seeds from the roster's range and diverges freely;
+ * nothing is written back, because one account's useful window has nothing to
+ * do with the grid's.
  *
- * What it does **not** do is decide which posts are listed. It briefly did, and
- * that made it look broken: under a 7-day window every listed post was at most
- * seven days old, so "change over 7 days" was just its lifetime total. Scoping
- * only the measurement is what makes the control do visible work.
+ * It used to sit in the header and scope every post card too. That was the
+ * wrong axis for posts: a post does almost all of its moving inside its first
+ * day or two and is read every 6–12 hours then, so the range steps built for a
+ * follower count that moves by the day (1d · 3d · 7d · 30d…) either cut a post's
+ * curve off mid-rise or contained a single reading and drew nothing. Post cards
+ * now always show their **whole tracked life**, where the rate sparkline can
+ * show the spike and the decay — the one thing it is drawn for.
  *
  * ── One account, one scale ──────────────────────────────────────────────────
  * The follower axis is scaled to the data rather than zero-based: these accounts
@@ -117,8 +119,13 @@ export function AccountPanel({
   onSetTracking,
   onSetCategory,
   onRefreshAccount,
+  pinned,
+  onTogglePin,
 }: {
   account: GrowthAccount;
+  /** Whether it is on the viewer's home widget — the page owns the pin list. */
+  pinned: boolean;
+  onTogglePin: (account: GrowthAccount) => void;
   days: DayMap;
   /** The roster's range, used only as this panel's starting window. */
   range: GrowthRange;
@@ -171,20 +178,12 @@ export function AccountPanel({
 
   const nextReading = useMemo(() => soonestRefresh(posts), [posts]);
 
-  /** "over 7 days" / "all time" — one phrasing, reused by every figure below. */
+  /** "over 7 days" / "all time" — the follower section's phrasing. */
   const windowLabel = panelRange === 'all' ? 'all time' : `over ${RANGE_LABEL[panelRange]}`;
 
   /**
-   * The cards, newest first, every figure on them scoped to the window.
-   *
-   * ── The window measures; it does not filter membership ────────────────────
-   * It briefly did both — the list was also cut to posts *published* inside the
-   * window — and that made the control look broken: under a 7-day window every
-   * listed post was at most seven days old, so "change over 7 days" was simply
-   * its lifetime total and the picker appeared to do nothing. Scoping only the
-   * measurement makes the control mean one thing on the whole panel, exactly as
-   * the follower section reads it: the roster is always whole, and the window
-   * says *how much each thing moved lately*.
+   * The cards, newest first, every figure on them measured over the post's
+   * whole tracked life — never the follower window (see the file header).
    *
    * ── The order is fixed, and nothing re-sorts it ───────────────────────────
    * Ranking by engagement is the obvious move and it is wrong here: engagement
@@ -207,10 +206,11 @@ export function AccountPanel({
           STRIP_METRICS.map((m) => [m, post.latest ? metricValue(post.latest, m) : null]),
         ) as Partial<Record<PostMetric, number | null>>,
         engagement: post.latest ? totalEngagement(post.latest) : null,
-        delta: postDeltaFor(post.history, 'engagement', from),
+        // First reading → latest: what the post gained while it was watched.
+        delta: postDeltaFor(post.history, 'engagement'),
         // The rate, not the running total — see `ratePointsFor` for why a
         // cumulative trace is the same shape on every post that ever worked.
-        rateSpark: ratePointsFor(post.history, 'engagement', from).map(
+        rateSpark: ratePointsFor(post.history, 'engagement').map(
           (p): SeriesPoint => ({ date: p.t, value: p.value }),
         ),
         velocity: velocityFor(post.history, 'engagement'),
@@ -223,7 +223,7 @@ export function AccountPanel({
       if (at === null) return 1;
       if (bt === null) return -1;
       return bt - at;
-    }), [posts, from]);
+    }), [posts]);
 
   /**
    * Opening a card fetches its untrimmed history — the card renders on the
@@ -240,7 +240,6 @@ export function AccountPanel({
   const activePosts = useMemo(() => posts.filter((p) => p.isActive).length, [posts]);
 
   const isX = account.platform === 'twitter';
-  const readFailed = account.isActive && account.lastScrapeStatus === 'failed';
   const trackBusy = busyId === account.id;
 
   return (
@@ -283,46 +282,23 @@ export function AccountPanel({
             <CategorySelect
               dot
               className="h-6! w-auto gap-1.5 border-white/[0.07] bg-white/[0.04] px-2 py-0 text-[11px] font-medium"
-              account={account}
+              platform={account.platform}
+              value={account.category}
+              ariaLabel={`Category for @${account.handle}`}
               busy={categoryBusy}
               onChange={setCategory}
             />
-            {readFailed && <ScrapeFailedBadge error={account.lastScrapeError} />}
+            <ReadProblemBadge item={account} subject="account" />
             {view.spike !== null && view.spike > 0 && <SpikeBadge percent={view.spike} />}
           </div>
-          <TrackingButton
-            account={account}
-            activePosts={activePosts}
-            onSetTracking={onSetTracking}
-          />
-        </div>
-
-        {/* The window belongs to the whole panel, not to the chart, so it sits
-            above everything it scopes — the follower series *and* which posts are
-            listed. Left inside the Followers section it silently changed the list
-            further down, which is the failure the roster's own control layout
-            already avoids. */}
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.07] pt-3">
-          {/* The plain label step. This names a control rather than heading a
-              section, so it stays a <span> — the rail is for sections. */}
-          <span id="account-window-label" className="text-xs font-medium text-zinc-400">
-            Window
-          </span>
-          <ToggleGroup
-            type="single"
-            value={panelRange}
-            onValueChange={(v) => v && setPanelRange(v as GrowthRange)}
-            variant="outline"
-            size="sm"
-            aria-labelledby="account-window-label"
-          >
-            {(Object.keys(RANGE_DAYS) as GrowthRange[]).map((r) => (
-              <ToggleGroupItem key={r} value={r} className={SEGMENT_ITEM_CLASS}>
-                {r === 'all' ? 'All' : r}
-                <span className="sr-only"> — {RANGE_LABEL[r]}</span>
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <PinButton account={account} pinned={pinned} onTogglePin={onTogglePin} />
+            <TrackingButton
+              account={account}
+              activePosts={activePosts}
+              onSetTracking={onSetTracking}
+            />
+          </div>
         </div>
       </SheetHeader>
 
@@ -415,9 +391,35 @@ export function AccountPanel({
           </p>
         )}
 
-        {/* ── 3. Followers ─────────────────────────────────────────────── */}
+        {/* ── 3. Followers ─────────────────────────────────────────────────
+            The window sits on this section's rail because this section is all
+            it scopes — the follower figure and chart. It lived in the header
+            while it also scoped the post cards; they now always show a post's
+            whole tracked life (see the file header), so leaving it up there
+            would have claimed a reach it no longer has. */}
         <section>
-          <SectionLabel>Followers</SectionLabel>
+          <SectionLabel
+            aside={(
+              <ToggleGroup
+                type="single"
+                value={panelRange}
+                onValueChange={(v) => v && setPanelRange(v as GrowthRange)}
+                variant="outline"
+                size="sm"
+                aria-label="Follower window"
+                className="shrink-0"
+              >
+                {(Object.keys(RANGE_DAYS) as GrowthRange[]).map((r) => (
+                  <ToggleGroupItem key={r} value={r} className={SEGMENT_ITEM_CLASS}>
+                    {r === 'all' ? 'All' : r}
+                    <span className="sr-only"> — {RANGE_LABEL[r]}</span>
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            )}
+          >
+            Followers
+          </SectionLabel>
 
           <div className="mt-2 flex flex-wrap items-baseline gap-2.5">
             <p className="text-2xl font-semibold tabular-nums">
@@ -505,8 +507,6 @@ export function AccountPanel({
                     key={post.id}
                     post={post}
                     figures={figures}
-                    windowLabel={windowLabel}
-                    from={from}
                     onSync={onSyncPost}
                     onSetTracking={onSetPostTracking}
                     onDelete={onDeletePost}
@@ -638,6 +638,41 @@ function TrackingButton({
 }
 
 /**
+ * Pin this account to the Growth Tracking widget on the home page.
+ *
+ * The overview card has the same control as a star; this copy exists because
+ * the overview only shows *tracked* accounts. Once someone stops tracking a
+ * pinned account its card leaves the grid, and without a pin control here the
+ * only place left to unpin it from would be nowhere. Same Action Blue fill for
+ * the pinned state as the card's star and the Resources page's pin.
+ */
+function PinButton({
+  account,
+  pinned,
+  onTogglePin,
+}: {
+  account: GrowthAccount;
+  pinned: boolean;
+  onTogglePin: (account: GrowthAccount) => void;
+}) {
+  return (
+    <Button
+      variant="outline"
+      size="xs"
+      aria-pressed={pinned}
+      onClick={() => onTogglePin(account)}
+      title={pinned ? 'Remove from the Growth Tracking widget on your home page' : 'Show on the Growth Tracking widget on your home page'}
+    >
+      <StarIcon
+        className={pinned ? 'size-3.5 fill-action-blue text-action-blue' : 'size-3.5'}
+        aria-hidden
+      />
+      {pinned ? 'Pinned' : 'Pin to home'}
+    </Button>
+  );
+}
+
+/**
  * How current this panel is, and the one control that changes the answer.
  *
  * ── It is the post card's live line, one level up ───────────────────────────
@@ -723,6 +758,10 @@ function AccountRefreshLine({
   // entire difference between stopping and deleting. A button that spent anyway
   // would quietly undo the one thing the user asked for.
   const stopped = !account.isActive;
+  // Stopped *automatically* — the account is still tracked, but the cron has
+  // given up after repeated billed empty reads. This button is the way back, so
+  // unlike a manually stopped account it stays enabled.
+  const halted = readProblemOf(account) === 'stopped';
   const waitMinutes = Math.ceil(cooldownLeft / 60_000);
 
   return (
@@ -733,7 +772,11 @@ function AccountRefreshLine({
             Followers read {formatAge(account.lastScrapeAt)}
           </p>
           <p className="text-sm text-zinc-200">
-            {stopped ? 'No scheduled reads' : <>Next scrape <NextScrape /></>}
+            {stopped
+              ? 'No scheduled reads'
+              : halted
+                ? STOPPED_SUMMARY
+                : <>Next scrape <NextScrape /></>}
           </p>
         </div>
         <Button
@@ -762,7 +805,9 @@ function AccountRefreshLine({
           ? 'Tracking is stopped, so this account costs nothing and is not read.'
           : busy
             ? 'Two scrapers are running. This usually takes 10–30 seconds.'
-            : `Reads ${willRead}. Both are billed.`}
+            : halted
+              ? `${STOPPED_HINT} It reads ${willRead}, both billed; if followers come back, nightly reads resume.`
+              : `Reads ${willRead}. Both are billed.`}
       </p>
     </div>
   );
@@ -847,7 +892,14 @@ function AccountFacts({ account }: { account: GrowthAccount }) {
       <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Fact label="Category">{account.category ?? 'Unfiled'}</Fact>
         <Fact label="Platform">{PLATFORM_LABEL[account.platform]}</Fact>
-        <Fact label="Tracking">{account.isActive ? 'Read nightly' : 'Stopped'}</Fact>
+        {/* "Stopped" is reserved for the automatic state the badge names; an
+            account someone switched off is "Not tracked", as Manage accounts
+            heads that list — two different states must not share a word. */}
+        <Fact label="Tracking">
+          {!account.isActive
+            ? 'Not tracked'
+            : readProblemOf(account) === 'stopped' ? STOPPED_SUMMARY : 'Read nightly'}
+        </Fact>
         {/* Shown as a latest value only, never charted: these are not in the
             imported history, so a chart of them would start abruptly at whenever
             automation began and imply the metric did not exist before. */}

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import type { GoLoginOrbitaState } from '@/types/electron';
+import { PRIMARY_BUTTON } from '../_lib/manage';
 
 const SIGN_IN_URL = 'https://app.gologin.com/sign_in';
 
@@ -145,7 +146,7 @@ export default function GoLoginOnboarding({
                 <div className="flex flex-wrap items-center gap-3">
                   <Button
                     size="sm"
-                    className="bg-[#2563eb] text-white hover:bg-[#1d4ed8]"
+                    className={PRIMARY_BUTTON}
                     onClick={onDownloadOrbita}
                   >
                     Download
@@ -238,7 +239,7 @@ export default function GoLoginOnboarding({
               <Button
                 type="submit"
                 size="sm"
-                className="shrink-0 bg-[#2563eb] text-white hover:bg-[#1d4ed8]"
+                className={`shrink-0 ${PRIMARY_BUTTON}`}
                 disabled={!apiKey.trim() || saving}
               >
                 {saving && <Loader2 className="size-3.5 animate-spin" aria-hidden />}

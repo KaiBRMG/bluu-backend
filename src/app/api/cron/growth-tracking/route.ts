@@ -14,6 +14,7 @@ import {
   type ScrapeResult,
 } from '@/lib/services/growthTrackingService';
 import { growthAccountId } from '@/lib/growth/platform';
+import { isReadHalted } from '@/lib/growth/metrics';
 
 /**
  * Two Apify actors at 10–30s each, run in parallel — but a slow actor can sit
@@ -82,22 +83,29 @@ export async function GET() {
   }
 
   try {
-    const accounts = (await listGrowthAccounts()).filter((a) => a.isActive);
+    const active = (await listGrowthAccounts()).filter((a) => a.isActive);
+    // An account that has failed `MAX_CONSECUTIVE_FAILURES` reads in a row is
+    // Stopped: every one of those reads was billed and returned nothing, so the
+    // job stops paying for it until a person buys one manual read (a success
+    // clears the streak) or stops and resumes it. Still counted against the
+    // breaker below — it is on the roster, and the ceiling bounds the roster.
+    const accounts = active.filter((a) => !isReadHalted(a));
+    const halted = active.length - accounts.length;
 
-    if (accounts.length > MAX_TRACKED_ACCOUNTS) {
+    if (active.length > MAX_TRACKED_ACCOUNTS) {
       console.error(
-        `[cron/growth-tracking] REFUSING TO RUN — ${accounts.length} active accounts exceeds the ` +
+        `[cron/growth-tracking] REFUSING TO RUN — ${active.length} active accounts exceeds the ` +
         `MAX_TRACKED_ACCOUNTS ceiling of ${MAX_TRACKED_ACCOUNTS}. Nothing was scraped and nothing ` +
         `was billed. Stop tracking accounts, or raise the ceiling deliberately.`,
       );
-      return NextResponse.json({ skipped: 'account-ceiling', active: accounts.length }, { status: 200 });
+      return NextResponse.json({ skipped: 'account-ceiling', active: active.length }, { status: 200 });
     }
 
     const facebook = accounts.filter((a) => a.platform === 'facebook');
     const twitter = accounts.filter((a) => a.platform === 'twitter');
 
     if (facebook.length === 0 && twitter.length === 0) {
-      return NextResponse.json({ recorded: 0, note: 'no active accounts' });
+      return NextResponse.json({ recorded: 0, halted, note: 'no active accounts to read' });
     }
 
     const [fbOutcome, twOutcome] = await Promise.allSettled([
@@ -113,7 +121,11 @@ export async function GET() {
 
     const dayKey = currentDayKey();
     const recorded: Array<{ accountId: string; result: ScrapeResult }> = [];
-    const failures: Array<{ accountId: string; error: string }> = [];
+    // Two kinds of failure, kept apart because only one is evidence about the
+    // account (see `recordScrapeFailures`): a whole run falling over, and a run
+    // that succeeded but left an account out.
+    const runFailures: Array<{ accountIds: string[]; error: string }> = [];
+    const missing: string[] = [];
 
     const collect = (
       platform: 'facebook' | 'twitter',
@@ -124,7 +136,7 @@ export async function GET() {
         // The whole run failed, so every account in it is unknown tonight.
         const error = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
         console.error(`[cron/growth-tracking] ${platform} run failed:`, error);
-        for (const a of expected) failures.push({ accountId: a.id, error });
+        runFailures.push({ accountIds: expected.map((a) => a.id), error });
         return;
       }
       const returned = new Set(outcome.value.map((r) => r.handleNormalized));
@@ -135,9 +147,7 @@ export async function GET() {
       // renamed, went private, or was deleted. Those are per-account failures,
       // and the manage tab shows the reason so someone can act on it.
       for (const a of expected) {
-        if (!returned.has(a.handleNormalized)) {
-          failures.push({ accountId: a.id, error: 'The scraper returned no data for this account. It may have been renamed, made private, or removed.' });
-        }
+        if (!returned.has(a.handleNormalized)) missing.push(a.id);
       }
     };
 
@@ -145,13 +155,15 @@ export async function GET() {
     collect('twitter', twitter, twOutcome);
 
     await recordSnapshots(recorded, dayKey);
-    // Grouped by message so identical failures share one batch pass.
-    for (const message of new Set(failures.map((f) => f.error))) {
-      await recordScrapeFailures(
-        failures.filter((f) => f.error === message).map((f) => f.accountId),
-        message,
-      );
+    for (const { accountIds, error } of runFailures) {
+      await recordScrapeFailures(accountIds, error, false);
     }
+    await recordScrapeFailures(
+      missing,
+      'The scraper returned no data for this account. It may have been renamed, made private, or removed.',
+      true,
+    );
+    const failed = missing.length + runFailures.reduce((n, f) => n + f.accountIds.length, 0);
 
     // Reconcile the month against what Apify actually billed. Free account
     // metadata, never an actor run (rule 9d), and non-fatal by construction:
@@ -163,14 +175,15 @@ export async function GET() {
 
     const cost = estimateCost({ facebook: facebook.length, twitter: twitter.length });
     console.log(
-      `[cron/growth-tracking] ${dayKey}: recorded ${recorded.length}, failed ${failures.length}, ` +
-      `est. cost $${cost.toFixed(3)}`,
+      `[cron/growth-tracking] ${dayKey}: recorded ${recorded.length}, failed ${failed}, ` +
+      `skipped ${halted} stopped after repeated failures, est. cost $${cost.toFixed(3)}`,
     );
 
     return NextResponse.json({
       date: dayKey,
       recorded: recorded.length,
-      failed: failures.length,
+      failed,
+      halted,
       estimatedCostUsd: Number(cost.toFixed(3)),
     });
   } catch (error) {

@@ -19,20 +19,28 @@
 | `src/app/api/gologin/launch-token/route.ts` | **Hands the caller's own token to main.** Read its header first |
 | `src/app/api/gologin/session-lock/route.ts` | Claim (authenticated) + admin force-release |
 | `src/app/api/gologin/session-lock/lease/route.ts` | Heartbeat / release, authenticated by the lease secret |
-| `src/app/api/gologin/admin/members/route.ts` | Management: grant/revoke seats, reconcile a pre-existing workspace |
-| `src/app/api/gologin/admin/assignments/route.ts` | Management: read the folder tree, add/remove profiles |
+| `src/app/api/gologin/admin/members/route.ts` | Members: grant/revoke seats, reconcile a pre-existing workspace (`members` capability) |
+| `src/lib/services/gologinManageService.ts` | Profile create/edit/delete/restore, folder create/delete/fill, live folder sharing + profile sharing — all on the master token |
+| `src/lib/gologin/proxyCheck.ts` | "Ping proxy": the SDK's own `geo.myip.link` check, server-side, behind an SSRF fence |
+| `src/app/api/gologin/manage/profiles/**` | Create (`POST`), read/edit/delete (`[id]`), Undo (`[id]/restore`) — `profiles` capability |
+| `src/app/api/gologin/manage/proxy-check/route.ts` | Ping proxy — `profiles` capability, throttled per user |
+| `src/app/api/gologin/manage/folders/route.ts` | List (any capability) / create / fill / delete folders — `folders` capability |
+| `src/app/api/gologin/manage/sharing/route.ts` | The Sharing dialog's read and writes — `sharing` capability |
+| `src/app/api/gologin/pins/route.ts` | Pin / unpin (everyone with the page) |
+| `src/app/gologin/_lib/manage.ts` | `useGoLoginCapabilities()` + the shared form/checkbox/button recipes |
+| `src/app/gologin/_components/{NewProfileDialog,EditProfileSheet,ProxyFields,FolderChecklist,AddToFolderDialog,EditFoldersDialog,SharingDialog,MembersDialog}.tsx` | The management surfaces — see § Management |
 | `electron/main.js` (GoLogin section) | The SDK, the session map, Orbita downloads, the lock lease |
 | `src/hooks/useGoLoginAccount.ts` | Seat + token state for the current operator |
 | `src/hooks/useGoLoginProfiles.ts` | The window's one profile fetch |
 | `src/hooks/useGoLoginSessions.ts` | Local session state + launch/stop |
 | `src/hooks/useGoLoginLocks.ts` | Live "who has this open", over `onSnapshot` |
 | `src/hooks/useOrbita.ts` | Orbita install state + download progress |
-| `src/app/gologin/_components/MembersPanel.tsx` | The seat-management half of the Management dialog |
+| `src/app/gologin/_components/MembersPanel.tsx` | The seat list inside `MembersDialog` |
 | `src/app/gologin/_components/Notice.tsx` | The window's one full-screen message — no seat, no access, rejected token |
 | `src/app/gologin/_lib/session.ts` | Session labels, the error vocabulary (incl. `invalid-token`) and `TONE_CHIP` |
 | `src/hooks/useAuthFetch.ts` | `ApiError` — carries the route's `code` through the throw |
 | `src/app/gologin/**` | The window: layout, guard, onboarding, list, Management, Orbita gate |
-| `src/lib/definitions.ts` | `apps-gologin` page (Apps teamspace, `href: null`) + its `apps-gologin-management` sub-item |
+| `src/lib/definitions.ts` | `apps-gologin` page (Apps teamspace, `href: null`) + its four capability sub-items (`apps-gologin-members` / `-profiles` / `-folders` / `-sharing`) |
 
 ## Firestore
 
@@ -43,7 +51,7 @@ Two collections, **both new**, both with rules and index exemptions in place.
 | `gologin-accounts/{uid}` | Admin SDK only | The seat binding (uid to GoLogin address + folder id) and the encrypted API token |
 | `gologin-sessions/{profileId}` | **Client-readable**, Admin-written | The live session lock. Readable so a row can say "In use · Kai" without polling the provider |
 
-Plus three non-secret fields mirrored onto `users/{uid}`: `gologinEmail`, `gologinMemberSince` and `gologinLinkedAt`. They exist so the window can decide "onboarding or profiles?" off the `useUserData` snapshot it already holds, at zero extra reads.
+Plus three non-secret fields mirrored onto `users/{uid}`: `gologinEmail`, `gologinMemberSince` and `gologinLinkedAt`. They exist so the window can decide "onboarding or profiles?" off the `useUserData` snapshot it already holds, at zero extra reads. A fourth, `gologinPinnedProfileIds`, holds that person's pins (§ Pinned) for the same reason; it is index-exempt in `firestore.indexes.json`.
 
 > **The API key is deliberately NOT on the user document.** `users/{uid}` is streamed to the renderer by `onSnapshot`, so a field there is a field the client has. That is the entire reason `gologin-accounts` exists as a separate, fully-denied collection.
 
@@ -158,7 +166,7 @@ The response is checked for a JSON content type before parsing — a Cloudflare 
 Four independent layers:
 
 1. **Electron main process** — the window is not created until main has sent the renderer's ID token to `/api/gologin/access` and got a 200.
-2. **Every API route** re-checks `requireGoLoginAccess(uid)` — the `apps-gologin` page permission, tier 2. The Management routes (members + assignments) additionally require **`requireGoLoginManagement(token)`**: holding the page lets you *use* profiles, not hand them out. The force-release on the session lock is the one control still gated on `requireGoLoginAdmin` outright.
+2. **Every API route** re-checks `requireGoLoginAccess(uid)` — the `apps-gologin` page permission, tier 2. Every management route additionally requires **one capability** via `requireGoLoginAccessAnd(token, cap)`: holding the page lets you *use* profiles, not create, delete or hand them out. The force-release on the session lock is the one control still gated on `requireGoLoginAdmin` outright.
 3. **`GoLoginGuard`** refuses to render for a user without the page.
 4. **GoLogin itself** — an operator's token can only see what has been shared into their account. A bug in our filtering can show *fewer* profiles, never more.
 
@@ -234,7 +242,17 @@ Detection is on the error *message* because that is all the SDK offers: it throw
 
 **The listing states its own age, because nothing polls.** `fetchedAtMs` was on the client and used only as a cache key; the count line now ends "· read 12m ago", ticked once a minute. A surface that deliberately refuses to auto-refresh (see the rate-limit section) owes the reader that number — without it "nothing polls" is indistinguishable from "this is live", and an operator launches a profile that was unassigned an hour ago.
 
-**Rows are ordered live-first**, then by the provider's order: the operator's own running sessions, then locked-by-someone-else, then GoLogin's `isRunning`, then the rest. Their own live sessions are the rows they come back to, and alphabetical order scatters three of them through hundreds. Nothing reorders while it is being read — the only thing that moves a row is a session starting or stopping, which the operator caused.
+**Rows are ordered live-first**, then by the provider's order: the operator's own running sessions, then locked-by-someone-else, then GoLogin's `isRunning`, then the rest. Their own live sessions are the rows they come back to, and alphabetical order scatters three of them through hundreds.
+
+**That order is a snapshot, taken when the listing changes** — search, chip, Refresh — and **never re-taken because of the reader's own click** (`rankSnap`, adjusted during render against `listKey`). It used to re-rank on every session change, so pressing Launch on row 12 moved it to the top the same instant and a quick second click landed on a different row's Launch: a different live account (critique 2026-09-30, P1). A launched row now keeps its place and gains its *Open here* chip; it rises on the next refresh. A profile not in the snapshot (one just created) sorts first.
+
+**Launch is optimistic.** `useGoLoginSessions.launch` sets `starting` on the click, before main's first broadcast, so the button cannot take a second press; a failure before main answers sets `failed` with its reason. Failure toasts **name the profile** (several launches can be in flight), and a failed row's *Retry* carries the reason on its title, because the toast that said why has gone.
+
+**Row folder chips are capped at two** plus a `+N` count (named on hover): the lane grows with every folder and the profile name beside it is what truncates. The six-character **profile id is shown to managers only** — it is for reconciling against GoLogin's own app, which an operator who only launches never does.
+
+**Launching a profile GoLogin reports as running outside Bluu asks first** (`requestLaunch`). Bluu's lock blocks a colleague launching *through Bluu*; it cannot see someone running the profile in GoLogin's own app, and `profile.isRunning` is the only signal of that. It is only as fresh as the listing, so it asks rather than refuses — naming the reported user and the listing's age — but opening it again puts one account on two devices and two IPs.
+
+**The window renders once, when it is ready.** `ConnectingScreen` ("Connecting to GoLogin…") covers every wait before there is something real to show — the session and user-doc check in `GoLoginGuard`, the seat check, and the first profile walk — replacing three skeletons that flashed in turn. It carries the GoLogin mark (the brand-asset escape hatch, as in `PageIcon`'s `SVG_ICONS`) because the wait is an outside service answering, a stage line saying what is being waited on, and after 6s the reason a big workspace is slow (30 profiles per request, walked sequentially). A Refresh does **not** use it: the list stays on screen and the button spins.
 
 **The keyboard model is DOM focus, never a React cursor.** `/` focuses search, `j`/`k` walk `button[data-row-action]` (each row's own primary control, disabled ones skipped), and `Enter` is the browser's own activation of whatever is focused — there is no handler for it. A parallel selection state would have to be kept in step with a list that reorders as sessions start, would re-render the window on every keystroke, and would be invisible to a screen reader. It also keeps a keystroke from firing a billed provider call by itself: the operator still presses Enter on a button they can see is focused. The listener is bound to the page element, **not** `window`, so the Orbita gate and the close guard — which render as siblings outside that subtree — keep the keyboard to themselves.
 
@@ -246,42 +264,141 @@ Detection is on the error *message* because that is all the SDK offers: it throw
 
 **A blocked row carries an admin force-release.** The route and `forceReleaseProfileLock` have existed since the lock did and nothing ever called them, so the only way to free a wedged claim was the Firestore console. The three-minute stale window covers a machine losing power; it does **not** cover a holder whose app is hung, which heartbeats never stop for and teardown never runs for. It is confirmed with an `AlertDialog` that names the holder and states the cost — clearing the lock does not close their browser, so if theirs is still open their session will not be saved back and two people can end up signed into one account. ⚠ The route gates on **`requireGoLoginAdmin`, not a bare `token.admin`**, for the same reason the Management routes do: claims do not reach an already-issued ID token, this renderer runs for weeks (rule 9c), and the button renders off the live `userData.groups` snapshot — a bare claim check would show an admin a control that answers "Admins only".
 
-### Management (admins, or the Management grant): two tabs, one workflow
+### Management: four capabilities, five surfaces (reworked 2026-09-30)
 
-A dialog rather than a page: it edits the contents of the list behind it, and the window has no sidebar to navigate back with. It spends money and grants access to live logged-in accounts, so it is never reachable on the `apps-gologin` page permission alone.
+Until 2026-09-30 there was one **Management** dialog behind one grant (`apps-gologin-management`) with two tabs, Members and Profile access. It bundled paying for seats with handing out accounts, and it could not create, edit or delete a profile at all. It is now **four capabilities**, each a sub-item of `apps-gologin` on `/admin-portal/sharing`, and each unlocks its own controls in the window:
 
-**Who gets in — changed 2026-09-19.** It was admin-only. The problem was not the bar but the *instrument*: the only way to let someone run the GoLogin workspace was to make them a Bluu **admin**, which also hands them user management, the permission map itself, and `GL_API_TOKEN` on their desktop. Management is now its own grant — **`apps-gologin-management`**, a **sub-item** of `apps-gologin` on `/admin-portal/sharing` (the indented row under GoLogin). See [permissions.md](permissions.md#sub-item-pages-a-capability-inside-a-page) for the mechanism.
+| Capability (Sharing page label) | Page id | Unlocks |
+|---|---|---|
+| **Add & Remove Members** | `apps-gologin-members` | Header **Members** → `MembersDialog` (the old Members tab, alone) |
+| **Create, Edit & Delete Profiles** | `apps-gologin-profiles` | Header **New profile**; row menu **Edit profile** and **Delete profile**; Ping proxy |
+| **Create, Edit & Delete Folders** | `apps-gologin-folders` | **Edit folders** beside the folder chips; row menu **Add to folder**; the folder list in Edit profile |
+| **Share Profiles & Folders** | `apps-gologin-sharing` | Header **Sharing**; row menu **Share profile** |
 
-- Server: `requireGoLoginManagement(token)`, always paired with `requireGoLoginAccess` — Management without the GoLogin page is not a state a route may be reached in.
-- Client: `canManage` in `src/app/gologin/page.tsx` — `isAdmin || permittedPageIds.includes('apps-gologin-management')`.
-- **Admins are in unconditionally, and that is not a convenience.** They run the workspace on the master token (`usesMasterGoLoginToken`), so revoking the Sharing row from them would lock the only people who can administer it out of it. The row is for delegating *to* non-admins.
-- The sub-item is **not** a satellite page and has **no href** — the sidebar skips it. The only thing it changes is whether the Management button renders inside the GoLogin window.
+**Pin / Unpin is on every row's menu for everyone** — it is not a capability; it changes only the reader's own view.
 
-⚠ **Neither half is a bare `token.admin` check, and that distinction is load-bearing.** `setCustomUserClaims` does not reach an ID token that has already been issued, and this renderer routinely runs for weeks without a reload (rule 9c). Both flags meanwhile render off the live `users/{uid}` snapshot (`groups`, `permittedPageIds`). So a raw claim check drifts, one-directionally and visibly: the button appears and every route behind it answers "Admins only" — reported on 2026-09-11 with the claim correctly set server-side the whole time. The claim is kept as the fast path, with the `admin` group (via the 60s-cached `getUserById`) as the fallback, then the page grant. That is not a weakening — the claim is *derived* from that group — and it collapses the two definitions of "admin" this feature briefly had, since `usesMasterGoLoginToken` already decided master-token access from the group.
+The existing grants were **not migrated** (decided 2026-09-30: "start from zero"). `apps-gologin-management` was removed from `definitions.ts`; its orphaned `page-permissions` doc and `permittedPageIds` entries are cleaned with `src/scripts/remove-retired-pages.js` (see permissions.md — until then `repair-permissions.js` hard-aborts on the stranded doc).
 
-**Members** is the default tab, because an empty workspace has nothing to assign. It grants and revokes seats, shows the seat budget from the workspace plan, and carries the **Reconcile** action for a pre-existing workspace. Each row says which of four things is true — `Active`, `No token yet`, `Invite pending`, `Seat removed in GoLogin` — because each has a different remedy and a single "inactive" badge would collapse them into one.
+- Server: `requireGoLoginAccessAnd(token, capability)` — the page gate, then `requireGoLoginCapability`. It takes one capability or an array of which **any** suffices (the folder list is read by three dialogs).
+- Client: `useGoLoginCapabilities()` in `src/app/gologin/_lib/manage.ts`, off the live `users/{uid}` snapshot. The ids live once, as `GOLOGIN_CAPABILITIES` in the client-safe `types.ts`, and `definitions.ts` declares the same four.
+- **Admins hold all four unconditionally, and that is not a convenience.** They run the workspace on the master token (`usesMasterGoLoginToken`), so revoking a Sharing row from them would lock the only people who can administer it out of it. The rows are for delegating *to* non-admins.
+- Sub-items have **no href** — the sidebar skips them. They only change what renders inside the GoLogin window.
 
-Two deliberate asymmetries with the other tab:
+⚠ **No half of this is a bare `token.admin` check, and that is load-bearing.** `setCustomUserClaims` does not reach an ID token that has already been issued, and this renderer routinely runs for weeks without a reload (rule 9c). The buttons render off the live `users/{uid}` snapshot (`groups`, `permittedPageIds`), so a raw claim check drifts one way and visibly: the button appears and every route behind it refuses — reported on 2026-09-11 with the claim correctly set server-side the whole time. The claim is the fast path, the `admin` group (via the 60s-cached `getUserById`) the fallback, then the page grant.
 
-- **Confirmation is by blast radius, not by direction.** Removing a seat is confirmed: it ends a paid seat, cuts someone off mid-shift, and cannot restore their GoLogin invitation state, so it gets an `AlertDialog` naming exactly what survives (their folder and its assignments) and what does not. **Whole-folder assign/remove is confirmed too** — `Assign 47` hands a colleague forty-seven live, logged-in accounts in one press. Single-profile toggles stay unconfirmed, correctly: one click, trivially reversible. The panel previously stopped an admin from removing *one* seat while letting a bulk grant of tens of accounts fire on a single click; that asymmetry was an oversight, not a decision, and the bulk dialog now also restates the copy-not-subscription fact at the moment it matters.
-- **The GoLogin address defaults to `workEmail` but stays editable.** It is usually right and must never be assumed: people sign up to GoLogin under whatever address they like, and the seat must be granted to the one they will actually hold.
+**Everything management does speaks as the master token, server-side** (`gologinManageService.ts`). A non-admin holding a capability administers the workspace; they never *become* it — `GL_API_TOKEN` still never reaches their desktop.
 
-**Profile access** is the assignment surface, and **who it is writing to has to be unmistakable**. The selected operator is the Action Blue **tint** (`/15`) plus `font-semibold text-white`, with unselected rows at `font-medium text-zinc-400` — hue separating selection from hover, the same recipe DESIGN.md §5 prescribes for the sibling satellite's chat rows. It shipped as `bg-white/[0.06]` selected against `bg-white/[0.03]` hover, about 1.1:1 apart and effectively invisible, on the pane where every control grants access to a live logged-in account; `selected = users.find(…) ?? users[0]` also falls back to the first person when the selection is lost on a refresh. The pane header now names the operator outright, because the search placeholder that used to carry that name disappears the moment anyone types.
+#### Members
 
-Left pane picks the operator (with their assigned count, which is the question an admin arrives with), right pane assigns — whole folders first, then individual profiles with assigned ones sorted first. Per-profile writes are optimistic and roll back by **reloading** rather than inverting — after a failed write the real membership is whatever GoLogin says, not whatever we guessed.
+The old Members tab, unchanged in behaviour, now its own dialog. It grants and revokes seats, shows the seat budget, and carries **Reconcile**. Each row says which of four things is true — `Active`, `No token yet`, `Invite pending`, `Seat removed in GoLogin` — because each has a different remedy. The GoLogin address defaults to `workEmail` but stays editable.
 
-**Assigning a folder is a copy, not a subscription.** `changeAssignmentFromFolder` expands the source folder to the profiles it holds *at that moment* and adds those to the operator's own folder. A profile added to the source folder afterwards does **not** reach them: GoLogin offers no webhook, so keeping the two in step would mean polling, and polling is the one thing that reliably destroys the API token (rule 9e). The panel says so on the folder header rather than leaving an admin to assume a live link and under-assign for weeks.
+**Removing a member is what "cannot access profiles from GoLogin directly" means.** `DELETE /workspaces/{wid}/members/{id}` ends the seat, so GoLogin itself stops them opening any profile, in its own app too. And because `/api/gologin/access` — the door Electron checks before creating the window — requires a seat, the window stops opening for them too. Removal is confirmed; the copy says that individually shared profiles are remembered (their personal folder survives) but **folder shares are not** (they lived in the seat's scope, which is gone).
 
-Four details of that surface are deliberate:
+⚠ **One gap the API cannot close.** The very first design (before seats) shared folders to people's free accounts with `POST /share/multi`. GoLogin has **no per-recipient unshare** — `DELETE /share/folder/{id}` takes no recipient — so any such legacy share survives a seat removal. If one exists it shows in the profile's `sharedEmails` (master token only); removing it means GoLogin's own app.
 
-- **The server expands the folder**, not the client. The expansion comes from the already-memoised folder tree, so it costs nothing, and a 90-profile folder never meets `MAX_BATCH` — that cap bounds hand-picked selections, not a folder that is legitimately large.
-- **Operators' own folders are excluded as sources.** They are the *destination* of an assignment; offering one as a source would let an admin copy one person's entire caseload onto another by clicking a row that looks like any other.
-- **Folder rows hide while searching.** A search is about finding one profile, and bulk buttons above a filtered list invite assigning far more than what is on screen.
-- **Assign and Remove both stay visible**, each disabled at its no-op, rather than one button swapping identity as the count changes — which is how "remove all" gets clicked by accident. Folder writes are **not** optimistic: guessing the result of moving tens of ids would be a large, confident lie if the write failed.
+#### New profile
 
-**It fetches only when its tab is opened**, not when the dialog is. Its payload costs a `GET /user` plus a full profile walk, and an admin who came only to add a member must not spend that.
+A large dialog: **name, OS, proxy, folders**. Nothing else is configurable, deliberately.
 
-The share budget (`plan.maxShares` from `GET /user`, against the summed folder membership) is shown above it. GoLogin meters "1 share = 1 instance of a shared profile", so a folder of 40 profiles reaching 10 people is 400 shares.
+- **Create is `POST /browser/quick`** — GoLogin's own "profile on the default settings" — with `os` + `osSpec`. GoLogin generates the whole fingerprint (user agent, resolution, WebGL, fonts, canvas, CPU/RAM) consistently for that OS, from the workspace's default-settings template. A fingerprint assembled field by field is how an inconsistent one happens, and an inconsistent fingerprint is what gets an account flagged. The response's `id` is read the way GoLogin's own quickstart reads it (`profile.id`); `_id` is probed as well.
+- **The four OS choices** (`GOLOGIN_OS_CHOICES`) are the pairs the SDK itself sends from `getOsAdvanced()`: Windows 10 = `win`/`''`, Windows 11 = `win`/`win11`, Mac M1 = `mac`/`M1`, Mac Intel = `mac`/`''`.
+- **Then the proxy, via `PATCH /browser/proxy/many/v2`** — and "Without proxy" is written explicitly as `mode: 'none'`, because a workspace's default template can itself carry a proxy.
+- **If attaching the proxy fails, the new profile is deleted.** A profile without the proxy it was made for launches on whatever IP the desk has; better no profile than that trap in the list. If even the cleanup fails, the error names the profile and says to delete it before anyone launches it.
+- **Then folders**, one `PATCH /folders/folder` each. A failure here is a warning on the toast, not a rollback — the profile is sound.
+- **A non-admin creator gets the new profile shared to their own folder**, or they could not see what they just made.
+- **Create stays disabled until Ping has passed for the proxy fields as they now stand.** Edit one character and the check is void.
+
+#### Ping proxy
+
+**GoLogin has no endpoint for this.** It is the SDK's own pre-launch check (`getTimeZone` in `gologin.js`): `GET https://geo.myip.link` *through* the proxy, reporting exit IP, country, city and timezone — the fact a manager needs, because a proxy in the wrong country launches fine and gets the account flagged. Implemented in `src/lib/gologin/proxyCheck.ts`, run **server-side** (decided 2026-09-30: no Electron build). The cost: a proxy that only admits whitelisted IPs fails here and may still work from a desk — the timeout message says so.
+
+⚠ **It is an outbound connection to an address a user typed, so it is fenced as an SSRF primitive.** The host is resolved first and **every** record must be public (loopback, RFC 1918, link-local incl. `169.254.169.254`, CGNAT, multicast and IPv6 equivalents are refused, via `net.BlockList`); the agent then connects to the **resolved IP**, never the name, so a second resolution cannot rebind it; the destination URL is fixed; the body is capped; the route is capability-gated and throttled per user. Do not loosen any of these.
+
+A refused CONNECT arrives as the response status (https-proxy-agent replays the proxy's reply rather than throwing), so `407` becomes "rejected the username or password". The IP field also accepts a pasted `host:port:user:pass` line and fills all four.
+
+#### Edit profile
+
+A side sheet with **every fact about the profile**, of which **name, notes, proxy and folders are editable** and the fingerprint is shown read-only with a lock and a one-line reason. The line between the two is GoLogin's own ("What's safe to change"): OS, user agent, resolution, fonts, canvas, WebGL and CPU/RAM must never change after an account has logged in.
+
+⛔ **`PUT /browser/{id}/custom` is never used.** GoLogin documents that it **re-randomises every parameter the body omits** — renaming a profile through it would silently re-roll a logged-in account's fingerprint. It is deliberately absent from `IGoLoginClient`. Instead each field has its own path:
+
+| Field | Endpoint |
+|---|---|
+| Name | `PATCH /browser/name/many` |
+| Proxy | `PATCH /browser/proxy/many/v2` |
+| Folders | `PATCH /folders/folder` add/remove, diffed against the tree |
+| Notes | **GoLogin's own SDK `update()`**: `GET /browser/{id}`, change `notes`, `PUT /browser/{id}` with the whole document. Every other field goes back exactly as it came. ⚠ `PUT /browser/{id}` is not in the OpenAPI spec — the official SDK uses it. Accepted 2026-09-30. |
+
+**Notes are written first**, because that PUT sends the whole document and would otherwise put the old name and proxy back over new ones.
+
+- The **proxy password never reaches the renderer.** The projection (`GoLoginProfileDetail`) carries `hasPassword`; the form shows "Unchanged"; `password: undefined` means "keep it", and the adapter reads the stored one back itself. Ping on an edit sends `profileId` so the server can fill the kept password in.
+- **A changed proxy must pass Ping** before Save enables.
+- **The current exit is pinged when the sheet opens** ("Currently exits in Miami, United States · 1.2.3.4"; the stored password is filled in server-side, so this costs one `GET /browser/{id}`). The new ping is then **compared** with it: a different **country** shows the move in an orange box and blocks Save until *"Change the country anyway"* is ticked (the acknowledgement is keyed to the proxy fields, so editing them voids it); a different city is a softer note; an unknown current location says it cannot be compared. The old generic "keep the same country" warning had nothing to compare against.
+- **Removing the proxy asks first** — "Without proxy" on a profile that had one puts a signed-in account on whichever desk opens it next.
+- A proxy mode the form cannot express (SOCKS4, Tor, GoLogin's own) is shown read-only with a **Replace proxy** action rather than being misread as HTTP.
+- **Save exists only while something differs**, and sends only changed keys. **Discard** restores from memory — no request. Closing the sheet (Esc, outside click, ✕) with unsaved edits asks *"Discard your changes?"* first — it used to drop them silently, including a proxy that had just passed Ping.
+- **A profile anyone has open cannot be edited or deleted** — `getLiveLockHolder` on the server, the live lock snapshot on the client. A proxy change would not reach the running session, and the notes PUT replays the whole document under it.
+- Changing folders from the sheet needs the **folders** capability as well.
+
+#### Delete profile
+
+Confirmed by `AlertDialog`, refused while in use, and the toast carries a real **Undo**: GoLogin keeps deleted profiles restorable (`POST /deleted-profiles/restore`), so Undo restores the actual profile — id, fingerprint, cookies — and the row is re-inserted from memory.
+
+#### Folder edits are access grants — every picker says so
+
+Because a shared folder is live, **adding a profile to a folder hands it to everyone that folder is shared with**. That makes every folder picker a sharing control, so every one of them states it (critique 2026-09-30, P1):
+
+- The folder read endpoints (`GET /manage/folders`, and the folder list returned with `GET /manage/profiles/{id}`) carry **`sharedWith`** — the display names of the members whose seat is scoped to each folder (`loadUserFoldersWithShares`: the memoised workspace read, one `gologin-accounts` read, one batched `getAll` of names — never a read per member). Write paths use the lighter `loadUserFolders`, which omits it.
+- `FolderChecklist` (New profile, Edit profile, Add to folder) shows a people count on each folder, names on hover, and — for any **newly** ticked folder, measured against the `initial` set it is given — an attention-orange line naming who gains the profile: *"Kai, Sam and 2 others will be able to open this profile."*
+- It also names who **loses** it when a shared folder is unticked — measured against the folders still ticked, so someone who still reaches the profile another way is not listed (a direct share survives either way; the copy says "through these folders").
+- Edit folders states who the selected folder is shared with in the pane header, before the first "Add", and the delete confirm names who loses access. **A toggle on a shared folder toasts who gained or lost the profile, with an Undo** — the same safety the Sharing dialog gives the same act. Toggles on an unshared folder stay silent: it is only a label, and a toast per click there would train people to ignore the ones that matter.
+
+#### Add to folder
+
+A small dialog off the row menu: the user-facing folders as a checklist, **pre-ticked with the profile's current folders**, so it adds and removes. One `PUT /manage/folders` with the desired set; the server diffs it against one fresh read (`setProfileFolders` — the same diff Edit profile uses) and answers with the folders the profile ended up in. Needs only the folders capability.
+
+#### Edit folders
+
+Two panes: folders on the left (create inline, delete with confirm), the selected folder's profiles on the right (toggle in/out, optimistic, rolled back by re-reading). **Members-first order is fixed when the folder or search changes, never by a toggle** — re-sorting per click moved the row just clicked out from under the cursor.
+
+- **There is no rename, and the dialog says so.** GoLogin has no rename endpoint; an emulated one (create, move, re-scope members, delete) is four non-atomic calls that can leave two folders behind. Decided 2026-09-30 to leave renaming to GoLogin's own app.
+- **Names are unique case-insensitively across every folder**, hidden ones included — folders are addressed by name.
+- **Bluu's `Bluu · …` prefix is refused** on create: such a folder would be hidden everywhere on arrival.
+- **Deleting a folder re-scopes every member who had it first**, then deletes it. Profiles inside are kept. GoLogin's behaviour for a seat scoped to a deleted folder is undocumented; this order means we never find out.
+- User-facing folders exclude Bluu's per-person folders **by id** (the accounts collection) as well as by prefix, so a renamed plumbing folder cannot come back as something to edit.
+
+#### Sharing
+
+Replaced the Profile access tab. **People first:** pick one or more members on the left; every folder and profile on the right shows its coverage across them — `Shared` (all), `2 of 3`, `Not shared` — and one click evens it out (shares with all selected, or, if all already hold it, takes it back from all).
+
+**Two kinds of access:**
+
+- **A shared folder is live** (decided 2026-09-30). It re-scopes each member's seat (`PATCH /workspaces/{wid}/members/{id}` with the folder added to `folders`), so profiles added to the folder later reach them with nothing further to do. This replaced the old copy-at-that-moment model. The write replaces the member's whole scope, so the member list is read **fresh** first, and their **personal folder is always kept in it** — dropping it would silently revoke every individually shared profile.
+- **A shared profile is a single grant** into the member's personal folder (`changeAssignment`, unchanged).
+
+A profile someone reaches **through a folder** is marked `via REPOST`: unsharing it individually does not remove that access, and a row claiming otherwise would be the most dangerous lie on the surface. Folder shares are confirmed with the count; single-profile toggles are one click. Results come back per member (`{ done, failed[] }`) — one seat that has gone must not stop the rest, nor be reported as a success. Success is applied locally from that report; nothing re-walks.
+
+- **Every change toasts with an Undo** that sends the inverse to exactly the people it landed on (the Undo itself is not undoable). A mis-click hands out or takes back a live account; noticing and clicking again was the only remedy before.
+- **Every control names its verb** — `aria-label="Share Cole with Kai, Sam — 2 of 3"`, and the verb appears beside the coverage pill on hover and focus. `aria-pressed` on a `2 of 3` row could not say that a click shares with all three.
+- **With nobody selected the right pane says so** rather than dimming itself; an `opacity-50` pane read as broken, pushed its grey under the contrast floor, and disabled nothing a screen reader could tell.
+
+**Profile first, from a row.** A row's *Share profile* answers a different question — "who can open **this**?" — which the people-first grid cannot answer without selecting everyone. So it opens `focusProfile` (addressed by **id**; a name search would also match "Cole · TikTok"): every member listed as *Shared directly* / *Can open it via REPOST* / *No access*, with one Share / Stop sharing button each. A link at the foot switches to the people-first view. Busy state is tracked per item *and* person, so one row's spinner does not spin them all.
+
+Admins are not listed: they see everything on the master token.
+
+#### Pinned (everyone)
+
+Bluu's own folder, **per person** (decided 2026-09-30), stored on `users/{uid}.gologinPinnedProfileIds` (written by `POST /api/gologin/pins`, capped at 200, index-exempt). It rides the user-doc snapshot the window already holds, so reading it is free. GoLogin's own `isPinned` is deliberately not used — it is one flag shared by everyone.
+
+- **Pinned is the default chip on startup when it has anything in it** — derived (`folder === undefined` resolves to Pinned while `pinnedTotal > 0`), never set in an effect.
+- Only pins matching a visible profile count, so the chip never promises rows it cannot produce.
+- **A search that misses inside Pinned leads out of it**, keeping the text: *"No pinned profile matches "cole". Show 3 in All."* With Pinned as the default, looking up an unpinned profile is the everyday case; it used to dead-end on a "Clear them" that also erased the search. The other empty state clears only the search.
+- **Without a management capability, the row's ⋯ menu is a pin toggle** (filled when pinned, `aria-pressed`). A menu that opens onto one item is two clicks for one action on the surface operators use most. The name-side pin mark is shown only where the menu hides the state.
+- `useGoLoginPins` mirrors `usePinnedGrowthAccounts`: the snapshot array is content-compared (presence rewrites the user doc every few minutes), the optimistic value is tagged with the snapshot it was made against so it clears itself, and `togglePin` is stable. No success toast (the high-frequency exception, DESIGN.md §5).
+
+#### The list does not re-walk after a write
+
+Create, edit and delete update the list **in place** from the write's own response (`useGoLoginProfiles`' `upsert` / `patch` / `remove`) and the server drops its memos, so the next Refresh is exact. Re-reading after every write would cost one provider request per 30 profiles each time — the burst the rate-limit design exists to prevent. Edit folders and Members call one Refresh on close, only if something changed; Sharing only if the **caller's own** access changed (sharing with colleagues changes nothing in the caller's list). Server-side, a membership write patches the `GET /user` memo in place (`applyFolderMembership`) instead of dropping it, so toggling ten profiles, or sharing one with ten people, does not cost ten extra `GET /user`s; only structural writes (folder or profile created/deleted) invalidate it.
 
 ### Older installed builds: a hard version floor
 
@@ -359,18 +476,18 @@ Running a macOS-marked profile on Windows is supported and normal. The SDK compu
 
 `apps-gologin` is an ordinary tier-2 page in the Apps teamspace with `href: null`. It has **no `page-permissions` doc until someone grants it** on `/admin-portal/sharing`, and a page with no doc grants nobody — fail-closed.
 
-`apps-gologin-management` is a **sub-item** of it (`parentPageId: 'apps-gologin'`): same tier-2 machinery, same fail-closed default, but no href and no sidebar row — see [permissions.md](permissions.md#sub-item-pages-a-capability-inside-a-page). It gates the Management dialog and its two routes. Granting it without `apps-gologin` does nothing: the routes check both, and without the parent the window never opens.
+The four capabilities (`apps-gologin-members`, `-profiles`, `-folders`, `-sharing`) are **sub-items** of it (`parentPageId: 'apps-gologin'`): same tier-2 machinery, same fail-closed default, but no href and no sidebar row — see [permissions.md](permissions.md#sub-item-pages-a-capability-inside-a-page) and § Management above. Granting one without `apps-gologin` does nothing: the routes check both, and without the parent the window never opens.
 
-**Three things Management deliberately does *not* carry with it**, because they are admin authority rather than workspace administration:
-- **The master token.** `usesMasterGoLoginToken` still reads the `admin` group alone, so a non-admin manager launches with their **own** key and sees their **own** folder. `GL_API_TOKEN` never reaches their desktop. They administer the workspace server-side; they do not become the workspace.
+**Three things a capability deliberately does *not* carry with it**, because they are admin authority rather than workspace administration:
+- **The master token.** `usesMasterGoLoginToken` still reads the `admin` group alone, so a non-admin manager launches with their **own** key and sees their **own** folder. `GL_API_TOKEN` never reaches their desktop. They administer the workspace server-side; they do not become the workspace. (This is why a non-admin who creates a profile has it shared to their own folder — otherwise they could not see it.)
 - **Force-release** on a wedged session lock — still `requireGoLoginAdmin`, and still rendered off `groups.includes('admin')`.
-- **The seat exemptions.** A non-admin manager is an ordinary operator to every other part of the model: they appear as a seat candidate, reconciliation matches them, and assignment works on them normally.
+- **The seat exemptions.** A non-admin manager is an ordinary operator to every other part of the model: they appear as a seat candidate, reconciliation matches them, and sharing works on them normally.
 
 ## Scope
 
-Implemented: per-user account linking with folder provisioning and sharing, Orbita install with progress (including mid-launch updates), profile listing with search / faceted folder chips / lazy window / refresh, local launching, a cross-machine session lock, and an admin assignment surface.
+Implemented: per-user account linking with folder provisioning, Orbita install with progress (including mid-launch updates), profile listing with search / faceted folder chips / per-person Pinned / lazy window / refresh, local launching, a cross-machine session lock, and — since 2026-09-30 — creating (quick-create + proxy + folders, with Ping proxy), editing (name, notes, proxy, folders; fingerprint read-only), deleting with Undo, folder create/delete/fill, and live folder + single-profile sharing, behind four grantable capabilities.
 
-Deliberately **not** implemented: an in-app view of the running browser (built, tried, removed), creating/editing/cloning/deleting profiles, folder *management* (renaming, creating non-operator folders), proxy configuration, fingerprint inspection, scripted automation over CDP, and Cloud Browser.
+Deliberately **not** implemented: an in-app view of the running browser (built, tried, removed), **editing the fingerprint** (GoLogin: never after login), **renaming folders** (no API endpoint), cloning profiles, proxy types beyond HTTP/SOCKS5, GoLogin's own proxy pool, scripted automation over CDP, and Cloud Browser.
 
 ## Gotchas
 
@@ -384,7 +501,14 @@ Deliberately **not** implemented: an in-app view of the running browser (built, 
 - [ ] **Never fan out reconciliation.** It is sequential because each member costs two or three provider calls.
 - [ ] **Never map a GoLogin member to a Bluu user on a fuzzy match.** One exact `workEmail` hit or it is reported unmapped — a wrong binding shows one person another person's profiles.
 - [ ] **Never "fix" `recepients`.** It is the provider's spelling; the correct one shares with nobody and still returns 201.
-- [ ] **New GoLogin route → `requireGoLoginAccess(token.uid)` first**, and **`requireGoLoginManagement(token)`** — not a bare `token.admin` — if it changes who can see what. A raw claim check drifts from the live `users/{uid}` snapshot the buttons render off, and this renderer runs for weeks (rule 9c). Reserve `requireGoLoginAdmin` for authority that must not be delegatable (force-release is the only one).
+- [ ] **New GoLogin route → `requireGoLoginAccess(token.uid)` first**, and **`requireGoLoginAccessAnd(token, capability)`** — not a bare `token.admin` — if it changes what exists or who can see what. A raw claim check drifts from the live `users/{uid}` snapshot the buttons render off, and this renderer runs for weeks (rule 9c). Reserve `requireGoLoginAdmin` for authority that must not be delegatable (force-release is the only one).
+- [ ] **Never call `PUT /browser/{id}/custom`.** It re-randomises every parameter the body omits — an "edit the name" through it re-rolls a logged-in account's fingerprint. It is deliberately absent from `IGoLoginClient`; add a field-scoped method instead.
+- [ ] **Never offer a fingerprint field as editable** (OS, user agent, resolution, fonts, canvas, WebGL, CPU/RAM). GoLogin: never change after login.
+- [ ] **Never leave a created profile without its proxy.** `createProfile` deletes it if the proxy step fails; keep that rollback.
+- [ ] **Never send the proxy password to a renderer.** `hasPassword` only; "keep" is `password: undefined`, resolved inside the adapter.
+- [ ] **Never loosen `proxyCheck.ts`'s fence** — resolve first, every record public, connect to the resolved IP, fixed destination.
+- [ ] **A member's folder scope is written whole.** Read the workspace fresh before `updateWorkspaceMember`, and always keep their personal folder in the list.
+- [ ] **Never re-walk the profile list after a write** — update it in place from the response (`upsert` / `patch` / `remove`).
 - [ ] **Never surface a provider error string as the whole answer.** A rejected or revoked token is `invalid-token` and gets its own screen with a route back to the paste field. A Retry button on a dead key is worse than no button.
 - [ ] **Never `window.confirm` or `alert`.** Destructive acts here use shadcn `AlertDialog`, and the threshold is blast radius: one profile no, a folder of them yes, a seat yes, someone else's lock yes.
 - [ ] **Never use the uppercase eyebrow as a section scaffold.** It is the device a *window* names itself with (the list, onboarding, the Orbita gate and the close guard each use it once, correctly). A heading inside a dialog or a panel is a plain `text-xs font-medium text-zinc-400`.

@@ -3,7 +3,13 @@
 import { Fragment, useState, useEffect, useRef, useCallback } from 'react';
 import { getAuth } from 'firebase/auth';
 import AppLayout from "@/components/AppLayout";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
@@ -15,11 +21,8 @@ import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
   AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction,
 } from "@/components/ui/alert-dialog";
-import {
-  Card, CardHeader, CardTitle, CardContent, CardFooter,
-} from "@/components/ui/card";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { MoreHorizontal, UserCircle, Copy, Check, Info, ChevronRight, CornerDownRight } from "lucide-react";
+import { MoreHorizontal, UserCircle, Copy, Check, Info, ChevronRight, CornerDownRight, Plus, Loader2Icon } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { timezoneLabel } from "@/lib/timezone";
 import { toast } from "sonner";
@@ -91,15 +94,27 @@ function toBase64(file: File): Promise<string> {
   });
 }
 
-// ─── Creator Form Card ────────────────────────────────────────────────────────
+// ─── Creator Form Dialog ──────────────────────────────────────────────────────
 
-interface CreatorFormCardProps {
-  initial?: Creator | null;
-  onSave: () => void;
-  onCancel: () => void;
+/** The server's own message names the rule that failed; fall back to the status. */
+async function errorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = await res.json();
+    if (typeof body?.error === 'string' && body.error) return body.error;
+  } catch {
+    /* non-JSON error body — keep the fallback */
+  }
+  return `${fallback} (${res.status})`;
 }
 
-function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
+interface CreatorFormProps {
+  initial: Creator | null;
+  onSaved: () => void;
+  onCancel: () => void;
+  onBusyChange: (busy: boolean) => void;
+}
+
+function CreatorForm({ initial, onSaved, onCancel, onBusyChange }: CreatorFormProps) {
   const isEdit = !!initial;
   const [stageName, setStageName] = useState(initial?.stageName ?? '');
   const [OFID, setOFID] = useState(initial?.OFID ?? '');
@@ -118,11 +133,22 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [copied, setCopied] = useState(false);
 
-  const copyPassword = () => {
+  // A picked photo previews from an object URL; release it when it is replaced
+  // or the dialog closes, or every re-pick leaks the whole image.
+  useEffect(() => {
+    if (!photoPreview?.startsWith('blob:')) return;
+    return () => URL.revokeObjectURL(photoPreview);
+  }, [photoPreview]);
+
+  const copyPassword = async () => {
     if (!password) return;
-    navigator.clipboard.writeText(password);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(password);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error('Could not copy the password.');
+    }
   };
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -132,202 +158,213 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
     setPhotoPreview(URL.createObjectURL(file));
   };
 
+  const uploadPhoto = async (uid: string, file: File) => {
+    const imageData = await toBase64(file);
+    return apiRequest(`/api/admin/creators/${uid}/photo`, {
+      method: 'POST',
+      body: JSON.stringify({ imageData, contentType: file.type }),
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSaving(true);
+    onBusyChange(true);
 
     try {
       if (isEdit && initial) {
-        // Update existing
         const updateBody: Record<string, unknown> = { stageName, OFID, driveLink };
         if (password) updateBody.newPassword = password;
         const res = await apiRequest(`/api/admin/creators/${initial.uid}`, {
           method: 'PUT',
           body: JSON.stringify(updateBody),
         });
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error ?? 'Update failed');
-        }
+        if (!res.ok) throw new Error(await errorMessage(res, 'Could not save changes'));
 
-        // Upload photo if changed
         if (photoFile) {
-          const imageData = await toBase64(photoFile);
-          const photoRes = await apiRequest(`/api/admin/creators/${initial.uid}/photo`, {
-            method: 'POST',
-            body: JSON.stringify({ imageData, contentType: photoFile.type }),
-          });
-          if (!photoRes.ok) throw new Error('Photo upload failed');
+          const photoRes = await uploadPhoto(initial.uid, photoFile);
+          if (!photoRes.ok) throw new Error(await errorMessage(photoRes, 'Details saved, but the photo did not upload'));
         }
+        toast.success(`${stageName} updated`);
       } else {
-        // Create new
         const res = await apiRequest('/api/admin/creators', {
           method: 'POST',
           body: JSON.stringify({ stageName, userEmail, password, OFID, driveLink }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? 'Create failed');
+        if (!res.ok) throw new Error(await errorMessage(res, 'Could not add the creator'));
+        const data = (await res.json()) as { uid?: string };
 
-        // Upload photo for new creator
-        if (photoFile && data.uid) {
-          const imageData = await toBase64(photoFile);
-          await apiRequest(`/api/admin/creators/${data.uid}/photo`, {
-            method: 'POST',
-            body: JSON.stringify({ imageData, contentType: photoFile.type }),
+        // The account exists at this point, so a failed photo must not read as a
+        // failed create — the admin would add them a second time.
+        const photoRes = photoFile && data.uid ? await uploadPhoto(data.uid, photoFile).catch(() => null) : undefined;
+        if (photoRes === null || (photoRes && !photoRes.ok)) {
+          toast.warning(`${stageName} added, but the photo did not upload.`, {
+            description: 'Edit the creator to try the photo again.',
+          });
+        } else {
+          toast.success(`${stageName} added`, {
+            description: 'Copy their Telegram link from the row menu so they can sign in.',
           });
         }
       }
 
-      onSave();
+      onSaved();
     } catch (err: unknown) {
-      setError((err as Error).message ?? 'An error occurred');
+      setError(err instanceof Error ? err.message : 'Something went wrong. Try again.');
     } finally {
       setSaving(false);
+      onBusyChange(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>{isEdit ? 'Edit Creator' : 'Add Creator'}</CardTitle>
-        </CardHeader>
-        <form onSubmit={handleSubmit}>
-          <CardContent className="flex flex-col gap-4">
-            {/* Profile picture */}
-            <div className="flex flex-col items-center gap-2">
-              <Avatar
-                className="size-20 cursor-pointer border border-zinc-700"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {photoPreview && <AvatarImage src={photoPreview} alt="Profile preview" className="object-cover" />}
-                <AvatarFallback className="bg-zinc-800">
-                  <UserCircle className="w-10 h-10 text-zinc-500" />
-                </AvatarFallback>
-              </Avatar>
-              <Button
-                type="button"
-                variant="ghost"
-                className="text-xs text-zinc-400 hover:text-white h-auto px-2 py-1"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {photoPreview ? 'Change photo' : 'Upload photo'}
-              </Button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/gif,image/webp"
-                className="hidden"
-                onChange={handlePhotoChange}
-              />
-            </div>
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <DialogHeader>
+        <DialogTitle>{isEdit ? `Edit ${initial?.stageName}` : 'Add creator'}</DialogTitle>
+        <DialogDescription>
+          {isEdit
+            ? 'Changes apply to their portal account straight away.'
+            : 'Creates their portal account. They sign in through Telegram once you send them a link.'}
+        </DialogDescription>
+      </DialogHeader>
 
-            {/* Stage name */}
-            <div>
-              <label className="block text-sm text-zinc-400 mb-1">Stage Name</label>
-              <input
-                type="text"
-                value={stageName}
-                onChange={e => setStageName(e.target.value)}
-                required
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
-              />
-            </div>
+      {/* One target for the photo: the avatar and its caption are one button. */}
+      <button
+        type="button"
+        onClick={() => fileInputRef.current?.click()}
+        className="group mx-auto flex flex-col items-center gap-2 rounded-lg p-1 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      >
+        <Avatar className="size-20 border border-white/[0.07]">
+          {photoPreview && <AvatarImage src={photoPreview} alt="" className="object-cover" />}
+          <AvatarFallback className="bg-white/[0.04]">
+            <UserCircle aria-hidden className="size-10 text-zinc-500" />
+          </AvatarFallback>
+        </Avatar>
+        <span className="text-xs text-zinc-400 transition-colors group-hover:text-white">
+          {photoPreview ? 'Change photo' : 'Upload photo'}
+        </span>
+      </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/gif,image/webp"
+        className="hidden"
+        onChange={handlePhotoChange}
+      />
 
-            {/* OFID */}
-            <div>
-              <label className="block text-sm text-zinc-400 mb-1">OFID</label>
-              <div className="flex">
-                <span className="bg-zinc-700 border border-r-0 border-zinc-700 rounded-l-lg px-3 py-2 text-sm text-zinc-400">@</span>
-                <input
-                  type="text"
-                  value={OFID.startsWith('@') ? OFID.slice(1) : OFID}
-                  onChange={e => setOFID('@' + e.target.value)}
-                  required
-                  className="flex-1 bg-zinc-800 border border-zinc-700 rounded-r-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
-                  placeholder="handle"
-                />
-              </div>
-            </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="creator-stage-name" className="text-xs text-zinc-400">Stage name</Label>
+        <Input
+          id="creator-stage-name"
+          value={stageName}
+          onChange={e => setStageName(e.target.value)}
+          required
+          autoFocus={!isEdit}
+        />
+      </div>
 
-            {/* Drive Link */}
-            <div>
-              <label className="block text-sm text-zinc-400 mb-1">Google Drive Link</label>
-              <input
-                type="url"
-                value={driveLink}
-                onChange={e => setDriveLink(e.target.value)}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
-                placeholder="https://drive.google.com/..."
-              />
-            </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="creator-ofid" className="text-xs text-zinc-400">OFID</Label>
+        <div className="flex">
+          <span
+            aria-hidden
+            className="flex items-center rounded-l-md border border-r-0 border-input bg-white/[0.04] px-3 text-sm text-zinc-400"
+          >
+            @
+          </span>
+          <Input
+            id="creator-ofid"
+            value={OFID.startsWith('@') ? OFID.slice(1) : OFID}
+            onChange={e => setOFID('@' + e.target.value.replace(/^@+/, ''))}
+            required
+            placeholder="handle"
+            autoComplete="off"
+            className="rounded-l-none"
+          />
+        </div>
+      </div>
 
-            {/* Timezone — reported, not set. See `detectedTimezone` above. */}
-            <div>
-              <label className="block text-sm text-zinc-400 mb-1">Timezone</label>
-              <p className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-300">
-                {detectedTimezone ? timezoneLabel(detectedTimezone) : 'Not detected yet'}
-              </p>
-              <p className="mt-1 text-xs text-zinc-400">
-                {detectedTimezone
-                  ? "Detected from this creator's device. Due dates are judged against it."
-                  : 'Detected automatically the first time this creator signs in.'}
-              </p>
-            </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="creator-drive" className="text-xs text-zinc-400">
+          Google Drive link <span className="font-normal">(optional)</span>
+        </Label>
+        <Input
+          id="creator-drive"
+          type="url"
+          value={driveLink}
+          onChange={e => setDriveLink(e.target.value)}
+          placeholder="https://drive.google.com/…"
+        />
+      </div>
 
-            {/* Email */}
-            <div>
-              <label className="block text-sm text-zinc-400 mb-1">Email</label>
-              <input
-                type="email"
-                value={userEmail}
-                onChange={e => setUserEmail(e.target.value)}
-                required={!isEdit}
-                disabled={isEdit}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              />
-            </div>
+      {/* Timezone — reported, not set. See `detectedTimezone` above. */}
+      <div className="space-y-1.5">
+        <p className="text-xs font-medium text-zinc-400">Timezone</p>
+        <p className="text-sm">
+          {detectedTimezone ? timezoneLabel(detectedTimezone) : <span className="text-zinc-400">Not detected yet</span>}
+        </p>
+        <p className="text-xs text-zinc-400">
+          {detectedTimezone
+            ? "Detected from this creator's device. Due dates are judged against it."
+            : 'Detected automatically the first time this creator signs in.'}
+        </p>
+      </div>
 
-            {/* Password */}
-            <div>
-              <label className="block text-sm text-zinc-400 mb-1">
-                {isEdit ? 'New Password (optional)' : 'Password'}
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  required={!isEdit}
-                  autoComplete="new-password"
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 pr-10 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
-                  placeholder={isEdit ? 'Leave blank to keep current' : 'Enter password'}
-                />
-                <button
-                  type="button"
-                  onClick={copyPassword}
-                  disabled={!password}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                >
-                  {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="creator-email" className="text-xs text-zinc-400">Email</Label>
+        <Input
+          id="creator-email"
+          type="email"
+          value={userEmail}
+          onChange={e => setUserEmail(e.target.value)}
+          required={!isEdit}
+          disabled={isEdit}
+          autoComplete="off"
+        />
+      </div>
 
-            {error && <p className="text-red-400 text-sm">{error}</p>}
-          </CardContent>
-          <CardFooter className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={saving}>
-              {saving ? 'Saving...' : isEdit ? 'Save Changes' : 'Add Creator'}
-            </Button>
-          </CardFooter>
-        </form>
-      </Card>
-    </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="creator-password" className="text-xs text-zinc-400">
+          {isEdit ? 'New password (optional)' : 'Password'}
+        </Label>
+        <div className="relative">
+          <Input
+            id="creator-password"
+            type="text"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            required={!isEdit}
+            autoComplete="new-password"
+            placeholder={isEdit ? 'Leave blank to keep current' : undefined}
+            className="pr-10"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={copyPassword}
+            disabled={!password}
+            aria-label={copied ? 'Password copied' : 'Copy password'}
+            className="absolute top-1/2 right-1.5 -translate-y-1/2 text-zinc-400 hover:text-white"
+          >
+            {copied ? <Check aria-hidden className="text-green-400" /> : <Copy aria-hidden />}
+          </Button>
+        </div>
+      </div>
+
+      {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
+
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={saving}>
+          {saving && <Loader2Icon aria-hidden className="activity-spinner" />}
+          {isEdit ? 'Save changes' : 'Add creator'}
+        </Button>
+      </DialogFooter>
+    </form>
   );
 }
 
@@ -335,6 +372,8 @@ function CreatorFormCard({ initial, onSave, onCancel }: CreatorFormCardProps) {
 
 interface CreatorTableProps {
   list: Creator[];
+  /** The one quiet line shown when the list is empty. */
+  emptyMessage: string;
   onEdit: (creator: Creator) => void;
   onToggleActive: (creator: Creator) => void;
   onArchive: (creator: Creator) => void;
@@ -346,7 +385,7 @@ interface CreatorTableProps {
 }
 
 function CreatorTable({
-  list, onEdit, onToggleActive, onArchive, onRestore, onDelete,
+  list, emptyMessage, onEdit, onToggleActive, onArchive, onRestore, onDelete,
   onTelegramLink, onTelegramDisconnect, onManageSubAccounts,
 }: CreatorTableProps) {
   // Tracks the *collapsed* rows rather than the expanded ones, so every creator
@@ -364,20 +403,18 @@ function CreatorTable({
 
   if (list.length === 0) {
     return (
-      <div className="rounded-lg p-8 text-center mt-4" style={{ background: 'var(--sidebar-background)', border: '1px solid var(--border-subtle)' }}>
-        <p className="text-sm text-muted-foreground">No creators found.</p>
-      </div>
+      <p className="py-8 text-sm text-zinc-400">{emptyMessage}</p>
     );
   }
 
   return (
-    <div className="mt-4 rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border-subtle)' }}>
+    <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border-subtle)' }}>
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead className="w-8"><span className="sr-only">Expand</span></TableHead>
-            <TableHead className="w-12"></TableHead>
-            <TableHead>Stage Name</TableHead>
+            <TableHead className="w-12"><span className="sr-only">Photo</span></TableHead>
+            <TableHead>Stage name</TableHead>
             <TableHead>Email</TableHead>
             <TableHead>OFID</TableHead>
             <TableHead>
@@ -385,8 +422,12 @@ function CreatorTable({
                 Status
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button type="button" className="text-zinc-500 hover:text-zinc-300 transition-colors">
-                      <Info className="w-3.5 h-3.5" />
+                    <button
+                      type="button"
+                      aria-label="About deactivating and archiving"
+                      className="rounded-sm text-zinc-500 outline-none transition-colors hover:text-zinc-300 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    >
+                      <Info aria-hidden className="size-3.5" />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs">
@@ -403,8 +444,12 @@ function CreatorTable({
                 Telegram
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button type="button" className="text-zinc-500 hover:text-zinc-300 transition-colors">
-                      <Info className="w-3.5 h-3.5" />
+                    <button
+                      type="button"
+                      aria-label="About Telegram sign-in"
+                      className="rounded-sm text-zinc-500 outline-none transition-colors hover:text-zinc-300 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    >
+                      <Info aria-hidden className="size-3.5" />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs">
@@ -413,7 +458,7 @@ function CreatorTable({
                 </Tooltip>
               </span>
             </TableHead>
-            <TableHead className="w-12"></TableHead>
+            <TableHead className="w-12"><span className="sr-only">Actions</span></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -452,13 +497,13 @@ function CreatorTable({
                   <TableCell className="font-medium">
                     {creator.stageName}
                     {hasSubAccounts && !expanded && (
-                      <span className="ml-2 text-xs font-normal text-zinc-400">
+                      <span className="ml-2 text-xs font-normal text-zinc-400 tabular-nums">
                         +{subAccounts.length} sub-account{subAccounts.length === 1 ? '' : 's'}
                       </span>
                     )}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">{creator.userEmail}</TableCell>
-                  <TableCell className="text-muted-foreground">{creator.OFID}</TableCell>
+                  <TableCell className="text-zinc-400">{creator.userEmail}</TableCell>
+                  <TableCell className="text-zinc-400">{creator.OFID}</TableCell>
                   <TableCell>
                     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                       creator.isActive
@@ -485,8 +530,8 @@ function CreatorTable({
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreHorizontal className="w-4 h-4" />
+                        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Actions for ${creator.stageName}`}>
+                          <MoreHorizontal aria-hidden className="size-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
@@ -547,7 +592,7 @@ function CreatorTable({
                     </TableCell>
                     <TableCell className="text-sm">{sub.stageName}</TableCell>
                     <TableCell />
-                    <TableCell className="text-muted-foreground">{sub.OFID}</TableCell>
+                    <TableCell className="text-zinc-400">{sub.OFID}</TableCell>
                     <TableCell>
                       {sub.isArchived && (
                         <span className="inline-flex items-center rounded-full bg-zinc-500/10 px-2 py-0.5 text-xs font-medium text-zinc-400">
@@ -565,7 +610,7 @@ function CreatorTable({
                             className="h-8 w-8"
                             aria-label={`Actions for ${sub.stageName}`}
                           >
-                            <MoreHorizontal className="w-4 h-4" />
+                            <MoreHorizontal aria-hidden className="size-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
@@ -591,11 +636,11 @@ function CreatorTable({
 export default function CreatorManagementPage() {
   const [creators, setCreators] = useState<Creator[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
 
-  // Card / dialog state
-  const [showAddCard, setShowAddCard] = useState(false);
-  const [editingCreator, setEditingCreator] = useState<Creator | null>(null);
+  // Dialog state. `formTarget` is `'new'` for Add, a creator for Edit, null closed.
+  const [formTarget, setFormTarget] = useState<Creator | 'new' | null>(null);
+  const [formBusy, setFormBusy] = useState(false);
   const [deactivateTarget, setDeactivateTarget] = useState<Creator | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Creator | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Creator | null>(null);
@@ -608,8 +653,9 @@ export default function CreatorManagementPage() {
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
       setCreators(data.creators ?? []);
+      setLoadFailed(false);
     } catch {
-      setError('Failed to load creators');
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -624,58 +670,73 @@ export default function CreatorManagementPage() {
   // shared store is the only thing that clears that.
   const refreshCreators = useRefreshCreators();
 
-  const handleFormSave = () => {
-    setShowAddCard(false);
-    setEditingCreator(null);
+  const handleFormSaved = () => {
+    setFormTarget(null);
     fetchCreators();
     refreshCreators();
   };
 
-  const handleToggleActive = async (creator: Creator) => {
+  /**
+   * One write against a creator, reported either way. Every action on this page
+   * used to fire and forget — a refused archive or delete looked exactly like a
+   * successful one, because nothing read the response.
+   */
+  const runAction = async (
+    request: () => Promise<Response>,
+    success: string,
+    failure: string,
+  ): Promise<boolean> => {
     setActionLoading(true);
     try {
-      await apiRequest(`/api/admin/creators/${creator.uid}`, {
-        method: 'PUT',
-        body: JSON.stringify({ isActive: !creator.isActive }),
-      });
+      const res = await request();
+      if (!res.ok) {
+        toast.error(await errorMessage(res, failure));
+        return false;
+      }
+      toast.success(success);
       await fetchCreators();
+      refreshCreators();
+      return true;
+    } catch {
+      toast.error(`${failure}. Check your connection and try again.`);
+      return false;
     } finally {
-      setDeactivateTarget(null);
       setActionLoading(false);
     }
+  };
+
+  const updateCreator = (creator: Creator, body: Record<string, unknown>) => () =>
+    apiRequest(`/api/admin/creators/${creator.uid}`, { method: 'PUT', body: JSON.stringify(body) });
+
+  const handleToggleActive = async (creator: Creator) => {
+    await runAction(
+      updateCreator(creator, { isActive: !creator.isActive }),
+      creator.isActive ? `${creator.stageName} deactivated` : `${creator.stageName} reactivated`,
+      creator.isActive ? `Could not deactivate ${creator.stageName}` : `Could not reactivate ${creator.stageName}`,
+    );
+    setDeactivateTarget(null);
   };
 
   const handleArchive = async (creator: Creator) => {
-    setActionLoading(true);
-    try {
-      await apiRequest(`/api/admin/creators/${creator.uid}`, {
-        method: 'PUT',
-        body: JSON.stringify({ isArchived: true, isActive: false }),
-      });
-      await fetchCreators();
-    } finally {
-      setArchiveTarget(null);
-      setDeleteTarget(null);
-      setActionLoading(false);
-    }
+    await runAction(
+      updateCreator(creator, { isArchived: true, isActive: false }),
+      `${creator.stageName} archived`,
+      `Could not archive ${creator.stageName}`,
+    );
+    setArchiveTarget(null);
+    setDeleteTarget(null);
   };
 
-  const handleRestore = async (creator: Creator) => {
-    setActionLoading(true);
-    try {
-      await apiRequest(`/api/admin/creators/${creator.uid}`, {
-        method: 'PUT',
-        // Restore only un-archives (restores employee-side visibility). Portal
-        // login is governed independently by isActive — use Reactivate to grant
-        // it back — so restoring a creator who was deactivated before archiving
-        // must not silently re-enable their portal access.
-        body: JSON.stringify({ isArchived: false }),
-      });
-      await fetchCreators();
-    } finally {
-      setActionLoading(false);
-    }
-  };
+  const handleRestore = (creator: Creator) =>
+    void runAction(
+      // Restore only un-archives (restores employee-side visibility). Portal
+      // login is governed independently by isActive — use Reactivate to grant
+      // it back — so restoring a creator who was deactivated before archiving
+      // must not silently re-enable their portal access.
+      updateCreator(creator, { isArchived: false }),
+      `${creator.stageName} restored`,
+      `Could not restore ${creator.stageName}`,
+    );
 
   /**
    * Mint a one-time connection link and put it on the clipboard for the admin to
@@ -727,74 +788,117 @@ export default function CreatorManagementPage() {
   };
 
   const handleDelete = async (creator: Creator) => {
-    setActionLoading(true);
-    try {
-      await apiRequest(`/api/admin/creators/${creator.uid}`, { method: 'DELETE' });
-      await fetchCreators();
-    } finally {
-      setDeleteTarget(null);
-      setActionLoading(false);
-    }
+    await runAction(
+      () => apiRequest(`/api/admin/creators/${creator.uid}`, { method: 'DELETE' }),
+      `${creator.stageName} deleted`,
+      `Could not delete ${creator.stageName}`,
+    );
+    setDeleteTarget(null);
   };
 
   const activeCreators = creators.filter(c => !c.isArchived);
   const archivedCreators = creators.filter(c => c.isArchived);
 
+  const tableHandlers = {
+    onEdit: setFormTarget,
+    onToggleActive: setDeactivateTarget,
+    onArchive: setArchiveTarget,
+    onRestore: handleRestore,
+    onDelete: setDeleteTarget,
+    onManageSubAccounts: setSubAccountTarget,
+    onTelegramLink: handleTelegramLink,
+    onTelegramDisconnect: handleTelegramDisconnect,
+  };
+
   return (
     <AppLayout>
-      <div className="max-w-5xl">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold tracking-tight">Creator Management</h1>
-          <Button onClick={() => setShowAddCard(true)}>Add Creator</Button>
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="mb-1 text-2xl font-bold tracking-tight">Creator Management</h1>
+            <p className="text-sm text-zinc-400">
+              Creators&apos; portal accounts, the other accounts they run, and how each one signs in.
+            </p>
+          </div>
+          <Button onClick={() => setFormTarget('new')}>
+            <Plus aria-hidden />
+            Add creator
+          </Button>
         </div>
 
-        {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
-        {error && <p className="text-sm text-red-400">{error}</p>}
-
-        {!loading && (
-          <Tabs defaultValue="active">
+        {loading ? (
+          // Shaped to the table: tab strip, then avatar + four text columns.
+          <div className="flex flex-col gap-2" aria-busy="true" aria-label="Loading creators">
+            <Skeleton className="h-9 w-56 rounded-lg" />
+            <div className="rounded-lg border" style={{ borderColor: 'var(--border-subtle)' }}>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-4 border-b px-4 py-3 last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                  <Skeleton className="size-8 shrink-0 rounded-full" />
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="ml-auto h-5 w-16 rounded-full" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : loadFailed && creators.length === 0 ? (
+          <p role="alert" className="py-8 text-sm text-zinc-400">
+            Could not load creators.{' '}
+            <button
+              type="button"
+              onClick={() => { setLoading(true); fetchCreators(); }}
+              className="rounded-sm text-zinc-200 underline-offset-2 outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              Try again
+            </button>
+          </p>
+        ) : (
+          <Tabs defaultValue="active" className="gap-4">
             <TabsList>
-              <TabsTrigger value="active">Active ({activeCreators.length})</TabsTrigger>
-              <TabsTrigger value="archived">Archived ({archivedCreators.length})</TabsTrigger>
+              <TabsTrigger value="active">
+                Active <span className="text-zinc-400 tabular-nums">{activeCreators.length}</span>
+              </TabsTrigger>
+              <TabsTrigger value="archived">
+                Archived <span className="text-zinc-400 tabular-nums">{archivedCreators.length}</span>
+              </TabsTrigger>
             </TabsList>
             <TabsContent value="active">
               <CreatorTable
                 list={activeCreators}
-                onEdit={setEditingCreator}
-                onToggleActive={setDeactivateTarget}
-                onArchive={setArchiveTarget}
-                onRestore={handleRestore}
-                onDelete={setDeleteTarget}
-                onManageSubAccounts={setSubAccountTarget}
-                onTelegramLink={handleTelegramLink}
-                onTelegramDisconnect={handleTelegramDisconnect}
+                emptyMessage="No creators yet. Add one to give them a portal account."
+                {...tableHandlers}
               />
             </TabsContent>
             <TabsContent value="archived">
               <CreatorTable
                 list={archivedCreators}
-                onEdit={setEditingCreator}
-                onToggleActive={setDeactivateTarget}
-                onArchive={setArchiveTarget}
-                onRestore={handleRestore}
-                onDelete={setDeleteTarget}
-                onManageSubAccounts={setSubAccountTarget}
-                onTelegramLink={handleTelegramLink}
-                onTelegramDisconnect={handleTelegramDisconnect}
+                emptyMessage="No archived creators."
+                {...tableHandlers}
               />
             </TabsContent>
           </Tabs>
         )}
       </div>
 
-      {/* Add / Edit form */}
-      {(showAddCard || editingCreator) && (
-        <CreatorFormCard
-          initial={editingCreator}
-          onSave={handleFormSave}
-          onCancel={() => { setShowAddCard(false); setEditingCreator(null); }}
-        />
-      )}
+      {/* Add / Edit. The form is keyed so each open starts from its own record,
+          and the dialog cannot be dismissed mid-save. */}
+      <Dialog
+        open={formTarget !== null}
+        onOpenChange={open => { if (!open && !formBusy) setFormTarget(null); }}
+      >
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
+          {formTarget !== null && (
+            <CreatorForm
+              key={formTarget === 'new' ? 'new' : formTarget.uid}
+              initial={formTarget === 'new' ? null : formTarget}
+              onSaved={handleFormSaved}
+              onCancel={() => setFormTarget(null)}
+              onBusyChange={setFormBusy}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Sub-accounts — the other accounts a creator runs. Each is assignable
           to a shift on its own and counts once toward that agent's hourly rate,
@@ -811,7 +915,7 @@ export default function CreatorManagementPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {deactivateTarget?.isActive ? 'Deactivate Creator' : 'Reactivate Creator'}
+              {deactivateTarget?.isActive ? `Deactivate ${deactivateTarget.stageName}?` : `Reactivate ${deactivateTarget?.stageName}?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {deactivateTarget?.isActive
@@ -826,7 +930,7 @@ export default function CreatorManagementPage() {
               disabled={actionLoading}
               onClick={() => deactivateTarget && handleToggleActive(deactivateTarget)}
             >
-              Confirm
+              {deactivateTarget?.isActive ? 'Deactivate' : 'Reactivate'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -836,7 +940,7 @@ export default function CreatorManagementPage() {
       <AlertDialog open={!!archiveTarget} onOpenChange={open => { if (!open) setArchiveTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Archive Creator</AlertDialogTitle>
+            <AlertDialogTitle>Archive {archiveTarget?.stageName}?</AlertDialogTitle>
             <AlertDialogDescription>
               This will deactivate {archiveTarget?.stageName}&apos;s account and remove them from active operations. Their data will not be deleted.
             </AlertDialogDescription>
@@ -847,7 +951,7 @@ export default function CreatorManagementPage() {
               disabled={actionLoading}
               onClick={() => archiveTarget && handleArchive(archiveTarget)}
             >
-              Confirm
+              Archive
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -857,7 +961,7 @@ export default function CreatorManagementPage() {
       <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Creator</AlertDialogTitle>
+            <AlertDialogTitle>Delete {deleteTarget?.stageName}?</AlertDialogTitle>
             <AlertDialogDescription>
               Deletion is permanent and cannot be undone. Consider archiving instead to preserve data while removing access.
             </AlertDialogDescription>
@@ -869,14 +973,14 @@ export default function CreatorManagementPage() {
               disabled={actionLoading}
               onClick={() => deleteTarget && handleArchive(deleteTarget)}
             >
-              Archive Instead
+              Archive instead
             </Button>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className={buttonVariants({ variant: 'destructive' })}
               disabled={actionLoading}
               onClick={() => deleteTarget && handleDelete(deleteTarget)}
             >
-              Confirm Delete
+              Delete permanently
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

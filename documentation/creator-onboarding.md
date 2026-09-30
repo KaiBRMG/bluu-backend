@@ -82,7 +82,7 @@ Two more guards before any automatic send: **one auto-reply per address per 14 d
 
 ## Approval → the welcome email
 
-Approving an application on Model Submissions raises a non-modal card (bottom-right, banner layer): *"Email {name} their onboarding link?"*. It never takes focus, so a reviewer approving a run of applicants keeps working the grid. Approved cards also carry an **Invite / Invited** action to send later or re-send.
+Approving an application on Model Submissions raises a non-modal card (top-right under the top bar, banner layer — bottom-right is reserved for toasts; DESIGN.md §5 The Corner Rule): *"Email {name} their onboarding link?"*. It never takes focus, so a reviewer approving a run of applicants keeps working the grid. Approved cards also carry an **Invite / Invited** action to send later or re-send.
 
 `POST /api/creator-onboarding/invite` refuses unless the application is `approved` and has an email, and refuses a re-send once the form is completed. It creates `creator-onboarding/{id}` (first time, with **prefilled answers**) or **rotates the link** (re-send), then sends **"Welcome to BLUU ROCK 🎉"** from `hello@bluurock.com` with Resend idempotency key `onboarding-invite/<id>/<n>`. Either page permission (`apps-model-submissions` or `creators-onboarding`) may call it — both pages already show that applicant.
 
@@ -140,7 +140,8 @@ Model Submissions itself moved into the Creator Portal on 2026-09-28 (`/creator-
 2. Resend → Webhooks → add `https://bluu-backend.vercel.app/api/email/inbound` for `email.received`; copy its signing secret into `RESEND_WEBHOOK_SECRET` on Vercel.
 3. Create a full-access API key → `RESEND_INBOUND_API_KEY` on Vercel.
 4. Gmail (hello@) → Settings → Forwarding → add `hello@<id>.resend.app`. Gmail emails a confirmation to that address: it arrives in **Onboarding → Inbox** (filter "Filtered out" / "All", verdict *Automated*) with the link clickable — open it to confirm. Then enable forwarding (keep Gmail's copy).
-5. Seed the page permission (above) and deploy the Firestore rules + indexes.
+5. **The website contact form needs its own route in.** It sends **from hello@ to hello@**, and Gmail does not auto-forward mail the account itself sent — so step 4 never passes these on, and they never reach Resend. In the form's notification settings, add the Resend receiving address as a second recipient (or BCC) alongside hello@. The filter already handles this shape: the reply goes to the `Email:` in the body (fixture: "website form sent from hello@ to hello@"), and a form with no email in it hits the loop guard instead of replying to hello@. If a form message ever arrives by both routes, the 14-day per-address window stops a second reply.
+6. Seed the page permission (above) and deploy the Firestore rules + indexes.
 
 ## Rules for changing this subsystem
 

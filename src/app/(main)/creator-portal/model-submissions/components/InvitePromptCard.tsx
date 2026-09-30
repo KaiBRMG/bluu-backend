@@ -20,9 +20,15 @@ interface InvitePromptCardProps {
  * A card, not a modal: a reviewer approving a run of applicants should be able
  * to keep working the grid and answer the card when they choose, and a dialog
  * would steal focus on every approval. For the same reason it never takes focus
- * itself; the dialog role and its label announce it. Pinned to the viewport corner on the
- * banner layer, opaque (it floats over the photo grid, where the overlay recipe
- * would let photos bleed through its text).
+ * itself; the dialog role and its label announce it. Opaque, because it floats
+ * over the photo grid, where the overlay recipe would let photos bleed through
+ * its text.
+ *
+ * TOP-right, never bottom-right (DESIGN.md §5 — The Corner Rule): bottom-right
+ * is where toasts report what just happened, and a prompt waiting for an answer
+ * must not queue up among messages that dismiss themselves. `top-[4.5rem]`
+ * clears the 56px top bar (`h-14`) plus the 16px page gutter, so the card
+ * never covers the notification bell or the user menu.
  */
 export function InvitePromptCard({ name, resend, onSend, onDismiss }: InvitePromptCardProps) {
   const [sending, setSending] = useState(false);
@@ -34,7 +40,7 @@ export function InvitePromptCard({ name, resend, onSend, onDismiss }: InviteProm
       aria-modal="false"
       aria-labelledby="invite-prompt-title"
       aria-describedby="invite-prompt-desc"
-      className="fixed right-4 bottom-4 z-[var(--z-banner)] w-[min(24rem,calc(100vw-2rem))] animate-in fade-in slide-in-from-bottom-2 rounded-xl border border-[#2a2a2a] bg-[#171717] p-4 duration-[120ms]"
+      className="fixed top-[4.5rem] right-4 z-[var(--z-banner)] w-[min(24rem,calc(100vw-2rem))] animate-in fade-in slide-in-from-top-2 rounded-xl border border-[#2a2a2a] bg-[#171717] p-4 duration-[120ms]"
     >
       <div className="flex items-start gap-3">
         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-zinc-300" aria-hidden>

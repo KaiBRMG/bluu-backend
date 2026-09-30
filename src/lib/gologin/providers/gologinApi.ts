@@ -15,12 +15,15 @@
  */
 import {
   GoLoginApiError,
+  isGoLoginProxyMode,
   type GoLoginAccountInfo,
   type GoLoginFolder,
   type GoLoginMember,
   type GoLoginMemberRole,
   type GoLoginProfile,
+  type GoLoginProfileDetail,
   type GoLoginProfilePage,
+  type GoLoginProxyInput,
   type GoLoginShareRole,
   type GoLoginWorkspace,
   type IGoLoginClient,
@@ -111,6 +114,67 @@ function normaliseProfile(raw: Raw): GoLoginProfile | null {
     createdAtMs: ms(raw.createdAt),
     updatedAtMs: ms(raw.updatedAt),
     lastActivityMs: ms(raw.lastActivity),
+  };
+}
+
+/** `osSpec` ships as a string; `isM1` is the older spelling of Apple Silicon. */
+function readOsSpec(raw: Raw): string {
+  if (typeof raw.osSpec === 'string') return raw.osSpec;
+  if (raw.osSpec && typeof raw.osSpec === 'object') return str(raw.osSpec.value) || str(raw.osSpec.name);
+  return raw.isM1 === true ? 'M1' : '';
+}
+
+function obj(value: unknown): Raw {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Raw) : {};
+}
+
+/**
+ * The Edit panel's projection. Same boundary as `normaliseProfile`, one step
+ * wider: fingerprint facts are read (to be *shown*, never edited), and the proxy
+ * password is reduced to a boolean. `facebookAccountData`, `sharedEmails` and
+ * `permissions` are still dropped.
+ */
+function normaliseProfileDetail(raw: Raw): GoLoginProfileDetail {
+  const base = normaliseProfile(raw);
+  if (!base) throw new GoLoginApiError('GoLogin returned a profile with no id.', 502);
+  const navigator = obj(raw.navigator);
+  const webgl = obj(raw.webGLMetadata);
+  const proxy = obj(raw.proxy);
+  const timezone = obj(raw.timezone);
+  return {
+    id: base.id,
+    name: base.name,
+    notes: base.notes,
+    os: base.os,
+    osSpec: readOsSpec(raw),
+    browserType: base.browserType,
+    userAgent: str(navigator.userAgent),
+    resolution: str(navigator.resolution),
+    language: str(navigator.language),
+    platform: str(navigator.platform),
+    hardwareConcurrency: num(navigator.hardwareConcurrency),
+    deviceMemory: num(navigator.deviceMemory),
+    webglVendor: str(webgl.vendor),
+    webglRenderer: str(webgl.renderer),
+    webRtcMode: str(obj(raw.webRTC).mode),
+    canvasMode: str(obj(raw.canvas).mode),
+    // GoLogin's default is to derive the zone from the proxy's IP, so only an
+    // explicit `false` means it was pinned by hand.
+    timezoneFromIp: timezone.fillBasedOnIp !== false,
+    timezone: str(timezone.timezone),
+    autoLang: raw.autoLang === true,
+    proxy: {
+      mode: str(proxy.mode) || str(raw.proxyType) || 'none',
+      host: str(proxy.host) || str(raw.host),
+      port: num(proxy.port) ?? num(raw.port),
+      username: str(proxy.username),
+      hasPassword: !!str(proxy.password),
+    },
+    folders: base.folders,
+    isRunning: base.isRunning,
+    createdAtMs: base.createdAtMs,
+    updatedAtMs: base.updatedAtMs,
+    lastActivityMs: base.lastActivityMs,
   };
 }
 
@@ -210,7 +274,7 @@ function normaliseWorkspace(raw: Raw): GoLoginWorkspace {
 // ─── Client ─────────────────────────────────────────────────────────
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   body?: unknown;
   /** Some endpoints answer 201/204 with an empty body; do not try to parse one. */
   expectBody?: boolean;
@@ -390,6 +454,131 @@ class GoLoginApiClient implements IGoLoginClient {
       `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(memberId)}`,
       { method: 'DELETE', expectBody: false },
     );
+  }
+
+  // ─── Profile management ───────────────────────────────────────────
+  //
+  // ⚠ `PUT /browser/{id}/custom` is never called from here. GoLogin documents
+  // that it re-randomises every parameter the body omits, so an "edit the name"
+  // through it would re-roll the fingerprint of a logged-in account. Each method
+  // below touches only the field it is named for.
+
+  /** The raw profile document. Never returned above this file. */
+  private rawProfile(profileId: string): Promise<Raw> {
+    return this.request(`/browser/${encodeURIComponent(profileId)}`);
+  }
+
+  async getProfile(profileId: string): Promise<GoLoginProfile> {
+    const row = normaliseProfile(await this.rawProfile(profileId));
+    if (!row) throw new GoLoginApiError('GoLogin returned a profile with no id.', 502);
+    return row;
+  }
+
+  async getProfileDetail(profileId: string): Promise<GoLoginProfileDetail> {
+    return normaliseProfileDetail(await this.rawProfile(profileId));
+  }
+
+  async getProfileProxySecret(
+    profileId: string,
+  ): Promise<(GoLoginProxyInput & { password: string }) | null> {
+    const raw = await this.rawProfile(profileId);
+    const proxy = obj(raw.proxy);
+    const mode = str(proxy.mode);
+    const port = num(proxy.port);
+    if (!isGoLoginProxyMode(mode) || !str(proxy.host) || port === null) return null;
+    return {
+      mode,
+      host: str(proxy.host),
+      port,
+      username: str(proxy.username),
+      password: str(proxy.password),
+    };
+  }
+
+  async quickCreateProfile(params: {
+    name: string;
+    os: string;
+    osSpec: string;
+    workspaceId: string;
+  }): Promise<string> {
+    const { name, os, osSpec, workspaceId } = params;
+    const query = workspaceId ? `?currentWorkspace=${encodeURIComponent(workspaceId)}` : '';
+    const body = await this.request(`/browser/quick${query}`, {
+      method: 'POST',
+      body: { name, os, osSpec },
+    });
+    // The response schema is undocumented; GoLogin's own quickstart reads
+    // `profile.id` off it. `_id` is probed for the same reason every other
+    // normaliser here probes it.
+    const id = str(body.id) || str(body._id);
+    if (!id) {
+      throw new GoLoginApiError('GoLogin created the profile but did not return its id.', 502);
+    }
+    return id;
+  }
+
+  async renameProfile(profileId: string, name: string): Promise<void> {
+    await this.request('/browser/name/many', {
+      method: 'PATCH',
+      body: [{ profileId, name }],
+      expectBody: false,
+    });
+  }
+
+  async setProfileNotes(profileId: string, notes: string): Promise<void> {
+    // GoLogin's own SDK `update()`: read the whole document, change one field,
+    // write the whole document back. The fingerprint travels back untouched.
+    const raw = await this.rawProfile(profileId);
+    await this.request(`/browser/${encodeURIComponent(profileId)}`, {
+      method: 'PUT',
+      body: { ...raw, notes },
+      expectBody: false,
+    });
+  }
+
+  async setProfileProxy(profileId: string, proxy: GoLoginProxyInput | null): Promise<void> {
+    let payload: Raw;
+    if (!proxy) {
+      payload = { mode: 'none' };
+    } else {
+      let password = proxy.password;
+      if (password === undefined) {
+        // "Keep the stored password": read it back here, inside the adapter, so
+        // the secret never has to pass through a caller or a renderer.
+        password = (await this.getProfileProxySecret(profileId))?.password ?? '';
+      }
+      payload = { ...proxy, password };
+    }
+    await this.request('/browser/proxy/many/v2', {
+      method: 'PATCH',
+      body: { proxies: [{ profileId, proxy: payload }] },
+      expectBody: false,
+    });
+  }
+
+  async deleteProfiles(profileIds: string[]): Promise<void> {
+    if (!profileIds.length) return;
+    await this.request('/browser', {
+      method: 'DELETE',
+      body: { profilesToDelete: profileIds },
+      expectBody: false,
+    });
+  }
+
+  async restoreProfiles(profileIds: string[], workspaceId: string): Promise<void> {
+    if (!profileIds.length) return;
+    await this.request('/deleted-profiles/restore', {
+      method: 'POST',
+      body: { profileIds, workspaceId },
+      expectBody: false,
+    });
+  }
+
+  async deleteFolder(folderName: string): Promise<void> {
+    await this.request(`/folders/folder?name=${encodeURIComponent(folderName)}`, {
+      method: 'DELETE',
+      expectBody: false,
+    });
   }
 }
 

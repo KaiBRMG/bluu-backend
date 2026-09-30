@@ -18,11 +18,14 @@ import {
 import { Sparkline } from './Sparkline';
 import { ScrapeFailedBadge } from './growthUi';
 import {
-  AnimatedCount, ReadFreshness, RefreshCountdown, RefreshStatePill, VelocityValue,
+  AnimatedCount, PostScheduleLine, RefreshStatePill, VelocityValue,
   postExcerpt, useSlowTick,
 } from './postUi';
 import { cn } from '@/lib/utils';
-import { formatCompact, formatCount, formatDelta, type SeriesPoint } from '@/lib/growth/metrics';
+import {
+  formatCompact, formatCount, formatDelta, readProblemOf,
+  type SeriesPoint,
+} from '@/lib/growth/metrics';
 import {
   MANUAL_SYNC_COOLDOWN_MS,
   METRIC_LABEL,
@@ -74,14 +77,21 @@ const BREAKDOWN: Array<{ metric: PostMetric; icon: LucideIcon }> = [
   ...STRIP.slice(3),
 ];
 
+/**
+ * What every change figure on a post card is measured over: the post's whole
+ * tracked life, first reading to latest. Deliberately **not** the follower
+ * window — see "Measured over the post's whole tracked life" below.
+ */
+const SPAN_LABEL = 'since tracked';
+
 export interface PostCardFigures {
   /** Latest reading per strip metric — absolute, as X states them. */
   totals: Partial<Record<PostMetric, number | null>>;
   /** Latest total engagement. */
   engagement: number | null;
-  /** Engagement gained over the panel's window. */
+  /** Engagement gained between the first reading and the latest. */
   delta: PostDelta;
-  /** Engagement *per day* between each pair of readings in the window. */
+  /** Engagement *per day* between each pair of readings, whole tracked life. */
   rateSpark: SeriesPoint[];
   /** The rate across the two most recent readings — the sparkline's last value. */
   velocity: PostVelocity | null;
@@ -104,17 +114,19 @@ export interface PostCardFigures {
  * post. That placement is not decoration — it is the layout the reader already
  * has memorised, so five numbers land without a single label being read.
  *
- * ── Everything on this card is measured over the panel's window ─────────────
+ * ── Measured over the post's whole tracked life ─────────────────────────────
  * The headline figure is where the post stands *now*; the change beside it and
- * the sparkline under it are both scoped to the window chosen in the panel
- * header, exactly as the follower section above scopes its own. One control, one
- * meaning, applied to every number on the panel that can carry a window.
+ * the sparkline under it cover every reading since tracking began. They used to
+ * follow the panel's follower window, which was the wrong clock: a post does
+ * most of its moving in its first day or two, read every 6–12 hours, so the
+ * follower range steps either clipped the rise or held a single reading and
+ * drew nothing. Over the whole life the rate trace shows the spike *and* the
+ * decay, which is the shape it exists to show.
  *
- * A post with fewer than two readings inside the window renders `—` and a dashed
- * hairline rather than a zero. "Nothing was measured in this window" and "this
- * did not change" are different facts, and a `0` meaning the first is a lie the
- * reader cannot detect — which is exactly why a **frozen** post reads as blank
- * under a short window instead of as flat.
+ * A post with fewer than two readings renders `—` and a dashed hairline rather
+ * than a zero. "Nothing has been measured twice yet" and "this did not change"
+ * are different facts, and a `0` meaning the first is a lie the reader cannot
+ * detect.
  *
  * ── Two things deliberately not copied from `AccountCard` ───────────────────
  * **Colour.** That card tints its figure, its delta and its sparkline green or
@@ -152,18 +164,12 @@ export interface PostCardFigures {
 export const PostCard = memo(function PostCard({
   post,
   figures,
-  windowLabel,
-  from,
   onSync,
   onSetTracking,
   onDelete,
 }: {
   post: GrowthPost;
   figures: PostCardFigures;
-  /** How the window reads in prose — "over 7 days", "all time". */
-  windowLabel: string;
-  /** Window start as a day key, or `null` for all time. */
-  from: string | null;
 } & PostCardActions) {
   const posted = post.postedAt
     ? new Date(post.postedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
@@ -172,7 +178,9 @@ export const PostCard = memo(function PostCard({
   // Same gate as the account card's: a post that is not being refreshed has a
   // frozen `lastReadStatus`, and rendering that as a live failure reports a job
   // that is not running and cannot fail.
-  const readFailed = post.isActive && post.lastReadStatus === 'failed';
+  // A Stopped post shows that instead (through `RefreshStatePill`) — it is the
+  // stronger claim about the same failure, so the two never stack.
+  const readFailed = readProblemOf(post) === 'failed';
 
   return (
     <AccordionItem
@@ -250,7 +258,7 @@ export const PostCard = memo(function PostCard({
             ))}
           </span>
 
-          {/* ── 3 · the headline, and its change over the window ───────── */}
+          {/* ── 3 · the headline, and what it gained while tracked ─────── */}
           <span className="mt-3 mb-2 flex items-baseline justify-between gap-2">
             <span className="flex items-baseline gap-1.5">
               {/* `formatCount`, not the account card's compact form: this panel
@@ -263,7 +271,7 @@ export const PostCard = memo(function PostCard({
               />
               <span className="text-[11px] text-zinc-400">engagement</span>
             </span>
-            <WindowDelta delta={figures.delta} windowLabel={windowLabel} />
+            <TrackedDelta delta={figures.delta} />
           </span>
 
           {/* ── 4 · is it still moving? ─────────────────────────────────
@@ -288,8 +296,6 @@ export const PostCard = memo(function PostCard({
       <AccordionContent className="px-4 pt-0 pb-4">
         <PostCardDetail
           post={post}
-          windowLabel={windowLabel}
-          from={from}
           onSync={onSync}
           onSetTracking={onSetTracking}
           onDelete={onDelete}
@@ -338,19 +344,17 @@ function StripValue({
 }
 
 /**
- * Engagement gained inside the panel's window.
+ * Engagement gained since tracking began — first reading to latest.
  *
- * Green only when there is a real rise to report. A window with fewer than two
- * readings is not zero growth — it is no measurement — so it renders `—` with
- * the reason in its tooltip rather than a confident `+0`.
+ * Green only when there is a real rise to report. A post read only once is not
+ * zero growth — it is no measurement — so it renders `—` with the reason in
+ * its tooltip rather than a confident `+0`.
  */
-function WindowDelta({
+function TrackedDelta({
   delta,
-  windowLabel,
   className,
 }: {
   delta: PostDelta;
-  windowLabel: string;
   className?: string;
 }) {
   if (delta.change === null) {
@@ -358,10 +362,10 @@ function WindowDelta({
       <span
         className={cn('text-xs tabular-nums text-zinc-400', className)}
         title={delta.points === 1
-          ? `Only one refresh landed ${windowLabel} — a change needs two`
-          : `No refreshes landed ${windowLabel}`}
+          ? 'Only one refresh so far — a change needs two'
+          : 'Not refreshed yet'}
       >
-        — <span className="font-normal">{windowLabel}</span>
+        — <span className="font-normal">{SPAN_LABEL}</span>
       </span>
     );
   }
@@ -373,7 +377,7 @@ function WindowDelta({
   return (
     <span className={cn('text-xs font-medium tabular-nums', tone, className)}>
       {formatDelta(delta.change)}
-      <span className="ml-1 font-normal text-zinc-400">{windowLabel}</span>
+      <span className="ml-1 font-normal text-zinc-400">{SPAN_LABEL}</span>
     </span>
   );
 }
@@ -389,44 +393,44 @@ function WindowDelta({
  * ── What it is for, now that the strip carries the numbers ──────────────────
  * It used to be a grid of the same figures the collapsed card now shows, which
  * made opening a card mostly a restatement. Its job is the **second column**:
- * every metric's movement *inside the panel's window*, which is the one thing no
+ * every metric's movement *since tracking began*, which is the one thing no
  * amount of space on the collapsed card could hold. The strip says where a post
- * stands; this says what it did lately, per metric, and the engagement row under
- * the rule is the sum the headline figure reports.
+ * stands; this says what each metric gained while it was watched, and the
+ * engagement row under the rule is the sum the headline figure reports.
+ *
+ * Opening a card also loads the post's untrimmed history (the list payload
+ * ships only the newest readings), so the column and the log below it are the
+ * whole record — not the trimmed tail the collapsed card was drawn from.
  */
 function PostCardDetail({
   post,
-  windowLabel,
-  from,
   onSync,
   onSetTracking,
   onDelete,
 }: {
   post: GrowthPost;
-  windowLabel: string;
-  from: string | null;
 } & PostCardActions) {
   const [syncing, setSyncing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  /** Readings inside the window, newest first — the record behind every figure. */
+  /** Every reading, newest first — the record behind every figure. */
   const readings = useMemo(
-    () => historyKeys(post.history, from).reverse(),
-    [post.history, from],
+    () => historyKeys(post.history).reverse(),
+    [post.history],
   );
 
   const rows = useMemo(() => BREAKDOWN.map(({ metric, icon }) => ({
     metric,
     icon,
     now: post.latest ? metricValue(post.latest, metric) : null,
-    delta: postDeltaFor(post.history, metric, from),
-  })), [post, from]);
+    delta: postDeltaFor(post.history, metric),
+  })), [post]);
 
   const engagementRow = useMemo(() => ({
     now: post.latest ? totalEngagement(post.latest) : null,
-    delta: postDeltaFor(post.history, 'engagement', from),
-  }), [post, from]);
+    delta: postDeltaFor(post.history, 'engagement'),
+  }), [post]);
 
   // Affordance only — the server owns this window and 429s inside it. Subscribed
   // to the slow tick so the button re-enables itself while the card stays open;
@@ -520,21 +524,7 @@ function PostCardDetail({
           now. Grouped because they answer one question: "how current is what I
           am looking at?" */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-white/[0.04] px-3 py-2.5">
-        <div className="space-y-0.5">
-          <p className="text-[11px] text-zinc-400">
-            Refreshed <ReadFreshness post={post} className="inline" />
-          </p>
-          <p className="text-sm text-zinc-200">
-            {post.isActive ? (
-              <>
-                Next refresh{' '}
-                <RefreshCountdown to={post.nextRefreshAt} prefix="in " className="font-medium text-white" />
-              </>
-            ) : (
-              'No further refreshes scheduled'
-            )}
-          </p>
-        </div>
+        <PostScheduleLine post={post} />
         <Button
           variant="outline"
           size="sm"
@@ -553,23 +543,20 @@ function PostCardDetail({
 
       {/* ── The breakdown ───────────────────────────────────────────────
           Every metric the scraper returned inside the same billed result, each
-          with what it did over the panel's window. A real <table>, because two
+          with what it gained since tracking began. A real <table>, because two
           figures per metric with a shared pair of column headings is exactly
           what a table is. */}
       <div className="overflow-x-auto">
         <table className="w-full text-[13px]">
           <caption className="sr-only">
-            Each metric now, and its change {windowLabel}
+            Each metric now, and its change since tracking began
           </caption>
           <thead>
             <tr className="text-[11px] text-zinc-400">
               <th scope="col" className="pb-1.5 text-left font-medium">Metric</th>
               <th scope="col" className="pb-1.5 text-right font-medium">Now</th>
-              {/* `first-letter:`, not `capitalize` — CSS `capitalize` titles
-                  every word, so this column read "Over 7 Days" while the same
-                  string rendered lowercase everywhere else on the panel. */}
-              <th scope="col" className="pb-1.5 text-right font-medium first-letter:uppercase">
-                {windowLabel}
+              <th scope="col" className="pb-1.5 text-right font-medium">
+                Since tracked
               </th>
             </tr>
           </thead>
@@ -625,8 +612,8 @@ function PostCardDetail({
 
       {/* The reading log. This is what makes every number above a measurement
           rather than a claim: each row is a moment something was actually read.
-          Scoped to the window like everything else, so the log and the sparkline
-          on the card describe the same stretch of time. */}
+          The whole record, like the card's sparkline, so the two describe the
+          same stretch of time. */}
       <div>
         <div className="mb-1.5 flex items-baseline justify-between gap-2">
           {/* The plain label step, not the sidebar eyebrow — see `SectionLabel`
@@ -634,14 +621,11 @@ function PostCardDetail({
               which sit under the sheet's own `<h2>` title. */}
           <h4 className="text-xs font-medium text-zinc-400">Engagement per refresh</h4>
           <span className="text-[11px] tabular-nums text-zinc-400">
-            {readings.length} {readings.length === 1 ? 'refresh' : 'refreshes'} {windowLabel}
+            {readings.length} {readings.length === 1 ? 'refresh' : 'refreshes'}
           </span>
         </div>
         {readings.length === 0 ? (
-          <p className="text-[11px] text-zinc-400">
-            Nothing was read {windowLabel}.
-            {post.readCount > 0 && ' Widen the window to see this post’s earlier refreshes.'}
-          </p>
+          <p className="text-[11px] text-zinc-400">Nothing has been read yet.</p>
         ) : (
           <ol className="max-h-40 overflow-y-auto">
             {readings.map((key) => {
@@ -716,15 +700,15 @@ function PostCardDetail({
   );
 }
 
-/** A metric's movement inside the window, or an honest blank. */
+/** A metric's movement since tracking began, or an honest blank. */
 function DeltaCell({ delta }: { delta: PostDelta }) {
   if (delta.change === null) {
     return (
       <span
         className="tabular-nums text-zinc-400"
         title={delta.points === 1
-          ? 'Only one refresh in this window — a change needs two'
-          : 'No refreshes in this window'}
+          ? 'Only one refresh so far — a change needs two'
+          : 'Not reported in any refresh yet'}
       >
         —
       </span>

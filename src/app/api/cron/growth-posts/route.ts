@@ -3,6 +3,7 @@ import { headers } from 'next/headers';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
 import { syncApifyUsageQuietly } from '@/lib/services/apifyUsageService';
 import { listGrowthAccounts } from '@/lib/services/growthTrackingService';
+import { isReadHalted } from '@/lib/growth/metrics';
 import {
   checkSpendCeiling,
   discoverPostsForAccounts,
@@ -118,7 +119,10 @@ export async function GET() {
     // ── Pass 1: discovery ───────────────────────────────────────────────────
     const accounts = await listGrowthAccounts();
     const dueForDiscovery = accounts
-      .filter((a) => a.isActive && a.trackPosts && a.platform === 'twitter')
+      // A Stopped account (repeated failed follower reads) is not searched
+      // either: a handle the profile actor cannot find is one the search will
+      // not find, and each discovery pays a 20-result floor.
+      .filter((a) => a.isActive && a.trackPosts && a.platform === 'twitter' && !isReadHalted(a))
       .filter((a) => {
         if (!a.lastPostDiscoveryAt) return true;
         const elapsed = now.getTime() - Date.parse(a.lastPostDiscoveryAt);
@@ -153,12 +157,12 @@ export async function GET() {
 
       const byId = new Map<string, ScrapedPost>(call.results.map((p) => [p.tweetId, p]));
       const readings: PostReading[] = [];
-      const missing: Array<{ id: string; postedAt: string | null }> = [];
+      const missing: typeof toRefresh = [];
 
       for (const post of toRefresh) {
         const scraped = byId.get(post.id);
         if (scraped) readings.push({ post: scraped, existing: post });
-        else missing.push({ id: post.id, postedAt: post.postedAt });
+        else missing.push(post);
       }
 
       await recordPostReadings(readings, now);

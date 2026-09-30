@@ -277,6 +277,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 18d-2. Growth Tracking categories created from Manage accounts (the five
+    // built-ins ship in code). Written by POST /api/smm/growth/categories and
+    // merged into every Growth Tracking payload server-side.
+    match /growth-categories/{categoryId} {
+      allow read, write: if false;
+    }
+
     // 18e. Apify usage. `apify-usage/{YYYY-MM}` is the measured cost of a
     // month's actor runs, read from Apify's own billing records and served
     // through /api/smm/growth/usage; `apify-actors/{actId}` is the immutable

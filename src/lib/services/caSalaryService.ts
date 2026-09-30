@@ -24,6 +24,7 @@ import { getShiftsByRange, getLedgerEntriesForUsers, getActiveSessionsForUsers }
 import { expandShiftsForWindow } from '../utils/recurrence';
 import { serialiseShift } from '../utils/shiftSerialise';
 import { computeTimeWorked } from '../utils/shiftAttendance';
+import type { ShiftWindow } from '../salary/salesImport';
 import { computeSalaryMonth, DEFAULT_SALARY_CONFIG, sumMonth } from '../salary/salaryEngine';
 import { monthKeyRange, toDayKey, type SalaryDayKey, type SalaryMonthKey } from '../salary/salaryDate';
 import { computeFinalizationReset } from '../leave/leaveBalance';
@@ -203,14 +204,17 @@ export async function getSalesForMonthByUser(month: SalaryMonthKey): Promise<Map
  * report can distinguish "imported" from "already had it" — that number is how
  * an admin knows a re-upload did nothing rather than silently doubling a month.
  */
-export async function writeSales(sales: SalarySale[]): Promise<{ written: number; duplicates: number }> {
+export async function writeSales(
+  sales: SalarySale[],
+  existingIds?: Set<string>,
+): Promise<{ written: number; duplicates: number }> {
   if (sales.length === 0) return { written: 0, duplicates: 0 };
 
-  const refs = sales.map(s => adminDb.collection(SALES).doc(s.saleId));
   const existing = new Set<string>();
-  for (let i = 0; i < refs.length; i += 300) {
-    const snaps = await adminDb.getAll(...refs.slice(i, i + 300));
-    for (const snap of snaps) if (snap.exists) existing.add(snap.id);
+  if (existingIds) {
+    for (const sale of sales) if (existingIds.has(sale.saleId)) existing.add(sale.saleId);
+  } else {
+    for (const id of (await getExistingSaleStamps(sales.map(s => s.saleId))).keys()) existing.add(id);
   }
 
   const writer = adminDb.bulkWriter();
@@ -224,6 +228,66 @@ export async function writeSales(sales: SalarySale[]): Promise<{ written: number
   await writer.close();
 
   return { written: sales.length - existing.size, duplicates: existing.size };
+}
+
+/**
+ * The day and month each already-stored sale is stamped with, by sale id.
+ *
+ * Read before an import writes, for three reasons: the report's duplicate
+ * count, the count of stored sales a re-upload moves, and the finalised-month
+ * guard. A sale's stamp can now *change* on re-upload (it follows its shift —
+ * see `attributeSalesToShifts`), so a row stored in a paid month must not be
+ * quietly moved out of it into an open one, where it would be paid a second
+ * time. Field-masked: only the two stamps are read.
+ */
+export async function getExistingSaleStamps(
+  saleIds: string[],
+): Promise<Map<string, { day: SalaryDayKey; month: SalaryMonthKey }>> {
+  const out = new Map<string, { day: SalaryDayKey; month: SalaryMonthKey }>();
+  const refs = saleIds.map(id => adminDb.collection(SALES).doc(id));
+  for (let i = 0; i < refs.length; i += 300) {
+    const snaps = await adminDb.getAll(...refs.slice(i, i + 300), { fieldMask: ['day', 'month'] });
+    for (const snap of snaps) {
+      if (snap.exists) out.set(snap.id, { day: snap.get('day'), month: snap.get('month') });
+    }
+  }
+  return out;
+}
+
+/**
+ * Every shift each agent worked over the span of an import, as time windows.
+ *
+ * The input to `attributeSalesToShifts`. One roster-wide range read rather than
+ * one per agent (rule 9) — the same query the month grid makes. The window
+ * opens a day before the earliest sale so an overnight shift that began the
+ * previous evening is found.
+ */
+export async function getShiftWindowsForSales(sales: SalarySale[]): Promise<Map<string, ShiftWindow[]>> {
+  const out = new Map<string, ShiftWindow[]>();
+  if (sales.length === 0) return out;
+
+  const SHIFT_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+  let earliest = Infinity;
+  let latest = -Infinity;
+  for (const sale of sales) {
+    const at = Date.parse(sale.occurredAt);
+    if (at < earliest) earliest = at;
+    if (at > latest) latest = at;
+  }
+  const windowStart = earliest - SHIFT_LOOKBACK_MS;
+  const windowEnd = latest + 1;
+
+  const userIds = new Set(sales.map(s => s.userId));
+  const raw = (await getShiftsByRange(windowStart, windowEnd))
+    .filter(s => userIds.has(s.userId))
+    .map(s => ({ ...serialiseShift(s), timeWorkedSeconds: null, attendanceStatus: null }));
+
+  for (const occurrence of expandShiftsForWindow(raw, windowStart, windowEnd)) {
+    const list = out.get(occurrence.userId) ?? [];
+    list.push({ start: occurrence.occurrenceStart, end: occurrence.occurrenceEnd });
+    out.set(occurrence.userId, list);
+  }
+  return out;
 }
 
 /** Remove a single sale. Used when a source export retracts a row an earlier one carried. */

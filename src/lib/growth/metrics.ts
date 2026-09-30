@@ -203,6 +203,62 @@ export function formatPercent(p: number): string {
  */
 export const MANUAL_REFRESH_COOLDOWN_MS = 15 * 60 * 1000;
 
+/**
+ * How many failed reads in a row stop an account or a post from being read.
+ *
+ * Every failed read is still a billed read — the X profile actor charges per
+ * handle requested, the tweet actor bills its 20-result floor whatever comes
+ * back, and every run carries platform usage on top — so an account that was
+ * renamed or deleted used to cost money every night, forever, to report the same
+ * failure. Past this many the schedulers skip it, and the UI marks it
+ * **Stopped**. A person restarts it by buying one read (Refresh now — a success
+ * clears the streak) or by stopping and resuming tracking, which resets it.
+ *
+ * Only failures that are the *item's* fault count. A whole scraper run falling
+ * over (an Apify outage, exhausted credit) is not evidence about any one account,
+ * and counting it would stop the entire roster after three bad nights.
+ *
+ * Pure-module constant for the same reason as the cooldown above: the cron, the
+ * routes and the badge must all agree on the number.
+ */
+export const MAX_CONSECUTIVE_FAILURES = 3;
+
+/** Whether an account or post has failed enough reads in a row to be stopped. */
+export function isReadHalted(item: { consecutiveFailures?: number | null }): boolean {
+  return (item.consecutiveFailures ?? 0) >= MAX_CONSECUTIVE_FAILURES;
+}
+
+/**
+ * The read problem worth marking on an account or post, or `null` when there is
+ * none — the one place the precedence lives, so no surface re-derives it:
+ *
+ *  - Nothing is marked on something that is **not tracked** (`isActive: false`):
+ *    its last status is frozen from before tracking stopped, and reporting it
+ *    would describe a job that is not running.
+ *  - **Stopped** outranks **failed** — it is the stronger claim about the same
+ *    failure, and the one that needs a person to act.
+ *
+ * Accounts carry `lastScrapeStatus`, posts `lastReadStatus`; either is read.
+ */
+export type ReadProblem = 'stopped' | 'failed';
+
+export function readProblemOf(item: {
+  isActive: boolean;
+  consecutiveFailures?: number | null;
+  lastScrapeStatus?: 'ok' | 'failed' | null;
+  lastReadStatus?: 'ok' | 'failed' | null;
+}): ReadProblem | null {
+  if (!item.isActive) return null;
+  if (isReadHalted(item)) return 'stopped';
+  return (item.lastScrapeStatus ?? item.lastReadStatus) === 'failed' ? 'failed' : null;
+}
+
+/** The Stopped state, in words — one phrasing for every surface that states it. */
+export const STOPPED_SUMMARY = `Stopped after ${MAX_CONSECUTIVE_FAILURES} failed reads`;
+/** …and the way out, which is always the same. */
+export const STOPPED_HINT =
+  'The schedule skips it now — each failed read was still billed. Refresh now tries once more.';
+
 export const STALE_AFTER_HOURS = 36;
 
 export function isStale(lastScrapeAt: string | null, now: Date = new Date()): boolean {

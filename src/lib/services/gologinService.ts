@@ -20,29 +20,23 @@ import {
   getMasterGoLoginClient,
   getUserGoLoginClient,
   GoLoginApiError,
+  GOLOGIN_CAPABILITIES,
   PROFILES_PER_PAGE,
+  type GoLoginCapability,
   type GoLoginProfile,
   type IGoLoginClient,
 } from '@/lib/gologin';
 import {
   getGoLoginAccount,
   getGoLoginUserToken,
-  getMasterAccount,
   getMembershipStatus,
-  invalidateMasterAccount,
+  applyFolderMembership,
   isGoLoginAdmin,
   resolveFolder,
 } from '@/lib/services/gologinAccountService';
 
 /** Page permission that gates every GoLogin surface. */
 export const GOLOGIN_PAGE_ID = 'apps-gologin';
-
-/**
- * The sub-item permission that gates the **Management** surface (seats +
- * assignments) — a `parentPageId` child of `apps-gologin` in `definitions.ts`,
- * granted on `/admin-portal/sharing` under the GoLogin row.
- */
-export const GOLOGIN_MANAGEMENT_PAGE_ID = 'apps-gologin-management';
 
 /**
  * Tier-2 gate for every GoLogin route. Returns a 403 response when denied,
@@ -126,20 +120,28 @@ export async function requireGoLoginAdmin(token: {
   return NextResponse.json({ error: 'Admins only.' }, { status: 403 });
 }
 
+/** What each capability is called in a refusal — the Sharing page's own wording. */
+const CAPABILITY_LABEL: Record<GoLoginCapability, string> = {
+  members: 'Add & Remove Members',
+  profiles: 'Create, Edit & Delete Profiles',
+  folders: 'Create, Edit & Delete Folders',
+  sharing: 'Share Profiles & Folders',
+};
+
 /**
- * Gate for the **Management** surface: admin, *or* the `apps-gologin-management`
- * sub-item grant.
+ * Gate for one GoLogin **capability**: admin, *or* that capability's sub-item
+ * grant (`GOLOGIN_CAPABILITIES`, granted on `/admin-portal/sharing` under the
+ * GoLogin row).
  *
- * Management was tier 3 until 2026-09-19. It is still an authority that spends
- * money and hands out live logged-in accounts — what changed is that the only
- * way to delegate it was to make someone a Bluu **admin**, which grants the
- * whole auth graph (user management, the permission map itself, the GoLogin
- * master token on their desktop). A page grant is the narrower instrument, and
- * it is the one an admin can hand out and take back from one screen.
+ * Replaced `requireGoLoginManagement` on 2026-09-30. One "Management" grant
+ * bundled paying for seats with deleting profiles; these are four separate
+ * authorities an admin can hand out separately. Each still spends money or
+ * hands out live logged-in accounts, so each is still a second gate on top of
+ * the page permission, never the page permission alone.
  *
  * **Admins stay in unconditionally, and not merely as a convenience.** They run
  * the workspace on the master token (`usesMasterGoLoginToken`), so an admin
- * without the sub-item grant would be locked out of a workspace only they can
+ * without a sub-item grant would be locked out of a workspace only they can
  * administer — and revoking a row on the Sharing page would silently do that.
  *
  * The admin half keeps `requireGoLoginAdmin`'s claim-then-group shape, for the
@@ -147,23 +149,33 @@ export async function requireGoLoginAdmin(token: {
  * ID token and this renderer runs for weeks (rule 9c).
  *
  * ⚠ This is the *second* gate, never the first. Callers pair it with
- * `requireGoLoginAccess`, because holding Management without `apps-gologin` is
- * not a state anyone should be able to reach through a route.
+ * `requireGoLoginAccess`, because a capability without `apps-gologin` is not a
+ * state anyone should be able to reach through a route.
  */
-export async function requireGoLoginManagement(token: {
-  uid: string;
-  admin?: unknown;
-}): Promise<NextResponse | null> {
+export async function requireGoLoginCapability(
+  token: { uid: string; admin?: unknown },
+  /** One capability, or several of which **any** suffices. */
+  capability: GoLoginCapability | readonly GoLoginCapability[],
+): Promise<NextResponse | null> {
   if (token.admin === true) return null;
   if (await isGoLoginAdmin(token.uid)) return null;
-  if (!(await checkPageAccess(token.uid, GOLOGIN_MANAGEMENT_PAGE_ID))) return null;
+  const wanted = typeof capability === 'string' ? [capability] : capability;
+  if (!(await checkPageAccess(token.uid, wanted.map((c) => GOLOGIN_CAPABILITIES[c])))) return null;
   return NextResponse.json(
     {
-      error: 'You do not have access to GoLogin Management. Ask an admin to grant it.',
-      code: 'not-a-manager',
+      error: `You do not have the GoLogin “${CAPABILITY_LABEL[wanted[0]]}” permission. Ask an admin to grant it.`,
+      code: 'missing-capability',
     },
     { status: 403 },
   );
+}
+
+/** The page gate, then the capability — the pair every management route opens with. */
+export async function requireGoLoginAccessAnd(
+  token: { uid: string; admin?: unknown },
+  capability: GoLoginCapability | readonly GoLoginCapability[],
+): Promise<NextResponse | null> {
+  return (await requireGoLoginAccess(token.uid)) ?? (await requireGoLoginCapability(token, capability));
 }
 
 /** How long a listing is served without touching the provider at all. */
@@ -346,49 +358,11 @@ export async function changeAssignment({ uid, profileIds, action }: AssignmentCh
 
   await getMasterGoLoginClient().setFolderProfiles(folder.name, ids, action);
 
-  // Membership just changed, so both the folder tree and that operator's own
-  // listing are stale. Everyone else's is untouched.
-  invalidateMasterAccount();
+  // Membership just changed: patch the folder tree memo in place (re-fetching
+  // `GET /user` to learn what we just wrote is a wasted provider request, per
+  // person when sharing with several), and drop that operator's own listing.
+  applyFolderMembership(folder.id, ids, action);
   invalidateGoLoginProfiles(uid);
-}
-
-/** The folder tree as the master sees it, for the Management surface. */
-export async function getAssignmentOverview(force = false) {
-  return getMasterAccount(force);
-}
-
-/**
- * Assign (or unassign) **every profile in a source folder** at once.
- *
- * ⚠ **This is a copy, not a subscription, and the UI must not imply otherwise.**
- * It expands the folder to its current members and adds those profiles to the
- * operator's own folder. A profile added to the source folder *afterwards* does
- * not reach them: GoLogin offers no webhook, so keeping the two in step would
- * mean polling, and polling is the one thing that reliably destroys the API
- * token (rule 9e).
- *
- * The **server** expands the folder rather than the client sending a list of
- * ids. Two reasons: the expansion is read from the already-memoised master
- * account, so it costs nothing; and it keeps a 90-profile folder from tripping
- * the per-request batch cap that exists to bound hand-picked selections.
- */
-export async function changeAssignmentFromFolder(params: {
-  uid: string;
-  sourceFolderId: string;
-  action: 'add' | 'remove';
-}): Promise<{ moved: number }> {
-  const { uid, sourceFolderId, action } = params;
-
-  // `force` on a miss only — the folder is almost always in the 60s memo.
-  const folder =
-    (await resolveFolder(sourceFolderId)) ?? (await resolveFolder(sourceFolderId, true));
-  if (!folder) {
-    throw new GoLoginApiError('That folder no longer exists in GoLogin.', 409);
-  }
-  if (!folder.profileIds.length) return { moved: 0 };
-
-  await changeAssignment({ uid, profileIds: folder.profileIds, action });
-  return { moved: folder.profileIds.length };
 }
 
 /**

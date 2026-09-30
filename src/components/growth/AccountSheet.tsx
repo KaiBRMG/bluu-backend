@@ -53,8 +53,12 @@ export function AccountSheet({
   onSetTracking,
   onSetCategory,
   onRefreshAccount,
+  pinned,
+  onTogglePin,
 }: {
   account: GrowthAccount | null;
+  pinned: boolean;
+  onTogglePin: (account: GrowthAccount) => void;
   days: DayMap;
   range: GrowthRange;
   posts: GrowthPost[];
@@ -80,8 +84,8 @@ export function AccountSheet({
 
         `overflow-hidden`, **not** `overflow-y-auto` — the scroll lives on the
         panel's body instead (see `AccountPanel`). When this element scrolled,
-        two things went with it: the Window control, which scopes every figure
-        below it and sat ~2,600px above the reader by post 14, and shadcn's own
+        two things went with it: the header's controls (then including the
+        Window control), ~2,600px above the reader by post 14, and shadcn's own
         close button, which is `absolute` inside this box and therefore scrolls
         with its content. A panel whose whole argument is "a peek" had no visible
         exit from its second screenful.
@@ -122,6 +126,8 @@ export function AccountSheet({
             onSetTracking={onSetTracking}
             onSetCategory={onSetCategory}
             onRefreshAccount={onRefreshAccount}
+            pinned={pinned}
+            onTogglePin={onTogglePin}
           />
         )}
       </SheetContent>

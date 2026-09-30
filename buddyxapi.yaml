@@ -1,0 +1,1552 @@
+openapi: 3.1.0
+info:
+  title: BuddyX Public API
+  version: '1.0.0'
+  summary: Programmatic access to BuddyX statistics for OnlyFans creators.
+  description: |
+    The BuddyX Public API lets you read your BuddyX statistics
+    programmatically. It includes tracking and free-trial link performance, subscriber
+    events, fan and message data, per-creator revenue breakdowns, and team
+    reports (PPV revenue, tips, unlock rates).
+
+    ## Getting started
+    1. Open the [BuddyX API page](https://dashboard.buddyx.app/buddyx-api/)
+       in your dashboard.
+    2. Create an API key. The plaintext key (format: `bxa_…`) is shown **once**;
+       store it securely.
+    3. Call any endpoint below with the header
+       `Authorization: Bearer insert_your_API_key (bxa_...)`.
+
+    ## Limits
+    Each manager account can hold up to **3 active keys** at a time. Revoke an
+    existing key (in the dashboard) to free a slot.
+
+    ## Rate limits
+    Requests are rate-limited per API key:
+
+    | Scope                                                      | Limit          |
+    | ---------------------------------------------------------- | -------------- |
+    | All endpoints (sustained per key)                          | 120 req/min    |
+    | `/creators/earnings-breakdown`, `/team-reports/overview`   | 30 req/min     |
+
+    Expensive endpoints count against **both** the global and the per-endpoint
+    bucket. There is also an additional pre-auth safety net of 1000 req/min
+    per source IP that you should not normally encounter.
+
+    On every response, the standard `RateLimit-Limit`, `RateLimit-Remaining`,
+    and `RateLimit-Reset` headers (RFC draft) tell you where you are. When you
+    exceed a limit you receive `429 RATE_LIMIT_EXCEEDED` together with a
+    `Retry-After` header in seconds — wait at least that long before retrying.
+
+    ## Numbers and currency
+    All monetary fields (`revenue`, `tips`, `cost`, `price`, `amount`,
+    `totalSpent…`, `revShareAmount`, etc.) are returned as JSON numbers
+    rounded to **two decimal places**. Where a figure has both a gross
+    and net component, both halves are rounded individually (`net` is
+    `gross * 0.8`, the OnlyFans 80/20 split). Percentages such as
+    `unlockRate` and `ppvRate` are also rounded to two decimals.
+
+    ### Aggregating across rows
+    Because every per-row `gross` and `net` is rounded to two decimals,
+    summing them client-side accumulates rounding drift of about
+    `±$0.005` per row — over thousands of rows you can see totals that
+    differ from the true figure by tens of dollars.
+
+    **For totals, use the aggregate endpoints**
+    (`/v1/public/team-reports/overview`,
+    `/v1/public/creators/earnings-breakdown`). They sum the underlying
+    raw values server-side and round only at the end, so the totals
+    are exact and match what the dashboard shows.
+
+    If you must aggregate client-side from a list endpoint:
+
+    - Sum the `gross` values, then derive net once as
+      `net = round2(Σ gross × 0.8)`.
+    - **Never sum the per-row `net` values directly** — the drift
+      compounds and the result won't agree with the aggregate
+      endpoints or the dashboard.
+
+    ## Pagination
+    All list endpoints are cursor-paginated:
+
+    ```
+    GET /v1/public/free-trial-links?modelId=123&limit=50
+    GET /v1/public/free-trial-links?modelId=123&limit=50&cursor=eyJmcm9tIjo1MH0
+    ```
+
+    The response contains `pagination.nextCursor` (or `null` if there are no
+    more results) plus a boolean `pagination.hasMore`.
+
+    ## Errors
+    All errors share the same envelope:
+
+    ```json
+    { "error": { "code": "MODEL_FORBIDDEN", "message": "...", "requestId": "abc123" } }
+    ```
+
+    | code                  | meaning                                            |
+    | --------------------- | -------------------------------------------------- |
+    | AUTH_MISSING          | No `Authorization` header                          |
+    | AUTH_INVALID_SCHEME   | Header isn't `Bearer …`                            |
+    | AUTH_INVALID_KEY      | Key unknown, malformed, or revoked                 |
+    | VALIDATION_ERROR      | Query/body failed validation                       |
+    | MODEL_REQUIRED        | `modelId` is missing                               |
+    | MODEL_FORBIDDEN       | Your key can't access the requested model          |
+    | MODEL_INACTIVE        | Model has no recent stats heartbeat for your subscription |
+    | CHATTER_FORBIDDEN     | None of the requested `chatterIds` are in your team |
+    | NO_TEAM_MEMBERS       | Your account has no team members (messages only)   |
+    | RATE_LIMIT_EXCEEDED   | Too many requests in the last minute               |
+    | INVALID_CURSOR        | Cursor is malformed — restart pagination from the first page |
+    | START_DATE_TOO_EARLY  | `startDate` is before the earliest available data for the endpoint |
+    | LINK_NOT_FOUND        | No FTL/TL with the supplied `{linkId}` exists for the supplied `modelId` |
+    | NOT_FOUND             | Unknown route                                      |
+    | INTERNAL_ERROR        | Unexpected server error                            |
+
+servers:
+  - url: https://api.buddyx.app
+    description: Production
+  - url: https://api.staging.buddyx.app
+    description: Staging
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Free Trial Links
+  - name: Tracking Links
+  - name: Fans
+  - name: Messages
+  - name: Mass Messages
+  - name: Conversations
+  - name: Subscribers
+  - name: Creators
+  - name: Team Reports
+  - name: Team Members
+  - name: Meta
+
+x-tagGroups:
+  - name: API Endpoints
+    tags:
+      - Free Trial Links
+      - Tracking Links
+      - Fans
+      - Messages
+      - Mass Messages
+      - Conversations
+      - Subscribers
+      - Creators
+      - Team Reports
+      - Team Members
+  - name: Reference
+    tags:
+      - Meta
+
+paths:
+  /v1/public/ping:
+    get:
+      tags: [Meta]
+      summary: Verify your API key
+      description: 'Returns `{ ok: true }` when the key is accepted.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PingResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/public/free-trial-links:
+    get:
+      tags: [Free Trial Links]
+      summary: List free trial links for a creator
+      parameters:
+        - $ref: '#/components/parameters/ModelId'
+        - in: query
+          name: archived
+          schema: { type: string, enum: ['true', 'false'] }
+          description: When set, restricts results to archived (or non-archived) links.
+        - in: query
+          name: search
+          schema: { type: string }
+          description: Filter by link URL, name, or pasted full URL.
+        - in: query
+          name: sortField
+          schema: { type: string, enum: [createdAt, linkName] }
+        - in: query
+          name: sortDirection
+          schema: { type: string, enum: [asc, desc] }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of free-trial links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FreeTrialLinkPage'
+        '400':
+          $ref: '#/components/responses/InvalidCursor'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ModelAccessForbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -H "Authorization: Bearer bxa_..." \
+              "https://api.buddyx.app/v1/public/free-trial-links?modelId=123&limit=50"
+        - lang: Node
+          source: |
+            const res = await fetch(
+              'https://api.buddyx.app/v1/public/free-trial-links?modelId=123&limit=50',
+              { headers: { Authorization: 'Bearer bxa_...' } }
+            );
+            const json = await res.json();
+        - lang: Python
+          source: |
+            import requests
+            r = requests.get(
+              'https://api.buddyx.app/v1/public/free-trial-links',
+              params={'modelId': '123', 'limit': 50},
+              headers={'Authorization': 'Bearer bxa_...'},
+            )
+
+  /v1/public/tracking-links:
+    get:
+      tags: [Tracking Links]
+      summary: List tracking links for a creator
+      parameters:
+        - $ref: '#/components/parameters/ModelId'
+        - in: query
+          name: archived
+          schema: { type: string, enum: ['true', 'false'] }
+        - in: query
+          name: search
+          schema: { type: string }
+          description: Filter by campaign name or campaign code.
+        - in: query
+          name: sortField
+          schema: { type: string, enum: [createdAt, linkName] }
+        - in: query
+          name: sortDirection
+          schema: { type: string, enum: [asc, desc] }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of tracking links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackingLinkPage'
+        '400':
+          $ref: '#/components/responses/InvalidCursor'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ModelAccessForbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /v1/public/free-trial-links/{linkId}/fans:
+    get:
+      tags: [Fans, Free Trial Links]
+      summary: List fans claimed via a free-trial link
+      parameters:
+        - in: path
+          name: linkId
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/ModelId'
+        - in: query
+          name: onlyStackers
+          schema: { type: string, enum: ['true', 'false'] }
+          description: |
+            When `true`, only return fans flagged as "stackers" (subscribed via
+            multiple free-trial links).
+        - in: query
+          name: onlySpenders
+          schema: { type: string, enum: ['true', 'false'] }
+          description: When `true`, only return fans whose total spend > 0.
+        - in: query
+          name: startDate
+          schema: { type: string, format: date-time }
+        - in: query
+          name: endDate
+          schema: { type: string, format: date-time }
+        - in: query
+          name: timeZone
+          schema: { type: string }
+          description: IANA time zone for `startDate`/`endDate` (e.g. `Europe/Berlin`).
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of fans
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FanPage'
+        '400':
+          $ref: '#/components/responses/InvalidCursor'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ModelAccessForbidden'
+        '404':
+          $ref: '#/components/responses/LinkNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /v1/public/tracking-links/{linkId}/fans:
+    get:
+      tags: [Fans, Tracking Links]
+      summary: List fans claimed via a tracking link
+      parameters:
+        - in: path
+          name: linkId
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/ModelId'
+        - in: query
+          name: onlySpenders
+          schema: { type: string, enum: ['true', 'false'] }
+        - in: query
+          name: startDate
+          schema: { type: string, format: date-time }
+        - in: query
+          name: endDate
+          schema: { type: string, format: date-time }
+        - in: query
+          name: timeZone
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of fans
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FanPage'
+        '400':
+          $ref: '#/components/responses/InvalidCursor'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ModelAccessForbidden'
+        '404':
+          $ref: '#/components/responses/LinkNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /v1/public/subscribers:
+    get:
+      tags: [Subscribers]
+      summary: Get Subscriber Events for a Creator
+      description: |
+        Returns subscriber records for a single creator within a given date
+        range — one entry per "subscribed" event captured by BuddyX Stats.
+
+        This endpoint is based on the subscriber chart in the dashboard, but
+        instead of aggregated counts, it returns full fan-level data so you
+        can build your own reports.
+
+        A valid `modelId` (that your key has access to) is required. The
+        creator must also have active stats tracking within the last 7 days
+        (same requirement as the free-trial and tracking link endpoints).
+
+        Results are sorted by `subscribedAt` (descending) and are paginated
+        using a cursor.
+      parameters:
+        - $ref: '#/components/parameters/ModelId'
+        - in: query
+          name: startDate
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: endDate
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: timeZone
+          schema: { type: string }
+          description: IANA time zone applied to the date range filter (e.g. `Europe/Berlin`).
+        - in: query
+          name: includeCreators
+          description: |
+            Set to `false` to exclude rows where the subscriber is itself an
+            OnlyFans creator (`isCreator = true`). Defaults to `true`.
+          schema: { type: string, enum: ['true', 'false'], default: 'true' }
+        - in: query
+          name: includeFans
+          description: |
+            Set to `false` to exclude rows where the subscriber is a regular
+            fan (`isCreator = false`). Defaults to `true`. If both
+            `includeCreators` and `includeFans` are `false` the response is
+            an empty page.
+          schema: { type: string, enum: ['true', 'false'], default: 'true' }
+        - in: query
+          name: onlyTrials
+          description: |
+            When set, restricts results to free-trial subs (`true`) or paid
+            subs (`false`). Omit to return both.
+          schema: { type: string, enum: ['true', 'false'] }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of subscribers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriberPage'
+        '400':
+          $ref: '#/components/responses/InvalidCursor'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ModelAccessForbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -H "Authorization: Bearer bxa_..." \
+              "https://api.buddyx.app/v1/public/subscribers?modelId=123&startDate=2026-04-01T00:00:00Z&endDate=2026-04-30T23:59:59Z&limit=50"
+        - lang: Node
+          source: |
+            const params = new URLSearchParams({
+              modelId: '123',
+              startDate: '2026-04-01T00:00:00Z',
+              endDate: '2026-04-30T23:59:59Z',
+              limit: '50',
+            });
+            const res = await fetch(
+              `https://api.buddyx.app/v1/public/subscribers?${params}`,
+              { headers: { Authorization: 'Bearer bxa_...' } }
+            );
+            const json = await res.json();
+        - lang: Python
+          source: |
+            import requests
+            r = requests.get(
+              'https://api.buddyx.app/v1/public/subscribers',
+              params={
+                'modelId': '123',
+                'startDate': '2026-04-01T00:00:00Z',
+                'endDate':   '2026-04-30T23:59:59Z',
+                'limit': 50,
+              },
+              headers={'Authorization': 'Bearer bxa_...'},
+            )
+
+  /v1/public/creators:
+    get:
+      tags: [Creators]
+      summary: List linked creators
+      description: |
+        Returns the creators connected to your account — the same list of
+        creators you see on the **Linked Accounts** page in your
+        dashboard.
+
+        Use this endpoint to map the `modelId` values returned by every
+        other endpoint (`/v1/public/messages`, `/v1/public/team-reports/*`,
+        `/v1/public/subscribers`, …) to a human-readable OnlyFans handle
+        and the custom name you set on the dashboard. Each row's `id`
+        field is the value to pass back as `modelId`.
+
+        The list is automatically scoped to the manager whose API key is
+        being used. There are no filters and no pagination — typically a
+        few dozen creators per account.
+      responses:
+        '200':
+          description: A list of linked creators
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreatorPage' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/public/messages:
+    get:
+      tags: [Messages]
+      summary: Search sent messages
+      description: |
+        Returns messages sent by your team members for all models linked to
+        your key. The results match what you see on the **Message Explorer**
+        page in your dashboard.
+
+        Supply `modelIds` to narrow the search to specific creators (the API
+        intersects your filter with the models your key can access). Supply
+        `chatterIds` to narrow further to specific team members (intersected
+        with your team).
+      parameters:
+        - in: query
+          name: startDate
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: endDate
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: timeZone
+          schema: { type: string }
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: unsentOnly
+          schema: { type: string, enum: ['true', 'false'] }
+        - in: query
+          name: modelIds
+          description: Comma-separated list of model `userid`s to filter by.
+          schema: { type: string }
+          examples:
+            single:   { value: '123' }
+            multiple: { value: '123,456,789' }
+        - in: query
+          name: chatterIds
+          description: |
+            Comma-separated list of OFB user IDs (your team members) to filter
+            by. Intersected with your team; if none of the requested IDs belong
+            to your team the request fails with `403 CHATTER_FORBIDDEN`.
+          schema: { type: string }
+          examples:
+            single:   { value: '4711' }
+            multiple: { value: '4711,4712' }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagePage'
+        '400':
+          $ref: '#/components/responses/InvalidCursor'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: |
+            Either `MODEL_FORBIDDEN` (none of the requested `modelIds` are
+            accessible to this key) or `CHATTER_FORBIDDEN` (none of the
+            requested `chatterIds` belong to your team).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '409':
+          description: |
+            `NO_TEAM_MEMBERS` — your account has no team members, so messages
+            (which are scoped per chatter) would always be empty.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /v1/public/mass-messages:
+    get:
+      tags: [Mass Messages]
+      summary: Mass message activity
+      description: |
+        Returns mass messages sent by your team members for all models
+        linked to your account. Only mass messages that were sent through
+        the BuddyX app are returned.
+
+        Supply `modelId` to narrow to a single creator (intersected with
+        the models your account can access). Supply `sentBy` to narrow to
+        a single team member, or `unsentBy` to only see messages that were
+        later unsent by a specific team member.
+
+        Results are sorted by `sentDate` (descending) and paginated using
+        a cursor.
+      parameters:
+        - in: query
+          name: startDate
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: endDate
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: timeZone
+          schema: { type: string }
+        - in: query
+          name: modelId
+          description: |
+            A single model `userid` to filter by. Must be accessible to
+            your account, otherwise the request fails with `403
+            MODEL_FORBIDDEN`. Omit to include every model your account
+            can access.
+          schema: { type: string }
+          examples:
+            single: { value: '123' }
+        - in: query
+          name: sentBy
+          description: |
+            A single user ID (a member of your team) to filter by. Must
+            belong to your team, otherwise the request fails with `403
+            CHATTER_FORBIDDEN`.
+          schema: { type: string }
+          examples:
+            single: { value: '4711' }
+        - in: query
+          name: unsentBy
+          description: |
+            A single user ID (a member of your team); returns only mass
+            messages that were unsent by this team member. Must belong to
+            your team, otherwise the request fails with `403
+            CHATTER_FORBIDDEN`.
+          schema: { type: string }
+          examples:
+            single: { value: '4711' }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of mass messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MassMessagePage'
+        '400':
+          $ref: '#/components/responses/InvalidCursor'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: |
+            Either `MODEL_FORBIDDEN` (the requested `modelId` is not
+            accessible to your account) or `CHATTER_FORBIDDEN` (the
+            requested `sentBy` or `unsentBy` user does not belong to your
+            team).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /v1/public/fan-conversation:
+    get:
+      tags: [Conversations]
+      summary: Get a fan conversation
+      description: |
+        Returns the full message thread between one creator (`modelId`)
+        and one fan (`fanId`) within a date range — both the messages your
+        creator sent to the fan and the messages the fan sent back, merged
+        into a single time-ordered stream.
+
+        Unlike `/v1/public/messages`, this endpoint returns **every**
+        message in the conversation. A conversation is only shown if your
+        team members are using the BuddyX app.
+
+        Results are sorted by `createdAt` (descending) and paginated using
+        a cursor.
+
+        **Data availability:** conversation history is only available from
+        **2026-06-10** onward. A `startDate` before that date is rejected
+        with `422 START_DATE_TOO_EARLY`.
+      parameters:
+        - in: query
+          name: modelId
+          required: true
+          description: |
+            The creator's OnlyFans `userid`. Must be accessible to your
+            account, otherwise the request fails with `403
+            MODEL_FORBIDDEN`.
+          schema: { type: string }
+          examples:
+            single: { value: '12345' }
+        - in: query
+          name: fanId
+          required: true
+          description: 'The fan''s OnlyFans `userid`.'
+          schema: { type: string }
+          examples:
+            single: { value: '987654' }
+        - in: query
+          name: startDate
+          required: true
+          description: |
+            Start of the date range. Must be on or after **2026-06-10**
+            (the earliest available conversation data); an earlier value
+            returns `422 START_DATE_TOO_EARLY`.
+          schema: { type: string, format: date-time }
+        - in: query
+          name: endDate
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: timeZone
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of conversation messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationMessagePage'
+        '400':
+          $ref: '#/components/responses/InvalidCursor'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: '`MODEL_FORBIDDEN` — the requested `modelId` is not accessible to your account.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422':
+          description: |
+            Either `VALIDATION_ERROR` (bad input, e.g. `endDate` before
+            `startDate`) or `START_DATE_TOO_EARLY` (`startDate` is before
+            2026-06-10, the earliest available conversation data).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /v1/public/team-members:
+    get:
+      tags: [Team Members]
+      summary: List team members
+      description: |
+        Returns the chatters on your team — the same list of users you
+        manage on the **Team** page in your dashboard.
+
+        Use this endpoint to map the `ofbUserId` / `chatterId` values
+        returned by `/v1/public/messages` and `/v1/public/team-reports/*`
+        back to a human-readable name and email.
+
+        The result set is automatically scoped to the manager whose API
+        key is being used. Only chatter roles are returned — the manager
+        themselves and any non-chatter roles are filtered out.
+      parameters:
+        - in: query
+          name: onlyActive
+          description: 'When `true`, only members with `status: active` are returned. Omit (or pass `false`) to receive every team member regardless of status.'
+          schema: { type: string, enum: ['true', 'false'] }
+      responses:
+        '200':
+          description: A list of team members
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TeamMemberPage' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /v1/public/creators/earnings-breakdown:
+    get:
+      tags: [Creators]
+      summary: Earnings breakdown by creator
+      description: |
+        Mirrors the dashboard's *Breakdown by Creator* table. Returns one row
+        per linked creator with their gross/net revenue split by source
+        (messages, subscriptions, tips), the count of new subscribers, and the
+        number of mass messages sent.
+
+        The list is automatically scoped to the creators your subscription is
+        linked to **and** that have streamed stats data within the last 7 days.
+        There is no `modelId` filter — use `/v1/public/team-reports/overview`
+        if you need a per-model query.
+      parameters:
+        - in: query
+          name: startDate
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: endDate
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: timeZone
+          schema: { type: string, default: UTC }
+          description: IANA time zone applied to the date range filter.
+      responses:
+        '200':
+          description: A list of per-creator earnings rows
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreatorEarningsPage' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+      x-codeSamples:
+        - lang: curl
+          source: |
+            curl -H "Authorization: Bearer bxa_..." \
+              "https://api.buddyx.app/v1/public/creators/earnings-breakdown?startDate=2026-01-01&endDate=2026-01-31&timeZone=Europe/Berlin"
+        - lang: Node
+          source: |
+            const res = await fetch(
+              'https://api.buddyx.app/v1/public/creators/earnings-breakdown?startDate=2026-01-01&endDate=2026-01-31',
+              { headers: { Authorization: 'Bearer bxa_...' } }
+            );
+        - lang: Python
+          source: |
+            import requests
+            r = requests.get(
+              'https://api.buddyx.app/v1/public/creators/earnings-breakdown',
+              params={'startDate': '2026-01-01', 'endDate': '2026-01-31'},
+              headers={'Authorization': 'Bearer bxa_...'},
+            )
+
+  /v1/public/team-reports/overview:
+    get:
+      tags: [Team Reports]
+      summary: Team performance overview
+      description: |
+        Aggregate PPV / message / tips / online-time stats for your team
+        across one or more creators in a date range. Returns both totals and
+        a per-chatter breakdown.
+
+        Models: defaults to all your linked + active creators. Optional
+        `modelIds` narrows the scope; if you pass `modelIds` and none of them
+        are accessible to your key the request fails with `403
+        MODEL_FORBIDDEN`.
+
+        Chatters: results are always scoped to your team's `ofbUserId`s. The
+        manager themselves is implicitly included so manager-sent activity
+        is reported (mirroring the dashboard). The breakdown contains one
+        row per team member with non-zero activity in the window — including
+        chatters who were online but didn't send messages or earn revenue
+        (those rows have `onlineMs > 0` and the rest at `0`).
+
+        Online time (`onlineMs` / `totals.onlineMs`) is de-duplicated across
+        creators, so a chatter simultaneously online under two creators is
+        counted once for the overlapping interval.
+
+        Reply time (`medianResponseTimeMs`) is the median (50th percentile)
+        time between a fan's message and the chatter's *first* reply to it,
+        in milliseconds. Follow-up messages in the same conversation are not
+        counted. The median is used so a few very slow replies don't skew
+        the number, and replies slower than 8 hours are excluded as
+        outliers. `p75ResponseTimeMs` is the 75th percentile of the same
+        population — 3 out of 4 fans got their first reply faster than
+        this — useful for spotting chatters whose typical replies are fast
+        but who leave a quarter of fans waiting. Both are `null` when there
+        are no qualifying replies in the window.
+      parameters:
+        - in: query
+          name: startDate
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: endDate
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: timeZone
+          schema: { type: string, default: UTC }
+        - in: query
+          name: modelIds
+          description: Comma-separated list of model `userid`s to filter by.
+          schema: { type: string }
+          examples:
+            single:   { value: '123' }
+            multiple: { value: '123,456' }
+      responses:
+        '200':
+          description: Aggregated team performance for the period
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TeamOverviewResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: '`MODEL_FORBIDDEN` — none of the requested `modelIds` are accessible.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /v1/public/team-reports/ppv-revenue:
+    get:
+      tags: [Team Reports]
+      summary: List unlocked PPV messages with revenue
+      description: |
+        Returns each unlocked PPV message in the date range with its price
+        (gross + net) and the chatter who unlocked it, paginated.
+
+        Scoping mirrors the dashboard's *Revenue from PPVs* dialog:
+        - Models intersect with your allowed list (`MODEL_FORBIDDEN` if zero
+          overlap when explicit).
+        - When `chatterId` is provided it must belong to your team
+          (`CHATTER_FORBIDDEN` otherwise). Omit it to get rows for every team
+          member, useful for an aggregated export.
+      parameters:
+        - in: query
+          name: startDate
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: endDate
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: timeZone
+          schema: { type: string, default: UTC }
+        - in: query
+          name: modelIds
+          description: Comma-separated list of model `userid`s.
+          schema: { type: string }
+        - in: query
+          name: chatterId
+          description: |
+            Single OFB user ID (a team member). When omitted, results cover
+            every team member.
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of unlocked PPV messages
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PpvRevenuePage' }
+        '400':
+          $ref: '#/components/responses/InvalidCursor'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: |
+            `MODEL_FORBIDDEN` (no overlap with allowed models) or
+            `CHATTER_FORBIDDEN` (`chatterId` is not in your team).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /v1/public/team-reports/tips:
+    get:
+      tags: [Team Reports]
+      summary: List tip allocations
+      description: |
+        Returns tip-allocation rows for your team across the chosen creators
+        and date range. Each row is one tip with the chatter it was assigned
+        to (or `null` if unassigned).
+
+        Filters mirror the dashboard's *Revenue from Tips* dialog:
+        - `chatterId` (optional) — must be in your team.
+        - `onlyUnassigned=true` — restricts the result to tips with no
+          chatter assigned. Combining `onlyUnassigned=true` and `chatterId`
+          will always return zero rows by definition.
+      parameters:
+        - in: query
+          name: startDate
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: endDate
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: timeZone
+          schema: { type: string, default: UTC }
+        - in: query
+          name: modelIds
+          description: Comma-separated list of model `userid`s.
+          schema: { type: string }
+        - in: query
+          name: chatterId
+          description: Single OFB user ID; must belong to your team.
+          schema: { type: string }
+        - in: query
+          name: onlyUnassigned
+          schema: { type: string, enum: ['true', 'false'] }
+          description: When `true`, returns only tips with no `chatterId` set.
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of tip allocations
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TipsPage' }
+        '400':
+          $ref: '#/components/responses/InvalidCursor'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: '`MODEL_FORBIDDEN` or `CHATTER_FORBIDDEN`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API Key
+      description: 'Manager-issued key; format: `bxa_<32 chars>`.'
+
+  parameters:
+    ModelId:
+      in: query
+      name: modelId
+      required: true
+      schema: { type: string }
+      description: OnlyFans `userid` of the creator. Must be accessible to your key.
+    Limit:
+      in: query
+      name: limit
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Cursor:
+      in: query
+      name: cursor
+      schema: { type: string }
+      description: Opaque cursor returned in `pagination.nextCursor`.
+
+  responses:
+    Unauthorized:
+      description: Auth header missing or invalid
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Forbidden:
+      description: Key cannot access this resource
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    ModelAccessForbidden:
+      description: |
+        Either:
+        - `MODEL_FORBIDDEN` — your API key isn't linked to the requested model, or
+        - `MODEL_INACTIVE` — the model is linked to one of your subscriptions
+          but has not sent stats data in the last 7 days. Make sure the
+          OnlyFans creator is actively connected to the BuddyX extension.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    ValidationError:
+      description: Bad input
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    InvalidCursor:
+      description: |
+        `INVALID_CURSOR` — the supplied cursor is malformed. Restart
+        pagination from the first page (drop the `cursor` parameter)
+        and use the `pagination.nextCursor` value from the first
+        response to keep paging.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    LinkNotFound:
+      description: |
+        `LINK_NOT_FOUND` — no free-trial or tracking link with the
+        supplied `{linkId}` exists for the supplied `modelId`. Double-
+        check the `linkId` you're paging on; this is also returned when
+        the link exists but belongs to a different creator.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  schemas:
+    Pagination:
+      type: object
+      properties:
+        hasMore:    { type: boolean }
+        nextCursor: { type: string, nullable: true }
+        total:      { type: integer, nullable: true }
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:      { type: string, example: MODEL_FORBIDDEN }
+            message:   { type: string }
+            requestId: { type: string, nullable: true }
+
+    PingResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            ok: { type: boolean, example: true }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        requestId:  { type: string, nullable: true }
+
+    FreeTrialLink:
+      type: object
+      properties:
+        id:        { type: string }
+        linkId:    { type: string }
+        modelId:   { type: string }
+        name:      { type: string, nullable: true }
+        url:       { type: string, nullable: true }
+        createdAt: { type: string, format: date-time, nullable: true }
+        archived:  { type: boolean }
+        cost:      { type: number }
+        claimCounts:
+          type: integer
+          description: |
+            Number of times the trial link was claimed by a fan (i.e. the trial
+            subscription was activated). Same metric shown in the dashboard's
+            free-trial-links table.
+        subscribeCounts:
+          type: integer
+          description: |
+            Cap configured on the trial link for how many times it can still be
+            claimed. Mirrors OnlyFans' own "subscribe counts" on the link.
+        metrics:
+          type: object
+          properties:
+            revenue:             { type: number }
+            fansCount:           { type: integer }
+            revenueFromStackers: { type: number }
+            stackersCount:       { type: integer }
+
+    FreeTrialLinkPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/FreeTrialLink' }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        requestId:  { type: string, nullable: true }
+
+    TrackingLink:
+      type: object
+      properties:
+        id:           { type: string }
+        linkId:       { type: string }
+        modelId:      { type: string }
+        campaignName: { type: string, nullable: true }
+        campaignCode: { type: string, nullable: true }
+        url:
+          type: string
+          nullable: true
+          example: 'https://onlyfans.com/modelhandle/c12345'
+          description: The OnlyFans landing URL for this tracking link.
+        createdAt:    { type: string, format: date-time, nullable: true }
+        archived:     { type: boolean }
+        cost:         { type: number }
+        countSubscribers:
+          type: integer
+          description: |
+            Number of subscribers OnlyFans has attributed to this tracking link.
+            Same metric shown in the dashboard's tracking-links table.
+        countTransitions:
+          type: integer
+          description: |
+            Number of transitions (clicks that resulted in a navigation) recorded
+            for this tracking link.
+        metrics:
+          type: object
+          properties:
+            revenue:   { type: number }
+            fansCount: { type: integer }
+
+    TrackingLinkPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/TrackingLink' }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        requestId:  { type: string, nullable: true }
+
+    Fan:
+      type: object
+      properties:
+        id:                     { type: string }
+        fanId:                  { type: string, nullable: true }
+        fanName:                { type: string, nullable: true }
+        isStacker:              { type: boolean }
+        currentSubDate:         { type: string, format: date-time, nullable: true }
+        totalSpentBeforeIndex:  { type: number }
+        totalSpentAfterIndex:   { type: number }
+        totalSpent:             { type: number }
+
+    FanPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Fan' }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        requestId:  { type: string, nullable: true }
+
+    Message:
+      type: object
+      properties:
+        id:          { type: string }
+        text:        { type: string, nullable: true }
+        fromUserId:  { type: string }
+        toUserId:    { type: string }
+        ofbUserId:   { type: string }
+        createdAt:   { type: string, format: date-time }
+        unsent:      { type: boolean }
+        unsentDate:  { type: string, format: date-time, nullable: true }
+        unsentBy:    { type: string, nullable: true }
+
+    MessagePage:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Message' }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        requestId:  { type: string, nullable: true }
+
+    MassMessage:
+      type: object
+      properties:
+        id:         { type: string, description: 'Internal document id for this mass-message record.' }
+        messageId:  { type: string, nullable: true, example: '987654321', description: 'OnlyFans mass-message id.' }
+        modelId:    { type: string, nullable: true, example: '12345', description: 'OnlyFans `userid` of the creator the mass message was sent from.' }
+        sentBy:     { type: string, nullable: true, example: '4711', description: 'User ID of the team member who sent the mass message.' }
+        sentDate:   { type: string, format: date-time, nullable: true }
+        price:      { type: number, example: 9.99, description: 'Price of the mass message in USD (0 for free messages).' }
+        previews:
+          type: array
+          items: { type: string }
+          description: 'Media ids included as previews on the mass message. Empty when there are none.'
+        text:       { type: string, nullable: true, description: 'Body text of the mass message.' }
+        unsentBy:   { type: string, nullable: true, example: '4711', description: 'User ID of the team member who unsent the mass message, if it was unsent.' }
+        unsentDate: { type: string, format: date-time, nullable: true, description: 'When the mass message was unsent, if it was unsent.' }
+
+    MassMessagePage:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/MassMessage' }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        requestId:  { type: string, nullable: true }
+
+    ConversationMessage:
+      type: object
+      description: |
+        A single message in a fan conversation. `direction` tells you who
+        sent it; sender identity (`sentBy`, `sentByName`, `unsentBy`,
+        `unsentByName`) is only populated for messages sent/unsent by your
+        own team members and is `null` otherwise.
+      properties:
+        id:             { type: string, description: 'Internal document id for this message.' }
+        messageId:      { type: string, nullable: true, example: '987654321', description: 'OnlyFans message id.' }
+        conversationId: { type: string, nullable: true, example: '12345-987654', description: 'Conversation key, `"${modelId}-${fanId}"`.' }
+        modelId:        { type: string, nullable: true, example: '12345' }
+        fanId:          { type: string, nullable: true, example: '987654' }
+        direction:
+          type: string
+          enum: [outgoing, incoming]
+          description: '`outgoing` = sent by the creator/team to the fan; `incoming` = sent by the fan to the creator.'
+        text:           { type: string, nullable: true }
+        price:          { type: number, example: 9.99, description: 'Price of the message in USD (0 if free).' }
+        isTip:          { type: boolean }
+        tipAmount:      { type: number, nullable: true, example: 5, description: 'Tip amount in USD, when the message is a tip.' }
+        media:
+          type: array
+          description: 'Media attached to the message.'
+          items:
+            type: object
+            properties:
+              id:       { type: string, nullable: true }
+              type:     { type: string, nullable: true, example: 'photo' }
+              duration: { type: integer, nullable: true, description: 'Duration in seconds for audio/video media.' }
+        createdAt:      { type: string, format: date-time, nullable: true }
+        unsent:         { type: boolean }
+        unsentDate:     { type: string, format: date-time, nullable: true }
+        sentBy:         { type: string, nullable: true, example: '4711', description: 'User ID of the team member who sent the message. `null` for incoming (fan) messages and for outgoing messages sent by another manager''s team.' }
+        sentByName:     { type: string, nullable: true, example: 'Anna', description: 'Name of the sending team member. Populated under the same conditions as `sentBy`.' }
+        unsentBy:       { type: string, nullable: true, example: '4711', description: 'User ID of the team member who unsent the message. `null` unless that member belongs to your team.' }
+        unsentByName:   { type: string, nullable: true, example: 'Anna', description: 'Name of the team member who unsent the message. Populated under the same conditions as `unsentBy`.' }
+
+    ConversationMessagePage:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ConversationMessage' }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        requestId:  { type: string, nullable: true }
+
+    Subscriber:
+      type: object
+      description: |
+        One `type: 'subscribed'` event captured by BuddyX stats. `price`
+        follows the platform-wide gross/net split (`net = gross * 0.8`).
+      properties:
+        id:           { type: string, description: 'OnlyFans subscription event id.' }
+        modelId:      { type: string, nullable: true, example: '12345' }
+        fanId:        { type: string, nullable: true, example: '987654' }
+        type:         { type: string, nullable: true, example: 'subscribed' }
+        subType:      { type: string, nullable: true, description: 'OF sub-type — one of `new_subscriber`, `returning_subscriber`, `new_subscriber_trial`.' }
+        isCreator:    { type: boolean, description: 'True when the subscriber is themselves an OF creator.' }
+        isTrial:      { type: boolean, description: 'True when the sub originated from a free-trial link.' }
+        price:
+          allOf:
+            - $ref: '#/components/schemas/RevenueAmount'
+          description: |
+            The amount the fan paid for this subscription, in the same
+            gross / net split used elsewhere in the API. Free trials
+            (`isTrial: true`) and creator-to-creator subs do not have a
+            paid price and are reported as `{ gross: 0, net: 0 }`.
+        subscribedAt: { type: string, format: date-time, nullable: true }
+
+    SubscriberPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Subscriber' }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        requestId:  { type: string, nullable: true }
+
+    RevenueAmount:
+      type: object
+      description: |
+        Revenue figure expressed both as the gross OnlyFans price and the
+        creator's net cut. `net = gross * 0.8` (the OnlyFans 80/20 split).
+        Both values are rounded to two decimal places.
+
+        When you need a total across many rows, prefer the aggregate
+        endpoints (`/team-reports/overview`,
+        `/creators/earnings-breakdown`) — they round once at the end and
+        match the dashboard exactly. If you have to aggregate
+        client-side, sum `gross` and derive `net = round2(Σ gross × 0.8)`;
+        never sum per-row `net` values. See **Numbers and currency** on
+        the introduction page for the full rule.
+      properties:
+        gross: { type: number, example: 100.00 }
+        net:   { type: number, example: 80.00 }
+
+    CreatorEarningsRow:
+      type: object
+      properties:
+        modelId:      { type: string, example: '12345' }
+        handle:       { type: string, nullable: true, example: 'modelhandle' }
+        customName:   { type: string, nullable: true, example: 'Top Earner', description: 'Manager-defined label for this creator. Matches the `customName` field on `/v1/public/creators`.' }
+        revenue:      { $ref: '#/components/schemas/RevenueAmount' }
+        tips:         { $ref: '#/components/schemas/RevenueAmount' }
+        messages:     { $ref: '#/components/schemas/RevenueAmount' }
+        subscriptions: { $ref: '#/components/schemas/RevenueAmount' }
+        newSubs:      { type: integer, example: 42 }
+        massMessages: { type: integer, example: 7 }
+        revShare:     { type: number, nullable: true, description: 'Configured rev-share percentage for this creator (0-100).' }
+        revShareAmount:
+          allOf:
+            - $ref: '#/components/schemas/RevenueAmount'
+          nullable: true
+          description: |
+            The actual rev-share *amount* owed to the creator for this
+            period, calculated as `revenue * (revShare / 100)` for both
+            the gross and net figures. Mirrors the dashboard's
+            `Rev. Share Amount` column. `null` when no rev-share is
+            configured for the creator.
+
+    CreatorEarningsPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/CreatorEarningsRow' }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        requestId:  { type: string, nullable: true }
+
+    TeamOverviewTotals:
+      type: object
+      properties:
+        revenue:
+          allOf:
+            - $ref: '#/components/schemas/RevenueAmount'
+          description: Total revenue from PPVs unlocked in the selected window.
+        tips:          { $ref: '#/components/schemas/RevenueAmount' }
+        tipsAssigned:  { $ref: '#/components/schemas/RevenueAmount' }
+        tipsCount:     { type: integer }
+        ppvsSent:      { type: integer }
+        ppvsUnlocked:  { type: integer }
+        unlockRate:    { type: number, description: 'Percentage (0-100) of PPVs sent that were unlocked.' }
+        ppvRate:       { type: number, description: 'Ratio (0-1) of total messages that were PPV.' }
+        fansChatted:   { type: integer }
+        totalMessages: { type: integer }
+        onlineMs:
+          type: integer
+          description: >-
+            De-duplicated total online time across all team chatters
+            (and the manager themselves) in milliseconds. A chatter
+            simultaneously online under multiple creators is counted
+            once for that overlapping interval.
+        medianResponseTimeMs:
+          type: integer
+          nullable: true
+          description: >-
+            Median chatter reply time in milliseconds (50th percentile
+            of the time between a fan's message and the chatter's first
+            reply to it; follow-up messages are not counted) across the
+            whole team. Replies slower than 8 hours are excluded as
+            outliers. `null` when there are no qualifying replies in
+            the window.
+        p75ResponseTimeMs:
+          type: integer
+          nullable: true
+          description: >-
+            75th-percentile chatter reply time in milliseconds across
+            the whole team — 3 out of 4 fans got their first reply
+            faster than this. Same population as
+            `medianResponseTimeMs` (first replies only, 8-hour outlier
+            cutoff). `null` when there are no qualifying replies in
+            the window.
+
+    TeamBreakdownRow:
+      type: object
+      properties:
+        chatterId:     { oneOf: [{ type: string }, { type: integer }] }
+        chatterName:   { type: string, nullable: true }
+        revenue:
+          allOf:
+            - $ref: '#/components/schemas/RevenueAmount'
+          description: Revenue from PPVs unlocked for this chatter in the selected window.
+        ppvsUnlocked:  { type: integer }
+        ppvsSent:      { type: integer }
+        ppvRate:       { type: number }
+        unlockRate:    { type: number }
+        fansChatted:   { type: integer }
+        totalMessages: { type: integer }
+        tips:          { $ref: '#/components/schemas/RevenueAmount' }
+        tipsCount:     { type: integer }
+        onlineMs:
+          type: integer
+          description: >-
+            De-duplicated online time for this chatter in milliseconds,
+            across all selected creators. Rows may include chatters
+            with `onlineMs > 0` but no message/revenue activity in the
+            window — those are placeholder rows so the table can show
+            "online but didn't chat" sessions.
+        medianResponseTimeMs:
+          type: integer
+          nullable: true
+          description: >-
+            Median reply time for this chatter in milliseconds (50th
+            percentile of the time between a fan's message and the
+            chatter's first reply to it; follow-up messages are not
+            counted). Replies slower than 8 hours are excluded as
+            outliers. `null` when the chatter has no qualifying
+            replies in the window (placeholder rows are always `null`).
+        p75ResponseTimeMs:
+          type: integer
+          nullable: true
+          description: >-
+            75th-percentile reply time for this chatter in milliseconds
+            — 3 out of 4 fans got their first reply faster than this.
+            Same population as `medianResponseTimeMs` (first replies
+            only, 8-hour outlier cutoff). `null` when the chatter has
+            no qualifying replies in the window (placeholder rows are
+            always `null`).
+
+    TeamOverviewResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            totals:    { $ref: '#/components/schemas/TeamOverviewTotals' }
+            breakdown:
+              type: array
+              items: { $ref: '#/components/schemas/TeamBreakdownRow' }
+        requestId: { type: string, nullable: true }
+
+    PpvRevenueRow:
+      type: object
+      properties:
+        id:            { type: string }
+        modelId:       { type: string, nullable: true }
+        modelHandle:   { type: string, nullable: true }
+        fanId:         { oneOf: [{ type: string }, { type: integer }], nullable: true }
+        chatterId:     { oneOf: [{ type: string }, { type: integer }], nullable: true }
+        chatterName:   { type: string, nullable: true }
+        revenue:       { $ref: '#/components/schemas/RevenueAmount' }
+        unlockDate:    { type: string, nullable: true, format: date-time }
+        createdAt:     { type: string, nullable: true, format: date-time }
+        text:          { type: string, nullable: true }
+        media:         { nullable: true }
+        previews:      { nullable: true }
+
+    PpvRevenuePage:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/PpvRevenueRow' }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        requestId:  { type: string, nullable: true }
+
+    TipRow:
+      type: object
+      properties:
+        id:           { type: string }
+        modelId:      { type: string, nullable: true }
+        modelHandle:  { type: string, nullable: true }
+        chatterId:    { oneOf: [{ type: string }, { type: integer }], nullable: true, description: '`null` when the tip is unassigned.' }
+        chatterName:  { type: string, nullable: true }
+        fanId:        { oneOf: [{ type: string }, { type: integer }], nullable: true }
+        type:         { type: string, nullable: true, description: 'Tip source (e.g. `tips_messages`, `tips_posts`).' }
+        amount:       { $ref: '#/components/schemas/RevenueAmount' }
+        datePurchase: { type: string, nullable: true, format: date-time }
+
+    TipsPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/TipRow' }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        requestId:  { type: string, nullable: true }
+
+    TeamMember:
+      type: object
+      properties:
+        id:                 { type: string, example: '4711', description: 'OFB user ID of the team member. Matches the `ofbUserId` / `chatterId` fields returned by `/v1/public/messages` and `/v1/public/team-reports/*`.' }
+        name:               { type: string, nullable: true, example: 'Alex Chatter' }
+        email:              { type: string, nullable: true, example: 'alex@example.com' }
+        status:             { type: string, nullable: true, example: 'active', description: 'Lifecycle status of the member. One of `active`, `invite-pending`, or `inactive`. `invite-pending` means the manager has sent the invite email but the user has not yet activated their account.' }
+        timeZone:           { type: string, nullable: true, example: 'Europe/Berlin', description: 'IANA time zone configured for the member.' }
+        allCreatorAccess:   { type: boolean, description: 'Whether the member has access to all creators on the team.' }
+        needsShiftApproval: { type: boolean, description: 'Whether the member needs to have their shifts approved before they can chat.' }
+        onlyShiftAccess:    { type: boolean, description: 'Whether the member is restricted to working only during their assigned shifts.' }
+
+    TeamMemberPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/TeamMember' }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        requestId:  { type: string, nullable: true }
+
+    Creator:
+      type: object
+      properties:
+        id:         { type: string, example: '12345', description: 'OnlyFans `userid` of the creator. Pass this as `modelId` to other endpoints.' }
+        handle:     { type: string, nullable: true, example: 'modelhandle', description: 'OnlyFans handle of the creator.' }
+        customName: { type: string, nullable: true, example: 'Top Earner', description: 'Manager-defined label for this creator, set on the dashboard''s *Linked Accounts* page.' }
+        revShare:   { type: number, nullable: true, example: 50, description: 'Configured rev-share percentage for this creator (0–100), or `null` if unset.' }
+
+    CreatorPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Creator' }
+        pagination: { $ref: '#/components/schemas/Pagination' }
+        requestId:  { type: string, nullable: true }

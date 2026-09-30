@@ -287,4 +287,14 @@ export interface SalesImportResult {
   perUser: Array<{ userId: string; displayName: string; sourceEmail: string; gross: number; rows: number }>;
   /** Months that were already finalised and therefore refused the rows. */
   rejectedFinalizedMonths: SalaryMonthKey[];
+  /**
+   * Rows written to the day their shift started rather than their own calendar
+   * day — sales made after midnight on an overnight shift. Absent on imports
+   * recorded before shift attribution existed.
+   */
+  shiftAttributed?: number;
+  /** Of those, the rows that landed in the previous month (the last night of a month). */
+  shiftAttributedToPreviousMonth?: number;
+  /** Already-stored rows this upload moved to a different day. */
+  restamped?: number;
 }

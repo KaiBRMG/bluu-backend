@@ -4,6 +4,8 @@ import { adminDb } from '@/lib/firebase-admin';
 import { invalidateUserCache } from '@/lib/services/userService';
 import { isValidTimezone } from '@/lib/timezone';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { isGrowthAccountId } from '@/lib/growth/platform';
+import { MAX_PINNED_GROWTH_ACCOUNTS } from '@/lib/growth/access';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
@@ -28,6 +30,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       'timezoneSource',
       'additionalTimezones',
       'pinnedResources',
+      // Growth Tracking accounts on the home widget — validated below.
+      'pinnedGrowthAccounts',
       'notificationPreferences',
       // Always-visible session timer (tray / docked HUD). Default on, so absent
       // means enabled — only an explicit `false` switches it off.
@@ -110,6 +114,31 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       if (pinned.length > MAX_PINNED_RESOURCES) {
         return NextResponse.json(
           { error: `pinnedResources is limited to ${MAX_PINNED_RESOURCES} items` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Pinned Growth Tracking accounts: at most 5, each shaped like a
+    // `growth-accounts` id (`twitter_handle` / `facebook_handle`), no duplicates.
+    // Page access is NOT checked here — a pin is only a preference; the widget's
+    // data route checks the page permission on every read, so pinning an account
+    // you cannot see shows you nothing.
+    if (updates.pinnedGrowthAccounts !== undefined) {
+      const pinned = updates.pinnedGrowthAccounts;
+      if (
+        !Array.isArray(pinned) ||
+        !pinned.every(isGrowthAccountId) ||
+        new Set(pinned).size !== pinned.length
+      ) {
+        return NextResponse.json(
+          { error: 'pinnedGrowthAccounts must be an array of distinct account ids' },
+          { status: 400 }
+        );
+      }
+      if (pinned.length > MAX_PINNED_GROWTH_ACCOUNTS) {
+        return NextResponse.json(
+          { error: `pinnedGrowthAccounts is limited to ${MAX_PINNED_GROWTH_ACCOUNTS} accounts` },
           { status: 400 }
         );
       }

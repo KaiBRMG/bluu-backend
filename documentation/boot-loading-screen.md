@@ -32,6 +32,7 @@ Components don't show/hide the loader directly — they **report** their loading
 | `'home-resources'` | home page widget | its data resolves |
 | `'home-notifications'` | home page widget | its data resolves |
 | `'home-timetracking'` | home page widget | its data resolves |
+| `'home-growth'` | Growth Tracking widget (`GrowthHomeWidget`) — mounted only for holders of `smm-growth-tracking`/`smm-admin` | its **first** load resolves (no pins = no request, resolves at once); a pin added later shows its own skeleton row rather than re-raising the loader |
 
 ### 3. Lift timing
 Loader lifts at `max(all phases cleared, MIN_LOADER_MS)`.

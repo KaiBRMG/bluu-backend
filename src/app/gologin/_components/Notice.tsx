@@ -1,6 +1,7 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
+import { PRIMARY_BUTTON } from '../_lib/manage';
 
 /**
  * A dead end with an explanation, and the window's only full-screen message.
@@ -35,7 +36,7 @@ export default function Notice({
           variant={action.variant === 'primary' ? 'default' : 'outline'}
           className={
             action.variant === 'primary'
-              ? 'mt-2 bg-[#2563eb] text-white hover:bg-[#1d4ed8]'
+              ? `mt-2 ${PRIMARY_BUTTON}`
               : 'mt-2'
           }
           onClick={action.onClick}

@@ -18,6 +18,16 @@
 /** Overlay fill + hairline border: the standard raised panel. */
 export const SURFACE = 'border border-white/[0.07] bg-white/[0.025]';
 
+/**
+ * A checked `Checkbox`, inked Action Blue Deep. shadcn's checked state paints
+ * `--primary`, which renders near-white in this theme (DESIGN.md §2) — so a
+ * checked box reads as "disabled" rather than "on". Selection is exactly what
+ * Action Blue is for (the One Voice Rule), and the trailing `!` is needed to beat
+ * the primitive's own same-specificity rule.
+ */
+export const SELECT_BOX_CLASS =
+  'data-[state=checked]:bg-[#2563eb]! data-[state=checked]:border-[#2563eb]! data-[state=checked]:text-white!';
+
 /** The hairline on its own — dividers, section rules, table heads. */
 export const HAIRLINE = 'border-white/[0.07]';
 

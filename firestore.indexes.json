@@ -1231,6 +1231,11 @@
     },
     {
       "collectionGroup": "growth-accounts",
+      "fieldPath": "consecutiveFailures",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-accounts",
       "fieldPath": "lastManualRefreshAt",
       "indexes": []
     },
@@ -1247,6 +1252,36 @@
     {
       "collectionGroup": "growth-accounts",
       "fieldPath": "previous",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-categories",
+      "fieldPath": "createdAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-categories",
+      "fieldPath": "createdBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-categories",
+      "fieldPath": "name",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-categories",
+      "fieldPath": "platforms",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-categories",
+      "fieldPath": "tone",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "growth-posts",
+      "fieldPath": "consecutiveFailures",
       "indexes": []
     },
     {
@@ -1675,6 +1710,16 @@
     {
       "collectionGroup": "users",
       "fieldPath": "lastActiveAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "pinnedGrowthAccounts",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "gologinPinnedProfileIds",
       "indexes": []
     },
     {

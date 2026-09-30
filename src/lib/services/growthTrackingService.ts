@@ -32,15 +32,15 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
-import { getUserById } from '@/lib/services/userService';
-import { serializeTimestamp } from '@/lib/middleware/apiHelpers';
+import { GROWTH_PAGE_IDS } from '@/lib/growth/access';
+import { checkPageAccess, serializeTimestamp } from '@/lib/middleware/apiHelpers';
 import {
   growthAccountId,
   seriesDocIdFor,
   utcDayKey,
   type GrowthPlatform,
 } from '@/lib/growth/platform';
-import { normalizeCategory } from '@/lib/growth/category';
+import { cleanCategoryName } from '@/lib/growth/category';
 import type { GrowthAccount, GrowthSeries, GrowthSnapshot } from '@/types/firestore';
 import type { DocumentSnapshot } from 'firebase-admin/firestore';
 
@@ -82,9 +82,9 @@ const UNIT_COST: Record<GrowthPlatform, number> = { facebook: 0.01, twitter: 0.0
  * these routes touch no part of the auth graph. `getUserById` is cached (60s).
  */
 export async function checkGrowthAccess(uid: string): Promise<NextResponse | null> {
-  const pages = (await getUserById(uid))?.permittedPageIds ?? [];
-  const ok = pages.includes('smm-growth-tracking') || pages.includes('smm-admin');
-  return ok ? null : NextResponse.json({ error: 'Access denied' }, { status: 403 });
+  // `GROWTH_PAGE_IDS` is shared with the home page, which mounts the Growth
+  // widget only for the same people this lets through.
+  return checkPageAccess(uid, GROWTH_PAGE_IDS);
 }
 
 // ─── Apify ───────────────────────────────────────────────────────────
@@ -334,6 +334,9 @@ export async function recordSnapshots(
       lastScrapeAt: now,
       lastScrapeStatus: 'ok',
       lastScrapeError: null,
+      // Any successful read ends a failure streak — including the manual
+      // refresh that is how a person restarts a Stopped account.
+      consecutiveFailures: 0,
     }, { merge: true });
 
     batch.set(
@@ -352,10 +355,19 @@ export async function recordSnapshots(
  * `latest` is deliberately left untouched: a failed night means "we do not know
  * today's number", not "the account dropped to zero". The page reads the status
  * and says so, and the chart simply has a gap — which is the truth.
+ *
+ * `countsTowardStop` decides whether this failure is evidence about the
+ * *account*. A run that succeeded but left this account out (renamed, private,
+ * deleted) is — it bumps `consecutiveFailures`, and at
+ * `MAX_CONSECUTIVE_FAILURES` the cron stops reading it, because each of those
+ * reads is still billed. A whole run that fell over (an Apify outage, exhausted
+ * credit) is not, and must pass `false`: counting it would stop the entire
+ * roster after three bad nights.
  */
 export async function recordScrapeFailures(
   accountIds: string[],
   error: string,
+  countsTowardStop: boolean,
 ): Promise<void> {
   if (accountIds.length === 0) return;
   const batch = adminDb.batch();
@@ -364,6 +376,7 @@ export async function recordScrapeFailures(
       lastScrapeAt: FieldValue.serverTimestamp(),
       lastScrapeStatus: 'failed',
       lastScrapeError: error.slice(0, 500),
+      ...(countsTowardStop ? { consecutiveFailures: FieldValue.increment(1) } : {}),
     }, { merge: true });
   }
   await batch.commit();
@@ -379,10 +392,12 @@ export function serializeGrowthAccount(doc: DocumentSnapshot): GrowthAccount {
     handle: (d.handle as string) ?? '',
     handleNormalized: (d.handleNormalized as string) ?? '',
     profileUrl: (d.profileUrl as string) ?? '',
-    // Normalised on the way out, so a category written by the import script, by
-    // hand in the console, or by an older shape all resolve to the closed set —
-    // and anything outside it reads as "unfiled" rather than as a sixth colour.
-    category: normalizeCategory(d.category),
+    // Only tidied here — whether the name is still a *known* category depends
+    // on the registry, which includes created categories and so lives in
+    // Firestore. The series route resolves it against `listCategoryDefs()`,
+    // where anything unknown (the retired FACEBOOK value, say) reads as unfiled
+    // rather than as a colour nobody chose.
+    category: cleanCategoryName(d.category),
     platformAccountId: (d.platformAccountId as string) ?? null,
     isActive: d.isActive !== false,
     profilePictureUrl: (d.profilePictureUrl as string) ?? null,
@@ -398,6 +413,7 @@ export function serializeGrowthAccount(doc: DocumentSnapshot): GrowthAccount {
     lastPostDiscoveryError: (d.lastPostDiscoveryError as string) ?? null,
     postsWindowSaturated: d.postsWindowSaturated === true,
     lastManualRefreshAt: serializeTimestamp(d.lastManualRefreshAt as Timestamp | null),
+    consecutiveFailures: typeof d.consecutiveFailures === 'number' ? d.consecutiveFailures : 0,
     addedBy: (d.addedBy as string) ?? '',
     addedTime: serializeTimestamp(d.addedTime as Timestamp | null),
   };

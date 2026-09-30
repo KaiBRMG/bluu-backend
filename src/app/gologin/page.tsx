@@ -1,7 +1,24 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Loader2, RefreshCcw, Search, Settings2, Unlock, WifiOff } from 'lucide-react';
+import {
+  Download,
+  FolderCog,
+  FolderInput,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Pin,
+  PinOff,
+  Plus,
+  RefreshCcw,
+  Search,
+  Share2,
+  Trash2,
+  Unlock,
+  Users,
+  WifiOff,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { useNetworkStatus } from '@/contexts/NetworkStatusContext';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
@@ -12,10 +29,10 @@ import { useGoLoginProfiles } from '@/hooks/useGoLoginProfiles';
 import { useGoLoginSessions } from '@/hooks/useGoLoginSessions';
 import { useOrbita } from '@/hooks/useOrbita';
 import { useGoLoginCloseGuard } from '@/hooks/useGoLoginCloseGuard';
+import { useGoLoginPins } from '@/hooks/useGoLoginPins';
 import type { GoLoginSession } from '@/types/electron';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Skeleton } from '@/components/ui/skeleton';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,11 +43,32 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { isManagedGoLoginFolder, type GoLoginProfile } from '@/lib/gologin/types';
-import { SESSION_ERRORS, TONE_CHIP, sessionErrorMessage } from './_lib/session';
+import { SESSION_ERRORS, TONE_CHIP, isLive, sessionErrorMessage } from './_lib/session';
+import {
+  DANGER_BUTTON,
+  holderHas,
+  PRIMARY_BUTTON,
+  useGoLoginCapabilities,
+  type GoLoginCapabilities,
+  type ProfileHolder,
+} from './_lib/manage';
 import GoLoginOnboarding from './_components/GoLoginOnboarding';
-import ManagementDialog from './_components/ManagementDialog';
+import AddToFolderDialog from './_components/AddToFolderDialog';
+import EditFoldersDialog from './_components/EditFoldersDialog';
+import EditProfileSheet from './_components/EditProfileSheet';
+import MembersDialog from './_components/MembersDialog';
+import NewProfileDialog from './_components/NewProfileDialog';
+import SharingDialog from './_components/SharingDialog';
 import Notice from './_components/Notice';
+import ConnectingScreen from './_components/ConnectingScreen';
 import OrbitaGate from './_components/OrbitaGate';
 import CloseGuard, { type BusyProfile } from './_components/CloseGuard';
 
@@ -52,6 +90,12 @@ const PAGE_SIZE = 30;
  * never be in — see the chip row below.
  */
 const FOLDER_CHIP_CAP = 8;
+
+/**
+ * The key of Bluu's own "Pinned" chip in the folder filter. Not a folder name —
+ * a NUL-prefixed sentinel, so no GoLogin folder can ever collide with it.
+ */
+const PINNED = '\u0000pinned';
 
 /**
  * GoLogin — the browser-profile console.
@@ -101,14 +145,41 @@ export default function GoLoginPage() {
     launch: launchSession,
     stop: stopSession,
   } = useGoLoginSessions();
-  const { profiles, total, truncated, fetchedAtMs, loading, refreshing, error, errorCode, refresh } =
-    useGoLoginProfiles(account.linked);
+  const {
+    profiles,
+    total,
+    truncated,
+    fetchedAtMs,
+    loading,
+    refreshing,
+    error,
+    errorCode,
+    refresh,
+    upsert: upsertProfile,
+    patch: patchProfile,
+    remove: removeProfile,
+  } = useGoLoginProfiles(account.linked);
   const authFetch = useAuthFetch();
+  const caps = useGoLoginCapabilities();
   const [query, setQuery] = useState('');
-  const [folder, setFolder] = useState<string | null>(null);
+  /**
+   * The chosen folder chip. `undefined` means "not chosen yet", which resolves
+   * to **Pinned** whenever the reader has pins (the spec: a non-empty Pinned is
+   * the default on startup) and to All otherwise. Derived rather than set in an
+   * effect once profiles arrive — `react-hooks/set-state-in-effect`.
+   */
+  const [folder, setFolder] = useState<string | null | undefined>(undefined);
   const [shown, setShown] = useState(PAGE_SIZE);
-  const [managing, setManaging] = useState(false);
   const [allFolders, setAllFolders] = useState(false);
+  const [dialog, setDialog] = useState<'new' | 'members' | 'sharing' | 'folders' | null>(null);
+  /** Opened from a row's "Share profile": the Sharing list starts filtered to it. */
+  const [shareFocus, setShareFocus] = useState<{ id: string; name: string } | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [folderTarget, setFolderTarget] = useState<GoLoginProfile | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<GoLoginProfile | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  /** A launch held for confirmation: GoLogin says it is already running outside Bluu. */
+  const [confirmLaunch, setConfirmLaunch] = useState<GoLoginProfile | null>(null);
   const [releasing, setReleasing] = useState<string | null>(null);
   /** The profile an admin is about to take off a colleague, pending confirmation. */
   const [confirmRelease, setConfirmRelease] = useState<{
@@ -119,25 +190,17 @@ export default function GoLoginPage() {
   const searchRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
 
-  // Client-side convenience only. Every admin route behind these re-checks on
-  // the server (rule 3), so hiding a button is not the control — and both flags
-  // are derived from the live `users/{uid}` snapshot rather than from the ID
-  // token, which is why they agree with the server on a renderer that has been
-  // open for weeks (rule 9c: a claim set today does not reach a token issued
-  // last month).
-  const isAdmin = userData?.groups?.includes('admin') === true;
+  // Client-side convenience only. Every route behind these re-checks on the
+  // server (rule 3), so hiding a button is not the control — and every flag is
+  // derived from the live `users/{uid}` snapshot rather than from the ID token,
+  // which is why they agree with the server on a renderer that has been open for
+  // weeks (rule 9c: a claim set today does not reach a token issued last month).
+  // The four management capabilities are sub-items of GoLogin on
+  // `/admin-portal/sharing`; admins hold all four. See `useGoLoginCapabilities`.
+  const isAdmin = caps.isAdmin;
 
-  /**
-   * Who sees **Management**: an admin, or anyone granted the
-   * `apps-gologin-management` sub-item on `/admin-portal/sharing` (the indented
-   * row under GoLogin). Mirrors `requireGoLoginManagement` on the server.
-   *
-   * Admins are in regardless of the grant — they run the workspace on the master
-   * token, so revoking the row must not lock the only people who can administer
-   * it out of it.
-   */
-  const canManage =
-    isAdmin || userData?.permittedPageIds?.includes('apps-gologin-management') === true;
+  /** This reader's pins — see `useGoLoginPins` for why it is not a plain memo. */
+  const { pinned: pinnedIds, togglePin } = useGoLoginPins();
 
   /**
    * Sessions that make closing the window a bad idea, named.
@@ -215,11 +278,28 @@ export default function GoLoginPage() {
     return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [searchMatches, visibleFolders]);
 
+  /**
+   * Pins that match a profile this reader can actually see. A pin on a profile
+   * since deleted or unshared is inert — counted nowhere, shown nowhere — so the
+   * Pinned chip can never promise rows it cannot produce.
+   */
+  const pinnedTotal = useMemo(() => countPinned(profiles, pinnedIds), [profiles, pinnedIds]);
+  const pinnedInSearch = useMemo(() => countPinned(searchMatches, pinnedIds), [searchMatches, pinnedIds]);
+
   // A folder that disappears (the search narrowed past it, or a refresh removed
   // it) must not leave the list filtered by something with no chip left to
   // unset — so the selection is *derived* rather than corrected in an effect.
+  // Pinned is the default until the reader picks something else, but only while
+  // it has anything in it.
+  const wantedFolder = folder === undefined ? (pinnedTotal > 0 ? PINNED : null) : folder;
   const activeFolder =
-    folder && folderFacets.some(([name]) => name === folder) ? folder : null;
+    wantedFolder === PINNED
+      ? pinnedTotal > 0
+        ? PINNED
+        : null
+      : wantedFolder && folderFacets.some(([name]) => name === wantedFolder)
+        ? wantedFolder
+        : null;
 
   // The chip row is capped so the header cannot outgrow the list it describes.
   // The selected chip is always kept — a filter you cannot see is a filter you
@@ -247,26 +327,56 @@ export default function GoLoginPage() {
    * Locked-by-someone-else counts as live: it is the other row you need to find
    * quickly, because it is the one you have to go and ask about.
    */
-  const filtered = useMemo(() => {
-    const base = activeFolder
-      ? searchMatches.filter((p) => p.folders.includes(activeFolder))
-      : searchMatches;
-    const rank = (p: GoLoginProfile) => {
-      const status = sessions[p.id]?.status;
-      if (status === 'running' || status === 'starting' || status === 'stopping') return 0;
-      if (locks[p.id]) return 1;
-      if (p.isRunning) return 2;
-      return 3;
-    };
-    // A stable sort over a copy — `base` is a memo the facet counts also read.
-    return [...base].sort((a, b) => rank(a) - rank(b));
-  }, [searchMatches, activeFolder, sessions, locks]);
+  const base = useMemo(
+    () =>
+      activeFolder === PINNED
+        ? searchMatches.filter((p) => pinnedIds.has(p.id))
+        : activeFolder
+          ? searchMatches.filter((p) => p.folders.includes(activeFolder))
+          : searchMatches,
+    [searchMatches, activeFolder, pinnedIds],
+  );
 
   // Any change to *what is being listed* starts the window over. Adjusted
   // during render against a key rather than in an effect: an effect would paint
   // one frame of the previous window's row count first, and `setState` in an
   // effect body is a cascading render (react-hooks/set-state-in-effect).
   const listKey = `${query}\u0000${activeFolder ?? ''}\u0000${fetchedAtMs ?? ''}`;
+
+  /**
+   * The live-first order is a **snapshot**, taken when the listing changes —
+   * search, chip, Refresh — and never re-taken because of the reader's own click.
+   * It used to re-rank on every session change, so pressing Launch on row 12
+   * moved that row to the top the same instant and the next click landed on a
+   * different row's Launch: a different live account. A launched row now keeps
+   * its place and gains its "Open here" chip; it rises on the next refresh.
+   * Profiles not in the snapshot (one just created) sort first, where the
+   * person who made it is looking.
+   */
+  const [rankSnap, setRankSnap] = useState<{ key: string; rank: ReadonlyMap<string, number> } | null>(null);
+  if (rankSnap?.key !== listKey) {
+    const rank = new Map<string, number>();
+    for (const p of base) {
+      const status = sessions[p.id]?.status;
+      rank.set(
+        p.id,
+        status === 'running' || status === 'starting' || status === 'stopping'
+          ? 0
+          : locks[p.id]
+            ? 1
+            : p.isRunning
+              ? 2
+              : 3,
+      );
+    }
+    setRankSnap({ key: listKey, rank });
+  }
+
+  const filtered = useMemo(() => {
+    const rank = rankSnap?.rank;
+    // A stable sort over a copy — `base` is a memo the facet counts also read.
+    return rank ? [...base].sort((a, b) => (rank.get(a.id) ?? -1) - (rank.get(b.id) ?? -1)) : base;
+  }, [base, rankSnap]);
   const [windowKey, setWindowKey] = useState(listKey);
   if (windowKey !== listKey) {
     setWindowKey(listKey);
@@ -322,10 +432,8 @@ export default function GoLoginPage() {
     closeGuard.clearIfIdle(stillBusy);
   }, [closeGuard, stillBusy]);
 
-  const clearFilters = () => {
-    setQuery('');
-    setFolder(null);
-  };
+  /** The label a chip goes by in a sentence. */
+  const chipLabel = activeFolder === PINNED ? 'pinned' : activeFolder ? `${activeFolder}` : '';
 
   /**
    * The keyboard model, and the one thing it deliberately does not do.
@@ -404,18 +512,98 @@ export default function GoLoginPage() {
     [authFetch],
   );
 
+  /**
+   * Delete, confirmed — then an **Undo** on the toast that means it: GoLogin
+   * keeps deleted profiles restorable, so Undo restores the real profile (same
+   * id, same fingerprint, same cookies), not a copy. The row is put back from
+   * memory once the restore lands, which costs no re-walk.
+   */
+  const deleteProfile = useCallback(
+    async (profile: GoLoginProfile) => {
+      setDeleting(true);
+      try {
+        await authFetch(`/api/gologin/manage/profiles/${encodeURIComponent(profile.id)}`, {
+          method: 'DELETE',
+        });
+        removeProfile(profile.id);
+        setConfirmDelete(null);
+        toast.success(`Deleted ${profile.name || 'the profile'}.`, {
+          duration: 10_000,
+          action: {
+            label: 'Undo',
+            onClick: () => {
+              void authFetch(`/api/gologin/manage/profiles/${encodeURIComponent(profile.id)}/restore`, {
+                method: 'POST',
+              })
+                .then(() => {
+                  upsertProfile(profile);
+                  toast.success(`Restored ${profile.name || 'the profile'}.`);
+                })
+                .catch((err: unknown) =>
+                  toast.error(err instanceof Error ? err.message : 'Could not restore it.'),
+                );
+            },
+          },
+        });
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Could not delete that profile.');
+      } finally {
+        setDeleting(false);
+      }
+    },
+    [authFetch, removeProfile, upsertProfile],
+  );
+
+  /**
+   * Who has a profile open — the one derivation, from this machine's session map
+   * and the live lock snapshot, for the Edit panel and the Delete guard.
+   */
+  const holderOf = (profileId: string): ProfileHolder | null => {
+    const session = sessions[profileId];
+    if (session && isLive(session)) return { self: true, name: 'You' };
+    const lock = locks[profileId];
+    if (!lock) return null;
+    return lock.uid === userData?.uid
+      ? { self: true, name: 'You' }
+      : { self: false, name: lock.displayName || 'Someone' };
+  };
+  const deleteHolder = confirmDelete ? holderOf(confirmDelete.id) : null;
+
+  /**
+   * Open Sharing — people-first from the header, or on one profile's own
+   * "who can open this?" view from a row, addressed by id (a name search would
+   * also match every profile whose name contains it).
+   */
+  const openSharing = (profile: GoLoginProfile | null = null) => {
+    setShareFocus(profile ? { id: profile.id, name: profile.name } : null);
+    setDialog('sharing');
+  };
+
+  /**
+   * Launch, unless GoLogin's own flag says the profile is already open
+   * somewhere Bluu cannot see. Bluu's lock blocks a colleague launching through
+   * Bluu; it cannot see someone running the profile in GoLogin's own app. The
+   * flag is only as fresh as the listing, so this asks rather than refuses —
+   * but opening it too puts one account on two devices and two IPs, which is
+   * the thing an anti-detect profile exists to avoid.
+   */
+  const requestLaunch = (profileId: string, name?: string) => {
+    const profile = profiles.find((p) => p.id === profileId);
+    const status = sessions[profileId]?.status;
+    const liveHere = status === 'running' || status === 'starting';
+    if (profile?.isRunning && !locks[profileId] && !liveHere) {
+      setConfirmLaunch(profile);
+      return Promise.resolve(false);
+    }
+    return launchSession(profileId, name);
+  };
+
   // ── State 1: not linked yet ────────────────────────────────────────
   // `accountLoading` is only ever true on a cold window with no seed, so this
   // skeleton is the rare case rather than the usual one.
-  if (accountLoading) {
-    return (
-      <div className="flex h-full w-full flex-col gap-3 bg-background p-6" role="status" aria-label="Loading GoLogin">
-        <Skeleton className="h-8 w-48 rounded-md" />
-        <Skeleton className="h-9 w-full rounded-lg" />
-        <Skeleton className="h-full w-full rounded-xl" />
-      </div>
-    );
-  }
+  // One loading screen for the whole connect, rather than three skeletons
+  // flashing in turn while GoLogin answers — see `ConnectingScreen`.
+  if (accountLoading) return <ConnectingScreen stage="account" />;
 
   // ── State 1a: the seat could not be checked ────────────────────────
   // Checked BEFORE membership, because a failed lookup leaves `account` at its
@@ -494,6 +682,10 @@ export default function GoLoginPage() {
     );
   }
 
+  // The first listing, only: a Refresh keeps the list on screen and spins its
+  // own button. The window renders once, when there is a list to render.
+  if (loading) return <ConnectingScreen stage="profiles" />;
+
   return (
     // The keyboard model is bound here rather than on `window`: this window
     // hosts modal overlays (Orbita, the close guard) that render as siblings
@@ -515,12 +707,11 @@ export default function GoLoginPage() {
             <h1 className="text-2xl font-bold tracking-tight text-white">Profiles</h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {canManage && (
-              <Button variant="outline" size="sm" onClick={() => setManaging(true)}>
-                <Settings2 aria-hidden />
-                Management
-              </Button>
-            )}
+            {/* Each control exists only for someone who can use it — a button
+                that answers "you do not have permission" is a button that
+                should not have rendered. Members and Sharing are outline: they
+                administer; New profile is the one filled action, so it sits
+                last, at the edge the eye ends on. */}
             <Button
               variant="outline"
               size="sm"
@@ -533,6 +724,28 @@ export default function GoLoginPage() {
               <RefreshCcw className={refreshing ? 'animate-spin' : undefined} />
               Refresh
             </Button>
+            {caps.members && (
+              <Button variant="outline" size="sm" onClick={() => setDialog('members')}>
+                <Users aria-hidden />
+                Members
+              </Button>
+            )}
+            {caps.sharing && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => openSharing()}
+              >
+                <Share2 aria-hidden />
+                Sharing
+              </Button>
+            )}
+            {caps.profiles && (
+              <Button size="sm" className={PRIMARY_BUTTON} onClick={() => setDialog('new')} disabled={!isOnline}>
+                <Plus aria-hidden />
+                New profile
+              </Button>
+            )}
           </div>
         </div>
 
@@ -570,7 +783,7 @@ export default function GoLoginPage() {
             row rendered — the header out-competing the thing it describes. The
             selected folder is always shown even when it sits past the cap, so
             expanding is never the only way to see what is filtering the list. */}
-        {folderFacets.length > 0 && (
+        {(folderFacets.length > 0 || pinnedTotal > 0 || caps.folders) && (
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             <FolderChip
               label="All"
@@ -578,6 +791,19 @@ export default function GoLoginPage() {
               selected={activeFolder === null}
               onSelect={() => setFolder(null)}
             />
+            {/* Bluu's own folder, not GoLogin's — this reader's pins. First after
+                All because it is the one they built themselves, and it stays
+                visible at a zero count while a search hides every pin: a filter
+                that vanishes mid-search is a filter the reader cannot clear. */}
+            {pinnedTotal > 0 && (
+              <FolderChip
+                label="Pinned"
+                icon={<Pin className="size-3" aria-hidden />}
+                count={pinnedInSearch}
+                selected={activeFolder === PINNED}
+                onSelect={() => setFolder(activeFolder === PINNED ? null : PINNED)}
+              />
+            )}
             {visibleFacets.map(([name, count]) => (
               <FolderChip
                 key={name}
@@ -599,22 +825,26 @@ export default function GoLoginPage() {
                 {allFolders ? 'Show fewer' : `+${hiddenFacetCount} more`}
               </button>
             )}
+            {/* Small and last: it edits the row it sits in, and it is an
+                occasional admin act beside chips that are used all day. */}
+            {caps.folders && (
+              <Button
+                variant="ghost"
+                size="xs"
+                className="ml-auto h-6 text-zinc-400 hover:text-white"
+                onClick={() => setDialog('folders')}
+                disabled={!isOnline}
+              >
+                <FolderCog className="size-3.5" aria-hidden />
+                Edit folders
+              </Button>
+            )}
           </div>
         )}
 
         <p className="mt-2 text-[11px] text-zinc-400">
-          {loading ? (
-            // A named wait, not a bare "Loading…". Listing every profile is one
-            // provider request per 30 of them, walked strictly sequentially to
-            // stay under the rate limit, so this is genuinely slow on a large
-            // workspace — and a reader who knows why waits differently than one
-            // who thinks the app has hung.
-            <span className="flex items-center gap-1.5">
-              <Loader2 className="size-3.5 animate-spin" aria-hidden />
-              Loading profiles from GoLogin…
-            </span>
-          ) : (
-            <>
+          {/* The first listing never reaches here — it is `ConnectingScreen`. */}
+          <>
               {hasMore ? (
                 <>
                   {'Showing '}
@@ -655,8 +885,7 @@ export default function GoLoginPage() {
                   {fetchedAt}
                 </>
               )}
-            </>
-          )}
+          </>
         </p>
 
         {/*
@@ -715,9 +944,7 @@ export default function GoLoginPage() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-2">
-        {loading ? (
-          <ListSkeleton />
-        ) : error ? (
+        {error ? (
           // Persistent state, rendered inline with a way out — not a toast that
           // reports the same fact and then vanishes.
           <div className="flex flex-col items-start gap-2 py-8">
@@ -729,15 +956,30 @@ export default function GoLoginPage() {
         ) : filtered.length === 0 ? (
           // "Empty because of a filter" is a dead end and must carry its own way
           // out; "empty because there is nothing" is just a fact.
-          isFiltered ? (
+          // Two different dead ends, each with the way out that keeps what the
+          // reader typed. With Pinned as the default, "search for a profile I
+          // have not pinned" is the everyday case — it must lead to the match,
+          // not to a blank list and a link that erases the search.
+          activeFolder && searchMatches.length > 0 ? (
             <p className="py-8 text-sm text-zinc-400">
-              Nothing matches these filters.{' '}
+              No {chipLabel} profile matches{query.trim() ? ` “${query.trim()}”` : ''}.{' '}
               <button
                 type="button"
-                onClick={clearFilters}
+                onClick={() => setFolder(null)}
                 className="underline underline-offset-2 hover:text-white"
               >
-                Clear them
+                Show <span className="tabular-nums">{searchMatches.length}</span> in All
+              </button>
+            </p>
+          ) : isFiltered ? (
+            <p className="py-8 text-sm text-zinc-400">
+              Nothing matches “{query.trim()}”.{' '}
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                className="underline underline-offset-2 hover:text-white"
+              >
+                Clear the search
               </button>{' '}
               to see all <span className="tabular-nums">{profiles.length}</span>.
             </p>
@@ -758,7 +1000,7 @@ export default function GoLoginPage() {
                   canLaunch={sessionsSupported}
                   isAdmin={isAdmin}
                   releasing={releasing === profile.id}
-                  onLaunch={launchSession}
+                  onLaunch={requestLaunch}
                   onStop={stopSession}
                   onForceRelease={(p, holder) =>
                     setConfirmRelease({
@@ -767,6 +1009,13 @@ export default function GoLoginPage() {
                       holder,
                     })
                   }
+                  pinned={pinnedIds.has(profile.id)}
+                  caps={caps}
+                  onTogglePin={(p) => void togglePin(p.id)}
+                  onEdit={(p) => setEditingId(p.id)}
+                  onAddToFolder={setFolderTarget}
+                  onShare={openSharing}
+                  onDelete={setConfirmDelete}
                 />
               ))}
             </ul>
@@ -775,15 +1024,142 @@ export default function GoLoginPage() {
         )}
       </div>
 
-      {canManage && (
-        <ManagementDialog
-          open={managing}
-          onOpenChange={setManaging}
-          // A grant only reaches the operator's own list on their next fetch, but
-          // an admin editing their *own* access should see it immediately.
+      {/* Each management surface mounts only for someone who can use it. */}
+      {caps.members && (
+        <MembersDialog
+          open={dialog === 'members'}
+          onOpenChange={(open) => setDialog(open ? 'members' : null)}
+          // A seat change reaches the person's own list on their next fetch; an
+          // admin changing their *own* access should see it now.
           onChanged={refresh}
         />
       )}
+      {caps.sharing && (
+        <SharingDialog
+          // Remounted per opening so a row's "Share profile" starts filtered to
+          // that profile, and the Sharing button starts clean.
+          key={dialog === 'sharing' ? `open:${shareFocus?.id ?? ''}` : 'closed'}
+          open={dialog === 'sharing'}
+          onOpenChange={(open) => setDialog(open ? 'sharing' : null)}
+          focusProfile={shareFocus}
+          myUid={userData?.uid}
+          onChanged={refresh}
+        />
+      )}
+      {caps.folders && (
+        <EditFoldersDialog
+          open={dialog === 'folders'}
+          onOpenChange={(open) => setDialog(open ? 'folders' : null)}
+          // Folder membership is what the chips count, so the list re-reads —
+          // once, on close, and only if something changed.
+          onChanged={refresh}
+        />
+      )}
+      {caps.profiles && (
+        <>
+          <NewProfileDialog
+            open={dialog === 'new'}
+            onOpenChange={(open) => setDialog(open ? 'new' : null)}
+            onCreated={upsertProfile}
+          />
+          <EditProfileSheet
+            profileId={editingId}
+            onOpenChange={(open) => !open && setEditingId(null)}
+            onSaved={upsertProfile}
+            canEditFolders={caps.folders}
+            holder={editingId ? holderOf(editingId) : null}
+          />
+        </>
+      )}
+      {caps.folders && (
+        <AddToFolderDialog
+          profile={folderTarget}
+          onOpenChange={(open) => !open && setFolderTarget(null)}
+          onSaved={(profileId, names) => {
+            // Keep Bluu's plumbing folders on the row — they are what makes the
+            // profile visible to its operators, and only Sharing changes them.
+            const current = profiles.find((p) => p.id === profileId);
+            patchProfile(profileId, {
+              folders: [...names, ...(current?.folders.filter(isManagedGoLoginFolder) ?? [])],
+            });
+          }}
+        />
+      )}
+
+      <AlertDialog open={!!confirmLaunch} onOpenChange={(open) => !open && setConfirmLaunch(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmLaunch?.name || 'This profile'} may already be open</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmLaunch?.runningUserEmail
+                ? `GoLogin reported ${confirmLaunch.runningUserEmail} running it outside Bluu`
+                : 'GoLogin reported it running outside Bluu'}
+              {fetchedAt ? ` (as of ${fetchedAt})` : ''}. Opening it again signs one account in from
+              two devices and two IPs, which can get it flagged. Launch only if you know that session
+              has ended — Refresh first to check.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className={DANGER_BUTTON}
+              onClick={() => {
+                if (!confirmLaunch) return;
+                const { id, name } = confirmLaunch;
+                setConfirmLaunch(null);
+                void launchSession(id, name || undefined);
+              }}
+            >
+              Launch anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/*
+        Confirmed, and it names what survives. A deleted profile is restorable
+        (the toast carries a real Undo), but the account inside it is someone's
+        live login — deleting the wrong one is the kind of mistake worth one
+        extra click to prevent. Refused while anyone has it open, here and on
+        the server.
+      */}
+      <AlertDialog
+        open={!!confirmDelete}
+        onOpenChange={(open) => !open && !deleting && setConfirmDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {confirmDelete?.name || 'this profile'}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteHolder ? (
+                <>
+                  {holderHas(deleteHolder)} it open right now. It can be deleted once it is closed.
+                </>
+              ) : (
+                <>
+                  It disappears for everyone it is shared with, along with its saved logins and
+                  cookies. The toast afterwards offers Undo for 10 seconds; after that, restoring it
+                  means GoLogin&rsquo;s own app.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className={DANGER_BUTTON}
+              disabled={deleting || !!deleteHolder}
+              onClick={(e) => {
+                e.preventDefault();
+                if (confirmDelete) void deleteProfile(confirmDelete);
+              }}
+            >
+              {deleting && <Loader2 className="activity-spinner size-3.5 animate-spin" aria-hidden />}
+              Delete profile
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/*
         Confirmed, because it ends a colleague's session on another machine and
@@ -810,7 +1186,7 @@ export default function GoLoginPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-red-600 text-white hover:bg-red-700"
+              className={DANGER_BUTTON}
               onClick={() => {
                 if (!confirmRelease) return;
                 const { id, name, holder } = confirmRelease;
@@ -858,18 +1234,21 @@ function FolderChip({
   count,
   selected,
   onSelect,
+  icon,
 }: {
   label: string;
   count: number;
   selected: boolean;
   onSelect: () => void;
+  /** Only Bluu's own Pinned chip carries one — it marks the chip that is not GoLogin's. */
+  icon?: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#3b82f6] ${
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#3b82f6] ${
         selected
           ? 'bg-[#2563eb] text-white'
           : 'bg-white/[0.04] text-zinc-400 hover:bg-white/[0.055] hover:text-white active:bg-white/[0.08]'
@@ -879,6 +1258,7 @@ function FolderChip({
           contrast floor, and the count is the half of the chip a reader is
           actually comparing across the row. The unselected chip's own colour is
           already the de-emphasis step. */}
+      {icon}
       {label} <span className="tabular-nums">{count}</span>
     </button>
   );
@@ -910,6 +1290,13 @@ const OS_LABELS: Record<string, string> = {
  * timer gets a value that actually changes — a `Date.now()` inside would be
  * recomputed identically on every render that was not driven by the clock.
  */
+/** How many of these profiles are pinned. */
+function countPinned(list: GoLoginProfile[], pinned: ReadonlySet<string>): number {
+  let n = 0;
+  for (const p of list) if (pinned.has(p.id)) n++;
+  return n;
+}
+
 function relativeTime(msSince: number | null, now = Date.now()): string | null {
   if (!msSince) return null;
   const diff = now - msSince;
@@ -936,7 +1323,22 @@ function ProfileRow({
   onLaunch,
   onStop,
   onForceRelease,
+  pinned,
+  caps,
+  onTogglePin,
+  onEdit,
+  onAddToFolder,
+  onShare,
+  onDelete,
 }: {
+  pinned: boolean;
+  /** Which management items the row's menu offers. Pin is for everyone. */
+  caps: GoLoginCapabilities;
+  onTogglePin: (profile: GoLoginProfile) => void;
+  onEdit: (profile: GoLoginProfile) => void;
+  onAddToFolder: (profile: GoLoginProfile) => void;
+  onShare: (profile: GoLoginProfile) => void;
+  onDelete: (profile: GoLoginProfile) => void;
   profile: GoLoginProfile;
   /** Bluu's own per-operator folders already stripped — see `visibleFolders`. */
   folders: string[];
@@ -948,7 +1350,7 @@ function ProfileRow({
   /** Client-side convenience only — the route re-checks (rule 3). */
   isAdmin: boolean;
   releasing: boolean;
-  onLaunch: (profileId: string) => Promise<boolean>;
+  onLaunch: (profileId: string, name?: string) => Promise<boolean>;
   onStop: (profileId: string) => Promise<boolean>;
   onForceRelease: (profile: GoLoginProfile, holder: string) => void;
 }) {
@@ -995,13 +1397,18 @@ function ProfileRow({
         <div className="flex items-center gap-2">
           <span
             className={`inline-block size-2 shrink-0 rounded-full ${
-              liveHere ? MINE_DOT : blocked || profile.isRunning ? OTHER_DOT : IDLE_DOT
+              liveHere || status === 'starting' ? MINE_DOT : blocked || profile.isRunning ? OTHER_DOT : IDLE_DOT
             }`}
             aria-hidden
           />
           <span className="truncate text-sm font-medium text-white">
             {profile.name || 'Untitled profile'}
           </span>
+          {/* A mark, not a control — the menu is where pinning happens. Kept
+              so a pinned row is recognisable under All, not only under Pinned. */}
+          {pinned && (caps.profiles || caps.folders || caps.sharing) && (
+            <Pin className="size-3 shrink-0 text-zinc-400" aria-label="Pinned" role="img" />
+          )}
           {liveHere && (
             <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${TONE_CHIP.green}`}>
               Open here
@@ -1048,22 +1455,36 @@ function ProfileRow({
         {/* The row keeps its folders as attribute chips — greyscale, because a
             folder is a label the profile carries, not a state it is in. The
             filter row above is where they become interactive. */}
-        {folders.map((name) => (
+        {/* Capped at two: the lane grows with every folder and the name
+            beside it is what truncates. The rest are one count, named on hover. */}
+        {folders.slice(0, 2).map((name) => (
           <span
             key={name}
-            className="rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[11px] font-medium text-zinc-300"
+            className="max-w-[9rem] truncate rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[11px] font-medium text-zinc-300"
           >
             {name}
           </span>
         ))}
+        {folders.length > 2 && (
+          <span
+            className="rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-zinc-300"
+            title={folders.slice(2).join(', ')}
+          >
+            +{folders.length - 2}
+          </span>
+        )}
         {/* The profile's GoLogin id, for matching a row against GoLogin's own
             dashboard. A reference, not an attribute — so it steps back below
             the folder chips rather than sitting at their weight, and says what
-            it is to a screen reader instead of reading out six characters. */}
-        <span className="font-mono text-[11px] text-zinc-400" title="GoLogin profile id">
-          <span className="sr-only">GoLogin id </span>
-          {profile.id.slice(-6)}
-        </span>
+            it is to a screen reader instead of reading out six characters.
+            Managers only: it is for reconciling against GoLogin's own app,
+            which an operator who only launches never does. */}
+        {(caps.profiles || caps.folders || caps.sharing) && (
+          <span className="font-mono text-[11px] text-zinc-400" title="GoLogin profile id">
+            <span className="sr-only">GoLogin id </span>
+            {profile.id.slice(-6)}
+          </span>
+        )}
         {/* The action lane. Always visible rather than revealed on hover,
             because launching is now this page's whole job — the decision-queue
             rule, not the faceted-index one. */}
@@ -1121,58 +1542,145 @@ function ProfileRow({
                 data-row-action
                 className="h-7"
                 disabled={blocked}
-                title={blocked ? `${lock!.displayName} has this profile open` : undefined}
-                onClick={() => onLaunch(profile.id)}
+                title={
+                  blocked
+                    ? `${lock!.displayName} has this profile open`
+                    : status === 'failed'
+                      ? // The toast that said why has gone; the reason stays here.
+                        sessionErrorMessage(session?.error)
+                      : undefined
+                }
+                onClick={() => onLaunch(profile.id, profile.name || undefined)}
               >
                 {blocked ? 'In use' : status === 'failed' ? 'Retry' : 'Launch'}
               </Button>
             )}
           </div>
         )}
+        <RowMenu
+          profile={profile}
+          pinned={pinned}
+          caps={caps}
+          // Deleting a profile someone has open would pull a live account out
+          // from under them; the server refuses too, this just says so first.
+          inUse={liveHere || status === 'starting' || status === 'stopping' || !!lock}
+          onTogglePin={onTogglePin}
+          onEdit={onEdit}
+          onAddToFolder={onAddToFolder}
+          onShare={onShare}
+          onDelete={onDelete}
+        />
       </div>
     </li>
   );
 }
 
 /**
- * The loading state for the list.
+ * A row's options. **Pin** is for everyone; the rest appear only for someone
+ * holding the capability behind them, so the menu never offers a thing that
+ * answers "you don't have permission".
  *
- * Shaped like the rows it replaces — status dot, name, meta line, then the
- * right-hand lane of folder chip, id and action button — so the layout does not
- * jump when the real data lands. The widths vary per row because a column of
- * identical bars reads as a rendering artefact rather than as content arriving.
+ * One trigger rather than a row of buttons (DESIGN.md §5, the satellite shell's
+ * per-message actions): four affordances on hundreds of rows is DOM in the
+ * heaviest container here. It is always visible rather than hover-revealed —
+ * the Launch button beside it already is, and a menu that appears on hover is
+ * one a keyboard reader has to hunt for. It carries no `data-row-action`, so
+ * `j`/`k` keep landing on the row's primary control.
  */
-const SKELETON_ROWS = [
-  { name: 'w-44', meta: 'w-64' },
-  { name: 'w-56', meta: 'w-52' },
-  { name: 'w-36', meta: 'w-72' },
-  { name: 'w-52', meta: 'w-56' },
-  { name: 'w-40', meta: 'w-64' },
-  { name: 'w-60', meta: 'w-48' },
-  { name: 'w-44', meta: 'w-60' },
-  { name: 'w-48', meta: 'w-56' },
-];
-
-function ListSkeleton() {
+function RowMenu({
+  profile,
+  pinned,
+  caps,
+  inUse,
+  onTogglePin,
+  onEdit,
+  onAddToFolder,
+  onShare,
+  onDelete,
+}: {
+  profile: GoLoginProfile;
+  pinned: boolean;
+  caps: GoLoginCapabilities;
+  inUse: boolean;
+  onTogglePin: (profile: GoLoginProfile) => void;
+  onEdit: (profile: GoLoginProfile) => void;
+  onAddToFolder: (profile: GoLoginProfile) => void;
+  onShare: (profile: GoLoginProfile) => void;
+  onDelete: (profile: GoLoginProfile) => void;
+}) {
+  const manages = caps.profiles || caps.folders || caps.sharing;
+  // A menu that opens onto one item is two clicks for one action, on every row
+  // of the surface operators use most. Without a management capability, Pin is
+  // the whole menu — so it is simply a toggle.
+  if (!manages) {
+    return (
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className={`size-7 ${pinned ? 'text-white' : 'text-zinc-400 hover:text-white'}`}
+        aria-pressed={pinned}
+        aria-label={`${pinned ? 'Unpin' : 'Pin'} ${profile.name || 'this profile'}`}
+        title={pinned ? 'Unpin' : 'Pin'}
+        onClick={() => onTogglePin(profile)}
+      >
+        {/* Filled when pinned: the toggle shows its own state. */}
+        <Pin className={`size-4 ${pinned ? 'fill-current' : ''}`} aria-hidden />
+      </Button>
+    );
+  }
   return (
-    <ul className="divide-y divide-white/[0.07]" role="status" aria-label="Loading profiles">
-      {SKELETON_ROWS.map((row, i) => (
-        <li key={i} className="flex items-start justify-between gap-4 py-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <Skeleton className="size-2 shrink-0 rounded-full" />
-              <Skeleton className={`h-4 ${row.name} rounded`} />
-            </div>
-            <Skeleton className={`mt-1.5 h-3 ${row.meta} rounded`} />
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <Skeleton className="h-5 w-16 rounded-md" />
-            <Skeleton className="h-4 w-12 rounded" />
-            <Skeleton className="h-7 w-16 rounded-md" />
-          </div>
-        </li>
-      ))}
-    </ul>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="size-7 text-zinc-400 hover:text-white"
+          aria-label={`Options for ${profile.name || 'this profile'}`}
+        >
+          <MoreHorizontal className="size-4" aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuItem onSelect={() => onTogglePin(profile)}>
+          {pinned ? <PinOff aria-hidden /> : <Pin aria-hidden />}
+          {pinned ? 'Unpin' : 'Pin'}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {caps.profiles && (
+          <DropdownMenuItem onSelect={() => onEdit(profile)}>
+            <Pencil aria-hidden />
+            Edit profile
+          </DropdownMenuItem>
+        )}
+        {caps.folders && (
+          <DropdownMenuItem onSelect={() => onAddToFolder(profile)}>
+            <FolderInput aria-hidden />
+            Add to folder
+          </DropdownMenuItem>
+        )}
+        {caps.sharing && (
+          <DropdownMenuItem onSelect={() => onShare(profile)}>
+            <Share2 aria-hidden />
+            Share profile
+          </DropdownMenuItem>
+        )}
+        {caps.profiles && (
+          <>
+            <DropdownMenuSeparator />
+            {/* Last and red, and apart from the rest — the one item here that
+                cannot be taken back after a few seconds. */}
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={inUse}
+              onSelect={() => onDelete(profile)}
+            >
+              <Trash2 aria-hidden />
+              {inUse ? 'Delete (in use)' : 'Delete profile'}
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

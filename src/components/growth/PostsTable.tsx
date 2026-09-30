@@ -1,7 +1,8 @@
 'use client';
 
 import { memo, useMemo, useState } from 'react';
-import { ArrowDownIcon, ArrowUpIcon } from 'lucide-react';
+import { ArrowDownIcon, ArrowUpIcon, PanelRightOpenIcon } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -9,6 +10,7 @@ import { Sparkline } from './Sparkline';
 import {
   AnimatedCount, PostAuthorAvatar, ReadFreshness, RefreshStatePill, VelocityValue, postExcerpt,
 } from './postUi';
+import { AccountAvatar, CategoryDot } from './growthUi';
 import {
   metricValue,
   pointsForMetric,
@@ -17,7 +19,7 @@ import {
   type PostVelocity,
 } from '@/lib/growth/postMetrics';
 import type { SeriesPoint } from '@/lib/growth/metrics';
-import type { GrowthPost } from '@/types/firestore';
+import type { GrowthAccount, GrowthPost } from '@/types/firestore';
 
 export type TableMetric = PostMetric | 'engagement';
 type SortKey = 'posted' | 'value' | 'rate';
@@ -42,10 +44,30 @@ type SortKey = 'posted' | 'value' | 'rate';
  * the sparkline all describe — one choice, three columns — which is the same
  * idiom as the range control on the overview rather than eight columns of
  * numbers nobody can scan.
+ *
+ * ── Grouped by account ──────────────────────────────────────────────────────
+ * Posts are grouped under the account that wrote them, one `<tbody>` per
+ * account headed by a `scope="colgroup"` row — so "how is @x's content doing"
+ * is one glance instead of a scan for a handle down 200 rows, and a screen
+ * reader hears which account each post belongs to. The author avatar and handle
+ * left the rows with it: every row under a heading has the same author, so a
+ * column of identical faces states nothing (the account panel's post cards drop
+ * it for the same reason).
+ *
+ * The sort still applies, twice over: **inside** each group, and **between**
+ * groups, which are ordered by their best-ranked post. Sorting by rate therefore
+ * floats the account with the fastest-moving post to the top rather than
+ * re-alphabetising the page, and "Posted" newest-first opens on whoever posted
+ * last. A post whose author is not a tracked account (a pasted link) still gets
+ * a group — by handle — marked as off the roster.
  */
 
 interface PostsTableProps {
   posts: GrowthPost[];
+  /** X accounts by `handleNormalized`, to head each group with its account. */
+  accountsByHandle: Map<string, GrowthAccount>;
+  /** Open a tracked account's panel from its group heading. */
+  onOpenAccount: (account: GrowthAccount) => void;
   metric: TableMetric;
   metricLabel: string;
   highlightId: string | null;
@@ -54,7 +76,7 @@ interface PostsTableProps {
 }
 
 export function PostsTable({
-  posts, metric, metricLabel, highlightId, onHighlight, onOpen,
+  posts, accountsByHandle, onOpenAccount, metric, metricLabel, highlightId, onHighlight, onOpen,
 }: PostsTableProps) {
   const [sort, setSort] = useState<SortKey>('posted');
   const [ascending, setAscending] = useState(false);
@@ -94,6 +116,27 @@ export function PostsTable({
     });
   }, [posts, metric, sort, ascending]);
 
+  /**
+   * Rows split by author, in sorted order: a `Map` keeps insertion order, and
+   * rows arrive sorted, so each group's first row is its best-ranked post and the
+   * groups come out ordered by it — no second sort.
+   */
+  const groups = useMemo(() => {
+    const byAuthor = new Map<string, typeof rows>();
+    for (const row of rows) {
+      const key = row.post.authorHandleNormalized ?? '';
+      const list = byAuthor.get(key);
+      if (list) list.push(row);
+      else byAuthor.set(key, [row]);
+    }
+    return [...byAuthor.entries()].map(([key, groupRows]) => ({
+      key,
+      rows: groupRows,
+      account: key ? accountsByHandle.get(key) ?? null : null,
+      sample: groupRows[0].post,
+    }));
+  }, [rows, accountsByHandle]);
+
   const toggleSort = (key: SortKey) => {
     if (sort === key) setAscending((v) => !v);
     else { setSort(key); setAscending(false); }
@@ -113,25 +156,89 @@ export function PostsTable({
             <TableHead className="w-[100px] text-right">Last refresh</TableHead>
           </TableRow>
         </TableHeader>
-        <TableBody>
-          {rows.map(({ post, value, velocity, spark }) => (
-            <PostRow
-              key={post.id}
-              post={post}
-              value={value}
-              metricKey={metric}
-              velocity={velocity}
-              spark={spark}
-              isHighlighted={post.id === highlightId}
-              onHighlight={onHighlight}
-              onOpen={onOpen}
+        {groups.map((group) => (
+          <TableBody key={group.key || '_unknown'}>
+            <GroupHeading
+              account={group.account}
+              sample={group.sample}
+              count={group.rows.length}
+              onOpenAccount={onOpenAccount}
             />
-          ))}
-        </TableBody>
+            {group.rows.map(({ post, value, velocity, spark }) => (
+              <PostRow
+                key={post.id}
+                post={post}
+                value={value}
+                metricKey={metric}
+                velocity={velocity}
+                spark={spark}
+                isHighlighted={post.id === highlightId}
+                onHighlight={onHighlight}
+                onOpen={onOpen}
+              />
+            ))}
+          </TableBody>
+        ))}
       </Table>
     </div>
   );
 }
+
+/**
+ * One account's heading — the section rail (DESIGN.md §5) as a table row: the
+ * account's identity, a hairline, and the count on the same line.
+ *
+ * A `<th scope="colgroup">` spanning the row, so it names every cell in its
+ * `<tbody>` for a screen reader. Not a link itself — it is a label — but a
+ * tracked account carries one small button that opens its panel over this page,
+ * the account's own view of the same posts. Off-roster authors say so instead:
+ * there is no panel to open, which is exactly why this page is their only home.
+ */
+const GroupHeading = memo(function GroupHeading({
+  account,
+  sample,
+  count,
+  onOpenAccount,
+}: {
+  account: GrowthAccount | null;
+  /** Any post in the group — the source of the handle and picture off-roster. */
+  sample: GrowthPost;
+  count: number;
+  onOpenAccount: (account: GrowthAccount) => void;
+}) {
+  const handle = account?.handle ?? sample.authorHandle ?? 'unknown';
+  return (
+    <TableRow className="border-b-0 hover:bg-transparent">
+      <TableHead scope="colgroup" colSpan={5} className="h-auto px-2 pt-5 pb-1.5 font-normal">
+        <div className="flex items-center gap-2.5">
+          {account
+            ? <AccountAvatar account={account} className="size-5" />
+            : <PostAuthorAvatar post={sample} className="size-5" />}
+          <span className="shrink-0 text-sm font-medium text-white">@{handle}</span>
+          {account
+            ? <CategoryDot category={account.category} className="shrink-0" />
+            : <span className="shrink-0 text-[11px] text-zinc-400">Not on the roster</span>}
+          <span className="h-px min-w-4 flex-1 bg-white/[0.07]" aria-hidden />
+          <span className="shrink-0 text-[11px] tabular-nums text-zinc-400">
+            {count} {count === 1 ? 'post' : 'posts'}
+          </span>
+          {account && (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="shrink-0 text-zinc-400 hover:text-white"
+              onClick={() => onOpenAccount(account)}
+              aria-label={`Open @${handle}`}
+            >
+              <PanelRightOpenIcon className="size-3.5" aria-hidden />
+              Open
+            </Button>
+          )}
+        </div>
+      </TableHead>
+    </TableRow>
+  );
+});
 
 /**
  * Memoised for the same reason the leaderboard's row is: the highlight lives on
@@ -169,8 +276,8 @@ const PostRow = memo(function PostRow({
       }`}
     >
       <TableCell className="max-w-0">
+        {/* No author avatar or handle: the group heading above states both. */}
         <div className="flex min-w-0 items-start gap-2.5">
-          <PostAuthorAvatar post={post} className="mt-0.5" />
           <div className="min-w-0 flex-1">
             <button
               type="button"
@@ -187,8 +294,6 @@ const PostRow = memo(function PostRow({
               {postExcerpt(post.text)}
             </button>
             <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-400">
-              <span className="truncate">@{post.authorHandle ?? 'unknown'}</span>
-              <span aria-hidden>·</span>
               <span className="tabular-nums">{posted}</span>
               <RefreshStatePill post={post} />
             </div>

@@ -104,13 +104,17 @@ export function useGrowthPosts() {
   }, [authFetch, refresh]);
 
   const setPostTracking = useCallback(async (id: string, isActive: boolean) => {
-    await authFetch(`/api/smm/growth/posts/${id}`, {
+    const { post } = await authFetch(`/api/smm/growth/posts/${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ isActive }),
-    });
-    // A single boolean flip does not justify re-reading the whole roster (rule 9).
+    }) as { post: GrowthPost };
+    // A single flip does not justify re-reading the whole roster (rule 9). The
+    // route answers with the post as it now stands — including side effects like
+    // clearing a Stopped streak — so no rule is re-derived here. Its history is
+    // the list's trimmed tail; a stop/resume adds no readings, so a fuller
+    // history already loaded for an open card is kept.
     setPosts((current) => {
-      const next = current.map((p) => (p.id === id ? { ...p, isActive } : p));
+      const next = current.map((p) => (p.id === id ? { ...post, history: p.history } : p));
       writeThrough(next);
       return next;
     });

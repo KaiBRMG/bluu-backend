@@ -13,6 +13,8 @@ import {
   stopPostsForAccount,
 } from '@/lib/services/growthPostsService';
 import { categoryListFor, normalizeCategoryFor } from '@/lib/growth/category';
+import { listCategoryDefs } from '@/lib/services/growthCategoryService';
+import { PLATFORM_LABEL } from '@/lib/growth/platform';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
@@ -83,10 +85,14 @@ export const PATCH = withAuth(async (
     // offers the right options is an affordance, not a validation — so the read
     // of the document has to happen before this check rather than after it.
     const clearing = !hasCategory || body.category == null || body.category === '';
-    const category = clearing ? null : normalizeCategoryFor(account.platform, body.category);
+    // The registry (built-ins + created categories) is read only when a
+    // category is actually being set — clearing one, or any other PATCH, needs
+    // no vocabulary (rule 9).
+    const defs = clearing ? [] : await listCategoryDefs();
+    const category = clearing ? null : normalizeCategoryFor(defs, account.platform, body.category);
     if (hasCategory && !clearing && category === null) {
       return NextResponse.json({
-        error: `A ${account.platform === 'facebook' ? 'Facebook' : 'X'} account can be filed under ${categoryListFor(account.platform)}.`,
+        error: `A ${PLATFORM_LABEL[account.platform]} account can be filed under ${categoryListFor(defs, account.platform)}.`,
       }, { status: 400 });
     }
 
@@ -100,8 +106,14 @@ export const PATCH = withAuth(async (
       }, { status: 400 });
     }
 
+    // Stopping or resuming is a person deciding about this account, so it wipes
+    // an automatic "Stopped after repeated failures" state: a resumed account
+    // gets a fresh run of reads rather than resuming straight back into Stopped.
+    const trackingChanged = hasIsActive && body.isActive !== account.isActive;
+
     await ref.update({
       ...(hasIsActive ? { isActive: body.isActive } : {}),
+      ...(trackingChanged ? { consecutiveFailures: 0 } : {}),
       ...(hasTrackPosts ? { trackPosts: body.trackPosts } : {}),
       ...(hasCategory ? { category } : {}),
     });

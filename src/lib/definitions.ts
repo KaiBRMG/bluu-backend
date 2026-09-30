@@ -17,7 +17,7 @@ export interface PageDef {
   /**
    * Set when this page is a **sub-item of another page** rather than a
    * destination of its own — a capability *inside* a page that an admin grants
-   * separately, like GoLogin's Management dialog.
+   * separately, like GoLogin's four management capabilities.
    *
    * A sub-item is an ordinary tier-2 page in every mechanical respect: it has a
    * `page-permissions/{pageId}` doc, it lands in `permittedPageIds`, and it gets
@@ -28,7 +28,7 @@ export interface PageDef {
    *
    * Holding a sub-item is meaningless without the parent, and nothing enforces
    * that pairing automatically: grant both, and gate the server route on both
-   * (GoLogin does this with `requireGoLoginAccess` + `requireGoLoginManagement`).
+   * (GoLogin does this with `requireGoLoginAccess` + `requireGoLoginCapability`).
    */
   parentPageId?: string;
 }
@@ -132,12 +132,16 @@ export const PAGES: PageDef[] = [
   // href — the sidebar special-cases it via SATELLITE_PAGES. Its icon is the
   // brand SVG at /Icons/gologin.svg (no lucide equivalent).
   { pageId: 'apps-gologin', title: 'GoLogin', teamspaceId: 'apps', href: null, icon: 'GoLogin', order: 6 },
-  // A sub-item of GoLogin, not a page: the Management dialog (seats +
-  // assignments) inside the GoLogin window. It was admin-only until 2026-09-19;
-  // it is now grantable on /admin-portal/sharing so the workspace can be run
-  // without handing out the admin claim. Admins keep it unconditionally — see
-  // `requireGoLoginManagement`. No href, so the sidebar skips it.
-  { pageId: 'apps-gologin-management', title: 'Management', teamspaceId: 'apps', href: null, icon: 'Settings2', order: 7, parentPageId: 'apps-gologin' },
+  // Four sub-items of GoLogin, not pages: capabilities inside the GoLogin window.
+  // They replaced the single `apps-gologin-management` grant on 2026-09-30,
+  // which bundled seats with profile deletion. Ids are mirrored as
+  // `GOLOGIN_CAPABILITIES` in `lib/gologin/types.ts`, the one list both the
+  // window and the routes read. Admins hold all four unconditionally — see
+  // `requireGoLoginCapability`. No href, so the sidebar skips them.
+  { pageId: 'apps-gologin-members', title: 'Add & Remove Members', teamspaceId: 'apps', href: null, icon: 'UserRoundCog', order: 7, parentPageId: 'apps-gologin' },
+  { pageId: 'apps-gologin-profiles', title: 'Create, Edit & Delete Profiles', teamspaceId: 'apps', href: null, icon: 'Settings2', order: 7.1, parentPageId: 'apps-gologin' },
+  { pageId: 'apps-gologin-folders', title: 'Create, Edit & Delete Folders', teamspaceId: 'apps', href: null, icon: 'FolderCog', order: 7.2, parentPageId: 'apps-gologin' },
+  { pageId: 'apps-gologin-sharing', title: 'Share Profiles & Folders', teamspaceId: 'apps', href: null, icon: 'Share2', order: 7.3, parentPageId: 'apps-gologin' },
 
 ];
 

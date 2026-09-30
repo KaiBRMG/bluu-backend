@@ -52,6 +52,7 @@ import {
   GoLoginApiError,
   GOLOGIN_MANAGED_FOLDER_PREFIX,
   GOLOGIN_MEMBER_ROLE,
+  usesMasterGoLoginToken,
   type GoLoginAccountInfo,
   type GoLoginFolder,
   type GoLoginMember,
@@ -137,9 +138,7 @@ export const EMPTY_ACCOUNT_SUMMARY: GoLoginAccountSummary = {
  * Bluu account, so **rotate `GL_API_TOKEN` when an admin leaves.** Non-admins
  * are unaffected: their desktops only ever see their own key.
  */
-export function usesMasterGoLoginToken(user: { groups?: string[] } | null | undefined): boolean {
-  return Array.isArray(user?.groups) && user.groups.includes('admin');
-}
+export { usesMasterGoLoginToken };
 
 /** The same test by uid. `getUserById` is cached 60s, so this is near-free. */
 export async function isGoLoginAdmin(uid: string): Promise<boolean> {
@@ -203,6 +202,22 @@ export async function getMasterAccount(force = false): Promise<GoLoginAccountInf
 /** Called after any folder mutation, so the next read is not a stale membership list. */
 export function invalidateMasterAccount(): void {
   masterCache = null;
+}
+
+/**
+ * Apply a folder-membership write to the memo **in place** instead of dropping
+ * it. A membership write changes one folder's `profileIds` and nothing else —
+ * no folder is created, renamed or removed — so re-fetching `GET /user` to learn
+ * what we just wrote cost a provider request per click (and per person, when
+ * sharing a profile with several at once). Structural changes still invalidate.
+ */
+export function applyFolderMembership(folderId: string, profileIds: string[], action: 'add' | 'remove'): void {
+  const folder = masterCache?.data.folders.find((f) => f.id === folderId);
+  if (!folder) return;
+  folder.profileIds =
+    action === 'add'
+      ? [...new Set([...folder.profileIds, ...profileIds])]
+      : folder.profileIds.filter((id) => !profileIds.includes(id));
 }
 
 /**

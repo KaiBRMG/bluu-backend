@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/components/AuthProvider';
 import { useUserData } from '@/hooks/useUserData';
-import { Skeleton } from '@/components/ui/skeleton';
+import ConnectingScreen from './ConnectingScreen';
 import Notice from './Notice';
 
 /**
@@ -19,17 +19,7 @@ export default function GoLoginGuard({ children }: { children: React.ReactNode }
   const { userData, loading: userDataLoading } = useUserData();
 
   if (loading || (user && userDataLoading)) {
-    return (
-      <div
-        className="flex h-full w-full flex-col gap-3 bg-background p-6"
-        role="status"
-        aria-label="Loading GoLogin"
-      >
-        <Skeleton className="h-8 w-48 rounded-md" />
-        <Skeleton className="h-9 w-full rounded-lg" />
-        <Skeleton className="h-full w-full rounded-xl" />
-      </div>
-    );
+    return <ConnectingScreen stage="session" />;
   }
 
   if (!user) {

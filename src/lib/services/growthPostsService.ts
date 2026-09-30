@@ -66,6 +66,7 @@ import {
 import { postUrlFor } from '@/lib/growth/postLink';
 import { refreshIntervalHours, snapshotKey } from '@/lib/growth/postMetrics';
 import { growthAccountId, seriesDocIdFor, utcDayKey } from '@/lib/growth/platform';
+import { MAX_CONSECUTIVE_FAILURES, isReadHalted } from '@/lib/growth/metrics';
 import type {
   GrowthPost,
   GrowthPostMedia,
@@ -460,8 +461,16 @@ export async function checkSpendCeiling(now: Date = new Date()): Promise<{
 
 // ─── The refresh ladder ──────────────────────────────────────────────
 
-/** When a post read at `readAt` next comes due, or the frozen sentinel. */
-export function nextRefreshFor(postedAt: Date | null, readAt: Date): Date {
+/**
+ * When a post read at `readAt` next comes due, or the frozen sentinel.
+ *
+ * The one function that decides `nextRefreshAt` — including for a **Stopped**
+ * post: at `MAX_CONSECUTIVE_FAILURES` failed reads in a row it is parked on the
+ * sentinel, so the queue (ordered by this field) simply stops reaching it. Pass
+ * the post's streak *after* this read; a successful read passes nothing.
+ */
+export function nextRefreshFor(postedAt: Date | null, readAt: Date, failureStreak = 0): Date {
+  if (failureStreak >= MAX_CONSECUTIVE_FAILURES) return FROZEN_REFRESH_AT;
   const ageHours = postedAt
     ? Math.max(0, (readAt.getTime() - postedAt.getTime()) / 3_600_000)
     : 0;
@@ -554,6 +563,9 @@ export async function recordPostReadings(
       lastReadAt: now,
       lastReadStatus: 'ok',
       lastReadError: null,
+      // Any successful read ends a failure streak — including the manual sync
+      // that is how a person restarts a Stopped post.
+      consecutiveFailures: 0,
       readCount: FieldValue.increment(1),
     }, { merge: true });
   }
@@ -677,21 +689,36 @@ async function applyAuthorFollowers(posts: ScrapedPost[], readAt: Date): Promise
  * accounts: a failed read means "we do not know this post's numbers right now",
  * not "engagement dropped to zero". `nextRefreshAt` still advances, so one
  * deleted post cannot pin the batch and be re-requested on every single run.
+ *
+ * ── Stopped after repeated failures ─────────────────────────────────────────
+ * Each call here is a post the scraper was asked for and did not return — the
+ * post's own failure, never a whole run falling over (a rejected run throws
+ * before any caller reaches this). Every such read is still billed, so the
+ * `MAX_CONSECUTIVE_FAILURES`th one in a row parks `nextRefreshAt` on the frozen
+ * sentinel: the refresh queue is ordered by that field, so the post simply
+ * stops coming due, with no new index and no extra query. A manual sync that
+ * succeeds (`recordPostReadings`) clears the streak and puts it back on the
+ * ladder; stopping and resuming it does the same (the PATCH route).
+ *
+ * The caller passes each post's current streak because the sentinel decision
+ * needs the new value, and every caller already holds the document.
  */
 export async function recordPostFailures(
-  posts: Array<{ id: string; postedAt: string | null }>,
+  posts: Array<{ id: string; postedAt: string | null; consecutiveFailures?: number }>,
   error: string,
   readAt: Date = new Date(),
 ): Promise<void> {
   if (posts.length === 0) return;
   const batch = adminDb.batch();
-  for (const { id, postedAt } of posts) {
+  for (const { id, postedAt, consecutiveFailures } of posts) {
+    const streak = (consecutiveFailures ?? 0) + 1;
     batch.set(adminDb.collection(GROWTH_POSTS).doc(id), {
       lastReadAt: FieldValue.serverTimestamp(),
       lastReadStatus: 'failed',
       lastReadError: error.slice(0, 500),
+      consecutiveFailures: streak,
       nextRefreshAt: Timestamp.fromDate(
-        nextRefreshFor(postedAt ? new Date(postedAt) : null, readAt),
+        nextRefreshFor(postedAt ? new Date(postedAt) : null, readAt, streak),
       ),
     }, { merge: true });
   }
@@ -726,6 +753,9 @@ export async function stampManualSyncMany(tweetIds: string[]): Promise<void> {
 }
 
 // ─── Reads / serialization ───────────────────────────────────────────
+
+/** Readings shipped per post in a list payload — the newest ones. */
+export const POST_LIST_HISTORY_LIMIT = 24;
 
 export function serializeGrowthPost(doc: DocumentSnapshot, historyLimit?: number): GrowthPost {
   const d = doc.data() ?? {};
@@ -771,6 +801,7 @@ export function serializeGrowthPost(doc: DocumentSnapshot, historyLimit?: number
     lastReadError: (d.lastReadError as string) ?? null,
     lastManualSyncAt: serializeTimestamp(d.lastManualSyncAt as Timestamp | null),
     readCount: (d.readCount as number) ?? 0,
+    consecutiveFailures: typeof d.consecutiveFailures === 'number' ? d.consecutiveFailures : 0,
     addedBy: (d.addedBy as string) ?? '',
     addedTime: serializeTimestamp(d.addedTime as Timestamp | null),
   };
@@ -783,7 +814,7 @@ export function serializeGrowthPost(doc: DocumentSnapshot, historyLimit?: number
  * page and the client slices ranges in memory afterwards — the same trade the
  * follower series makes, and for the same reason (rule 9).
  */
-export async function listGrowthPosts(historyLimit = 24): Promise<GrowthPost[]> {
+export async function listGrowthPosts(historyLimit = POST_LIST_HISTORY_LIMIT): Promise<GrowthPost[]> {
   const snap = await adminDb.collection(GROWTH_POSTS)
     .orderBy('postedAt', 'desc')
     .limit(MAX_TRACKED_POSTS)
@@ -804,7 +835,7 @@ export async function listGrowthPosts(historyLimit = 24): Promise<GrowthPost[]> 
 export async function listPostsForAccount(
   accountId: string,
   handleNormalized: string,
-  historyLimit = 24,
+  historyLimit = POST_LIST_HISTORY_LIMIT,
 ): Promise<GrowthPost[]> {
   const collection = adminDb.collection(GROWTH_POSTS);
   const [byAccount, byHandle] = await Promise.all([
@@ -896,7 +927,10 @@ export async function selectPostsForRefresh(limit = MAX_REFRESH_PER_RUN, now: Da
     .limit(limit)
     .get();
 
-  const ordered = snap.docs.map((doc) => serializeGrowthPost(doc));
+  // A Stopped post's `nextRefreshAt` is the frozen sentinel, so it sorts to the
+  // tail and is never due — filtered here anyway so it cannot be picked up as
+  // padding either. Stopped means *not read*, even for free.
+  const ordered = snap.docs.map((doc) => serializeGrowthPost(doc)).filter((p) => !isReadHalted(p));
   const isDue = (p: GrowthPost) => p.nextRefreshAt !== null && Date.parse(p.nextRefreshAt) <= now.getTime();
 
   const due = ordered.filter(isDue);
@@ -930,7 +964,7 @@ export async function stalestPostsForPadding(
   const excluded = new Set(exclude);
   return snap.docs
     .map((doc) => serializeGrowthPost(doc))
-    .filter((p) => !excluded.has(p.id))
+    .filter((p) => !excluded.has(p.id) && !isReadHalted(p))
     .slice(0, count);
 }
 

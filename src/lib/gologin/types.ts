@@ -129,6 +129,216 @@ export function isManagedGoLoginFolder(name: string): boolean {
   return typeof name === 'string' && name.startsWith(GOLOGIN_MANAGED_FOLDER_PREFIX);
 }
 
+// ─── Capabilities ───────────────────────────────────────────────────
+
+/**
+ * The four GoLogin capabilities, each a **sub-item** of `apps-gologin` on
+ * `/admin-portal/sharing` (see `definitions.ts` and permissions.md § Sub-item
+ * pages). They replaced the single `apps-gologin-management` grant on
+ * 2026-09-30, which bundled "who holds a paid seat" with "who may delete a
+ * profile" — two authorities an admin reasonably wants to hand to different
+ * people.
+ *
+ * Here, in the client-safe half, because both sides key off the same ids: the
+ * window decides which buttons to render, the routes decide what to allow.
+ * **Admins hold all four unconditionally** — see `requireGoLoginCapability`.
+ */
+export const GOLOGIN_CAPABILITIES = {
+  members: 'apps-gologin-members',
+  profiles: 'apps-gologin-profiles',
+  folders: 'apps-gologin-folders',
+  sharing: 'apps-gologin-sharing',
+} as const;
+
+export type GoLoginCapability = keyof typeof GOLOGIN_CAPABILITIES;
+
+/**
+ * **Admins operate as the workspace owner; everyone else brings their own key.**
+ * The one definition of "runs on the master token", shared by the server
+ * (seats, launch token, capability gates) and the window (which buttons render).
+ * Keyed off the `admin` group, so it follows group membership automatically.
+ * See `gologinAccountService.ts` for what follows from it.
+ */
+export function usesMasterGoLoginToken(user: { groups?: string[] } | null | undefined): boolean {
+  return Array.isArray(user?.groups) && user.groups.includes('admin');
+}
+
+/** A GoLogin profile id — a 24-char hex ObjectId. Checked before any provider call. */
+export function isGoLoginId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{24}$/i.test(value);
+}
+
+/** A user-facing folder as the management routes return it. */
+export interface GoLoginFolderRow {
+  id: string;
+  name: string;
+  profileIds: string[];
+  /**
+   * Display names of the people this folder is shared with (live — see
+   * gologin.md § Sharing). **Adding a profile to the folder hands it to every
+   * one of them**, which is why every folder picker shows this. Present on the
+   * read endpoints; absent on rows returned by writes.
+   */
+  sharedWith?: string[];
+}
+
+/** "Kai", "Kai and Sam", "Kai, Sam and 2 others" — for a sentence about who gains access. */
+export function namesSentence(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  if (names.length === 3) return `${names[0]}, ${names[1]} and ${names[2]}`;
+  return `${names[0]}, ${names[1]} and ${names.length - 2} others`;
+}
+
+/** One member, as the Sharing dialog sees them. */
+export interface GoLoginSharingMember {
+  uid: string;
+  displayName: string;
+  glEmail: string;
+  /** False when the seat is gone from GoLogin — nothing can be shared to it. */
+  hasSeat: boolean;
+  /** Profiles in their personal folder — shared one at a time. */
+  profileIds: string[];
+  /** User-facing folders their seat is scoped to — shared live. */
+  folderIds: string[];
+}
+
+export interface GoLoginSharingOverview {
+  members: GoLoginSharingMember[];
+  folders: GoLoginFolderRow[];
+  profiles: { id: string; name: string; os: string; folders: string[] }[];
+  truncated: boolean;
+  fetchedAtMs: number;
+}
+
+// ─── Profile management (create / edit / delete) ────────────────────
+
+/**
+ * The four OS choices the New Profile dialog offers, and what each one means to
+ * GoLogin.
+ *
+ * The pairs are not guessed: they are exactly what GoLogin's own SDK sends from
+ * `getOsAdvanced()` when it creates a profile for the machine it runs on —
+ * `mac` + `M1` on Apple Silicon, `mac` + `''` on Intel, `win` + `''` for the
+ * default Windows fingerprint. `win11` is the documented `osSpec` for Windows 11.
+ * The OS is a **fingerprint, not a requirement** (see gologin.md): a Mac profile
+ * runs on a Windows desk and vice versa.
+ */
+export const GOLOGIN_OS_CHOICES = {
+  win10: { os: 'win', osSpec: '', label: 'Windows 10' },
+  win11: { os: 'win', osSpec: 'win11', label: 'Windows 11' },
+  'mac-m1': { os: 'mac', osSpec: 'M1', label: 'macOS · Apple M1' },
+  'mac-intel': { os: 'mac', osSpec: '', label: 'macOS · Intel' },
+} as const;
+
+export type GoLoginOsChoice = keyof typeof GOLOGIN_OS_CHOICES;
+
+export function isGoLoginOsChoice(value: unknown): value is GoLoginOsChoice {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(GOLOGIN_OS_CHOICES, value);
+}
+
+/** The label for a profile's `os` + `osSpec` pair, for read-only display. */
+export function goLoginOsLabel(os: string, osSpec: string): string {
+  const choice = Object.values(GOLOGIN_OS_CHOICES).find((c) => c.os === os && c.osSpec === osSpec);
+  if (choice) return choice.label;
+  if (os === 'mac') return osSpec ? `macOS · Apple ${osSpec}` : 'macOS';
+  if (os === 'win') return 'Windows';
+  if (os === 'lin') return 'Linux';
+  if (os === 'android') return 'Android';
+  return os || 'Unknown';
+}
+
+/**
+ * The proxy protocols offered. GoLogin's vocabulary has more (`socks4`, `tor`,
+ * `gologin`, …); HTTP and SOCKS5 cover every residential and mobile provider
+ * this team buys from, and every extra option is one more way to mis-configure a
+ * profile that holds a live account.
+ */
+export const GOLOGIN_PROXY_MODES = ['http', 'socks5'] as const;
+export type GoLoginProxyMode = (typeof GOLOGIN_PROXY_MODES)[number];
+
+export function isGoLoginProxyMode(value: unknown): value is GoLoginProxyMode {
+  return typeof value === 'string' && (GOLOGIN_PROXY_MODES as readonly string[]).includes(value);
+}
+
+/**
+ * A proxy as a manager enters it.
+ *
+ * `password` is **optional on purpose**: `undefined` means "keep the password
+ * already on the profile". The stored password never reaches a renderer (see
+ * `GoLoginProfileDetail.proxy.hasPassword`), so an edit that only changes the
+ * port must be able to say "leave the secret alone" without knowing it.
+ */
+export interface GoLoginProxyInput {
+  mode: GoLoginProxyMode;
+  host: string;
+  port: number;
+  username: string;
+  password?: string;
+}
+
+/**
+ * Everything the Edit Profile panel shows — the **manager's** projection.
+ *
+ * Wider than `GoLoginProfile` because the panel is "all information of a
+ * profile", but still a projection, not the provider's document: the proxy
+ * **password** is reduced to `hasPassword`, and `facebookAccountData`,
+ * `sharedEmails` and `permissions` are dropped exactly as `normaliseProfile`
+ * drops them. The fingerprint fields are here to be *read* — GoLogin's own
+ * guidance is that OS, user agent, resolution, fonts, canvas, WebGL and CPU/RAM
+ * must never change once an account has logged in, so nothing edits them.
+ */
+export interface GoLoginProfileDetail {
+  id: string;
+  name: string;
+  notes: string;
+  os: string;
+  osSpec: string;
+  browserType: string;
+  userAgent: string;
+  resolution: string;
+  language: string;
+  platform: string;
+  hardwareConcurrency: number | null;
+  /** GiB, as GoLogin reports it. */
+  deviceMemory: number | null;
+  webglVendor: string;
+  webglRenderer: string;
+  webRtcMode: string;
+  canvasMode: string;
+  /** True when the timezone follows the proxy's IP (GoLogin's default). */
+  timezoneFromIp: boolean;
+  timezone: string;
+  /** True when the language follows the proxy's location. */
+  autoLang: boolean;
+  proxy: {
+    mode: string;
+    host: string;
+    port: number | null;
+    username: string;
+    /** Whether a password is stored. The password itself never leaves the server. */
+    hasPassword: boolean;
+  };
+  folders: string[];
+  isRunning: boolean;
+  createdAtMs: number | null;
+  updatedAtMs: number | null;
+  lastActivityMs: number | null;
+}
+
+/** What "Ping proxy" reports. `ok: false` carries a sentence, never a stack. */
+export type GoLoginProxyCheckResult =
+  | {
+      ok: true;
+      /** The exit IP the proxy presents to the world. */
+      ip: string;
+      country: string;
+      city: string;
+      timezone: string;
+      latencyMs: number;
+    }
+  | { ok: false; error: string; latencyMs: number };
+
 /** Workspace member role. Note this is NOT the same vocabulary as a share role. */
 export type GoLoginMemberRole = 'owner' | 'admin' | 'editor' | 'guest';
 
@@ -220,4 +430,67 @@ export interface IGoLoginClient {
 
   /** `DELETE /workspaces/{wid}/members/{id}` — releases the seat. */
   removeWorkspaceMember(workspaceId: string, memberId: string): Promise<void>;
+
+  // ─── Profile management (master token only) ───────────────────────
+  //
+  /** `GET /browser/{id}` as a list row — the same projection the listing uses. */
+  getProfile(profileId: string): Promise<GoLoginProfile>;
+  //
+  // ⚠ `PUT /browser/{id}/custom` is deliberately absent. GoLogin documents that
+  // it **re-randomises every parameter the body leaves out** — using it to
+  // rename a profile would silently re-roll the fingerprint of a logged-in
+  // account, which is how accounts get flagged. Every edit below goes through an
+  // endpoint that touches only the field it names.
+
+  /** `GET /browser/{id}`, projected for the Edit panel. Never carries the proxy password. */
+  getProfileDetail(profileId: string): Promise<GoLoginProfileDetail>;
+
+  /**
+   * The profile's stored proxy, **including its password**. Server-only by
+   * construction: it exists so "Ping proxy" can test an edited proxy whose
+   * password the manager chose to keep, and it must never be returned by a route.
+   */
+  getProfileProxySecret(profileId: string): Promise<(GoLoginProxyInput & { password: string }) | null>;
+
+  /**
+   * `POST /browser/quick` — a profile on the workspace's **default settings**
+   * for the given OS. The rest of the fingerprint (user agent, resolution,
+   * WebGL, fonts, …) is generated by GoLogin to match the OS, which is the whole
+   * point: a hand-assembled fingerprint is how an inconsistent one happens.
+   * Returns the new profile's id (the response's `id`, as GoLogin's own
+   * quickstart reads it).
+   */
+  quickCreateProfile(params: {
+    name: string;
+    os: string;
+    osSpec: string;
+    workspaceId: string;
+  }): Promise<string>;
+
+  /** `PATCH /browser/name/many` — the name, and nothing else. */
+  renameProfile(profileId: string, name: string): Promise<void>;
+
+  /**
+   * Notes have no surgical endpoint, so this is GoLogin's own SDK `update()`:
+   * `GET /browser/{id}`, change `notes`, `PUT /browser/{id}` with the whole
+   * document. Every other field goes back exactly as it came, so the fingerprint
+   * is preserved — unlike `PUT …/custom`, which would re-randomise it.
+   */
+  setProfileNotes(profileId: string, notes: string): Promise<void>;
+
+  /**
+   * `PATCH /browser/proxy/many/v2` — the proxy and nothing else. `null` removes
+   * it. A `password` of `undefined` keeps the one already stored; the adapter
+   * reads it back itself so it never has to travel through a caller.
+   */
+  setProfileProxy(profileId: string, proxy: GoLoginProxyInput | null): Promise<void>;
+
+  /** `DELETE /browser`. GoLogin keeps deleted profiles restorable. */
+  deleteProfiles(profileIds: string[]): Promise<void>;
+
+  /** `POST /deleted-profiles/restore` — the Undo behind a delete. */
+  restoreProfiles(profileIds: string[], workspaceId: string): Promise<void>;
+
+  /** `DELETE /folders/folder?name=` — addressed by **name**, like every folder write. */
+  deleteFolder(folderName: string): Promise<void>;
 }

@@ -45,7 +45,12 @@ Both actors return extra fields **inside the same billed result**, so these cost
 | Service | `src/lib/services/growthPostsService.ts` (**the only module that calls the tweet actor**) |
 | Service | `src/lib/services/apifyUsageService.ts` (**measured** cost — reads Apify's own billing records; never runs an actor) |
 | Pure logic | `src/lib/growth/{platform,metrics,signals,postLink,postMetrics,category}.ts` |
-| Client hook | `src/hooks/useGrowthTracking.ts` |
+| Client hook | `src/hooks/useGrowthTracking.ts` (roster, series **and the category registry**) |
+| Client hook | `src/hooks/usePinnedGrowthAccounts.ts` — the home-widget pins, on `users/{uid}.pinnedGrowthAccounts` |
+| Home widget | `src/components/growth/GrowthHomeWidget.tsx`, mounted in `src/app/(main)/page.tsx` |
+| Categories | `src/lib/services/growthCategoryService.ts`, `src/app/api/smm/growth/categories`, `CategorySelect` / `CreateCategoryDialog` / `GrowthCategoriesProvider` / `categoryContext` in `src/components/growth/` |
+| API route | `src/app/api/smm/growth/pinned` — the widget's projected payload |
+| Pure logic | `src/lib/growth/access.ts` — `GROWTH_PAGE_IDS` (shared by `checkGrowthAccess` and the home page) and `MAX_PINNED_GROWTH_ACCOUNTS` |
 | Client hook | `src/hooks/useGrowthPosts.ts` |
 | Types | `src/types/firestore.ts` (`GrowthAccount`, `GrowthSeries`, `GrowthSnapshot`, `GrowthPost`, `GrowthPostSnapshot`, `GrowthSpendLedger`, `ApifyUsageReport`) |
 | Import script | `src/scripts/import-growth-tracking.js` (`--dry-run`, `--wipe`) — the hand-collected *history* |
@@ -58,7 +63,9 @@ Registered in `src/lib/definitions.ts` as `smm-growth-tracking` under the `smm-p
 
 | Path | Purpose |
 |---|---|
-| `growth-accounts/{platform}_{handleNormalized}` | A tracked account. `isActive` (false = stopped, history kept), `latest`/`previous` denormalized readings, `lastScrapeAt`/`lastScrapeStatus`/`lastScrapeError`, `lastManualRefreshAt` (the manual-refresh cooldown gate; index-exempted) |
+| `growth-accounts/{platform}_{handleNormalized}` | A tracked account. `isActive` (false = stopped, history kept), `latest`/`previous` denormalized readings, `lastScrapeAt`/`lastScrapeStatus`/`lastScrapeError`, `lastManualRefreshAt` (the manual-refresh cooldown gate; index-exempted), `consecutiveFailures` (the [Stopped](#stopped-after-repeated-failures) streak; index-exempted) |
+| `growth-categories/{slug}` | A category created in the app: `name`, `platforms`, `tone`, `createdBy`, `createdAt`. The five built-ins are **not** stored — they ship in `category.ts`. Every field index-exempt |
+| `users/{uid}.pinnedGrowthAccounts` | Up to 5 `growth-accounts` ids on that person's home widget, in pin order. Index-exempt |
 | `growth-accounts/{id}/series/{YYYY}` | `days: { 'YYYY-MM-DD': { followers, …extras } }` — **one document per account per year** |
 | `growth-posts/{tweetId}` | One tracked X post: metadata, `latest`/`previous`, and `history: { 'YYYY-MM-DDTHH:mm': {…} }` — readings live **on the document**, no subcollection |
 | `growth-spend/{YYYY-MM}` | The rolling cost ledger the refresh breaker reads. `results`/`usd`/`runs` are our own **estimate**, incremented as we spend; `actualUsd`/`actualTotalUsd`/`actualRuns` are what **Apify billed**, written back by `apifyUsageService` |
@@ -69,20 +76,26 @@ Both denied in `firestore.rules` (the subcollection match is explicit — rules 
 
 **The document id is deterministic** (`facebook_adamtwinkx`), which is what makes the duplicate check a single `get()` instead of a query and the importer idempotent for free. It is built from `parseProfileUrl` output, so **changing that function changes the identity of every account** — history would be written under ids the app never looks up, and the import would silently appear to do nothing.
 
-**A `category` is a label, not identity.** Each account carries one of a **closed** set, declared with its colour triad in [`src/lib/growth/category.ts`](../src/lib/growth/category.ts), or `null` for an unfiled account. Because it is not part of the document id, it can be corrected freely (the manage view has a per-row picker, and re-running the roster import re-files in bulk) without orphaning a single reading. The vocabulary being closed is the whole justification for colouring it: DESIGN.md bans hashing an open-ended label onto N hues, and permits exactly this case.
+**A `category` is a label, not identity.** Each account carries the name of one category, or `null` for an unfiled account. Because it is not part of the document id, it can be corrected freely (the manage view has a per-row picker, and re-running the roster import re-files in bulk) without orphaning a single reading.
 
-**The vocabulary is scoped to the platform**, and `CATEGORIES_BY_PLATFORM` — not `GROWTH_CATEGORIES` — is the real one:
+**Five categories are built in; the rest are created by the people who run the roster.** The built-ins ship in [`src/lib/growth/category.ts`](../src/lib/growth/category.ts) (`BUILT_IN_CATEGORIES`). Every category picker — the per-row picker in Manage accounts, the add dialog and the account panel, all one shared [`CategorySelect`](../src/components/growth/CategorySelect.tsx) — ends in **New category…**, which opens [`CreateCategoryDialog`](../src/components/growth/CreateCategoryDialog.tsx): a name (2–20 characters, stored upper-case), a colour, and the platforms it is for (defaulting to the account being filed, which lands in the new category on creation). `POST /api/smm/growth/categories` validates all three again and writes `growth-categories/{slug}` with `create()` on a deterministic id, so a duplicate name is refused atomically. Capped at 20 (`MAX_CUSTOM_CATEGORIES`). **There is no rename or delete yet** — a mistaken category has to be removed in the console, after re-filing its accounts.
+
+**The registry is a `CategoryDef[]`, merged server-side.** `listCategoryDefs()` ([`growthCategoryService.ts`](../src/lib/services/growthCategoryService.ts)) returns the built-ins, then created categories oldest first. It rides on the `/series` payload as `categories` (the page cannot draw a chip without it, so a separate request would only serialise first paint) and reaches every chip, dot and picker through [`categoryContext`](../src/components/growth/categoryContext.tsx) rather than props. The context's default is the built-ins with creation unavailable, so a component rendered outside the page still colours a shipped category. Every function that interprets a category takes the registry: `categoriesFor(defs, platform)`, `normalizeCategory(defs, …)`, `normalizeCategoryFor(defs, platform, …)`, `toneFor(defs, name)`.
+
+**Why a created category may still carry a hue.** DESIGN.md bans *hashing* an open-ended label onto N colours, because the result is unlearnable. That never happens here: a category's colour is **chosen when it is made**, from the fixed, contrast-measured palette `CATEGORY_TONES` (purple · orange · green · blue · pink · teal · lime · indigo · grey), and stored with it. The dialog preselects the first hue nothing uses yet and says which category already wears each colour, so a repeat is a decision rather than an accident. Yellow and red are deliberately absent — they mean *attention* and *error* on this page. Measure any hue added to the palette against white before it ships (the table is in `category.ts`).
+
+**The vocabulary is scoped to the platform.** Every definition carries the platforms it may be assigned on, and `categoriesFor` — never the whole registry — is the menu. The built-ins:
 
 | Platform | May be filed under |
 |---|---|
 | X | `TWXNK` · `BONUS` · `CREATOR` · `SFW REPOST` |
 | Facebook | `GENERAL` · `CREATOR` |
 
-`GROWTH_CATEGORIES` is only their **union**. Use it to render chips for values already present in the data (the overview's filter row counts what the roster actually uses) or to check a stored value is still known; **never offer it as a picker**, or a Facebook page gets an X grouping in its menu.
+The whole registry is only for rendering chips for values already present in the data (the overview's filter row counts what the roster actually uses) or for checking a stored value is still known; **never offer it as a picker**, or a Facebook page gets an X grouping in its menu.
 
 **`CREATOR` is deliberately shared by both platforms.** A creator's X account and that same creator's Facebook page are one grouping seen twice, so filtering by `CREATOR` returns both. Splitting it into an `FB CREATOR` would put one grouping behind two chips and make "how are the creators doing" a question you have to ask twice.
 
-**Two normalisers, and the difference is the direction of travel.** `normalizeCategory` is platform-blind and is what `serializeGrowthAccount` applies on the way *out* of Firestore — the question there is "is this still a category the app knows", and rejecting a value for being wrong *for its platform* would blank a filed account instead of showing the misfiling. `normalizeCategoryFor(platform, …)` is the **write** path, used by `POST /api/smm/growth/accounts` and the `PATCH` route (which must therefore read the document *before* validating, to know the platform). A picker that only offers the right options is an affordance, not a validation.
+**Two normalisers, and the difference is the direction of travel.** `normalizeCategory(defs, …)` is platform-blind and is applied on the way *out* — by the `/series` route, since knowing a name needs the registry (`serializeGrowthAccount` only tidies the string) — and the question there is "is this still a category the app knows", and rejecting a value for being wrong *for its platform* would blank a filed account instead of showing the misfiling. `normalizeCategoryFor(defs, platform, …)` is the **write** path, used by `POST /api/smm/growth/accounts` and the `PATCH` route (which must therefore read the document *before* validating, to know the platform). Both read the registry only when a category is actually being set (rule 9). A picker that only offers the right options is an affordance, not a validation.
 
 **Retired: `FACEBOOK`.** Until 2026-09-09 every Facebook page sat in a single `FACEBOOK` category — a "category" that only restated the platform mark already on the row. It is out of the vocabulary, so any document still holding it reads as **unfiled** rather than as a sixth colour, which is a state the manage view can fix. The one-off [`src/scripts/recategorise-facebook.js`](../src/scripts/recategorise-facebook.js) (`--dry-run` first) re-files every Facebook page as `GENERAL`, or `CREATOR` for the handles listed in `CREATOR_HANDLES`. It writes **only** `category`, is idempotent, and should be deleted once it has run.
 
@@ -123,6 +136,20 @@ The cost of that choice is paid in `firestore.indexes.json`: **`series.days` is 
 
 **An account's posts are found by `accountId` OR author handle**, the same union the panel filters on, via two equality queries on the automatic single-field indexes ([`listPostsForAccount`](../src/lib/services/growthPostsService.ts)). `listGrowthPosts` would have read every post on the roster to find a dozen (rule 9).
 
+### Stopped after repeated failures
+
+**A failed read is still a billed read.** The X profile actor charges per handle requested, the tweet actor bills its 20-result floor whatever comes back, and every run carries Apify platform usage on top — so an account that was renamed or deleted used to cost money every night, forever, to report the same failure. (That is the subsystem's own cost model; it was not re-verified against the API, per rule 9d. The Usage dialog's run log shows what each run actually billed.)
+
+So after `MAX_CONSECUTIVE_FAILURES` (**3**, in [`metrics.ts`](../src/lib/growth/metrics.ts)) failed reads in a row, an account or a post is **Stopped**: the schedulers skip it, and every surface marks it with a red **Stopped** badge (a stop glyph, deliberately a different shape from "Read failed"'s alert — both are red, so hue cannot separate them).
+
+- **The streak** is `consecutiveFailures` on `growth-accounts` and `growth-posts`, reset to 0 by any successful read.
+- **Only the item's own failures count.** A run that succeeded but left this account/post out increments it; a whole run that fell over (an Apify outage, exhausted credit) does not — counting it would stop the entire roster after three bad nights. The cron keeps the two kinds as separate lists and passes `recordScrapeFailures` an explicit boolean for each.
+- **Accounts:** the follower cron and post discovery skip them (`isReadHalted`). They stay on the overview (they are still tracked) and are collected by a red **Stopped** filter chip, which only renders when something is Stopped.
+- **Posts:** `nextRefreshFor(postedAt, readAt, streak)` — the one function that sets `nextRefreshAt` — parks a Stopped post on the frozen sentinel, so the refresh queue (ordered by that field) stops reaching it with no new index. `selectPostsForRefresh` and the padding query also filter them in memory, so a Stopped post is not even read as free padding.
+- **The way back is always a person.** *Refresh now* (account) or *Refresh now* on a post card is not refused for a Stopped item — clicking it is exactly the decision to spend one more read; a success clears the streak and the item rejoins the schedule, a failure extends it. Stopping and resuming tracking also resets the streak (the PATCH routes, on a real `isActive` flip; a resumed Stopped post is made due immediately). The cooldowns still apply, so "retry until it works" stays bounded.
+- **One derivation, one set of words.** `readProblemOf(item)` in `metrics.ts` returns `'stopped' | 'failed' | null` (nothing for an untracked item, Stopped outranks failed), `ReadProblemBadge` renders it, and `STOPPED_SUMMARY` / `STOPPED_HINT` are the only copy. Every card, row, panel header and the home widget goes through them.
+- **"Stopped" is reserved for this state.** A post switched off by a person reads **Not refreshing**; an account, **Not tracked** — two different states must not share a word.
+
 **Remove is `isActive: false`, not a delete.** Stopping ends the cost and takes the account off the active roster while keeping every reading, and it is one click to resume. `DELETE` exists but only from the stopped list, behind a confirm that names what it destroys — `recursiveDelete` takes the `series` subtree with it, and the scrapers only ever return *today's* number, so deleted history cannot be re-collected.
 
 **Stopping cascades to the account's posts. Resuming does not.** Stopping is the instruction to stop spending, and an account's posts are a line on the *same* bill — so `PATCH` sets `isActive: false` on every one of them ([`stopPostsForAccount`](../src/lib/services/growthPostsService.ts)) on the true → false edge only, and returns `postsStopped` so the UI can state the number instead of guessing it. It is a batched write over the same `accountId` OR handle union as above, and posts already stopped are skipped — writing `false` over `false` is a billed write that changes nothing (rule 9). The asymmetry is deliberate: resuming an account buys one cheap follower read, while resuming twenty posts would restart twenty billed refreshes nobody asked for, so posts come back one at a time from the account panel that still lists them. **This is the one cascade — `DELETE` still never touches posts** (see the route comment: their engagement history is exactly as unrecoverable as the follower history).
@@ -159,7 +186,9 @@ The layout was rebuilt on 2026-09-09 from a supplied reference design. Its **str
 
 They replaced *Posts tracked* and *Active signals* (2026-09-09). Neither figure was lost: the post count is on the **Tracked posts** button in the page header, and the signal count is stated in the Signals band itself — the tiles were restating what the surfaces below them already said, where an account name is something no other tile carries.
 
-**Colour on a card is rationed to three jobs, each a state**: the delta's direction (green / red, which the sparkline echoes), a spike (orange — the app's *attention needed* hue), and the category dot. The platform mark stays greyscale; brand colour would be decoration. The whole card is the button — there is nothing else interactive inside it, unlike the tables in this subsystem where `role="button"` on a `<tr>` would orphan the cells.
+**Colour on a card is rationed to five jobs, each a state**: the delta's direction (green / red, which the sparkline echoes), a spike (orange — the app's *attention needed* hue), a failed or Stopped read (red), the category dot, and a pinned star (Action Blue — the user's own selection). The platform mark stays greyscale; brand colour would be decoration.
+
+**The card opens; its star pins.** The whole card used to be one `<button>`, honest while nothing else inside it was interactive. The pin star is a second control and a button cannot contain one, so the card is now a plain surface with an **`inset-0` overlay button** that opens the account and the star sitting `relative` above it — the construction `SaleDisputesPanel` uses. The content between is `pointer-events-none`, so a click anywhere but the star still opens the card (which is why the exact-follower tooltip moved onto the overlay). The star shows on hover and `:focus-within`, and stays visible while pinned. Pins live on `users/{uid}.pinnedGrowthAccounts` (at most 5, enforced in `/api/user/update`) and feed the [home widget](#the-home-widget).
 
 ### Signals
 
@@ -173,7 +202,7 @@ They replaced *Posts tracked* and *Active signals* (2026-09-09). Neither figure 
 
 ### The account panel
 
-**The panel's body scrolls, not the panel.** `SheetContent` is `overflow-hidden`; the header is `shrink-0` and the body is `min-h-0 flex-1 overflow-y-auto`. When the whole sheet scrolled, two things left with it: the Window control — which scopes every figure below it, and sat ~2,600px above the reader by post 14 — and shadcn's own close button, which is `absolute` inside that box and therefore scrolls with its content. A panel whose argument is "a peek" had no visible exit from its second screenful. `min-h-0` is load-bearing: a flex child's default `min-height: auto` refuses to shrink below its content, so without it the body grows full-height and the sheet scrolls as a whole again.
+**The panel's body scrolls, not the panel.** `SheetContent` is `overflow-hidden`; the header is `shrink-0` and the body is `min-h-0 flex-1 overflow-y-auto`. When the whole sheet scrolled, two things left with it: the header's controls (then including the Window control), ~2,600px above the reader by post 14 — and shadcn's own close button, which is `absolute` inside that box and therefore scrolls with its content. A panel whose argument is "a peek" had no visible exit from its second screenful. `min-h-0` is load-bearing: a flex child's default `min-height: auto` refuses to shrink below its content, so without it the body grows full-height and the sheet scrolls as a whole again.
 
 **Section headings are the section rail, not the eyebrow.** A plain `text-xs font-medium text-zinc-400` label, an `h-px bg-white/[0.07]` rule filling the width, and anything the section states on the same line (a count, a countdown) — the pattern DESIGN.md §5 already defines. The panel previously rendered the uppercase 11px eyebrow five times, which DESIGN.md §3 reserves for sidebar section headers as "a deliberate, single-use brand device, **not a per-section scaffold**" — and which failed at the job anyway, since `space-y-5` gives sections the same gap as the elements inside them, leaving the eye nothing to catch on down a 3,000px column. Heading levels now run `SheetTitle` `<h2>` → `SectionLabel` `<h3>` → the open card's log `<h4>`; they used to skip from a second `<h2>` straight to `<h4>`.
 
@@ -191,17 +220,16 @@ They replaced *Posts tracked* and *Active signals* (2026-09-09). Neither figure 
 
 **Order is an argument about priority, and controls win.** Live line → Controls → followers → tracked posts → folded-away facts. The page version had it backwards: its only two decisions (post discovery, and pasting a link) sat at the very bottom, below a table, which put the surface's actions behind its longest read. The one exception to the order is a failed read, which sits directly under the header — it is the only thing that explains why the chart below it has a flat tail, and folding it away would leave stale numbers looking current.
 
-**The Window control belongs to the panel, not to the roster and not to the chart.** One account is on this axis, so the window that suits it has nothing to do with the window the grid behind it is showing. It seeds from the page's range and diverges from there; nothing is written back. The follower axis is scaled to the data rather than zero-based — only one account is on it, so the scale can simply be its own.
+**The Window control belongs to the Followers section, not to the roster and not to the posts.** One account is on this axis, so the window that suits it has nothing to do with the window the grid behind it is showing. It seeds from the page's range and diverges from there; nothing is written back. The follower axis is scaled to the data rather than zero-based — only one account is on it, so the scale can simply be its own.
 
-**It sits in the header because it scopes the whole panel**: the follower delta and chart, *and* every post card's change figure and sparkline, *and* every row of the open card's breakdown. One picker meaning one thing wherever its effect lands is the reason it sits above all of it. It started inside the Followers section, where it silently changed content further down — the same failure the roster's control layout already avoids.
+**Post cards ignore it and always show a post's whole tracked life (2026-09-29).** The window used to sit in the panel header and scope every post card's change figure, sparkline, breakdown column and reading log too. That was the wrong clock for posts: a post does almost all of its moving in its first day or two, read every 6–12 hours, so follower-sized range steps (`1d · 3d · 7d · 30d…`) either clipped its rise or held a single reading and drew nothing. Every post figure is now first reading → latest ("since tracked"), the rate sparkline draws the whole spike-and-decay, and the open card's breakdown column is headed **Since tracked** with an unwindowed reading log. With posts gone from its reach the control moved off the header onto the Followers section rail — left in the header it would have claimed a scope it no longer has. (The list payload ships a post's newest 24 readings; opening a card loads the full history, so its column and log are the whole record. A collapsed card on a post read more than 24 times — only possible through repeated manual syncs — measures from the oldest reading shipped.)
 
-**It scopes measurement, not membership — and that distinction was learned the hard way.** The first version also cut the list to posts *published* inside the window, which made the control look broken: under a 7-day window every listed post was at most seven days old, so "change over 7 days" was simply its lifetime total. Every tracked post is now always listed, and the window says *how much each one moved lately*. A post with fewer than two readings inside the window renders `—` and a dashed hairline, never a zero — so a **frozen** post reads as unmeasured under a short window rather than as flat, which is the same "never invent a value for a gap" rule the follower chart follows.
+**Every tracked post is always listed** — a window never decides membership. (An earlier version cut the list to posts *published* inside the window, which made the control look broken: under a 7-day window "change over 7 days" was every post's lifetime total.) A post with fewer than two readings renders `—` and a dashed hairline, never a zero — the same "never invent a value for a gap" rule the follower chart follows.
 
-**The headline figures are not windowed, deliberately.** The five-metric strip and the engagement total state where a post *stands*, which is not a windowed question — and keeping them unscoped is what leaves a frozen post readable under a window that can measure nothing about it.
+**The panel header carries what is true of the *account*, not of the view.** The chip row holds the **category picker** on the left and, on the right, **Pin to home** and **Stop / Resume tracking**. Everything else on the panel describes what is being shown (the window, the refresh, the posts); these change the account itself — or the viewer's relationship to it — which is why they sit above the rail rather than inside the Controls deck.
 
-**The panel header carries what is true of the *account*, not of the view.** Two controls sit on the chip row, left and right: the **category picker** and **Stop / Resume tracking**. Everything else on the panel describes what is being shown (the window, the refresh, the posts); these two change the account itself, which is why they sit above the rail rather than inside the Controls deck.
-
-- The category was a read-only `CategoryDot`. It became the picker *in place* rather than gaining one beside it — one element for one fact. [`CategorySelect`](../src/components/growth/growthUi.tsx) is shared with the manage table so the two cannot offer different vocabularies; its `dot` prop is the single thing they disagree about, and the reason is written at the definition (this is the only place the account's category colour appears on the panel, so the mark moves inside the trigger).
+- **Pin to home** duplicates the overview card's star on purpose: the overview lists only *tracked* accounts, so a pinned account whose tracking is stopped would otherwise have nowhere left to be unpinned from.
+- The category was a read-only `CategoryDot`. It became the picker *in place* rather than gaining one beside it — one element for one fact. [`CategorySelect`](../src/components/growth/CategorySelect.tsx) is shared with the manage table and the add dialog so they cannot offer different vocabularies; its `dot` prop is the single thing they disagree about, and the reason is written at the definition (this is the only place the account's category colour appears on the panel, so the mark moves inside the trigger).
 - **Stop tracking is `outline`, not `destructive`, and confirms.** Nothing is destroyed, so a red button would misread — but "stop" next to a button that looks destructive is exactly what stops people stopping accounts they should. The dialog states the three true things: the card leaves the overview, *n* tracked posts stop refreshing, and every reading is kept in Manage accounts where it can be resumed. **Resume needs no confirm** — it costs one nightly read and undoes nothing, and without it the panel would be a dead end for the account it had just stopped.
 - **The panel takes its own opening focus.** Radix hands it to the first tabbable descendant, which is now the category picker — so every account opened with a focus ring on a control that writes data, and the first Tab started past the header. `AccountSheet` prevents that (`onOpenAutoFocus` + `tabIndex={-1}`) and focuses the panel, which is also what a screen reader should announce.
 
@@ -243,7 +271,7 @@ Current seed: 453 readings across 12 accounts, 2026-07-03 → 2026-08-31 (Facebo
 
 ## The roster import
 
-`src/scripts/import-growth-accounts.js` loads `accounts.txt` (repo root) — the managed roster, grouped under `Category:` headings — into `growth-accounts`. Run `--dry-run` first; `--file=<path>` reads a different roster. A heading alone is not enough: an account listed under a category **its platform cannot hold** (a Facebook URL under `Category: TWXNK`) is reported and skipped rather than coerced, because guessing which grouping was meant is how a creator's page ends up filed as general. Its `CATEGORIES_BY_PLATFORM` mirror must stay in lockstep with `category.ts`.
+`src/scripts/import-growth-accounts.js` loads `accounts.txt` (repo root) — the managed roster, grouped under `Category:` headings — into `growth-accounts`. Run `--dry-run` first; `--file=<path>` reads a different roster. A heading alone is not enough: an account listed under a category **its platform cannot hold** (a Facebook URL under `Category: TWXNK`) is reported and skipped rather than coerced, because guessing which grouping was meant is how a creator's page ends up filed as general. Its category mirror must stay in lockstep with `BUILT_IN_CATEGORIES` in `category.ts` — and it knows **only the built-ins**: a category created in the app cannot be used as a `Category:` heading until the script learns to read `growth-categories`.
 
 - **The label before the URL is ignored.** It is a hand-typed nickname ("💌 TWINKLOAD"); the handle comes from the URL, which is the only authoritative field on the line. An account is named by its handle and nothing else.
 - **It never overwrites tracked data.** An account that already exists gets exactly one field written — `category`, merged. `latest`, `previous`, `isActive`, `trackPosts`, the scrape stamps and the whole `series` subtree are untouched. About a dozen accounts in the file already carry two months of hand-collected history, and the scrapers only ever return *today's* number.
@@ -521,7 +549,7 @@ line (the whole reason this subsystem scales to data).
 
 **The card carries X's own metric strip, where X puts it.** Replies · reposts · likes · views · bookmarks, with the platform's own glyphs (`MessageCircle`, `Repeat2`, `Heart`, `ChartNoAxesColumnIncreasing`, `Bookmark`), sitting directly under the post the way they do on X. This **replaced a segmented `Total · Likes · Reposts · Replies · Views` picker** above the list: all five fit on one 16px line, and the person reading this panel already knows those glyphs by heart from the platform the data came from — a control that hides four facts to reveal one is a worse deal than the line that shows all five. Each glyph is `aria-hidden` with the metric named in `sr-only` text; a heart means nothing to a screen reader. An unreported metric renders `—`, never `0`, because X reports `views` and `bookmarks` inconsistently and "nobody bookmarked this" is not "X did not say".
 
-`quotes` is the one engagement component **not** on the strip — X does not surface it under a post either — but it keeps its row in the open card's breakdown. `STRIP_METRICS` is exported so the panel builds exactly the five figures the strip renders; it briefly built all six and threw `quotes` away on every card, every window change.
+`quotes` is the one engagement component **not** on the strip — X does not surface it under a post either — but it keeps its row in the open card's breakdown. `STRIP_METRICS` is exported so the panel builds exactly the five figures the strip renders; it briefly built all six and threw `quotes` away on every card, every render.
 
 **The strip is a five-column grid, not a flex row.** Under `flex … gap-x-5` each glyph's x-position depended on the digit width of the value before it, so three stacked cards put their five metrics at three different sets of positions and the column could not be read downward at all — which is most of what a strip like this is for. `tabular-nums` aligns digits *inside* one figure and does nothing for this.
 
@@ -536,13 +564,13 @@ click.
 
 **The open card's job is the second column.** It used to be a grid of the same
 figures the strip now shows, which made opening a card mostly a restatement. It
-is now a real `<table>` — metric · **Now** · **movement over the window** — for
-all six metrics with engagement summed under a rule. The strip says where a post
-stands; this says what it did lately, per metric, which is the one thing no
-amount of space on the collapsed card could hold. Around it: the full text, the
-tag row, the live line with **Refresh now**, the reading log (windowed, so it and
-the card's sparkline describe the same stretch of time), and
-stop/resume/delete.
+is now a real `<table>` — metric · **Now** · **Since tracked** — for all six
+metrics with engagement summed under a rule. The strip says where a post stands;
+this says what each metric gained while it was watched, which is the one thing
+no amount of space on the collapsed card could hold. Around it: the full text,
+the tag row, the live line with **Refresh now**, the full reading log (like the
+card's sparkline, the post's whole tracked life — see [the account
+panel](#the-account-panel)), and stop/resume/delete.
 
 **No chart in the expansion, on purpose.** The standalone sheet on the roster-wide
 view draws one because it is one post, alone, with the width for it. Here the
@@ -609,6 +637,8 @@ silently, because the discipline this feature runs on is that whoever switches i
 on sees what they switched on. Two copies of that wording is how one of them ends
 up describing a schedule the system no longer runs.
 
+**The Tracked posts page groups posts by account.** One `<tbody>` per author, headed by a `scope="colgroup"` row — the section rail as a table row: avatar, `@handle`, category dot, a hairline, the post count, and an **Open** button that opens that account's panel over the page. The author avatar and handle left the rows, since every row under a heading has the same author. The sort applies inside each group *and* between groups, which are ordered by their best-ranked post (a `Map` built over the already-sorted rows, so no second sort) — sorting by rate floats the account with the fastest-moving post to the top rather than re-alphabetising. An author who is not a tracked account still gets a group, marked "Not on the roster": this page is its only home.
+
 **The Tracked posts page lists only what is being refreshed.** `activePosts` in `page.tsx` filters `isActive` before the tab sees it, and the `stopped` facet is gone with it — every column on that page describes movement, and a frozen row can only mislead. Nothing is deleted: a stopped post keeps its readings and stays on its **account panel**, which lists an account's posts regardless of state and is therefore the one place a post is resumed. That is also the recovery path for a post stopped by the account cascade above.
 
 **Manage accounts** shows the switch per **X** account. Facebook rows show a dash
@@ -616,6 +646,16 @@ rather than a disabled switch — post tracking is a capability that platform do
 not have here, not a permission the user lacks, and a greyed control would
 suggest it could be turned on. `postsWindowSaturated` renders as an amber warning
 beside the switch.
+
+## The home widget
+
+[`GrowthHomeWidget`](../src/components/growth/GrowthHomeWidget.tsx) shows the accounts a person starred, on the home page's right column under Pinned Resources. It mounts only for holders of `GROWTH_PAGE_IDS` — the same list `checkGrowthAccess` uses, so it never renders for someone the API refuses.
+
+- **Pinning.** The star on each overview card (revealed on hover/focus, Action Blue while pinned) and **Pin to home** in the account panel's header — the latter because the overview lists only *tracked* accounts, so a pinned account whose tracking is stopped would otherwise have nowhere to be unpinned from. At most 5, checked in the hook for the toast and enforced in `/api/user/update` (distinct, well-formed ids via `isGrowthAccountId`). The page owns the only instance of `usePinnedGrowthAccounts`; cards and panel get its state as props. The hook content-compares the server list (presence rewrites the user doc every ten minutes) and keeps `togglePin` stable, so a star click re-renders one card, not the grid. Pins whose account has been **deleted** are pruned silently when the page loads, or they would hold a slot forever.
+- **What a row is.** `AccountCard` compressed, not redesigned: identity with its read badge, the follower figure with its 30-day change, a 24px sparkline on the account's own scale. No category line, no range picker — **one fixed window, 30 days** (the page's default), stated in the header. Rows sit on the overlay's list-item step inside the widget card, never a card inside a card.
+- **Clicking a row** follows a `<Link prefetch={false}>` to `/smm-portal/growth-tracking?account=<id>`. The page seeds `openAccountId` from that param in its state initialiser (no `useSearchParams`, no Suspense boundary; no hydration risk, because the panel only opens once the roster has loaded) and strips it from the URL.
+- **Data.** `GET /api/smm/growth/pinned?ids=…` reads only the pinned documents and their series (two `getAll`s, in parallel) and ships each account's last 30 days projected to the follower count. The ids are in the URL so it can be browser-cached: `private, max-age=900` + `Vary: Authorization` — fifteen minutes, the manual-refresh cooldown, bounds how long a Refresh now takes to show. The fetch is keyed on the pin ids as a string, never on the user-doc snapshot (rule 9i).
+- **States.** The first load holds the boot screen (`home-growth`, see [boot-loading-screen.md](boot-loading-screen.md)); a pin added later shows a row-height skeleton while the other rows stay. No pins is one quiet line linking to the page. A failed load says so with Try again — as the whole body when nothing is on screen, or as a line under the rows that did load. Each row's accessible name is one sentence ("@handle, 12,340 followers, up 210 in 30 days, stopped after 3 failed reads") rather than the row's text run together.
 
 ## Usage & real cost — what Apify actually billed
 
@@ -752,6 +792,7 @@ ceiling would trip a breaker over spending it does not control.
   account), and every field on them — plus the three new `growth-spend.actual*`
   fields — is exempted, since nothing queries either collection by anything but
   document id. `firebase deploy --only firestore:rules,firestore:indexes`.
+- **Categories, Stopped and pins (2026-09-30) changed rules and indexes.** `growth-categories` is denied to clients; every field on it, `growth-accounts.consecutiveFailures`, `growth-posts.consecutiveFailures` and `users.pinnedGrowthAccounts` are index-exempt. `firebase deploy --only firestore:rules,firestore:indexes`.
 - **No new env var.** `APIFY_API_KEY` already had to be set; the usage endpoints
   authenticate with the same token, sent as a `Bearer` header rather than a
   query parameter so it never lands in a log line or an error message.

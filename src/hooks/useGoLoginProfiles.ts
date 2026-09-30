@@ -99,5 +99,47 @@ export function useGoLoginProfiles(enabled = true) {
 
   const refresh = useCallback(() => load(true), [load]);
 
-  return { profiles, total, truncated, fetchedAtMs, loading, refreshing, error, errorCode, refresh };
+  /**
+   * Local edits after a management write, so the list reflects it **without a
+   * re-walk**. Re-reading after every create, edit or delete would cost one
+   * provider request per 30 profiles each time — the exact burst the rate-limit
+   * design exists to prevent. The write's own response is the truth for that
+   * row; the server has already dropped its memos, so the next Refresh is exact.
+   */
+  // `total` is deliberately left alone: it is the provider's own count, shown
+  // only beside a truncated walk, and the next Refresh restates it exactly.
+  // (Adjusting it from inside these updaters would double-count under
+  // StrictMode, which runs updaters twice.)
+  const upsert = useCallback((profile: GoLoginProfile) => {
+    setProfiles((prev) => {
+      const at = prev.findIndex((p) => p.id === profile.id);
+      if (at === -1) return [profile, ...prev];
+      const next = prev.slice();
+      next[at] = profile;
+      return next;
+    });
+  }, []);
+
+  const patch = useCallback((profileId: string, change: Partial<GoLoginProfile>) => {
+    setProfiles((prev) => prev.map((p) => (p.id === profileId ? { ...p, ...change } : p)));
+  }, []);
+
+  const remove = useCallback((profileId: string) => {
+    setProfiles((prev) => prev.filter((p) => p.id !== profileId));
+  }, []);
+
+  return {
+    profiles,
+    total,
+    truncated,
+    fetchedAtMs,
+    loading,
+    refreshing,
+    error,
+    errorCode,
+    refresh,
+    upsert,
+    patch,
+    remove,
+  };
 }

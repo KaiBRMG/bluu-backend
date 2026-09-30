@@ -92,14 +92,17 @@ Consequences worth knowing:
 
 ## Sub-item pages: a capability *inside* a page
 
-Some things an admin needs to grant are not destinations. GoLogin's **Management** dialog is the first: it lives inside the GoLogin window, it is a different authority from using GoLogin, and until 2026-09-19 the only way to delegate it was to make someone a Bluu admin — which also hands over user management and the permission map itself.
+Some things an admin needs to grant are not destinations. GoLogin's management capabilities are the first: they live inside the GoLogin window, they are a different authority from using GoLogin, and until 2026-09-19 the only way to delegate them was to make someone a Bluu admin — which also hands over user management and the permission map itself. (Until 2026-09-30 this was one sub-item, `apps-gologin-management`; it is now four — Members, Profiles, Folders, Sharing — so each authority can be granted on its own. See [gologin.md](gologin.md).)
 
 A **sub-item** is the narrower instrument. `PageDef.parentPageId` marks it:
 
 ```ts
-{ pageId: 'apps-gologin',            title: 'GoLogin',    …, href: null, order: 6 },
-{ pageId: 'apps-gologin-management', title: 'Management', …, href: null, order: 7,
+{ pageId: 'apps-gologin',          title: 'GoLogin',                        …, href: null, order: 6 },
+{ pageId: 'apps-gologin-members',  title: 'Add & Remove Members',           …, href: null, order: 7,
   parentPageId: 'apps-gologin' },
+{ pageId: 'apps-gologin-profiles', title: 'Create, Edit & Delete Profiles', …, href: null, order: 7.1,
+  parentPageId: 'apps-gologin' },
+// … -folders (7.2) and -sharing (7.3) likewise
 ```
 
 **It is an ordinary tier-2 page in every mechanical respect** — a `page-permissions/{pageId}` doc, an entry in `permittedPageIds`, a row on the Sharing page, the nightly sync, `repair-permissions.js`, all unchanged. What differs follows entirely from it not being a destination:
@@ -113,8 +116,8 @@ A **sub-item** is the narrower instrument. `PageDef.parentPageId` marks it:
 
 **Three rules, all load-bearing:**
 
-- **Gate on both, server-side.** Holding the sub-item without the parent is meaningless, and nothing enforces the pairing automatically. GoLogin's routes read `requireGoLoginAccess(uid)` **then** `requireGoLoginManagement(token)`.
-- **Decide what the escape hatch is.** A sub-item that can be revoked from the only people who can fix the thing it gates is a lockout. GoLogin lets admins through `requireGoLoginManagement` unconditionally, because they are the ones who administer the workspace.
+- **Gate on both, server-side.** Holding the sub-item without the parent is meaningless, and nothing enforces the pairing automatically. GoLogin's routes read `requireGoLoginAccess(uid)` **then** `requireGoLoginCapability(token, cap)` — the pair is `requireGoLoginAccessAnd`.
+- **Decide what the escape hatch is.** A sub-item that can be revoked from the only people who can fix the thing it gates is a lockout. GoLogin lets admins through `requireGoLoginCapability` unconditionally, because they are the ones who administer the workspace.
 - **A grant is not a role.** The sub-item unlocks a surface; it does not confer the other things admins get. A GoLogin manager is still an ordinary operator everywhere else — notably `usesMasterGoLoginToken` still reads the `admin` group, so the master API token never reaches their desktop. Widen deliberately or not at all.
 
 Adding one: the `parentPageId` field, an icon registered in `ICON_MAP` ([`PageIcon.tsx`](../src/components/PageIcon.tsx)), and the check in whatever renders the surface. Nothing else — the resolver, the sync and the Sharing page all follow.

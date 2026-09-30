@@ -25,6 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { DANGER_BUTTON, PRIMARY_BUTTON } from '../_lib/manage';
 
 interface MemberRow {
   uid: string;
@@ -59,13 +60,12 @@ interface Overview {
  * This is the gate on the whole feature, not a nicety. A free GoLogin account
  * cannot generate an API token, so nobody without a seat can use GoLogin through
  * Bluu whatever page permissions they hold. Granting one here also creates the
- * person's folder and scopes them to it, which is why this panel sits beside
- * profile assignment rather than somewhere in the admin portal: the two are one
- * workflow, add then assign.
+ * person's folder and scopes them to it; what they can open is then decided in
+ * the Sharing dialog.
  *
- * **Removing a seat costs a person their access and is confirmed.** Assignment
- * toggles are one click with an undo path, but this is a different kind of act:
- * it ends a paid seat and cuts someone off mid-shift, and there is no undo that
+ * **Removing a seat costs a person their access and is confirmed.** Sharing
+ * changes carry an Undo on their toast; this is a different kind of act — it
+ * ends a paid seat and cuts someone off mid-shift, and there is no undo that
  * restores their GoLogin invitation state.
  */
 export default function MembersPanel({ onChanged }: { onChanged: () => void }) {
@@ -340,7 +340,7 @@ export default function MembersPanel({ onChanged }: { onChanged: () => void }) {
 
             <Button
               size="sm"
-              className="bg-[#2563eb] text-white hover:bg-[#1d4ed8]"
+              className={PRIMARY_BUTTON}
               disabled={!picked || !emailValue.trim() || !!busy}
               onClick={add}
             >
@@ -491,16 +491,16 @@ export default function MembersPanel({ onChanged }: { onChanged: () => void }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Remove {confirming?.displayName} from GoLogin?</AlertDialogTitle>
             <AlertDialogDescription>
-              This releases their paid seat and cuts off their access immediately, including any
-              profile they have open right now. Their folder and its assignments are kept, so adding
-              them back restores everything — but they will have to accept a new GoLogin invitation
-              and paste a new API token.
+              This releases their paid seat and cuts off their access immediately — in Bluu and in
+              GoLogin&rsquo;s own app. Profiles shared with them individually are remembered and come
+              back if you add them again; folders shared with them do not and will need sharing again.
+              They will also have to accept a new GoLogin invitation and paste a new API token.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-red-600 text-white hover:bg-red-700"
+              className={DANGER_BUTTON}
               onClick={() => confirming && remove(confirming)}
             >
               Remove

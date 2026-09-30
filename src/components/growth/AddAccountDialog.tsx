@@ -13,14 +13,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { PLATFORM_LABEL, parseProfileUrl, type GrowthPlatform } from '@/lib/growth/platform';
-import { CATEGORIES_BY_PLATFORM, isCategoryAllowed, type GrowthCategory } from '@/lib/growth/category';
+import { findCategory, type GrowthCategory } from '@/lib/growth/category';
 import type { AddGrowthAccountPayload } from '@/hooks/useGrowthTracking';
-
-/**
- * Radix's `Select` reserves the empty string (it is how it clears a value), so
- * "no category" travels as this sentinel and is mapped back to `null` on submit.
- */
-const NO_CATEGORY = 'none';
+import { CategorySelect } from './CategorySelect';
+import { useGrowthCategories } from './categoryContext';
 
 const PLACEHOLDER: Record<GrowthPlatform, string> = {
   facebook: 'https://www.facebook.com/adamtwinkx',
@@ -52,7 +48,8 @@ export function AddAccountDialog({
 }) {
   const [platform, setPlatform] = useState<GrowthPlatform>('twitter');
   const [profileUrl, setProfileUrl] = useState('');
-  const [category, setCategory] = useState<string>(NO_CATEGORY);
+  const [category, setCategory] = useState<GrowthCategory | null>(null);
+  const { categories } = useGrowthCategories();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,12 +68,12 @@ export function AddAccountDialog({
       await onAdd({
         platform,
         profileUrl: profileUrl.trim(),
-        category: category === NO_CATEGORY ? null : (category as GrowthCategory),
+        category,
       });
       toast.success(`Now tracking @${parsed.handle}`);
       onOpenChange(false);
       setProfileUrl('');
-      setCategory(NO_CATEGORY);
+      setCategory(null);
     } catch (err) {
       // Stays open with the draft intact — the message usually asks for a
       // correction to the very field they just filled in.
@@ -109,9 +106,9 @@ export function AddAccountDialog({
                 // it would show as a blank trigger over a list that does not
                 // contain it, and submit a value the server refuses.
                 setCategory((current) => (
-                  current !== NO_CATEGORY
-                    && !isCategoryAllowed(next, current as GrowthCategory)
-                      ? NO_CATEGORY
+                  current !== null
+                    && !findCategory(categories, current)?.platforms.includes(next)
+                      ? null
                       : current
                 ));
               }}
@@ -150,20 +147,19 @@ export function AddAccountDialog({
 
           <div>
             <Label htmlFor="growth-category" className="mb-1 text-xs text-zinc-400">Category</Label>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger id="growth-category" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_CATEGORY}>No category</SelectItem>
-                {/* This platform's groupings only — see `category.ts`. Switching
-                    platform above clears a selection the new one cannot hold,
-                    rather than leaving a value the server would refuse. */}
-                {CATEGORIES_BY_PLATFORM[platform].map((c) => (
-                  <SelectItem key={c} value={c}>{c}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* This platform's groupings only — see `category.ts`. Switching
+                platform above clears a selection the new one cannot hold,
+                rather than leaving a value the server would refuse. The shared
+                picker ends in "New category…", so a grouping that does not
+                exist yet can be made without leaving the dialog. */}
+            <CategorySelect
+              id="growth-category"
+              className="h-9! w-full text-sm"
+              platform={platform}
+              value={category}
+              noneLabel="No category"
+              onChange={setCategory}
+            />
             {/* Optional, and said so — the account is tracked either way, and the
                 category only decides which filter chip finds it. It can be
                 changed later from Manage accounts. */}

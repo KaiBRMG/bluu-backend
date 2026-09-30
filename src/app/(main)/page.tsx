@@ -28,6 +28,8 @@ import {
   TEMP_ANALYTICS_HOME_UIDS,
 } from "@/lib/temp-analytics/useTempAnalyticsScreenshot";
 import { safeTimezone } from '@/lib/utils/timezone';
+import { GrowthHomeWidget } from "@/components/growth/GrowthHomeWidget";
+import { canUseGrowthTracking } from "@/lib/growth/access";
 
 function formatTime(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
@@ -554,6 +556,9 @@ export default function Home() {
   const displayGroup = userGroup.charAt(0).toUpperCase() + userGroup.slice(1);
 
   const showTimeTracking = userData?.permittedPageIds?.includes('time-tracking') ?? false;
+  // The same pages `checkGrowthAccess` accepts, so the widget never renders for
+  // someone whose every request would be refused.
+  const showGrowth = canUseGrowthTracking(userData?.permittedPageIds);
   // Resources is org-wide (UNIVERSAL_PAGES) — there is no permission to check.
 
   // Being unassigned is a pending state awaiting an admin, not an error the user
@@ -622,8 +627,11 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Right column: pinned resources, spanning all the way to the right */}
-          <PinnedResourcesWidget />
+          {/* Right column: the two "things I pinned" widgets, stacked. */}
+          <div className="flex flex-col gap-6 w-full min-w-0">
+            <PinnedResourcesWidget />
+            {showGrowth && <GrowthHomeWidget />}
+          </div>
         </div>
       </div>
     </AppLayout>

@@ -16,6 +16,7 @@ import {
   serializeGrowthAccount,
 } from '@/lib/services/growthTrackingService';
 import { categoryListFor, normalizeCategoryFor } from '@/lib/growth/category';
+import { listCategoryDefs } from '@/lib/services/growthCategoryService';
 import {
   GROWTH_PLATFORMS,
   PLATFORM_LABEL,
@@ -71,14 +72,17 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     }
 
     // Optional, and validated against **this platform's** categories rather than
-    // accepted as typed: the vocabulary is closed and platform-scoped (that is
-    // what makes its colours mean anything), so an unrecognised one — or an X
-    // grouping on a Facebook page — is refused here instead of being stored and
-    // rendering as an unfiled account the user believes they filed.
-    const category = normalizeCategoryFor(platform, body.category);
-    if (body.category != null && body.category !== '' && category === null) {
+    // accepted as typed: the vocabulary is platform-scoped (that is what makes
+    // its colours mean anything), so an unrecognised one — or an X grouping on a
+    // Facebook page — is refused here instead of being stored and rendering as
+    // an unfiled account the user believes they filed. The registry is read
+    // only when a category was actually sent (rule 9).
+    const wantsCategory = body.category != null && body.category !== '';
+    const defs = wantsCategory ? await listCategoryDefs() : [];
+    const category = wantsCategory ? normalizeCategoryFor(defs, platform, body.category) : null;
+    if (wantsCategory && category === null) {
       return NextResponse.json({
-        error: `A ${PLATFORM_LABEL[platform]} account can be filed under ${categoryListFor(platform)}.`,
+        error: `A ${PLATFORM_LABEL[platform]} account can be filed under ${categoryListFor(defs, platform)}.`,
       }, { status: 400 });
     }
 

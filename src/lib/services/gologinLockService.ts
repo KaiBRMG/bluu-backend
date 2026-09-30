@@ -96,6 +96,20 @@ function isLive(lock: GoLoginLockDoc | undefined, now: number): boolean {
 }
 
 /**
+ * Who has this profile open right now, if anyone — read-only, one document.
+ *
+ * For management actions (edit, delete) that must not land on a profile a
+ * colleague is using: deleting it would pull the account out from under them,
+ * and a proxy or notes write can race the session's own commit on close.
+ */
+export async function getLiveLockHolder(profileId: string): Promise<LockHolder | null> {
+  const snap = await adminDb.collection(GOLOGIN_SESSIONS_COLLECTION).doc(profileId).get();
+  const lock = snap.exists ? (snap.data() as GoLoginLockDoc) : undefined;
+  if (!lock || !isLive(lock, Date.now())) return null;
+  return { uid: lock.uid, displayName: lock.displayName, heartbeatAtMs: lock.heartbeatAtMs };
+}
+
+/**
  * Take the lock, or report who has it.
  *
  * A transaction rather than a get-then-set: two operators clicking Launch in the

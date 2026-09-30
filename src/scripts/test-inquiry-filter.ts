@@ -52,6 +52,36 @@ const cases: { name: string; email: InboundEmail; expect: InquiryVerdict; replyT
     greet: 'Bruno',
   },
   {
+    // The website form sends FROM hello@ TO hello@ — the applicant's address
+    // is only in the body. Must reply to the body address, not loop to hello@.
+    name: 'website form sent from hello@ to hello@',
+    email: {
+      from: 'hello@bluurock.com',
+      fromHeader: 'Bluu Rock <hello@bluurock.com>',
+      subject: 'Need onlyfans management',
+      text: [
+        'Name: Bruno',
+        'Email: bruno@rekorder.be',
+        'Subject: Need onlyfans management',
+        'Message: I want to relaunch my OnlyFans account and I am looking for an agency to manage it and grow my fans.',
+      ].join('\n'),
+      headers: {},
+    },
+    expect: 'reply',
+    replyTo: 'bruno@rekorder.be',
+    greet: 'Bruno',
+  },
+  {
+    name: 'website form with the email field left empty (loop guard)',
+    email: {
+      from: 'hello@bluurock.com',
+      subject: 'OnlyFans',
+      text: ['Name: Sam', 'Subject: OnlyFans', 'Message: I am a creator looking for management for my OnlyFans.'].join('\n'),
+      headers: {},
+    },
+    expect: 'system',
+  },
+  {
     name: 'short direct enquiry',
     email: direct('"Jay Smith" <jay.smith@gmail.com>'.replace(/.*<|>/g, ''), 'Joining', 'Hi, I would love to join your agency as a model. I have an OF with 2k subscribers.', {
       fromHeader: '"Jay Smith" <jay.smith@gmail.com>',

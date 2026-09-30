@@ -3,6 +3,7 @@
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { CloseDecision } from '@/hooks/useGoLoginCloseGuard';
+import { PRIMARY_BUTTON } from '../_lib/manage';
 
 export interface BusyProfile {
   profileId: string;
@@ -107,7 +108,7 @@ export default function CloseGuard({
           <div className="mt-5 flex flex-wrap items-center gap-2">
             <Button
               size="sm"
-              className="bg-[#2563eb] text-white hover:bg-[#1d4ed8]"
+              className={PRIMARY_BUTTON}
               onClick={() => onDecision('after-completion')}
             >
               Close when finished
@@ -128,7 +129,7 @@ export default function CloseGuard({
           <div className="mt-5 flex flex-wrap items-center gap-2">
             <Button
               size="sm"
-              className="bg-[#2563eb] text-white hover:bg-[#1d4ed8]"
+              className={PRIMARY_BUTTON}
               onClick={() => onDecision('stop-and-close')}
             >
               Save &amp; quit

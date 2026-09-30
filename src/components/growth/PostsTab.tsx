@@ -15,7 +15,7 @@ import {
   refreshStateFor,
   soonestRefresh,
 } from '@/lib/growth/postMetrics';
-import type { GrowthPost, GrowthSpendLedger } from '@/types/firestore';
+import type { GrowthAccount, GrowthPost, GrowthSpendLedger } from '@/types/firestore';
 
 /**
  * Mounted only after a post has been opened, and dynamically imported: the sheet
@@ -62,6 +62,8 @@ const TABLE_METRICS: TableMetric[] = ['engagement', 'likes', 'reposts', 'replies
  */
 export function PostsTab({
   posts,
+  accounts,
+  onOpenAccount,
   spend,
   loading,
   error,
@@ -73,6 +75,9 @@ export function PostsTab({
   onLoadFullHistory,
 }: {
   posts: GrowthPost[];
+  /** The whole roster — each post group is headed by its author's account. */
+  accounts: GrowthAccount[];
+  onOpenAccount: (account: GrowthAccount) => void;
   spend: GrowthSpendLedger | null;
   loading: boolean;
   error: string | null;
@@ -118,6 +123,14 @@ export function PostsTab({
   ), [posts, filter]);
 
   const nextReading = useMemo(() => soonestRefresh(posts), [posts]);
+
+  /** X accounts by handle — the key a post carries for its author. */
+  const accountsByHandle = useMemo(
+    () => new Map(
+      accounts.filter((a) => a.platform === 'twitter').map((a) => [a.handleNormalized, a]),
+    ),
+    [accounts],
+  );
 
   // Read from the live array rather than held in state, so a sync updates the
   // open sheet in place instead of showing the copy captured when it opened.
@@ -233,6 +246,8 @@ export function PostsTab({
           ) : (
             <PostsTable
               posts={visible}
+              accountsByHandle={accountsByHandle}
+              onOpenAccount={onOpenAccount}
               metric={metric}
               metricLabel={metric === 'engagement' ? 'Engagement' : METRIC_LABEL[metric]}
               highlightId={highlightId}

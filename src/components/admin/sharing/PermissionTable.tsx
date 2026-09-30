@@ -88,7 +88,7 @@ export default function PermissionTable({
    * Pages in render order, each sub-item directly beneath its parent.
    *
    * A sub-item (`PageDef.parentPageId`) is a capability inside another page
-   * rather than a destination — GoLogin's Management dialog is the first. It
+   * rather than a destination — GoLogin's four capabilities are the first. It
    * gets an ordinary row, indented, because it is an ordinary tier-2 grant; the
    * indent is the only thing saying "this is part of the row above", so it must
    * not be sorted away from it by `order`.

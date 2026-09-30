@@ -170,9 +170,22 @@ The sales tool identifies agents by their old `@bluurock.com` addresses. Resolut
 
 The admin screen always previews first (`dryRun=true`), showing per-agent gross for reconciliation against the source sheet and every skipped row grouped by reason. The skip list is the reason the preview exists — an agent whose rows silently vanish is an agent who is underpaid and nobody notices.
 
+### A sale belongs to the shift it was made on
+
+A shift is paid on the day it **starts** (`resolveShiftInputs`), so a 23:00–07:00 SAST shift belongs wholly to its first day. A sale's own clock would put everything sold after midnight on the next calendar day — and on the last night of a month, into the **next month**, which is not the month finalised and paid on the 1st. So the import stamps each sale's `day`/`month` with the **start day of the agent's shift that contains it** ([`attributeSalesToShifts`](../src/lib/salary/salesImport.ts)), not its calendar day. `occurredAt` is untouched; only the bucket moves.
+
+- **Shift windows** come from one roster-wide range read over the file's span, opened a day early so an overnight shift that began the evening before is found (`getShiftWindowsForSales`). Recurring series are expanded, tombstones (approved leave) excluded — the same expansion the salary grid uses.
+- **A sale inside no shift keeps its calendar day.** There is nothing better to attribute it to, and the engine's "sales with no shift" check already surfaces it.
+- **The shift end is exclusive, with no grace period.** A sale at 07:00:00 on a shift ending 07:00 is outside it.
+- **Overlapping shifts: the later-starting one wins** — the shift the agent most recently began.
+- **The stamp is decided at import and does not follow later shift edits.** Moving a shift after its sales were imported leaves them where they were; re-uploading an export that covers them re-stamps them (the sale id is a hash of the row, not of its day, so the same document is rewritten). This is the backfill path too: re-upload older exports to re-stamp sales imported before attribution existed.
+- The preview says how many rows moved, how many crossed into the previous month, and how many already-stored rows a re-upload moves (`shiftAttributed`, `shiftAttributedToPreviousMonth`, `restamped` on the import record).
+
 ### Finalised months refuse rows
 
 Rows belonging to an already-finalised agent-month are held back and the months are named. Reopen to accept them.
+
+Because a stored sale's month can now change on re-upload, the guard runs **both ways**: a row moving *into* a finalised month is refused, and so is a stored row moving *out* of one — otherwise it would be paid twice, once in the frozen month and again in the open one. The stored stamps are read once per import (`getExistingSaleStamps`, field-masked to `day`/`month`) and the same read feeds the duplicate count.
 
 ---
 
@@ -415,7 +428,7 @@ Both queries are bounded (400 requests, 600 entries) and names resolve in one `g
 
 ## 7. Timezone
 
-**`Africa/Harare` (UTC+2, no DST) is the salary day boundary for every agent**, regardless of where they live. The export is stamped in it and the roster is managed in SAST. One company-wide boundary is what makes a month reconcile exactly against the source sheet and stops a sale landing on a different day than the shift that earned it.
+**`Africa/Harare` (UTC+2, no DST) is the salary day boundary for every agent**, regardless of where they live. The export is stamped in it and the roster is managed in SAST. One company-wide boundary is what makes a month reconcile exactly against the source sheet. It is not, on its own, what keeps a sale on its shift's day — an overnight shift crosses the boundary — which is why the import attributes each sale to its shift (§4).
 
 [`salaryDate.ts`](../src/lib/salary/salaryDate.ts) uses **fixed-offset arithmetic**, which is exact here and nowhere else. **Do not copy those helpers to a timezone that observes DST** — they would silently mis-bucket two days a year.
 
@@ -799,7 +812,7 @@ One non-optimisation worth knowing: `loading="lazy"` on the avatar does nothing.
 cd tests/salary-engine && npm install && npm test
 ```
 
-81 assertions over the pure engine, the date helpers, the importer, shift serialisation and timezone resolution, including an **end-to-end run of the real August export** that asserts the figures the spreadsheet produced (Queen: $12,621.99 gross, 5% tier, $337.78 commission). The engine is pure, so this is cheap and exact — and it is the money path.
+99 tests over the pure engine, the date helpers, the importer (including shift attribution — `shiftAttribution.test.ts`), shift serialisation and timezone resolution, including an **end-to-end run of the real August export** that asserts the figures the spreadsheet produced (Queen: $12,621.99 gross, 5% tier, $337.78 commission). The engine is pure, so this is cheap and exact — and it is the money path.
 
 `shiftSerialise.test.ts` pins a regression worth knowing about: `recurrence.endDate` had two writers that disagreed — `createShift` stored the ISO **string** the shift modal sends, while `truncateSeriesAt` wrote a real `Timestamp` — and the reader assumed `Timestamp`, so one recurring shift with an end date 500'd the **whole** week view with `r.endDate.toDate is not a function`. The write side now normalises (`normaliseRecurrence`) and the read side tolerates every shape ever written (`toIsoString`). Keep both: one stops new bad documents, the other keeps existing ones from taking the roster down.
 

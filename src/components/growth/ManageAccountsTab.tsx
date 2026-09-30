@@ -15,7 +15,8 @@ import {
 } from '@/components/ui/alert-dialog';
 import { formatCount } from '@/lib/growth/metrics';
 import type { GrowthCategory } from '@/lib/growth/category';
-import { AccountIdentity, CategoryChip, CategorySelect, ScrapeStatus } from './growthUi';
+import { AccountIdentity, CategoryChip, ScrapeStatus } from './growthUi';
+import { CategorySelect } from './CategorySelect';
 import { AddAccountDialog } from './AddAccountDialog';
 import { UsageDialog } from './UsageDialog';
 import { useTrackPosts } from './useTrackPosts';
@@ -87,6 +88,9 @@ export function ManageAccountsTab({
    * id is platform + handle, so nothing moves and no history is touched. It is
    * editable here — rather than only at add time — because the bulk import files
    * a whole roster at once and a mis-filed account otherwise needs a script.
+   *
+   * The picker ends in "New category…": a grouping created there is filed onto
+   * this account through this same function once it exists.
    */
   const setCategory = async (account: GrowthAccount, category: GrowthCategory | null) => {
     setBusyId(account.id);
@@ -170,7 +174,9 @@ export function ManageAccountsTab({
                   <TableCell className="w-[10.5rem]">
                     <CategorySelect
                       className="w-full"
-                      account={account}
+                      platform={account.platform}
+                      value={account.category}
+                      ariaLabel={`Category for @${account.handle}`}
                       busy={busyId === account.id}
                       onChange={(next) => setCategory(account, next)}
                     />

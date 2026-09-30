@@ -1,20 +1,18 @@
 'use client';
 
 import Image from 'next/image';
-import { ArrowUpRightIcon, CircleAlertIcon } from 'lucide-react';
+import { ArrowUpRightIcon, CircleAlertIcon, CircleStopIcon } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { cn } from '@/lib/utils';
 import { PLATFORM_LABEL, type GrowthPlatform } from '@/lib/growth/platform';
+import { toneFor, type GrowthCategory } from '@/lib/growth/category';
 import {
-  CATEGORIES_BY_PLATFORM, CATEGORY_TONE, type GrowthCategory,
-} from '@/lib/growth/category';
-import { formatDelta, formatPercent, type GrowthDelta } from '@/lib/growth/metrics';
+  STOPPED_SUMMARY, formatDelta, formatPercent, readProblemOf, type GrowthDelta,
+} from '@/lib/growth/metrics';
 import type { GrowthAccount } from '@/types/firestore';
+import { useGrowthCategories } from './categoryContext';
 
 /**
  * Shared marks for the Growth Tracking surfaces.
@@ -161,11 +159,12 @@ export function PlatformChip({ platform }: { platform: GrowthPlatform }) {
  * rule rather than a preference: a category is a **closed vocabulary with a
  * meaning per value**, which is the one thing DESIGN.md says earns a hue — the
  * platform is already carried by its own mark, so colouring that too would be
- * decoration. The triad lives in `category.ts`; never re-map it inline.
+ * decoration. The triad lives in `category.ts` and is looked up through the
+ * registry (a created category's colour is stored with it); never re-map inline.
  *
  * Built on the shadcn `Badge` — the house primitive for exactly this mark
  * (CLAUDE.md rule 13). `variant="outline"` is the closest base to the tinted
- * triad: a transparent fill and a real border, both of which `CATEGORY_TONE`
+ * triad: a transparent fill and a real border, both of which the tone
  * then overrides through `cn`'s tailwind-merge.
  *
  * Three overrides on top of it, each load-bearing rather than taste:
@@ -182,10 +181,11 @@ export function CategoryChip({
   category: GrowthCategory;
   className?: string;
 }) {
+  const { categories } = useGrowthCategories();
   return (
     <Badge
       variant="outline"
-      className={cn('rounded-md px-1.5 py-0.5 text-[11px]', CATEGORY_TONE[category].chip, className)}
+      className={cn('rounded-md px-1.5 py-0.5 text-[11px]', toneFor(categories, category).chip, className)}
     >
       {category}
     </Badge>
@@ -239,6 +239,11 @@ export function ScrapeStatus({ account }: { account: GrowthAccount }) {
   if (!account.lastScrapeAt) {
     return <span className="text-[11px] text-zinc-400">First reading tonight</span>;
   }
+  // Checked before a plain failure: a Stopped account *is* failing, but the fact
+  // someone needs is that nothing will read it again on its own.
+  if (readProblemOf(account) === 'stopped') {
+    return <StoppedBadge subject="account" error={account.lastScrapeError} />;
+  }
   if (account.lastScrapeStatus === 'failed') {
     return (
       <span
@@ -261,6 +266,24 @@ export function ScrapeStatus({ account }: { account: GrowthAccount }) {
 }
 
 /**
+ * The error triad (`-400` ink, `/10` wash, `/30` border) — shared by the two read
+ * badges and the Stopped filter chip, so all three stay one red.
+ */
+const ERROR_TRIAD = 'border-red-500/30 bg-red-500/10 text-red-400';
+const READ_BADGE_CLASS = cn('gap-0.5 rounded-md px-1.5 py-0.5 text-[11px]', ERROR_TRIAD);
+
+/**
+ * The "Stopped" filter chip's triad. Red because the state is an error the
+ * system has given up on — the same hue as the Stopped badge on the cards it
+ * finds. Filled at `-700` (6.47:1 against white) for the same AA reason the
+ * category fills are measured.
+ */
+const STOPPED_TONE = {
+  chip: ERROR_TRIAD,
+  active: 'bg-red-700 text-white border-red-700',
+} as const;
+
+/**
  * A filter chip carrying its own count. Shared by the overview and the
  * tracked-posts view so
  * the two filter rows are the same control, not two that merely resemble it.
@@ -269,7 +292,7 @@ export function ScrapeStatus({ account }: { account: GrowthAccount }) {
  * on the lighter blue measures 3.68:1 and fails AA at this size (DESIGN.md §2).
  */
 export function FilterChip({
-  active, onClick, count, category, children,
+  active, onClick, count, category, status, children,
 }: {
   active: boolean;
   onClick: () => void;
@@ -282,9 +305,14 @@ export function FilterChip({
    * it away at the exact moment it is being used.
    */
   category?: GrowthCategory;
+  /** A chip that filters by a *state* wears that state's hue, by the same logic. */
+  status?: 'stopped';
   children: React.ReactNode;
 }) {
-  const tone = category ? CATEGORY_TONE[category] : null;
+  const { categories } = useGrowthCategories();
+  const tone = status === 'stopped'
+    ? STOPPED_TONE
+    : category ? toneFor(categories, category) : null;
   return (
     // The chip's *appearance* is the house `Badge`; its *semantics* are a
     // button, because this one is pressed. `asChild` is the sanctioned way to
@@ -338,13 +366,14 @@ export function CategoryDot({
   category: GrowthCategory | null;
   className?: string;
 }) {
+  const { categories } = useGrowthCategories();
   return (
     <span className={cn('flex min-w-0 items-center gap-1.5', className)}>
       <span
         aria-hidden
         className={cn(
           'size-1.5 shrink-0 rounded-full',
-          category ? CATEGORY_TONE[category].dot : 'bg-zinc-500',
+          category ? toneFor(categories, category).dot : 'bg-zinc-500',
         )}
       />
       <span className="truncate text-[11px] text-zinc-400">{category ?? 'Unfiled'}</span>
@@ -383,10 +412,7 @@ export function ScrapeFailedBadge({
   return (
     <Badge
       variant="outline"
-      className={cn(
-        'gap-0.5 rounded-md border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[11px] text-red-400',
-        className,
-      )}
+      className={cn(READ_BADGE_CLASS, className)}
       title={error ?? undefined}
     >
       <CircleAlertIcon aria-hidden />
@@ -423,69 +449,66 @@ export function SpikeBadge({ percent, className }: { percent: number; className?
 }
 
 /**
- * The account's category, editable in place — shared by the manage table and the
- * account panel, so the two cannot drift into offering different vocabularies.
+ * "This stopped being read on its own" — an account or post that failed
+ * `MAX_CONSECUTIVE_FAILURES` reads in a row, so the schedulers skip it rather
+ * than keep paying for empty results.
  *
- * **The options are the account's own platform's**, not the whole vocabulary:
- * TWXNK / BONUS / SFW REPOST describe how the X roster is run and mean nothing
- * on a Facebook page, which is GENERAL or CREATOR. The server checks the same
- * thing against the stored platform — this list is the affordance, not the
- * validation.
+ * **A different shape from `ScrapeFailedBadge`**, not only different words.
+ * Both are red — both are errors — so hue cannot separate them; the stop glyph
+ * (a square in a circle) against the alert's exclamation mark is what does,
+ * the same rule that keeps the saturation warning on its own triangle. Stopped
+ * replaces "Read failed" rather than stacking with it: it is the stronger claim
+ * about the same failure.
  *
- * Radix reserves the empty string as "no value", so "no category" travels as a
- * sentinel and is mapped back to `null` — the same trick the add dialog uses.
- *
- * `dot` is the one thing the two call sites disagree about, and the reason is
- * worth stating. In the manage table the trigger stays greyscale: a coloured
- * `Select` in a column of controls reads as a status control rather than a
- * picker, and that table shows the hue elsewhere. On the account panel this
- * control *replaces* `CategoryDot` — the only place that account's category
- * colour appeared — so the mark moves inside the trigger rather than being lost.
+ * The explanation names the way out, because the state only ends when a person
+ * acts: *Refresh now* (a success clears it) or stopping and resuming tracking.
+ * `sr-only` as well as `title`, for the reason `ScrapeFailedBadge` gives —
+ * a card that is itself a button cannot host a second focus stop for a tooltip.
  */
-const NO_CATEGORY = 'none';
-
-export function CategorySelect({
-  account,
-  busy,
-  onChange,
-  dot = false,
+export function StoppedBadge({
+  subject,
+  error,
   className,
 }: {
-  account: GrowthAccount;
-  busy: boolean;
-  onChange: (next: GrowthCategory | null) => void;
-  /** Show the category's colour inside the trigger. See above. */
-  dot?: boolean;
+  subject: 'account' | 'post';
+  error?: string | null;
   className?: string;
 }) {
+  const why = `${STOPPED_SUMMARY} in a row, so this ${subject} is no longer read or billed ` +
+    `on schedule. Use Refresh now to try it again.` + (error ? ` Last error: ${error}` : '');
   return (
-    <Select
-      value={account.category ?? NO_CATEGORY}
-      disabled={busy}
-      onValueChange={(v) => onChange(v === NO_CATEGORY ? null : (v as GrowthCategory))}
+    <Badge
+      variant="outline"
+      className={cn(READ_BADGE_CLASS, className)}
+      title={why}
     >
-      <SelectTrigger
-        size="sm"
-        className={cn('text-xs', className)}
-        aria-label={`Category for @${account.handle}`}
-      >
-        {dot && (
-          <span
-            aria-hidden
-            className={cn(
-              'size-1.5 shrink-0 rounded-full',
-              account.category ? CATEGORY_TONE[account.category].dot : 'bg-zinc-500',
-            )}
-          />
-        )}
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={NO_CATEGORY}>Unfiled</SelectItem>
-        {CATEGORIES_BY_PLATFORM[account.platform].map((c) => (
-          <SelectItem key={c} value={c}>{c}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+      <CircleStopIcon aria-hidden />
+      Stopped
+      <span className="sr-only">: {why}</span>
+    </Badge>
   );
+}
+
+/**
+ * Whichever read badge an account or post has earned — Stopped, Read failed, or
+ * nothing. The precedence (and the `isActive` gate) is `readProblemOf`'s, so
+ * every card, row and panel header renders the same answer from one call.
+ */
+export function ReadProblemBadge({
+  item,
+  subject,
+  className,
+}: {
+  item: Parameters<typeof readProblemOf>[0] & {
+    lastScrapeError?: string | null;
+    lastReadError?: string | null;
+  };
+  subject: 'account' | 'post';
+  className?: string;
+}) {
+  const problem = readProblemOf(item);
+  const error = item.lastScrapeError ?? item.lastReadError ?? null;
+  if (problem === 'stopped') return <StoppedBadge subject={subject} error={error} className={className} />;
+  if (problem === 'failed') return <ScrapeFailedBadge error={error} className={className} />;
+  return null;
 }

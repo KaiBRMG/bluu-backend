@@ -7,15 +7,33 @@ import { getCache, invalidateCacheByPrefix, setCache } from '@/lib/queryCache';
 import type { DayMap } from '@/lib/growth/metrics';
 import type { GrowthAccount, GrowthSeries } from '@/types/firestore';
 import type { GrowthPlatform } from '@/lib/growth/platform';
-import type { GrowthCategory } from '@/lib/growth/category';
+import {
+  BUILT_IN_CATEGORIES, type CategoryDef, type CategoryToneKey, type GrowthCategory,
+} from '@/lib/growth/category';
 
 const CACHE_PREFIX = 'bluu_growth_';
-const CACHE_KEY = `${CACHE_PREFIX}series_v1`;
+// v2: the payload gained `categories`. A v1 entry would hand the page a roster
+// with no registry, and every created category would render unfiled until the TTL.
+const CACHE_KEY = `${CACHE_PREFIX}series_v2`;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 interface GrowthPayload {
   accounts: GrowthAccount[];
   series: GrowthSeries[];
+  /** Built-in + created categories, merged server-side. */
+  categories: CategoryDef[];
+}
+
+/** Apply an in-place edit to the cached payload, if there is one. */
+function patchCache(edit: (cached: GrowthPayload) => GrowthPayload): void {
+  const cached = getCache<GrowthPayload>(CACHE_KEY, CACHE_TTL_MS);
+  if (cached) setCache(CACHE_KEY, edit(cached));
+}
+
+export interface CreateCategoryPayload {
+  name: string;
+  platforms: GrowthPlatform[];
+  tone: CategoryToneKey;
 }
 
 export interface AddGrowthAccountPayload {
@@ -74,6 +92,9 @@ export function useGrowthTracking() {
 
   const [accounts, setAccounts] = useState<GrowthAccount[]>([]);
   const [series, setSeries] = useState<GrowthSeries[]>([]);
+  // Seeded with the built-ins so a chip can render its colour before the first
+  // payload lands; replaced by the merged registry from the server.
+  const [categories, setCategories] = useState<CategoryDef[]>([...BUILT_IN_CATEGORIES]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,6 +104,7 @@ export function useGrowthTracking() {
       if (cached) {
         setAccounts(cached.accounts);
         setSeries(cached.series);
+        setCategories(cached.categories);
         setLoading(false);
         return;
       }
@@ -93,6 +115,7 @@ export function useGrowthTracking() {
       const data = await authFetch('/api/smm/growth/series') as GrowthPayload;
       setAccounts(data.accounts);
       setSeries(data.series);
+      setCategories(data.categories);
       setCache(CACHE_KEY, data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load growth data');
@@ -184,7 +207,31 @@ export function useGrowthTracking() {
       body: JSON.stringify({ category }),
     });
     setAccounts((current) => current.map((a) => (a.id === id ? { ...a, category } : a)));
-    invalidateCacheByPrefix(CACHE_PREFIX);
+    // Written through rather than dropped: the cached payload is the whole
+    // roster *and* every series, and one label changing is no reason for the
+    // next mount to re-read all of it (rule 9).
+    patchCache((cached) => ({
+      ...cached,
+      accounts: cached.accounts.map((a) => (a.id === id ? { ...a, category } : a)),
+    }));
+  }, [authFetch]);
+
+  /**
+   * Create a category, and return it so the picker that asked can file the
+   * account under it straight away.
+   *
+   * The server answers with the whole merged registry, which replaces ours — no
+   * roster refetch, since no account changed (rule 9), and the session cache is
+   * patched rather than dropped for the same reason.
+   */
+  const createCategory = useCallback(async (payload: CreateCategoryPayload): Promise<CategoryDef> => {
+    const response = await authFetch('/api/smm/growth/categories', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }) as { category: CategoryDef; categories: CategoryDef[] };
+    setCategories(response.categories);
+    patchCache((cached) => ({ ...cached, categories: response.categories }));
+    return response.category;
   }, [authFetch]);
 
   const deleteAccount = useCallback(async (id: string) => {
@@ -220,6 +267,7 @@ export function useGrowthTracking() {
   return useMemo(() => ({
     accounts,
     seriesById,
+    categories,
     loading,
     error,
     refresh,
@@ -227,7 +275,11 @@ export function useGrowthTracking() {
     setTracking,
     setTrackPosts,
     setCategory,
+    createCategory,
     deleteAccount,
     refreshAccount,
-  }), [accounts, seriesById, loading, error, refresh, addAccount, setTracking, setTrackPosts, setCategory, deleteAccount, refreshAccount]);
+  }), [
+    accounts, seriesById, categories, loading, error, refresh, addAccount, setTracking,
+    setTrackPosts, setCategory, createCategory, deleteAccount, refreshAccount,
+  ]);
 }

@@ -24,10 +24,28 @@ import { createGoLoginApiClient, PROFILES_PER_PAGE } from './providers/gologinAp
 import { GoLoginApiError, type IGoLoginClient } from './types';
 
 export { GoLoginApiError, PROFILES_PER_PAGE };
-export { GOLOGIN_MANAGED_FOLDER_PREFIX, isManagedGoLoginFolder } from './types';
+export {
+  GOLOGIN_CAPABILITIES,
+  GOLOGIN_MANAGED_FOLDER_PREFIX,
+  GOLOGIN_OS_CHOICES,
+  isGoLoginOsChoice,
+  isGoLoginProxyMode,
+  isGoLoginId,
+  isManagedGoLoginFolder,
+  usesMasterGoLoginToken,
+} from './types';
 export type {
   GoLoginAccountInfo,
+  GoLoginCapability,
+  GoLoginOsChoice,
+  GoLoginProfileDetail,
+  GoLoginProxyCheckResult,
+  GoLoginProxyInput,
+  GoLoginProxyMode,
   GoLoginFolder,
+  GoLoginFolderRow,
+  GoLoginSharingMember,
+  GoLoginSharingOverview,
   GoLoginMember,
   GoLoginMemberRole,
   GoLoginProfile,

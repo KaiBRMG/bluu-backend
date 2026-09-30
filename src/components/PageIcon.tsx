@@ -31,6 +31,7 @@ import {
   ClockFading,
   ImageUpscale,
   Settings2,
+  FolderCog,
   type LucideIcon,
 } from "lucide-react";
 
@@ -69,6 +70,7 @@ export const ICON_MAP: Record<string, LucideIcon> = {
   ClockFading,
   ImageUpscale,
   Settings2,
+  FolderCog,
 };
 
 // Brand icons that have no lucide equivalent are served from /Icons as SVGs.
