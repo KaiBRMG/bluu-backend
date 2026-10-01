@@ -260,17 +260,6 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
 
   // ─── Salary ───────────────────────────────────────────────────────────────
   {
-    id: 'salesImported',
-    category: 'Salary',
-    event: 'Sales data imported',
-    trigger:
-      'An admin completes a real (non-dry-run) .xlsx sales import that wrote at least one row. A re-upload of an overlapping export writes nothing and sends nothing — every figure would be unchanged.',
-    recipients: 'Every chat agent (the CA group, excluding archived users)',
-    sources: ['src/app/api/ca-salary/import/route.ts'],
-    content: notifications.salesImported('{August 2026}'),
-    telegramEnabled: true,
-  },
-  {
     id: 'paydayApproaching',
     category: 'Salary',
     event: 'Payday reminder',

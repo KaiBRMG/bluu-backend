@@ -319,22 +319,14 @@ function ImportPreview({
         </div>
       )}
 
-      {/* Shift attribution changes which day — and at a month's end, which
-          month — a sale is paid in. Said up front, because it is the one way
-          this preview can disagree with the source sheet's own dates. */}
-      {(!!result.shiftAttributed || !!result.restamped) && (
+      {/* A re-upload can move stored sales to a different day — sales stamped
+          with their shift's start day while shift attribution was live move
+          back to the day they were made. Said up front, because it changes
+          which day (and possibly month) already-recorded money sits in. */}
+      {!!result.restamped && (
         <p className="text-sm text-zinc-400">
-          {!!result.shiftAttributed && (
-            <>
-              {pluralise(result.shiftAttributed, 'sale')} made after midnight on an overnight shift{' '}
-              {result.shiftAttributed === 1 ? 'counts' : 'count'} on the day the shift started
-              {!!result.shiftAttributedToPreviousMonth &&
-                ` — ${result.shiftAttributedToPreviousMonth} of them in the previous month`}
-              .{' '}
-            </>
-          )}
-          {!!result.restamped &&
-            `${pluralise(result.restamped, 'already-recorded sale')} will move to the day ${result.restamped === 1 ? 'its' : 'their'} shift started.`}
+          {pluralise(result.restamped, 'already-recorded sale')} will move back to the day{' '}
+          {result.restamped === 1 ? 'it was' : 'they were'} made, matching the CRM.
         </p>
       )}
 

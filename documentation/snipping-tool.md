@@ -809,7 +809,7 @@ It uses **`useSyncExternalStore`**, whose server snapshot is UTC and whose clien
 
 So: the owner's card opens `shareUrl` (the public page — which also shows them what a recipient sees), and the public page's image is **not wrapped in a link at all**. If a "view full size" affordance is ever wanted back, it needs to be a client-side zoom, not an anchor to the image route.
 
-**The same rule covers the recording.** The player's controls play, scrub and fullscreen in place, and none of them navigate. Do not add a download button: it would be an anchor to the video route, which is the leak this paragraph exists to prevent. A recipient who needs the file can still save it from the element's own menu, which follows the redirect without ever showing the target.
+**The same rule covers the recording.** The player's controls play, scrub and fullscreen in place, and none of them navigate. (On iPhone, which has no element fullscreen, the fullscreen button hands the `<video>` to the native iOS player via `webkitEnterFullscreen()` — still the same element and the same signed source, so nothing new is exposed.) Do not add a download button: it would be an anchor to the video route, which is the leak this paragraph exists to prevent. A recipient who needs the file can still save it from the element's own menu, which follows the redirect without ever showing the target.
 
 ### The player is ours, and the reason is the file, not taste
 

@@ -26,7 +26,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
-  goLoginOsLabel,
   type GoLoginSharingMember as SharingMember,
   type GoLoginSharingOverview as Overview,
 } from '@/lib/gologin/types';
@@ -38,6 +37,7 @@ import {
   plural,
   type ManagedFolder,
 } from '../_lib/manage';
+import OsIcon from './OsIcon';
 
 type SharingProfile = Overview['profiles'][number];
 type Kind = 'folders' | 'profiles';
@@ -609,8 +609,9 @@ export default function SharingDialog({
                               >
                                 <span className="min-w-0">
                                   <span className="block truncate text-sm text-white">{profile.name || 'Untitled profile'}</span>
-                                  <span className="block truncate text-[11px] text-zinc-400">
-                                    {[goLoginOsLabel(profile.os, ''), ...profile.folders].join(' · ')}
+                                  <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-zinc-400">
+                                    <OsIcon os={profile.os} osSpec={profile.osSpec} />
+                                    <span className="truncate">{profile.folders.join(' · ')}</span>
                                   </span>
                                 </span>
                                 <span className="flex shrink-0 items-center gap-1.5">

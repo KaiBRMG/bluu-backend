@@ -24,12 +24,13 @@ import { getShiftsByRange, getLedgerEntriesForUsers, getActiveSessionsForUsers }
 import { expandShiftsForWindow } from '../utils/recurrence';
 import { serialiseShift } from '../utils/shiftSerialise';
 import { computeTimeWorked } from '../utils/shiftAttendance';
-import type { ShiftWindow } from '../salary/salesImport';
 import { computeSalaryMonth, DEFAULT_SALARY_CONFIG, sumMonth } from '../salary/salaryEngine';
-import { monthKeyRange, toDayKey, type SalaryDayKey, type SalaryMonthKey } from '../salary/salaryDate';
+import { addMonths, currentMonthKey, monthKeyRange, toDayKey, type SalaryDayKey, type SalaryMonthKey } from '../salary/salaryDate';
 import { computeFinalizationReset } from '../leave/leaveBalance';
 import { invalidateUserCache } from './userService';
 import type {
+  DashboardSalaryMonth,
+  RecentlyFinalizedSalary,
   SalaryConfig,
   SalaryDayInput,
   SalaryDayOverride,
@@ -235,10 +236,12 @@ export async function writeSales(
  *
  * Read before an import writes, for three reasons: the report's duplicate
  * count, the count of stored sales a re-upload moves, and the finalised-month
- * guard. A sale's stamp can now *change* on re-upload (it follows its shift —
- * see `attributeSalesToShifts`), so a row stored in a paid month must not be
- * quietly moved out of it into an open one, where it would be paid a second
- * time. Field-masked: only the two stamps are read.
+ * guard. A stored stamp can differ from the one a re-upload computes — sales
+ * imported between 2026-09-30 and 2026-10-01 were stamped with their shift's
+ * start day, and re-uploading is what moves them back to the day they were
+ * made — so a row stored in a paid month must not be quietly moved out of it
+ * into an open one, where it would be paid a second time. Field-masked: only
+ * the two stamps are read.
  */
 export async function getExistingSaleStamps(
   saleIds: string[],
@@ -250,42 +253,6 @@ export async function getExistingSaleStamps(
     for (const snap of snaps) {
       if (snap.exists) out.set(snap.id, { day: snap.get('day'), month: snap.get('month') });
     }
-  }
-  return out;
-}
-
-/**
- * Every shift each agent worked over the span of an import, as time windows.
- *
- * The input to `attributeSalesToShifts`. One roster-wide range read rather than
- * one per agent (rule 9) — the same query the month grid makes. The window
- * opens a day before the earliest sale so an overnight shift that began the
- * previous evening is found.
- */
-export async function getShiftWindowsForSales(sales: SalarySale[]): Promise<Map<string, ShiftWindow[]>> {
-  const out = new Map<string, ShiftWindow[]>();
-  if (sales.length === 0) return out;
-
-  const SHIFT_LOOKBACK_MS = 24 * 60 * 60 * 1000;
-  let earliest = Infinity;
-  let latest = -Infinity;
-  for (const sale of sales) {
-    const at = Date.parse(sale.occurredAt);
-    if (at < earliest) earliest = at;
-    if (at > latest) latest = at;
-  }
-  const windowStart = earliest - SHIFT_LOOKBACK_MS;
-  const windowEnd = latest + 1;
-
-  const userIds = new Set(sales.map(s => s.userId));
-  const raw = (await getShiftsByRange(windowStart, windowEnd))
-    .filter(s => userIds.has(s.userId))
-    .map(s => ({ ...serialiseShift(s), timeWorkedSeconds: null, attendanceStatus: null }));
-
-  for (const occurrence of expandShiftsForWindow(raw, windowStart, windowEnd)) {
-    const list = out.get(occurrence.userId) ?? [];
-    list.push({ start: occurrence.occurrenceStart, end: occurrence.occurrenceEnd });
-    out.set(occurrence.userId, list);
   }
   return out;
 }
@@ -752,6 +719,108 @@ export async function buildSalaryMonth(
   // A month that was finalised and then reopened keeps its record; surface the
   // reopen so the UI can say "previously paid" rather than implying it never was.
   return withLeave(result, await leavePromise);
+}
+
+/**
+ * The month the agent's dashboard summary should show: the earliest one still
+ * owed to them.
+ *
+ * On the 1st the calendar has moved on but payroll has not — last month is not
+ * paid until an admin finalises it, and a card that jumped to the new month's
+ * $0 would hide the figure the agent is actually waiting on. So the previous
+ * month wins while it is **open and has anything in it**; once it is finalised
+ * (or was empty — a new starter has no last month to wait for) the current
+ * month takes over.
+ *
+ * Only one month back. An older month still open is a payroll backlog for an
+ * admin to clear, not something the dashboard should silently rewind to.
+ *
+ * Cost: before finalisation, one month build (the previous month's). After, one
+ * snapshot read plus the current month's build — the same as before this
+ * existed, plus a single document read.
+ */
+export async function buildDashboardSalaryMonth(
+  userId: string,
+  options: Pick<BuildSalaryMonthOptions, 'now'> = {},
+): Promise<DashboardSalaryMonth> {
+  const now = options.now ?? Date.now();
+  const config = await getSalaryConfig();
+  const current = currentMonthKey(now);
+
+  const previous = await buildSalaryMonth(userId, addMonths(current, -1), { now, config });
+  if (previous.status === 'open' && previous.days.length > 0) {
+    return { ...previous, recentlyFinalized: null };
+  }
+
+  const result = await buildSalaryMonth(userId, current, { now, config });
+  return { ...result, recentlyFinalized: recentlyFinalizedSummary(previous, now) };
+}
+
+/**
+ * How long the dashboard keeps a "last month was finalised" card up. Long
+ * enough to be seen by an agent who only opens the app on shift days; short
+ * enough that it is news, not furniture.
+ */
+export const RECENTLY_FINALIZED_WINDOW_MS = 5 * 24 * 60 * 60 * 1000;
+
+/**
+ * The previous month's payout, while it is fresh. Comes off the build
+ * `buildDashboardSalaryMonth` already did — a finalised month is one snapshot
+ * read — so the card costs nothing extra.
+ */
+function recentlyFinalizedSummary(previous: SalaryMonthResult, now: number): RecentlyFinalizedSalary | null {
+  if (previous.status !== 'finalized' || !previous.finalizedAt) return null;
+  const finalizedMs = Date.parse(previous.finalizedAt);
+  if (!Number.isFinite(finalizedMs) || now - finalizedMs > RECENTLY_FINALIZED_WINDOW_MS) return null;
+  return {
+    month: previous.month,
+    salary: previous.totals.salary,
+    commission: previous.totals.commission,
+    wage: previous.totals.wage,
+    finalizedAt: previous.finalizedAt,
+  };
+}
+
+/**
+ * The month CA Admin's payroll view should open on — the roster-wide twin of
+ * `buildDashboardSalaryMonth`.
+ *
+ * The previous month while **any** active chat agent still has it open with
+ * something in it; otherwise the current month. Same "has something in it" test
+ * as the agent's card (`days.length > 0`), so an agent who started this month
+ * does not pin payroll to a month they never worked.
+ *
+ * Cost (rule 9): the CA roster query plus one batched read of last month's
+ * snapshots. Only while unfinalised agents remain does it build their previous
+ * month to check for activity — and that build is skipped entirely once payroll
+ * has finalised everyone.
+ */
+export async function resolvePayrollMonth(now: number = Date.now()): Promise<SalaryMonthKey> {
+  const current = currentMonthKey(now);
+  const previous = addMonths(current, -1);
+
+  // Same roster as `/roster` and `/overview`, filtered rather than queried on
+  // `isArchived` for the same reason (rule 6).
+  const snap = await adminDb
+    .collection('users')
+    .where('groups', 'array-contains', 'CA')
+    .select('uid', 'isArchived')
+    .get();
+  const uids = snap.docs
+    .map(d => d.data())
+    .filter(u => u.isArchived !== true)
+    .map(u => (u.uid as string | undefined) ?? '')
+    .filter(Boolean);
+
+  const finalized = await getFinalizedMonthsFor(uids, previous);
+  const pending = uids.filter(uid => !finalized.has(uid));
+  if (pending.length === 0) return current;
+
+  const months = await buildSalaryMonthForUsers(pending, previous, { now });
+  for (const result of months.values()) {
+    if (result.status === 'open' && result.days.length > 0) return previous;
+  }
+  return current;
 }
 
 /**

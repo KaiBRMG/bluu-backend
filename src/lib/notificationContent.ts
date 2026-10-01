@@ -276,13 +276,6 @@ export const notifications = {
   }),
 
   // ─── Chat-agent salary ────────────────────────────────────────────────────────
-  salesImported: (monthLabel: string): NotificationContent => ({
-    title: '📈 Earnings Report Updated',
-    message: `New sales for ${monthLabel} have been imported. Your earnings report and daily breakdown now include them.`,
-    type: 'system',
-    actionUrl: '/ca-portal/dashboard/salary',
-  }),
-
   paydayApproaching: (monthLabel: string): NotificationContent => ({
     title: '💸 Payday is Approaching',
     message: `Payday is in 3 days. Check your ${monthLabel} daily breakdown now and raise anything that looks wrong before the 1st — once the month is finalised the figures are locked.`,

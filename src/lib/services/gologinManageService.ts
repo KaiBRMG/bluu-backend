@@ -180,20 +180,6 @@ export function parseProxyInput(value: unknown): GoLoginProxyInput {
   return { mode, host, port, username, password };
 }
 
-/**
- * The proxy with its password filled in: the typed one, or — when the manager
- * kept the stored one (`undefined`) — the one on `profileId`, read here so the
- * secret never leaves the server. For "Ping proxy" on an edit.
- */
-export async function withResolvedPassword(
-  proxy: GoLoginProxyInput,
-  profileId: string | null,
-): Promise<GoLoginProxyInput & { password: string }> {
-  if (proxy.password !== undefined) return { ...proxy, password: proxy.password };
-  const stored = profileId ? await getMasterGoLoginClient().getProfileProxySecret(profileId) : null;
-  return { ...proxy, password: stored?.password ?? '' };
-}
-
 // ─── Folder helpers ─────────────────────────────────────────────────
 
 /**
@@ -387,6 +373,7 @@ export async function createProfile(params: {
       name,
       notes: '',
       os: choice.os,
+      osSpec: choice.osSpec,
       browserType: 'chrome',
       proxyType: proxy?.mode ?? 'none',
       proxyRegion: '',
@@ -635,6 +622,7 @@ export async function getSharingOverview(force = false): Promise<GoLoginSharingO
       id: p.id,
       name: p.name,
       os: p.os,
+      osSpec: p.osSpec,
       folders: p.folders.filter((n) => !isManagedGoLoginFolder(n)),
     })),
     truncated: list.truncated,

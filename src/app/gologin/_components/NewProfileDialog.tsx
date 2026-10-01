@@ -23,12 +23,11 @@ import {
 import { FIELD, LABEL, PRIMARY_BUTTON } from '../_lib/manage';
 import { useManagedFolders } from '../_lib/useManagedFolders';
 import FolderChecklist from './FolderChecklist';
+import OsIcon from './OsIcon';
 import ProxyFields, {
   EMPTY_PROXY,
   proxyComplete,
-  proxyKey,
   proxyPayload,
-  type ProxyCheckState,
   type ProxyDraft,
 } from './ProxyFields';
 
@@ -58,15 +57,14 @@ const NO_FOLDERS: ReadonlySet<string> = new Set();
  * Windows GPU string), and an inconsistent fingerprint is what gets an account
  * flagged. The OS is the one choice that decides the rest.
  *
- * ## The proxy must be proven before the profile exists
+ * ## The proxy
  *
- * With a proxy selected, **Create stays disabled until Ping has passed for the
- * fields exactly as they now stand** — edit one character and the check is
- * void. A proxy typo is invisible until an operator launches the profile; a
- * proxy in the wrong country is invisible until the account is flagged. The
- * ping names the exit country, city and timezone so both are caught here.
- * Server-side, a failure to attach the proxy deletes the new profile rather
- * than leaving it on a desk's real IP.
+ * There is no pre-flight test: the team's proxies are private and only admit
+ * the operators' own connections, so a test from Bluu's server failed on
+ * working proxies (removed 2026-09-30). The proxy is tested for real when the
+ * profile is first launched, and a failure there is shown on the row as a
+ * proxy failure. Server-side, a failure to *attach* the proxy deletes the new
+ * profile rather than leaving it on a desk's real IP.
  */
 export default function NewProfileDialog({
   open,
@@ -81,7 +79,6 @@ export default function NewProfileDialog({
   const [name, setName] = useState('');
   const [os, setOs] = useState<GoLoginOsChoice>('win10');
   const [proxy, setProxy] = useState<ProxyDraft>(EMPTY_PROXY);
-  const [check, setCheck] = useState<ProxyCheckState | null>(null);
   const [folderIds, setFolderIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const folders = useManagedFolders(open);
@@ -90,24 +87,16 @@ export default function NewProfileDialog({
     setName('');
     setOs('win10');
     setProxy(EMPTY_PROXY);
-    setCheck(null);
     setFolderIds(new Set());
   };
 
-  const proxyProven = !proxy.enabled || (check?.key === proxyKey(proxy) && check.result.ok);
-  const nameOk = !!name.trim();
-  // A passing check is keyed to the fields as they stand, and Ping only runs on
-  // complete fields — so "proven" already implies "complete".
-  const canCreate = nameOk && proxyProven && !saving;
-
   /** Why Create is disabled, said beside it — a greyed button explains nothing. */
-  const blocker = !nameOk
+  const blocker = !name.trim()
     ? 'Name the profile.'
     : proxy.enabled && !proxyComplete(proxy)
       ? 'Enter the proxy’s IP and port.'
-      : !proxyProven
-        ? 'Ping the proxy — it must pass before the profile is created.'
-        : null;
+      : null;
+  const canCreate = !blocker && !saving;
 
   const submit = async () => {
     if (!canCreate) return;
@@ -206,8 +195,12 @@ export default function NewProfileDialog({
                       className="mt-0.5 data-[state=checked]:border-[#3b82f6] [&_svg]:fill-[#3b82f6]"
                     />
                     <span className="min-w-0">
-                      <span className={`block text-sm ${on ? 'font-semibold text-white' : 'font-medium text-zinc-300'}`}>
-                        {GOLOGIN_OS_CHOICES[choice].label}
+                      <span className={`flex items-center gap-1.5 text-sm ${on ? 'font-semibold text-white' : 'font-medium text-zinc-300'}`}>
+                        {/* Mark and words together here: the card must tell
+                            Windows 10 from 11 and M1 from Intel, which a mark
+                            alone cannot. */}
+                        <OsIcon os={GOLOGIN_OS_CHOICES[choice].os} osSpec={GOLOGIN_OS_CHOICES[choice].osSpec} className="size-4" />
+                        <span>{GOLOGIN_OS_CHOICES[choice].label}</span>
                       </span>
                       <span className="block text-[11px] text-zinc-400">{OS_HINT[choice]}</span>
                     </span>
@@ -223,12 +216,7 @@ export default function NewProfileDialog({
 
           <fieldset>
             <legend className={LABEL}>Connection</legend>
-            <ProxyFields
-              draft={proxy}
-              onChange={setProxy}
-              check={check}
-              onCheck={setCheck}
-            />
+            <ProxyFields draft={proxy} onChange={setProxy} />
           </fieldset>
 
           <fieldset>

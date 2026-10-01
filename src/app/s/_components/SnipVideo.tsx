@@ -20,6 +20,19 @@ import {
 import { Slider } from '@/components/ui/slider';
 import { SNIP_PLAYBACK_RATES, formatSnipDuration } from '@/lib/snips';
 
+// The prefixed Safari fullscreen surface, which `lib.dom` does not declare.
+// Every member is optional because which of them exist is the whole question.
+type WebkitFullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => void;
+};
+type WebkitFullscreenElement = HTMLDivElement & {
+  webkitRequestFullscreen?: () => void;
+};
+type WebkitVideoElement = HTMLVideoElement & {
+  webkitEnterFullscreen?: () => void;
+};
+
 /**
  * The shared recording, with the player built around it.
  *
@@ -255,9 +268,18 @@ export function SnipVideo({
   }, [resolveDuration]);
 
   useEffect(() => {
-    const onChange = () => setFullscreen(document.fullscreenElement === shellRef.current);
+    const doc = document as WebkitFullscreenDocument;
+    const onChange = () =>
+      setFullscreen(
+        (doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null) === shellRef.current,
+      );
+    // Prefixed Safari fires only the prefixed event.
     document.addEventListener('fullscreenchange', onChange);
-    return () => document.removeEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+    };
   }, []);
 
   const togglePlay = useCallback(() => {
@@ -280,11 +302,40 @@ export function SnipVideo({
     }
   }, [duration]);
 
+  /**
+   * Fullscreen, across three generations of the API.
+   *
+   * **iPhone Safari has no element fullscreen at all** — `requestFullscreen` is
+   * undefined on every element, prefixed or not. The only thing it offers is
+   * the video's own `webkitEnterFullscreen()`, which hands playback to the
+   * native iOS player (our chrome is not shown there, but the native one is,
+   * and it has a working scrubber). Older desktop Safari and pre-16.4 iPadOS
+   * have only the `webkit`-prefixed element API, which returns `undefined`
+   * rather than a promise — hence `Promise.resolve` around every call.
+   */
   const toggleFullscreen = useCallback(() => {
-    const shell = shellRef.current;
+    const shell = shellRef.current as WebkitFullscreenElement | null;
+    const video = videoRef.current as WebkitVideoElement | null;
     if (!shell) return;
-    if (document.fullscreenElement === shell) void document.exitFullscreen().catch(() => {});
-    else void shell.requestFullscreen().catch(() => {});
+    const doc = document as WebkitFullscreenDocument;
+    const current = doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+    const swallow = (call: () => unknown) => {
+      try {
+        void Promise.resolve(call()).catch(() => {});
+      } catch {
+        // A browser that refuses fullscreen leaves the player inline, which is
+        // what the recipient was already looking at.
+      }
+    };
+
+    if (current === shell) {
+      if (doc.exitFullscreen) swallow(() => doc.exitFullscreen());
+      else if (doc.webkitExitFullscreen) swallow(() => doc.webkitExitFullscreen!());
+      return;
+    }
+    if (shell.requestFullscreen) swallow(() => shell.requestFullscreen());
+    else if (shell.webkitRequestFullscreen) swallow(() => shell.webkitRequestFullscreen!());
+    else if (video?.webkitEnterFullscreen) swallow(() => video.webkitEnterFullscreen!());
   }, []);
 
   /**

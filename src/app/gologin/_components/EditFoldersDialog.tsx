@@ -24,7 +24,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { goLoginOsLabel, namesSentence } from '@/lib/gologin/types';
+import { namesSentence } from '@/lib/gologin/types';
+import OsIcon from './OsIcon';
 import { DANGER_BUTTON, FIELD, PRIMARY_BUTTON, plural, type ManagedFolder } from '../_lib/manage';
 import { useManagedFolders, type FolderProfile } from '../_lib/useManagedFolders';
 
@@ -403,9 +404,8 @@ export default function EditFoldersDialog({
                             >
                               <span className="min-w-0">
                                 <span className="block truncate text-sm text-white">{profile.name || 'Untitled profile'}</span>
-                                <span className="block truncate text-[11px] text-zinc-400">
-                                  {goLoginOsLabel(profile.os, '')}
-                                  <span aria-hidden> · </span>
+                                <span className="flex items-center gap-1.5 text-[11px] text-zinc-400">
+                                  <OsIcon os={profile.os} osSpec={profile.osSpec} />
                                   <span className="font-mono">{profile.id.slice(-6)}</span>
                                 </span>
                               </span>

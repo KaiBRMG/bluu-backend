@@ -54,7 +54,7 @@ export const GET = withAuth(async (req: NextRequest, token: DecodedIdToken) => {
         folders,
         ...(list
           ? {
-              profiles: list.profiles.map((p) => ({ id: p.id, name: p.name, os: p.os })),
+              profiles: list.profiles.map((p) => ({ id: p.id, name: p.name, os: p.os, osSpec: p.osSpec })),
               truncated: list.truncated,
             }
           : {}),

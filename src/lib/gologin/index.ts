@@ -39,7 +39,6 @@ export type {
   GoLoginCapability,
   GoLoginOsChoice,
   GoLoginProfileDetail,
-  GoLoginProxyCheckResult,
   GoLoginProxyInput,
   GoLoginProxyMode,
   GoLoginFolder,

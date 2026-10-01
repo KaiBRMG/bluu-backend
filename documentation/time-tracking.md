@@ -153,6 +153,8 @@ setDisplayState('idle');      // never ran
 
 `syncTransition(transition)` in `TimeTrackingContext.tsx` is the only sanctioned caller. It is fire-and-forget and reports failures to Sentry (`area: 'time-tracking'`, `reason: 'transition-sync-failed'`) — they were previously silent `console.error`s, which is how **~43h of mislabelled time across 9 users accumulated unnoticed over 45 days**.
 
+A failed sync is **replayed, not dropped**: the latest unsynced transition is held in `pendingTransitionRef` and re-sent on the window `online` event and on the next heartbeat tick. A newer transition replaces it, because the route only sets the latest state. The heartbeat never writes `currentState`, so before this a `break-end` lost to a network blip left the admin view showing the user on break for the rest of their shift. The Sentry event carries `online` and `retry` tags; `online=false` is an expected offline blip, not a bug.
+
 Two supporting disciplines:
 
 - **Append the event first.** If `appendEvent` throws, the transition aborts having changed nothing, so log and display still agree — the safe failure direction.

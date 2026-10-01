@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { SalarySummaryCard } from '@/components/salary/SalarySummaryCard';
+import { RecentPayoutCard } from '@/components/salary/RecentPayoutCard';
+import { useSalaryMonth } from '@/hooks/useSalaryMonth';
 import { ShiftCalendar } from '@/components/shifts/ShiftCalendar';
 import { FullScheduleDialog } from '@/components/shifts/FullScheduleDialog';
 import { LeaveBalanceCard } from '@/components/shifts/LeaveBalanceCard';
@@ -58,9 +60,16 @@ import { useViewerTimezone } from '@/hooks/useViewerTimezone';
  *   spare this week — and a month of ~90px cells buries that in a thirty-cell
  *   scan. The month is still one click away in `FullScheduleDialog`, which
  *   carries its own picker along with everything else the week view can do.
- * - **The salary card shows the current, unfinalised month**, which is the only
- *   month a dashboard summary should ever mean. History belongs on
+ * - **The salary card shows the earliest month still owed to the agent** — last
+ *   month while payroll has not finalised it (with a "Not finalised" chip), then
+ *   the current month. The server decides (`month=open`), so the card never
+ *   jumps to a fresh $0 on the 1st. History belongs on
  *   `/ca-portal/dashboard/salary`, which has a picker of its own.
+ *
+ * Once last month is finalised, a **recent-payout card** sits under the
+ * disputes column for a few days (the server decides how many, off the same
+ * `month=open` response, so it costs no request of its own) — the figure the
+ * agent waited on should not vanish the moment it becomes real.
  *
  * So the two scopes cannot disagree — not because one control governs both, but
  * because neither is a scope the reader has to hold in their head.
@@ -69,6 +78,9 @@ import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 export default function CaDashboardPage() {
   const { timezone } = useViewerTimezone();
   const [fullScheduleOpen, setFullScheduleOpen] = useState(false);
+  // Owned here, not in the card: the recent-payout card reads the same response.
+  const salary = useSalaryMonth('open');
+  const recentPayout = salary.data?.recentlyFinalized ?? null;
 
   return (
     <AppLayout>
@@ -86,7 +98,7 @@ export default function CaDashboardPage() {
 
         <div className="mt-6 grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_23rem]">
           <div className="min-w-0 space-y-5">
-            <SalarySummaryCard />
+            <SalarySummaryCard salary={salary} />
 
             {/* Above the calendar: the balance is the constraint you read *before*
                 picking a day to request off, not a footnote to it. */}
@@ -96,8 +108,12 @@ export default function CaDashboardPage() {
           {/* Second in source order so it lands between the balance and the
               calendar when the grid collapses to one column — see the header
               comment. `row-span-2` is what gives it the whole right-hand track
-              at `xl`, rather than leaving the calendar's height beside it blank. */}
-          <SaleDisputesPanel timezone={timezone} className="min-w-0 xl:row-span-2" />
+              at `xl`, rather than leaving the calendar's height beside it blank.
+              The recent-payout card rides under the queue in the same track. */}
+          <div className="min-w-0 space-y-5 xl:row-span-2">
+            <SaleDisputesPanel timezone={timezone} className="min-w-0" />
+            {recentPayout && <RecentPayoutCard payout={recentPayout} />}
+          </div>
 
           {/* Overtime renders inside the calendar rather than in a section of
               its own: an offer is only worth claiming relative to the shifts

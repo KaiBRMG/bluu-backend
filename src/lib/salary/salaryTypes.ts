@@ -231,6 +231,20 @@ export interface SalaryMonthResult {
   finalizedByName?: string | null;
 }
 
+/** Last month's payout, surfaced on the agent dashboard for a few days after finalisation. */
+export interface RecentlyFinalizedSalary {
+  month: SalaryMonthKey;
+  salary: number;
+  commission: number;
+  wage: number;
+  finalizedAt: string;
+}
+
+/** `GET /api/ca-salary/month?month=open` — the resolved month plus the recent-payout card. */
+export interface DashboardSalaryMonth extends SalaryMonthResult {
+  recentlyFinalized: RecentlyFinalizedSalary | null;
+}
+
 // ─── Sales ───────────────────────────────────────────────────────────
 
 /** One imported sale row, serialised. */
@@ -288,13 +302,9 @@ export interface SalesImportResult {
   /** Months that were already finalised and therefore refused the rows. */
   rejectedFinalizedMonths: SalaryMonthKey[];
   /**
-   * Rows written to the day their shift started rather than their own calendar
-   * day — sales made after midnight on an overnight shift. Absent on imports
-   * recorded before shift attribution existed.
+   * Already-stored rows this upload moved to a different day — in practice,
+   * sales stamped with their shift's start day while shift attribution was live
+   * (2026-09-30 → 2026-10-01), moving back to the day they were made.
    */
-  shiftAttributed?: number;
-  /** Of those, the rows that landed in the previous month (the last night of a month). */
-  shiftAttributedToPreviousMonth?: number;
-  /** Already-stored rows this upload moved to a different day. */
   restamped?: number;
 }

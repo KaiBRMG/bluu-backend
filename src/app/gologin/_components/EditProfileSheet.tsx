@@ -1,13 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Lock, MapPin } from 'lucide-react';
+import { Loader2, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { cn } from '@/lib/utils';
 import { SURFACE } from '@/lib/surfaces';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
@@ -23,7 +22,6 @@ import {
   isGoLoginProxyMode,
   type GoLoginProfile,
   type GoLoginProfileDetail,
-  type GoLoginProxyCheckResult,
 } from '@/lib/gologin/types';
 import {
   AlertDialog,
@@ -36,7 +34,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
-  CHECKBOX_ON,
   DANGER_BUTTON,
   FIELD,
   holderHas,
@@ -46,12 +43,12 @@ import {
   type ProfileHolder,
 } from '../_lib/manage';
 import FolderChecklist from './FolderChecklist';
+import OsIcon from './OsIcon';
 import ProxyFields, {
   EMPTY_PROXY,
   proxyComplete,
   proxyKey,
   proxyPayload,
-  type ProxyCheckState,
   type ProxyDraft,
 } from './ProxyFields';
 
@@ -136,14 +133,10 @@ export default function EditProfileSheet({
   const [notes, setNotes] = useState('');
   const [proxy, setProxy] = useState<ProxyDraft | null>(null);
   const [replacingProxy, setReplacingProxy] = useState(false);
-  const [check, setCheck] = useState<ProxyCheckState | null>(null);
   const [folderIds, setFolderIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [confirmRemoveProxy, setConfirmRemoveProxy] = useState(false);
-  const [currentExit, setCurrentExit] = useState<GoLoginProxyCheckResult | 'checking' | null>(null);
-  /** The proxy fields a location change was acknowledged for — void once they change. */
-  const [ackKey, setAckKey] = useState<string | null>(null);
 
   const aliveRef = useRef(true);
   useEffect(() => {
@@ -159,59 +152,24 @@ export default function EditProfileSheet({
     setNotes(data.profile.notes);
     setProxy(draftFrom(data.profile));
     setReplacingProxy(false);
-    setCheck(null);
     setFolderIds(new Set(data.folderIds));
   }, []);
-
-  /**
-   * Where the profile's **current** proxy exits, pinged when the sheet opens.
-   *
-   * A proxy change is the riskiest edit on this panel — a new location is what
-   * gets a signed-in account challenged — and it used to be the one with the
-   * least evidence: a generic "keep the same country" warning with nothing to
-   * compare against. With the current exit on screen, the new ping is compared
-   * to it and a country change must be acknowledged. The stored password is
-   * filled in server-side and never reaches this window.
-   */
-  const pingCurrent = useCallback(
-    async (detail: GoLoginProfileDetail) => {
-      const draft = draftFrom(detail);
-      if (!draft.enabled || !proxyComplete(draft)) return;
-      setCurrentExit('checking');
-      try {
-        const result: GoLoginProxyCheckResult = await authFetch('/api/gologin/manage/proxy-check', {
-          method: 'POST',
-          body: JSON.stringify({ proxy: proxyPayload(draft), profileId: detail.id }),
-        });
-        if (!aliveRef.current) return;
-        setCurrentExit(result);
-        // The unchanged fields are now tested, so the form shows it too.
-        setCheck({ key: proxyKey(draft), result });
-      } catch (err) {
-        if (!aliveRef.current) return;
-        setCurrentExit({ ok: false, error: err instanceof Error ? err.message : 'Could not check it.', latencyMs: 0 });
-      }
-    },
-    [authFetch],
-  );
 
   const load = useCallback(
     async (id: string) => {
       setLoaded(null);
       setError(null);
-      setCurrentExit(null);
       try {
         const data: Loaded = await authFetch(`/api/gologin/manage/profiles/${encodeURIComponent(id)}`);
         if (!aliveRef.current) return;
         setLoaded(data);
         applyLoaded(data);
-        void pingCurrent(data.profile);
       } catch (err) {
         if (!aliveRef.current) return;
         setError(err instanceof Error ? err.message : 'Could not load the profile.');
       }
     },
-    [authFetch, applyLoaded, pingCurrent],
+    [authFetch, applyLoaded],
   );
 
   useEffect(() => {
@@ -231,26 +189,6 @@ export default function EditProfileSheet({
   const initialFolders = useMemo(() => new Set(loaded?.folderIds ?? []), [loaded]);
   const dirty = nameChanged || notesChanged || proxyChanged || foldersChanged;
 
-  const proxyProven =
-    !proxyChanged || !proxy?.enabled || (check?.key === proxyKey(proxy) && check.result.ok);
-
-  /**
-   * The move a proxy change makes, once both ends are known: the current exit
-   * (pinged on open) and the new one (pinged by the manager). Compared by
-   * country, then city — country is what gets an account challenged.
-   */
-  const newExit = proxy && check?.key === proxyKey(proxy) && check.result.ok ? check.result : null;
-  const oldExit = currentExit && currentExit !== 'checking' && currentExit.ok ? currentExit : null;
-  const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
-  const move =
-    proxyChanged && proxy?.enabled && newExit && oldExit
-      ? !same(oldExit.country, newExit.country)
-        ? 'country'
-        : !same(oldExit.city, newExit.city)
-          ? 'city'
-          : 'same'
-      : null;
-  const moveAcked = !!proxy && ackKey === proxyKey(proxy);
   const removingProxy = proxyChanged && !proxy?.enabled && !!baseline?.enabled;
 
   const blocker = holder
@@ -259,11 +197,7 @@ export default function EditProfileSheet({
       ? 'The profile needs a name.'
       : proxyChanged && proxy?.enabled && !proxyComplete(proxy)
         ? 'Enter the proxy’s IP and port.'
-        : !proxyProven
-          ? 'Ping the new proxy — it must pass before it is saved.'
-          : move === 'country' && !moveAcked
-            ? 'Confirm the change of country below.'
-            : null;
+        : null;
 
   const save = () => {
     if (!detail || !dirty || blocker || saving) return;
@@ -301,7 +235,13 @@ export default function EditProfileSheet({
 
   const fingerprint: [string, React.ReactNode][] = detail
     ? [
-        ['Operating system', goLoginOsLabel(detail.os, detail.osSpec)],
+        [
+          'Operating system',
+          <span key="os" className="flex items-center gap-1.5">
+            <OsIcon os={detail.os} osSpec={detail.osSpec} />
+            {goLoginOsLabel(detail.os, detail.osSpec)}
+          </span>,
+        ],
         ['Browser', detail.browserType || '—'],
         ['User agent', <span key="ua" className="break-all font-mono text-[11px]">{detail.userAgent || '—'}</span>],
         ['Screen', <span key="res" className="tabular-nums">{detail.resolution || '—'}</span>],
@@ -431,66 +371,15 @@ export default function EditProfileSheet({
                   </div>
                 ) : (
                   <>
-                    <ProxyFields
-                      draft={proxy}
-                      onChange={setProxy}
-                      check={check}
-                      onCheck={setCheck}
-                      profileId={detail.id}
-                    />
-                    {/* Where it exits today — the fact every change is measured
-                        against. Checked on open, so it is here before any typing. */}
-                    {baseline?.enabled && (
-                      <p className="mt-2 flex items-center gap-1.5 text-[11px] text-zinc-400">
-                        <MapPin className="size-3.5 shrink-0" aria-hidden />
-                        {currentExit === 'checking' ? (
-                          'Checking where the current proxy exits…'
-                        ) : currentExit?.ok ? (
-                          <span>
-                            Currently exits in{' '}
-                            <span className="font-medium text-white">
-                              {[currentExit.city, currentExit.country].filter(Boolean).join(', ') || 'an unknown location'}
-                            </span>
-                            <span className="font-mono"> · {currentExit.ip}</span>
-                          </span>
-                        ) : currentExit ? (
-                          <span>The current proxy did not answer: {currentExit.error}</span>
-                        ) : null}
+                    <ProxyFields draft={proxy} onChange={setProxy} />
+                    {/* A new proxy is safe; a new *location* is not. Said only
+                        when an existing proxy is being replaced, so it is read. */}
+                    {proxyChanged && proxy.enabled && baseline?.enabled && (
+                      <p className="mt-2 max-w-[62ch] text-[11px] text-orange-400">
+                        If an account is already signed in here, keep the new proxy in the same
+                        country and city — a sudden change of location can trigger a security check.
                       </p>
                     )}
-
-                    {/* A new proxy is safe; a new *location* is not. With both ends
-                        known the move is stated, and a new country must be
-                        acknowledged — the one change that reliably gets a
-                        signed-in account challenged. */}
-                    {move === 'country' && oldExit && newExit ? (
-                      <div className="mt-2 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-[11px] text-orange-400">
-                        <p>
-                          This moves the profile from{' '}
-                          <span className="font-semibold">{oldExit.country || 'an unknown country'}</span> to{' '}
-                          <span className="font-semibold">{newExit.country || 'an unknown country'}</span>. An
-                          account already signed in here will likely be asked to verify it is you.
-                        </p>
-                        <label className="mt-2 flex cursor-pointer items-center gap-2 text-zinc-300">
-                          <Checkbox
-                            checked={moveAcked}
-                            onCheckedChange={(v) => setAckKey(v === true ? proxyKey(proxy) : null)}
-                            className={CHECKBOX_ON}
-                          />
-                          Change the country anyway
-                        </label>
-                      </div>
-                    ) : move === 'city' && oldExit && newExit ? (
-                      <p className="mt-2 max-w-[62ch] text-[11px] text-orange-400">
-                        Same country, different city ({oldExit.city || '?'} → {newExit.city || '?'}). Usually
-                        fine; a sensitive account may still ask to verify.
-                      </p>
-                    ) : proxyChanged && proxy.enabled && baseline?.enabled && !oldExit ? (
-                      <p className="mt-2 max-w-[62ch] text-[11px] text-orange-400">
-                        The current location is unknown, so this change cannot be compared. If an account
-                        is signed in here, keep the new proxy in the same country and city.
-                      </p>
-                    ) : null}
                   </>
                 )}
               </fieldset>
@@ -576,9 +465,8 @@ export default function EditProfileSheet({
           <AlertDialogHeader>
             <AlertDialogTitle>Remove the proxy from {detail?.name || 'this profile'}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Without a proxy it connects from the IP of whichever computer opens it next
-              {oldExit ? `, not from ${[oldExit.city, oldExit.country].filter(Boolean).join(', ')}` : ''}. An
-              account signed in here will see a new location and may be locked or asked to verify.
+              Without a proxy it connects from the IP of whichever computer opens it next. An account
+              signed in here will see a new location and may be locked or asked to verify.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

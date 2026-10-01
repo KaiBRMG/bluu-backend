@@ -57,10 +57,12 @@ export const SESSION_ERRORS: Record<string, string> = {
     'The browser did not start in time. The first launch downloads it — try again, it resumes where it left off.',
   'too-many-sessions': 'Too many profiles are already running. Stop one and try again.',
   'invalid-profile': 'That profile id is not valid.',
-  // The most common launch failure by far, and the only one with a remedy the
-  // operator can act on themselves — so it names the fix rather than the fault.
+  // The most common launch failure by far, and the one cause known for certain
+  // (the SDK tests the proxy before spawning anything). Says what failed and
+  // what it usually means; *who* fixes it is said on the row, which knows the
+  // reader's role.
   'proxy-error':
-    "This profile's proxy is not responding. Check or replace it in GoLogin, then try again.",
+    "The proxy isn't responding, so the profile couldn't start. It may be offline, or its address or login may be wrong.",
   'launch-failed': 'GoLogin could not start this profile.',
   'stop-failed': 'The browser did not close cleanly. Close its window by hand.',
   unsupported: 'This version of the desktop app cannot launch profiles. Update Bluu and try again.',

@@ -14,7 +14,8 @@ import { useDisputesData, type AdminFilters } from '@/hooks/useDisputesData';
 import type { DisputeDocument, ApprovalStatus } from '@/types/firestore';
 import { DeletedUser } from '@/components/DeletedUser';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
-import { currentMonthKey } from '@/lib/salary/salaryDate';
+import { currentMonthKey, isMonthKey } from '@/lib/salary/salaryDate';
+import { useAuth } from '@/components/AuthProvider';
 
 // ─── Column set ───────────────────────────────────────────────────────
 
@@ -246,11 +247,42 @@ const AdminRates = dynamic(() => import('@/components/ca-admin/AdminRates'), {
  * The **month is owned here**, shared by Overview and Payroll, because those two
  * are read together and a month that only moved on one of them is how a figure
  * gets quoted from the wrong one (ca-salary.md §10).
+ *
+ * It **opens on the month payroll still owes**, not the calendar month: last
+ * month while any agent has it unfinalised (`/api/ca-salary/payroll-month`).
+ * Both panels wait for that answer rather than mounting on the calendar month
+ * and refetching — a flash of October's roster is how September gets skipped.
  */
 export default function CaAdminPage() {
   const { setAdminApproval, setAdminApprovalBulk } = useDisputesData();
   const [refreshKey, setRefreshKey] = useState(0);
-  const [month, setMonth] = useState(currentMonthKey());
+  const { user } = useAuth();
+  // `null` until the server says which month payroll is on.
+  const [month, setMonth] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user || month) return;
+    let cancelled = false;
+    (async () => {
+      let resolved: string = currentMonthKey();
+      try {
+        const res = await fetch('/api/ca-salary/payroll-month', {
+          headers: { Authorization: `Bearer ${await user.getIdToken()}` },
+        });
+        if (res.ok) {
+          const body = (await res.json()) as { month?: unknown };
+          if (isMonthKey(body.month)) resolved = body.month;
+        }
+      } catch {
+        // The calendar month is a safe fallback — the picker still reaches the
+        // previous one — so a failure here must not block the page.
+      }
+      if (!cancelled) setMonth(m => m ?? resolved);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, month]);
 
   const { timezone: userTimezone } = useViewerTimezone();
 
@@ -310,10 +342,10 @@ export default function CaAdminPage() {
 
             <div className="min-h-[600px] p-6">
               <TabsContent value="overview">
-                <AdminOverview month={month} onMonthChange={setMonth} />
+                {month ? <AdminOverview month={month} onMonthChange={setMonth} /> : <PanelSkeleton />}
               </TabsContent>
               <TabsContent value="salaries">
-                <AdminSalaries month={month} onMonthChange={setMonth} />
+                {month ? <AdminSalaries month={month} onMonthChange={setMonth} /> : <PanelSkeleton />}
               </TabsContent>
               <TabsContent value="sales"><AdminSalesData /></TabsContent>
               <TabsContent value="coverage"><AdminCoverage /></TabsContent>

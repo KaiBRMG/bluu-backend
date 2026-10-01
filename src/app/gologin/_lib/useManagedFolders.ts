@@ -8,6 +8,7 @@ export interface FolderProfile {
   id: string;
   name: string;
   os: string;
+  osSpec: string;
 }
 
 interface FoldersPayload {

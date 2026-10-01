@@ -2,11 +2,11 @@
 
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { ArrowRight, Lock, RotateCcw } from 'lucide-react';
+import { ArrowRight, Hourglass, Lock, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CommissionLadder } from './CommissionLadder';
-import { useSalaryMonth } from '@/hooks/useSalaryMonth';
+import type { SalaryMonthState } from '@/hooks/useSalaryMonth';
 import { useBootPhase } from '@/contexts/BootLoaderContext';
 import { formatHours, formatUsd } from '@/lib/salary/salaryFormat';
 import { currentMonthKey, formatMonthLabel } from '@/lib/salary/salaryDate';
@@ -25,16 +25,13 @@ import { SURFACE, SURFACE_INTERACTIVE } from '@/lib/surfaces';
  * roster) and gives a much larger target than a "View details" link would.
  */
 
-export function SalarySummaryCard({ month: monthProp }: { month?: string } = {}) {
-  // Defaults to the current, unfinalised month — which is what the dashboard
-  // wants, and the only month a summary card should ever mean. It takes a month
-  // anyway because it once had to: a picker governing the page had to govern this
-  // card too, or August's roster could render above September's pay with both
-  // labels correct and nothing saying the two scopes differed. The dashboard now
-  // has no page-level scope at all (its schedule navigates itself), so nothing
-  // passes one today — history lives on the salary page, which has its own picker.
-  const month = monthProp ?? currentMonthKey();
-  const { data, loading, error, refetch } = useSalaryMonth(month);
+export function SalarySummaryCard({ salary }: { salary: SalaryMonthState }) {
+  // The dashboard owns the fetch (`useSalaryMonth('open')`) because the
+  // recent-payout card reads the same response — one request for both. `open`
+  // lets the server pick the earliest month still owed to the agent: last month
+  // while payroll has not finalised it, otherwise this one
+  // (`buildDashboardSalaryMonth`). The month shown is `data.month`.
+  const { data, loading, error, refetch } = salary;
 
   // Async home widgets gate the boot screen so the dashboard does not paint
   // half-empty (CLAUDE.md rule 8).
@@ -75,9 +72,13 @@ export function SalarySummaryCard({ month: monthProp }: { month?: string } = {})
 
   if (!data) return null;
 
-  const { totals, tier, config, status } = data;
+  const { month, totals, tier, config, status } = data;
   const isFinalized = status === 'finalized';
   const isCurrentMonth = month === currentMonthKey();
+  // A past month the server still reports as open: the calendar has moved on,
+  // payroll has not. Only the dashboard's `open` resolution lands here on
+  // purpose, and it is exactly the state the agent needs told.
+  const awaitingFinalisation = !isFinalized && !isCurrentMonth;
 
   return (
     <Link
@@ -92,15 +93,15 @@ export function SalarySummaryCard({ month: monthProp }: { month?: string } = {})
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold">Salary · {formatMonthLabel(month)}</h2>
-          {/* "So far this month" is only true of the current month — now that the
-              picker governs this card, each of the three states says its own
-              thing. */}
+          {/* "So far this month" is only true of the current month — each of the
+              three states says its own thing. A past month that is still open
+              has not been paid, so it must not claim it was. */}
           <p className="mt-0.5 text-xs text-zinc-400">
             {isFinalized
               ? 'Finalised and scheduled for payout'
               : isCurrentMonth
                 ? 'So far this month · paid on the 1st'
-                : 'Payout Processed'}
+                : 'Month closed · awaiting payroll'}
           </p>
         </div>
 
@@ -109,6 +110,12 @@ export function SalarySummaryCard({ month: monthProp }: { month?: string } = {})
             <span className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2 py-0.5 text-[11px] font-medium text-green-400">
               <Lock className="size-3" aria-hidden />
               Finalised
+            </span>
+          )}
+          {awaitingFinalisation && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[11px] font-medium text-orange-400">
+              <Hourglass className="size-3" aria-hidden />
+              Not finalised
             </span>
           )}
           <ArrowRight

@@ -22,7 +22,7 @@
 
 import { createHash } from 'node:crypto';
 import { SALES_EMAIL_MAP, REQUIRED_SALES_COLUMNS, type SaleStatus } from './salaryConstants';
-import { monthOfDay, parseExportTimestamp, toDayKey, toMonthKey } from './salaryDate';
+import { parseExportTimestamp, toDayKey, toMonthKey } from './salaryDate';
 import type { SalarySale, SalesImportSkip } from './salaryTypes';
 import type { XlsxSheet } from './xlsx';
 import { XlsxError } from './xlsx';
@@ -247,61 +247,4 @@ export function buildUserResolver(
     }
     return byEmail.get(normalise(sourceEmail)) ?? null;
   };
-}
-
-/** One worked shift occurrence, as the attribution below needs it. */
-export interface ShiftWindow {
-  /** UTC ms. */
-  start: number;
-  /** UTC ms, exclusive. */
-  end: number;
-}
-
-/**
- * Move each sale onto the salary day of the shift it was made on.
- *
- * A shift is paid on the day it *starts* (`resolveShiftInputs`), so a
- * 23:00–07:00 shift belongs wholly to its first day. A sale is stamped by its
- * own clock, which puts everything sold after midnight on the next calendar
- * day — and on the last night of a month, into the *next month*, which is not
- * the month being finalised and paid on the 1st. This re-stamps a sale that
- * falls inside one of its agent's shifts with that shift's start day and month.
- *
- * A sale inside no shift keeps its calendar day: there is nothing better to
- * attribute it to, and the engine already surfaces "sales with no shift".
- * Where two shifts overlap the sale, the later-starting one wins — it is the
- * shift the agent most recently began.
- *
- * Returns the ids of the sales that moved, and of those that changed month.
- * Only `day` and `month` change. The sale id is a hash of the row's facts, not
- * of its day, so a re-upload after a shift edit rewrites the same document.
- */
-export function attributeSalesToShifts(
-  sales: SalarySale[],
-  windowsByUser: Map<string, ShiftWindow[]>,
-): { sales: SalarySale[]; moved: Set<string>; movedAcrossMonth: Set<string> } {
-  const moved = new Set<string>();
-  const movedAcrossMonth = new Set<string>();
-
-  const out = sales.map(sale => {
-    const windows = windowsByUser.get(sale.userId);
-    if (!windows || windows.length === 0) return sale;
-
-    const at = Date.parse(sale.occurredAt);
-    let owner: ShiftWindow | null = null;
-    for (const w of windows) {
-      if (w.start <= at && at < w.end && (!owner || w.start > owner.start)) owner = w;
-    }
-    if (!owner) return sale;
-
-    const day = toDayKey(owner.start);
-    if (day === sale.day) return sale;
-
-    const month = monthOfDay(day);
-    moved.add(sale.saleId);
-    if (month !== sale.month) movedAcrossMonth.add(sale.saleId);
-    return { ...sale, day, month };
-  });
-
-  return { sales: out, moved, movedAcrossMonth };
 }

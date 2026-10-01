@@ -21,14 +21,12 @@
 | `src/app/api/gologin/session-lock/lease/route.ts` | Heartbeat / release, authenticated by the lease secret |
 | `src/app/api/gologin/admin/members/route.ts` | Members: grant/revoke seats, reconcile a pre-existing workspace (`members` capability) |
 | `src/lib/services/gologinManageService.ts` | Profile create/edit/delete/restore, folder create/delete/fill, live folder sharing + profile sharing — all on the master token |
-| `src/lib/gologin/proxyCheck.ts` | "Ping proxy": the SDK's own `geo.myip.link` check, server-side, behind an SSRF fence |
 | `src/app/api/gologin/manage/profiles/**` | Create (`POST`), read/edit/delete (`[id]`), Undo (`[id]/restore`) — `profiles` capability |
-| `src/app/api/gologin/manage/proxy-check/route.ts` | Ping proxy — `profiles` capability, throttled per user |
 | `src/app/api/gologin/manage/folders/route.ts` | List (any capability) / create / fill / delete folders — `folders` capability |
 | `src/app/api/gologin/manage/sharing/route.ts` | The Sharing dialog's read and writes — `sharing` capability |
 | `src/app/api/gologin/pins/route.ts` | Pin / unpin (everyone with the page) |
 | `src/app/gologin/_lib/manage.ts` | `useGoLoginCapabilities()` + the shared form/checkbox/button recipes |
-| `src/app/gologin/_components/{NewProfileDialog,EditProfileSheet,ProxyFields,FolderChecklist,AddToFolderDialog,EditFoldersDialog,SharingDialog,MembersDialog}.tsx` | The management surfaces — see § Management |
+| `src/app/gologin/_components/{ConnectingScreen,NewProfileDialog,EditProfileSheet,ProxyFields,FolderChecklist,AddToFolderDialog,EditFoldersDialog,SharingDialog,MembersDialog}.tsx` | The management surfaces — see § Management |
 | `electron/main.js` (GoLogin section) | The SDK, the session map, Orbita downloads, the lock lease |
 | `src/hooks/useGoLoginAccount.ts` | Seat + token state for the current operator |
 | `src/hooks/useGoLoginProfiles.ts` | The window's one profile fetch |
@@ -236,7 +234,7 @@ That test is **name-based and therefore best-effort** — rename a folder in GoL
 
 **The list is a client-side lazy window: 30 rows, extended by an `IntersectionObserver` sentinel.** Every profile is already in memory, so this is DOM cost, not network — which is why the sentinel is a bare `h-px` with no spinner and the count line carries the state. The window resets **during render against a `listKey`**, not in an effect.
 
-**A failed proxy gets its own chip.** The SDK tests the profile's proxy *before* it spawns anything — `getTimeZone` fetches a timezone through it and throws — so a dead proxy is much the most common launch failure, and the only one whose remedy the operator can act on themselves. Main maps it to `proxy-error` and the row shows a red **Proxy Error** chip with the fix on its title attribute; left generic it read as "GoLogin could not start this profile" and sent people to an admin for something they can see in GoLogin.
+**A failed proxy is said on the row, with the remedy that fits the reader.** The SDK tests the profile's proxy *before* it spawns anything — `getTimeZone` fetches a timezone through it and throws — so a dead proxy is much the most common launch failure, and the one cause Bluu can name for certain. Main maps it to `proxy-error`; the row then shows a red **Proxy failed** chip and, beneath the name, *"Couldn't start — the proxy isn't responding."* followed by **Edit proxy** (opens the Edit sheet) for someone with the profiles capability, or *"Ask a manager to check it."* for everyone else — an operator cannot change a proxy, so telling them to was a dead end. It used to be a chip reading *Proxy Error* with the explanation only on its `title`, which a keyboard never reaches. The launch toast carries the same cause, prefixed with the profile's name. **This launch-time failure is the only proxy test there is** — see § Ping proxy (removed).
 
 Detection is on the error *message* because that is all the SDK offers: it throws a bare `Error('Proxy Error')` (or `'Proxy Error (Gologin)'`), and for non-SOCKS proxies rethrows the underlying request error with `(Gologin)` appended. The check runs **last** among the SDK failures, so an explicit code always wins — a timeout that happens to mention a proxy is still a timeout.
 
@@ -244,9 +242,11 @@ Detection is on the error *message* because that is all the SDK offers: it throw
 
 **Rows are ordered live-first**, then by the provider's order: the operator's own running sessions, then locked-by-someone-else, then GoLogin's `isRunning`, then the rest. Their own live sessions are the rows they come back to, and alphabetical order scatters three of them through hundreds.
 
-**That order is a snapshot, taken when the listing changes** — search, chip, Refresh — and **never re-taken because of the reader's own click** (`rankSnap`, adjusted during render against `listKey`). It used to re-rank on every session change, so pressing Launch on row 12 moved it to the top the same instant and a quick second click landed on a different row's Launch: a different live account (critique 2026-09-30, P1). A launched row now keeps its place and gains its *Open here* chip; it rises on the next refresh. A profile not in the snapshot (one just created) sorts first.
+**That order is a snapshot, taken when the listing changes** — search, chip, Refresh — and **never re-taken because of the reader's own click** (`rankSnap`, adjusted during render against `listKey`). It used to re-rank on every session change, so pressing Launch on row 12 moved it to the top the same instant and a quick second click landed on a different row's Launch: a different live account (critique 2026-09-30, P1). A launched row now keeps its place and gains its *Open* chip; it rises on the next refresh. A profile not in the snapshot (one just created) sorts first.
 
 **Launch is optimistic.** `useGoLoginSessions.launch` sets `starting` on the click, before main's first broadcast, so the button cannot take a second press; a failure before main answers sets `failed` with its reason. Failure toasts **name the profile** (several launches can be in flight), and a failed row's *Retry* carries the reason on its title, because the toast that said why has gone.
+
+**The OS is a platform mark, not a word** (`OsIcon`: the `/download` page's Tabler `IconBrandWindows` / `IconBrandApple`), leading the meta line in the list, Edit folders and Sharing; the full OS — Windows 10 vs 11, Apple M1 vs Intel, from `osSpec`, which the list projection now carries — is its accessible name and hover title. **Windows and macOS only**, the team's two platforms; any other OS renders no mark. New Profile's OS cards and the Edit sheet show the mark *and* the words, because there the variant is the choice.
 
 **Row folder chips are capped at two** plus a `+N` count (named on hover): the lane grows with every folder and the profile name beside it is what truncates. The six-character **profile id is shown to managers only** — it is for reconciling against GoLogin's own app, which an operator who only launches never does.
 
@@ -271,7 +271,7 @@ Until 2026-09-30 there was one **Management** dialog behind one grant (`apps-gol
 | Capability (Sharing page label) | Page id | Unlocks |
 |---|---|---|
 | **Add & Remove Members** | `apps-gologin-members` | Header **Members** → `MembersDialog` (the old Members tab, alone) |
-| **Create, Edit & Delete Profiles** | `apps-gologin-profiles` | Header **New profile**; row menu **Edit profile** and **Delete profile**; Ping proxy |
+| **Create, Edit & Delete Profiles** | `apps-gologin-profiles` | Header **New profile**; row menu **Edit profile** and **Delete profile**; **Edit proxy** on a proxy-failed row |
 | **Create, Edit & Delete Folders** | `apps-gologin-folders` | **Edit folders** beside the folder chips; row menu **Add to folder**; the folder list in Edit profile |
 | **Share Profiles & Folders** | `apps-gologin-sharing` | Header **Sharing**; row menu **Share profile** |
 
@@ -306,15 +306,15 @@ A large dialog: **name, OS, proxy, folders**. Nothing else is configurable, deli
 - **If attaching the proxy fails, the new profile is deleted.** A profile without the proxy it was made for launches on whatever IP the desk has; better no profile than that trap in the list. If even the cleanup fails, the error names the profile and says to delete it before anyone launches it.
 - **Then folders**, one `PATCH /folders/folder` each. A failure here is a warning on the toast, not a rollback — the profile is sound.
 - **A non-admin creator gets the new profile shared to their own folder**, or they could not see what they just made.
-- **Create stays disabled until Ping has passed for the proxy fields as they now stand.** Edit one character and the check is void.
+- **Create needs a name and, with a proxy, an IP and port** — nothing more. The proxy is tested for real at first launch.
 
-#### Ping proxy
+#### Ping proxy (removed 2026-09-30)
 
-**GoLogin has no endpoint for this.** It is the SDK's own pre-launch check (`getTimeZone` in `gologin.js`): `GET https://geo.myip.link` *through* the proxy, reporting exit IP, country, city and timezone — the fact a manager needs, because a proxy in the wrong country launches fine and gets the account flagged. Implemented in `src/lib/gologin/proxyCheck.ts`, run **server-side** (decided 2026-09-30: no Electron build). The cost: a proxy that only admits whitelisted IPs fails here and may still work from a desk — the timeout message says so.
+There was a **Ping proxy** button on New and Edit profile. It ran the SDK's own pre-launch check (`GET https://geo.myip.link` through the proxy) from **Bluu's server**, and Create/Save were gated on it passing. It was removed because it could not work here: **the team's proxies are private and admit only the operators' own connections**, so a check from a Vercel IP failed on proxies that were fine, and there was no way to make it pass. The server module (`proxyCheck.ts`), its route, its SSRF fence and the two proxy-agent dependencies went with it, as did the Edit sheet's "currently exits in…" read-out and the country-change acknowledgement that were built on it.
 
-⚠ **It is an outbound connection to an address a user typed, so it is fenced as an SSRF primitive.** The host is resolved first and **every** record must be public (loopback, RFC 1918, link-local incl. `169.254.169.254`, CGNAT, multicast and IPv6 equivalents are refused, via `net.BlockList`); the agent then connects to the **resolved IP**, never the name, so a second resolution cannot rebind it; the destination URL is fixed; the body is capped; the route is capability-gated and throttled per user. Do not loosen any of these.
+**Do not rebuild it server-side.** The only place a meaningful proxy test can run is the operator's machine — which is exactly where GoLogin's SDK already tests it, at launch. A failure there is reported on the row (§ The list, "A failed proxy is said on the row"). If a pre-launch test is ever wanted, it belongs in the Electron main process, behind a new build (rule 14).
 
-A refused CONNECT arrives as the response status (https-proxy-agent replays the proxy's reply rather than throwing), so `407` becomes "rejected the username or password". The IP field also accepts a pasted `host:port:user:pass` line and fills all four.
+The IP field still accepts a pasted `host:port:user:pass` line and fills all four.
 
 #### Edit profile
 
@@ -331,12 +331,11 @@ A side sheet with **every fact about the profile**, of which **name, notes, prox
 
 **Notes are written first**, because that PUT sends the whole document and would otherwise put the old name and proxy back over new ones.
 
-- The **proxy password never reaches the renderer.** The projection (`GoLoginProfileDetail`) carries `hasPassword`; the form shows "Unchanged"; `password: undefined` means "keep it", and the adapter reads the stored one back itself. Ping on an edit sends `profileId` so the server can fill the kept password in.
-- **A changed proxy must pass Ping** before Save enables.
-- **The current exit is pinged when the sheet opens** ("Currently exits in Miami, United States · 1.2.3.4"; the stored password is filled in server-side, so this costs one `GET /browser/{id}`). The new ping is then **compared** with it: a different **country** shows the move in an orange box and blocks Save until *"Change the country anyway"* is ticked (the acknowledgement is keyed to the proxy fields, so editing them voids it); a different city is a softer note; an unknown current location says it cannot be compared. The old generic "keep the same country" warning had nothing to compare against.
+- The **proxy password never reaches the renderer.** The projection (`GoLoginProfileDetail`) carries `hasPassword`; the form shows "Unchanged"; `password: undefined` means "keep it", and the adapter reads the stored one back itself (`storedProxyPassword`, private to the adapter).
+- **Replacing an existing proxy shows a same-location warning** — a new *location* is what gets a signed-in account challenged.
 - **Removing the proxy asks first** — "Without proxy" on a profile that had one puts a signed-in account on whichever desk opens it next.
 - A proxy mode the form cannot express (SOCKS4, Tor, GoLogin's own) is shown read-only with a **Replace proxy** action rather than being misread as HTTP.
-- **Save exists only while something differs**, and sends only changed keys. **Discard** restores from memory — no request. Closing the sheet (Esc, outside click, ✕) with unsaved edits asks *"Discard your changes?"* first — it used to drop them silently, including a proxy that had just passed Ping.
+- **Save exists only while something differs**, and sends only changed keys. **Discard** restores from memory — no request. Closing the sheet (Esc, outside click, ✕) with unsaved edits asks *"Discard your changes?"* first — it used to drop them silently.
 - **A profile anyone has open cannot be edited or deleted** — `getLiveLockHolder` on the server, the live lock snapshot on the client. A proxy change would not reach the running session, and the notes PUT replays the whole document under it.
 - Changing folders from the sheet needs the **folders** capability as well.
 
@@ -485,7 +484,7 @@ The four capabilities (`apps-gologin-members`, `-profiles`, `-folders`, `-sharin
 
 ## Scope
 
-Implemented: per-user account linking with folder provisioning, Orbita install with progress (including mid-launch updates), profile listing with search / faceted folder chips / per-person Pinned / lazy window / refresh, local launching, a cross-machine session lock, and — since 2026-09-30 — creating (quick-create + proxy + folders, with Ping proxy), editing (name, notes, proxy, folders; fingerprint read-only), deleting with Undo, folder create/delete/fill, and live folder + single-profile sharing, behind four grantable capabilities.
+Implemented: per-user account linking with folder provisioning, Orbita install with progress (including mid-launch updates), profile listing with search / faceted folder chips / per-person Pinned / lazy window / refresh, local launching, a cross-machine session lock, and — since 2026-09-30 — creating (quick-create + proxy + folders), editing (name, notes, proxy, folders; fingerprint read-only), deleting with Undo, folder create/delete/fill, and live folder + single-profile sharing, behind four grantable capabilities.
 
 Deliberately **not** implemented: an in-app view of the running browser (built, tried, removed), **editing the fingerprint** (GoLogin: never after login), **renaming folders** (no API endpoint), cloning profiles, proxy types beyond HTTP/SOCKS5, GoLogin's own proxy pool, scripted automation over CDP, and Cloud Browser.
 
@@ -506,7 +505,7 @@ Deliberately **not** implemented: an in-app view of the running browser (built, 
 - [ ] **Never offer a fingerprint field as editable** (OS, user agent, resolution, fonts, canvas, WebGL, CPU/RAM). GoLogin: never change after login.
 - [ ] **Never leave a created profile without its proxy.** `createProfile` deletes it if the proxy step fails; keep that rollback.
 - [ ] **Never send the proxy password to a renderer.** `hasPassword` only; "keep" is `password: undefined`, resolved inside the adapter.
-- [ ] **Never loosen `proxyCheck.ts`'s fence** — resolve first, every record public, connect to the resolved IP, fixed destination.
+- [ ] **Never test proxies from the server.** They are private; a server-side check fails on working proxies (see § Ping proxy (removed)). The launch is the test.
 - [ ] **A member's folder scope is written whole.** Read the workspace fresh before `updateWorkspaceMember`, and always keep their personal folder in the list.
 - [ ] **Never re-walk the profile list after a write** — update it in place from the response (`upsert` / `patch` / `remove`).
 - [ ] **Never surface a provider error string as the whole answer.** A rejected or revoked token is `invalid-token` and gets its own screen with a route back to the paste field. A Retry button on a dead key is worse than no button.

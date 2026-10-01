@@ -41,6 +41,8 @@ export interface GoLoginProfile {
   notes: string;
   /** 'win' | 'mac' | 'lin' | 'android' | '' — the provider's own vocabulary. */
   os: string;
+  /** 'win11', 'M1'…, or '' — the variant the OS mark cannot show; named on its hover. */
+  osSpec: string;
   browserType: string;
   /** 'none' when the profile runs without one. Never carries credentials. */
   proxyType: string;
@@ -206,7 +208,7 @@ export interface GoLoginSharingMember {
 export interface GoLoginSharingOverview {
   members: GoLoginSharingMember[];
   folders: GoLoginFolderRow[];
-  profiles: { id: string; name: string; os: string; folders: string[] }[];
+  profiles: { id: string; name: string; os: string; osSpec: string; folders: string[] }[];
   truncated: boolean;
   fetchedAtMs: number;
 }
@@ -243,8 +245,8 @@ export function goLoginOsLabel(os: string, osSpec: string): string {
   if (choice) return choice.label;
   if (os === 'mac') return osSpec ? `macOS · Apple ${osSpec}` : 'macOS';
   if (os === 'win') return 'Windows';
-  if (os === 'lin') return 'Linux';
-  if (os === 'android') return 'Android';
+  // Windows and macOS are the only platforms this team uses; anything else is
+  // passed through as GoLogin spells it rather than dignified with a name.
   return os || 'Unknown';
 }
 
@@ -326,18 +328,6 @@ export interface GoLoginProfileDetail {
   lastActivityMs: number | null;
 }
 
-/** What "Ping proxy" reports. `ok: false` carries a sentence, never a stack. */
-export type GoLoginProxyCheckResult =
-  | {
-      ok: true;
-      /** The exit IP the proxy presents to the world. */
-      ip: string;
-      country: string;
-      city: string;
-      timezone: string;
-      latencyMs: number;
-    }
-  | { ok: false; error: string; latencyMs: number };
 
 /** Workspace member role. Note this is NOT the same vocabulary as a share role. */
 export type GoLoginMemberRole = 'owner' | 'admin' | 'editor' | 'guest';
@@ -444,13 +434,6 @@ export interface IGoLoginClient {
 
   /** `GET /browser/{id}`, projected for the Edit panel. Never carries the proxy password. */
   getProfileDetail(profileId: string): Promise<GoLoginProfileDetail>;
-
-  /**
-   * The profile's stored proxy, **including its password**. Server-only by
-   * construction: it exists so "Ping proxy" can test an edited proxy whose
-   * password the manager chose to keep, and it must never be returned by a route.
-   */
-  getProfileProxySecret(profileId: string): Promise<(GoLoginProxyInput & { password: string }) | null>;
 
   /**
    * `POST /browser/quick` — a profile on the workspace's **default settings**

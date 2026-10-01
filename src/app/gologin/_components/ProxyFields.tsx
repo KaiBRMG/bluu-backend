@@ -1,12 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { CircleCheck, CircleX, Loader2, Radar } from 'lucide-react';
-import { useAuthFetch } from '@/hooks/useAuthFetch';
-import { Button } from '@/components/ui/button';
+import { useId } from 'react';
 import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import type { GoLoginProxyCheckResult, GoLoginProxyMode } from '@/lib/gologin/types';
+import type { GoLoginProxyMode } from '@/lib/gologin/types';
 import { FIELD, LABEL, SEGMENT_ITEM } from '../_lib/manage';
 
 /**
@@ -51,82 +48,41 @@ export function proxyPayload(draft: ProxyDraft) {
   };
 }
 
-/** The fields are filled in enough to test. */
+/** The IP and port are filled in enough to save. */
 export function proxyComplete(draft: ProxyDraft): boolean {
   const port = Number(draft.port);
   return !!draft.host.trim() && Number.isInteger(port) && port >= 1 && port <= 65535;
 }
 
-/**
- * The fingerprint a check result belongs to. A result is only shown — and only
- * counts as "tested" — while the fields still say what was tested; editing any
- * of them silently invalidates it rather than leaving a green tick beside a
- * proxy nobody has checked.
- */
+/** Everything that identifies a proxy draft — two drafts with one key are the same proxy. */
 export function proxyKey(draft: ProxyDraft): string {
   return [draft.mode, draft.host.trim(), draft.port, draft.username.trim(), draft.keepPassword ? '(kept)' : draft.password].join('\u0000');
-}
-
-export interface ProxyCheckState {
-  key: string;
-  result: GoLoginProxyCheckResult;
 }
 
 /** `host:port:user:pass` — the line most proxy providers hand out. */
 const PROVIDER_LINE = /^([^\s:]+):(\d{1,5})(?::([^:\s]*))?(?::(\S*))?$/;
 
 /**
- * The proxy half of New Profile and Edit Profile, with its own **Ping**.
+ * The proxy half of New Profile and Edit Profile.
  *
- * Pinging is not decoration: a dead or mis-typed proxy is the most common
- * reason a profile fails to launch, and a proxy in the wrong country is worse —
- * it launches fine and the account behind it gets flagged for "logging in from
- * somewhere new". So the result names the exit IP, **country, city and
- * timezone**, which is the fact a manager actually needs to confirm, and the
- * parent requires a passing check for the fields as they now stand before it
- * enables Create or Save.
+ * There is **no "Ping proxy"** (removed 2026-09-30). It tested the proxy from
+ * Bluu's server, and the team's proxies are private — they only admit the
+ * operators' own connections — so it failed on working proxies and could not be
+ * made to pass. The real test is the one GoLogin's SDK runs at launch, and a
+ * failure there is reported on the row as a proxy failure (see page.tsx).
  */
 export default function ProxyFields({
   draft,
   onChange,
-  check,
-  onCheck,
-  profileId,
   allowNone = true,
 }: {
   draft: ProxyDraft;
   onChange: (next: ProxyDraft) => void;
-  check: ProxyCheckState | null;
-  onCheck: (state: ProxyCheckState) => void;
-  /** Edit only — lets the server fill a kept password in for the ping. */
-  profileId?: string;
   allowNone?: boolean;
 }) {
-  const authFetch = useAuthFetch();
-  const [pinging, setPinging] = useState(false);
   const set = (patch: Partial<ProxyDraft>) => onChange({ ...draft, ...patch });
-
-  const key = proxyKey(draft);
-  const current = check && check.key === key ? check.result : null;
-
-  const ping = async () => {
-    if (!proxyComplete(draft) || pinging) return;
-    setPinging(true);
-    try {
-      const result: GoLoginProxyCheckResult = await authFetch('/api/gologin/manage/proxy-check', {
-        method: 'POST',
-        body: JSON.stringify({ proxy: proxyPayload(draft), profileId }),
-      });
-      onCheck({ key, result });
-    } catch (err) {
-      onCheck({
-        key,
-        result: { ok: false, error: err instanceof Error ? err.message : 'Could not run the check.', latencyMs: 0 },
-      });
-    } finally {
-      setPinging(false);
-    }
-  };
+  // Per-instance, so two forms on screen never share a label id.
+  const protocolId = useId();
 
   /**
    * Paste `host:port:user:pass` into the IP field and it fills all four. It is
@@ -178,14 +134,14 @@ export default function ProxyFields({
         <>
           <div className="grid grid-cols-[auto_minmax(0,1fr)_7rem] items-end gap-2">
             <div>
-              <span className={LABEL} id="proxy-protocol">Protocol</span>
+              <span className={LABEL} id={protocolId}>Protocol</span>
               <ToggleGroup
                 type="single"
                 variant="outline"
                 size="sm"
                 value={draft.mode}
                 onValueChange={(value) => value && set({ mode: value as GoLoginProxyMode })}
-                aria-labelledby="proxy-protocol"
+                aria-labelledby={protocolId}
                 className="h-9"
               >
                 <ToggleGroupItem value="http" className={`h-9 ${SEGMENT_ITEM}`}>
@@ -246,62 +202,8 @@ export default function ProxyFields({
           </div>
           <p className="text-[11px] text-zinc-400">
             Tip: paste a <span className="font-mono">host:port:user:pass</span> line into the IP field
-            to fill all four.
+            to fill all four. The proxy is tested when the profile is first launched.
           </p>
-
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={ping}
-              disabled={!proxyComplete(draft) || pinging}
-            >
-              {pinging ? (
-                <Loader2 className="activity-spinner size-3.5 animate-spin" aria-hidden />
-              ) : (
-                <Radar className="size-3.5" aria-hidden />
-              )}
-              Ping proxy
-            </Button>
-            <div role="status" aria-live="polite" className="min-w-0 flex-1 text-[11px]">
-              {pinging ? (
-                <span className="text-zinc-400">Connecting through the proxy…</span>
-              ) : current ? (
-                current.ok ? (
-                  <span className="flex flex-wrap items-center gap-x-1.5 text-green-400">
-                    <CircleCheck className="size-3.5 shrink-0" aria-hidden />
-                    <span className="font-medium">Working</span>
-                    <span aria-hidden>·</span>
-                    <span className="font-mono">{current.ip}</span>
-                    {(current.city || current.country) && (
-                      <>
-                        <span aria-hidden>·</span>
-                        <span>{[current.city, current.country].filter(Boolean).join(', ')}</span>
-                      </>
-                    )}
-                    {current.timezone && (
-                      <>
-                        <span aria-hidden>·</span>
-                        <span>{current.timezone}</span>
-                      </>
-                    )}
-                    <span aria-hidden>·</span>
-                    <span className="tabular-nums">{current.latencyMs} ms</span>
-                  </span>
-                ) : (
-                  <span className="flex items-start gap-1.5 text-red-400">
-                    <CircleX className="mt-px size-3.5 shrink-0" aria-hidden />
-                    <span>{current.error}</span>
-                  </span>
-                )
-              ) : (
-                <span className="text-zinc-400">
-                  {proxyComplete(draft) ? 'Not checked yet.' : 'Enter the IP and port to check it.'}
-                </span>
-              )}
-            </div>
-          </div>
         </>
       )}
     </div>

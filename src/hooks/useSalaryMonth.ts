@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
 import { currentMonthKey } from '@/lib/salary/salaryDate';
-import type { SalaryMonthResult } from '@/lib/salary/salaryTypes';
+import type { RecentlyFinalizedSalary, SalaryMonthResult } from '@/lib/salary/salaryTypes';
 
 /**
  * One agent's salary month.
@@ -28,7 +28,11 @@ function cacheKey(viewerUid: string, subjectUid: string, month: string): string 
 
 export interface SalaryMonthWithUser extends SalaryMonthResult {
   user: { uid: string; displayName: string; photoURL: string | null } | null;
+  /** Only on `month=open` — last month's payout while it is fresh. */
+  recentlyFinalized?: RecentlyFinalizedSalary | null;
 }
+
+export type SalaryMonthState = ReturnType<typeof useSalaryMonth>;
 
 export function useSalaryMonth(month?: string, userId?: string | null) {
   const { user } = useAuth();

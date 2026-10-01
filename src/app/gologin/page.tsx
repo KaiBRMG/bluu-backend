@@ -68,6 +68,7 @@ import MembersDialog from './_components/MembersDialog';
 import NewProfileDialog from './_components/NewProfileDialog';
 import SharingDialog from './_components/SharingDialog';
 import Notice from './_components/Notice';
+import OsIcon from './_components/OsIcon';
 import ConnectingScreen from './_components/ConnectingScreen';
 import OrbitaGate from './_components/OrbitaGate';
 import CloseGuard, { type BusyProfile } from './_components/CloseGuard';
@@ -349,7 +350,7 @@ export default function GoLoginPage() {
    * It used to re-rank on every session change, so pressing Launch on row 12
    * moved that row to the top the same instant and the next click landed on a
    * different row's Launch: a different live account. A launched row now keeps
-   * its place and gains its "Open here" chip; it rises on the next refresh.
+   * its place and gains its "Open" chip; it rises on the next refresh.
    * Profiles not in the snapshot (one just created) sort first, where the
    * person who made it is looking.
    */
@@ -1278,13 +1279,6 @@ const MINE_DOT = 'bg-green-400';
 const OTHER_DOT = 'bg-blue-400';
 const IDLE_DOT = 'bg-zinc-500';
 
-const OS_LABELS: Record<string, string> = {
-  win: 'Windows',
-  mac: 'macOS',
-  lin: 'Linux',
-  android: 'Android',
-};
-
 /**
  * `now` is passed in rather than read here so a caller that re-renders on a
  * timer gets a value that actually changes — a `Date.now()` inside would be
@@ -1360,8 +1354,6 @@ function ProfileRow({
   // always visible rather than revealed on hover, because launching a profile is
   // now this page's whole job (the decision-queue rule, not the index one).
   const meta: string[] = [];
-  const os = OS_LABELS[profile.os] ?? profile.os;
-  if (os) meta.push(os);
   if (profile.proxyType && profile.proxyType !== 'none') {
     meta.push(profile.proxyRegion ? `${profile.proxyType} · ${profile.proxyRegion}` : profile.proxyType);
   } else {
@@ -1385,10 +1377,11 @@ function ProfileRow({
   const liveElsewhere = !liveHere && !lockedByOther && profile.isRunning;
   const blocked = lockedByOther;
 
-  // The proxy is checked before anything spawns, so this is the most common way
-  // a launch fails — and unlike the others it names something the operator can
-  // go and fix. It earns a red chip rather than living only in the toast that
-  // already vanished.
+  // The SDK tests the proxy before anything spawns, so this is the most common
+  // way a launch fails — and the one cause Bluu can name for certain. It earns a
+  // red chip and a line on the row rather than living only in a toast that has
+  // already gone. (There is no pre-flight "Ping": the proxies are private and a
+  // test from Bluu's server failed on working ones, so the launch *is* the test.)
   const proxyFailed = status === 'failed' && session?.error === 'proxy-error';
 
   return (
@@ -1411,7 +1404,7 @@ function ProfileRow({
           )}
           {liveHere && (
             <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${TONE_CHIP.green}`}>
-              Open here
+              Open
             </span>
           )}
           {/* Naming the holder is the point: the reader's next move is to go and
@@ -1427,24 +1420,47 @@ function ProfileRow({
             </span>
           )}
           {/* Red, because unlike every other chip on this row it reports
-              something broken that stays broken until someone acts. The full
-              remedy is on the title, so the chip stays two words. */}
+              something broken that stays broken until someone acts. */}
           {proxyFailed && (
-            <span
-              className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${TONE_CHIP.red}`}
-              title={sessionErrorMessage('proxy-error')}
-            >
-              Proxy Error
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${TONE_CHIP.red}`}>
+              Proxy failed
             </span>
           )}
         </div>
-        <p className="mt-0.5 truncate text-[11px] text-zinc-400">
-          {meta.map((item, i) => (
-            <span key={item}>
-              {i > 0 && <span aria-hidden> · </span>}
-              {item}
-            </span>
-          ))}
+        {/* The cause, said on the row — not left in a toast that has gone, nor
+            in a tooltip a keyboard never reaches. Main maps the SDK's own
+            pre-launch proxy test failing to `proxy-error`, so this appears
+            only when the proxy is known to be the reason. The remedy depends
+            on who is reading: a manager can fix the proxy from here; an
+            operator cannot, and is told who can. */}
+        {proxyFailed && (
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-red-400" role="alert">
+            <span>Couldn&rsquo;t start — the proxy isn&rsquo;t responding.</span>
+            {caps.profiles ? (
+              <button
+                type="button"
+                onClick={() => onEdit(profile)}
+                className="rounded underline underline-offset-2 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                Edit proxy
+              </button>
+            ) : (
+              <span className="text-zinc-400">Ask a manager to check it.</span>
+            )}
+          </p>
+        )}
+        <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-zinc-400">
+          {/* The platform mark leads the meta line — the /download page's own
+              marks — with the full OS (incl. Windows 11 / Apple M1) on hover. */}
+          {profile.os && <OsIcon os={profile.os} osSpec={profile.osSpec} />}
+          <span className="truncate">
+            {meta.map((item, i) => (
+              <span key={item}>
+                {i > 0 && <span aria-hidden> · </span>}
+                {item}
+              </span>
+            ))}
+          </span>
         </p>
         {profile.notes && (
           <p className="mt-1 max-w-[70ch] truncate text-[11px] text-zinc-400">{profile.notes}</p>

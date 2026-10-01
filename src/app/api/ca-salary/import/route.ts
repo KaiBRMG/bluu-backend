@@ -18,10 +18,10 @@
  * who has left the company and has no account — their rows skip, and the report
  * names the address so it is a decision rather than a mystery.
  *
- * **A sale belongs to the shift it was made on.** Every row is stamped with the
- * start day of the agent's shift that contains it, not its own calendar day,
- * so a 23:00–07:00 shift's post-midnight sales are paid with the shift — and on
- * the last night of a month, in the month finalised on the 1st.
+ * **A sale is dated by its own clock**, in the salary timezone — the same day
+ * the external CRM reports it on, so the two reconcile. A sale made at 02:00 on
+ * an overnight shift belongs to the calendar day it was made, not the day the
+ * shift started.
  *
  * `dryRun` runs the whole parse and reports what *would* happen without writing,
  * which is what the upload screen shows before an admin confirms.
@@ -32,7 +32,7 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
 import { requireCaAdmin } from '@/lib/salary/salaryAuth';
 import { readXlsxSheet, XlsxError } from '@/lib/salary/xlsx';
-import { parseSalesSheet, buildUserResolver, attributeSalesToShifts } from '@/lib/salary/salesImport';
+import { parseSalesSheet, buildUserResolver } from '@/lib/salary/salesImport';
 import { normalizeEmail } from '@/lib/authEmail';
 import { adminDb } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
@@ -42,12 +42,11 @@ import {
   getRecentImports,
   getFinalizedMonthsFor,
   getExistingSaleStamps,
-  getShiftWindowsForSales,
 } from '@/lib/services/caSalaryService';
 import { round2 } from '@/lib/salary/salaryEngine';
 import { buildSalaryMonthForUsers } from '@/lib/services/caSalaryService';
 import { notifications } from '@/lib/notificationContent';
-import { getChatAgentUids, notifyUsers, syncCommissionTierNotice } from '@/lib/services/caNotifications';
+import { notifyUsers, syncCommissionTierNotice } from '@/lib/services/caNotifications';
 import { formatMonthLabel } from '@/lib/salary/salaryDate';
 import { formatPercent } from '@/lib/salary/salaryFormat';
 import type { DecodedIdToken } from 'firebase-admin/auth';
@@ -113,15 +112,13 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       throw err;
     }
 
-    // ── Attribute each sale to the shift it was made on ──
-    // A shift is paid on the day it starts, so a sale made at 02:00 on an
-    // overnight shift belongs to the previous day — and on the last night of a
-    // month, to the month being paid on the 1st. See `attributeSalesToShifts`.
-    const attribution = attributeSalesToShifts(parsed.sales, await getShiftWindowsForSales(parsed.sales));
-    const sales = attribution.sales;
+    const sales = parsed.sales;
 
     // What is already stored, and where. Feeds the duplicate count, the
-    // re-stamp count, and the finalised guard below.
+    // re-stamp count, and the finalised guard below. A stored stamp can differ
+    // from the calendar day: sales imported while shift attribution was live
+    // (2026-09-30 → 2026-10-01) carry their shift's start day, and a re-upload
+    // is what moves them back.
     const existing = await getExistingSaleStamps(sales.map(s => s.saleId));
     /** The stored month when this upload would move the sale out of it, else null. */
     const movedFrom = (s: (typeof sales)[number]) => {
@@ -133,7 +130,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     // A finalised month is what was paid. Letting a late export quietly move it
     // would make the payout record a lie, so those rows are held back and the
     // months are named — the admin reopens if the correction is real. That
-    // cuts both ways now that a sale's month follows its shift: a row moving
+    // cuts both ways when a re-upload re-stamps a stored row: a row moving
     // *into* a finalised month is refused, and so is a stored row moving *out*
     // of one, which would otherwise be paid twice — once in the frozen month,
     // again in the open one.
@@ -169,8 +166,6 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     const blocked = sales.length - writable.length;
     const rejectedFinalizedMonths = [...rejectedMonths].sort();
 
-    const shiftAttributed = writable.filter(s => attribution.moved.has(s.saleId)).length;
-    const shiftAttributedToPreviousMonth = writable.filter(s => attribution.movedAcrossMonth.has(s.saleId)).length;
     const restamped = writable.filter(s => {
       const prev = existing.get(s.saleId);
       return prev !== undefined && prev.day !== s.day;
@@ -208,8 +203,13 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     }
 
     // ── Write ──
+    // A dry run counts duplicates from the same `existing` read the write uses,
+    // so the preview's "new" figure matches what the commit will report.
     const { written, duplicates } = dryRun
-      ? { written: writable.length, duplicates: 0 }
+      ? (() => {
+          const dupes = writable.filter(s => existing.has(s.saleId)).length;
+          return { written: writable.length - dupes, duplicates: dupes };
+        })()
       : await writeSales(writable, new Set(existing.keys()));
 
     const result: SalesImportResult = {
@@ -225,8 +225,6 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       monthsTouched: [...new Set(writable.map(s => s.month))].sort(),
       perUser,
       rejectedFinalizedMonths,
-      shiftAttributed,
-      shiftAttributedToPreviousMonth,
       restamped,
     };
 
@@ -239,28 +237,20 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     }
 
     // ── Notifications ──
-    // Two of them, and both belong *after* the response: an admin waiting on an
-    // upload should not also wait on a roster-wide fan-out and a month
-    // recomputation. `after()` runs them once the response is flushed.
+    // Runs *after* the response: an admin waiting on an upload should not also
+    // wait on a month recomputation. `after()` runs it once the response is
+    // flushed.
     //
     // Nothing fires on a dry run (nothing was written) or on an import that
-    // wrote nothing (a re-upload of an overlapping export is the normal case,
-    // and "your earnings were updated" would be a lie).
+    // wrote nothing (a re-upload of an overlapping export is the normal case).
+    //
+    // There is deliberately no roster-wide "earnings report updated" message —
+    // it was removed on 2026-10-01. Only a tier crossing is news to an agent.
     if (!dryRun && (written > 0 || restamped > 0)) {
       const monthsTouched = result.monthsTouched;
       const affectedUserIds = [...perUserMap.keys()];
 
       after(async () => {
-        try {
-          const monthLabel =
-            monthsTouched.length === 1 ? formatMonthLabel(monthsTouched[0]) : 'your open months';
-          await notifyUsers(await getChatAgentUids(), notifications.salesImported(monthLabel), {
-            label: 'salesImported',
-          });
-        } catch (err) {
-          console.error('[ca-salary/import] earnings-updated notification failed', err);
-        }
-
         // ── Commission tier crossings ──
         // A sales import is the only thing that moves month-to-date gross for a
         // whole roster at once, which makes it the moment a tier is actually

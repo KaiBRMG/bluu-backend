@@ -170,16 +170,13 @@ The sales tool identifies agents by their old `@bluurock.com` addresses. Resolut
 
 The admin screen always previews first (`dryRun=true`), showing per-agent gross for reconciliation against the source sheet and every skipped row grouped by reason. The skip list is the reason the preview exists — an agent whose rows silently vanish is an agent who is underpaid and nobody notices.
 
-### A sale belongs to the shift it was made on
+### A sale is dated by its own clock, not its shift
 
-A shift is paid on the day it **starts** (`resolveShiftInputs`), so a 23:00–07:00 SAST shift belongs wholly to its first day. A sale's own clock would put everything sold after midnight on the next calendar day — and on the last night of a month, into the **next month**, which is not the month finalised and paid on the 1st. So the import stamps each sale's `day`/`month` with the **start day of the agent's shift that contains it** ([`attributeSalesToShifts`](../src/lib/salary/salesImport.ts)), not its calendar day. `occurredAt` is untouched; only the bucket moves.
+**A sale's `day`/`month` is its calendar day in the salary timezone** — the day the external CRM reports it on. A sale made at 02:00 on a 23:00–07:00 shift belongs to the *next* calendar day, even though the shift itself is paid on the day it starts (`resolveShiftInputs`). That split is deliberate: the app's sales figures must reconcile day-for-day with the CRM, and the CRM dates a sale by when it happened.
 
-- **Shift windows** come from one roster-wide range read over the file's span, opened a day early so an overnight shift that began the evening before is found (`getShiftWindowsForSales`). Recurring series are expanded, tombstones (approved leave) excluded — the same expansion the salary grid uses.
-- **A sale inside no shift keeps its calendar day.** There is nothing better to attribute it to, and the engine's "sales with no shift" check already surfaces it.
-- **The shift end is exclusive, with no grace period.** A sale at 07:00:00 on a shift ending 07:00 is outside it.
-- **Overlapping shifts: the later-starting one wins** — the shift the agent most recently began.
-- **The stamp is decided at import and does not follow later shift edits.** Moving a shift after its sales were imported leaves them where they were; re-uploading an export that covers them re-stamps them (the sale id is a hash of the row, not of its day, so the same document is rewritten). This is the backfill path too: re-upload older exports to re-stamp sales imported before attribution existed.
-- The preview says how many rows moved, how many crossed into the previous month, and how many already-stored rows a re-upload moves (`shiftAttributed`, `shiftAttributedToPreviousMonth`, `restamped` on the import record).
+> **History — shift attribution was tried and reverted.** From 2026-09-30 to 2026-10-01 the import re-stamped each sale with the start day of the shift containing it (`attributeSalesToShifts`). The app's daily and monthly figures then disagreed with the CRM, so it was removed. **Sales imported in that window are still stored with their shift's start day.** Re-uploading the exports that cover them re-stamps them to their calendar day: the sale id is a hash of the row, not of its day, so the same document is rewritten. Do not reintroduce attribution without changing what the CRM reports.
+
+- **A re-upload can move a stored sale.** The import reads every stored sale's stamp first (`getExistingSaleStamps`) and reports how many it moves (`restamped` on the import record, stated in the preview). A move into **or out of** a finalised month is refused (next section), because moving a row out of a paid month would pay it twice.
 
 ### Finalised months refuse rows
 
@@ -307,6 +304,14 @@ Everything an agent does with their own roster happens on the dashboard calendar
 
 What remains on the dashboard, in order: salary card → leave balance → calendar. The balance sits **above** the calendar because it is the constraint you read before picking a day to request off.
 
+### The salary card shows the month still owed, not the calendar month
+
+[`SalarySummaryCard`](../src/components/salary/SalarySummaryCard.tsx) requests `GET /api/ca-salary/month?month=open`, and the server ([`buildDashboardSalaryMonth`](../src/lib/services/caSalaryService.ts)) picks: **the previous month while it is unfinalised and has any days in it, otherwise the current month.** On the 1st the calendar moves on but payroll has not, and a card that jumped to the new month's $0 would hide the figure the agent is waiting to be paid. That past-but-open month carries an orange **Not finalised** chip and reads "Month closed · awaiting payroll"; finalising it (§ month close) flips the card to the current month within the hook's 60s cache. Only one month back — an older open month is a payroll backlog, not something the dashboard rewinds to. The card labels and links from the response's `month`, never from the query. Cost: one month build before finalisation; one snapshot read plus the current build after.
+
+**After finalisation, a recent-payout card for a few days.** Once last month is finalised the salary card moves on, so the same `month=open` response also carries `recentlyFinalized` (`{ month, salary, commission, wage, finalizedAt }`) while `finalizedAt` is within `RECENTLY_FINALIZED_WINDOW_MS` (**5 days**, server-side). [`RecentPayoutCard`](../src/components/salary/RecentPayoutCard.tsx) renders it under the disputes column, linking to that month's salary page. It costs nothing extra: the previous month's snapshot is already read to decide the card's month. The dashboard page owns the `useSalaryMonth('open')` call and hands it to both cards, so there is one request for the pair.
+
+**CA Admin follows the same rule, roster-wide.** The admin page's shared Overview/Payroll month opens on `GET /api/ca-salary/payroll-month` ([`resolvePayrollMonth`](../src/lib/services/caSalaryService.ts), `ca-admin` page permission): the previous month while **any** active CA agent still has it open with days in it, otherwise the current month. Both panels render a skeleton until it answers rather than mounting on the calendar month and refetching; a failed lookup falls back to the calendar month. Cost: the CA roster query + one batched snapshot read; the previous month is only built for agents still unfinalised. Browser-cached `private, max-age=60` + `Vary: Authorization` (rule 9i).
+
 ### The dashboard shows a week; the month is a dialog
 
 The calendar has **two views off one cell renderer** ([`ShiftCalendar`](../src/components/shifts/ShiftCalendar.tsx), `view="week" | "month"`), and the dashboard leads with the **week**:
@@ -428,7 +433,7 @@ Both queries are bounded (400 requests, 600 entries) and names resolve in one `g
 
 ## 7. Timezone
 
-**`Africa/Harare` (UTC+2, no DST) is the salary day boundary for every agent**, regardless of where they live. The export is stamped in it and the roster is managed in SAST. One company-wide boundary is what makes a month reconcile exactly against the source sheet. It is not, on its own, what keeps a sale on its shift's day — an overnight shift crosses the boundary — which is why the import attributes each sale to its shift (§4).
+**`Africa/Harare` (UTC+2, no DST) is the salary day boundary for every agent**, regardless of where they live. The export is stamped in it and the roster is managed in SAST. One company-wide boundary is what makes a month reconcile exactly against the source sheet and the CRM. An overnight shift crosses it, so its post-midnight sales land on the next calendar day — on purpose (§4).
 
 [`salaryDate.ts`](../src/lib/salary/salaryDate.ts) uses **fixed-offset arithmetic**, which is exact here and nowhere else. **Do not copy those helpers to a timezone that observes DST** — they would silently mis-bucket two days a year.
 
@@ -683,7 +688,7 @@ Three calls worth not re-litigating:
 
 ## 11. Notifications
 
-**They are in.** Nine events notify, restored after the deliberate pre-launch silence — the figures have been trusted long enough to tell people about them. Copy lives in `notificationContent.ts` and the catalogue in `automatedNotifications.ts`, under the `Coverage` and `Salary` categories (cross-cutting rule 15); the full event → factory table is in [notifications.md](notifications.md#notification-events--factory-functions).
+**They are in.** Eight events notify, restored after the deliberate pre-launch silence — the figures have been trusted long enough to tell people about them. Copy lives in `notificationContent.ts` and the catalogue in `automatedNotifications.ts`, under the `Coverage` and `Salary` categories (cross-cutting rule 15); the full event → factory table is in [notifications.md](notifications.md#notification-events--factory-functions).
 
 | Event | Who is told | Gate |
 |---|---|---|
@@ -692,7 +697,6 @@ Three calls worth not re-litigating:
 | Overtime assigned | The assignee | **Coalesced** per agent per day · fires from **both** assignment routes |
 | Overtime cancelled | Each agent who was covering | **Coalesced** per agent per day |
 | Overtime still unassigned | One named approver | The day before the shift, from 09:00 salary-local · remembers the offers it has chased |
-| Sales imported | Every chat agent | Only a real import that wrote rows |
 | Payday in 3 days | Every chat agent | Once per month, latched |
 | Salary finalised | That agent | — (reopening notifies nobody) |
 | Commission tier reached | That agent | Once per band per month, and only upwards |
@@ -812,7 +816,7 @@ One non-optimisation worth knowing: `loading="lazy"` on the avatar does nothing.
 cd tests/salary-engine && npm install && npm test
 ```
 
-99 tests over the pure engine, the date helpers, the importer (including shift attribution — `shiftAttribution.test.ts`), shift serialisation and timezone resolution, including an **end-to-end run of the real August export** that asserts the figures the spreadsheet produced (Queen: $12,621.99 gross, 5% tier, $337.78 commission). The engine is pure, so this is cheap and exact — and it is the money path.
+92 tests over the pure engine, the date helpers, the importer, shift serialisation and timezone resolution, including an **end-to-end run of the real August export** that asserts the figures the spreadsheet produced (Queen: $12,621.99 gross, 5% tier, $337.78 commission). The engine is pure, so this is cheap and exact — and it is the money path.
 
 `shiftSerialise.test.ts` pins a regression worth knowing about: `recurrence.endDate` had two writers that disagreed — `createShift` stored the ISO **string** the shift modal sends, while `truncateSeriesAt` wrote a real `Timestamp` — and the reader assumed `Timestamp`, so one recurring shift with an end date 500'd the **whole** week view with `r.endDate.toDate is not a function`. The write side now normalises (`normaliseRecurrence`) and the read side tolerates every shape ever written (`toIsoString`). Keep both: one stops new bad documents, the other keeps existing ones from taking the roster down.
 

@@ -15,7 +15,6 @@
  */
 import {
   GoLoginApiError,
-  isGoLoginProxyMode,
   type GoLoginAccountInfo,
   type GoLoginFolder,
   type GoLoginMember,
@@ -106,6 +105,7 @@ function normaliseProfile(raw: Raw): GoLoginProfile | null {
     name: str(raw.name),
     notes: str(raw.notes),
     os: readOs(raw),
+    osSpec: readOsSpec(raw),
     browserType: str(raw.browserType),
     ...readProxy(raw),
     isRunning: raw.isRunning === true,
@@ -478,21 +478,9 @@ class GoLoginApiClient implements IGoLoginClient {
     return normaliseProfileDetail(await this.rawProfile(profileId));
   }
 
-  async getProfileProxySecret(
-    profileId: string,
-  ): Promise<(GoLoginProxyInput & { password: string }) | null> {
-    const raw = await this.rawProfile(profileId);
-    const proxy = obj(raw.proxy);
-    const mode = str(proxy.mode);
-    const port = num(proxy.port);
-    if (!isGoLoginProxyMode(mode) || !str(proxy.host) || port === null) return null;
-    return {
-      mode,
-      host: str(proxy.host),
-      port,
-      username: str(proxy.username),
-      password: str(proxy.password),
-    };
+  /** The stored proxy password. Private: it exists only for "keep the password" on an edit. */
+  private async storedProxyPassword(profileId: string): Promise<string> {
+    return str(obj((await this.rawProfile(profileId)).proxy).password);
   }
 
   async quickCreateProfile(params: {
@@ -545,7 +533,7 @@ class GoLoginApiClient implements IGoLoginClient {
       if (password === undefined) {
         // "Keep the stored password": read it back here, inside the adapter, so
         // the secret never has to pass through a caller or a renderer.
-        password = (await this.getProfileProxySecret(profileId))?.password ?? '';
+        password = await this.storedProxyPassword(profileId);
       }
       payload = { ...proxy, password };
     }

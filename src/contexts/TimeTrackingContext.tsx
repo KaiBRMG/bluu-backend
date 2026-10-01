@@ -266,19 +266,47 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
    *      real work as idle and scoring those screenshots 0% activity.
    *
    * Apply local state first, then call this. Failures are reported, not thrown.
+   *
+   * A failed sync is REPLAYED, not dropped. The heartbeat never touches
+   * `currentState`, so a lost `break-end` used to leave the admin view showing
+   * the user on break until their next transition — possibly the rest of the
+   * shift. Only the latest transition is kept: the route just sets the state,
+   * so a newer transition supersedes an unsynced older one. Replay happens on
+   * the `online` event and on the next heartbeat tick.
    */
-  const syncTransition = useCallback((transition: string) => {
+  const pendingTransitionRef = useRef<string | null>(null);
+
+  const syncTransition = useCallback((transition: string, isRetry = false) => {
+    pendingTransitionRef.current = null;
     apiCall('transition', 'POST', { transition }).catch(err => {
+      // A newer transition was issued while this one was in flight — it owns
+      // the pending slot now; replaying this one would regress the state.
+      if (pendingTransitionRef.current === null) pendingTransitionRef.current = transition;
       console.error(`[TimeTracking] Transition '${transition}' failed to sync:`, err);
       // Telemetry is half the point: these failures were previously silent, which
       // is how ~43h of mislabelled time accumulated across the fleet unnoticed.
       Sentry.captureException(err, {
         level: 'warning',
-        tags: { area: 'time-tracking', reason: 'transition-sync-failed' },
+        tags: {
+          area: 'time-tracking',
+          reason: 'transition-sync-failed',
+          online: String(typeof navigator === 'undefined' || navigator.onLine),
+          retry: String(isRetry),
+        },
         extra: { transition },
       });
     });
   }, [apiCall]);
+
+  const flushPendingTransition = useCallback(() => {
+    const pending = pendingTransitionRef.current;
+    if (pending) syncTransition(pending, true);
+  }, [syncTransition]);
+
+  useEffect(() => {
+    window.addEventListener('online', flushPendingTransition);
+    return () => window.removeEventListener('online', flushPendingTransition);
+  }, [flushPendingTransition]);
 
   /**
    * Retroactively exclude a span the machine was asleep: inject pause/resume
@@ -619,6 +647,9 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         apiCall('heartbeat', 'POST').catch(err => {
           console.error('[TimeTracking] Heartbeat failed:', err);
         });
+        // Backstop for a drop the `online` event never reported (flaky Wi-Fi
+        // where navigator.onLine stayed true).
+        flushPendingTransition();
       }, HEARTBEAT_INTERVAL_MS);
     }
 
@@ -628,7 +659,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         heartbeatRef.current = null;
       }
     };
-  }, [displayState, apiCall, patchSleepGap, reconcileLogState]);
+  }, [displayState, apiCall, patchSleepGap, reconcileLogState, flushPendingTransition]);
 
   // ─── Idle Detection ──────────────────────────────────────────────────
   const enableIdleTimeout = userData?.enableIdleTimeout ?? true;
