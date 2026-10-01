@@ -105,9 +105,16 @@ export default function AdminSalesData() {
       if (dryRun) {
         setPreview(body.result);
       } else {
+        const { imported, restamped = 0 } = body.result;
         toast.success(
-          body.result.imported > 0
-            ? `Imported ${pluralise(body.result.imported, 'sale')}`
+          imported > 0 || restamped > 0
+            ? [
+                imported > 0 && `Imported ${pluralise(imported, 'sale')}`,
+                restamped > 0 && `moved ${pluralise(restamped, 'recorded sale')} to the day ${restamped === 1 ? 'it was' : 'they were'} made`,
+              ]
+                .filter(Boolean)
+                .join(' · ')
+                .replace(/^m/, 'M')
             : 'Nothing new to import — every row was already recorded',
         );
         reset();
@@ -263,7 +270,11 @@ function ImportPreview({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const nothingToDo = result.imported === 0;
+  // A re-upload that only re-stamps stored sales (moving them back to the day
+  // they were made) writes no *new* rows but still changes figures, so it is
+  // not "nothing to do" — gating on `imported` alone disabled exactly that fix.
+  const restamped = result.restamped ?? 0;
+  const nothingToDo = result.imported === 0 && restamped === 0;
 
   return (
     <div className="space-y-4 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
@@ -365,7 +376,11 @@ function ImportPreview({
       <div className="flex items-center gap-2 border-t border-white/[0.07] pt-3">
         <Button onClick={onConfirm} disabled={committing || nothingToDo}>
           {committing && <Loader2Icon className="activity-spinner size-3.5" aria-hidden />}
-          {nothingToDo ? 'Nothing to import' : `Import ${pluralise(result.imported, 'sale')}`}
+          {nothingToDo
+            ? 'Nothing to import'
+            : result.imported > 0
+              ? `Import ${pluralise(result.imported, 'sale')}`
+              : `Move ${pluralise(restamped, 'sale')}`}
         </Button>
         <Button variant="ghost" onClick={onCancel} disabled={committing} className="text-zinc-400">
           Cancel
