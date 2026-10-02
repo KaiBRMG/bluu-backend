@@ -15,6 +15,8 @@ import { deleteAllSnipsForUser } from '@/lib/services/snipService';
  * PUT /api/admin/users/[uid]
  * Admin-only. Updates any user's profile fields.
  * Does NOT handle group membership — use /api/admin/groups/[groupId]/members for that.
+ * Does NOT handle time-tracking settings (idle timeout, screenshots) — those are
+ * resolved org → group → user via /api/admin/time-tracking-settings.
  */
 export const PUT = withAuth(async (
   request: NextRequest,
@@ -44,8 +46,6 @@ export const PUT = withAuth(async (
       'paymentInfo',
       'userComments',
       'photoURL',
-      'enableIdleTimeout',
-      'enableScreenshots',
       'hasPaidLeave',
       'remainingUnpaidLeave',
       'remainingPaidLeave',

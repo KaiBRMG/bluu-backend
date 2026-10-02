@@ -94,7 +94,7 @@
 
 - **`getUserById` 60s TTL cache** — any route that writes a user doc **must** call `invalidateUserCache(uid)` in the same handler.
 - **Batch reads** use `adminDb.getAll(...refs)` to avoid N+1 reads.
-- **`enableScreenshots`** is read from the client-side `useUserData` snapshot, **not** from the time-tracking status API.
+- **`enableScreenshots`** is read from the client-side `useUserData` snapshot, **not** from the time-tracking status API. So are `enableIdleTimeout` and `idleTimeoutMinutes`. All three are **resolved** values (org → group → user) written by `recomputeTimeTrackingSettings` — edit the overrides via `/api/admin/time-tracking-settings`, never the fields. See [time-tracking.md §3f](time-tracking.md#3f-time-tracking-settings-organization--group--user).
 - **`isAdmin()`** security rule uses the `request.auth.token.admin` JWT claim → **zero Firestore reads** (see [auth.md](auth.md)).
 
 ---

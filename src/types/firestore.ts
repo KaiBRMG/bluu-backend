@@ -1,3 +1,4 @@
+import type { IdleInputMode, TimeTrackingOverrides } from '@/lib/timeTrackingSettings';
 // Timestamp used in shared types — compatible with both firebase/firestore and firebase-admin/firestore
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Timestamp = any;
@@ -165,8 +166,16 @@ export interface UserDocument {
    */
   unpaidLeaveResetMonth?: string;
   paidLeaveResetYear?: number;
+  // RESOLVED time-tracking settings (org → group → user), written only by
+  // timeTrackingSettingsService. Never edit directly — edit the overrides.
   enableIdleTimeout?: boolean;
+  /** Absent on users not yet recomputed — read via `idleThresholdSeconds()`. */
+  idleTimeoutMinutes?: number;
+  /** Absent on users not yet recomputed — read via `normalizeIdleInputMode()`. */
+  idleInputMode?: IdleInputMode;
   enableScreenshots?: boolean;
+  /** This user's own overrides; absent field = inherit. See lib/timeTrackingSettings.ts. */
+  timeTrackingOverrides?: TimeTrackingOverrides;
 
   // Always-visible session timer (macOS menu-bar tray / Windows docked HUD).
   // User-controlled in Settings → App Settings and DEFAULT ON, so absent must

@@ -188,6 +188,94 @@ ipcMain.handle('timeTracking:getIdleTime', () => {
   return powerMonitor.getSystemIdleTime();
 });
 
+// ─── Per-input idle (keyboard vs mouse) ──────────────────────────────
+// powerMonitor only reports COMBINED idle. Admins choose which input counts as
+// activity for the idle timeout (Shift Management → Organization Settings →
+// `idleInputMode`), so main also measures keyboard and mouse separately. Only
+// last-input TIMES are kept — never which key, never where the pointer is.
+//   • darwin — CoreGraphics' per-event-type idle counter, via koffi FFI. Reads
+//     the HID system's last-event times; it is not an event tap, so it needs
+//     no Accessibility / Input Monitoring permission.
+//   • win32  — uiohook-napi: a low-level hook on its OWN thread (an LL hook on
+//     the main thread would lag system-wide input whenever main is busy). No
+//     permission on Windows. Started lazily on the first request, so users on
+//     the default `any` policy never install a hook at all.
+// Any failure yields nulls and the renderer falls back to combined idle.
+const CG_EVENT_SOURCE_STATE_HID_SYSTEM = 1;
+const CG_KEYBOARD_EVENT_TYPES = [10 /* keyDown */, 12 /* flagsChanged */];
+const CG_MOUSE_EVENT_TYPES = [
+  1 /* leftMouseDown */, 3 /* rightMouseDown */, 5 /* mouseMoved */,
+  6 /* leftMouseDragged */, 7 /* rightMouseDragged */, 22 /* scrollWheel */,
+  25 /* otherMouseDown */, 27 /* otherMouseDragged */,
+];
+let cgSecondsSinceLastEvent = null; // null = not loaded yet, false = unavailable
+
+function macInputIdleSeconds() {
+  if (cgSecondsSinceLastEvent === null) {
+    try {
+      const koffi = require('koffi');
+      const cg = koffi.load('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics');
+      cgSecondsSinceLastEvent = cg.func('double CGEventSourceSecondsSinceLastEventType(uint32_t, uint32_t)');
+    } catch (err) {
+      console.error('[main] Per-input idle unavailable (CoreGraphics):', err);
+      cgSecondsSinceLastEvent = false;
+    }
+  }
+  if (!cgSecondsSinceLastEvent) return null;
+  const since = types =>
+    Math.min(...types.map(t => cgSecondsSinceLastEvent(CG_EVENT_SOURCE_STATE_HID_SYSTEM, t)));
+  return { keyboard: since(CG_KEYBOARD_EVENT_TYPES), mouse: since(CG_MOUSE_EVENT_TYPES) };
+}
+
+let winInputHook = null; // null = not started, false = unavailable, else { lastKeyboardMs, lastMouseMs }
+
+function winInputIdleSeconds() {
+  if (winInputHook === null) {
+    try {
+      const { uIOhook } = require('uiohook-napi');
+      // Seed both from combined idle: before the hook existed we only know the
+      // last input of EITHER kind, so neither type starts out looking active.
+      const seed = Date.now() - powerMonitor.getSystemIdleTime() * 1000;
+      const state = { lastKeyboardMs: seed, lastMouseMs: seed };
+      const onKeyboard = () => { state.lastKeyboardMs = Date.now(); };
+      const onMouse = () => { state.lastMouseMs = Date.now(); };
+      uIOhook.on('keydown', onKeyboard);
+      uIOhook.on('mousemove', onMouse);
+      uIOhook.on('mousedown', onMouse);
+      uIOhook.on('wheel', onMouse);
+      uIOhook.start();
+      app.on('will-quit', () => {
+        try { uIOhook.stop(); } catch { /* quitting anyway */ }
+      });
+      winInputHook = state;
+    } catch (err) {
+      console.error('[main] Per-input idle unavailable (uiohook):', err);
+      winInputHook = false;
+    }
+  }
+  if (!winInputHook) return null;
+  const now = Date.now();
+  return {
+    keyboard: (now - winInputHook.lastKeyboardMs) / 1000,
+    mouse: (now - winInputHook.lastMouseMs) / 1000,
+  };
+}
+
+ipcMain.handle('timeTracking:getInputIdleTimes', () => {
+  const any = powerMonitor.getSystemIdleTime();
+  let split = null;
+  try {
+    if (process.platform === 'darwin') split = macInputIdleSeconds();
+    else if (process.platform === 'win32') split = winInputIdleSeconds();
+  } catch (err) {
+    console.error('[main] Per-input idle read failed:', err);
+  }
+  // A single input type can never have been more recent than "any input", so
+  // clamp to it — this also absorbs the seed/rounding edge cases above.
+  const perType = v => (typeof v === 'number' && Number.isFinite(v) ? Math.max(any, Math.floor(v)) : null);
+  return { any, keyboard: perType(split?.keyboard), mouse: perType(split?.mouse) };
+});
+
 // Activity sampling for productivity % calculation (used at each screenshot interval)
 let activitySamples = [];
 const SAMPLE_RETENTION_MS = 45 * 60 * 1000;

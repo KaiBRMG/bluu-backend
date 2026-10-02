@@ -301,6 +301,12 @@ interface ElectronAPI {
   };
   timeTracking: {
     getIdleTime: () => Promise<number>;
+    /**
+     * Seconds since the last input of each kind. Optional — absent on builds
+     * before v0.15.0, so feature-detect and fall back to `getIdleTime()`. A
+     * per-type field is null where the platform cannot measure it.
+     */
+    getInputIdleTimes?: () => Promise<{ any: number; keyboard: number | null; mouse: number | null }>;
     captureScreenshot: () => Promise<{ success: boolean; screens?: string[]; error?: string }>;
     setPowerSaveBlocker?: (enable: boolean) => Promise<{ success: boolean }>;
     getActivitySince?: (sinceMs: number) => Promise<Array<{ sampleMs: number; idleSeconds: number }>>;

@@ -79,8 +79,6 @@ interface FormData {
   paymentMethod: string;
   paymentInfo: string;
   userComments: string;
-  enableIdleTimeout: boolean;
-  enableScreenshots: boolean;
   hasPaidLeave: boolean;
   remainingUnpaidLeave: string;
   remainingPaidLeave: string;
@@ -101,7 +99,7 @@ const FIELD_SECTION: Partial<Record<keyof FormData, string>> = {
 const SECTION_LABELS: Record<string, string> = {
   identity: 'Identity',
   work: 'Work',
-  'time-tracking': 'Time Tracking',
+  'time-tracking': 'Leave',
   address: 'Address',
   contact: 'Contact',
   'emergency-contact': 'Emergency Contact',
@@ -148,8 +146,6 @@ function buildFormData(user: AdminFullUser): FormData {
     paymentMethod: user.paymentMethod || '',
     paymentInfo: user.paymentInfo || '',
     userComments: user.userComments || '',
-    enableIdleTimeout: user.enableIdleTimeout ?? true,
-    enableScreenshots: user.enableScreenshots ?? true,
     hasPaidLeave: user.hasPaidLeave ?? false,
     // The allotment constants — see `lib/leave/leaveBalance.ts`. Hand-typed here
     // and disagreeing with the agent-facing default was how one document showed
@@ -466,8 +462,6 @@ export default function UserDetailContent({
         paymentMethod: formData.paymentMethod,
         paymentInfo: formData.paymentInfo,
         userComments: formData.userComments,
-        enableIdleTimeout: formData.enableIdleTimeout,
-        enableScreenshots: formData.enableScreenshots,
         hasPaidLeave: formData.hasPaidLeave,
         remainingUnpaidLeave: Number(formData.remainingUnpaidLeave),
         remainingPaidLeave: Number(formData.remainingPaidLeave),
@@ -833,7 +827,8 @@ export default function UserDetailContent({
                 </AccordionContent>
               </AccordionItem>
 
-              {/* Time Tracking Section */}
+              {/* Leave Section — keyed 'time-tracking' so existing validation routing holds.
+                  Idle/screenshot policy moved to Shift Management → Organization Settings. */}
               <AccordionItem value="time-tracking">
                 <AccordionTrigger>
                   <SectionLabel section="time-tracking" count={errorCountFor('time-tracking')} />
@@ -842,44 +837,13 @@ export default function UserDetailContent({
                   <div className="space-y-4">
                     {!enableTimeTracking && (
                       <p className="text-xs text-zinc-400">
-                        Grant Time Tracking access above to configure these settings.
+                        Grant Time Tracking access above to configure leave.
                       </p>
                     )}
 
-                    <div className="flex items-center justify-between gap-4">
-                      <Label
-                        htmlFor={fid('enableIdleTimeout')}
-                        className={cn('text-sm', !enableTimeTracking && 'text-zinc-500')}
-                      >
-                        Enable Idle Timeout
-                      </Label>
-                      <Switch
-                        id={fid('enableIdleTimeout')}
-                        checked={formData.enableIdleTimeout}
-                        onCheckedChange={(checked) => handleChange('enableIdleTimeout', checked === true)}
-                        disabled={!enableTimeTracking}
-                      />
-                    </div>
-
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <Label
-                          htmlFor={fid('enableScreenshots')}
-                          className={cn('text-sm', !enableTimeTracking && 'text-zinc-500')}
-                        >
-                          Enable Screenshots
-                        </Label>
-                        <p className="mt-1 text-xs text-zinc-400">
-                          Activity % is not monitored when disabled.
-                        </p>
-                      </div>
-                      <Switch
-                        id={fid('enableScreenshots')}
-                        checked={formData.enableScreenshots}
-                        onCheckedChange={(checked) => handleChange('enableScreenshots', checked === true)}
-                        disabled={!enableTimeTracking}
-                      />
-                    </div>
+                    <p className="text-xs text-zinc-400">
+                      Idle timeout and screenshot settings are managed in Shift Management → Organization Settings.
+                    </p>
 
                     <div className="flex items-center justify-between gap-4">
                       <Label

@@ -1846,6 +1846,21 @@
       "collectionGroup": "snips",
       "fieldPath": "description",
       "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "timeTrackingOverrides",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "idleTimeoutMinutes",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "groups",
+      "fieldPath": "timeTrackingOverrides",
+      "indexes": []
     }
   ]
 }

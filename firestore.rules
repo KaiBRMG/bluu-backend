@@ -569,5 +569,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Organization-wide settings (doc id = area, e.g. `time-tracking`).
+    // Read and written only by /api/admin/time-tracking-settings; the resolved
+    // values reach each client on its own users/{uid} doc, so no client ever
+    // needs this collection. Admin SDK only.
+    match /org-settings/{docId} {
+      allow read, write: if false;
+    }
+
   }
+
 }

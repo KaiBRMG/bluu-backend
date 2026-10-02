@@ -3,6 +3,7 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb, adminAuth } from '@/lib/firebase-admin';
 import { getUserById, invalidateUserCache } from '@/lib/services/userService';
 import { recomputeUserPermissions } from '@/lib/services/pageService';
+import { recomputeTimeTrackingSettings } from '@/lib/services/timeTrackingSettingsService';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -99,6 +100,9 @@ export const POST = withAuth(async (
         ]);
       }))
     ).catch(err => console.error('[GroupMembers POST] Failed to update claims/permissions:', err));
+    // Group overrides follow membership — re-resolve time-tracking settings.
+    recomputeTimeTrackingSettings(uids)
+      .catch(err => console.error('[GroupMembers POST] Failed to recompute time-tracking settings:', err));
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
@@ -168,6 +172,7 @@ export const DELETE = withAuth(async (
     Promise.all([
       adminAuth.setCustomUserClaims(uid, { admin: isAdmin }),
       recomputeUserPermissions(uid, updatedGroups),
+      recomputeTimeTrackingSettings([uid]),
     ]).catch(err => console.error('[GroupMembers DELETE] Failed to update claims/permissions:', err));
 
     return NextResponse.json({ success: true });

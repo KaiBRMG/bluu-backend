@@ -10,6 +10,7 @@ import {
 } from '@/lib/services/userService';
 import { getAllGroups } from '@/lib/services/groupService';
 import { recomputeUserPermissions } from '@/lib/services/pageService';
+import { recomputeTimeTrackingSettings } from '@/lib/services/timeTrackingSettingsService';
 import { invalidateDisplayNamesCache } from '@/app/api/users/display-names/route';
 import { normalizeEmail, isPlausibleEmail } from '@/lib/authEmail';
 import type { DecodedIdToken } from 'firebase-admin/auth';
@@ -217,6 +218,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     // leaves a registered user with no pages rather than an orphaned claim.
     await addUserToGroup(uid, groupId);
     await recomputeUserPermissions(uid, [groupId]);
+    // Born with the built-in defaults; resolve against org + group settings.
+    await recomputeTimeTrackingSettings([uid]);
 
     invalidateUserCache(uid);
     invalidateAdminUsersCache();

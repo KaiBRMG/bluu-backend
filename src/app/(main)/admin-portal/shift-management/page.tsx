@@ -37,6 +37,10 @@ const AdminLeave = dynamic(
   () => import("@/components/admin/shift-management/AdminLeave"),
   { loading: () => <PanelSkeleton /> }
 );
+const OrganizationSettings = dynamic(
+  () => import("@/components/admin/shift-management/OrganizationSettings"),
+  { loading: () => <PanelSkeleton /> }
+);
 const AdminAnalytics = dynamic(
   () => import("@/components/admin/shift-management/analytics/AdminAnalytics"),
   { loading: () => <PanelSkeleton /> }
@@ -67,6 +71,7 @@ export default function ShiftManagementPage() {
                 <TabsTrigger value="screenshots">Screenshots</TabsTrigger>
                 <TabsTrigger value="leave">Leave</TabsTrigger>
                 <TabsTrigger value="analytics">Analytics</TabsTrigger>
+                <TabsTrigger value="organization-settings">Organization Settings</TabsTrigger>
               </TabsList>
             </div>
 
@@ -83,6 +88,7 @@ export default function ShiftManagementPage() {
               <TabsContent value="analytics">
                 <AdminAnalytics selectedUserId={selectedUserId} onUserChange={setSelectedUserId} />
               </TabsContent>
+              <TabsContent value="organization-settings"><OrganizationSettings /></TabsContent>
             </div>
           </Tabs>
         </div>

@@ -16,6 +16,7 @@ import {
 import { useUserData } from '@/hooks/useUserData';
 import { getAppInfo } from '@/lib/appVersion';
 import { markScreenshotBugFixed } from '@/lib/markScreenshotBugFixed';
+import { idleThresholdSeconds, normalizeIdleInputMode, type IdleInputMode } from '@/lib/timeTrackingSettings';
 import { buildTimerWidgetPayload, pushTimerWidgetState, hideTimerWidget } from '@/lib/timerWidget';
 import { toast } from 'sonner';
 import * as Sentry from '@sentry/nextjs';
@@ -24,10 +25,26 @@ const HEARTBEAT_INTERVAL_MS   = 15 * 60 * 1000; // 15 minutes — working state 
 const SLEEP_GAP_THRESHOLD_MS  = HEARTBEAT_INTERVAL_MS + 5 * 60 * 1000; // 20 min — gap larger than this implies the process was suspended
 const IDLE_CHECK_INTERVAL_MS  = 30_000;          // poll for idle every 30s
 const IDLE_RESUME_CHECK_MS    = 5_000;           // poll for resume every 5s
-const IDLE_THRESHOLD_SECONDS  = 900;             // 15 minutes without input = idle
 const LOCK_CONFIRM_IDLE_SECONDS = 60;            // a `lock` is only "user walked away" if they were active just before it
 const SAMPLE_GAP_TOLERANCE_MS = 60_000;          // native sampler ticks every 5s — a hole this big means the process was stopped
 const BREAK_DURATION_SECONDS  = 2700;            // 45-minute break allowance per period
+
+/**
+ * Seconds since the last input that COUNTS for this user's idle policy.
+ * `any` (and any build without per-input measurement, pre-v0.15.0, or a platform
+ * that cannot split it) reads the OS's combined counter — the original behaviour.
+ */
+async function readIdleSeconds(
+  api: NonNullable<Window['electronAPI']>['timeTracking'],
+  mode: IdleInputMode,
+): Promise<number> {
+  if (mode !== 'any' && api.getInputIdleTimes) {
+    const times = await api.getInputIdleTimes();
+    const perType = times[mode];
+    return typeof perType === 'number' ? perType : times.any;
+  }
+  return api.getIdleTime();
+}
 const WORK_PERIOD_SECONDS     = 8 * 3600;        // new break period unlocked every 8 hours
 const SCREENSHOT_WINDOW_MS    = 15 * 60 * 1000;
 const STALE_THRESHOLD_MS      = 15 * 60 * 1000; // 15 minutes — beyond this, don't resume
@@ -346,7 +363,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
    * Healing moves the RENDERER to the log's state — it does not write a closing
    * event. Writing one would assert that the user resumed at this instant, which
    * is precisely what we do not know; the OS does. Landing in `idle` hands the
-   * question to the resume poll, which reads `getIdleTime()` within
+   * question to the resume poll, which reads `readIdleSeconds()` within
    * IDLE_RESUME_CHECK_MS and returns to working on the first real input, closing
    * the span at a timestamp we can actually justify.
    *
@@ -663,6 +680,13 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
 
   // ─── Idle Detection ──────────────────────────────────────────────────
   const enableIdleTimeout = userData?.enableIdleTimeout ?? true;
+  // Per-user, resolved org → group → user and written onto the user doc by
+  // timeTrackingSettingsService, so it arrives on the live snapshot — an admin
+  // change reaches a running session without a reload.
+  const idleThreshold = idleThresholdSeconds(userData?.idleTimeoutMinutes);
+  // Which input counts as activity (keyboard, mouse, or either) — same
+  // resolution path, so it also changes live.
+  const idleInputMode = normalizeIdleInputMode(userData?.idleInputMode);
 
   useEffect(() => {
     if (idleCheckRef.current) {
@@ -707,8 +731,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
           if (sid) await reconcileLogState(sid);
           if (displayStateRef.current !== 'working') return;
 
-          const idleTime = await electronAPI.timeTracking.getIdleTime();
-          if (idleTime >= IDLE_THRESHOLD_SECONDS) {
+          const idleTime = await readIdleSeconds(electronAPI.timeTracking, idleInputMode);
+          if (idleTime >= idleThreshold) {
             isTransitioningRef.current = true;
             try {
               const sid = sessionIdRef.current;
@@ -746,8 +770,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         if (isTransitioningRef.current) return;
         if (displayStateRef.current !== 'idle') return;
         try {
-          const idleTime = await electronAPI.timeTracking.getIdleTime();
-          if (idleTime < IDLE_THRESHOLD_SECONDS) {
+          const idleTime = await readIdleSeconds(electronAPI.timeTracking, idleInputMode);
+          if (idleTime < idleThreshold) {
             isTransitioningRef.current = true;
             try {
               const sid = sessionIdRef.current;
@@ -777,7 +801,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         idleCheckRef.current = null;
       }
     };
-  }, [displayState, enableIdleTimeout, syncTransition, reconcileLogState]);
+  }, [displayState, enableIdleTimeout, idleThreshold, idleInputMode, syncTransition, reconcileLogState]);
 
   // ─── Native power/lock events (Electron) ─────────────────────────────
   // Native suspend/resume/lock/unlock carry exact timestamps, so they beat both
@@ -792,8 +816,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
      * working → idle, crediting the segment worked up to `atMs`.
      *
      * `trigger` is recorded on the event because the three producers of
-     * `idle-start` carry very different confidence: the 30s poll has 15 minutes
-     * of measured silence behind it, `suspend` is certain, and `lock` is only a
+     * `idle-start` carry very different confidence: the 30s poll has the user's
+     * full idle timeout of measured silence behind it, `suspend` is certain, and `lock` is only a
      * heuristic (LOCK_CONFIRM_IDLE_SECONDS). Collapsing them into one
      * indistinguishable event is what made the false-idle reports impossible to
      * attribute — see documentation/time-tracking.md.
@@ -835,9 +859,9 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
           // which by definition only happens after an inactivity timeout, so it
           // says nothing new about presence. Trusting it blindly marks a user
           // reading on-screen idle at their screensaver timeout (often 5 min)
-          // instead of the real 15-min threshold. Let the idle poll judge those.
+          // instead of their configured idle threshold. Let the idle poll judge those.
           if (isTransitioningRef.current || displayStateRef.current !== 'working') return;
-          const idleTime = await electronAPI.timeTracking.getIdleTime();
+          const idleTime = await readIdleSeconds(electronAPI.timeTracking, idleInputMode);
           if (idleTime >= LOCK_CONFIRM_IDLE_SECONDS) return;
           if (isTransitioningRef.current || displayStateRef.current !== 'working') return;
           isTransitioningRef.current = true;
@@ -850,8 +874,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         // Must be a check, not an assumption: after a resume the OS idle counter
         // can still read high, in which case the poll handles it.
         if (isTransitioningRef.current || displayStateRef.current !== 'idle') return;
-        const idleTime = await electronAPI.timeTracking.getIdleTime();
-        if (idleTime >= IDLE_THRESHOLD_SECONDS) return;
+        const idleTime = await readIdleSeconds(electronAPI.timeTracking, idleInputMode);
+        if (idleTime >= idleThreshold) return;
         if (isTransitioningRef.current || displayStateRef.current !== 'idle') return;
 
         isTransitioningRef.current = true;
@@ -876,7 +900,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     return () => {
       electronAPI.power?.removeEventListener();
     };
-  }, [enableIdleTimeout, syncTransition]);
+  }, [enableIdleTimeout, idleThreshold, idleInputMode, syncTransition]);
 
   // ─── Timer Tick (1s) ─────────────────────────────────────────────────
   useEffect(() => {

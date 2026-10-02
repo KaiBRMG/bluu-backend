@@ -83,6 +83,7 @@ All renderer↔main communication goes through `preload.js` → `window.electron
 | `gologin.onCloseBlocked(cb)` | main→renderer | `gologin:close-blocked` | Main held the window open because sessions are live — either a commit in flight (`gl.stop()` uploads cookies and logins) or an open Orbita the window close would **not** close. Main draws no UI; the renderer owns the dialog. Same `removeAllListeners` caveat |
 | `gologin.onOrbitaChanged(cb)` | main→renderer | `gologin:orbita-changed` | Download/install progress, throttled to 250ms. Fires **during a launch too**: the Orbita version a profile needs comes from its own user agent, so an update can start mid-session and the window blocks on it. Same `removeAllListeners` caveat |
 | `timeTracking.getIdleTime()` | invoke | `timeTracking:getIdleTime` | `powerMonitor.getSystemIdleTime()` |
+| `timeTracking.getInputIdleTimes()` | invoke | `timeTracking:getInputIdleTimes` | `{ any, keyboard, mouse }` seconds since last input of each kind; a per-type field is `null` where unmeasurable. Optional — v0.15.0+. See [Per-input idle](#per-input-idle-keyboard-vs-mouse) |
 | `timeTracking.getActivitySince(sinceMs)` | invoke | `timeTracking:getActivitySince` | 5s idle-time samples (45-min rolling buffer) for accurate activity % |
 | `timeTracking.captureScreenshot()` | invoke | `timeTracking:captureScreenshot` | `desktopCapturer`, all screens → base64 PNGs |
 | `timeTracking.setPowerSaveBlocker(bool)` | invoke | `timeTracking:setPowerSaveBlocker` | keep display awake while working |
@@ -354,7 +355,7 @@ So the flush now runs on: the **Windows** X button, and a real quit on either pl
 
 ## Power events → precise session boundaries
 
-Main forwards `powerMonitor` `suspend`/`resume`/`lock-screen`/`unlock-screen` as a single `power:event` IPC. `TimeTrackingContext` transitions to **idle immediately** on `lock`/`suspend` while working (instead of waiting up to 15 min for the idle poll); the idle-resume poll returns to `working` on unlock/resume. Feature-detected — no-ops on builds that don't forward power events.
+Main forwards `powerMonitor` `suspend`/`resume`/`lock-screen`/`unlock-screen` as a single `power:event` IPC. `TimeTrackingContext` transitions to **idle immediately** on `lock`/`suspend` while working (instead of waiting up to the user's idle timeout — default 6 min — for the idle poll); the idle-resume poll returns to `working` on unlock/resume. Feature-detected — no-ops on builds that don't forward power events.
 
 ## Version reporting & the update prompt
 
@@ -561,3 +562,19 @@ The reset repairs the **next** scheduled capture, not the one that just failed. 
 - [ ] Announcing the release? Set `APP_UPDATE.releaseNote` **and rewrite `notifications.releaseNote()`'s copy in the same commit** — a bumped version pointing at the previous release's wording is the failure mode. This one may ship with the code (step 1), not at step 5.
 - [ ] Verify the release has `latest-mac.yml` + **both** `.dmg` and **both** `.zip` before arming. A missing zip or manifest = auto-update silently dead. The x64 `.dmg` has **no arch suffix** (`Bluu Backend-0.8.0.dmg` is Intel) — label the download page accordingly, or Apple Silicon users end up on Rosetta and stay on x64 updates forever.
 - [ ] Prefer `compulsory: false` on **Windows** for routine releases — updating there means quitting and reinstalling by hand, so blocking is a genuine interruption. macOS installs in one click, so compulsory is cheap there.
+
+## Per-input idle (keyboard vs mouse)
+
+`powerMonitor.getSystemIdleTime()` only reports **combined** idle. The `idleInputMode` time-tracking setting ([time-tracking.md §3f](time-tracking.md#3f-time-tracking-settings-organization--group--user)) needs keyboard and mouse separately, so `timeTracking:getInputIdleTimes` measures them natively (v0.15.0+). Only last-input **times** are kept — never which key, never pointer position.
+
+| Platform | Mechanism | Permission |
+|---|---|---|
+| macOS | `CGEventSourceSecondsSinceLastEventType` (CoreGraphics, HID system state) via **koffi** FFI. Keyboard = `keyDown`/`flagsChanged`; mouse = move/drag/down/scroll. Reads the HID system's last-event times — **not an event tap** | **None** (no Accessibility / Input Monitoring prompt) |
+| Windows | **uiohook-napi** low-level hook on its **own thread** — an LL hook on Electron's main thread would lag system-wide input whenever main is busy. Started **lazily** on the first request, so users on `any` never install a hook. Seeded from combined idle at start | None |
+| Other | none — fields `null` | — |
+
+- **Every per-type value is clamped to `>= any`** — one input type cannot be more recent than "any input".
+- **Any failure (native load, platform) yields `null` and the renderer falls back to combined idle** — the `any` behaviour. Never throw from this handler.
+- **Packaging:** `koffi` is pinned to **2.x** because 2.x bundles every platform's prebuilt binary in one package. koffi 3 moved binaries to per-arch optional deps, and the mac CI job builds **arm64 and x64 on one arm64 runner** — `npm ci` would install only the arm64 binary and Intel Macs would silently fall back to `any`. Unused koffi platforms and both packages' sources are excluded via `build.files`. uiohook-napi ships N-API prebuilds for both targets.
+- **Windows caveat:** a global keyboard hook in an unsigned app can attract antivirus heuristics. If AV reports surface, that is where to look first.
+

@@ -1,6 +1,6 @@
 {
   "name": "bluu-backend",
-  "version": "0.14.2",
+  "version": "0.15.0",
   "description": "Bluu Rock MGMT SaaS",
   "author": "BluuRockMGMT",
   "private": true,
@@ -17,7 +17,9 @@
   "dependencies": {
     "electron-updater": "^6.6.2",
     "glob": "^13.0.6",
-    "gologin": "^3.0.3"
+    "gologin": "^3.0.3",
+    "koffi": "^2.16.3",
+    "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {
     "cross-env": "^10.1.0",
@@ -43,7 +45,11 @@
       "public/logo/icon.ico",
       "public/tray/*.png",
       "public/mixkit-message-pop-alert-2354.mp3",
-      "package.json"
+      "package.json",
+      "!node_modules/koffi/{src,vendor,doc}/**",
+      "!node_modules/koffi/build/koffi/{freebsd,linux,musl,openbsd}_*/**",
+      "!node_modules/koffi/build/koffi/win32_{ia32,arm64}/**",
+      "!node_modules/uiohook-napi/{libuiohook,src}/**"
     ],
     "asarUnpack": [
       "node_modules/gologin/**",

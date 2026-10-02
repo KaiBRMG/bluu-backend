@@ -5,6 +5,7 @@ import { notifications } from '@/lib/notificationContent';
 import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { normalizeEmail } from '@/lib/authEmail';
 import { GROUP_DISPLAY_NAMES } from '@/types/firestore';
+import { DEFAULT_TIME_TRACKING_SETTINGS } from '@/lib/timeTrackingSettings';
 
 /** Server-only index: doc id = normalised email, body = { uid, email }. */
 export const AUTH_EMAIL_COLLECTION = 'auth-emails';
@@ -302,8 +303,13 @@ export function buildNewUserDoc(record: NewUserRecord): Record<string, unknown> 
     hasPaidLeave: false,
     remainingUnpaidLeave: 4,
     remainingPaidLeave: 10,
-    enableIdleTimeout: true,
-    enableScreenshots: true,
+    // Placeholders — the registration route resolves the real values from
+    // org/group settings right after (recomputeTimeTrackingSettings).
+    enableIdleTimeout: DEFAULT_TIME_TRACKING_SETTINGS.enableIdleTimeout,
+    idleTimeoutMinutes: DEFAULT_TIME_TRACKING_SETTINGS.idleTimeoutMinutes,
+    idleInputMode: DEFAULT_TIME_TRACKING_SETTINGS.idleInputMode,
+    enableScreenshots: DEFAULT_TIME_TRACKING_SETTINGS.enableScreenshots,
+    timeTrackingOverrides: {},
     // Rotated again on first login; a placeholder keeps the field's type stable.
     sessionToken: randomUUID(),
     hasAcceptedTerms: false,

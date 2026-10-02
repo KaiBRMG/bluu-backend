@@ -122,6 +122,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Time tracking
   timeTracking: {
     getIdleTime: () => ipcRenderer.invoke('timeTracking:getIdleTime'),
+    // { any, keyboard, mouse } seconds since last input; a per-type field is
+    // null where the platform can't measure it (renderer falls back to `any`).
+    getInputIdleTimes: () => ipcRenderer.invoke('timeTracking:getInputIdleTimes'),
     captureScreenshot: () => ipcRenderer.invoke('timeTracking:captureScreenshot'),
     setPowerSaveBlocker: (enable) => ipcRenderer.invoke('timeTracking:setPowerSaveBlocker', enable),
     getActivitySince: (sinceMs) => ipcRenderer.invoke('timeTracking:getActivitySince', sinceMs),
