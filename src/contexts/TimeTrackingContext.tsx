@@ -28,26 +28,38 @@ const IDLE_RESUME_CHECK_MS    = 5_000;           // poll for resume every 5s
 const LOCK_CONFIRM_IDLE_SECONDS = 60;            // a `lock` is only "user walked away" if they were active just before it
 const SAMPLE_GAP_TOLERANCE_MS = 60_000;          // native sampler ticks every 5s — a hole this big means the process was stopped
 const BREAK_DURATION_SECONDS  = 2700;            // 45-minute break allowance per period
+const WORK_PERIOD_SECONDS     = 8 * 3600;        // new break period unlocked every 8 hours
+const SCREENSHOT_WINDOW_MS    = 15 * 60 * 1000;
+const STALE_THRESHOLD_MS      = 15 * 60 * 1000; // 15 minutes — beyond this, don't resume
 
 /**
  * Seconds since the last input that COUNTS for this user's idle policy.
- * `any` (and any build without per-input measurement, pre-v0.15.0, or a platform
- * that cannot split it) reads the OS's combined counter — the original behaviour.
+ *
+ * Backwards compatible by construction — every path that cannot honour the
+ * policy degrades to the OS's combined counter, i.e. the original `any`
+ * behaviour, and never to "no idle detection":
+ *   • `any` mode                         → combined counter (unchanged path)
+ *   • build without `getInputIdleTimes`  → combined (Electron < v0.15.0)
+ *   • IPC rejects / returns malformed    → combined (a throw here would fail
+ *     every idle poll, and a user who can never go idle is the worst outcome)
+ *   • per-type field null (platform can't split input) → that reply's `any`
  */
 async function readIdleSeconds(
   api: NonNullable<Window['electronAPI']>['timeTracking'],
   mode: IdleInputMode,
 ): Promise<number> {
-  if (mode !== 'any' && api.getInputIdleTimes) {
-    const times = await api.getInputIdleTimes();
-    const perType = times[mode];
-    return typeof perType === 'number' ? perType : times.any;
+  if (mode !== 'any' && typeof api.getInputIdleTimes === 'function') {
+    try {
+      const times = await api.getInputIdleTimes();
+      const perType = times?.[mode];
+      if (typeof perType === 'number' && Number.isFinite(perType)) return perType;
+      if (typeof times?.any === 'number' && Number.isFinite(times.any)) return times.any;
+    } catch (err) {
+      console.warn('[TimeTracking] Per-input idle read failed; using combined idle:', err);
+    }
   }
   return api.getIdleTime();
 }
-const WORK_PERIOD_SECONDS     = 8 * 3600;        // new break period unlocked every 8 hours
-const SCREENSHOT_WINDOW_MS    = 15 * 60 * 1000;
-const STALE_THRESHOLD_MS      = 15 * 60 * 1000; // 15 minutes — beyond this, don't resume
 
 /** Total break seconds allowed based on how many 8-hour periods have elapsed. */
 function computeBreakAllowance(workingSeconds: number): number {

@@ -226,7 +226,7 @@ function OrgDefaultsSection({
               {SETTING_LABELS.idleInputMode}
             </span>
             <p className="mt-1 text-xs text-zinc-400">
-              Which input keeps a session active. With Keyboard only, moving the mouse does not stop it going idle; with Mouse only, typing does not.
+              Which input keeps a session active. With Keyboard only, moving the mouse does not stop it going idle; with Mouse only, typing does not. Needs app v0.15.0 or later — older versions count either input.
             </p>
           </div>
           <ToggleGroup
