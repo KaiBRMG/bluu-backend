@@ -216,6 +216,7 @@ export const APP_UPDATE: AppUpdateConfig = {
   // win: null,
   win: { latestVersion: '0.15.2', compulsory: true, allUsers: false, uids: [], groups: ['CA'] },
 
+  
   // `/update`, not `/download`: this link is only ever opened for someone who
   // ALREADY has the app, so it must not put the one-time certificate sequence in
   // front of them. `/download` remains the first-install page, and `/update`
