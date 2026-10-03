@@ -25,10 +25,18 @@ jobs:
         working-directory: electron
         run: npm ci
 
+      # npmRebuild=false: every native dep here is N-API and already installed
+      # for win32-x64 by `npm ci` (uiohook-napi + koffi ship prebuilds, sqlite3
+      # pulls a napi prebuild), so the Electron rebuild has nothing to do. Left
+      # on, @electron/rebuild misses uiohook-napi's prebuild (it is named
+      # uiohook-napi.node, not node.napi.node) and compiles it from source with
+      # node-gyp, which dies with "Could not find any Visual Studio installation".
+      # Windows-only: the mac job builds x64 on an arm64 runner and NEEDS the
+      # rebuild step to swap in the other arch's binaries.
       - name: Build Windows installer
         working-directory: electron
         env:
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run dist:win -- --publish always
+        run: npm run dist:win -- --publish always -c.npmRebuild=false
