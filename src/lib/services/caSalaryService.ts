@@ -291,12 +291,15 @@ function serialiseOverride(doc: CaSalaryOverrideDocument): SalaryDayOverride {
   const fields: SalaryDayOverride['fields'] = {};
   for (const [key, entry] of Object.entries(doc.fields ?? {})) {
     if (!entry) continue;
+    // Optional keys are omitted, never set to `undefined`: these entries are
+    // copied verbatim into `day.overrides` and frozen by `finalizeMonth`, and
+    // Firestore rejects an `undefined` value — the whole finalise then 500s.
     fields[key as SalaryOverrideField] = {
       value: entry.value,
       setBy: entry.setBy,
-      setByName: entry.setByName,
+      ...(entry.setByName ? { setByName: entry.setByName } : {}),
       setAt: entry.setAt?.toDate?.()?.toISOString() ?? new Date(0).toISOString(),
-      reason: entry.reason,
+      ...(entry.reason ? { reason: entry.reason } : {}),
     };
   }
   return { day: doc.day, userId: doc.userId, fields, note: doc.note ?? null };
