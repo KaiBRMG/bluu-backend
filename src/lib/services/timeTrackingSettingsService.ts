@@ -10,9 +10,22 @@ import {
   type GroupOverrideSource,
   type TimeTrackingSettings,
 } from '../timeTrackingSettings';
+import { normalizeShiftBreakPolicy, type ShiftBreakPolicy } from '../shiftBreakPolicy';
 
 /** Single doc holding the organization-wide defaults. Server-only (rules deny clients). */
 export const ORG_TIME_TRACKING_REF = () => adminDb.collection('org-settings').doc('time-tracking');
+
+/**
+ * Organization-only shift-break policy (no group/user overrides, nothing
+ * denormalised onto user docs). Its own doc so the org-defaults `set()` above
+ * can never wipe it. Server-only, like the rest of `org-settings`.
+ */
+export const ORG_SHIFT_BREAKS_REF = () => adminDb.collection('org-settings').doc('shift-breaks');
+
+export async function getShiftBreakPolicy(): Promise<ShiftBreakPolicy> {
+  const snap = await ORG_SHIFT_BREAKS_REF().get();
+  return normalizeShiftBreakPolicy(snap.data());
+}
 
 export async function getOrgTimeTrackingSettings(): Promise<TimeTrackingSettings> {
   const snap = await ORG_TIME_TRACKING_REF().get();

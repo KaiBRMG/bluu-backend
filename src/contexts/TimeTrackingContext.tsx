@@ -17,6 +17,7 @@ import { useUserData } from '@/hooks/useUserData';
 import { getAppInfo } from '@/lib/appVersion';
 import { markScreenshotBugFixed } from '@/lib/markScreenshotBugFixed';
 import { idleThresholdSeconds, normalizeIdleInputMode, type IdleInputMode } from '@/lib/timeTrackingSettings';
+import { breakBlockAt, breakBlockMessage, nextBreakBlockBoundary, type BreakBlockWindow } from '@/lib/shiftBreakPolicy';
 import { buildTimerWidgetPayload, pushTimerWidgetState, hideTimerWidget } from '@/lib/timerWidget';
 import { toast } from 'sonner';
 import * as Sentry from '@sentry/nextjs';
@@ -31,6 +32,7 @@ const BREAK_DURATION_SECONDS  = 2700;            // 45-minute break allowance pe
 const WORK_PERIOD_SECONDS     = 8 * 3600;        // new break period unlocked every 8 hours
 const SCREENSHOT_WINDOW_MS    = 15 * 60 * 1000;
 const STALE_THRESHOLD_MS      = 15 * 60 * 1000; // 15 minutes — beyond this, don't resume
+const BREAK_POLICY_REFRESH_MS = 15 * 60 * 1000; // re-read shift no-break windows while a session runs
 
 /**
  * Seconds since the last input that COUNTS for this user's idle policy.
@@ -74,6 +76,8 @@ interface TimeTrackingContextType {
   breakRemainingSeconds: number | null;
   breakUsedSeconds:      number;
   breakAllowanceSeconds: number;  // total break seconds allowed so far (grows every 8h)
+  /** Non-null while a break may not start: first/last hour of a scheduled shift (§3g). */
+  breakBlock:            BreakBlockWindow | null;
   startTracking:         () => Promise<void>;
   stopTracking:          () => Promise<void>;
   pauseTracking:         () => Promise<void>;
@@ -230,6 +234,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading]                       = useState(false);
   const [isHydrating, setIsHydrating]                   = useState(true);
   const [enableScreenshots, setEnableScreenshots]       = useState(false);
+  const [breakBlockWindows, setBreakBlockWindows]       = useState<BreakBlockWindow[]>([]);
+  const [breakBlock, setBreakBlock]                     = useState<BreakBlockWindow | null>(null);
 
   // Cumulative working seconds across the session (restored from buffer on crash recovery)
   const sessionBaseSecondsRef = useRef(0);
@@ -626,6 +632,48 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       electronAPI.removeAppClosingListeners();
     };
   }, [clockOutAndFlush]);
+
+  // ─── Shift-edge break policy (§3g) ──────────────────────────────────
+  // Read over HTTP, not compiled in or denormalised, so an admin flipping the
+  // org setting reaches a renderer that has been open for weeks (rule 9c).
+  // Fetched at session start and refreshed on an interval rather than on the
+  // Break press, so starting a break is never gated on the network. A failed
+  // fetch keeps the last known windows; none known means unrestricted.
+  const sessionActive = displayState !== 'clocked-out' && !!sessionId;
+  useEffect(() => {
+    if (!sessionActive) {
+      setBreakBlockWindows([]);
+      return;
+    }
+    let cancelled = false;
+    const load = () => {
+      apiCall('break-policy', 'GET')
+        .then((data: { windows?: BreakBlockWindow[] }) => {
+          if (!cancelled) setBreakBlockWindows(Array.isArray(data.windows) ? data.windows : []);
+        })
+        .catch(err => console.warn('[TimeTracking] Break policy fetch failed:', err));
+    };
+    load();
+    const id = setInterval(load, BREAK_POLICY_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [sessionActive, sessionId, apiCall]);
+
+  // State that flips exactly at each window edge, independent of the 1 Hz tick.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const evaluate = () => {
+      const now = Date.now();
+      setBreakBlock(breakBlockAt(breakBlockWindows, now));
+      const next = nextBreakBlockBoundary(breakBlockWindows, now);
+      // setTimeout's ceiling is ~24.8 days; windows only span ~a day anyway.
+      if (next !== null) timer = setTimeout(evaluate, Math.min(next - now + 50, 2 ** 31 - 1));
+    };
+    evaluate();
+    return () => { if (timer) clearTimeout(timer); };
+  }, [breakBlockWindows]);
 
   // ─── Heartbeat (working state only) ─────────────────────────────────
   useEffect(() => {
@@ -1384,6 +1432,14 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     if (!sid) return;
     // Block break if the full allowance for the current period has been used
     if (breakUsedSecondsRef.current >= computeBreakAllowance(sessionBaseSecondsRef.current)) return;
+    // First/last hour of a scheduled shift. Evaluated against windows already
+    // fetched, so this check never waits on the network (§3c).
+    const block = breakBlockAt(breakBlockWindows, Date.now());
+    if (block) {
+      const { title, detail } = breakBlockMessage(block, userData?.timezone);
+      toast.error(title, { description: detail });
+      return;
+    }
     setIsLoading(true);
     try {
       // Stop the tick immediately so no further updates race with state changes
@@ -1410,7 +1466,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, displayState, sessionId, entryStartTime, syncTransition]);
+  }, [isLoading, displayState, sessionId, entryStartTime, syncTransition, breakBlockWindows, userData?.timezone]);
 
   const endBreak = useCallback(async () => {
     if (isLoading || displayState !== 'on-break') return;
@@ -1444,6 +1500,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     breakRemainingSeconds,
     breakUsedSeconds,
     breakAllowanceSeconds,
+    breakBlock,
     startTracking,
     stopTracking,
     pauseTracking,
@@ -1455,7 +1512,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     isHydrating,
   }), [
     displayState, sessionId, elapsedSeconds, breakRemainingSeconds,
-    breakUsedSeconds, breakAllowanceSeconds, startTracking, stopTracking,
+    breakUsedSeconds, breakAllowanceSeconds, breakBlock, startTracking, stopTracking,
     pauseTracking, resumeFromPause, startBreak, endBreak, clockOutAndFlush,
     isLoading, isHydrating,
   ]);

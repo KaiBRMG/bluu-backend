@@ -9,6 +9,7 @@ import type {
   TimeTrackingSettingKey,
   TimeTrackingSettings,
 } from '@/lib/timeTrackingSettings';
+import type { ShiftBreakPolicy } from '@/lib/shiftBreakPolicy';
 
 export interface TimeTrackingSettingsGroup {
   id: string;
@@ -33,6 +34,7 @@ export type OverridePatch = Partial<Record<TimeTrackingSettingKey, boolean | num
 
 interface State {
   org: TimeTrackingSettings | null;
+  shiftBreaks: ShiftBreakPolicy | null;
   groups: TimeTrackingSettingsGroup[];
   users: TimeTrackingSettingsUser[];
   loading: boolean;
@@ -49,7 +51,7 @@ const ADMIN_USERS_CACHE_KEY = 'bluu_admin_users_v1';
  */
 export function useTimeTrackingSettings() {
   const { user } = useAuth();
-  const [state, setState] = useState<State>({ org: null, groups: [], users: [], loading: true, error: null });
+  const [state, setState] = useState<State>({ org: null, shiftBreaks: null, groups: [], users: [], loading: true, error: null });
 
   const fetchData = useCallback(async () => {
     if (!user) return;
@@ -62,7 +64,7 @@ export function useTimeTrackingSettings() {
         throw new Error(res.status === 403 ? 'You do not have access to these settings' : `Request failed: ${res.status}`);
       }
       const data = await res.json();
-      setState({ org: data.org, groups: data.groups ?? [], users: data.users ?? [], loading: false, error: null });
+      setState({ org: data.org, shiftBreaks: data.shiftBreaks ?? null, groups: data.groups ?? [], users: data.users ?? [], loading: false, error: null });
     } catch (err) {
       setState(prev => ({ ...prev, loading: false, error: err instanceof Error ? err.message : 'Unknown error' }));
     }
@@ -94,6 +96,10 @@ export function useTimeTrackingSettings() {
   );
 
   const saveOrg = useCallback((settings: TimeTrackingSettings) => save({ scope: 'org', settings }), [save]);
+  const saveShiftBreaks = useCallback(
+    (policy: ShiftBreakPolicy) => save({ scope: 'shift-breaks', policy }),
+    [save],
+  );
   const saveGroup = useCallback(
     (id: string, overrides: OverridePatch) => save({ scope: 'group', id, overrides }),
     [save],
@@ -104,7 +110,7 @@ export function useTimeTrackingSettings() {
   );
 
   return useMemo(
-    () => ({ ...state, refetch: fetchData, saveOrg, saveGroup, saveUser }),
-    [state, fetchData, saveOrg, saveGroup, saveUser],
+    () => ({ ...state, refetch: fetchData, saveOrg, saveShiftBreaks, saveGroup, saveUser }),
+    [state, fetchData, saveOrg, saveShiftBreaks, saveGroup, saveUser],
   );
 }

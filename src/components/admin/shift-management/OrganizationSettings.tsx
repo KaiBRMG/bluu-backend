@@ -19,6 +19,7 @@ import {
   type TimeTrackingSettingKey,
   type TimeTrackingSettings,
 } from '@/lib/timeTrackingSettings';
+import { DEFAULT_SHIFT_BREAK_POLICY, type ShiftBreakPolicy } from '@/lib/shiftBreakPolicy';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -89,7 +90,8 @@ function savedToast(updatedUsers: number) {
 // ─── Panel ─────────────────────────────────────────────────────────────
 
 export default function OrganizationSettings() {
-  const { org, groups, users, loading, error, saveOrg, saveGroup, saveUser } = useTimeTrackingSettings();
+  const { org, shiftBreaks, groups, users, loading, error, saveOrg, saveShiftBreaks, saveGroup, saveUser } =
+    useTimeTrackingSettings();
 
   if (loading) {
     return (
@@ -112,6 +114,7 @@ export default function OrganizationSettings() {
         then the organization default. Anything not set at a level is inherited from the one below it.
       </p>
       <OrgDefaultsSection org={org} onSave={saveOrg} />
+      <ShiftBreaksSection policy={shiftBreaks ?? DEFAULT_SHIFT_BREAK_POLICY} onSave={saveShiftBreaks} />
       <GroupsSection org={org} groups={groups} onSave={saveGroup} />
       <UsersSection org={org} groups={groups} users={users} onSave={saveUser} />
     </div>
@@ -276,6 +279,81 @@ function OrgDefaultsSection({
             </Button>
             <Button size="sm" onClick={handleSave} disabled={saving || !minutesValid}>
               {saving ? 'Saving…' : 'Save defaults'}
+            </Button>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ─── Shift breaks (organization-only) ──────────────────────────────────
+
+function ShiftBreaksSection({
+  policy,
+  onSave,
+}: {
+  policy: ShiftBreakPolicy;
+  onSave: (p: ShiftBreakPolicy) => Promise<number>;
+}) {
+  const [draft, setDraft] = useState(policy);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => setDraft(policy), [policy]);
+
+  const dirty = draft.restrictBreaksAtShiftEdges !== policy.restrictBreaksAtShiftEdges;
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave(draft);
+      toast.success('Settings saved', {
+        description: 'Running sessions pick this up within 15 minutes.',
+      });
+    } catch (err) {
+      toast.error('Could not save shift break rules', {
+        description: err instanceof Error ? err.message : 'Please try again.',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section>
+      <SectionHeader
+        title="Breaks on scheduled shifts"
+        description="Applies organization-wide and can't be changed per group or person."
+      />
+      <div className="divide-y divide-white/[0.07] rounded-xl border border-white/[0.07] bg-white/[0.025]">
+        <div className="flex items-start justify-between gap-6 px-4 py-4">
+          <div>
+            <Label htmlFor="org-shift-edge-breaks" className="text-sm">
+              No breaks in the first or last hour of a shift
+            </Label>
+            <p className="mt-1 text-xs text-zinc-400">
+              Blocks starting a break during the first hour and the last hour of a scheduled shift.
+              A break already running is not ended.
+            </p>
+            <p className="mt-1 text-xs text-zinc-400">
+              <span className="font-medium text-zinc-300">Only applies to people with a shift scheduled in Shift Management.</span>{' '}
+              People who track time without a shift, and time worked outside a scheduled shift, are never affected.
+            </p>
+          </div>
+          <Switch
+            id="org-shift-edge-breaks"
+            checked={draft.restrictBreaksAtShiftEdges}
+            onCheckedChange={c => setDraft({ restrictBreaksAtShiftEdges: c === true })}
+          />
+        </div>
+
+        {dirty && (
+          <div className="flex items-center justify-end gap-2 px-4 py-3">
+            <Button variant="ghost" size="sm" onClick={() => setDraft(policy)} disabled={saving}>
+              Discard
+            </Button>
+            <Button size="sm" onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
             </Button>
           </div>
         )}

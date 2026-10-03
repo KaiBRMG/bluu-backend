@@ -7,6 +7,8 @@ import { useTimeTracking } from "@/hooks/useTimeTracking";
 import { useUserData } from "@/hooks/useUserData";
 import { useDayTotal } from "@/hooks/useDayTotal";
 import { Coffee, Info, Pause } from "lucide-react";
+import { BREAK_BLOCKED_TOOLTIP } from "@/lib/shiftBreakPolicy";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -117,6 +119,7 @@ export default function TimeTrackingPage() {
     elapsedSeconds,
     breakUsedSeconds,
     breakAllowanceSeconds,
+    breakBlock,
     startTracking,
     stopTracking,
     pauseTracking,
@@ -251,14 +254,30 @@ export default function TimeTrackingPage() {
                       <Pause aria-hidden="true" style={{ width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
                       {isLoading ? 'Pausing…' : 'Pause'}
                     </Button>
-                    <Button
-                      onClick={startBreak}
-                      disabled={isLoading}
-                      variant="outline"
-                    >
-                      <Coffee aria-hidden="true" style={{ width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
-                      {isLoading ? 'Starting…' : 'Break'}
-                    </Button>
+                    {breakBlock ? (
+                      // A disabled button takes no pointer events, so the
+                      // focusable wrapper is what carries the tooltip.
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span tabIndex={0} className="inline-flex rounded-md" aria-label={`Break unavailable. ${BREAK_BLOCKED_TOOLTIP}`}>
+                            <Button disabled variant="outline" tabIndex={-1} aria-hidden="true">
+                              <Coffee aria-hidden="true" style={{ width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
+                              Break
+                            </Button>
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[16rem]">{BREAK_BLOCKED_TOOLTIP}</TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <Button
+                        onClick={startBreak}
+                        disabled={isLoading}
+                        variant="outline"
+                      >
+                        <Coffee aria-hidden="true" style={{ width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
+                        {isLoading ? 'Starting…' : 'Break'}
+                      </Button>
+                    )}
                   </>
                 )}
 

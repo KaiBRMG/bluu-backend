@@ -22,7 +22,8 @@
 | `src/components/timesheet/DayTimeline.tsx` | One day's segment bar + tooltip; opens the walkthrough |
 | `src/components/timesheet/SessionWalkthroughDialog.tsx` | Per-session event-log walkthrough (§6) |
 | `src/hooks/useTimesheetData.ts` | Timesheet cache (5 min TTL) |
-| API: `src/app/api/time-tracking/*/route.ts` | `start`, `stop`, `clock-out`, `discard`, `heartbeat`, `transition`, `status`, `upload-log`, `entries`, `screenshots/*` |
+| API: `src/app/api/time-tracking/*/route.ts` | `start`, `stop`, `clock-out`, `discard`, `heartbeat`, `transition`, `status`, `upload-log`, `entries`, `break-policy`, `screenshots/*` |
+| `src/lib/shiftBreakPolicy.ts` | Shift-edge break restriction: policy type, blocked-window maths, user-facing copy (§3g) |
 | `electron/main.js`, `electron/preload.js` | `timeTracking:getActivitySince` IPC (powerMonitor) |
 | `src/types/electron.d.ts` | `electronAPI.timeTracking.getActivitySince` type |
 | Cloud Function (`functions/`) | Daily stale-session cleanup |
@@ -207,6 +208,17 @@ Idle timeout (on/off, length **and which input counts**) and screenshots are con
   - **Activity % is unchanged** — the 5s sampler still records combined idle, so in `keyboard` mode a mouse-only stretch below the timeout still scores as active. Change that separately if needed.
 - **Authorisation:** the `shift-management` page permission (`/api/admin/time-tracking-settings`), the same tier as the rest of Shift Management. `PUT /api/admin/users/[uid]` no longer accepts `enableIdleTimeout`/`enableScreenshots`.
 - Leave fields (`hasPaidLeave`, balances) are per-person HR data, not policy — they stay in User Management under a section now titled **Leave**.
+
+### 3g. No Breaks in the First or Last Hour of a Shift
+
+An **organization-only** policy on the same Organization Settings tab, in its own section *Breaks on scheduled shifts*. **Default off.** When on, a user may not *start* a break during the first hour or the last hour of a **scheduled shift** (Admin → Shift Management). A break already running is not ended.
+
+- **Only applies to time inside a scheduled shift occurrence.** Someone who tracks time without shifts, or works outside their shift, gets no windows and is never restricted. Leave-approved occurrences are tombstoned, so they drop out like they do everywhere else.
+- **Stored at `org-settings/shift-breaks`** (`{ restrictBreaksAtShiftEdges }`), deliberately **not** in `org-settings/time-tracking`: the org-defaults save is a whole-doc `set()` and would wipe it. Not part of the group/user resolver and **not denormalised** onto user docs. Saved via `PUT /api/admin/time-tracking-settings` `{ scope: 'shift-breaks', policy }` (same `shift-management` tier); no user recompute.
+- **`GET /api/time-tracking/break-policy`** expands the caller's own occurrences for ±1 day and returns `{ restricted, windows: [{ start, end, reason: 'shift-start' | 'shift-end' }] }`. Policy off → 1 doc read, no shift queries. Touching/overlapping occurrences are **merged first** (`computeBreakBlockWindows`), so back-to-back shifts (regular + cover) are one shift — the seam is not a "last hour" + "first hour". A shift under 2h is closed to breaks end to end.
+- **Renderer:** `TimeTrackingContext` fetches the windows when a session becomes active and every 15 min after (`BREAK_POLICY_REFRESH_MS`) — over HTTP, so a flip reaches long-lived renderers (rule 9c) within 15 min. **The Break press never waits on the network (§3c):** `startBreak` checks `breakBlockAt(windows, Date.now())` against what is already loaded and toasts the reason. A failed fetch keeps the last known windows; none known = unrestricted (fail-open, like the policy's soft enforcement elsewhere). `breakBlock` is exposed on the context and flips on a timer at each window edge, not via the 1 Hz tick, so it survives the tick being taken out of React.
+- **Enforcement is renderer-side**, the same as the 45-min allowance guard: breaks are events in the local log, and no server route starts one.
+- **UI:** both Break buttons (home widget, time-tracking page) render greyed out (disabled) while blocked, with the tooltip `BREAK_BLOCKED_TOOLTIP` — *"Breaks are not available during the first and last hour of your shift"*. A disabled button has `pointer-events-none`, so the tooltip hangs off a focusable `<span tabIndex={0}>` wrapper (keyboard reachable too). The `startBreak` toast (`breakBlockMessage`, with the unlock time in the viewer's `safeTimezone`) remains as the backstop.
 
 **RULE — a heartbeat gap alone must never erase worked time.** The heartbeat period (15 min) sits only 5 min under `SLEEP_GAP_THRESHOLD_MS` (20 min), so a throttled timer or a stalled network call can overshoot it while the machine was awake and the user was working. `wasAwakeDuring(from, to)` settles it with evidence: the native sampler ticks every 5s in the main process, so samples spanning the gap **prove** the machine was running and the patch is skipped; a hole (> `SAMPLE_GAP_TOLERANCE_MS`) means it genuinely slept. It is deliberately conservative — it returns `false` (patch, i.e. legacy behavior) whenever it cannot prove wakefulness: no sampler on older builds, samples aged out of the 45-min retention, or IPC failure.
 

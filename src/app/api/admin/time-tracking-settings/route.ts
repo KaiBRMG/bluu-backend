@@ -4,8 +4,10 @@ import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById, invalidateUserCache } from '@/lib/services/userService';
 import {
+  ORG_SHIFT_BREAKS_REF,
   ORG_TIME_TRACKING_REF,
   getGroupOverrideSources,
+  getShiftBreakPolicy,
   getOrgTimeTrackingSettings,
   recomputeTimeTrackingSettings,
 } from '@/lib/services/timeTrackingSettingsService';
@@ -19,6 +21,7 @@ import {
   type TimeTrackingOverrides,
   type TimeTrackingSettings,
 } from '@/lib/timeTrackingSettings';
+import type { ShiftBreakPolicy } from '@/lib/shiftBreakPolicy';
 import { invalidateAdminUsersCache } from '@/app/api/admin/users/route';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -46,8 +49,9 @@ export const GET = withAuth(async (_request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    const [org, groups, usersSnap] = await Promise.all([
+    const [org, shiftBreaks, groups, usersSnap] = await Promise.all([
       getOrgTimeTrackingSettings(),
+      getShiftBreakPolicy(),
       getGroupOverrideSources(),
       adminDb.collection('users').get(),
     ]);
@@ -82,6 +86,7 @@ export const GET = withAuth(async (_request: NextRequest, token: DecodedIdToken)
 
     return NextResponse.json({
       org,
+      shiftBreaks,
       groups: groups.map(g => ({ ...g, memberCount: memberCounts.get(g.id) ?? 0 })),
       users,
     });
@@ -109,6 +114,7 @@ function applyPatch(
  *   { scope: 'org',   settings: TimeTrackingSettings }          — all three fields required
  *   { scope: 'group', id, overrides: { [key]: value | null } }  — null = inherit
  *   { scope: 'user',  id, overrides: { [key]: value | null } }  — null = inherit
+ *   { scope: 'shift-breaks', policy: ShiftBreakPolicy }         — org-only, no recompute
  *
  * Re-resolves only the users the change can reach, and writes only those whose
  * effective values moved.
@@ -122,6 +128,22 @@ export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     const body = await request.json().catch(() => null);
     const scope = body?.scope;
     let affected: string[] | undefined;
+
+    if (scope === 'shift-breaks') {
+      // Org-only and not denormalised: the renderer reads it through
+      // /api/time-tracking/break-policy, so no user doc moves.
+      const restrict = body?.policy?.restrictBreaksAtShiftEdges;
+      if (typeof restrict !== 'boolean') {
+        return NextResponse.json({ error: 'Invalid shift break policy' }, { status: 400 });
+      }
+      const policy: ShiftBreakPolicy = { restrictBreaksAtShiftEdges: restrict };
+      await ORG_SHIFT_BREAKS_REF().set({
+        ...policy,
+        updatedAt: FieldValue.serverTimestamp(),
+        updatedBy: token.uid,
+      });
+      return NextResponse.json({ success: true, updatedUsers: 0 });
+    }
 
     if (scope === 'org') {
       const patch = parseOverridePatch(body.settings);

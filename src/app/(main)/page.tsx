@@ -28,6 +28,7 @@ import {
   TEMP_ANALYTICS_HOME_UIDS,
 } from "@/lib/temp-analytics/useTempAnalyticsScreenshot";
 import { safeTimezone } from '@/lib/utils/timezone';
+import { BREAK_BLOCKED_TOOLTIP } from '@/lib/shiftBreakPolicy';
 import { GrowthHomeWidget } from "@/components/growth/GrowthHomeWidget";
 import { canUseGrowthTracking } from "@/lib/growth/access";
 
@@ -236,6 +237,7 @@ function TimeTrackingWidget() {
     displayState,
     elapsedSeconds,
     breakRemainingSeconds,
+    breakBlock,
     startTracking,
     stopTracking,
     startBreak,
@@ -286,10 +288,26 @@ function TimeTrackingWidget() {
                 <Button onClick={stopTracking} disabled={isLoading} variant="destructive" size="sm">
                   {isLoading ? 'Stopping...' : 'Clock Out'}
                 </Button>
-                <Button onClick={startBreak} disabled={isLoading} variant="outline" size="sm">
-                  <Coffee style={{ width: '0.75rem', height: '0.75rem', flexShrink: 0 }} />
-                  {isLoading ? 'Starting...' : 'Break'}
-                </Button>
+                {breakBlock ? (
+                  // A disabled button takes no pointer events, so the
+                  // focusable wrapper is what carries the tooltip.
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span tabIndex={0} className="inline-flex rounded-md" aria-label={`Break unavailable. ${BREAK_BLOCKED_TOOLTIP}`}>
+                        <Button disabled variant="outline" size="sm" tabIndex={-1} aria-hidden="true">
+                          <Coffee style={{ width: '0.75rem', height: '0.75rem', flexShrink: 0 }} />
+                          Break
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-[16rem]">{BREAK_BLOCKED_TOOLTIP}</TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Button onClick={startBreak} disabled={isLoading} variant="outline" size="sm">
+                    <Coffee style={{ width: '0.75rem', height: '0.75rem', flexShrink: 0 }} />
+                    {isLoading ? 'Starting...' : 'Break'}
+                  </Button>
+                )}
               </>
             )}
 
