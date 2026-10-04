@@ -16,7 +16,7 @@ const ALLOWED_UPDATE_FIELDS = ['stageName', 'OFID', 'isActive', 'isArchived', 'd
 
 /**
  * PUT /api/admin/creators/[creatorId]
- * Updates Firestore fields and optionally resets the Firebase Auth password.
+ * Updates Firestore fields.
  * Syncs disabled state to Firebase Auth on isActive changes.
  */
 export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken, params: Promise<{ creatorId: string }>) => {
@@ -43,10 +43,9 @@ export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken, 
     }
 
     // Build a single Auth update to avoid redundant sequential calls
-    const authUpdate: { disabled?: boolean; password?: string } = {};
+    const authUpdate: { disabled?: boolean } = {};
     if ('isActive' in body) authUpdate.disabled = !body.isActive;
     if (body.isArchived === true) authUpdate.disabled = true;
-    if (body.newPassword) authUpdate.password = body.newPassword;
 
     await Promise.all([
       adminDb.collection('creators').doc(creatorId).update(firestoreUpdate),

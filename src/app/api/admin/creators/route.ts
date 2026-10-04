@@ -102,7 +102,13 @@ export const GET = withAuth(async (_request: NextRequest, token: DecodedIdToken)
 /**
  * POST /api/admin/creators
  * Creates a Firebase Auth user and a Firestore creator document.
- * Password is passed to Firebase Auth only — not stored in Firestore.
+ *
+ * The Auth account carries **no email and no password**. Creators sign in only
+ * through Telegram (a custom token minted for this uid — telegram.md), so a
+ * credential here would be one nothing can use. It also keeps creator accounts
+ * out of the email namespace staff now share, so there is no employee/creator
+ * address collision to arbitrate. Older creators still carry the email/password
+ * from the password era; those are inert (no `tg` claim — auth.md).
  */
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
@@ -111,60 +117,19 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     }
 
     const body = await request.json();
-    const { stageName, userEmail, password, OFID, driveLink = '', defaultTimezone = '' } = body;
+    const { stageName, OFID, driveLink = '', defaultTimezone = '' } = body;
 
-    if (!stageName || !userEmail || !password || !OFID) {
-      return NextResponse.json({ error: 'stageName, userEmail, password, and OFID are required' }, { status: 400 });
+    if (!stageName || !OFID) {
+      return NextResponse.json({ error: 'stageName and OFID are required' }, { status: 400 });
     }
 
-    // Get or create the Firebase Auth user
-    let uid: string;
-    try {
-      const authUser = await adminAuth.createUser({
-        email: userEmail,
-        password,
-        displayName: stageName,
-      });
-      uid = authUser.uid;
-    } catch (error: unknown) {
-      const code = (error as { code?: string })?.code;
-      if (code === 'auth/email-already-exists') {
-        // Auth user exists (e.g. from prior testing) but no Firestore doc — reuse the UID.
-        // Update displayName and password to match what the admin provided.
-        const existing = await adminAuth.getUserByEmail(userEmail);
-
-        // ...unless that account is an EMPLOYEE. Staff now sign in with personal
-        // addresses, so an employee and a creator can collide on one email — and
-        // adopting the account below would reset that employee's password and
-        // displayName, then leave one uid owning both a users and a creators doc
-        // (two auth contexts, one identity). Refuse instead.
-        const employeeDoc = await adminDb.collection('users').doc(existing.uid).get();
-        if (employeeDoc.exists) {
-          return NextResponse.json(
-            { error: 'That email already belongs to an employee account. Use a different address for the creator.' },
-            { status: 409 },
-          );
-        }
-
-        uid = existing.uid;
-        await adminAuth.updateUser(uid, { displayName: stageName, password, disabled: false });
-      } else {
-        throw error;
-      }
-    }
-
-    // Ensure there's no existing creators doc for this UID
-    const existingDoc = await adminDb.collection('creators').doc(uid).get();
-    if (existingDoc.exists) {
-      return NextResponse.json({ error: 'A creator with that email already exists' }, { status: 409 });
-    }
+    const { uid } = await adminAuth.createUser({ displayName: stageName });
 
     // Write Firestore doc
     await adminDb.collection('creators').doc(uid).set({
       uid,
       creatorID: uid,
       stageName,
-      userEmail,
       displayName: stageName,
       photoURL: null,
       photoThumb: null,

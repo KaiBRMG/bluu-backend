@@ -91,7 +91,7 @@ User opens the link, presses Start
 
 Two surfaces, same service and same rules:
 
-- **One creator** — the `⋯` row menu on `/creator-portal/creator-management` → "Copy Telegram link", straight to the clipboard.
+- **One creator** — the `⋯` row menu on `/creator-portal/creator-management` → "Copy Telegram link", straight to the clipboard. The same link, with a Copy button, is also in the creator's **Edit** dialog, and **Add creator** mints one automatically and ends on it — adding a creator and handing over their way in are one step.
 - **The whole roster** — `cd src && node scripts/mint-creator-telegram-links.js`, which prints one link per creator for sending by hand. `--dry-run` first; already-connected creators are skipped unless you pass `--all`.
 
 **Minting revokes**, so re-running the script over creators you have already sent links to invalidates what you sent — that is why the skip is the default.
@@ -145,7 +145,7 @@ The requirement is that the portal is reachable **only** from inside Telegram. A
 - **`withCreatorAuth`** refuses `token.tg !== true` with a 403, *before* the Firestore read — a non-Telegram token costs no read.
 - **`firestore.rules`**, via `isTelegramCreator()`. Every portal screen is a live `onSnapshot`, so checking only in the API would leave the entire data path open. The creator branches of `/creators`, `/campaign-tracking` and `/content-planning` all require the claim; employee branches are untouched.
 
-This is what makes leaving creator passwords in place survivable: the credential still exists, but a session built from it carries no `tg` claim and reaches nothing.
+This is what makes leaving creator passwords in place survivable: the credential still exists, but a session built from it carries no `tg` claim and reaches nothing. Creators added since are created with no email or password at all, and Creator Management can no longer set one.
 
 **`checkRevoked` is deliberately not used** — it would add a round trip to Google's Identity service on every creator API call, and the sessions it would catch are exactly the ones the claim already refuses.
 

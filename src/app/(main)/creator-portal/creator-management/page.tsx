@@ -37,7 +37,6 @@ interface Creator {
   uid: string;
   creatorID: string;
   stageName: string;
-  userEmail: string;
   displayName: string;
   photoURL: string | null;
   photoStoragePath: string | null;
@@ -107,31 +106,132 @@ async function errorMessage(res: Response, fallback: string): Promise<string> {
   return `${fallback} (${res.status})`;
 }
 
+/**
+ * Mint a one-time Telegram connection link. Minting voids any previous
+ * outstanding link for this creator — it is not idempotent, it revokes. The link
+ * is never stored anywhere readable, so there is no "show it again": lose it,
+ * mint another.
+ */
+async function mintTelegramLink(uid: string): Promise<string> {
+  const res = await apiRequest(`/api/admin/creators/${uid}/telegram-link`, { method: 'POST' });
+  if (!res.ok) throw new Error(await errorMessage(res, 'Could not generate a connection link'));
+  const { url } = (await res.json()) as { url: string };
+  return url;
+}
+
+interface TelegramLinkFieldProps {
+  uid: string;
+  connected: boolean;
+  /** A link minted by the caller (the add flow mints one on create). */
+  initialUrl?: string | null;
+}
+
+/**
+ * The creator's Telegram connection link with a copy button — Telegram is the
+ * only way into the creator portal, so this is what the admin sends. Generating
+ * is an immediate action, separate from the form's Save.
+ */
+function TelegramLinkField({ uid, connected, initialUrl = null }: TelegramLinkFieldProps) {
+  const [url, setUrl] = useState<string | null>(initialUrl);
+  const [generating, setGenerating] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const copy = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error('Could not copy the link.');
+    }
+  };
+
+  const generate = async () => {
+    setGenerating(true);
+    try {
+      const next = await mintTelegramLink(uid);
+      setUrl(next);
+      await copy(next);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not generate a connection link.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={`creator-telegram-${uid}`} className="text-xs text-zinc-400">Telegram link</Label>
+      {url ? (
+        <div className="relative">
+          <Input
+            id={`creator-telegram-${uid}`}
+            value={url}
+            readOnly
+            onFocus={e => e.currentTarget.select()}
+            className="pr-10 text-zinc-300"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => copy(url)}
+            aria-label={copied ? 'Link copied' : 'Copy Telegram link'}
+            className="absolute top-1/2 right-1.5 -translate-y-1/2 text-zinc-400 hover:text-white"
+          >
+            {copied ? <Check aria-hidden className="text-green-400" /> : <Copy aria-hidden />}
+          </Button>
+        </div>
+      ) : (
+        <Button
+          id={`creator-telegram-${uid}`}
+          type="button"
+          variant="outline"
+          onClick={generate}
+          disabled={generating}
+          className="w-full"
+        >
+          {generating ? <Loader2Icon aria-hidden className="activity-spinner" /> : <Copy aria-hidden />}
+          {connected ? 'Copy new Telegram link' : 'Copy Telegram link'}
+        </Button>
+      )}
+      <p className="text-xs text-zinc-400">
+        {url
+          ? 'Single use, expires in 7 days. Generating another voids this one.'
+          : connected
+            ? 'Already connected. A new link is only needed if they lost their Telegram account.'
+            : 'Not connected yet. They cannot sign in until they open this link in Telegram.'}
+      </p>
+    </div>
+  );
+}
+
 interface CreatorFormProps {
   initial: Creator | null;
   onSaved: () => void;
   onCancel: () => void;
   onBusyChange: (busy: boolean) => void;
+  /** Refetch without closing — the add flow stays open to hand over the link. */
+  onRefresh: () => void;
 }
 
-function CreatorForm({ initial, onSaved, onCancel, onBusyChange }: CreatorFormProps) {
+function CreatorForm({ initial, onSaved, onCancel, onBusyChange, onRefresh }: CreatorFormProps) {
   const isEdit = !!initial;
   const [stageName, setStageName] = useState(initial?.stageName ?? '');
   const [OFID, setOFID] = useState(initial?.OFID ?? '');
-  const [userEmail, setUserEmail] = useState(initial?.userEmail ?? '');
   const [driveLink, setDriveLink] = useState(initial?.driveLink ?? '');
   // Read-only: `defaultTimezone` is detected from the creator's own device when
   // they sign in (POST /api/creator/timezone) and is the basis of every due-date
   // calculation. An admin value here would be silently overwritten at their next
   // sign-in, so the field reports rather than edits.
   const detectedTimezone = initial?.defaultTimezone ?? '';
-  const [password, setPassword] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(initial?.photoURL ?? null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [copied, setCopied] = useState(false);
+  // Set once the add succeeds: the dialog then turns into the link hand-over.
+  const [created, setCreated] = useState<{ uid: string; url: string | null } | null>(null);
 
   // A picked photo previews from an object URL; release it when it is replaced
   // or the dialog closes, or every re-pick leaks the whole image.
@@ -139,17 +239,6 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange }: CreatorFormPr
     if (!photoPreview?.startsWith('blob:')) return;
     return () => URL.revokeObjectURL(photoPreview);
   }, [photoPreview]);
-
-  const copyPassword = async () => {
-    if (!password) return;
-    try {
-      await navigator.clipboard.writeText(password);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast.error('Could not copy the password.');
-    }
-  };
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -174,11 +263,9 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange }: CreatorFormPr
 
     try {
       if (isEdit && initial) {
-        const updateBody: Record<string, unknown> = { stageName, OFID, driveLink };
-        if (password) updateBody.newPassword = password;
         const res = await apiRequest(`/api/admin/creators/${initial.uid}`, {
           method: 'PUT',
-          body: JSON.stringify(updateBody),
+          body: JSON.stringify({ stageName, OFID, driveLink }),
         });
         if (!res.ok) throw new Error(await errorMessage(res, 'Could not save changes'));
 
@@ -190,23 +277,24 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange }: CreatorFormPr
       } else {
         const res = await apiRequest('/api/admin/creators', {
           method: 'POST',
-          body: JSON.stringify({ stageName, userEmail, password, OFID, driveLink }),
+          body: JSON.stringify({ stageName, OFID, driveLink }),
         });
         if (!res.ok) throw new Error(await errorMessage(res, 'Could not add the creator'));
-        const data = (await res.json()) as { uid?: string };
+        const { uid } = (await res.json()) as { uid: string };
 
-        // The account exists at this point, so a failed photo must not read as a
-        // failed create — the admin would add them a second time.
-        const photoRes = photoFile && data.uid ? await uploadPhoto(data.uid, photoFile).catch(() => null) : undefined;
+        // The account exists at this point, so a failed photo or link must not
+        // read as a failed create — the admin would add them a second time.
+        const photoRes = photoFile ? await uploadPhoto(uid, photoFile).catch(() => null) : undefined;
         if (photoRes === null || (photoRes && !photoRes.ok)) {
           toast.warning(`${stageName} added, but the photo did not upload.`, {
             description: 'Edit the creator to try the photo again.',
           });
-        } else {
-          toast.success(`${stageName} added`, {
-            description: 'Copy their Telegram link from the row menu so they can sign in.',
-          });
         }
+        // A failed mint leaves the field's own generate button to retry with.
+        const url = await mintTelegramLink(uid).catch(() => null);
+        setCreated({ uid, url });
+        onRefresh();
+        return;
       }
 
       onSaved();
@@ -217,6 +305,23 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange }: CreatorFormPr
       onBusyChange(false);
     }
   };
+
+  if (created) {
+    return (
+      <div className="flex flex-col gap-4">
+        <DialogHeader>
+          <DialogTitle>{stageName} added</DialogTitle>
+          <DialogDescription>
+            Send them this link. Opening it in Telegram connects their account and signs them in.
+          </DialogDescription>
+        </DialogHeader>
+        <TelegramLinkField uid={created.uid} connected={false} initialUrl={created.url} />
+        <DialogFooter>
+          <Button type="button" onClick={onCancel}>Done</Button>
+        </DialogFooter>
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -311,47 +416,9 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange }: CreatorFormPr
         </p>
       </div>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="creator-email" className="text-xs text-zinc-400">Email</Label>
-        <Input
-          id="creator-email"
-          type="email"
-          value={userEmail}
-          onChange={e => setUserEmail(e.target.value)}
-          required={!isEdit}
-          disabled={isEdit}
-          autoComplete="off"
-        />
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="creator-password" className="text-xs text-zinc-400">
-          {isEdit ? 'New password (optional)' : 'Password'}
-        </Label>
-        <div className="relative">
-          <Input
-            id="creator-password"
-            type="text"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            required={!isEdit}
-            autoComplete="new-password"
-            placeholder={isEdit ? 'Leave blank to keep current' : undefined}
-            className="pr-10"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            onClick={copyPassword}
-            disabled={!password}
-            aria-label={copied ? 'Password copied' : 'Copy password'}
-            className="absolute top-1/2 right-1.5 -translate-y-1/2 text-zinc-400 hover:text-white"
-          >
-            {copied ? <Check aria-hidden className="text-green-400" /> : <Copy aria-hidden />}
-          </Button>
-        </div>
-      </div>
+      {isEdit && initial && (
+        <TelegramLinkField uid={initial.uid} connected={!!initial.telegram} />
+      )}
 
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
 
@@ -415,7 +482,6 @@ function CreatorTable({
             <TableHead className="w-8"><span className="sr-only">Expand</span></TableHead>
             <TableHead className="w-12"><span className="sr-only">Photo</span></TableHead>
             <TableHead>Stage name</TableHead>
-            <TableHead>Email</TableHead>
             <TableHead>OFID</TableHead>
             <TableHead>
               <span className="inline-flex items-center gap-1.5">
@@ -502,7 +568,6 @@ function CreatorTable({
                       </span>
                     )}
                   </TableCell>
-                  <TableCell className="text-zinc-400">{creator.userEmail}</TableCell>
                   <TableCell className="text-zinc-400">{creator.OFID}</TableCell>
                   <TableCell>
                     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -574,7 +639,7 @@ function CreatorTable({
                 </TableRow>
 
                 {/* Sub-accounts are assignable peers of their parent for shifts and
-                    pay, but they have no login — hence no email, status or Telegram
+                    pay, but they have no login — hence no status or Telegram
                     of their own. Managed through the parent's Sub-accounts dialog. */}
                 {expanded && subAccounts.map(sub => (
                   <TableRow key={sub.subAccountId} className={cn(sub.isArchived && 'opacity-60')}>
@@ -591,7 +656,6 @@ function CreatorTable({
                       </span>
                     </TableCell>
                     <TableCell className="text-sm">{sub.stageName}</TableCell>
-                    <TableCell />
                     <TableCell className="text-zinc-400">{sub.OFID}</TableCell>
                     <TableCell>
                       {sub.isArchived && (
@@ -738,23 +802,12 @@ export default function CreatorManagementPage() {
       `Could not restore ${creator.stageName}`,
     );
 
-  /**
-   * Mint a one-time connection link and put it on the clipboard for the admin to
-   * send. Minting voids any previous outstanding link for this creator, which is
-   * why the menu item reads "Copy **new** Telegram link" once one has been
-   * issued — pressing it again is not idempotent, it revokes.
-   *
-   * The link is never stored anywhere readable, so there is no "show it again":
-   * lose it, mint another.
-   */
+  /** Mint a one-time connection link (see `mintTelegramLink`) and put it on the
+   *  clipboard for the admin to send. */
   const handleTelegramLink = async (creator: Creator) => {
     setActionLoading(true);
     try {
-      const res = await apiRequest(`/api/admin/creators/${creator.uid}/telegram-link`, {
-        method: 'POST',
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const { url } = (await res.json()) as { url: string };
+      const url = await mintTelegramLink(creator.uid);
       await navigator.clipboard.writeText(url);
       toast.success(`Connection link copied — send it to ${creator.stageName}.`, {
         description: 'Single use, expires in 7 days.',
@@ -895,6 +948,7 @@ export default function CreatorManagementPage() {
               onSaved={handleFormSaved}
               onCancel={() => setFormTarget(null)}
               onBusyChange={setFormBusy}
+              onRefresh={() => { fetchCreators(); refreshCreators(); }}
             />
           )}
         </DialogContent>

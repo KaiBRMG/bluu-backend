@@ -116,9 +116,11 @@ export function PortalHeader({ title }: { title?: string }) {
               <p className="truncate text-sm font-semibold" style={{ color: COLOR.ink }}>
                 {stageName}
               </p>
-              <p className="mt-0.5 truncate text-xs" style={{ color: COLOR.ink2 }}>
-                {creatorUser?.userEmail}
-              </p>
+              {creatorUser?.userEmail && (
+                <p className="mt-0.5 truncate text-xs" style={{ color: COLOR.ink2 }}>
+                  {creatorUser.userEmail}
+                </p>
+              )}
             </div>
             <div className="p-1.5">
               {driveLink && (

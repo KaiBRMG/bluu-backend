@@ -9,7 +9,8 @@ import { detectDeviceTimezone } from '@/lib/timezone';
 export interface CreatorUser {
   uid: string;
   creatorID: string;
-  userEmail: string;
+  /** Legacy — absent on creators added after the Telegram cutover. */
+  userEmail?: string;
   displayName: string;
   stageName: string;
   photoURL?: string | null;

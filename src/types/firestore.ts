@@ -905,7 +905,9 @@ export interface CreatorFullDocument {
   uid: string;
   creatorID: string;        // same as uid
   stageName: string;
-  userEmail: string;
+  /** Legacy — only creators added in the password era have one. New creators
+   *  sign in through Telegram and are created without an email. */
+  userEmail?: string;
   displayName: string;      // same as stageName
   photoURL: string | null;
   photoStoragePath: string | null;

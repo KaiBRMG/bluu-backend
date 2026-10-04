@@ -55,11 +55,20 @@ export function useOrbita() {
     api.onOrbitaChanged((next) => {
       if (!alive) return;
       setState(next);
-      // A finished install adds a version; re-reading the whole status here
-      // would be a second IPC round trip per progress tick.
-      if (next.phase === 'ready' && typeof next.version === 'number') {
+      if (next.phase !== 'ready') return;
+      // A finished install adds a version; re-reading the whole status on every
+      // event would be a second IPC round trip per progress tick.
+      if (typeof next.version === 'number') {
         setInstalledVersions((prev) => (prev.includes(next.version as number) ? prev : [...prev, next.version as number]));
+        return;
       }
+      // A download that happened inside a profile Launch reports `ready` with no
+      // version (main never learns the major on that path), so the list above
+      // would stay empty and the "not installed" notice would outlive the
+      // install. Re-read from disk — once per completed install, not per tick.
+      void api.orbitaStatus?.().then((current) => {
+        if (alive && current) setInstalledVersions(current.installedVersions ?? []);
+      });
     });
 
     return () => {
