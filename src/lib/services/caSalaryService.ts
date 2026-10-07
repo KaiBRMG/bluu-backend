@@ -27,6 +27,7 @@ import { computeTimeWorked } from '../utils/shiftAttendance';
 import { computeSalaryMonth, DEFAULT_SALARY_CONFIG, sumMonth } from '../salary/salaryEngine';
 import { addMonths, currentMonthKey, monthKeyRange, toDayKey, type SalaryDayKey, type SalaryMonthKey } from '../salary/salaryDate';
 import { computeFinalizationReset } from '../leave/leaveBalance';
+import { normaliseSaleType, saleKindOf, saleSourceOf } from '../salary/saleTypes';
 import { invalidateUserCache } from './userService';
 import type {
   DashboardSalaryMonth,
@@ -140,30 +141,63 @@ export async function setSalaryConfig(
 
 // ─── Sales ───────────────────────────────────────────────────────────
 
-function serialiseSale(doc: CaSaleDocument): SalarySale {
+export function serialiseSale(doc: CaSaleDocument): SalarySale {
+  const transfer = doc.transfer ?? null;
   return {
     saleId: doc.saleId,
-    userId: doc.userId,
+    userId: doc.userId ?? null,
     day: doc.day,
     month: doc.month,
     occurredAt: doc.occurredAt?.toDate?.()?.toISOString() ?? new Date(0).toISOString(),
-    employeeName: doc.employeeName,
-    sourceEmail: doc.sourceEmail,
-    creatorName: doc.creatorName,
-    fanName: doc.fanName,
-    fanId: doc.fanId,
+    employeeName: doc.employeeName ?? '',
+    sourceEmail: doc.sourceEmail ?? '',
+    creatorName: doc.creatorName ?? '',
+    fanName: doc.fanName ?? '',
+    fanId: doc.fanId ?? '',
     grossRevenue: doc.grossRevenue,
     netRevenue: doc.netRevenue,
     signedGross: doc.signedGross,
-    type: doc.type,
-    rule: doc.rule,
-    assignedBy: doc.assignedBy,
+    type: normaliseSaleType(doc.type ?? ''),
+    rule: doc.rule ?? '',
+    assignedBy: doc.assignedBy ?? '',
     status: doc.status,
-    importId: doc.importId,
+    importId: doc.importId ?? '',
+    // Rows imported before the BuddyX integration carry none of these; the
+    // defaults are what those rows always meant.
+    source: saleSourceOf(doc, doc.occurredAt?.toMillis?.() ?? 0),
+    kind: saleKindOf(doc),
+    creatorId: doc.creatorId ?? null,
+    sourceUserId: doc.sourceUserId !== undefined ? doc.sourceUserId : (doc.userId ?? null),
+    transfer: transfer
+      ? {
+          fromUserId: transfer.fromUserId ?? null,
+          toUserId: transfer.toUserId,
+          disputeId: transfer.disputeId,
+          approvedBy: transfer.approvedBy,
+          approvedAt: transfer.approvedAt?.toDate?.()?.toISOString() ?? new Date(0).toISOString(),
+        }
+      : null,
+    disputeId: doc.disputeId ?? null,
+    removedAt: doc.removedAt?.toDate?.()?.toISOString() ?? null,
+    unmappedChatterId: doc.unmappedChatterId ?? null,
+    attributionConflict: doc.attributionConflict === true,
+    vanishedAfterFinalise: doc.vanishedAfterFinalise === true,
   };
 }
 
-/** Every sale for one agent in one month, oldest first. */
+/**
+ * Whether a stored row counts toward pay.
+ *
+ * A row BuddyX no longer returns is soft-removed (`removedAt`) rather than
+ * deleted, so it stays on record for audit — and it is excluded **here, in
+ * memory**, on every read the engine is fed from. No index change, and the
+ * engine never has to know removal exists.
+ */
+function counts(doc: CaSaleDocument): boolean {
+  return !doc.removedAt;
+}
+
+/** Every sale for one agent in one month, oldest first. Removed rows excluded. */
 export async function getSalesForMonth(userId: string, month: SalaryMonthKey): Promise<SalarySale[]> {
   const snap = await adminDb
     .collection(SALES)
@@ -172,7 +206,10 @@ export async function getSalesForMonth(userId: string, month: SalaryMonthKey): P
     .orderBy('occurredAt', 'asc')
     .get();
 
-  return snap.docs.map(d => serialiseSale(d.data() as CaSaleDocument));
+  return snap.docs
+    .map(d => d.data() as CaSaleDocument)
+    .filter(counts)
+    .map(serialiseSale);
 }
 
 /**
@@ -181,19 +218,54 @@ export async function getSalesForMonth(userId: string, month: SalaryMonthKey): P
  * One query for the whole roster instead of one per agent — the admin month
  * grid reads 8+ agents at once and an N+1 here would be the single most
  * expensive thing in the subsystem.
+ *
+ * Rows held by nobody (an unassigned tip, an unmapped chatter) and removed rows
+ * are left out: neither counts toward anyone's pay. `getAllSalesForMonth` is
+ * the admin ledger's read, which keeps both.
  */
 export async function getSalesForMonthByUser(month: SalaryMonthKey): Promise<Map<string, SalarySale[]>> {
   const snap = await adminDb.collection(SALES).where('month', '==', month).get();
 
   const byUser = new Map<string, SalarySale[]>();
   for (const doc of snap.docs) {
-    const sale = serialiseSale(doc.data() as CaSaleDocument);
-    const list = byUser.get(sale.userId);
+    const data = doc.data() as CaSaleDocument;
+    if (!counts(data) || !data.userId) continue;
+    const sale = serialiseSale(data);
+    const list = byUser.get(data.userId);
     if (list) list.push(sale);
-    else byUser.set(sale.userId, [sale]);
+    else byUser.set(data.userId, [sale]);
   }
   for (const list of byUser.values()) list.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
   return byUser;
+}
+
+/**
+ * Every row in a month — every agent, unassigned and unmapped rows, and removed
+ * rows — oldest first. CA Admin → Sales reads this; nothing on the pay path
+ * does.
+ */
+export async function getAllSalesForMonth(month: SalaryMonthKey): Promise<SalarySale[]> {
+  const snap = await adminDb.collection(SALES).where('month', '==', month).get();
+  return snap.docs
+    .map(d => serialiseSale(d.data() as CaSaleDocument))
+    .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+}
+
+/**
+ * Sales a dispute moved **off** this agent in this month — what left their
+ * report, and why. Served by the `transferFromUserId ASC, month ASC` index.
+ */
+export async function getTransferredAwaySales(userId: string, month: SalaryMonthKey): Promise<SalarySale[]> {
+  const snap = await adminDb
+    .collection(SALES)
+    .where('transferFromUserId', '==', userId)
+    .where('month', '==', month)
+    .get();
+  return snap.docs
+    .map(d => d.data() as CaSaleDocument)
+    .filter(counts)
+    .map(serialiseSale)
+    .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
 }
 
 /**
@@ -220,11 +292,39 @@ export async function writeSales(
 
   const writer = adminDb.bulkWriter();
   for (const sale of sales) {
-    writer.set(adminDb.collection(SALES).doc(sale.saleId), {
-      ...sale,
-      occurredAt: Timestamp.fromMillis(Date.parse(sale.occurredAt)),
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    // Only the facts an import owns. `merge` keeps anything a later stage wrote
+    // onto the same document — a transfer, a dispute lock — which a wholesale
+    // `set` from a re-uploaded file would otherwise erase.
+    writer.set(
+      adminDb.collection(SALES).doc(sale.saleId),
+      {
+        saleId: sale.saleId,
+        userId: sale.userId,
+        day: sale.day,
+        month: sale.month,
+        occurredAt: Timestamp.fromMillis(Date.parse(sale.occurredAt)),
+        employeeName: sale.employeeName,
+        sourceEmail: sale.sourceEmail,
+        creatorName: sale.creatorName,
+        fanName: sale.fanName,
+        fanId: sale.fanId,
+        grossRevenue: sale.grossRevenue,
+        netRevenue: sale.netRevenue,
+        signedGross: sale.signedGross,
+        type: sale.type,
+        rule: sale.rule,
+        assignedBy: sale.assignedBy,
+        status: sale.status,
+        importId: sale.importId,
+        source: sale.source,
+        sourceId: sale.saleId,
+        kind: sale.kind,
+        creatorId: sale.creatorId,
+        sourceUserId: sale.sourceUserId,
+        createdAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
   }
   await writer.close();
 

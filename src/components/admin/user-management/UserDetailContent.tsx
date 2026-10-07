@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useId, useRef } from 'react';
 import { toast } from 'sonner';
-import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
+import type { AdminFullUser, AdminGroup, UserLifecycleResult } from '@/hooks/useAdminUsers';
 import { GroupChips } from './GroupPicker';
 import { validateEmail, validatePhoneNumber, validateRequired } from '@/lib/validation';
 import { cn } from '@/lib/utils';
@@ -48,11 +48,11 @@ interface UserDetailContentProps {
   user: AdminFullUser;
   /** Every group in the org — the Groups field needs names, not just ids. */
   groups: AdminGroup[];
-  onUpdateUser: (uid: string, updates: Record<string, unknown>) => Promise<void>;
+  onUpdateUser: (uid: string, updates: Record<string, unknown>) => Promise<UserLifecycleResult>;
   onAddGroupMembers?: (groupId: string, uids: string[]) => Promise<void>;
   onRemoveGroupMember?: (groupId: string, uid: string) => Promise<void>;
   onRefetch?: () => Promise<void>;
-  onDeleteUser?: () => Promise<void>;
+  onDeleteUser?: () => Promise<UserLifecycleResult>;
   onClose?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
 }
@@ -258,6 +258,16 @@ export default function UserDetailContent({
   const deleteConfirmPhrase = fullName || user.workEmail;
   const isArchived = !!user.isArchived;
 
+  // Only said when there is a seat to lose — the sentence would be noise on
+  // everyone else's dialog. Restoring the person later does not buy it back.
+  const gologinSeatNote = user.gologinEmail ? (
+    <>
+      {' '}
+      Their GoLogin seat (<span className="font-mono text-xs">{user.gologinEmail}</span>) will be
+      released; restoring them later does not give it back.
+    </>
+  ) : null;
+
   // Change detection — the drawer reads this to guard against closing over edits.
   useEffect(() => {
     const changed = JSON.stringify(formData) !== JSON.stringify(originalDataRef.current);
@@ -288,12 +298,27 @@ export default function UserDetailContent({
   const errorCountFor = (section: string) =>
     (Object.keys(errors) as (keyof FormData)[]).filter((f) => FIELD_SECTION[f] === section).length;
 
+  /**
+   * Offboarding frees the person's GoLogin seat server-side. Say what happened
+   * to it — and, on failure, say it separately and loudly: the Bluu action
+   * succeeded, but a paid seat is still held.
+   */
+  const reportSeat = (result: UserLifecycleResult) => {
+    if (result.gologinSeat === 'failed') {
+      toast.warning(`Could not release ${shortName}'s GoLogin seat`, {
+        description: 'It is still held and paid for. Remove it on GoLogin → Members.',
+      });
+    }
+    return result.gologinSeat === 'released' ? ' Their GoLogin seat was released.' : '';
+  };
+
   const confirmArchive = async () => {
     setIsActionSubmitting(true);
     try {
-      await onUpdateUser(user.uid, { isActive: false, isArchived: true });
+      const result = await onUpdateUser(user.uid, { isActive: false, isArchived: true });
+      const seat = reportSeat(result);
       toast.success(`${shortName} archived`, {
-        description: 'They are signed out and moved to Archived Users. No data was deleted.',
+        description: `They are signed out and moved to Archived Users. No data was deleted.${seat}`,
       });
       setShowArchiveConfirm(false);
       onClose?.();
@@ -324,9 +349,10 @@ export default function UserDetailContent({
     if (!onDeleteUser || deleteConfirmText.trim() !== deleteConfirmPhrase) return;
     setIsActionSubmitting(true);
     try {
-      await onDeleteUser();
+      const result = await onDeleteUser();
+      const seat = reportSeat(result);
       toast.success(`${shortName} permanently deleted`, {
-        description: 'Their account and all associated data have been removed.',
+        description: `Their account and all associated data have been removed.${seat}`,
       });
       setShowDeleteConfirm(false);
     } catch (err) {
@@ -341,9 +367,12 @@ export default function UserDetailContent({
     const next = pendingIsActive;
     setIsActiveUpdating(true);
     try {
-      await onUpdateUser(user.uid, { isActive: next });
+      const result = await onUpdateUser(user.uid, { isActive: next });
       setIsActive(next);
-      toast.success(next ? `Access restored for ${shortName}` : `Access revoked for ${shortName}`);
+      const seat = reportSeat(result);
+      toast.success(next ? `Access restored for ${shortName}` : `Access revoked for ${shortName}`, {
+        description: seat.trim() || undefined,
+      });
     } catch (err) {
       toast.error('Could not change account access', { description: errorMessage(err, 'Please try again.') });
     } finally {
@@ -1219,6 +1248,7 @@ export default function UserDetailContent({
               This will deactivate {shortName}&apos;s account and move them to the Archived Users list.
               They will be immediately signed out and blocked from logging in. Their data, such as
               timesheets and screenshots, is <strong>not</strong> deleted.
+              {gologinSeatNote}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1277,6 +1307,7 @@ export default function UserDetailContent({
               <strong>all of their data</strong> — including their timesheets, screenshots, shifts,
               leave requests, and notifications — remove them from all groups, and revoke all page
               permissions. <strong>This action cannot be undone.</strong>
+              {gologinSeatNote}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div>
@@ -1324,6 +1355,7 @@ export default function UserDetailContent({
               {pendingIsActive
                 ? `This will restore ${shortName}'s access to Bluu Backend. They will be able to log in immediately.`
                 : `This will immediately block ${shortName} from logging in. If they are currently logged in, they will be signed out and redirected to an access-revoked screen within seconds. This action can be undone at any time.`}
+              {pendingIsActive === false && gologinSeatNote}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

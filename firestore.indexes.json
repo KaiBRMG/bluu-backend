@@ -511,6 +511,38 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "creatorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "occurredAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "transferFromUserId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "month",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [
@@ -957,11 +989,6 @@
     {
       "collectionGroup": "ca-sales",
       "fieldPath": "employeeName",
-      "indexes": []
-    },
-    {
-      "collectionGroup": "ca-sales",
-      "fieldPath": "fanId",
       "indexes": []
     },
     {
@@ -1860,6 +1887,398 @@
     {
       "collectionGroup": "groups",
       "fieldPath": "timeTrackingOverrides",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "transfer",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "sourceId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "modelHandle",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "modelId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "chatterId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "sourceUserId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "syncedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "unmappedChatterId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "syncHash",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "attributionConflict",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "vanishedAfterFinalise",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "removedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "disputeId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "disputes",
+      "fieldPath": "sales",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "disputes",
+      "fieldPath": "saleIds",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "disputes",
+      "fieldPath": "transferResult",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "disputes",
+      "fieldPath": "groupId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "disputes",
+      "fieldPath": "groupSize",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "disputes",
+      "fieldPath": "totalGross",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "disputes",
+      "fieldPath": "untransfers",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "disputes",
+      "fieldPath": "version",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-team-days",
+      "fieldPath": "totals",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-team-days",
+      "fieldPath": "breakdown",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-team-periods",
+      "fieldPath": "totals",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-team-periods",
+      "fieldPath": "breakdown",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-sync-runs",
+      "fieldPath": "errors",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-sync-runs",
+      "fieldPath": "counts",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-sync-runs",
+      "fieldPath": "scopes",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "totalGross",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "subsGross",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "tipsGross",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "messagesGross",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "newSubs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "fansChatted",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "messagesSent",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "ppvsSent",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "replyTimeMs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "revShareGross",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "massMessages",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "ppvsUnlocked",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "unlockRate",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "onlineMs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "tz",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "source",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-stats-days",
+      "fieldPath": "syncedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fans",
+      "fieldPath": "spendByMonth",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fans",
+      "fieldPath": "subscriptions",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fans",
+      "fieldPath": "acquisition",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fans",
+      "fieldPath": "name",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fans",
+      "fieldPath": "salesName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fans",
+      "fieldPath": "nameSource",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fans",
+      "fieldPath": "linkTotalSpent",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fans",
+      "fieldPath": "isStacker",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fans",
+      "fieldPath": "updatedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-links",
+      "fieldPath": "series",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-links",
+      "fieldPath": "name",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-links",
+      "fieldPath": "url",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-links",
+      "fieldPath": "cost",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-links",
+      "fieldPath": "revenue",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-links",
+      "fieldPath": "fansCount",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-links",
+      "fieldPath": "transitions",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-links",
+      "fieldPath": "subscribers",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-links",
+      "fieldPath": "stackersCount",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-links",
+      "fieldPath": "revenueFromStackers",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-links",
+      "fieldPath": "createdAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-links",
+      "fieldPath": "fansSyncedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-links",
+      "fieldPath": "fansSyncedCount",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-mass-messages",
+      "fieldPath": "price",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-mass-messages",
+      "fieldPath": "previewCount",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-mass-messages",
+      "fieldPath": "unsentBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-mass-messages",
+      "fieldPath": "unsentDate",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-subscribers",
+      "fieldPath": "priceGross",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-subscribers",
+      "fieldPath": "subType",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-subscribers",
+      "fieldPath": "isTrial",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-subscribers",
+      "fieldPath": "isCreator",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "name",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-sync-runs",
+      "fieldPath": "expireAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-team-periods",
+      "fieldPath": "expireAt",
+      "ttl": true,
       "indexes": []
     }
   ]

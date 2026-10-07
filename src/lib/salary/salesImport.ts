@@ -21,7 +21,8 @@
  */
 
 import { createHash } from 'node:crypto';
-import { SALES_EMAIL_MAP, REQUIRED_SALES_COLUMNS, type SaleStatus } from './salaryConstants';
+import { SALES_EMAIL_MAP, REQUIRED_SALES_COLUMNS, salesSourceFor, type SaleStatus } from './salaryConstants';
+import { kindForSaleType, normaliseSaleType } from './saleTypes';
 import { parseExportTimestamp, toDayKey, toMonthKey } from './salaryDate';
 import type { SalarySale, SalesImportSkip } from './salaryTypes';
 import type { XlsxSheet } from './xlsx';
@@ -106,7 +107,16 @@ interface SkipAccumulator {
  * so an admin sees "142 rows: no account for jessy@bluurock.com" rather than a
  * wall.
  */
-export function parseSalesSheet(sheet: XlsxSheet, resolve: UserResolver, importId: string): ParsedSales {
+export function parseSalesSheet(
+  sheet: XlsxSheet,
+  resolve: UserResolver,
+  importId: string,
+  /**
+   * Creator name → creator/sub-account id. Optional so the pure tests can run
+   * without a roster; an unresolved name stores `creatorId: null`.
+   */
+  resolveCreatorId: (name: string) => string | null = () => null,
+): ParsedSales {
   const present = new Set(sheet.headers);
   const missing = REQUIRED_SALES_COLUMNS.filter(c => !present.has(c));
   if (missing.length > 0) {
@@ -150,6 +160,15 @@ export function parseSalesSheet(sheet: XlsxSheet, resolve: UserResolver, importI
     const occurredAtMs = parseExportTimestamp(row['Date & time Africa/Harare'] ?? '');
     if (occurredAtMs === null) {
       skip('unparseable-date', row['Date & time Africa/Harare'] || '(blank)', rowNumber);
+      continue;
+    }
+
+    // BuddyX owns everything after the cutover. Refusing it here — in the one
+    // parser every Infloww upload goes through — is what stops an export that
+    // runs past 4 Oct from counting a sale twice. `salesSourceFor` is the same
+    // predicate the sync uses, so the two sides cannot drift apart.
+    if (salesSourceFor(occurredAtMs) !== 'infloww') {
+      skip('after-cutover', 'Sales after 08:50 on 4 Oct 2026 come from BuddyX', rowNumber);
       continue;
     }
 
@@ -201,11 +220,23 @@ export function parseSalesSheet(sheet: XlsxSheet, resolve: UserResolver, importI
       // A reversal is money going back to the fan, so it is stored negative and
       // the engine simply sums this column.
       signedGross: status === 'reverse' ? -grossRevenue : grossRevenue,
-      type,
+      // Stored in the shared vocabulary (`saleTypes.ts`); the raw label still
+      // feeds the id above, so the normalisation cannot change a sale's id.
+      type: normaliseSaleType(type),
       rule: (row['Rule'] ?? '').trim(),
       assignedBy: (row['Assigned by'] ?? '').trim(),
       status,
       importId,
+      source: 'infloww',
+      kind: kindForSaleType(type),
+      creatorId: resolveCreatorId(creatorName),
+      sourceUserId: user.uid,
+      transfer: null,
+      disputeId: null,
+      removedAt: null,
+      unmappedChatterId: null,
+      attributionConflict: false,
+      vanishedAfterFinalise: false,
     });
   }
 

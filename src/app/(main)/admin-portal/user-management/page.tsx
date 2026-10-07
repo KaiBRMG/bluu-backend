@@ -218,9 +218,10 @@ export default function UserManagementPage() {
   /* -------------------------------- Actions -------------------------------- */
 
   const handleDeleteUser = useCallback(async () => {
-    if (!selectedUserId) return;
-    await deleteUser(selectedUserId);
+    if (!selectedUserId) return {};
+    const result = await deleteUser(selectedUserId);
     setSelectedUserId(null);
+    return result;
   }, [selectedUserId, deleteUser]);
 
   const toggleSelect = useCallback((uid: string) => {

@@ -40,3 +40,7 @@ functions/node_modules
 .vercel
 
 .claude
+
+# Infloww exports used for the one-off BuddyX historical import. They hold fan
+# names and per-agent sales — never commit them.
+Infloww-data/

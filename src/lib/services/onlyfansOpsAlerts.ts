@@ -72,6 +72,22 @@ export async function sendOpsAlertOnce(key: string, content: NotificationContent
 }
 
 /**
+ * Re-arm a latched alert, so the next occurrence of its condition sends again.
+ *
+ * Every alert above is once-*ever*, because its condition persists until fixed.
+ * An **incident** alert is different: `buddyx-sync-failing` describes something
+ * that recovers on its own, and a second outage next month is news. Its owner
+ * clears the latch on the first healthy run after it fired, which makes it
+ * once-per-incident rather than once-ever. A no-op when nothing is latched.
+ */
+export async function clearOpsAlert(key: string): Promise<void> {
+  const latchRef = adminDb.doc(LATCH_DOC);
+  const snapshot = await latchRef.get();
+  if (!snapshot.exists || !snapshot.get(key)) return;
+  await latchRef.update({ [key]: FieldValue.delete() });
+}
+
+/**
  * Report that the provider is serving its video renditions from a host the
  * adapter will not accept — which means every video is falling back to the
  * source master and the single largest media saving is not applying.

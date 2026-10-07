@@ -47,7 +47,8 @@ export type AutomatedNotificationCategory =
   | 'Disputes'
   | 'Content Planning'
   | 'Model Submissions'
-  | 'OF Manager';
+  | 'OF Manager'
+  | 'Integrations';
 
 export interface AutomatedNotification {
   /** Factory name in `notificationContent.ts` — stable id for React keys. */
@@ -286,12 +287,16 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     category: 'Salary',
     event: 'Commission tier reached',
     trigger:
-      'An agent’s month-to-date gross crosses into a higher commission band — after a sales import, or after an admin override that re-tiers the month. Once per band per month: the trigger is a change, and the derived salary data cannot remember what the agent was last told, so ca-salary-tier-notices holds that memory. A tier that falls (a large reversal dated mid-month) notifies nobody.',
+      'An agent’s month-to-date gross crosses into a higher commission band — after a BuddyX sales sync, an approved dispute or admin un-transfer that moves a sale, the historical Infloww import, or an admin override that re-tiers the month. Once per band per month: the trigger is a change, and the derived salary data cannot remember what the agent was last told, so ca-salary-tier-notices holds that memory. A tier that falls (a large reversal dated mid-month) notifies nobody.',
     recipients: 'The agent who crossed the band',
     sources: [
-      'src/app/api/ca-salary/import/route.ts',
+      'src/lib/services/buddyxSyncService.ts',
+      'src/app/api/disputes/[disputeId]/admin-approval/route.ts',
+      'src/app/api/disputes/bulk-approval/route.ts',
+      'src/app/api/ca-sales/[saleId]/transfer/route.ts',
+      'src/app/api/admin/buddyx/historical-import/route.ts',
       'src/app/api/ca-salary/override/route.ts',
-      'src/lib/services/caNotifications.ts',
+      'src/lib/services/tierNotices.ts',
     ],
     content: notifications.commissionTierUp('{5%}', '{August 2026}'),
     telegramEnabled: true,
@@ -302,9 +307,9 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     id: 'disputeAssigned',
     category: 'Disputes',
     event: 'Dispute submitted',
-    trigger: 'A dispute is created against a sale and assigned to someone (skipped when assignee is "No One").',
-    recipients: 'The CA the dispute is assigned to',
-    sources: ['src/app/api/disputes/route.ts'],
+    trigger: 'An agent claims tips another agent holds. One claim becomes one dispute per current holder, and each holder is told once (skipped for unassigned tips, whose claim goes straight to admin).',
+    recipients: 'Each CA currently holding a claimed tip',
+    sources: ['src/app/api/disputes/route.ts', 'src/lib/services/disputeTransfer.ts'],
     content: notifications.disputeAssigned('{createdByName}'),
     telegramEnabled: true,
   },
@@ -425,6 +430,22 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     content: notifications.ofVideoSourceHostUnrecognised('{host}'),
   },
 
+  // ─── Integrations ──────────────────────────────────────────────────────────
+  {
+    id: 'buddyxSyncFailing',
+    category: 'Integrations',
+    event: 'BuddyX sales sync failing',
+    trigger:
+      'A BuddyX sync run hits a revoked or invalid API key, fails three runs in a row, or finds a new BuddyX chatter carrying sales that matches no Bluu user. Once per incident: the latch clears on the next healthy run, so a later outage alerts again. Each unmapped chatter alerts once.',
+    recipients: 'One named maintainer (OPS_ALERT_RECIPIENT_UID)',
+    sources: [
+      'src/app/api/cron/buddyx-sync/route.ts',
+      'src/app/api/buddyx/sync/route.ts',
+      'src/lib/services/buddyxSyncService.ts',
+    ],
+    content: notifications.buddyxSyncFailing('{reason}'),
+  },
+
   // NOTE — `notifications.releaseNote()` is deliberately NOT catalogued here,
   // and that is the one sanctioned exception to cross-cutting rule 15. This tab
   // is a record of what the system sends *on an ongoing basis*, so an admin can
@@ -444,6 +465,7 @@ export const AUTOMATED_NOTIFICATION_CATEGORIES: AutomatedNotificationCategory[] 
   'Content Planning',
   'Model Submissions',
   'OF Manager',
+  'Integrations',
 ];
 
 // ─── Creators (Telegram only — see the header note) ────────────────────────

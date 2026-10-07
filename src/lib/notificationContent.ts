@@ -219,6 +219,20 @@ export const notifications = {
     actionUrl: null,
   }),
 
+  // ─── Integrations ─────────────────────────────────────────────────────────────
+  // The BuddyX sync is what pays chat agents now (documentation/buddyx.md), so a
+  // sync that has stopped working is a payroll problem, not a cosmetic one. One
+  // named operator (OPS_ALERT_RECIPIENT_UID), once per incident: the latch is
+  // cleared on the first healthy run, so a later outage alerts again.
+  // `reason` is a pre-written sentence from buddyxSyncService — a revoked key,
+  // three failed runs in a row, or a new chatter carrying unmapped sales.
+  buddyxSyncFailing: (reason: string): NotificationContent => ({
+    title: '⚠️ BuddyX sales sync needs attention',
+    message: `${reason} Chat-agent sales may be missing or unassigned until it is fixed — see CA Admin → Sales.`,
+    type: 'alert',
+    actionUrl: '/ca-portal/admin?tab=sales',
+  }),
+
   // ─── Chat-agent coverage (leave → overtime marketplace) ───────────────────────
   // The absence pipeline's four moving parts, restored after the deliberate
   // silence documented in ca-salary.md §11. Two rules shape this group:

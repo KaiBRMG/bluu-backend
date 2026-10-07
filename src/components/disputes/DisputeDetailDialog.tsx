@@ -18,8 +18,32 @@ import {
   formatSaleDate,
   STAGE_HINT,
 } from './disputeStatus';
-import { DisputeCreatorChip, PersonTag, StagePill, RejectReasonBar } from './disputeUi';
+import { DisputeCreatorChip, PersonTag, StagePill, RejectReasonBar, type ReasonBarCopy } from './disputeUi';
 import type { DisputeVerdict } from './DisputeReviewQueue';
+import { CreatorChip } from '@/components/creators/CreatorChip';
+import { AttrChip, FanLabel } from '@/components/buddyx/buddyxUi';
+import { formatSaleDateTime } from '@/lib/salary/salaryFormat';
+import { saleTypeLabel } from '@/lib/salary/saleTypes';
+
+const UNTRANSFER_COPY: ReasonBarCopy = {
+  label: 'Why this transfer is being reverted',
+  placeholder: 'Reason (required) — recorded on the dispute',
+  confirm: 'Revert transfer',
+  busy: 'Reverting…',
+  required: true,
+};
+
+/** "2 tips moved to Jenelle's sales · 1 skipped — month finalised". */
+function describeTransfer(dispute: DisputeDocument): string | null {
+  const result = dispute.transferResult;
+  if (!result) return null;
+  const who = dispute.createdByName ? `${dispute.createdByName}'s` : "the filer's";
+  const moved = result.transferred.length;
+  const parts = [`${moved} ${moved === 1 ? 'tip' : 'tips'} moved to ${who} sales`];
+  const reasons = [...new Set(result.skipped.map(s => s.reason))];
+  if (result.skipped.length > 0) parts.push(`${result.skipped.length} skipped — ${reasons.join(', ')}`);
+  return parts.join(' · ');
+}
 
 /**
  * One dispute, in full.
@@ -54,6 +78,7 @@ export function DisputeDetailDialog({
   onOpenChange,
   timezone,
   onAction,
+  onUntransfer,
 }: {
   /** Null between closing and the exit animation finishing. */
   dispute: DisputeDocument | null;
@@ -62,9 +87,15 @@ export function DisputeDetailDialog({
   timezone: string;
   /** Absent unless the viewer is the assigned reviewer and it is still open. */
   onAction?: (id: string, verdict: DisputeVerdict, reason?: string) => Promise<void>;
+  /**
+   * CA Admin only: revert one transferred tip — the escape hatch for a wrong
+   * approval. Offered per moved tip on an approved v2 dispute.
+   */
+  onUntransfer?: (saleId: string, reason: string) => Promise<void>;
 }) {
   const [rejecting, setRejecting] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [reverting, setReverting] = useState<string | null>(null);
 
   const run = async (verdict: DisputeVerdict, reason?: string) => {
     if (!dispute) return;
@@ -101,6 +132,7 @@ export function DisputeDetailDialog({
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <DialogTitle className="text-2xl font-semibold tabular-nums tracking-tight">
                   {formatMoney(dispute.saleAmount)}
+                  <span className="ml-1.5 text-xs font-normal tracking-normal text-zinc-400">gross</span>
                 </DialogTitle>
                 <StagePill dispute={dispute} />
               </div>
@@ -114,19 +146,23 @@ export function DisputeDetailDialog({
                 and the reason neither needs a nested card to say "these five
                 facts belong together". */}
             <dl className={cn('grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-2.5 border-t pt-4 text-sm', HAIRLINE)}>
-              <dt className="text-zinc-400">Sale</dt>
-              <dd className="tabular-nums">
-                {formatSaleDate(dispute.saleDate, timezone)}
-                <span className="ml-1.5 text-xs text-zinc-400">{timezone}</span>
-              </dd>
+              {dispute.version === 1 && (
+                <>
+                  <dt className="text-zinc-400">Sale</dt>
+                  <dd className="tabular-nums">
+                    {formatSaleDate(dispute.saleDate, timezone)}
+                    <span className="ml-1.5 text-xs text-zinc-400">{timezone}</span>
+                  </dd>
 
-              <dt className="text-zinc-400">Fan</dt>
-              <dd className="truncate" title={dispute.fanName}>{dispute.fanName}</dd>
+                  <dt className="text-zinc-400">Fan</dt>
+                  <dd className="truncate" title={dispute.fanName}>{dispute.fanName}</dd>
 
-              <dt className="text-zinc-400">Creator</dt>
-              <dd className="min-w-0">
-                <DisputeCreatorChip dispute={dispute} />
-              </dd>
+                  <dt className="text-zinc-400">Creator</dt>
+                  <dd className="min-w-0">
+                    <DisputeCreatorChip dispute={dispute} />
+                  </dd>
+                </>
+              )}
 
               <dt className="text-zinc-400">Claimed by</dt>
               <dd className="min-w-0">
@@ -149,6 +185,83 @@ export function DisputeDetailDialog({
                 </>
               )}
             </dl>
+
+            {/* A v2 claim names its tips; each one's state is what the admin's
+                approval did to it. */}
+            {dispute.version === 2 && dispute.sales.length > 0 && (
+              <div className={cn('border-t pt-4', HAIRLINE)}>
+                <h3 className="text-xs font-semibold text-zinc-400">
+                  {dispute.sales.length === 1 ? 'The tip' : `${dispute.sales.length} tips`}
+                  {dispute.groupSize > 1 && (
+                    <span className="font-normal">
+                      {' '}· filed with {dispute.groupSize - 1} other {dispute.groupSize === 2 ? 'dispute' : 'disputes'}
+                    </span>
+                  )}
+                </h3>
+                <ul className="mt-2 max-h-56 divide-y divide-white/[0.07] overflow-y-auto">
+                  {dispute.sales.map(sale => {
+                    const moved = dispute.transferResult?.transferred.includes(sale.saleId) ?? false;
+                    const skipped = dispute.transferResult?.skipped.find(x => x.saleId === sale.saleId);
+                    const reverted = dispute.untransfers.find(u => u.saleId === sale.saleId);
+                    const state = reverted ? 'Reverted' : moved ? 'Moved' : skipped ? `Skipped — ${skipped.reason}` : null;
+                    return (
+                      <li key={sale.saleId} className="py-1.5">
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="w-28 shrink-0 tabular-nums text-zinc-400">
+                            {sale.occurredAt ? formatSaleDateTime(sale.occurredAt, timezone) : '—'}
+                          </span>
+                          {sale.creatorId ? <CreatorChip creatorId={sale.creatorId} size="xs" avatarOnly /> : null}
+                          <AttrChip>{saleTypeLabel(sale.type)}</AttrChip>
+                          <FanLabel name={sale.fanName} fanId={sale.fanId} className="min-w-0 flex-1" />
+                          <span className="shrink-0 tabular-nums">{formatMoney(sale.gross)}</span>
+                        </div>
+                        {(state || (moved && !reverted && onUntransfer)) && (
+                          <div className="mt-0.5 flex items-center justify-end gap-2 text-[11px] text-zinc-400">
+                            {state && <span>{state}</span>}
+                            {moved && !reverted && onUntransfer && reverting !== sale.saleId && (
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                className="h-6 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                                onClick={() => setReverting(sale.saleId)}
+                              >
+                                Un-transfer
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                        {reverting === sale.saleId && onUntransfer && (
+                          <RejectReasonBar
+                            id={`untransfer-${sale.saleId}`}
+                            busy={busy}
+                            copy={UNTRANSFER_COPY}
+                            onCancel={() => setReverting(null)}
+                            onConfirm={async reason => {
+                              setBusy(true);
+                              try {
+                                await onUntransfer(sale.saleId, reason ?? '');
+                                setReverting(null);
+                              } catch {
+                                // The caller toasts; the reason stays typed.
+                              } finally {
+                                setBusy(false);
+                              }
+                            }}
+                          />
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+                {describeTransfer(dispute) && <p className="mt-2 text-sm">{describeTransfer(dispute)}</p>}
+              </div>
+            )}
+
+            {dispute.version === 1 && stage === 'approved' && (
+              <p className={cn('border-t pt-4 text-sm text-zinc-400', HAIRLINE)}>
+                Legacy dispute — adjust manually. Disputes filed before the BuddyX integration move nothing when approved.
+              </p>
+            )}
 
             {/* The argument is the whole basis of the decision, so it is never
                 truncated (DESIGN.md §5, the decision queue). */}

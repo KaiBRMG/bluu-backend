@@ -582,8 +582,12 @@ export interface ShiftDocument {
 /** `ca-sales/{saleId}` — one imported sale row. The id is a content hash; see `salesImport.ts`. */
 export interface CaSaleDocument {
   saleId: string;
-  /** Resolved at import time from the export's `Email` column. */
-  userId: string;
+  /**
+   * The **effective** holder — `transfer?.toUserId ?? sourceUserId`. Every pay
+   * path reads this. `null` for an unassigned tip or an unmapped chatter.
+   * Infloww rows: resolved at import time from the export's `Email` column.
+   */
+  userId: string | null;
   /** `YYYY-MM-DD` in the salary timezone — the bucketing key. */
   day: string;
   /** `YYYY-MM`, denormalised so a month reads with one range query. */
@@ -603,8 +607,44 @@ export interface CaSaleDocument {
   rule: string;
   assignedBy: string;
   status: 'complete' | 'reverse';
+  /** Infloww: the upload's id. BuddyX: the sync run that last wrote the row. */
   importId: string;
   createdAt: Timestamp;
+
+  // ── BuddyX integration (documentation/buddyx.md). Absent on Infloww rows
+  //    written before it; the serialiser defaults them. ──
+  /** `'infloww'` when absent. */
+  source?: 'infloww' | 'buddyx';
+  /** BuddyX row id, or the Infloww sale hash. Index-exempt. */
+  sourceId?: string;
+  kind?: 'tip' | 'ppv';
+  /** Resolved creator / sub-account id (rule 9h). Queried by the dispute search. */
+  creatorId?: string | null;
+  modelId?: string | null;
+  /** Index-exempt. */
+  modelHandle?: string | null;
+  chatterId?: string | null;
+  /** The uid the source attributes the sale to, before any transfer. */
+  sourceUserId?: string | null;
+  /** Index-exempt map. A sync never clears it. */
+  transfer?: {
+    fromUserId: string | null;
+    toUserId: string;
+    disputeId: string;
+    approvedBy: string;
+    approvedAt: Timestamp;
+  } | null;
+  /** Denormalised from `transfer.fromUserId` for the "transferred away" query. */
+  transferFromUserId?: string | null;
+  /** An open dispute holds this sale. */
+  disputeId?: string | null;
+  removedAt?: Timestamp | null;
+  unmappedChatterId?: string | null;
+  attributionConflict?: boolean;
+  vanishedAfterFinalise?: boolean;
+  /** Fingerprint of every synced field, so an unchanged row is never rewritten. Index-exempt. */
+  syncHash?: string;
+  syncedAt?: Timestamp;
 }
 
 /** `ca-sales-imports/{importId}` — the audit record for one upload. */
@@ -894,6 +934,31 @@ export interface DisputeDocument {
   createdBy: string;               // UID
   createdByName: string;           // resolved from users.displayName
   createdByPhotoURL: string | null;
+
+  // ── v2 (BuddyX): a claim over specific tips, which an approval transfers.
+  //    Absent / 1 on every dispute filed before it; those move nothing. ──
+  version: 1 | 2;
+  groupId: string | null;
+  /** How many disputes the submission became (one per holder). */
+  groupSize: number;
+  /** Snapshot at filing — the tips claimed. Empty on v1. */
+  sales: DisputeSaleSnapshot[];
+  totalGross: number | null;
+  /** Written on an admin approval: what moved, and what was skipped and why. */
+  transferResult: { transferred: string[]; skipped: Array<{ saleId: string; reason: string }> } | null;
+  /** Transfers an admin reverted afterwards. */
+  untransfers: Array<{ saleId: string; by: string; at: string | null; reason: string }>;
+}
+
+export interface DisputeSaleSnapshot {
+  saleId: string;
+  occurredAt: string | null;
+  creatorId: string | null;
+  creatorName: string;
+  fanId: string;
+  fanName: string;
+  type: string;
+  gross: number;
 }
 
 export interface CreatorDocument {
@@ -1483,4 +1548,277 @@ export interface ResolvedAccess {
   parentPageId?: string;
   grantedVia: 'user' | 'group';
   grantingGroupId?: string;
+}
+
+// ─── BuddyX integration (documentation/buddyx.md) ────────────────────
+//
+// Every collection below is Admin SDK only (`allow read, write: if false`) —
+// the same posture as the rest of CA salary: per-person performance and pay
+// data is assembled server-side and projected per caller.
+
+/** `buddyx-chatters/{chatterId}` — a BuddyX team member and the Bluu user they resolve to. */
+export interface BuddyxChatterDocument {
+  chatterId: string;
+  name: string | null;
+  email: string | null;
+  status: string | null;
+  timeZone: string | null;
+  /** Resolved Bluu uid: `manualUid`, else an email match, else null. */
+  uid: string | null;
+  match: 'email' | 'manual' | 'none';
+  /** An admin's link. Wins over the email match. */
+  manualUid?: string | null;
+  linkedBy?: string | null;
+  linkedAt?: Timestamp | null;
+  /** First time this chatter was seen carrying sales while unmapped — the alert latch. */
+  unmappedAlertedAt?: Timestamp | null;
+  syncedAt: Timestamp;
+}
+
+/** `buddyx-models/{modelId}` — a linked OnlyFans creator and the Bluu creator it resolves to. */
+export interface BuddyxModelDocument {
+  modelId: string;
+  handle: string | null;
+  customName: string | null;
+  revShare: number | null;
+  /** A `creators` uid **or** a `creator-subaccounts` id (rule 9h). */
+  creatorId: string | null;
+  /** The resolved creator's stage name, denormalised for the sales ledger. */
+  creatorName: string | null;
+  match: 'handle' | 'manual' | 'none';
+  manualCreatorId?: string | null;
+  linkedBy?: string | null;
+  linkedAt?: Timestamp | null;
+  syncedAt: Timestamp;
+}
+
+export type BuddyxSyncScope = 'directory' | 'sales' | 'chatters' | 'creators' | 'fans';
+
+export interface BuddyxScopeState {
+  lastSuccessAt: Timestamp | null;
+  lastAttemptAt: Timestamp | null;
+  lastError: string | null;
+  /** Consecutive failed runs — the alert fires at 3. */
+  failures?: number;
+}
+
+/** `buddyx-meta/state` — per-scope freshness, the one doc every "Synced 3 min ago" reads. */
+export type BuddyxStateDocument = Partial<Record<BuddyxSyncScope, BuddyxScopeState>>;
+
+/** `buddyx-meta/config` — server-read switches (rule 9c: never a compiled-in constant). */
+export interface BuddyxConfigDocument {
+  /**
+   * Whether the `sales` scope writes `ca-sales`. Off until an admin has
+   * eyeballed a dry run against the BuddyX dashboard (sequencing step 3).
+   */
+  salesWriteEnabled: boolean;
+  updatedBy?: string;
+  updatedAt?: Timestamp;
+}
+
+/** `buddyx-meta/lock` — the one-sync-at-a-time lease. */
+export interface BuddyxLockDocument {
+  holder: string;
+  scope: string;
+  expiresAt: Timestamp;
+}
+
+/** `buddyx-sync-runs/{auto}` — one row per run, for CA Admin → Sales. TTL 90 days. */
+export interface BuddyxSyncRunDocument {
+  trigger: 'cron' | string;
+  scopes: BuddyxSyncScope[];
+  startedAt: Timestamp;
+  durationMs: number;
+  requestCount: number;
+  counts: Record<string, number>;
+  errors: string[];
+  dryRun?: boolean;
+  expireAt: Timestamp;
+}
+
+/** One row of `/team-reports/overview`, as stored. Money is gross; ids are strings. */
+export interface BuddyxTeamRow {
+  chatterId: string;
+  chatterName: string | null;
+  uid: string | null;
+  ppvGross: number;
+  ppvsUnlocked: number;
+  ppvsSent: number;
+  ppvRate: number;
+  unlockRate: number;
+  fansChatted: number;
+  totalMessages: number;
+  tipsGross: number;
+  tipsCount: number;
+  onlineMs: number;
+  medianResponseTimeMs: number | null;
+  p75ResponseTimeMs: number | null;
+}
+
+export interface BuddyxTeamTotals {
+  ppvGross: number;
+  tipsGross: number;
+  tipsAssignedGross: number;
+  tipsCount: number;
+  ppvsSent: number;
+  ppvsUnlocked: number;
+  unlockRate: number;
+  ppvRate: number;
+  fansChatted: number;
+  totalMessages: number;
+  onlineMs: number;
+  medianResponseTimeMs: number | null;
+  p75ResponseTimeMs: number | null;
+}
+
+/** `buddyx-team-days/{day}` (salary-timezone day). */
+export interface BuddyxTeamDayDocument {
+  day: string;
+  totals: BuddyxTeamTotals;
+  breakdown: BuddyxTeamRow[];
+  syncedAt: Timestamp;
+}
+
+/**
+ * `buddyx-team-periods/{preset}` — the same shape for a whole period. Exists
+ * because medians and p75s cannot be summed from days.
+ */
+export interface BuddyxTeamPeriodDocument {
+  period: string;
+  from: string;
+  to: string;
+  totals: BuddyxTeamTotals;
+  breakdown: BuddyxTeamRow[];
+  syncedAt: Timestamp;
+  /** Custom ranges only — 7-day TTL. */
+  expireAt?: Timestamp;
+}
+
+/** `buddyx-mass-messages/{id}` — no message text, on purpose. */
+export interface BuddyxMassMessageDocument {
+  id: string;
+  modelId: string | null;
+  creatorId: string | null;
+  sentBy: string | null;
+  uid: string | null;
+  sentDate: Timestamp | null;
+  day: string | null;
+  price: number;
+  previewCount: number;
+  unsent: boolean;
+  unsentBy: string | null;
+  unsentDate: Timestamp | null;
+  syncedAt: Timestamp;
+}
+
+/**
+ * `creator-stats-days/{creatorId}_{day}` — one creator's day. Infloww history
+ * keeps only the fields BuddyX continues, so every chart is one series.
+ */
+export interface CreatorStatsDayDocument {
+  creatorId: string;
+  day: string;
+  source: 'infloww' | 'buddyx';
+  /** The day boundary the source bucketed in: Infloww `Africa/Monrovia`, BuddyX `Africa/Harare`. */
+  tz: string;
+  totalGross: number | null;
+  subsGross: number | null;
+  tipsGross: number | null;
+  messagesGross: number | null;
+  newSubs: number | null;
+  fansChatted: number | null;
+  messagesSent: number | null;
+  ppvsSent: number | null;
+  /** Infloww: an average. BuddyX: a median excluding replies over 8h. Not the same statistic. */
+  replyTimeMs: number | null;
+  // BuddyX-only extras
+  revShareGross?: number | null;
+  massMessages?: number | null;
+  ppvsUnlocked?: number | null;
+  unlockRate?: number | null;
+  onlineMs?: number | null;
+  syncedAt: Timestamp;
+}
+
+/** `buddyx-subscribers/{eventId}` — one "subscribed" event. */
+export interface BuddyxSubscriberDocument {
+  id: string;
+  modelId: string | null;
+  creatorId: string | null;
+  fanId: string | null;
+  subType: string | null;
+  isTrial: boolean;
+  isCreator: boolean;
+  priceGross: number;
+  subscribedAt: Timestamp | null;
+  day: string | null;
+  syncedAt: Timestamp;
+}
+
+/** `buddyx-links/{modelId}_{linkId}` — a tracking or free-trial link and its trend. */
+export interface BuddyxLinkDocument {
+  modelId: string;
+  linkId: string;
+  creatorId: string | null;
+  kind: 'tracking' | 'free-trial';
+  name: string | null;
+  url: string | null;
+  createdAt: string | null;
+  archived: boolean;
+  cost: number;
+  /** Tracking: `countSubscribers`. Free-trial: `claimCounts`. */
+  subscribers: number;
+  /** Tracking only: clicks that navigated. */
+  transitions: number | null;
+  revenue: number;
+  fansCount: number;
+  stackersCount: number | null;
+  revenueFromStackers: number | null;
+  /** `day → cumulative {subs, revenue, fans}`, capped at 400 entries. Index-exempt. */
+  series: Record<string, { subs: number; revenue: number; fans: number }>;
+  /** When the link's fan list was last walked, so the next walk is incremental. */
+  fansSyncedAt?: Timestamp | null;
+  /** `fansCount` at that walk — an unchanged count skips the walk entirely. */
+  fansSyncedCount?: number | null;
+  syncedAt: Timestamp;
+}
+
+/** `buddyx-fans/{creatorId}_{fanId}` — one fan of one creator, rolled up. */
+export interface BuddyxFanDocument {
+  creatorId: string;
+  fanId: string;
+  /** From a BuddyX link's fan list — the freshest name we have. */
+  name: string | null;
+  nameSource: 'infloww' | 'buddyx-link' | null;
+  /** The name on the fan's most recent sale row (Infloww export, or the fan directory at sync time). */
+  salesName?: string | null;
+  /**
+   * `YYYY-MM → {tips, ppv, count, first, last}` (gross; first/last are epoch ms
+   * of the month's first and last purchase). Rebuilt from `ca-sales` for each
+   * open month by the `fans` scope. Lifetime spend, first seen and last
+   * purchase are all derived from this on read. Index-exempt.
+   */
+  spendByMonth: Record<string, { tips: number; ppv: number; count: number; first: number | null; last: number | null }>;
+  /** The keys of `spendByMonth`, so a month's rebuild can find every fan it must update. */
+  spendMonths: string[];
+  subscriptions: {
+    lastSubType: string | null;
+    isTrial: boolean;
+    lastSubscribedAt: Timestamp | null;
+    subCount: number;
+    /** Ids already counted, so a re-read event never double-counts. Capped. */
+    eventIds?: string[];
+  } | null;
+  acquisition: { kind: 'tracking' | 'free-trial'; linkId: string; linkName: string | null } | null;
+  linkTotalSpent: number | null;
+  isStacker: boolean;
+  updatedAt: Timestamp;
+}
+
+/** `buddyx-fan-names/{fanId}` — a fan's name is the same on every creator. */
+export interface BuddyxFanNameDocument {
+  fanId: string;
+  name: string;
+  source: 'infloww' | 'buddyx-link';
+  lastSeenAt: Timestamp;
 }

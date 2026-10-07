@@ -6,28 +6,39 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { CreatorChip } from '@/components/creators/CreatorChip';
+
+/** Selected segment = filled Action Blue Deep (DESIGN.md §5, ToggleGroup). */
+const SEGMENT = 'data-[state=on]:bg-[#2563eb]! data-[state=on]:text-white! text-xs';
 import { useAuth } from '@/components/AuthProvider';
 import { formatMonthLabel } from '@/lib/salary/salaryDate';
 import { formatRelative, formatUsd, pluralise } from '@/lib/salary/salaryFormat';
 import type { SalesImportResult } from '@/lib/salary/salaryTypes';
 
 /**
- * Uploading the sales export.
+ * The one-off Infloww historical import — **delete after use** (buddyx.md §9).
  *
- * The temporary bridge until sales come from OF Manager, and built to be
- * boring: pick a file, read what it *would* do, confirm.
+ * What used to be the Sales data tab: the `.xlsx` upload was the only source of
+ * sales until BuddyX. It survives only to bring the history in — the CA sales
+ * export (which also backfills `source`/`kind`/`creatorId` onto rows already
+ * stored) and the *Creator Statistics* export for OnlyFans Analytics. Every
+ * row after the cutover is refused server-side. Admin claim only.
  *
- * ## Why a dry run, not a straight upload
- *
- * These exports are cumulative, so an admin uploading "the last few days" always
- * overlaps what is already there. Without a preview the only way to find out
- * whether a file double-counted a month is to go and look at a month. The dry
- * run answers it up front — imported versus already-had, per agent, with every
- * skipped row explained.
- *
- * The skip list is the part that matters most. An agent whose rows silently
- * vanish is an agent who is underpaid and nobody notices.
+ * Built to be boring: pick a file, read what it *would* do, confirm. The skip
+ * list is the part that matters most — an agent whose rows silently vanish is
+ * an agent who is underpaid and nobody notices.
  */
+
+type Kind = 'sales' | 'creator-stats';
+
+interface StatsResult {
+  rows: number;
+  written: number;
+  range: { from: string | null; to: string | null };
+  creators: Array<{ name: string; creatorId: string; days: number; totalGross: number }>;
+  skipped: Array<{ reason: string; detail: string; rowCount: number }>;
+}
 
 type ImportRecord = SalesImportResult & { uploadedByName?: string };
 
@@ -36,14 +47,19 @@ const REASON_LABELS: Record<string, string> = {
   'unparseable-date': 'Unreadable date',
   'unparseable-amount': 'Unreadable amount',
   'missing-email': 'No employee email',
+  'after-cutover': 'After the BuddyX cutover',
+  'deleted-creator': 'Deleted creator',
+  'unmatched-creator': 'No creator matched',
 };
 
-export default function AdminSalesData() {
+export default function HistoricalImport() {
   const { user } = useAuth();
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const [kind, setKind] = useState<Kind>('sales');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<SalesImportResult | null>(null);
+  const [statsPreview, setStatsPreview] = useState<StatsResult | null>(null);
   const [busy, setBusy] = useState<'preview' | 'commit' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -54,7 +70,7 @@ export default function AdminSalesData() {
     if (!user) return;
     try {
       const token = await user.getIdToken();
-      const res = await fetch('/api/ca-salary/import?limit=15', {
+      const res = await fetch('/api/admin/buddyx/historical-import', {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -79,9 +95,10 @@ export default function AdminSalesData() {
       const token = await user.getIdToken();
       const form = new FormData();
       form.append('file', chosen);
+      form.append('kind', kind);
       if (dryRun) form.append('dryRun', 'true');
 
-      const res = await fetch('/api/ca-salary/import', {
+      const res = await fetch('/api/admin/buddyx/historical-import', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: form,
@@ -100,12 +117,22 @@ export default function AdminSalesData() {
         return;
       }
 
-      const body = (await res.json()) as { dryRun: boolean; result: SalesImportResult };
+      if (kind === 'creator-stats') {
+        const body = (await res.json()) as { stats: StatsResult };
+        if (dryRun) setStatsPreview(body.stats);
+        else {
+          toast.success(`Imported ${pluralise(body.stats.written, 'creator day')}`);
+          reset();
+        }
+        return;
+      }
+
+      const body = (await res.json()) as { dryRun: boolean; result: SalesImportResult & { backfilled?: number } };
 
       if (dryRun) {
         setPreview(body.result);
       } else {
-        const { imported, restamped = 0 } = body.result;
+        const { imported, restamped = 0, backfilled = 0 } = body.result;
         toast.success(
           imported > 0 || restamped > 0
             ? [
@@ -115,7 +142,9 @@ export default function AdminSalesData() {
                 .filter(Boolean)
                 .join(' · ')
                 .replace(/^m/, 'M')
-            : 'Nothing new to import — every row was already recorded',
+            : backfilled > 0
+              ? `Backfilled ${pluralise(backfilled, 'recorded sale')} with source, type and creator`
+              : 'Nothing new to import — every row was already recorded',
         );
         reset();
         void loadHistory();
@@ -130,6 +159,7 @@ export default function AdminSalesData() {
   function choose(chosen: File | null) {
     setError(null);
     setPreview(null);
+    setStatsPreview(null);
     setFile(chosen);
     if (chosen) void send(chosen, true);
   }
@@ -137,17 +167,33 @@ export default function AdminSalesData() {
   function reset() {
     setFile(null);
     setPreview(null);
+    setStatsPreview(null);
     setError(null);
     if (inputRef.current) inputRef.current.value = '';
   }
 
   return (
     <div className="space-y-5">
-      <div>
-        <h2 className="text-lg font-semibold tracking-tight">Sales data</h2>
-        <p className="mt-0.5 max-w-[70ch] text-sm leading-relaxed text-zinc-400">
-          Upload the export from the sales tool. Re-uploading a file that overlaps a previous one is safe — rows already
-          recorded are recognised and not counted twice.
+      <div className="flex flex-wrap items-center gap-2">
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          size="sm"
+          value={kind}
+          onValueChange={v => {
+            if (!v) return;
+            setKind(v as Kind);
+            reset();
+          }}
+          aria-label="Which export"
+        >
+          <ToggleGroupItem value="sales" className={SEGMENT}>CA sales export</ToggleGroupItem>
+          <ToggleGroupItem value="creator-stats" className={SEGMENT}>Creator Statistics</ToggleGroupItem>
+        </ToggleGroup>
+        <p className="text-xs text-zinc-400">
+          {kind === 'sales'
+            ? 'Rows up to 08:50 on 4 Oct 2026. Overlapping files are safe; already-recorded rows are backfilled, not duplicated.'
+            : 'The "Creator Statistics Detail" sheet. Days before 4 Oct 2026; only the fields BuddyX continues are kept.'}
         </p>
       </div>
 
@@ -187,7 +233,9 @@ export default function AdminSalesData() {
         <span className="mt-1 text-xs text-zinc-400">
           {file
             ? `${(file.size / 1024).toFixed(0)} KB`
-            : 'Needs the Date, Employee, Email, Creator, Fan, Earnings, Gross, Net and Type columns'}
+            : kind === 'sales'
+              ? 'Needs the Date, Employee, Email, Creator, Fan, Earnings, Gross, Net and Type columns'
+              : 'The Infloww Creator Statistics export (.xlsx)'}
         </span>
       </label>
 
@@ -208,6 +256,15 @@ export default function AdminSalesData() {
         </div>
       )}
 
+      {statsPreview && file && (
+        <StatsPreview
+          result={statsPreview}
+          committing={busy === 'commit'}
+          onCancel={reset}
+          onConfirm={() => void send(file, false)}
+        />
+      )}
+
       {preview && file && (
         <ImportPreview
           result={preview}
@@ -218,7 +275,7 @@ export default function AdminSalesData() {
       )}
 
       <section>
-        <h3 className="text-sm font-semibold">Recent imports</h3>
+        <h3 className="text-sm font-semibold">Recent sales imports</h3>
         {history === null ? (
           <Skeleton className="mt-2 h-32 w-full rounded-lg" />
         ) : history.length === 0 ? (
@@ -318,7 +375,7 @@ function ImportPreview({
               <li key={entry.userId} className="flex items-baseline justify-between gap-3 py-1.5 text-sm">
                 <span className="min-w-0 truncate">
                   {entry.displayName}
-                  <span className="ml-1.5 text-xs text-zinc-500">{entry.sourceEmail}</span>
+                  <span className="ml-1.5 text-xs text-zinc-400">{entry.sourceEmail}</span>
                 </span>
                 <span className="shrink-0 tabular-nums">
                   {formatUsd(entry.gross)}
@@ -358,7 +415,7 @@ function ImportPreview({
                 </span>{' '}
                 <span className="break-all">{skip.detail}</span>
                 {skip.sampleRows.length > 0 && (
-                  <span className="text-xs text-zinc-500"> (e.g. row {skip.sampleRows.join(', ')})</span>
+                  <span className="text-xs text-zinc-400"> (e.g. row {skip.sampleRows.join(', ')})</span>
                 )}
               </li>
             ))}
@@ -381,6 +438,75 @@ function ImportPreview({
             : result.imported > 0
               ? `Import ${pluralise(result.imported, 'sale')}`
               : `Move ${pluralise(restamped, 'sale')}`}
+        </Button>
+        <Button variant="ghost" onClick={onCancel} disabled={committing} className="text-zinc-400">
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Creator statistics preview ──────────────────────────────────────
+
+function StatsPreview({
+  result,
+  committing,
+  onCancel,
+  onConfirm,
+}: {
+  result: StatsResult;
+  committing: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const days = result.creators.reduce((s, c) => s + c.days, 0);
+  return (
+    <div className="space-y-4 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold">What this file will do</h3>
+        <p className="text-xs text-zinc-400">
+          {pluralise(result.rows, 'row')} read
+          {result.range.from && ` · ${result.range.from} → ${result.range.to}`}
+        </p>
+      </div>
+      <ul className="divide-y divide-white/[0.07]">
+        {result.creators.map(c => (
+          <li key={c.creatorId} className="flex items-center justify-between gap-3 py-1.5 text-sm">
+            <span className="flex min-w-0 items-center gap-2">
+              <CreatorChip creatorId={c.creatorId} size="xs" />
+              <span className="truncate text-xs text-zinc-400">as “{c.name}”</span>
+            </span>
+            <span className="shrink-0 tabular-nums">
+              {formatUsd(c.totalGross)}
+              <span className="ml-2 text-xs text-zinc-400">{c.days} days</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {result.skipped.length > 0 && (
+        <div className="rounded-lg border border-orange-500/20 bg-orange-500/[0.06] p-3">
+          <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-orange-400">
+            <TriangleAlert className="size-3.5" aria-hidden />
+            Rows that will not be imported
+          </h4>
+          <ul className="mt-2 space-y-1.5">
+            {result.skipped.map(skip => (
+              <li key={`${skip.reason}:${skip.detail}`} className="text-sm">
+                <span className="tabular-nums font-medium">{skip.rowCount}</span>{' '}
+                <span className="text-zinc-400">
+                  {skip.rowCount === 1 ? 'row' : 'rows'} — {REASON_LABELS[skip.reason] ?? skip.reason}:
+                </span>{' '}
+                <span className="break-all">{skip.detail}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="flex items-center gap-2 border-t border-white/[0.07] pt-3">
+        <Button onClick={onConfirm} disabled={committing || days === 0}>
+          {committing && <Loader2Icon className="activity-spinner size-3.5" aria-hidden />}
+          {days === 0 ? 'Nothing to import' : `Import ${pluralise(days, 'creator day')}`}
         </Button>
         <Button variant="ghost" onClick={onCancel} disabled={committing} className="text-zinc-400">
           Cancel

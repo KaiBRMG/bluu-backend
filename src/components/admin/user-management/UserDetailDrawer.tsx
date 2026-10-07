@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from 'react';
-import type { AdminFullUser, AdminGroup } from '@/hooks/useAdminUsers';
+import type { AdminFullUser, AdminGroup, UserLifecycleResult } from '@/hooks/useAdminUsers';
 import UserDetailContent from './UserDetailContent';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -29,9 +29,9 @@ interface UserDetailDrawerProps {
   users: AdminFullUser[];
   groups: AdminGroup[];
   onClose: () => void;
-  onUpdateUser: (uid: string, updates: Record<string, unknown>) => Promise<void>;
+  onUpdateUser: (uid: string, updates: Record<string, unknown>) => Promise<UserLifecycleResult>;
   onRefetch: () => Promise<void>;
-  onDeleteUser?: () => Promise<void>;
+  onDeleteUser?: () => Promise<UserLifecycleResult>;
   onAddGroupMembers?: (groupId: string, uids: string[]) => Promise<void>;
   onRemoveGroupMember?: (groupId: string, uid: string) => Promise<void>;
 }

@@ -125,3 +125,33 @@ export const OPTIONAL_SALES_COLUMNS = ['Rule', 'Assigned by', 'Status'] as const
  * the fan got back. A day can legitimately go negative as a result.
  */
 export type SaleStatus = 'complete' | 'reverse';
+
+// ─── The Infloww → BuddyX cutover ────────────────────────────────────
+
+/**
+ * The instant of the last Infloww sale: `2026-10-04 08:50:31` in the salary
+ * timezone (`06:50:31Z`).
+ *
+ * **Each source owns its own side of this instant, and nothing counts twice.**
+ * Infloww owns every sale at or before it — the historical import refuses
+ * anything later — and BuddyX owns every sale after it — the sync drops
+ * anything earlier. Before it, BuddyX's own attribution is unusable for pay:
+ * most tips from 27 Sep to 3 Oct are unassigned, because chatters had not yet
+ * moved into the BuddyX app (verified against the live API, 2026-10-06).
+ */
+export const SALES_CUTOVER_AT = Date.UTC(2026, 9, 4, 6, 50, 31);
+
+/** Which system owns a sale at this instant. */
+export type SalesSource = 'infloww' | 'buddyx';
+
+/**
+ * The one predicate both writers use, so the two sides of the cutover cannot
+ * drift apart: the sync keeps a row only when this says `buddyx`, the
+ * historical import only when it says `infloww`.
+ */
+export function salesSourceFor(occurredAtMs: number): SalesSource {
+  return occurredAtMs <= SALES_CUTOVER_AT ? 'infloww' : 'buddyx';
+}
+
+/** What kind of sale a row is. PPVs belong to their sender; tips to the agent on shift. */
+export type SaleKind = 'tip' | 'ppv';

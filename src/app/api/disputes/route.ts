@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
-import { getUserById } from '@/lib/services/userService';
-import { FieldValue, Timestamp, DocumentData } from 'firebase-admin/firestore';
+import { DocumentData } from 'firebase-admin/firestore';
 import { byNewest, serialiseDisputes } from '@/lib/services/disputeSerialise';
-import { checkPageAccess, addNotificationToBatch } from '@/lib/middleware/apiHelpers';
-import { notifications } from '@/lib/notificationContent';
-import { sendTelegramNotification } from '@/lib/services/telegramService';
+import { checkPageAccess, readJsonBody } from '@/lib/middleware/apiHelpers';
+import { fileDisputes } from '@/lib/services/disputeTransfer';
+import { CLAIM_REFUSAL_LABEL, MAX_DISPUTE_SALES } from '@/lib/disputes/disputeRules';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 const PAGE_SIZE = 10;
+const MAX_COMMENT = 2000;
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -144,59 +144,65 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 });
 
 // ─── POST /api/disputes ───────────────────────────────────────────────
+//
+// Body: `{ saleIds: string[], Comment: string }` — disputes v2.
+//
+// The agent picks tips from the sale search (`/api/ca-sales/search`) rather
+// than typing a sale's details, because an approval now *moves* the sale inside
+// Bluu Backend (documentation/buddyx.md §4). One submission becomes one dispute
+// per current holder, linked by `groupId`; an unassigned tip has no holder to
+// approve, so its dispute goes straight to admin.
+//
+// All-or-nothing: if any tip cannot be claimed (a PPV, already disputed, a
+// finalised month…) nothing is written and every refusal comes back, so the
+// dialog can mark those rows and keep the rest of the claim. The freeform v1
+// create path is gone; v1 disputes stay readable and decidable.
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   // Gated on `ca-dashboard`, not the retired `ca-disputes`: filing a dispute is
   // a control on the dashboard now (the Sale Disputes column's New dispute
   // button), and the pageId that used to guard it no longer exists — a
-  // `checkPageAccess` against a pruned page would refuse everyone. The tier is
-  // unchanged in substance: the write is hard-scoped to `createdBy: token.uid`
-  // and to a sale the caller names, so page access decides who may *reach* the
-  // form, never whose report a sale can be claimed off.
+  // `checkPageAccess` against a pruned page would refuse everyone. The write is
+  // hard-scoped to `createdBy: token.uid`, and the sales it may claim are
+  // decided server-side by `claimRefusal`, never by the client.
   const denied = await checkPageAccess(token.uid, 'ca-dashboard');
   if (denied) return denied;
 
   try {
-    const body = await request.json();
-    const { assignedTo, Creator, saleDate, saleAmount, fanName, Comment } = body;
+    const parsed = await readJsonBody(request, 16 * 1024);
+    if (!parsed.ok) return parsed.response;
+    const { saleIds, Comment } = parsed.body as { saleIds?: unknown; Comment?: unknown };
 
-    // All fields required
-    if (!assignedTo || !Creator || !saleDate || saleAmount == null || !fanName || !Comment) {
-      return NextResponse.json({ error: 'All fields are required' }, { status: 400 });
+    const comment = typeof Comment === 'string' ? Comment.trim() : '';
+    if (!comment) {
+      return NextResponse.json({ error: 'A comment is required — it is the whole basis of the decision.' }, { status: 400 });
+    }
+    if (comment.length > MAX_COMMENT) {
+      return NextResponse.json({ error: `Keep the comment under ${MAX_COMMENT} characters.` }, { status: 400 });
+    }
+    if (!Array.isArray(saleIds) || saleIds.length === 0 || !saleIds.every(id => typeof id === 'string' && id)) {
+      return NextResponse.json({ error: 'Pick at least one tip to claim.' }, { status: 400 });
+    }
+    const unique = [...new Set(saleIds as string[])];
+    if (unique.length > MAX_DISPUTE_SALES) {
+      return NextResponse.json({ error: `A claim can include at most ${MAX_DISPUTE_SALES} tips.` }, { status: 400 });
     }
 
-    const disputeData = {
-      createdBy: token.uid,
-      assignedTo,
-      Creator,
-      saleDate: Timestamp.fromDate(new Date(saleDate)),
-      saleAmount: Number(saleAmount),
-      fanName,
-      Comment,
-      CaApproval: 'Pending',
-      AdminApproval: 'Pending',
-      createdAt: FieldValue.serverTimestamp(),
-    };
-
-    if (assignedTo !== 'No One') {
-      // Use a batch to atomically write dispute + notification
-      const batch = adminDb.batch();
-      const disputeRef = adminDb.collection('disputes').doc();
-      batch.set(disputeRef, disputeData);
-
-      const createdByUser = await getUserById(token.uid);
-      const createdByName = createdByUser?.displayName ?? 'Someone';
-
-      const content = notifications.disputeAssigned(createdByName);
-      addNotificationToBatch(batch, assignedTo, content);
-
-      await batch.commit();
-      await sendTelegramNotification([assignedTo], content);
-    } else {
-      await adminDb.collection('disputes').add(disputeData);
+    const outcome = await fileDisputes({ filerUid: token.uid, saleIds: unique, comment });
+    if (!outcome.ok) {
+      const ppv = outcome.refused.some(r => r.reason === 'ppv');
+      return NextResponse.json(
+        {
+          error: ppv
+            ? CLAIM_REFUSAL_LABEL.ppv
+            : `${outcome.refused.length} of these tips can no longer be claimed.`,
+          refused: outcome.refused.map(r => ({ ...r, label: CLAIM_REFUSAL_LABEL[r.reason] })),
+        },
+        { status: ppv ? 400 : 409 },
+      );
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, groupId: outcome.groupId, disputes: outcome.disputes });
   } catch (error) {
     console.error('[disputes POST]', error);
     return NextResponse.json({ error: 'Failed to create dispute' }, { status: 500 });

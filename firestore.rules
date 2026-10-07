@@ -569,6 +569,51 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 31. BuddyX integration (documentation/buddyx.md).
+    //
+    // Admin SDK only, every one of them — the same posture as the rest of CA
+    // salary, and for the same reason: per-person performance, fan spend and the
+    // identity map that decides who is paid for what are assembled server-side
+    // and projected per caller. Chatter Analytics shows an agent an *anonymous*
+    // benchmark; a direct read of `buddyx-team-days` would hand them every
+    // colleague's figures by name, which is exactly what the API withholds.
+    match /buddyx-meta/{docId} {
+      allow read, write: if false;
+    }
+    match /buddyx-sync-runs/{runId} {
+      allow read, write: if false;
+    }
+    match /buddyx-chatters/{chatterId} {
+      allow read, write: if false;
+    }
+    match /buddyx-models/{modelId} {
+      allow read, write: if false;
+    }
+    match /buddyx-team-days/{day} {
+      allow read, write: if false;
+    }
+    match /buddyx-team-periods/{periodId} {
+      allow read, write: if false;
+    }
+    match /buddyx-mass-messages/{messageId} {
+      allow read, write: if false;
+    }
+    match /creator-stats-days/{docId} {
+      allow read, write: if false;
+    }
+    match /buddyx-subscribers/{eventId} {
+      allow read, write: if false;
+    }
+    match /buddyx-links/{linkId} {
+      allow read, write: if false;
+    }
+    match /buddyx-fans/{fanKey} {
+      allow read, write: if false;
+    }
+    match /buddyx-fan-names/{fanId} {
+      allow read, write: if false;
+    }
+
     // Organization-wide settings (doc id = area, e.g. `time-tracking`).
     // Read and written only by /api/admin/time-tracking-settings; the resolved
     // values reach each client on its own users/{uid} doc, so no client ever

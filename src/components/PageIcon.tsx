@@ -32,6 +32,9 @@ import {
   ImageUpscale,
   Settings2,
   FolderCog,
+  MessagesSquare,
+  UsersRound,
+  ChartColumnBig,
   type LucideIcon,
 } from "lucide-react";
 
@@ -71,6 +74,9 @@ export const ICON_MAP: Record<string, LucideIcon> = {
   ImageUpscale,
   Settings2,
   FolderCog,
+  MessagesSquare,
+  UsersRound,
+  ChartColumnBig,
 };
 
 // Brand icons that have no lucide equivalent are served from /Icons as SVGs.

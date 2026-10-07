@@ -32,7 +32,7 @@ import type { DisputeDocument } from '@/types/firestore';
 // four requests.
 
 function useDisputeFeed(filter: string) {
-  const { fetchDisputes } = useDisputesData({ lookups: false });
+  const { fetchDisputes } = useDisputesData();
   const [disputes, setDisputes] = useState<DisputeDocument[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -95,7 +95,7 @@ function ReviewPanel({
   onTotalChange?: (total: number) => void;
   onRuled?: () => void;
 }) {
-  const { setCaApproval } = useDisputesData({ lookups: false });
+  const { setCaApproval } = useDisputesData();
   const feed = useDisputeFeed(filter);
   const { total, loading, reload } = feed;
 

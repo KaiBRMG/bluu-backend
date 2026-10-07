@@ -191,6 +191,7 @@ function SalaryPageContent() {
                 timezone={timezone}
                 day={inspectedDay}
                 onClearDay={() => setInspectedDay(null)}
+                onSelectDay={setInspectedDay}
               />
             </TabsContent>
           </Tabs>

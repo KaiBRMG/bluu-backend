@@ -29,6 +29,8 @@ export interface AdminFullUser {
   hasCompletedOnboarding?: boolean;
   isActive: boolean;
   isArchived?: boolean;
+  /** The GoLogin address of the seat they hold, if any — the non-secret mirror on `users/{uid}`. */
+  gologinEmail?: string;
   role?: 'admin' | 'member';
   jobTitle?: string;
   employmentType?: string;
@@ -75,6 +77,15 @@ export interface AdminFullUser {
     firstName?: string | null;
     linkedAt: string | null;
   };
+}
+
+/**
+ * What deactivating, archiving or deleting did to the person's GoLogin seat.
+ * Absent on an ordinary profile save. `'failed'` means the Bluu action went
+ * through but the seat is still held — it stays listed on GoLogin → Members.
+ */
+export interface UserLifecycleResult {
+  gologinSeat?: 'released' | 'none' | 'failed';
 }
 
 export interface AdminGroup {
@@ -174,7 +185,7 @@ export function useAdminUsers() {
   }, [fetchData]);
 
   const updateUser = useCallback(
-    async (targetUid: string, updates: Record<string, unknown>) => {
+    async (targetUid: string, updates: Record<string, unknown>): Promise<UserLifecycleResult> => {
       if (!user) throw new Error('Not authenticated');
       const idToken = await user.getIdToken();
 
@@ -192,8 +203,10 @@ export function useAdminUsers() {
         throw new Error(data.error || 'Failed to update user');
       }
 
+      const result = (await res.json().catch(() => ({}))) as UserLifecycleResult;
       invalidateCache(CACHE_KEY);
       await fetchData(true);
+      return result;
     },
     [user, fetchData]
   );
@@ -287,7 +300,7 @@ export function useAdminUsers() {
   );
 
   const deleteUser = useCallback(
-    async (targetUid: string) => {
+    async (targetUid: string): Promise<UserLifecycleResult> => {
       if (!user) throw new Error('Not authenticated');
       const idToken = await user.getIdToken();
 
@@ -301,9 +314,11 @@ export function useAdminUsers() {
         throw new Error(data.error || 'Failed to delete user');
       }
 
+      const result = (await res.json().catch(() => ({}))) as UserLifecycleResult;
       invalidateCache(CACHE_KEY);
       invalidateCache(ADMIN_DATA_CACHE_KEY);
       await fetchData(true);
+      return result;
     },
     [user, fetchData]
   );

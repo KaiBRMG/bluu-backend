@@ -67,6 +67,7 @@ GL_TOKEN_ENC_KEY           # 32 bytes base64 — encrypts operators' personal Go
 RESEND_API_KEY             # Resend, SENDING-ONLY key — every email the app sends (see creator-onboarding.md)
 RESEND_INBOUND_API_KEY     # Resend, FULL-ACCESS key — only reads a received email's body; falls back to RESEND_API_KEY
 RESEND_WEBHOOK_SECRET      # whsec_… — verifies the email.received webhook at /api/email/inbound; unset = 503
+BUDDYX_API_KEY             # BuddyX Public API (bxa_…) — sales + analytics sync, read-only (see buddyx.md)
 ```
 
 - `NEXT_PUBLIC_*` are client-exposed by Next convention. Everything else is **server-only**.
@@ -74,6 +75,7 @@ RESEND_WEBHOOK_SECRET      # whsec_… — verifies the email.received webhook a
 - `GL_API_TOKEN` and `GL_TOKEN_ENC_KEY` are read **only** under `src/lib/gologin/` and `src/lib/services/gologin*` (server) — `src/lib/gologin/types.ts` is the client-safe half. The master token **never leaves the server**; what `/api/gologin/launch-token` hands to the Electron main process is the *calling operator's own* GoLogin key, decrypted per launch and never written to disk or sent to a renderer. See [gologin.md](gologin.md#the-token-still-has-to-reach-the-desktop--but-it-is-a-much-smaller-token-now).
 - The `ONLYFANS*` keys are read **only** under `src/lib/onlyfans/` (server). Importing that folder from a client component would leak the key into the bundle — see [onlyfans-crm.md](onlyfans-crm.md).
 - The `RESEND_*` keys are read **only** by `src/lib/email/resend.ts` and `src/app/api/email/inbound/route.ts` (server). Two keys on purpose: the sending-only key is the one most code paths hold, and the full-access key lives in exactly one — see [creator-onboarding.md](creator-onboarding.md#email).
+- `BUDDYX_API_KEY` is read **only** by `src/lib/buddyx/client.ts`, which is `import 'server-only'`. Set it in Vercel for Production **and** Preview. A revoked key fires the `buddyxSyncFailing` ops alert on the next run — see [buddyx.md](buddyx.md).
 - Resources are served from the Firestore `app-resources` collection (no external integration) — see [resources.md](resources.md).
 
 ## 5. Portal Topology

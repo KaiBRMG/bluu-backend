@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { Loader2, Plus, RotateCcw, Share2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { Button } from '@/components/ui/button';
@@ -26,12 +26,20 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { DANGER_BUTTON, PRIMARY_BUTTON } from '../_lib/manage';
+import { STATUS_DOT, type CRStatus } from '@/lib/campaignTracking';
+import type { GoLoginCapability } from '@/lib/gologin/types';
+
+type BluuStatus = 'active' | 'invited' | 'no-access' | 'archived' | 'deleted';
 
 interface MemberRow {
   uid: string;
+  /** Empty when the Bluu account has been deleted. */
   displayName: string;
   workEmail: string;
-  isArchived: boolean;
+  bluu: BluuStatus;
+  isAdmin: boolean;
+  page: { access: 'direct' | 'group' | 'none'; groupName: string | null };
+  capabilities: GoLoginCapability[];
   glEmail: string;
   folderName: string;
   linked: boolean;
@@ -126,11 +134,21 @@ export default function MembersPanel({ onChanged }: { onChanged: () => void }) {
     if (!picked || !emailValue.trim() || busy) return;
     setBusy(picked.uid);
     try {
-      await authFetch('/api/gologin/admin/members', {
+      const result: { pageShared: boolean } = await authFetch('/api/gologin/admin/members', {
         method: 'POST',
         body: JSON.stringify({ uid: picked.uid, email: emailValue.trim() }),
       });
-      toast.success(`${picked.displayName} added. GoLogin has emailed them an invitation.`);
+      if (result.pageShared) {
+        toast.success(`${picked.displayName} added. GoLogin has emailed them an invitation.`, {
+          description: 'The GoLogin page has been shared with them.',
+        });
+      } else {
+        // The seat exists; only the page share failed. Say which half, and
+        // where the fix is — the row now carries a Share page button.
+        toast.warning(`${picked.displayName} added, but the GoLogin page could not be shared.`, {
+          description: 'Use Share page on their row to try again.',
+        });
+      }
       setPickedUid('');
       setEmail('');
       await load(true);
@@ -146,14 +164,47 @@ export default function MembersPanel({ onChanged }: { onChanged: () => void }) {
     setConfirming(null);
     setBusy(member.uid);
     try {
-      await authFetch(`/api/gologin/admin/members?uid=${encodeURIComponent(member.uid)}`, {
-        method: 'DELETE',
-      });
-      toast.success(`${member.displayName} removed from the workspace.`);
+      const result: { pageRevoked: boolean; stillSharedVia: string | null } = await authFetch(
+        `/api/gologin/admin/members?uid=${encodeURIComponent(member.uid)}`,
+        { method: 'DELETE' },
+      );
+      const name = member.displayName || 'Deleted user';
+      if (!result.pageRevoked) {
+        toast.warning(`${name} removed from the workspace, but their GoLogin page access could not be revoked.`, {
+          description: 'Remove it on Admin Portal → Sharing.',
+        });
+      } else if (result.stillSharedVia) {
+        // A group grant is shared with everyone in the group, so it is not
+        // this panel's to take away — but it must not be reported as gone.
+        toast.success(`${name} removed from the workspace.`, {
+          description: `They still see the GoLogin page through the ${result.stillSharedVia} group. Change that on Admin Portal → Sharing.`,
+        });
+      } else {
+        toast.success(`${name} removed from the workspace.`, {
+          description: 'Their GoLogin page access and permissions have been revoked.',
+        });
+      }
       await load(true);
       onChanged();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not remove that member.');
+    } finally {
+      if (aliveRef.current) setBusy(null);
+    }
+  };
+
+  /** Repair for a seat holder who cannot open the window: share the page alone. */
+  const sharePage = async (member: MemberRow) => {
+    setBusy(member.uid);
+    try {
+      await authFetch('/api/gologin/admin/members', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'share-page', uid: member.uid }),
+      });
+      toast.success(`GoLogin page shared with ${member.displayName}.`);
+      await load(true);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not share the page.');
     } finally {
       if (aliveRef.current) setBusy(null);
     }
@@ -168,6 +219,7 @@ export default function MembersPanel({ onChanged }: { onChanged: () => void }) {
         skippedAdmins: number;
         unmatched: { email: string }[];
         failed: { email: string; reason: string }[];
+        pageShared: boolean;
       } = await authFetch('/api/gologin/admin/members', {
         method: 'POST',
         body: JSON.stringify({ action: 'reconcile' }),
@@ -202,6 +254,10 @@ export default function MembersPanel({ onChanged }: { onChanged: () => void }) {
           ].join('\n'),
           // Long enough to read several lines, since the detail is the point.
           duration: 12_000,
+        });
+      } else if (done && !result.pageShared) {
+        toast.warning(summary, {
+          description: 'The GoLogin page could not be shared with them. Use Share page on each row.',
         });
       } else if (done) {
         toast.success(summary);
@@ -297,8 +353,9 @@ export default function MembersPanel({ onChanged }: { onChanged: () => void }) {
               not that, and using it here made a scaffold out of a brand mark. */}
           <h3 className="text-xs font-medium text-zinc-400">Add a member</h3>
           <p className="mt-1 max-w-[62ch] text-[11px] text-zinc-400">
-            Grants a paid GoLogin seat and creates their profile folder. GoLogin emails them an
-            invitation; they can generate an API token once they accept it.
+            Grants a paid GoLogin seat, shares the GoLogin page with them and creates their profile
+            folder. GoLogin emails them an invitation; they can generate an API token once they
+            accept it. Management permissions are never granted here.
           </p>
 
           <div className="mt-3 flex flex-wrap items-start gap-2">
@@ -442,9 +499,15 @@ export default function MembersPanel({ onChanged }: { onChanged: () => void }) {
                 <li key={member.uid} className="flex items-center justify-between gap-4 py-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-sm font-medium text-white">
-                        {member.displayName}
-                      </span>
+                      {member.displayName ? (
+                        <span className="truncate text-sm font-medium text-white">
+                          {member.displayName}
+                        </span>
+                      ) : (
+                        <span className="truncate text-sm font-medium italic text-zinc-400">
+                          Deleted user
+                        </span>
+                      )}
                       {/* Each of these is a different thing being wrong, so each
                           says which. A single "inactive" badge would collapse
                           three unrelated remedies into one. */}
@@ -457,28 +520,44 @@ export default function MembersPanel({ onChanged }: { onChanged: () => void }) {
                       ) : (
                         <Badge tone="green">Active</Badge>
                       )}
-                      {member.isArchived && <Badge tone="red">Archived in Bluu</Badge>}
                     </div>
                     <p className="mt-0.5 truncate text-[11px] text-zinc-400">
                       <span className="font-mono">{member.glEmail}</span>
                       {member.folderName ? ` · ${member.folderName}` : ''}
                     </p>
+                    <MemberAccess member={member} />
                   </div>
 
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    className="h-7 shrink-0 text-zinc-400 hover:text-red-400"
-                    disabled={busy === member.uid}
-                    onClick={() => setConfirming(member)}
-                  >
-                    {busy === member.uid ? (
-                      <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                    ) : (
-                      <Trash2 className="size-3.5" aria-hidden />
+                  <div className="flex shrink-0 items-center gap-1">
+                    {/* The repair for a seat nobody can use. Offered only where it
+                        would work — a deleted account has no doc to grant to. */}
+                    {member.page.access === 'none' && member.bluu !== 'deleted' && !member.isAdmin && (
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        className="h-7 text-zinc-400 hover:text-white"
+                        disabled={busy === member.uid}
+                        onClick={() => sharePage(member)}
+                      >
+                        <Share2 className="size-3.5" aria-hidden />
+                        Share page
+                      </Button>
                     )}
-                    Remove
-                  </Button>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      className="h-7 shrink-0 text-zinc-400 hover:text-red-400"
+                      disabled={busy === member.uid}
+                      onClick={() => setConfirming(member)}
+                    >
+                      {busy === member.uid ? (
+                        <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                      ) : (
+                        <Trash2 className="size-3.5" aria-hidden />
+                      )}
+                      Remove
+                    </Button>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -489,10 +568,13 @@ export default function MembersPanel({ onChanged }: { onChanged: () => void }) {
       <AlertDialog open={!!confirming} onOpenChange={(open) => !open && setConfirming(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove {confirming?.displayName} from GoLogin?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Remove {confirming?.displayName || 'this deleted user'} from GoLogin?
+            </AlertDialogTitle>
             <AlertDialogDescription>
               This releases their paid seat and cuts off their access immediately — in Bluu and in
-              GoLogin&rsquo;s own app. Profiles shared with them individually are remembered and come
+              GoLogin&rsquo;s own app — and unshares the GoLogin page and any GoLogin permissions
+              given to them directly. Profiles shared with them individually are remembered and come
               back if you add them again; folders shared with them do not and will need sharing again.
               They will also have to accept a new GoLogin invitation and paste a new API token.
             </AlertDialogDescription>
@@ -527,5 +609,67 @@ function Badge({ tone, children }: { tone: 'green' | 'zinc' | 'red'; children: R
     >
       {children}
     </span>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+
+/** Bluu account state — the registry's own labels and hues (`userStatus.ts`). */
+const BLUU_STATUS: Record<BluuStatus, { label: string; hue: CRStatus; hint: string }> = {
+  active: { label: 'Active', hue: 'Completed', hint: 'Signed in and set up in Bluu.' },
+  invited: { label: 'Not set up', hue: 'Awaiting Approval', hint: 'Registered in Bluu but has not finished setting up.' },
+  // These three normally release the seat automatically; a row still here in
+  // one of them means that release failed (or predates it). Remove it.
+  'no-access': { label: 'No access', hue: 'Rejected', hint: 'Deactivated in Bluu, but the seat was not released. Remove it.' },
+  archived: { label: 'Archived', hue: 'Archived', hint: 'Archived in Bluu, but the seat was not released. Remove it.' },
+  deleted: { label: 'Deleted', hue: 'Rejected', hint: 'Deleted from Bluu, but the seat was not released. Remove it.' },
+};
+
+const CAPABILITY_LABEL: Record<GoLoginCapability, string> = {
+  members: 'Members',
+  profiles: 'Profiles',
+  folders: 'Folders',
+  sharing: 'Sharing',
+};
+
+/**
+ * Where the seat holder stands outside GoLogin: their Bluu account and whether
+ * they can open the GoLogin page at all.
+ *
+ * Unsharing the page never releases a paid seat, and offboarding releases it
+ * only best-effort — so this line is how a manager notices a seat nobody can
+ * use. The hue is on the dot only; the words carry the state.
+ */
+function MemberAccess({ member }: { member: MemberRow }) {
+  const bluu = BLUU_STATUS[member.bluu];
+  const page = member.isAdmin
+    ? { label: 'Admin — runs on the master token', hue: 'Completed' as CRStatus }
+    : member.page.access === 'direct'
+      ? { label: 'Shared', hue: 'Completed' as CRStatus }
+      : member.page.access === 'group'
+        ? { label: `Via ${member.page.groupName}`, hue: 'Completed' as CRStatus }
+        : { label: 'Not shared — cannot open GoLogin', hue: 'Rejected' as CRStatus };
+
+  return (
+    <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-zinc-400">
+      <span className="inline-flex items-center gap-1.5" title={bluu.hint}>
+        Bluu
+        <span className={`size-1.5 rounded-full ${STATUS_DOT[bluu.hue]}`} aria-hidden />
+        <span className="text-zinc-300">{bluu.label}</span>
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        GoLogin page
+        <span className={`size-1.5 rounded-full ${STATUS_DOT[page.hue]}`} aria-hidden />
+        <span className="text-zinc-300">{page.label}</span>
+      </span>
+      {member.capabilities.length > 0 && !member.isAdmin && (
+        <span>
+          Can manage{' '}
+          <span className="text-zinc-300">
+            {member.capabilities.map((c) => CAPABILITY_LABEL[c]).join(', ')}
+          </span>
+        </span>
+      )}
+    </p>
   );
 }

@@ -46,8 +46,11 @@ import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { normalizeEmail } from '@/lib/authEmail';
 import { getUserById, invalidateUserCache } from '@/lib/services/userService';
+import { getPagePermission, setDirectPageGrants } from '@/lib/services/pageService';
+import { resolvePagePermission } from '@/lib/services/permissionResolver';
 import {
   getMasterGoLoginClient,
+  GOLOGIN_CAPABILITIES,
   getUserGoLoginClient,
   GoLoginApiError,
   GOLOGIN_MANAGED_FOLDER_PREFIX,
@@ -66,6 +69,9 @@ import { decryptToken, encryptToken, isTokenCryptoConfigured } from '@/lib/golog
  * which is exactly why the token does not live there.
  */
 export const GOLOGIN_ACCOUNTS_COLLECTION = 'gologin-accounts';
+
+/** Page permission that gates every GoLogin surface. Re-exported by `gologinService`. */
+export const GOLOGIN_PAGE_ID = 'apps-gologin';
 
 /** What `gologin-accounts/{uid}` holds. The token is an envelope, never plaintext. */
 export interface GoLoginAccountDoc {
@@ -511,26 +517,105 @@ export async function removeGoLoginMember(uid: string): Promise<void> {
     );
   }
 
-  const account = await getGoLoginAccount(uid);
+  await removeSeat(uid, await getGoLoginAccount(uid));
+}
+
+/** The removal itself — provider seat, seat row, mirrored user fields. */
+async function removeSeat(uid: string, account: GoLoginAccountDoc | null): Promise<void> {
   if (account?.glEmail) {
-    const workspace = await getWorkspace(true);
+    const [workspace, master] = await Promise.all([getWorkspace(true), getMasterAccount()]);
     const member = findMember(workspace, account.glEmail);
-    if (member) {
+    // Belt and braces: the owner's own address is never removed from the
+    // workspace, whatever row claims it. The master token *is* the workspace.
+    if (member && normalizeEmail(member.email) !== normalizeEmail(master.email)) {
       await getMasterGoLoginClient().removeWorkspaceMember(await getWorkspaceId(), member.id);
       invalidateWorkspace();
     }
   }
 
   await adminDb.collection(GOLOGIN_ACCOUNTS_COLLECTION).doc(uid).delete();
-  await adminDb.collection('users').doc(uid).set(
-    {
+  // `update`, not `set` + merge: a seat can outlive its Bluu account (deleting a
+  // user deliberately leaves the seat for a manager to release), and a merge-set
+  // on a deleted user would recreate an empty `users/{uid}` doc.
+  await adminDb
+    .collection('users')
+    .doc(uid)
+    .update({
       gologinEmail: FieldValue.delete(),
       gologinLinkedAt: FieldValue.delete(),
       gologinMemberSince: FieldValue.delete(),
-    },
-    { merge: true },
-  );
+    })
+    .catch((err: { code?: number }) => {
+      if (err?.code !== 5 /* NOT_FOUND */) throw err;
+    });
   invalidateUserCache(uid);
+}
+
+// ─── The page follows the seat ──────────────────────────────────────
+
+/** `apps-gologin` and its four capability sub-items — everything a removal revokes. */
+const GOLOGIN_PAGE_AND_CAPABILITIES = [
+  GOLOGIN_PAGE_ID,
+  ...Object.values(GOLOGIN_CAPABILITIES),
+];
+
+/**
+ * Share the `apps-gologin` page directly with new seat holders — **the page
+ * only, never a capability**. A seat is useless without the page (every route
+ * checks both), so granting one used to mean a second trip to the Sharing page.
+ *
+ * The seat drives the page, never the reverse: unsharing on
+ * `/admin-portal/sharing` leaves the paid seat alone, and the Members panel
+ * shows the mismatch. Offboarding is the other trigger that frees a seat — see
+ * `releaseGoLoginSeat`.
+ */
+export function shareGoLoginPage(uids: string[]): Promise<void> {
+  return setDirectPageGrants(uids, { grant: [GOLOGIN_PAGE_ID] });
+}
+
+/**
+ * Remove a former seat holder's **direct** grants on the page and every
+ * capability under it. Access through a group is untouched — that would change
+ * the group for everyone in it — so it is reported back for the caller to say.
+ *
+ * @returns the name of a group still granting the page, or null.
+ */
+export async function unshareGoLoginPage(uid: string): Promise<string | null> {
+  await setDirectPageGrants([uid], { revoke: GOLOGIN_PAGE_AND_CAPABILITIES });
+  const [user, permDoc] = await Promise.all([getUserById(uid), getPagePermission(GOLOGIN_PAGE_ID)]);
+  if (!user) return null;
+  const via = resolvePagePermission(permDoc ?? undefined, uid, user.groups ?? []);
+  if (via?.via !== 'group' || !via.groupId) return null;
+  return (await getGroupDisplayName(via.groupId)) ?? via.groupId;
+}
+
+/**
+ * Free a seat because the person is leaving Bluu — deactivated, archived or
+ * deleted on `/admin-portal/user-management`. Same removal as the Members
+ * panel, plus the page unshare, so a paid seat does not outlive the account.
+ *
+ * Differs from `removeGoLoginMember` in one way: it does not refuse admins. That
+ * refusal protects the workspace owner, who has no seat row; an admin who *does*
+ * have one (granted before a promotion) holds a real, paid seat that should go
+ * with them. `removeSeat` still never removes the owner's own address.
+ *
+ * Not reversed on restore — re-enabling or un-archiving someone does not buy
+ * the seat back; a manager re-adds them on Members (their folder is kept).
+ *
+ * Two provider calls at most, and only when a seat row exists, so the common
+ * case (no seat) is one Firestore read and no GoLogin traffic.
+ */
+export async function releaseGoLoginSeat(uid: string): Promise<'released' | 'none'> {
+  const account = await getGoLoginAccount(uid);
+  if (!account) return 'none';
+  await removeSeat(uid, account);
+  await setDirectPageGrants([uid], { revoke: GOLOGIN_PAGE_AND_CAPABILITIES });
+  return 'released';
+}
+
+async function getGroupDisplayName(groupId: string): Promise<string | null> {
+  const snap = await adminDb.collection('groups').doc(groupId).get();
+  return (snap.data()?.name as string | undefined) ?? null;
 }
 
 export interface ReconcileResult {

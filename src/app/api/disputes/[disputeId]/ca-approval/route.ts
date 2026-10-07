@@ -4,6 +4,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getUserById } from '@/lib/services/userService';
 import { queueDisputeNotice } from '@/lib/services/disputeNotices';
+import { releaseDisputeLocks } from '@/lib/services/disputeTransfer';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { ApprovalStatus } from '@/types/firestore';
 
@@ -49,6 +50,10 @@ export const PATCH = withAuth(async (
         ? { CaApproval, resolvedAt: FieldValue.serverTimestamp() }
         : { CaApproval },
     );
+
+    // A v2 claim locks its sales while it is open. A holder's rejection ends it,
+    // so the tips become claimable again (a fresh claim, as the filer refiles).
+    if (CaApproval === 'Rejected') await releaseDisputeLocks(disputeId);
 
     // Queued, not sent: an assigned CA works down their whole queue in one
     // sitting, so the decisions are coalesced into a single message a few

@@ -32,7 +32,7 @@ export type ColumnKey =
   | 'Comment';
 
 const COLUMN_LABELS: Record<ColumnKey, string> = {
-  saleAmount: 'Sale Amount',
+  saleAmount: 'Sale amount (gross)',
   saleDate: 'Sale Date',
   fanName: 'Fan Name',
   creatorName: 'Creator',
@@ -63,6 +63,8 @@ interface DisputeTableProps {
    * mixed selection would quietly flip decisions the reviewer never looked at.
    */
   selectable?: boolean;
+  /** Opens the full record — the tips a v2 claim covers, and what an approval moved. */
+  onOpenDetail?: (dispute: DisputeDocument) => void;
   /** Required for `selectable` to do anything. Resolves once the write lands. */
   onBulkAction?: (
     disputeIds: string[],
@@ -262,6 +264,7 @@ export function DisputeTable({
   groupByCreatedBy = false,
   selectable = false,
   onBulkAction,
+  onOpenDetail,
 }: DisputeTableProps) {
   const showActions = !!onAction;
   const showSelect = selectable && !!onBulkAction;
@@ -310,6 +313,7 @@ export function DisputeTable({
       showSelect={showSelect}
       selected={selected.includes(d.id)}
       onSelectChange={toggleOne}
+      onOpenDetail={onOpenDetail}
     />
   );
 
@@ -524,7 +528,9 @@ function DisputeRow({
   showSelect,
   selected,
   onSelectChange,
+  onOpenDetail,
 }: {
+  onOpenDetail?: (dispute: DisputeDocument) => void;
   dispute: DisputeDocument;
   columns: ColumnKey[];
   userTimezone: string;
@@ -537,8 +543,36 @@ function DisputeRow({
 }) {
   const cellValue = (col: ColumnKey) => {
     switch (col) {
-      case 'saleAmount':
-        return `$${dispute.saleAmount.toLocaleString()}`;
+      case 'saleAmount': {
+        const amount = `$${dispute.saleAmount.toLocaleString()}`;
+        // A v2 claim covers specific tips and an approval moves them; the
+        // row says how many, what moved, and opens the full record.
+        const v2 = dispute.version === 2;
+        const moved = dispute.transferResult?.transferred.length ?? 0;
+        const skipped = dispute.transferResult?.skipped.length ?? 0;
+        return (
+          <span className="flex flex-col gap-0.5">
+            {onOpenDetail ? (
+              <button
+                type="button"
+                onClick={() => onOpenDetail(dispute)}
+                className="self-start rounded-sm tabular-nums underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                {amount}
+              </button>
+            ) : (
+              <span className="tabular-nums">{amount}</span>
+            )}
+            {v2 && (
+              <span className="text-[11px] text-zinc-400">
+                {dispute.sales.length} {dispute.sales.length === 1 ? 'tip' : 'tips'}
+                {dispute.transferResult && ` · ${moved} moved${skipped ? ` · ${skipped} skipped` : ''}`}
+              </span>
+            )}
+            {!v2 && dispute.AdminApproval === 'Approved' && <span className="text-[11px] text-zinc-400">Legacy — adjust manually</span>}
+          </span>
+        );
+      }
       case 'saleDate':
         return <span className="whitespace-nowrap">{formatInUserTz(dispute.saleDate, userTimezone)}</span>;
       case 'fanName':

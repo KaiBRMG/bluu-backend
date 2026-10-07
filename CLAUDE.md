@@ -79,8 +79,10 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
  src/middleware.ts  → rewrites all non-Electron, non-allowlisted page traffic to /desktop-only
  Telegram bot @BluuRockBot → one bot, two audiences: employee alerts + the creator
               Mini App. Webhook at /api/telegram/webhook — see telegram.md
- CA salary → sales imported from .xlsx → ca-sales; every figure DERIVED on read
-              (engine: src/lib/salary) — see ca-salary.md. Leave approval releases
+ CA salary → sales synced from BuddyX (read-only API) → ca-sales; every figure
+              DERIVED on read (engine: src/lib/salary) — see ca-salary.md and
+              buddyx.md. An approved dispute MOVES the sale here (Bluu is the
+              source of truth for transfers; a sync never undoes one). Leave approval releases
               creator accounts to an overtime board that creates the shifts that pay.
               FINALISING a month is what resets leave (unpaid → 4; a December
               also resets paid → 10) — there is no calendar reset cron.
@@ -94,6 +96,9 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
                 + coalesced dispute decisions + the day-before chaser for
                 overtime still unassigned + the monthly payday reminder)
                 — see ca-salary.md §11
+              + BuddyX sync 05:01 / 13:01 / 21:01 UTC: sales into ca-sales (only
+                while buddyx-meta/config.salesWriteEnabled), team + creator
+                stats, links; fans on the 21:01 run — see buddyx.md
               + daily snip retention sweep (04:15 UTC): expired snips + their
                 Storage objects (media AND a recording's poster), plus upload
                 slots that were never finalised
@@ -240,6 +245,7 @@ Fixing the `AppLayout` hoist is therefore not only the navigation speed-up alrea
 | [smm-portal.md](documentation/smm-portal.md) | **SMM Portal** — Twitter/X accounts, the content schedule, the bonus rounds/submissions engine, Viral Accounts + page suggestions |
 | [growth-tracking.md](documentation/growth-tracking.md) | **Growth Tracking** — nightly Apify follower scrape, `growth-accounts` + its year-keyed series, the Apify cost rules. **Unrelated to `twitterx-accounts` by design** |
 | [ca-salary.md](documentation/ca-salary.md) | **Chat-agent salary & coverage** — the commission/wage engine, the `.xlsx` sales import, month close, creator assignment on shifts, the leave → overtime marketplace, and the eight CA notifications |
+| [buddyx.md](documentation/buddyx.md) | **BuddyX** — the read-only API client, the scheduled/refresh sync and its lease, identity mapping, the BuddyX sales written into `ca-sales` (cutover, attribution invariant, vanished rows, the write switch), disputes v2 transfers, the Infloww historical import, and Chatter / Fan / OnlyFans Analytics |
 | [campaign-tracking.md](documentation/campaign-tracking.md) | Custom requests vs campaigns, the two archive mechanisms, transfer |
 | [resources.md](documentation/resources.md) | `apps-resources` page (reading **and** managing — there is no separate admin page), `app-resources` collection, the group-based read/write access matrix |
 | [snipping-tool.md](documentation/snipping-tool.md) | **Snipping Tool** — the native region capture (global shortcut + menu-bar/tray item), the transparent selection surface, **screen recording with mic/system audio**, the public `/s/[shareId]` link, and the auto-delete retention sweep |
@@ -275,6 +281,8 @@ Fixing the `AppLayout` hoist is therefore not only the navigation speed-up alrea
 9g. **Never hand a raw user timezone to `Intl`.** The zone is **detected from the request IP** — `x-vercel-ip-timezone` → [`POST /api/user/timezone`](src/app/api/user/timezone/route.ts), triggered by [`TimezoneReporter`](src/components/TimezoneReporter.tsx) — and a choice made in App Settings stamps `timezoneSource: 'manual'`, after which detection never touches it again. Nothing derives a timezone from the user's address any more. Detection is still best-effort (it is absent off-platform and a VPN lies), so `ensureUserExists` seeds `timezone: ''` and an unset timezone is an **empty string, not null** — `?? 'UTC'` does not catch it and `Intl.DateTimeFormat` throws `RangeError: Invalid time zone specified:`. Client surfaces read [`useViewerTimezone()`](src/hooks/useViewerTimezone.ts); everything else calls `safeTimezone()` from [`lib/utils/timezone.ts`](src/lib/utils/timezone.ts), **including every leaf formatter**, so no caller can crash one. [`TimezoneNotice`](src/components/TimezoneNotice.tsx) is mounted app-wide in `AppLayout` because a user without a timezone silently reads every time in the product in UTC.
 
 9h. **A creator's sub-accounts are assignable peers, not children.** `creator-subaccounts/{id}` holds the other accounts a creator runs ("Cole (Fansly)"). One agent can be assigned the parent and another a sub-account, and **each counts as one account** toward the assignee's wage tier. The mechanism is that a sub-account is simply another id in `shifts.creatorIds` — creator ids are auth uids, sub-account ids are Firestore auto-ids, the spaces are disjoint — so the salary engine and the claim cap needed no change and must not gain one: never weight a sub-account as a fraction, and never group ids under a parent before counting. `isSubAccount` is display only. A sub-account is deliberately **not** a `creators` doc (that id is an auth uid; a sub-account has no login). Validate assignment ids with `normaliseAccountIds`, never against `creators` alone. See [ca-salary.md](documentation/ca-salary.md).
+
+9j. **BuddyX is read only through `src/lib/buddyx/client.ts`, and only from a sync.** No page read may call the API — the analytics routes read Firestore — and every BuddyX call is rate-limited per key (120/min, 30/min on the two aggregate endpoints). Don't `curl` it to explore; the spec is [`buddyxapi.yaml`](buddyxapi.yaml). Two invariants on the sales it writes: **a sync never clears a transfer** (an approved dispute's move stands; a later BuddyX re-attribution is flagged `attributionConflict`, never applied), and **nothing is soft-removed unless both endpoints paginated to completion**. See [buddyx.md](documentation/buddyx.md).
 
 9f. **Chat-agent salary is DERIVED, never stored.** Every figure on the CA salary surfaces is recomputed on read from sales + shifts + the time ledger + admin overrides + the rate config, by the pure engine in [`salaryEngine.ts`](src/lib/salary/salaryEngine.ts). Do not materialise a daily row, and do not patch a figure client-side — an override can re-tier every *later* day in the month via the commission ratchet, which no optimistic update can reproduce (the override endpoints return the recomputed month for exactly this reason). The one sanctioned snapshot is `ca-salary-months`, written by finalisation to freeze what was paid. The salary day boundary is **`Africa/Harare` for every agent**, and `salaryDate.ts`'s fixed-offset arithmetic is only correct because that zone has no DST — never reuse those helpers for a zone that does. See [ca-salary.md](documentation/ca-salary.md).
 

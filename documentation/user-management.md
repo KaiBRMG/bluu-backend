@@ -151,6 +151,7 @@ A user's timezone drives every time the product renders: shift times, salary day
 `DELETE /api/admin/users/[uid]` (from the record panel's Actions menu) is the **destructive counterpart to archiving** — permanently removes the user **and all their personal data**. (The Delete dialog says so; the Archive dialog explicitly states data is *not* deleted.)
 
 ### Removed by the handler
+- **Their GoLogin seat**, first, while the user doc still exists (`releaseGoLoginSeat`): the provider seat, `gologin-accounts/{uid}` (with its encrypted token) and their direct GoLogin page grants. Best-effort — a failure returns `gologinSeat: 'failed'` and is toasted, never stops the cascade. **Revoking access (`isActive: false`) and archiving release it too**, via the PUT handler; restoring does not re-grant it. See [gologin.md](gologin.md#members).
 - `users/{uid}`, group membership (`groups/*.members`), page-permission entries (`page-permissions/*.users.{uid}`), `active_sessions/{uid}`.
 - **The login allowlist entry** `auth-emails/{normalisedEmail}` (`releaseEmailClaim`). The email is read off the doc *before* it is deleted. Leaving the claim behind would keep the address pointing at a dead uid: re-registering that person would fail with "email already taken", and a login attempt would resolve to a doc that no longer exists.
 - Every doc **owned** by the user (`userId`/`uid` field) in: `time_entries`, legacy `time-entries`, `screenshots`, `shifts`, `leave_requests`, `leave-ledger`, `notifications`, `bugs`.

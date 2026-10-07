@@ -31,12 +31,12 @@ import {
   getGoLoginUserToken,
   getMembershipStatus,
   applyFolderMembership,
+  GOLOGIN_PAGE_ID,
   isGoLoginAdmin,
   resolveFolder,
 } from '@/lib/services/gologinAccountService';
 
-/** Page permission that gates every GoLogin surface. */
-export const GOLOGIN_PAGE_ID = 'apps-gologin';
+export { GOLOGIN_PAGE_ID };
 
 /**
  * Tier-2 gate for every GoLogin route. Returns a 403 response when denied,

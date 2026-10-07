@@ -88,8 +88,8 @@ Every row below is **automated** — fired by a handler on an event, never sent 
 | Overtime still unassigned | `notifications.overtimeUnassigned(creatorList, dateStr)` | **one named approver** — `CA_LEAVE_ALERT_RECIPIENT_UID` | `cron/ca-notifications` — the day before, from 09:00 salary-local |
 | Payday in 3 days | `notifications.paydayApproaching(monthLabel)` | every chat agent | `cron/ca-notifications` |
 | Salary finalised | `notifications.salaryFinalized(monthLabel)` | the agent whose month was frozen | `ca-salary/finalize` |
-| Commission tier reached | `notifications.commissionTierUp(percent, monthLabel)` | the agent who crossed the band | `ca-salary/import` **and** `ca-salary/override` |
-| Dispute assigned | `notifications.disputeAssigned(createdByName)` | `assignedTo` (skipped when `'No One'`) | `disputes` (POST) |
+| Commission tier reached | `notifications.commissionTierUp(percent, monthLabel)` | the agent who crossed the band | the BuddyX `sales` sync, `disputes/[disputeId]/admin-approval`, `disputes/bulk-approval`, `ca-sales/[saleId]/transfer` (DELETE), `admin/buddyx/historical-import` **and** `ca-salary/override` — all through `tierNotices.announceTierCrossings` |
+| Dispute assigned | `notifications.disputeAssigned(createdByName)` | each current holder of a claimed tip — one claim splits into one dispute per holder (skipped for `'No One'`) | `disputes` (POST) via `disputeTransfer.fileDisputes` |
 | Dispute — CA approved | `notifications.disputeCaApproved(assignedToName, count)` | the dispute's `createdBy` — **coalesced**, one message per filer | `disputes/[disputeId]/ca-approval` queues · `cron/ca-notifications` sends |
 | Dispute — CA rejected | `notifications.disputeCaRejected(assignedToName, reasons, count)` | the dispute's `createdBy` — **coalesced** the same way | `disputes/[disputeId]/ca-approval` queues · `cron/ca-notifications` sends |
 | Dispute — admin approved | `notifications.disputeAdminApproved(count)` | the dispute's `createdBy` — **coalesced** | `disputes/[disputeId]/admin-approval` **and** `disputes/bulk-approval` queue · `cron/ca-notifications` sends |
@@ -100,6 +100,7 @@ Every row below is **automated** — fired by a handler on an event, never sent 
 | Desktop app updated | `notifications.releaseNote(version)` | each user as they reach `APP_UPDATE.releaseNote.version` | `user/app-version` |
 | OF media cache hit its size threshold | `notifications.ofMediaCacheCritical(sizeLabel, periodLabel)` | **one named maintainer** — see below | `cron/onlyfans-media-usage` |
 | OF video renditions on an unrecognised host | `notifications.ofVideoSourceHostUnrecognised(host)` | **one named maintainer** — see below | `onlyfans/chats/[chatId]/messages` (via `after()`) |
+| BuddyX sales sync failing | `notifications.buddyxSyncFailing(reason)` | **one named maintainer** (`OPS_ALERT_RECIPIENT_UID`) — **once per incident**, not once ever | `cron/buddyx-sync` **and** `buddyx/sync` via `buddyxSyncService` — see [buddyx.md](buddyx.md#7-alerting) |
 
 ### The two OF Manager alerts — one recipient, once ever
 

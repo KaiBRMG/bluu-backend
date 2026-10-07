@@ -1,361 +1,386 @@
 'use client';
 
 /**
- * File a dispute.
+ * File a dispute — v2: claim specific tips, found by search.
  *
- * The form is split into the two questions a reviewer actually asks — *which
- * sale is this* and *why is it yours* — and every rule is enforced per field,
- * beside the field that broke it. The old single "All fields are required."
- * line made the reader hunt for which one.
+ * An approved dispute now *moves the sale* inside Bluu Backend (BuddyX is
+ * read-only), so the agent no longer types a sale's details; they pick the
+ * tips themselves. The search is deliberately narrow (D6): one creator, a
+ * window of at most 7 days, tips only, no totals.
+ *
+ * **Selection persists across filter changes** — tips from two creators can go
+ * into one claim. That is the opposite call from the admin bulk bar, and it is
+ * deliberate: here the selection *is* the claim being built, not an action on
+ * the rows in view. The footer shows it whole, with the split it will become
+ * (one dispute per current holder, D5).
+ *
+ * A refused submission (a tip locked by someone else a moment ago) keeps the
+ * dialog open with those rows marked in words. Nothing typed is lost.
  */
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
-import { CalendarIcon } from 'lucide-react';
+import { Loader2Icon, RotateCcw, X } from 'lucide-react';
+import { toast } from 'sonner';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-  DialogDescription, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
-} from '@/components/ui/select';
-import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { Skeleton } from '@/components/ui/skeleton';
+import { DatePicker } from '@/components/smm/shared/DatePicker';
+import { useAuth } from '@/components/AuthProvider';
+import { useBuddyxCreators } from '@/hooks/useBuddyxSync';
+import { useAuthFetch } from '@/hooks/useAuthFetch';
+import { CreatorCombobox } from '@/components/buddyx/CreatorCombobox';
+import { CreatorChip } from '@/components/creators/CreatorChip';
+import { AttrChip, FanLabel, InfoTip, PPV_ATTRIBUTION, TIPS_ATTRIBUTION } from '@/components/buddyx/buddyxUi';
+import { PersonTag } from './disputeUi';
+import { formatSaleDateTime, formatUsd, pluralise } from '@/lib/salary/salaryFormat';
+import { saleTypeLabel } from '@/lib/salary/saleTypes';
+import { MAX_DISPUTE_SALES } from '@/lib/disputes/disputeRules';
 import { cn } from '@/lib/utils';
-import type { CreatorDocument } from '@/types/firestore';
-import type { CaUser, CreateDisputePayload } from '@/hooks/useDisputesData';
+
+const COMMENT_MAX = 2000;
+const MAX_WINDOW_DAYS = 7;
+
+interface SearchRow {
+  saleId: string;
+  occurredAt: string;
+  type: string;
+  gross: number;
+  fanId: string;
+  fanName: string;
+  holder: { uid: string; displayName: string } | null;
+  disputed: boolean;
+  finalised: boolean;
+}
+
+type Picked = SearchRow & { creatorId: string };
 
 interface CreateDisputeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  creators: CreatorDocument[];
-  caUsers: CaUser[];
-  onSubmit: (payload: CreateDisputePayload) => Promise<void>;
+  timezone: string;
+  /** Runs after a successful submission (the column refetches). */
+  onSubmitted?: () => void | Promise<void>;
 }
 
-const COMMENT_MAX = 300;
-
-const EMPTY_FORM = {
-  saleAmount: '',
-  Creator: '',
-  fanName: '',
-  saleDate: undefined as Date | undefined,
-  saleTime: '',
-  Comment: '',
-  assignedTo: '',
-};
-
-type FormState = typeof EMPTY_FORM;
-type FieldErrors = Partial<Record<keyof FormState, string>>;
-
-// ─── Field shell ──────────────────────────────────────────────────────
-
-function Field({
-  id,
-  label,
-  hint,
-  error,
-  children,
-}: {
-  id: string;
-  label: string;
-  hint?: ReactNode;
-  error?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Label htmlFor={id} className="text-xs text-zinc-400">{label}</Label>
-      {children}
-      {error ? (
-        <p id={`${id}-error`} role="alert" className="text-xs text-red-400">{error}</p>
-      ) : hint ? (
-        <p id={`${id}-hint`} className="text-xs text-pretty text-zinc-400">{hint}</p>
-      ) : null}
-    </div>
-  );
+/** "1 dispute to Queen (2 tips), 1 to admin (unassigned)" — the split D5 will make. */
+function describeSplit(groups: Array<{ label: string; count: number }>): string {
+  return groups
+    .map((g, i) => `${i === 0 ? '1 dispute' : '1'} to ${g.label}${groups.length > 1 ? ` (${pluralise(g.count, 'tip')})` : ''}`)
+    .join(', ');
 }
 
-// ─── Dialog ───────────────────────────────────────────────────────────
+const dayKey = (d: Date) => format(d, 'yyyy-MM-dd');
+const daysBetween = (a: Date, b: Date) => Math.round((b.getTime() - a.getTime()) / 86_400_000) + 1;
 
-export function CreateDisputeDialog({
-  open,
-  onOpenChange,
-  creators,
-  caUsers,
-  onSubmit,
-}: CreateDisputeDialogProps) {
-  const [form, setForm] = useState<FormState>({ ...EMPTY_FORM });
-  const [errors, setErrors] = useState<FieldErrors>({});
-  const [calendarOpen, setCalendarOpen] = useState(false);
+export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted }: CreateDisputeDialogProps) {
+  const { user } = useAuth();
+  const authFetch = useAuthFetch();
+  const mappedCreatorIds = useBuddyxCreators();
+
+  const [creatorId, setCreatorId] = useState<string | null>(null);
+  const [from, setFrom] = useState<Date | undefined>(() => new Date());
+  const [to, setTo] = useState<Date | undefined>(() => new Date());
+  const [fanId, setFanId] = useState('');
+
+  const [rows, setRows] = useState<SearchRow[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [truncated, setTruncated] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
+
+  const [picked, setPicked] = useState<Map<string, Picked>>(new Map());
+  const [refused, setRefused] = useState<Map<string, string>>(new Map());
+  const [comment, setComment] = useState('');
+  const [commentError, setCommentError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const fanNeedle = fanId.trim();
+  const visibleRows = rows && fanNeedle ? rows.filter(r => r.fanId === fanNeedle) : rows;
 
-  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
-    setForm(f => ({ ...f, [key]: value }));
-    // Clearing on edit keeps an error attached to the thing that is still wrong.
-    setErrors(e => (e[key] ? { ...e, [key]: undefined } : e));
+  const windowDays = from && to ? daysBetween(from, to) : 0;
+  const windowError =
+    from && to && to < from ? 'The end is before the start.' : windowDays > MAX_WINDOW_DAYS ? `At most ${MAX_WINDOW_DAYS} days.` : null;
+
+  // ── Search ── (by creator and window only; the fan filter is applied to the
+  // rows in hand, so typing a fan id costs no request)
+  useEffect(() => {
+    if (!open || !user || !creatorId || !from || !to || windowError) {
+      setRows(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setSearching(true);
+      setSearchError(null);
+      try {
+        const params = new URLSearchParams({ creatorId, from: dayKey(from), to: dayKey(to) });
+        const body = await authFetch(`/api/ca-sales/search?${params}`);
+        if (!cancelled) {
+          setRows(body.rows ?? []);
+          setTruncated(body.truncated === true);
+        }
+      } catch (err) {
+        if (!cancelled) setSearchError(err instanceof Error ? err.message : 'Search failed');
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, user, authFetch, creatorId, from, to, windowError, retryKey]);
+
+  const toggle = (row: SearchRow, on: boolean) => {
+    setPicked(prev => {
+      const next = new Map(prev);
+      if (on && creatorId) next.set(row.saleId, { ...row, creatorId });
+      else next.delete(row.saleId);
+      return next;
+    });
   };
+
+  // ── The split preview: one dispute per current holder ──
+  const selection = [...picked.values()];
+  const split = useMemo(() => {
+    const groups = new Map<string, { label: string; count: number }>();
+    for (const row of picked.values()) {
+      const key = row.holder?.uid ?? '__none__';
+      const g = groups.get(key) ?? { label: row.holder ? row.holder.displayName || 'a former agent' : 'admin (unassigned)', count: 0 };
+      g.count += 1;
+      groups.set(key, g);
+    }
+    return [...groups.values()];
+  }, [picked]);
+  const selectedGross = selection.reduce((s, r) => s + r.gross, 0);
 
   const reset = () => {
-    setForm({ ...EMPTY_FORM });
-    setErrors({});
+    setPicked(new Map());
+    setRefused(new Map());
+    setComment('');
+    setCommentError(null);
     setSubmitError(null);
+    setFanId('');
   };
 
-  const handleOpenChange = (value: boolean) => {
-    if (!value) reset();
-    onOpenChange(value);
-  };
-
-  /** Returns the combined sale timestamp when the form is sound, else null. */
-  const validate = (): Date | null => {
-    const next: FieldErrors = {};
-
-    const amount = parseFloat(form.saleAmount);
-    if (!form.saleAmount.trim()) next.saleAmount = 'Enter the sale amount.';
-    else if (isNaN(amount) || amount <= 0) next.saleAmount = 'Must be a number greater than zero.';
-
-    if (!form.Creator) next.Creator = 'Pick the creator this sale belongs to.';
-    if (!form.fanName.trim()) next.fanName = 'Enter the fan’s name as it appears in Infloww.';
-    if (!form.saleDate) next.saleDate = 'Pick the date of the sale.';
-    else if (!form.saleTime) next.saleDate = 'Add the time of the sale.';
-    if (!form.Comment.trim()) next.Comment = 'Say why this sale should be yours.';
-    if (!form.assignedTo) next.assignedTo = 'Choose who the sale currently sits with.';
-
-    let saleDateLocal: Date | null = null;
-    if (form.saleDate && form.saleTime) {
-      const parsed = new Date(`${format(form.saleDate, 'yyyy-MM-dd')}T${form.saleTime}:00`);
-      if (isNaN(parsed.getTime())) next.saleDate = 'That date and time don’t make a real moment.';
-      else if (parsed.getTime() > Date.now()) next.saleDate = 'The sale can’t be in the future.';
-      else saleDateLocal = parsed;
+  async function submit() {
+    if (!user) return;
+    const text = comment.trim();
+    if (!text) {
+      setCommentError('Say why these tips are yours — it is the whole basis of the decision.');
+      return;
     }
-
-    setErrors(next);
-    return Object.values(next).some(Boolean) ? null : saleDateLocal;
-  };
-
-  const handleSubmit = async () => {
-    setSubmitError(null);
-    const saleDateLocal = validate();
-    if (!saleDateLocal) return;
-
     setSubmitting(true);
+    setSubmitError(null);
     try {
-      // Stored as UTC by the server; the operator always types their own tz.
-      await onSubmit({
-        assignedTo: form.assignedTo,
-        Creator: form.Creator,
-        saleDate: saleDateLocal.toISOString(),
-        saleAmount: parseFloat(form.saleAmount),
-        fanName: form.fanName.trim(),
-        Comment: form.Comment.trim(),
+      const res = await fetch('/api/disputes', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${await user.getIdToken()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ saleIds: selection.map(r => r.saleId), Comment: text }),
       });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (Array.isArray(body.refused)) {
+          setRefused(new Map(body.refused.map((r: { saleId: string; label: string }) => [r.saleId, r.label])));
+        }
+        setSubmitError(body.error ?? `Could not file the dispute (${res.status})`);
+        return;
+      }
+      const count = Array.isArray(body.disputes) ? body.disputes.length : 1;
+      toast.success(count === 1 ? 'Dispute submitted' : `${count} disputes submitted — one per agent holding a tip`);
       reset();
       onOpenChange(false);
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Failed to submit dispute.');
+      await onSubmitted?.();
+    } catch {
+      setSubmitError('Could not reach the server. Check your connection and try again.');
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const describedBy = (field: keyof FormState, hasHint = false) =>
-    errors[field] ? `${field}-error` : hasHint ? `${field}-hint` : undefined;
+  }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
+    <Dialog
+      open={open}
+      onOpenChange={next => {
+        if (!next && !submitting) setSubmitError(null);
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>New dispute</DialogTitle>
-          <DialogDescription className="text-pretty">
-            One sale per dispute. Copy the details straight from Infloww &gt; Analytics &gt;
-            Employee Reports &gt; Sales Record — a reviewer can only match the sale if the numbers
-            are exact.
+          <DialogDescription>
+            Find the tips that should be yours. An admin&apos;s approval moves them to your sales report.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-5">
-          {/* ── The sale ── */}
-          <fieldset className="flex flex-col gap-4">
-            <legend className="mb-3 w-full border-b border-white/[0.07] pb-2 text-xs font-semibold text-white">
-              The sale
-            </legend>
+        {/* ── Filters ── */}
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs text-zinc-400">Creator</Label>
+            <CreatorCombobox value={creatorId} onChange={setCreatorId} allowedIds={mappedCreatorIds} placeholder="Pick a creator" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs text-zinc-400">From</Label>
+            <DatePicker value={from} onChange={setFrom} className="h-8 w-40 text-sm" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs text-zinc-400">To</Label>
+            <DatePicker value={to} onChange={setTo} className="h-8 w-40 text-sm" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="dispute-fan" className="text-xs text-zinc-400">Fan ID (optional)</Label>
+            <Input
+              id="dispute-fan"
+              value={fanId}
+              onChange={e => setFanId(e.target.value.replace(/\D/g, ''))}
+              className="h-8 w-32 font-mono text-xs"
+              inputMode="numeric"
+            />
+          </div>
+        </div>
+        <p className={cn('-mt-1 text-[11px]', windowError ? 'text-red-400' : 'text-zinc-400')}>
+          {windowError ?? `Search up to ${MAX_WINDOW_DAYS} days at a time, this month or last. Days are in SAST.`}
+        </p>
 
-            <div className="grid grid-cols-2 gap-4">
-              <Field id="saleAmount" label="Amount" error={errors.saleAmount}>
-                <div className="relative">
-                  <span
-                    aria-hidden
-                    className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-zinc-400"
-                  >
-                    $
-                  </span>
-                  <Input
-                    id="saleAmount"
-                    type="number"
-                    inputMode="decimal"
-                    min="0"
-                    step="0.01"
-                    placeholder="0.00"
-                    className="pl-6 tabular-nums"
-                    value={form.saleAmount}
-                    aria-invalid={!!errors.saleAmount}
-                    aria-describedby={describedBy('saleAmount')}
-                    onChange={e => set('saleAmount', e.target.value)}
-                  />
-                </div>
-              </Field>
-
-              <Field id="Creator" label="Creator" error={errors.Creator}>
-                <Select value={form.Creator} onValueChange={v => set('Creator', v)}>
-                  <SelectTrigger
-                    id="Creator"
-                    className="w-full"
-                    aria-invalid={!!errors.Creator}
-                    aria-describedby={describedBy('Creator')}
-                  >
-                    <SelectValue placeholder="Select creator" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {creators.map(c => (
-                      <SelectItem key={c.creatorID} value={c.creatorID}>
-                        {c.stageName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
+        {/* ── Results ── */}
+        <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+          Tips <InfoTip text={TIPS_ATTRIBUTION} /> · amounts are gross
+        </div>
+        <div
+          tabIndex={0}
+          role="region"
+          aria-label="Tips found, scrollable"
+          className="max-h-72 min-h-24 overflow-y-auto rounded-lg border border-white/[0.07] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50"
+        >
+          {!creatorId ? (
+            <p className="p-3 text-sm text-zinc-400">Pick a creator and a day to find tips.</p>
+          ) : searching && !rows ? (
+            <div className="space-y-2 p-3">
+              {[0, 1, 2].map(i => <Skeleton key={i} className="h-9 w-full rounded-md" />)}
             </div>
-
-            <Field id="fanName" label="Fan name" error={errors.fanName}>
-              <Input
-                id="fanName"
-                type="text"
-                placeholder="As it appears in the Sales Record"
-                value={form.fanName}
-                aria-invalid={!!errors.fanName}
-                aria-describedby={describedBy('fanName')}
-                onChange={e => set('fanName', e.target.value)}
-              />
-            </Field>
-
-            <Field
-              id="saleDate"
-              label="Date & time of the sale"
-              error={errors.saleDate}
-              hint={<>Enter it in your own timezone — detected as <span className="text-zinc-300">{localTz}</span>.</>}
-            >
-              <div className="flex gap-2">
-                <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      id="saleDate"
-                      variant="outline"
-                      aria-invalid={!!errors.saleDate}
-                      aria-describedby={describedBy('saleDate', true)}
-                      className={cn(
-                        'flex-1 justify-start text-left font-normal',
-                        !form.saleDate && 'text-zinc-400',
-                      )}
-                    >
-                      <CalendarIcon className="mr-2 size-4 opacity-50" />
-                      {form.saleDate ? format(form.saleDate, 'PPP') : 'Pick a date'}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={form.saleDate}
-                      onSelect={d => {
-                        set('saleDate', d);
-                        setCalendarOpen(false);
-                      }}
-                      disabled={date => date > new Date()}
-                      initialFocus
+          ) : searchError ? (
+            <div className="flex items-center gap-3 p-3">
+              <p className="text-sm text-red-400">{searchError}</p>
+              <Button size="xs" variant="outline" onClick={() => setRetryKey(k => k + 1)}>
+                <RotateCcw className="size-3" aria-hidden /> Try again
+              </Button>
+            </div>
+          ) : visibleRows && visibleRows.length === 0 ? (
+            <p className="p-3 text-sm text-zinc-400">
+              No tips {fanNeedle ? `from fan ${fanNeedle} ` : ''}from this creator between {from && format(from, 'd MMM')} and {to && format(to, 'd MMM')}, other than your own.
+            </p>
+          ) : (
+            <ul className="divide-y divide-white/[0.07]">
+              {(visibleRows ?? []).map(row => {
+                const reason = refused.get(row.saleId) ?? (row.disputed ? 'Disputed' : row.finalised ? 'Finalised month' : null);
+                const checked = picked.has(row.saleId);
+                const disabled = reason !== null && !checked;
+                const id = `tip-${row.saleId}`;
+                return (
+                  <li key={row.saleId} className={cn('flex items-center gap-3 px-3 py-2 text-sm', checked && 'bg-action-blue/[0.10]')}>
+                    <Checkbox
+                      id={id}
+                      checked={checked}
+                      disabled={disabled}
+                      onCheckedChange={v => toggle(row, v === true)}
+                      aria-label={`Claim the ${formatUsd(row.gross)} tip at ${formatSaleDateTime(row.occurredAt, timezone)}`}
+                      className="data-[state=checked]:border-[#2563eb] data-[state=checked]:bg-[#2563eb] data-[state=checked]:text-white"
                     />
-                  </PopoverContent>
-                </Popover>
-
-                <Input
-                  type="time"
-                  aria-label="Time of the sale"
-                  className="w-32 tabular-nums [color-scheme:dark]"
-                  value={form.saleTime}
-                  aria-invalid={!!errors.saleDate}
-                  onChange={e => set('saleTime', e.target.value)}
-                />
-              </div>
-            </Field>
-          </fieldset>
-
-          {/* ── The claim ── */}
-          <fieldset className="flex flex-col gap-4">
-            <legend className="mb-3 w-full border-b border-white/[0.07] pb-2 text-xs font-semibold text-white">
-              The claim
-            </legend>
-
-            <Field id="Comment" label="Why is this sale yours?" error={errors.Comment}>
-              <Textarea
-                id="Comment"
-                rows={3}
-                maxLength={COMMENT_MAX}
-                placeholder="e.g. Sent 20 minutes after my shift ended — I closed the sale earlier in the day."
-                value={form.Comment}
-                aria-invalid={!!errors.Comment}
-                aria-describedby={describedBy('Comment')}
-                onChange={e => set('Comment', e.target.value)}
-              />
-              <p className="text-right text-[11px] tabular-nums text-zinc-400">
-                {form.Comment.length}/{COMMENT_MAX}
-              </p>
-            </Field>
-
-            <Field
-              id="assignedTo"
-              label="Who has the sale now?"
-              error={errors.assignedTo}
-              hint="They review it first. Pick “No one” if the sale isn’t assigned — it goes straight to an admin."
-            >
-              <Select value={form.assignedTo} onValueChange={v => set('assignedTo', v)}>
-                <SelectTrigger
-                  id="assignedTo"
-                  className="w-full"
-                  aria-invalid={!!errors.assignedTo}
-                  aria-describedby={describedBy('assignedTo', true)}
-                >
-                  <SelectValue placeholder="Select a chatter" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="No One">No one</SelectItem>
-                  {caUsers.map(u => (
-                    <SelectItem key={u.uid} value={u.uid}>
-                      {u.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          </fieldset>
-
-          {submitError && (
-            <p role="alert" className="text-sm text-red-400">{submitError}</p>
+                    <label htmlFor={id} className="w-28 shrink-0 tabular-nums text-zinc-400">
+                      {formatSaleDateTime(row.occurredAt, timezone)}
+                    </label>
+                    <AttrChip>{saleTypeLabel(row.type)}</AttrChip>
+                    <FanLabel name={row.fanName} fanId={row.fanId} className="min-w-0 flex-1" />
+                    <span className="w-28 shrink-0 truncate text-xs">
+                      {row.holder ? <PersonTag name={row.holder.displayName} photoURL={null} size="sm" /> : <span className="text-zinc-400">Unassigned</span>}
+                    </span>
+                    <span className="w-20 shrink-0 text-right tabular-nums">{formatUsd(row.gross)}</span>
+                    <span className={cn('w-28 shrink-0 text-right text-[11px]', refused.has(row.saleId) ? 'text-orange-400' : 'text-zinc-400')}>
+                      {reason ?? ''}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-zinc-400">
+          <span className="inline-flex items-center gap-1.5">
+            PPVs aren&apos;t listed <InfoTip text={PPV_ATTRIBUTION} />
+          </span>
+          {truncated && <span>Showing the first 500 — narrow the window to see the rest.</span>}
+        </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => handleOpenChange(false)} disabled={submitting} className="text-zinc-400 hover:text-white">
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} disabled={submitting}>
-            {submitting ? 'Submitting…' : 'Submit dispute'}
-          </Button>
+        {/* ── The claim being built ── */}
+        {selection.length > 0 && (
+          <div className="rounded-lg border border-white/[0.07] bg-white/[0.025] p-3">
+            <p className="text-xs font-medium text-zinc-300">Your claim</p>
+            <ul className="mt-2 flex flex-wrap gap-1.5">
+              {selection.map(row => (
+                <li key={row.saleId} className="inline-flex items-center gap-1.5 rounded-md bg-white/[0.06] py-0.5 pl-1.5 pr-0.5 text-xs">
+                  <CreatorChip creatorId={row.creatorId} size="xs" avatarOnly />
+                  <span className="tabular-nums">{formatUsd(row.gross)}</span>
+                  {refused.has(row.saleId) && <span className="text-orange-400">· {refused.get(row.saleId)}</span>}
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    className="size-5 text-zinc-400"
+                    aria-label={`Remove the ${formatUsd(row.gross)} tip from the claim`}
+                    onClick={() => toggle(row, false)}
+                  >
+                    <X className="size-3" aria-hidden />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="dispute-comment" className="text-xs text-zinc-400">Why are these yours?</Label>
+          <Textarea
+            id="dispute-comment"
+            value={comment}
+            maxLength={COMMENT_MAX}
+            onChange={e => {
+              setComment(e.target.value);
+              if (commentError) setCommentError(null);
+            }}
+            rows={3}
+            aria-invalid={commentError ? true : undefined}
+            placeholder="I was on shift with this fan — they tipped after my PPV at 14:10."
+          />
+          {commentError && <p role="alert" className="text-xs text-red-400">{commentError}</p>}
+        </div>
+
+        {submitError && <p role="alert" className="text-sm text-red-400">{submitError}</p>}
+
+        <DialogFooter className="items-center gap-3 sm:justify-between">
+          <p className="text-xs text-zinc-400" aria-live="polite">
+            {selection.length === 0
+              ? `Pick up to ${MAX_DISPUTE_SALES} tips.`
+              : `${pluralise(selection.length, 'tip')} · ${formatUsd(selectedGross)} gross → ${describeSplit(split)}`}
+          </p>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void submit()}
+              disabled={submitting || selection.length === 0 || selection.length > MAX_DISPUTE_SALES}
+            >
+              {submitting && <Loader2Icon className="activity-spinner size-3.5 animate-spin" aria-hidden />}
+              Submit dispute
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

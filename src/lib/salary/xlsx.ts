@@ -264,8 +264,13 @@ function columnLetters(ref: string): string {
  * silently picking a different one because a name matched would be worse than
  * failing. Duplicate header labels are suffixed (`Email`, `Email (2)`) so a
  * column can never be shadowed and silently lost.
+ *
+ * `options.sheetName` selects a sheet by its **exact** name instead, for the one
+ * workbook that carries several (the Infloww *Creator Statistics* export, whose
+ * per-day rows live on "Creator Statistics Detail"). A name that is absent
+ * throws rather than falling back — the same reasoning as above.
  */
-export function readXlsxSheet(data: Buffer): XlsxSheet {
+export function readXlsxSheet(data: Buffer, options: { sheetName?: string } = {}): XlsxSheet {
   if (data.length < 22) throw new XlsxError('The uploaded file is empty or truncated.');
   if (data[0] === 0xd0 && data[1] === 0xcf) {
     throw new XlsxError('This is a legacy .xls file. Open it and use "Save As → .xlsx", then upload again.');
@@ -287,7 +292,14 @@ export function readXlsxSheet(data: Buffer): XlsxSheet {
 
   // Resolve the first sheet's part name through the relationship id, falling
   // back to the conventional path when the rels part is absent.
-  const firstSheet = /<sheet\b[^>]*\/>/.exec(workbookXml);
+  const firstSheet = options.sheetName
+    ? ([...workbookXml.matchAll(/<sheet\b[^>]*\/>/g)].find(
+        m => decodeXml(/name="([^"]*)"/.exec(m[0])?.[1] ?? '') === options.sheetName,
+      ) ?? null)
+    : /<sheet\b[^>]*\/>/.exec(workbookXml);
+  if (options.sheetName && !firstSheet) {
+    throw new XlsxError(`The workbook has no sheet named "${options.sheetName}".`);
+  }
   const sheetName = firstSheet ? decodeXml(/name="([^"]*)"/.exec(firstSheet[0])?.[1] ?? 'Sheet1') : 'Sheet1';
   const relId = firstSheet ? /r:id="([^"]*)"/.exec(firstSheet[0])?.[1] : undefined;
 

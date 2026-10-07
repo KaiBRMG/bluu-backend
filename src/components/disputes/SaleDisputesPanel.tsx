@@ -131,13 +131,10 @@ export function SaleDisputesPanel({
 }) {
   const { summary, loading, refreshing, error, refetch } = useDisputeSummary();
 
-  // `lookups` is only armed once the create form has been asked for, so the
-  // dashboard does not fetch the creator roster and the CA list for a dialog
-  // most visits never open (CLAUDE.md rule 9).
+  // The create dialog is mounted on first use only — it pulls in the date
+  // pickers and the tip search, which most visits never open.
   const [createMounted, setCreateMounted] = useState(false);
-  const { creators, caUsers, createDispute, setCaApproval } = useDisputesData({
-    lookups: createMounted,
-  });
+  const { setCaApproval } = useDisputesData();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [allMounted, setAllMounted] = useState(arrivedFromDisputesLink);
@@ -357,13 +354,8 @@ export function SaleDisputesPanel({
         <CreateDisputeDialog
           open={createOpen}
           onOpenChange={setCreateOpen}
-          creators={creators}
-          caUsers={caUsers}
-          onSubmit={async payload => {
-            await createDispute(payload);
-            toast.success('Dispute submitted');
-            await refetch();
-          }}
+          timezone={timezone}
+          onSubmitted={refetch}
         />
       )}
     </section>
@@ -481,15 +473,30 @@ function RowShell({
   );
 }
 
-/** Amount + creator: the two facts that identify a sale at a glance. */
+/**
+ * Amount + creator: the two facts that identify a sale at a glance. A v2 claim
+ * over several tips says so instead — "3 tips · 2 creators" — because a chip
+ * for one of them would misstate what is being decided.
+ */
 function RowIdentity({ dispute }: { dispute: DisputeDocument }) {
+  const tips = dispute.version === 2 ? dispute.sales.length : 1;
+  const creators = dispute.version === 2 ? new Set(dispute.sales.map(s => s.creatorId ?? s.creatorName)).size : 1;
   return (
     <div className="flex min-w-0 items-center gap-1.5">
       <span className="shrink-0 text-sm font-semibold tabular-nums">
         {formatMoney(dispute.saleAmount)}
       </span>
       <span aria-hidden className="text-zinc-400">·</span>
-      <DisputeCreatorChip dispute={dispute} size="xs" className="min-w-0 text-zinc-300" />
+      {creators > 1 || dispute.Creator === 'multiple' ? (
+        <span className="min-w-0 truncate text-xs text-zinc-300">
+          {tips} tips · {creators} creators
+        </span>
+      ) : (
+        <>
+          <DisputeCreatorChip dispute={dispute} size="xs" className="min-w-0 text-zinc-300" />
+          {tips > 1 && <span className="shrink-0 text-xs text-zinc-400">· {tips} tips</span>}
+        </>
+      )}
     </div>
   );
 }
@@ -644,14 +651,19 @@ function DecidedRow({
   const stage = disputeStage(dispute);
   const approved = stage === 'approved';
   const money = formatMoney(dispute.saleAmount);
+  // A v2 approval has already moved the tips; a legacy one was fixed by hand.
   const outcome = approved
-    ? 'Approved — moving to your report'
+    ? dispute.version === 2
+      ? 'Approved — moved to your sales report'
+      : 'Approved — moving to your report'
     : stage === 'declined-ca'
       ? `Declined by ${dispute.assignedToName || 'the reviewer'}`
       : 'Rejected by an admin';
   // The visible string carries an em dash, which a screen reader announces as
   // "em dash". Same fact, punctuated for the ear.
-  const spoken = approved ? 'approved, moving to your report' : outcome.toLowerCase();
+  const spoken = approved
+    ? dispute.version === 2 ? 'approved, moved to your sales report' : 'approved, moving to your report'
+    : outcome.toLowerCase();
 
   return (
     <li>

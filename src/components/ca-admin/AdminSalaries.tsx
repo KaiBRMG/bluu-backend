@@ -365,6 +365,7 @@ function AgentDetail({ row, month, onBack }: { row: RosterRow; month: string; on
                 timezone={timezone}
                 day={inspectedDay}
                 onClearDay={() => setInspectedDay(null)}
+                onSelectDay={setInspectedDay}
                 allowDelete={data.status !== 'finalized'}
                 onDeleted={refetch}
               />

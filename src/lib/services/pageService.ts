@@ -1,6 +1,7 @@
 import { adminDb } from '../firebase-admin';
 import { resolveAccessiblePages } from './permissionResolver';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldPath, FieldValue } from 'firebase-admin/firestore';
+import { invalidateUserCache } from './userService';
 import type { PagePermissionDoc, ResolvedAccess } from '@/types/firestore';
 import { PAGES, getPageDef } from '@/lib/definitions';
 
@@ -90,6 +91,95 @@ export async function updatePagePermissions(
     }
     await directBatch.commit();
   }
+}
+
+/**
+ * Grants and/or revokes **direct** page access for specific users, touching only
+ * their own key in each page's `users` map.
+ *
+ * This is the narrow instrument for a subsystem that owns a page's audience
+ * (GoLogin seats → `apps-gologin`), as opposed to `updatePagePermissions`, which
+ * PUTs the whole map from the Sharing page. Field-level writes are the point:
+ * a read-modify-write here would race an admin editing the same page and drop
+ * whichever grant landed second (CLAUDE.md, Sharing known issue #4).
+ *
+ * **Group grants are never touched.** A user who reaches a page through a group
+ * keeps it after a revoke — removing it would mean editing the group's access
+ * for everyone in it. Callers that need to know check `resolvePagePermission`.
+ *
+ * Costs: 1 `getAll` over the named pages, ≤1 batch write, then (if anything
+ * changed) 1 page-permissions read + 1 `getAll` of the users + 1 batch write.
+ */
+export async function setDirectPageGrants(
+  uids: string[],
+  change: { grant?: string[]; revoke?: string[] },
+): Promise<void> {
+  const grant = change.grant ?? [];
+  const revoke = change.revoke ?? [];
+  const pageIds = [...new Set([...grant, ...revoke])];
+  for (const pageId of pageIds) {
+    if (!getPageDef(pageId)) throw new Error(`Unknown page: ${pageId}`);
+  }
+  if (uids.length === 0 || pageIds.length === 0) return;
+
+  const refs = pageIds.map((pageId) => adminDb.collection('page-permissions').doc(pageId));
+  const snaps = await adminDb.getAll(...refs);
+  const batch = adminDb.batch();
+  let writes = 0;
+
+  snaps.forEach((snap, i) => {
+    const pageId = pageIds[i];
+    const users: Record<string, true> = snap.exists ? (snap.data()?.users ?? {}) : {};
+    if (grant.includes(pageId)) {
+      const missing = uids.filter((uid) => !users[uid]);
+      if (missing.length === 0) return;
+      // `set` + merge creates the doc when the page has never been shared —
+      // fail-closed until now, so granting these users widens it to exactly them.
+      batch.set(
+        refs[i],
+        { pageId, users: Object.fromEntries(missing.map((uid) => [uid, true])) },
+        { merge: true },
+      );
+      writes++;
+    } else {
+      // Revoke: never create a doc just to delete from it.
+      const present = uids.filter((uid) => users[uid]);
+      if (present.length === 0) return;
+      const [head, ...tail] = present;
+      batch.update(
+        refs[i],
+        new FieldPath('users', head),
+        FieldValue.delete(),
+        ...tail.flatMap((uid) => [new FieldPath('users', uid), FieldValue.delete()]),
+      );
+      writes++;
+    }
+  });
+
+  if (writes === 0) return;
+  await batch.commit();
+
+  const userRefs = uids.map((uid) => adminDb.collection('users').doc(uid));
+  const [allPermDocs, userSnaps] = await Promise.all([
+    getAllPagePermissions(),
+    adminDb.getAll(...userRefs),
+  ]);
+  const userBatch = adminDb.batch();
+  let userWrites = 0;
+  for (const userDoc of userSnaps) {
+    // A deleted user has no doc to recompute — and `update` must not be what
+    // recreates one.
+    if (!userDoc.exists) continue;
+    const accessible = resolveAccessiblePages(allPermDocs, userDoc.id, userDoc.data()?.groups ?? []);
+    userBatch.update(userDoc.ref, {
+      permittedPageIds: accessible.map((p) => p.pageId),
+      permissionsVersion: FieldValue.increment(1),
+    });
+    userWrites++;
+  }
+  if (userWrites > 0) await userBatch.commit();
+  // `checkPageAccess` reads `permittedPageIds` through the 60s user cache (rule 2).
+  uids.forEach(invalidateUserCache);
 }
 
 /**

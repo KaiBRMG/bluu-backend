@@ -8,7 +8,7 @@
  */
 
 import type { SalaryDayKey, SalaryMonthKey } from './salaryDate';
-import type { CommissionTier, SaleStatus } from './salaryConstants';
+import type { CommissionTier, SaleKind, SaleStatus, SalesSource } from './salaryConstants';
 
 // ─── Rate configuration ──────────────────────────────────────────────
 
@@ -247,10 +247,31 @@ export interface DashboardSalaryMonth extends SalaryMonthResult {
 
 // ─── Sales ───────────────────────────────────────────────────────────
 
-/** One imported sale row, serialised. */
+/**
+ * A sale moved from one agent to another by an approved dispute.
+ *
+ * Bluu Backend is the source of truth for who holds a sale once a dispute has
+ * moved it: a later sync never clears a transfer, whatever the source system
+ * says (documentation/buddyx.md §4).
+ */
+export interface SaleTransfer {
+  /** The holder it was moved off. `null` for an unassigned tip. */
+  fromUserId: string | null;
+  toUserId: string;
+  disputeId: string;
+  approvedBy: string;
+  approvedAt: string;
+}
+
+/** One sale row, serialised. Infloww rows were imported; BuddyX rows are synced. */
 export interface SalarySale {
   saleId: string;
-  userId: string;
+  /**
+   * The **effective** holder: `transfer?.toUserId ?? sourceUserId`. Every pay
+   * path reads this. `null` for an unassigned tip or an unmapped chatter — such
+   * a row counts toward nobody until it is claimed.
+   */
+  userId: string | null;
   day: SalaryDayKey;
   month: SalaryMonthKey;
   occurredAt: string;
@@ -264,17 +285,37 @@ export interface SalarySale {
   netRevenue: number;
   /** `grossRevenue`, negated for a reversal. This is what the engine sums. */
   signedGross: number;
+  /** Normalised: `tips_messages` · `tips_posts` · `tips_profile` · `tips` · `ppv`. */
   type: string;
   rule: string;
   assignedBy: string;
   status: SaleStatus;
   importId: string;
+
+  /** Which system the row came from. Absent on rows written before the BuddyX integration → `infloww`. */
+  source: SalesSource;
+  kind: SaleKind;
+  /** Resolved creator or sub-account id, when known. */
+  creatorId: string | null;
+  /** The uid the source attributes the sale to, before any transfer. */
+  sourceUserId: string | null;
+  transfer: SaleTransfer | null;
+  /** Set while an open dispute holds the sale. */
+  disputeId: string | null;
+  /** Set when the sale no longer appears in BuddyX. A removed row counts toward nobody. */
+  removedAt: string | null;
+  /** BuddyX chatter id that matched no Bluu user. */
+  unmappedChatterId: string | null;
+  /** BuddyX re-attributed a sale after a dispute had moved it. Admin attention. */
+  attributionConflict: boolean;
+  /** The row vanished from BuddyX inside a finalised month, so it was left counting. */
+  vanishedAfterFinalise: boolean;
 }
 
 // ─── Import reporting ────────────────────────────────────────────────
 
 export interface SalesImportSkip {
-  reason: 'unmapped-email' | 'unparseable-date' | 'unparseable-amount' | 'missing-email';
+  reason: 'unmapped-email' | 'unparseable-date' | 'unparseable-amount' | 'missing-email' | 'after-cutover';
   detail: string;
   rowCount: number;
   /** Up to a handful of source row numbers, for the admin to look up. */

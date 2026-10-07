@@ -64,11 +64,37 @@ export function serialiseDispute(
     createdBy: data.createdBy,
     createdByName: createdByInfo.displayName,
     createdByPhotoURL: createdByInfo.photoURL,
+    version: data.version === 2 ? 2 : 1,
+    groupId: data.groupId ?? null,
+    groupSize: typeof data.groupSize === 'number' ? data.groupSize : 1,
+    sales: Array.isArray(data.sales)
+      ? data.sales.map((s: DocumentData) => ({
+          saleId: String(s.saleId ?? ''),
+          occurredAt: serializeTimestamp(s.occurredAt),
+          creatorId: s.creatorId ?? null,
+          // The snapshot's name, unless the roster resolved a better one.
+          creatorName: (s.creatorId && creatorMap[s.creatorId]?.stageName) || s.creatorName || '',
+          fanId: String(s.fanId ?? ''),
+          fanName: String(s.fanName ?? ''),
+          type: String(s.type ?? ''),
+          gross: Number(s.gross ?? 0),
+        }))
+      : [],
+    totalGross: typeof data.totalGross === 'number' ? data.totalGross : null,
+    transferResult: data.transferResult ?? null,
+    untransfers: Array.isArray(data.untransfers)
+      ? data.untransfers.map((u: DocumentData) => ({
+          saleId: String(u.saleId ?? ''),
+          by: String(u.by ?? ''),
+          at: serializeTimestamp(u.at),
+          reason: String(u.reason ?? ''),
+        }))
+      : [],
   };
 }
 
 export async function resolveNames(
-  ids: { createdBy: string; assignedTo: string; Creator: string }[],
+  ids: { createdBy: string; assignedTo: string; Creator: string; saleCreators?: string[] }[],
 ): Promise<NameMaps> {
   // Batch-fetch all unique user docs in one round-trip
   const uniqueUids = [...new Set([
@@ -90,7 +116,7 @@ export async function resolveNames(
   }
 
   // Batch-fetch creator names + photos via 'in' query (max 30 per Firestore limit)
-  const uniqueCreatorIds = [...new Set(ids.map(d => d.Creator).filter(Boolean))];
+  const uniqueCreatorIds = [...new Set(ids.flatMap(d => [d.Creator, ...(d.saleCreators ?? [])]).filter(c => c && c !== 'multiple'))];
   const creatorMap: Record<string, CreatorInfo> = {};
   if (uniqueCreatorIds.length > 0) {
     const chunks = chunk30(uniqueCreatorIds);
@@ -202,7 +228,13 @@ export async function serialiseDisputes(
 ): Promise<DisputeDocument[]> {
   if (docs.length === 0) return [];
   const { userMap, creatorMap } = await resolveNames(
-    docs.map(d => ({ createdBy: d.createdBy, assignedTo: d.assignedTo, Creator: d.Creator })),
+    docs.map(d => ({
+      createdBy: d.createdBy,
+      assignedTo: d.assignedTo,
+      Creator: d.Creator,
+      // A v2 claim across creators carries `Creator: 'multiple'`; its tips name them.
+      saleCreators: Array.isArray(d.sales) ? d.sales.map((s: DocumentData) => s.creatorId).filter(Boolean) : [],
+    })),
   );
   return docs.map(d => serialiseDispute(d._id, d, userMap, creatorMap));
 }

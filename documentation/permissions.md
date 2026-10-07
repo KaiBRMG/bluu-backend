@@ -49,6 +49,10 @@ Page permission is **tier 2** (see [auth.md](auth.md#authorization-tiers-least--
 - `isActive` changes
 - The page-permission map itself
 
+### The one other writer: `setDirectPageGrants`
+
+`pageService.setDirectPageGrants(uids, { grant, revoke })` adds or removes specific users' **direct** grants, writing only their own key in each page's `users` map (field-path update, never the whole map), then recomputes `permittedPageIds` for those users and invalidates their cache (rule 2). Group grants are never touched. Its only caller is GoLogin's Members panel — a seat grant shares `apps-gologin`, a seat removal revokes it and the four capability sub-items — gated on the `members` capability rather than the admin claim, because the write is pinned to those page ids and to the uid whose seat is changing. See [gologin.md](gologin.md#members). Anything new that wants to write `page-permissions` without the admin claim needs the same kind of pinning, not a general grant.
+
 ### The read/write asymmetry (intentional)
 - **GET** `/api/admin/pages` — gated by the `'sharing'` **page permission**.
 - **PUT** `/api/admin/pages/[pageId]/permissions` — requires the **admin claim**.
@@ -141,6 +145,18 @@ Current members: **Resources** (`/applications/apps-resources`), moved out of th
 **A page moving in either direction leaves orphans.** Removing one from `PAGES` strands its `page-permissions` doc and every `permittedPageIds` entry — and a stranded `page-permissions` doc makes `repair-permissions.js` **hard-abort**, so the drift-repair tool stops working entirely until it is cleaned up. `src/scripts/remove-retired-pages.js` does that cleanup (dry run by default; it refuses to touch any pageId `definitions.ts` still declares).
 
 Access is still real for a universal page — it is just enforced by the page's own data layer rather than by page permission. Resources filters its contents by group inside `/api/resources`; see [resources.md](resources.md).
+
+## BuddyX analytics pages (2026-10)
+
+Three pages, each its own permission, granted on Sharing like any other:
+
+| pageId | Teamspace | What `ca-admin` adds |
+|---|---|---|
+| `ca-chatter-analytics` | CA Portal | the named leaderboard (agents otherwise see themselves + an anonymous benchmark) |
+| `ca-fan-analytics` | CA Portal | every creator and the acquisition table (agents otherwise see creators they are rostered on this month) |
+| `creators-of-analytics` | Creator Portal | — (internal page; not in the Telegram Mini App) |
+
+The "what `ca-admin` adds" column is enforced server-side by `lib/buddyx/analyticsAuth.ts` — holding the analytics page is what lets you in; holding `ca-admin` as well (or the admin claim) is what widens the view. See [buddyx.md](buddyx.md).
 
 ## Rules for new pages
 

@@ -202,6 +202,21 @@ export const REASON_MAX = 50;
  * hold them — which is what the queue used to do, and what the column would
  * otherwise have had to re-implement.
  */
+export interface ReasonBarCopy {
+  label: string;
+  placeholder: string;
+  confirm: string;
+  busy: string;
+  required?: boolean;
+}
+
+const REJECT_COPY: ReasonBarCopy = {
+  label: 'Reason for rejecting this dispute',
+  placeholder: 'Reason (optional) — the filer sees this',
+  confirm: 'Confirm reject',
+  busy: 'Rejecting…',
+};
+
 export function RejectReasonBar({
   id,
   busy,
@@ -209,15 +224,24 @@ export function RejectReasonBar({
   onConfirm,
   /** `stack` is the narrow-column form: the field above its own buttons. */
   layout = 'row',
+  /**
+   * The same bar serves the admin's un-transfer, which needs a reason (it is
+   * recorded on the dispute) and different words. Defaults are the reject copy.
+   */
+  copy = REJECT_COPY,
 }: {
   id: string;
   busy: boolean;
   onCancel: () => void;
   onConfirm: (reason?: string) => void;
   layout?: 'row' | 'stack';
+  copy?: ReasonBarCopy;
 }) {
   const [reason, setReason] = useState('');
-  const confirm = () => onConfirm(reason.trim() || undefined);
+  const confirm = () => {
+    if (copy.required && !reason.trim()) return;
+    onConfirm(reason.trim() || undefined);
+  };
 
   return (
     <div
@@ -228,14 +252,14 @@ export function RejectReasonBar({
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <label htmlFor={`reason-${id}`} className="sr-only">
-          Reason for rejecting this dispute
+          {copy.label}
         </label>
         <Input
           id={`reason-${id}`}
           autoFocus
           value={reason}
           maxLength={REASON_MAX}
-          placeholder="Reason (optional) — the filer sees this"
+          placeholder={copy.placeholder}
           onChange={e => setReason(e.target.value)}
           onKeyDown={e => {
             if (e.key === 'Escape') onCancel();
@@ -251,8 +275,8 @@ export function RejectReasonBar({
         <Button size="sm" variant="ghost" onClick={onCancel} disabled={busy} className="text-zinc-400 hover:text-white">
           Cancel
         </Button>
-        <Button size="sm" variant="destructive" disabled={busy} onClick={confirm}>
-          {busy ? 'Rejecting…' : 'Confirm reject'}
+        <Button size="sm" variant="destructive" disabled={busy || (copy.required && !reason.trim())} onClick={confirm}>
+          {busy ? copy.busy : copy.confirm}
         </Button>
       </div>
     </div>

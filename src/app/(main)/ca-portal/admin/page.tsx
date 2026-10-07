@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import { toast } from 'sonner';
 import AppLayout from "@/components/AppLayout";
@@ -16,6 +16,15 @@ import { DeletedUser } from '@/components/DeletedUser';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { currentMonthKey, isMonthKey } from '@/lib/salary/salaryDate';
 import { useAuth } from '@/components/AuthProvider';
+import { useAuthFetch } from '@/hooks/useAuthFetch';
+import { DisputeDetailDialog } from '@/components/disputes/DisputeDetailDialog';
+
+const ADMIN_TABS = ['overview', 'salaries', 'sales', 'coverage', 'rates', 'disputes'];
+const noopSubscribe = () => () => {};
+function readRequestedTab(): string | null {
+  const requested = new URLSearchParams(window.location.search).get('tab');
+  return requested && ADMIN_TABS.includes(requested) ? requested : null;
+}
 
 // ─── Column set ───────────────────────────────────────────────────────
 
@@ -115,7 +124,9 @@ function AdminPanel({
   refreshKey,
   onAction,
   onBulkAction,
+  onOpenDetail,
 }: {
+  onOpenDetail?: (dispute: DisputeDocument) => void;
   filter: string;
   columns?: ColumnKey[];
   userTimezone: string;
@@ -192,6 +203,7 @@ function AdminPanel({
         groupByCreatedBy={groupByCreatedBy}
         selectable={selectable}
         onBulkAction={handleBulkAction}
+        onOpenDetail={onOpenDetail}
       />
     </div>
   );
@@ -220,7 +232,7 @@ const AdminOverview = dynamic(() => import('@/components/ca-admin/AdminOverview'
 const AdminSalaries = dynamic(() => import('@/components/ca-admin/AdminSalaries'), {
   loading: () => <PanelSkeleton />,
 });
-const AdminSalesData = dynamic(() => import('@/components/ca-admin/AdminSalesData'), {
+const AdminSales = dynamic(() => import('@/components/ca-admin/AdminSales'), {
   loading: () => <PanelSkeleton />,
 });
 const AdminCoverage = dynamic(() => import('@/components/ca-admin/AdminCoverage'), {
@@ -286,13 +298,59 @@ export default function CaAdminPage() {
 
   const { timezone: userTimezone } = useViewerTimezone();
 
+  // `?tab=sales` is where the BuddyX sync-failing alert points. Read as an
+  // external value (server: none) rather than through `useSearchParams`, which
+  // would suspend the page; the reader's own pick then wins.
+  const requestedTab = useSyncExternalStore(noopSubscribe, readRequestedTab, () => null);
+  const [pickedTab, setTab] = useState<string | null>(null);
+  const tab = pickedTab ?? requestedTab ?? 'overview';
+
+  // ── Dispute detail, shared by every Disputes tab ──
+  const [detail, setDetail] = useState<DisputeDocument | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const openDetail = useCallback((dispute: DisputeDocument) => {
+    setDetail(dispute);
+    setDetailOpen(true);
+  }, []);
+  const authFetch = useAuthFetch();
+
+  /**
+   * Revert one transfer — the escape hatch for a wrong approval. The detail
+   * dialog shows the reason bar; this records it and refreshes the tables.
+   */
+  const untransfer = async (saleId: string, reason: string) => {
+    try {
+      await authFetch(`/api/ca-sales/${encodeURIComponent(saleId)}/transfer`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason }),
+      });
+      toast.success('Transfer reverted — the tip is back with the agent BuddyX credits');
+      setDetail(prev =>
+        prev ? { ...prev, untransfers: [...prev.untransfers, { saleId, by: '', at: new Date().toISOString(), reason }] } : prev,
+      );
+      setRefreshKey(k => k + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not revert the transfer');
+      throw err;
+    }
+  };
+
   const handleAdminAction = async (
     id: string,
     action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>,
     reason?: string,
   ) => {
-    await setAdminApproval(id, action, reason);
+    const { transferResult } = await setAdminApproval(id, action, reason);
     setRefreshKey(k => k + 1);
+    // A v2 approval moves money; say what moved, in words.
+    if (transferResult) {
+      const moved = transferResult.transferred.length;
+      const skipped = transferResult.skipped.length;
+      toast.success(
+        `${moved} ${moved === 1 ? 'tip' : 'tips'} moved` +
+          (skipped ? ` · ${skipped} skipped — ${[...new Set(transferResult.skipped.map(x => x.reason))].join(', ')}` : ''),
+      );
+    }
   };
 
   /**
@@ -307,13 +365,14 @@ export default function CaAdminPage() {
     action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>,
     reason?: string,
   ) => {
-    const { updated, skipped } = await setAdminApprovalBulk(ids, action, reason);
+    const { updated, skipped, transferred, transferSkipped } = await setAdminApprovalBulk(ids, action, reason);
     setRefreshKey(k => k + 1);
     toast.success(
       `${updated} ${updated === 1 ? 'dispute' : 'disputes'} ${action === 'Approved' ? 'approved' : 'rejected'}` +
         // A stale row is the reviewer's business: it means the list they acted
         // on no longer matches the data.
-        (skipped > 0 ? ` · ${skipped} no longer existed` : ''),
+        (skipped > 0 ? ` · ${skipped} no longer existed` : '') +
+        (transferred + transferSkipped > 0 ? ` · ${transferred} tips moved${transferSkipped ? `, ${transferSkipped} skipped` : ''}` : ''),
     );
   };
 
@@ -322,18 +381,18 @@ export default function CaAdminPage() {
       <div className="max-w-7xl">
         <h1 className="text-2xl font-bold tracking-tight">CA Admin</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          Payroll, sales data, coverage and disputes. Chat Agents should not have access to this page.
+          Payroll, sales, coverage and disputes. Chat Agents should not have access to this page.
         </p>
 
         <div className="mt-6 rounded-lg border border-border-subtle bg-content-bg">
-          <Tabs defaultValue="overview">
+          <Tabs value={tab} onValueChange={setTab}>
             {/* pb-1.5: overflow-x:auto forces overflow-y to auto, so reserve room
                 for the trigger focus ring instead of letting it clip. */}
             <div className="overflow-x-auto px-6 pb-1.5 pt-4">
               <TabsList>
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="salaries">Salaries</TabsTrigger>
-                <TabsTrigger value="sales">Sales data</TabsTrigger>
+                <TabsTrigger value="sales">Sales</TabsTrigger>
                 <TabsTrigger value="coverage">Coverage</TabsTrigger>
                 <TabsTrigger value="rates">Rates</TabsTrigger>
                 <TabsTrigger value="disputes">Disputes</TabsTrigger>
@@ -347,7 +406,9 @@ export default function CaAdminPage() {
               <TabsContent value="salaries">
                 {month ? <AdminSalaries month={month} onMonthChange={setMonth} /> : <PanelSkeleton />}
               </TabsContent>
-              <TabsContent value="sales"><AdminSalesData /></TabsContent>
+              <TabsContent value="sales">
+                {month ? <AdminSales month={month} onMonthChange={setMonth} timezone={userTimezone} /> : <PanelSkeleton />}
+              </TabsContent>
               <TabsContent value="coverage"><AdminCoverage /></TabsContent>
               <TabsContent value="rates"><AdminRates /></TabsContent>
 
@@ -366,6 +427,7 @@ export default function CaAdminPage() {
                       filter="admin-all"
                       userTimezone={userTimezone}
                       refreshKey={refreshKey}
+                      onOpenDetail={openDetail}
                     />
                   </TabsContent>
 
@@ -376,6 +438,7 @@ export default function CaAdminPage() {
                       showActions
                       selectable
                       refreshKey={refreshKey}
+                      onOpenDetail={openDetail}
                       onAction={handleAdminAction}
                       onBulkAction={handleAdminBulkAction}
                     />
@@ -390,6 +453,7 @@ export default function CaAdminPage() {
                       groupByCreatedBy
                       selectable
                       refreshKey={refreshKey}
+                      onOpenDetail={openDetail}
                       onAction={handleAdminAction}
                       onBulkAction={handleAdminBulkAction}
                     />
@@ -402,6 +466,7 @@ export default function CaAdminPage() {
                       showActions
                       resolvedActions
                       refreshKey={refreshKey}
+                      onOpenDetail={openDetail}
                       onAction={handleAdminAction}
                     />
                   </TabsContent>
@@ -411,6 +476,14 @@ export default function CaAdminPage() {
           </Tabs>
         </div>
       </div>
+
+      <DisputeDetailDialog
+        dispute={detail}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        timezone={userTimezone}
+        onUntransfer={detail?.version === 2 && detail.AdminApproval === 'Approved' ? untransfer : undefined}
+      />
     </AppLayout>
   );
 }

@@ -145,7 +145,9 @@ An admin can replace any of eight fields on any day: `grossEarnings`, `hours`, `
 
 ## 4. Sales import
 
-The manual bridge until sales come from OF Manager. `POST /api/ca-salary/import`, multipart, `.xlsx`.
+> **Sales now come from BuddyX** (2026-10). Everything after the cutover (2026-10-04 08:50:31 SAST) is written by the BuddyX sync, and the `.xlsx` upload (`POST /api/ca-salary/import`, the old Sales data tab) was **deleted**. What follows describes the Infloww parser, which survives only inside the one-off historical import (`/api/admin/buddyx/historical-import`, admin claim) and refuses every row after the cutover. Rows it writes now also carry `source: 'infloww'`, `kind`, `creatorId` and `sourceUserId`, and their `type` is stored in the shared vocabulary of `saleTypes.ts` (`tips_messages` … `ppv`). See [buddyx.md](buddyx.md).
+
+The manual bridge until sales came from BuddyX. Multipart, `.xlsx`.
 
 ### Zero-dependency reader
 
@@ -456,7 +458,7 @@ Two rules, and both are load-bearing:
 
 | Collection | Doc id | What |
 |---|---|---|
-| `ca-sales` | content hash | One imported sale row |
+| `ca-sales` | content hash (Infloww) · `bx-tip-{id}` / `bx-ppv-{id}` (BuddyX) | One sale row — see [buddyx.md](buddyx.md#8-collections) for the BuddyX fields |
 | `ca-sales-imports` | auto | Audit record for one upload |
 | `ca-salary-overrides` | `{uid}_{YYYY-MM-DD}` | An admin's edits to one day |
 | `ca-salary-months` | `{uid}_{YYYY-MM}` | Frozen payout record |
@@ -508,7 +510,9 @@ Helpers: [`salaryAuth.ts`](../src/lib/salary/salaryAuth.ts).
                 agent profitability, creator leaderboard, payroll share,
                 attention band
   Salaries      roster → one agent's editable month
-  Sales data    .xlsx upload with dry-run preview, import history
+  Sales         BuddyX sync status + write switch, attention band, every
+                agent's sales ledger · Mapping · Sync history · Historical
+                import (one-off) — see buddyx.md
   Coverage      leave approvals → offer board → assign · History (outcomes
                 + balance trail)
   Rates         tiers, wage table, grace, deduction, rate basis
@@ -519,7 +523,10 @@ Helpers: [`salaryAuth.ts`](../src/lib/salary/salaryAuth.ts).
                             RIGHT Sale Disputes — the open review queue, recent
                                   verdicts on your own claims, and what is still
                                   waiting. New dispute + All disputes (dialog).
-/ca-portal/dashboard/salary Overview · Daily breakdown · Sales report
+/ca-portal/dashboard/salary Overview · Daily breakdown · Sales report (breakdown
+                            first: tips/PPV tiles, daily chart, by creator/type,
+                            then the ledger; transfers in and away)
+/ca-portal/chatter-analytics · /ca-portal/fan-analytics   BuddyX analytics — buddyx.md
 /ca-portal/disputes         REDIRECT → /ca-portal/dashboard?disputes=1
 ```
 
@@ -727,7 +734,7 @@ Its one honest limitation: a **recurring** shift is announced by its first occur
 
 **Reopening a month is silent on purpose.** Finalising says "your salary is on the way", which is the thing the agent has been waiting to hear. Reopening is an admin correcting something mid-flight, and telling an agent their locked month has come unlocked — before anyone knows what it will settle at — invites a question nobody can answer yet. The finalise that follows is the message.
 
-**The tier notice needs memory, because salary is derived.** Recomputing a month says what band an agent is *on*, never what band they were last told about, so `ca-salary-tier-notices/{uid}_{month}` holds that. First sight of an agent-month writes a **baseline** rather than announcing one, or the 1st of every month would greet everyone with "you are now earning 2.5%". Only an increase notifies; a band that falls (a large reversal dated mid-month) lowers the stored mark silently, so re-crossing notifies again. It fires from the sales import — the one thing that moves a whole roster's gross at once — and from the override endpoints, which already recompute the month.
+**The tier notice needs memory, because salary is derived.** Recomputing a month says what band an agent is *on*, never what band they were last told about, so `ca-salary-tier-notices/{uid}_{month}` holds that. First sight of an agent-month writes a **baseline** rather than announcing one, or the 1st of every month would greet everyone with "you are now earning 2.5%". Only an increase notifies; a band that falls (a large reversal dated mid-month) lowers the stored mark silently, so re-crossing notifies again. It fires through `tierNotices.announceTierCrossings` from everything that moves gross: the BuddyX sales sync, an approved dispute or admin un-transfer (which move a sale between two agents), the historical Infloww import, and the override endpoints, which already recompute the month.
 
 ### Withdrawing approved leave
 
@@ -826,12 +833,13 @@ When a rule genuinely changes, change the assertion **and** this document in the
 
 ---
 
-## 13. When OF Manager lands
+## 13. Sales from BuddyX (was: "When OF Manager lands")
 
-Sales will arrive with a uid already attached. At that point:
+It landed as BuddyX rather than OF Manager, and the prediction held: **the engine did not change.** BuddyX rows are written into `ca-sales` with the same shape (`documentation/buddyx.md`), and `buildSalaryMonth` reads them like any other. What did change is around the engine:
 
-- `SALES_EMAIL_MAP` and `buildUserResolver` disappear.
-- `xlsx.ts`, `salesImport.ts` and `/api/ca-salary/import` disappear with them.
-- **Everything else stays.** The engine takes `SalaryDayInput`, which is source-agnostic — write the OF Manager rows into `ca-sales` with the same shape and nothing downstream changes.
+- `userId` can be `null` (an unassigned tip, an unmapped chatter) — such a row counts toward nobody, and `getSalesForMonthByUser` skips it.
+- A row can be soft-removed (`removedAt`) when BuddyX stops returning it; every pay read drops those in memory.
+- A row can be **transferred** by an approved dispute (`transfer`, `userId = transfer.toUserId`) — Bluu Backend is the source of truth for that, and a sync never undoes it.
+- `/api/ca-salary/import` is gone. `SALES_EMAIL_MAP`, `buildUserResolver`, `xlsx.ts` and `salesImport.ts` remain only for the one-off historical import, and go with it.
 
 Keep `signedGross` as the only column the engine sums; it is what makes reversals work without a special case.

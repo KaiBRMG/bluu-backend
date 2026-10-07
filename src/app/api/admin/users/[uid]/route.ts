@@ -10,6 +10,26 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { randomUUID } from 'crypto';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { deleteAllSnipsForUser } from '@/lib/services/snipService';
+import { clearManualLinksForUser } from '@/lib/services/buddyxMappingService';
+import { releaseGoLoginSeat } from '@/lib/services/gologinAccountService';
+
+/**
+ * Offboarding frees the person's paid GoLogin seat (and their direct GoLogin
+ * page grants). **Best-effort**: the Bluu action is what the admin asked for and
+ * has already happened, so a GoLogin outage is reported as `'failed'` — the
+ * registry toasts it and the seat stays visible on GoLogin → Members — rather
+ * than failing the deactivation. `'none'` means they held no seat.
+ */
+type SeatRelease = 'released' | 'none' | 'failed';
+
+async function releaseSeatForOffboarding(uid: string): Promise<SeatRelease> {
+  try {
+    return await releaseGoLoginSeat(uid);
+  } catch (err) {
+    console.error(`[UserLifecycle] Failed to release GoLogin seat for ${uid}:`, err);
+    return 'failed';
+  }
+}
 
 /**
  * PUT /api/admin/users/[uid]
@@ -102,7 +122,14 @@ export const PUT = withAuth(async (
       });
     }
 
-    return NextResponse.json({ success: true });
+    // Revoking access and archiving both end the person's use of Bluu, so both
+    // free their GoLogin seat. Restoring them does not buy it back.
+    const gologinSeat: SeatRelease | undefined =
+      sanitizedUpdates.isActive === false || sanitizedUpdates.isArchived === true
+        ? await releaseSeatForOffboarding(targetUid)
+        : undefined;
+
+    return NextResponse.json({ success: true, gologinSeat });
   } catch (error: unknown) {
     console.error('Error updating user:', error);
     return NextResponse.json({ error: 'Failed to update user' }, { status: 500 });
@@ -134,6 +161,8 @@ async function deleteQueryDocs(query: FirebaseFirestore.Query): Promise<number> 
  * files),
  * shifts, leave requests, notifications, bug reports, and profile photo.
  *
+ * Also releases their GoLogin seat, if they hold one (best-effort, first).
+ *
  * Shared business records (disputes, campaign-tracking, content-planning,
  * notification batches) reference the user only as a participant/audit field
  * and belong to creators or other employees, so they are intentionally kept.
@@ -154,6 +183,12 @@ export const DELETE = withAuth(async (
     if (targetUid === token.uid) {
       return NextResponse.json({ error: 'Cannot delete your own account' }, { status: 400 });
     }
+
+    // ─── 0. GoLogin seat ────────────────────────────────────────────────
+    // First, while the user doc still exists: a paid seat in an outside
+    // workspace is the one thing here that keeps costing money after the
+    // person is gone. Best-effort — it must not stop the cascade.
+    const gologinSeat = await releaseSeatForOffboarding(targetUid);
 
     // ─── 1. User doc, group membership, page permissions, email claim ───
     const membershipBatch = adminDb.batch();
@@ -215,6 +250,11 @@ export const DELETE = withAuth(async (
       deleteAllSnipsForUser(targetUid).catch(err => {
         console.error(`[DeleteUser] Failed to delete snips for ${targetUid}:`, err);
       }),
+      // A BuddyX chatter manually linked to this user must not keep pointing at
+      // a deleted uid. `ca-sales` rows keep their `userId` — that is pay history.
+      clearManualLinksForUser(targetUid).catch(err => {
+        console.error(`[DeleteUser] Failed to clear BuddyX links for ${targetUid}:`, err);
+      }),
     ]);
 
     // ─── 3. Storage: screenshots (full-size + thumbnails) and profile photo ──
@@ -268,7 +308,7 @@ export const DELETE = withAuth(async (
     invalidateAdminUsersCache();
     invalidateDisplayNamesCache();
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, gologinSeat });
   } catch (error: unknown) {
     console.error('Error deleting user:', error);
     return NextResponse.json({ error: 'Failed to delete user' }, { status: 500 });

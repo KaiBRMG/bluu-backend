@@ -1,17 +1,10 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
-import { useAuth } from '@/components/AuthProvider';
+import { useState, useCallback, useMemo } from 'react';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
-import { getCache, setCache } from '@/lib/queryCache';
-import type { DisputeDocument, CreatorDocument, ApprovalStatus } from '@/types/firestore';
+import type { DisputeDocument, ApprovalStatus } from '@/types/firestore';
 
 // ─── Types ────────────────────────────────────────────────────────────
-
-export interface CaUser {
-  uid: string;
-  displayName: string;
-}
 
 export interface DisputeFetchResult {
   disputes: DisputeDocument[];
@@ -25,72 +18,18 @@ export interface AdminFilters {
   creator?: string;
 }
 
-export interface CreateDisputePayload {
-  assignedTo: string;
-  Creator: string;
-  saleDate: string;    // ISO string (local tz)
-  saleAmount: number;
-  fanName: string;
-  Comment: string;
-}
-
-const CACHE_TTL_MS = 5 * 60 * 1000;
-const CREATORS_KEY = 'bluu_disputes_creators_v1';
-const CA_USERS_KEY = 'bluu_disputes_ca_users_v1';
-
 // ─── Hook ─────────────────────────────────────────────────────────────
 
-export interface UseDisputesDataOptions {
-  /**
-   * Load the creator / CA-user pickers. Only the create form needs them, and a
-   * page mounts this hook once per feed — so a caller that just fetches or
-   * mutates passes `false` and skips two requests per instance.
-   */
-  lookups?: boolean;
-}
-
-export function useDisputesData({ lookups = true }: UseDisputesDataOptions = {}) {
-  const { user } = useAuth();
+/**
+ * Dispute reads and verdicts. Filing a dispute is the tip search in
+ * `CreateDisputeDialog`, which talks to its own two routes; the creator and
+ * CA-user pickers the old freeform form needed are gone with it.
+ */
+export function useDisputesData() {
   const authFetch = useAuthFetch();
 
-  const [creators, setCreators] = useState<CreatorDocument[]>([]);
-  const [caUsers, setCaUsers] = useState<CaUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // ── Load creators (cached) ──────────────────────────────────────────
-
-  const loadCreators = useCallback(async () => {
-    const cached = getCache<CreatorDocument[]>(CREATORS_KEY, CACHE_TTL_MS);
-    if (cached) { setCreators(cached); return; }
-    try {
-      const data = await authFetch('/api/creators');
-      setCreators(data.creators);
-      setCache(CREATORS_KEY, data.creators);
-    } catch (err) {
-      console.error('[useDisputesData] loadCreators failed:', err);
-    }
-  }, [authFetch]);
-
-  // ── Load CA users (cached) ──────────────────────────────────────────
-
-  const loadCaUsers = useCallback(async () => {
-    const cached = getCache<CaUser[]>(CA_USERS_KEY, CACHE_TTL_MS);
-    if (cached) { setCaUsers(cached); return; }
-    try {
-      const data = await authFetch('/api/disputes/users');
-      setCaUsers(data.users);
-      setCache(CA_USERS_KEY, data.users);
-    } catch (err) {
-      console.error('[useDisputesData] loadCaUsers failed:', err);
-    }
-  }, [authFetch]);
-
-  useEffect(() => {
-    if (!user || !lookups) return;
-    loadCreators();
-    loadCaUsers();
-  }, [user, lookups, loadCreators, loadCaUsers]);
 
   // ── Fetch disputes (not cached — always fresh) ─────────────────────
 
@@ -106,25 +45,6 @@ export function useDisputesData({ lookups = true }: UseDisputesDataOptions = {})
 
     const data = await authFetch(`/api/disputes?${params}`);
     return { disputes: data.disputes, total: data.total, totalPages: data.totalPages };
-  }, [authFetch]);
-
-  // ── Create dispute ──────────────────────────────────────────────────
-
-  const createDispute = useCallback(async (payload: CreateDisputePayload): Promise<void> => {
-    setLoading(true);
-    setError(null);
-    try {
-      await authFetch('/api/disputes', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to create dispute';
-      setError(msg);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
   }, [authFetch]);
 
   // ── Set CA approval ─────────────────────────────────────────────────
@@ -156,14 +76,15 @@ export function useDisputesData({ lookups = true }: UseDisputesDataOptions = {})
     disputeId: string,
     value: Extract<ApprovalStatus, 'Approved' | 'Rejected'>,
     reason?: string,
-  ): Promise<void> => {
+  ): Promise<{ transferResult: DisputeDocument['transferResult'] }> => {
     setLoading(true);
     setError(null);
     try {
-      await authFetch(`/api/disputes/${disputeId}/admin-approval`, {
+      const data = await authFetch(`/api/disputes/${disputeId}/admin-approval`, {
         method: 'PATCH',
         body: JSON.stringify({ AdminApproval: value, reason }),
       });
+      return { transferResult: data.transferResult ?? null };
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to update admin approval';
       setError(msg);
@@ -184,7 +105,7 @@ export function useDisputesData({ lookups = true }: UseDisputesDataOptions = {})
     disputeIds: string[],
     value: Extract<ApprovalStatus, 'Approved' | 'Rejected'>,
     reason?: string,
-  ): Promise<{ updated: number; skipped: number }> => {
+  ): Promise<{ updated: number; skipped: number; transferred: number; transferSkipped: number }> => {
     setLoading(true);
     setError(null);
     try {
@@ -192,7 +113,12 @@ export function useDisputesData({ lookups = true }: UseDisputesDataOptions = {})
         method: 'PATCH',
         body: JSON.stringify({ disputeIds, AdminApproval: value, reason }),
       });
-      return { updated: data.updated ?? disputeIds.length, skipped: data.skipped ?? 0 };
+      return {
+        updated: data.updated ?? disputeIds.length,
+        skipped: data.skipped ?? 0,
+        transferred: data.transferred ?? 0,
+        transferSkipped: data.transferSkipped ?? 0,
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to update disputes';
       setError(msg);
@@ -203,14 +129,11 @@ export function useDisputesData({ lookups = true }: UseDisputesDataOptions = {})
   }, [authFetch]);
 
   return useMemo(() => ({
-    creators,
-    caUsers,
     loading,
     error,
     fetchDisputes,
-    createDispute,
     setCaApproval,
     setAdminApproval,
     setAdminApprovalBulk,
-  }), [creators, caUsers, loading, error, fetchDisputes, createDispute, setCaApproval, setAdminApproval, setAdminApprovalBulk]);
+  }), [loading, error, fetchDisputes, setCaApproval, setAdminApproval, setAdminApprovalBulk]);
 }
