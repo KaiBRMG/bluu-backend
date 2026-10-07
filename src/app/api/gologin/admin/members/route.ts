@@ -112,12 +112,14 @@ export const GET = withAuth(async (req: NextRequest, token: DecodedIdToken) => {
 
     // `permittedPageIds` is what `checkPageAccess` actually enforces, so it
     // decides *whether*; the permission doc only explains *how*.
-    const pageAccessOf = (uid: string, user: UserFields | undefined) => {
-      if (!user?.permittedPageIds?.includes(GOLOGIN_PAGE_ID)) return { access: 'none' as const };
+    const pageAccessOf = (
+      uid: string,
+      user: UserFields | undefined,
+    ): { access: 'none' } | { access: 'direct' } | { access: 'group'; groupId: string } => {
+      if (!user?.permittedPageIds?.includes(GOLOGIN_PAGE_ID)) return { access: 'none' };
       const via = resolvePagePermission(pagePerm ?? undefined, uid, user.groups ?? []);
-      return via?.via === 'group' && via.groupId
-        ? { access: 'group' as const, groupId: via.groupId }
-        : { access: 'direct' as const };
+      const groupId = via?.via === 'group' ? via.groupId : undefined;
+      return groupId ? { access: 'group', groupId } : { access: 'direct' };
     };
     const pageAccess = new Map(accounts.map((a) => [a.uid, pageAccessOf(a.uid, usersById.get(a.uid))]));
 
