@@ -42,7 +42,7 @@ const db = admin.firestore();
 
 // Mirrors src/lib/publicOrigin.ts. Kept in sync by hand — this script is plain
 // CJS and cannot import the TS module.
-const PUBLIC_APP_ORIGIN = 'https://bluu-backend.vercel.app';
+const PUBLIC_APP_ORIGIN = 'https://app.bluurock.com';
 const MENU_URL = `${PUBLIC_APP_ORIGIN}/creator/dashboard`;
 
 async function setMenuButton(token, chatId) {

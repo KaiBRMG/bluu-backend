@@ -20,6 +20,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { MonthPicker } from '@/components/salary/MonthPicker';
+import { SALARY_HISTORY_START_MONTH } from '@/lib/salary/salaryConstants';
 import { SalaryDayTable } from '@/components/salary/SalaryDayTable';
 import { SalesReport } from '@/components/salary/SalesReport';
 import { CommissionLadder } from '@/components/salary/CommissionLadder';
@@ -140,7 +141,7 @@ export default function AdminSalaries({
               : 'Every chat agent’s month'}
           </p>
         </div>
-        <MonthPicker month={month} onChange={onMonthChange} />
+        <MonthPicker month={month} onChange={onMonthChange} earliest={SALARY_HISTORY_START_MONTH} />
       </div>
 
       {loading && <Skeleton className="h-80 w-full rounded-lg" />}

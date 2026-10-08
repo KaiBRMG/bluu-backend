@@ -290,7 +290,7 @@ export async function sendTelegramMessage(
  * Per-chat rather than global: the same bot serves employees, for whom a
  * "Creator Portal" button is meaningless. Telegram rejects a `web_app` URL whose
  * domain has not been registered for the bot in BotFather — that domain must be
- * `PUBLIC_APP_ORIGIN`, not the vercel.app host the Electron shell is pinned to.
+ * `PUBLIC_APP_ORIGIN`, not the legacy vercel.app host.
  */
 export async function setCreatorPortalMenuButton(
   chatId: string,

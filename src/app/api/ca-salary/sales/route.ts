@@ -22,7 +22,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
-import { requireCaAdmin, resolveSalarySubject } from '@/lib/salary/salaryAuth';
+import { requireCaAdmin, resolveSalarySubject, refuseHiddenMonth } from '@/lib/salary/salaryAuth';
 import {
   getAllSalesForMonth,
   getFinalizedMonth,
@@ -118,6 +118,8 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     if (!isMonthKey(month)) {
       return NextResponse.json({ error: 'month must be YYYY-MM' }, { status: 400 });
     }
+    const hidden = refuseHiddenMonth(month);
+    if (hidden) return hidden;
     if (day !== null && !isDayKey(day)) {
       return NextResponse.json({ error: 'day must be YYYY-MM-DD' }, { status: 400 });
     }

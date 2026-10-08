@@ -24,7 +24,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
-import { requireAdminClaim } from '@/lib/salary/salaryAuth';
+import { requireAdminClaim, refuseHiddenMonth } from '@/lib/salary/salaryAuth';
 import { finalizeMonth, reopenMonth, getFinalizedMonth } from '@/lib/services/caSalaryService';
 import { getUserById } from '@/lib/services/userService';
 import { formatMonthLabel, isMonthKey } from '@/lib/salary/salaryDate';
@@ -50,6 +50,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     if (!isMonthKey(month)) {
       return NextResponse.json({ error: 'month must be YYYY-MM' }, { status: 400 });
     }
+    const hidden = refuseHiddenMonth(month);
+    if (hidden) return hidden;
     if (action !== 'finalize' && action !== 'reopen') {
       return NextResponse.json({ error: "action must be 'finalize' or 'reopen'" }, { status: 400 });
     }

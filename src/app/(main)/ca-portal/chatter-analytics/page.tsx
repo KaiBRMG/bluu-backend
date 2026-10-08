@@ -94,7 +94,7 @@ export default function ChatterAnalyticsPage() {
           <div className="flex flex-wrap items-center gap-2">
             <DatePicker value={from} onChange={setFrom} placeholder="From" className="h-8 w-44 text-sm" />
             <DatePicker value={to} onChange={setTo} placeholder="To" className="h-8 w-44 text-sm" />
-            <p className="text-[11px] text-zinc-400">Up to 92 days. Totals are summed from days.</p>
+            <p className="text-[11px] text-zinc-400">Up to 92 days, as far back as October 2025. Totals are summed from days.</p>
           </div>
         )}
 
@@ -134,17 +134,29 @@ function ChatterBody({ data, onPulled }: { data: ChatterAnalytics; onPulled: () 
       {/* ── KPI row ── */}
       {me ? (
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-          <KpiTile label="PPV revenue" basis="gross" tip={PPV_ATTRIBUTION} value={formatUsd(me.ppvGross)} meta={`${formatCount(me.ppvsUnlocked)} unlocked`} />
+          <KpiTile label="PPV revenue" basis="gross" tip={PPV_ATTRIBUTION} value={formatUsd(me.ppvGross)} meta={`${formatCount(me.ppvSales)} sold`} />
           <KpiTile label="Tips" basis="gross" tip={TIPS_ATTRIBUTION} value={formatUsd(me.tipsGross)} meta={`${formatCount(me.tipsCount)} tips`} />
           <KpiTile label="Unlock rate" value={formatRate(me.unlockRate, 1)} meta={`${formatCount(me.ppvsSent)} PPVs sent`} />
           <KpiTile label="Median reply time" value={formatDuration(me.medianResponseTimeMs)} meta={me.p75ResponseTimeMs !== null ? `3 in 4 within ${formatDuration(me.p75ResponseTimeMs)}` : undefined} />
           <KpiTile label="Online time" value={formatDuration(me.onlineMs)} meta={me.revenuePerOnlineHour !== null ? `${formatUsd(me.revenuePerOnlineHour)} gross per online hour` : undefined} />
         </div>
       ) : (
-        !isAdmin && <p className="text-sm text-zinc-400">Your BuddyX account is not linked to you yet, so there are no figures to show. Ask an admin to link it.</p>
+        !isAdmin && (
+          <p className="text-sm text-zinc-400">
+            No sales or BuddyX activity for you in this period. If you worked in BuddyX, ask an admin to check your account is linked.
+          </p>
+        )
       )}
 
-      {!data.hasMedians && (
+      {data.from < data.activityFrom && (
+        <p className="text-sm text-zinc-400">
+          Revenue covers the whole period — Infloww history before 4 Oct 2026, BuddyX after. Messages, fans chatted,
+          unlock rate, online and reply times only exist from BuddyX, which starts{' '}
+          {formatDayLabelWithWeekday(data.activityFrom)}; {data.to < data.activityFrom ? 'this period has none' : 'they cover only the days from then'}.
+        </p>
+      )}
+
+      {!data.hasMedians && data.to >= data.activityFrom && (
         <CustomMedianNote data={data} isAdmin={isAdmin} onPulled={onPulled} />
       )}
 
@@ -157,7 +169,7 @@ function ChatterBody({ data, onPulled }: { data: ChatterAnalytics; onPulled: () 
           </p>
           {data.benchmarks ? (
             <div className="mt-2 divide-y divide-white/[0.07]">
-              {data.benchmarks.map(b => (
+              {data.benchmarks.filter(b => b.median !== null).map(b => (
                 <BenchmarkStrip key={b.key} label={BENCHMARK_LABELS[b.key].label} benchmark={b} format={BENCHMARK_LABELS[b.key].format} />
               ))}
             </div>
@@ -269,7 +281,7 @@ function sortValue(r: ChatterLeaderboardRow, key: SortKey): number {
 
 /** "online 31h · clocked 44h" — a fact, stated only past a 15% gap. */
 function clockGap(r: ChatterLeaderboardRow): { text: string; large: boolean } | null {
-  if (r.clockedMs === null || r.clockedMs <= 0) return null;
+  if (r.clockedMs === null || r.clockedMs <= 0 || r.onlineMs === null) return null;
   const gap = Math.abs(r.onlineMs - r.clockedMs) / r.clockedMs;
   if (gap <= 0.15) return null;
   return { text: `online ${formatDuration(r.onlineMs)} · clocked ${formatDuration(r.clockedMs)}`, large: gap > 0.4 };

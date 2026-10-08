@@ -12,8 +12,12 @@ const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 
 const isDev = process.env.ELECTRON_DEV === 'true' || !app.isPackaged;
-const BASE_URL = isDev ? 'http://localhost:3000' : 'https://bluu-backend.vercel.app';
+const BASE_URL = isDev ? 'http://localhost:3000' : 'https://app.bluurock.com';
 const BASE_ORIGIN = new URL(BASE_URL).origin;
+// The host every build before 0.16.0 loaded. Same deployment, so a link into it
+// (an old notification, a pasted URL) is re-pointed at BASE_URL in place rather
+// than thrown out to the system browser — see will-navigate.
+const LEGACY_BASE_URL = 'https://bluu-backend.vercel.app';
 
 // Custom protocol for OAuth callback
 const PROTOCOL = 'bluu';
@@ -3622,6 +3626,10 @@ function attachWindowBehaviour(win, { isMain, appUrl, minWidth, minHeight, satel
   win.webContents.on('will-navigate', (e, url) => {
     if (url.startsWith(BASE_URL) || LOCAL_PAGE_URLS.has(url.split('?')[0])) return;
     e.preventDefault();
+    if (url === LEGACY_BASE_URL || url.startsWith(`${LEGACY_BASE_URL}/`)) {
+      win.loadURL(`${BASE_URL}${url.slice(LEGACY_BASE_URL.length)}`);
+      return;
+    }
     openExternalSafe(url);
   });
 

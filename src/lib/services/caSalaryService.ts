@@ -27,6 +27,7 @@ import { computeTimeWorked } from '../utils/shiftAttendance';
 import { computeSalaryMonth, DEFAULT_SALARY_CONFIG, sumMonth } from '../salary/salaryEngine';
 import { addMonths, currentMonthKey, monthKeyRange, toDayKey, type SalaryDayKey, type SalaryMonthKey } from '../salary/salaryDate';
 import { computeFinalizationReset } from '../leave/leaveBalance';
+import { isSalaryMonthVisible } from '../salary/salaryConstants';
 import { normaliseSaleType, saleKindOf, saleSourceOf } from '../salary/saleTypes';
 import { invalidateUserCache } from './userService';
 import type {
@@ -850,7 +851,11 @@ export async function buildDashboardSalaryMonth(
   const config = await getSalaryConfig();
   const current = currentMonthKey(now);
 
-  const previous = await buildSalaryMonth(userId, addMonths(current, -1), { now, config });
+  const previousKey = addMonths(current, -1);
+  if (!isSalaryMonthVisible(previousKey)) {
+    return { ...(await buildSalaryMonth(userId, current, { now, config })), recentlyFinalized: null };
+  }
+  const previous = await buildSalaryMonth(userId, previousKey, { now, config });
   if (previous.status === 'open' && previous.days.length > 0) {
     return { ...previous, recentlyFinalized: null };
   }
@@ -901,6 +906,7 @@ function recentlyFinalizedSummary(previous: SalaryMonthResult, now: number): Rec
 export async function resolvePayrollMonth(now: number = Date.now()): Promise<SalaryMonthKey> {
   const current = currentMonthKey(now);
   const previous = addMonths(current, -1);
+  if (!isSalaryMonthVisible(previous)) return current;
 
   // Same roster as `/roster` and `/overview`, filtered rather than queried on
   // `isArchived` for the same reason (rule 6).

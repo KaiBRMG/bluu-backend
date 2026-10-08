@@ -77,6 +77,9 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
               Model Submissions offers the "Welcome to BLUU ROCK 🎉" email with
               the /join link — see creator-onboarding.md
  src/middleware.ts  → rewrites all non-Electron, non-allowlisted page traffic to /desktop-only
+                      (the public front door: creator → @BluuRockBot, applicant →
+                      /model-submissions, staff → /download, else → bluurock.com
+                      — DESIGN.md §10)
  Telegram bot @BluuRockBot → one bot, two audiences: employee alerts + the creator
               Mini App. Webhook at /api/telegram/webhook — see telegram.md
  CA salary → sales synced from BuddyX (read-only API) → ca-sales; every figure
@@ -109,7 +112,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 ```
 
 - **Monorepo:** `src/` (Next.js 16 web app, primary), `electron/` (desktop wrapper), `src/app/creator/` (creator interface), `functions/` (Cloud Functions).
-- **Two domains, one Vercel deployment:** the Electron shell is pinned to `bluu-backend.vercel.app` (`BASE_URL`); browser-facing pages use `app.bluurock.com` (`PUBLIC_APP_ORIGIN` in [`src/lib/publicOrigin.ts`](src/lib/publicOrigin.ts)). Build every user-facing link from that constant — **never `window.location.origin`**, which is the vercel.app host inside Electron. See [electron.md](documentation/electron.md#two-domains-one-deployment).
+- **Two domains, one Vercel deployment:** **`app.bluurock.com` is the official domain** — `PUBLIC_APP_ORIGIN` in [`src/lib/publicOrigin.ts`](src/lib/publicOrigin.ts), and the Electron shell's `BASE_URL` from build 0.16.0. `bluu-backend.vercel.app` is **legacy, being phased out, and must keep serving**: shells older than 0.16.0 are pinned to it, and `src/middleware.ts` 308s browser page traffic on it to the official domain (except Electron UAs, `/auth`, `/creator`; `/api` is never touched). Build every user-facing link from `PUBLIC_APP_ORIGIN` — **never `window.location.origin`**, which is the legacy host inside an old shell. See [electron.md](documentation/electron.md#two-domains-one-deployment).
 - **Sessions are per-DEVICE, not per user.** `users/{uid}.sessions[deviceId]` plus the `device-sessions/{deviceId} → uid` index replaced the single `sessionToken`. A desktop login still evicts other **desktop** sessions (nobody is clocked in on two machines); web sessions run concurrently. The legacy `sessionToken` is still written on desktop logins and is still the fallback comparison — **a web login must never rotate it** (rule 9c). This is the groundwork for web access; no surface exercises it yet. See [auth.md](documentation/auth.md#device-identity--session-enforcement).
 - **Two identity systems, deliberately separate.** Employees sign in with Google OAuth against the `users` allowlist (below). **Creators sign in with Telegram** — the portal is a Mini App, `initData` is the credential, and `/creator/login` no longer exists. The two must never share a uid; see [telegram.md](documentation/telegram.md) and [auth.md](documentation/auth.md).
 - **Auth:** Google OAuth only, with **personal** Google accounts — there is no company-domain restriction. **Google authenticates; Firestore authorises:** an admin must register someone in the Employee Registry before they can log in, and `/api/auth/exchange-code` refuses any address without a `users` doc. It **never creates one**. Admin status is a JWT custom claim (`token.admin`), not a Firestore read.

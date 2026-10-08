@@ -30,7 +30,7 @@ import { round2 } from '../salary/salaryEngine';
 import { saleKindOf, saleSourceOf } from '../salary/saleTypes';
 import { mappedCreatorIds } from './buddyxMappingService';
 import { computeBenchmarks } from '../buddyx/benchmarks';
-import { BUDDYX_CREATOR_STATS_START_DAY, BUDDYX_SUBSCRIBERS_START_DAY } from '../buddyx/constants';
+import { BUDDYX_CREATOR_STATS_START_DAY, BUDDYX_SUBSCRIBERS_START_DAY, BUDDYX_TEAM_STATS_START_DAY } from '../buddyx/constants';
 import type {
   AcquisitionRow,
   ChatterAnalytics,
@@ -122,11 +122,75 @@ export async function rosteredCreatorsFor(uid: string, now = Date.now()): Promis
 
 
 // ─── Chatter Analytics ───────────────────────────────────────────────
+//
+// Two sources, one per kind of figure:
+//
+// - **Revenue** (PPV and tips, gross; counts sold) comes from the sales ledger,
+//   `ca-sales` — Infloww history before the cutover, BuddyX after it, with
+//   dispute transfers applied. It is the same money the agent's Sales Report
+//   shows, so the two pages can never disagree, and it reaches back to October
+//   2025.
+// - **Activity** (messages, fans chatted, PPVs sent and the unlock rate, online
+//   time, reply times) exists only in BuddyX's team reports, from
+//   `BUDDYX_TEAM_STATS_START_DAY`. Before that it is `null` — rendered "—",
+//   never 0 — and the page says why.
 
-function metricsFrom(rows: BuddyxTeamRow[], withMedians: boolean): ChatterMetrics {
+/** One agent's ledger revenue over a range. */
+interface LedgerTotals {
+  ppvGross: number;
+  tipsGross: number;
+  tipsCount: number;
+  ppvSales: number;
+  byDay: Map<string, { ppv: number; tips: number }>;
+}
+
+/**
+ * Every sale in a range, folded per holder. One field-masked query per month
+ * the range touches (a custom range is at most 92 days, so at most 4).
+ * Unassigned and removed rows count toward nobody, exactly as on the payslip.
+ */
+async function readLedger(from: SalaryDayKey, to: SalaryDayKey): Promise<Map<string, LedgerTotals>> {
+  const months: string[] = [];
+  for (let m = from.slice(0, 7); m <= to.slice(0, 7); m = addMonths(m, 1)) months.push(m);
+  const snaps = await Promise.all(
+    months.map(m =>
+      adminDb.collection('ca-sales').where('month', '==', m).select('userId', 'day', 'kind', 'type', 'signedGross', 'removedAt').get(),
+    ),
+  );
+  const out = new Map<string, LedgerTotals>();
+  for (const snap of snaps) {
+    for (const doc of snap.docs) {
+      const sale = doc.data() as Partial<CaSaleDocument>;
+      if (!sale.userId || sale.removedAt || !sale.day || sale.day < from || sale.day > to) continue;
+      const t = out.get(sale.userId) ?? { ppvGross: 0, tipsGross: 0, tipsCount: 0, ppvSales: 0, byDay: new Map() };
+      const gross = Number(sale.signedGross ?? 0);
+      const day = t.byDay.get(sale.day) ?? { ppv: 0, tips: 0 };
+      if (saleKindOf(sale) === 'ppv') {
+        t.ppvGross += gross;
+        t.ppvSales += 1;
+        day.ppv += gross;
+      } else {
+        t.tipsGross += gross;
+        t.tipsCount += 1;
+        day.tips += gross;
+      }
+      t.byDay.set(sale.day, day);
+      out.set(sale.userId, t);
+    }
+  }
+  return out;
+}
+
+/**
+ * One agent's figures: revenue from the ledger (when the agent has a uid),
+ * activity from their BuddyX rows (when there are any). An unlinked BuddyX
+ * chatter has no ledger, so its revenue is BuddyX's own.
+ */
+function metricsFrom(rows: BuddyxTeamRow[], ledger: LedgerTotals | undefined, withMedians: boolean): ChatterMetrics {
   const sum = (k: keyof BuddyxTeamRow) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
-  const ppvGross = round2(sum('ppvGross'));
-  const tipsGross = round2(sum('tipsGross'));
+  const hasActivity = rows.length > 0;
+  const activity = (value: number) => (hasActivity ? value : null);
+  const bxRevenue = sum('ppvGross') + sum('tipsGross');
   const ppvsSent = sum('ppvsSent');
   const ppvsUnlocked = sum('ppvsUnlocked');
   const totalMessages = sum('totalMessages');
@@ -136,19 +200,22 @@ function metricsFrom(rows: BuddyxTeamRow[], withMedians: boolean): ChatterMetric
   // is used — one id per agent is the normal case.
   const timed = withMedians ? rows.find(r => r.medianResponseTimeMs !== null) : undefined;
   return {
-    ppvGross,
-    tipsGross,
-    tipsCount: sum('tipsCount'),
-    ppvsSent,
-    ppvsUnlocked,
-    unlockRate: ppvsSent > 0 ? round2((ppvsUnlocked / ppvsSent) * 100) : 0,
-    ppvRate: totalMessages > 0 ? round2(ppvsSent / totalMessages) : 0,
-    fansChatted: sum('fansChatted'),
-    totalMessages,
-    onlineMs,
+    ppvGross: round2(ledger ? ledger.ppvGross : sum('ppvGross')),
+    tipsGross: round2(ledger ? ledger.tipsGross : sum('tipsGross')),
+    tipsCount: ledger ? ledger.tipsCount : sum('tipsCount'),
+    ppvSales: ledger ? ledger.ppvSales : ppvsUnlocked,
+    ppvsSent: activity(ppvsSent),
+    ppvsUnlocked: activity(ppvsUnlocked),
+    unlockRate: hasActivity && ppvsSent > 0 ? round2((ppvsUnlocked / ppvsSent) * 100) : null,
+    ppvRate: hasActivity && totalMessages > 0 ? round2(ppvsSent / totalMessages) : null,
+    fansChatted: activity(sum('fansChatted')),
+    totalMessages: activity(totalMessages),
+    onlineMs: activity(onlineMs),
     medianResponseTimeMs: timed?.medianResponseTimeMs ?? null,
     p75ResponseTimeMs: timed?.p75ResponseTimeMs ?? null,
-    revenuePerOnlineHour: onlineMs > 0 ? round2((ppvGross + tipsGross) / (onlineMs / 3_600_000)) : null,
+    // BuddyX revenue over BuddyX online time — both from the same window, so a
+    // range that straddles the start of BuddyX does not inflate the rate.
+    revenuePerOnlineHour: onlineMs > 0 ? round2(bxRevenue / (onlineMs / 3_600_000)) : null,
   };
 }
 
@@ -205,63 +272,63 @@ export async function getChatterAnalytics(params: {
   const now = params.now ?? Date.now();
   const range = resolvePeriod(params.period, params.from, params.to, now);
   const key = `chatters:${params.period}:${range.from}:${range.to}`;
+  const activityFrom = BUDDYX_TEAM_STATS_START_DAY;
+  const hasActivityWindow = range.to >= activityFrom;
 
   // The team-wide part is cached once and projected per viewer below, so an
   // agent and an admin share the same reads.
   const team = await cached(key, async () => {
-    const days = enumerateDays(range.from, range.to);
+    // BuddyX only holds activity from its start day; asking for earlier days is
+    // a read that can only miss.
+    const days = hasActivityWindow ? enumerateDays(range.from > activityFrom ? range.from : activityFrom, range.to) : [];
     const periodId = params.period === 'custom' ? `custom-${range.from}-${range.to}` : params.period;
-    const [daySnaps, periodSnap, massSnap] = await Promise.all([
+    const [daySnaps, periodSnap, massSnap, ledger] = await Promise.all([
       days.length ? adminDb.getAll(...days.map(d => adminDb.collection('buddyx-team-days').doc(d))) : Promise.resolve([]),
-      adminDb.collection('buddyx-team-periods').doc(periodId).get(),
-      adminDb
-        .collection('buddyx-mass-messages')
-        .where('day', '>=', range.from)
-        .where('day', '<=', range.to)
-        .select('uid', 'sentBy', 'price', 'unsent', 'sentDate')
-        .get(),
+      hasActivityWindow ? adminDb.collection('buddyx-team-periods').doc(periodId).get() : Promise.resolve(null),
+      hasActivityWindow
+        ? adminDb
+            .collection('buddyx-mass-messages')
+            .where('day', '>=', range.from)
+            .where('day', '<=', range.to)
+            .select('uid', 'sentBy', 'price', 'unsent', 'sentDate')
+            .get()
+        : Promise.resolve(null),
+      readLedger(range.from, range.to),
     ]);
     const dayDocs = daySnaps.filter(s => s.exists).map(s => s.data() as BuddyxTeamDayDocument);
-    const periodDoc = periodSnap.exists ? (periodSnap.data() as BuddyxTeamPeriodDocument) : null;
+    const periodDoc = periodSnap?.exists ? (periodSnap.data() as BuddyxTeamPeriodDocument) : null;
 
     // Whole-period rows when we have them (exact medians); otherwise summed days.
     const rows = periodDoc?.breakdown ?? dayDocs.flatMap(d => d.breakdown ?? []);
     return {
       rows,
       hasMedians: Boolean(periodDoc),
-      dayDocs,
-      mass: massSnap.docs.map(d => d.data() as BuddyxMassMessageDocument),
+      ledger,
+      mass: (massSnap?.docs ?? []).map(d => d.data() as BuddyxMassMessageDocument),
     };
   });
 
   const grouped = groupRows(team.rows);
-  const teamMetrics = [...grouped.entries()]
-    .filter(([k]) => !k.startsWith('chatter:'))
-    .map(([uid, rows]) => ({ uid, metrics: metricsFrom(rows, team.hasMedians) }));
-  const meRows = grouped.get(params.viewerUid);
-  const me = meRows ? metricsFrom(meRows, team.hasMedians) : null;
+  const uidsWithData = new Set([...[...grouped.keys()].filter(k => !k.startsWith('chatter:')), ...team.ledger.keys()]);
+  const metricsFor = (uid: string) => metricsFrom(grouped.get(uid) ?? [], team.ledger.get(uid), team.hasMedians);
+  const teamMetrics = [...uidsWithData].map(uid => ({ uid, metrics: metricsFor(uid) }));
+  const me = uidsWithData.has(params.viewerUid) ? metricsFor(params.viewerUid) : null;
 
-  const daily: ChatterDailyPoint[] = team.dayDocs
-    .map(d => {
-      const mine = (d.breakdown ?? []).filter(r => r.uid === params.viewerUid);
-      return {
-        day: d.day,
-        ppvGross: round2(mine.reduce((s, r) => s + r.ppvGross, 0)),
-        tipsGross: round2(mine.reduce((s, r) => s + r.tipsGross, 0)),
-      };
-    })
+  const myDays = team.ledger.get(params.viewerUid)?.byDay ?? new Map<string, { ppv: number; tips: number }>();
+  const daily: ChatterDailyPoint[] = [...myDays.entries()]
+    .map(([day, v]) => ({ day, ppvGross: round2(v.ppv), tipsGross: round2(v.tips) }))
     .sort((a, b) => a.day.localeCompare(b.day));
 
   const result: ChatterAnalytics = {
     period: params.period,
     from: range.from,
     to: range.to,
+    activityFrom,
     hasMedians: team.hasMedians,
     me,
     daily,
     mass: massSummary(team.mass.filter(m => m.uid === params.viewerUid)),
     benchmarks: computeBenchmarks(me, teamMetrics, params.viewerUid),
-    activeAgents: teamMetrics.filter(t => t.metrics.onlineMs > 0).length,
     leaderboard: null,
     rosteredOffline: null,
   };
@@ -271,35 +338,50 @@ export async function getChatterAnalytics(params: {
   const [start] = dayKeyRange(range.from);
   const [, end] = dayKeyRange(range.to);
   const windowEnd = Math.min(end, now);
-  const roster = await rosterForWindow(start, windowEnd);
-  const uids = [...new Set([...teamMetrics.map(t => t.uid), ...roster.keys()])];
-  const [names, ledger, active] = await Promise.all([
+  // Online-vs-clocked and "never online" only mean anything where BuddyX could
+  // have seen the agent, so both use the part of the range it covers.
+  const activityStart = Math.max(start, dayKeyRange(activityFrom)[0]);
+  const [roster, activityRoster] = await Promise.all([
+    rosterForWindow(start, windowEnd),
+    hasActivityWindow && activityStart > start ? rosterForWindow(activityStart, windowEnd) : Promise.resolve(null),
+  ]);
+  const offlineRoster = hasActivityWindow ? activityRoster ?? roster : new Map<string, { accounts: Set<string>; shifts: number }>();
+  const uids = [...new Set([...uidsWithData, ...roster.keys()])];
+  const [names, timeLedger, active] = await Promise.all([
     displayNamesFor(uids),
-    getLedgerEntriesForUsers(uids, start - 8 * 3_600_000, windowEnd),
-    getActiveSessionsForUsers(uids),
+    hasActivityWindow ? getLedgerEntriesForUsers(uids, activityStart - 8 * 3_600_000, windowEnd) : Promise.resolve(new Map()),
+    hasActivityWindow ? getActiveSessionsForUsers(uids) : Promise.resolve(new Map()),
   ]);
 
-  result.leaderboard = [...grouped.entries()].map(([key, rows]): ChatterLeaderboardRow => {
-    const uid = key.startsWith('chatter:') ? null : key;
-    const metrics = metricsFrom(rows, team.hasMedians);
+  const rowFor = (uid: string | null, metrics: ChatterMetrics, bxRows: BuddyxTeamRow[]): ChatterLeaderboardRow => {
     const accounts = uid ? roster.get(uid)?.accounts.size ?? 0 : 0;
-    const clockedMs = uid
-      ? computeTimeWorked(start, windowEnd, ledger.get(uid) ?? [], active.get(uid)) * 1000
-      : null;
+    const chatter = bxRows[0];
     return {
       ...metrics,
       uid,
-      chatterId: rows[0].chatterId,
-      name: uid ? names.get(uid) ?? rows[0].chatterName ?? uid : `${rows[0].chatterName ?? `Chatter ${rows[0].chatterId}`} (not linked)`,
-      clockedMs,
+      chatterId: chatter?.chatterId ?? '',
+      name: uid
+        ? names.get(uid) ?? chatter?.chatterName ?? uid
+        : `${chatter?.chatterName ?? `Chatter ${chatter?.chatterId}`} (not linked)`,
+      clockedMs:
+        uid && hasActivityWindow
+          ? computeTimeWorked(activityStart, windowEnd, timeLedger.get(uid) ?? [], active.get(uid)) * 1000
+          : null,
       accounts,
       revenuePerAccount: accounts > 0 ? round2((metrics.ppvGross + metrics.tipsGross) / accounts) : null,
-      mass: massSummary(team.mass.filter(m => (uid ? m.uid === uid : m.sentBy === rows[0].chatterId))),
+      mass: massSummary(team.mass.filter(m => (uid ? m.uid === uid : m.sentBy === chatter?.chatterId))),
     };
-  }).sort((a, b) => b.ppvGross + b.tipsGross - (a.ppvGross + a.tipsGross));
+  };
 
-  const online = new Set(teamMetrics.filter(t => t.metrics.onlineMs > 0).map(t => t.uid));
-  result.rosteredOffline = [...roster.entries()]
+  result.leaderboard = [
+    ...teamMetrics.map(t => rowFor(t.uid, t.metrics, grouped.get(t.uid) ?? [])),
+    ...[...grouped.entries()]
+      .filter(([k]) => k.startsWith('chatter:'))
+      .map(([, rows]) => rowFor(null, metricsFrom(rows, undefined, team.hasMedians), rows)),
+  ].sort((a, b) => b.ppvGross + b.tipsGross - (a.ppvGross + a.tipsGross));
+
+  const online = new Set(teamMetrics.filter(t => (t.metrics.onlineMs ?? 0) > 0).map(t => t.uid));
+  result.rosteredOffline = [...offlineRoster.entries()]
     .filter(([uid, r]) => r.shifts > 0 && !online.has(uid))
     .map(([uid, r]) => ({ uid, name: names.get(uid) ?? uid, shifts: r.shifts }))
     .sort((a, b) => a.name.localeCompare(b.name));

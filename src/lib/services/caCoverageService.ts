@@ -397,6 +397,151 @@ export async function findCoveringShift(
   return null;
 }
 
+// ─── An agent's load on a day ────────────────────────────────────────
+
+/** Accounts an agent may work at once — inside their own shift, and outside it. */
+export const MAX_ACCOUNTS_IN_SHIFT = 5;
+export const MAX_ACCOUNTS_OUTSIDE_SHIFT = 4;
+
+/**
+ * Every occurrence an agent works that touches a salary day, recurrence
+ * expanded. Overlap, not start time: a shift that began the evening before and
+ * runs into this day is part of what they are carrying on it.
+ */
+function occurrencesOnDay(occurrences: ExpandedShift[], day: SalaryDayKey): ExpandedShift[] {
+  const [dayStart, dayEnd] = dayKeyRange(day);
+  return occurrences
+    .filter(o => o.occurrenceStart < dayEnd && o.occurrenceEnd > dayStart)
+    .sort((a, b) => a.occurrenceStart - b.occurrenceStart);
+}
+
+/**
+ * Distinct accounts across a set of occurrences. Every account counts,
+ * including a legacy zero-wage cover record's — the cap is about how many chats
+ * one person is answering, not what they are paid for.
+ */
+function accountsOf(occurrences: ExpandedShift[]): Set<string> {
+  return new Set(occurrences.flatMap(o => o.creatorIds ?? []));
+}
+
+/**
+ * The covering-shift test from `findCoveringShift`, over occurrences the caller
+ * already holds — the claim cap and the admin's hover card must agree with the
+ * assigner about in-shift versus outside it.
+ */
+function coveringOccurrence(
+  occurrences: ExpandedShift[],
+  windowStart: number,
+  windowEnd: number,
+): ExpandedShift | null {
+  return (
+    occurrences.find(
+      o =>
+        o.paysWage !== false &&
+        !isOvertimeShift(o) &&
+        o.occurrenceStart <= windowStart &&
+        o.occurrenceEnd >= windowEnd,
+    ) ?? null
+  );
+}
+
+/**
+ * Accounts an agent is already committed to on a day.
+ *
+ * This used to be a bare `startTime` range query in the claim route, which is
+ * the recurrence bug `occurrencesAround` documents: an agent on a weekly roster
+ * looked committed to nothing, so the 5/4 cap never counted their own accounts.
+ */
+export async function accountsCommittedOn(
+  userId: string,
+  day: SalaryDayKey,
+): Promise<Set<string>> {
+  const [dayStart, dayEnd] = dayKeyRange(day);
+  return accountsOf(occurrencesOnDay(await occurrencesAround(userId, dayStart, dayEnd), day));
+}
+
+export interface ClaimantShift {
+  start: number;
+  end: number;
+  creatorIds: string[];
+  overtimeCreatorIds: string[];
+  /** `overtime` pays on its own accounts; `cover` is a legacy zero-wage record. */
+  kind: 'regular' | 'overtime' | 'cover';
+}
+
+/**
+ * What an admin needs to judge one claim: what the claimant already works that
+ * day, and what assigning this offer would put them on.
+ */
+export interface ClaimantLoad {
+  shifts: ClaimantShift[];
+  /** Distinct accounts across `shifts`. */
+  accountCount: number;
+  /** Accounts on *other* offers that day they have also claimed and not yet been given. */
+  alsoClaimedCreatorIds: string[];
+  /** Whether this offer would sit inside one of their own shifts. */
+  inShift: boolean;
+  /** Distinct accounts if assigned this, counting their other open claims — the claim cap's arithmetic. */
+  projected: number;
+  limit: number;
+}
+
+/**
+ * Claimant loads for every open claim on a board, keyed `${offerId}:${userId}`.
+ *
+ * One roster read per **claimant**, across the whole board's date span, then
+ * bucketed by day in memory — not one per claim (rule 9). The span is a few
+ * weeks for a handful of people; the board already lists every claim it covers.
+ */
+export async function getClaimantLoads(offers: CoverageOffer[]): Promise<Map<string, ClaimantLoad>> {
+  const open = offers.filter(o => o.status === 'available' && o.claims.length > 0);
+  const loads = new Map<string, ClaimantLoad>();
+  if (open.length === 0) return loads;
+
+  const from = Math.min(...open.map(o => dayKeyRange(o.day)[0]));
+  const to = Math.max(...open.map(o => dayKeyRange(o.day)[1]));
+  const uids = [...new Set(open.flatMap(o => o.claims.map(c => c.userId)))];
+
+  const rosters = new Map(
+    await Promise.all(
+      uids.map(async uid => [uid, await occurrencesAround(uid, from, to)] as const),
+    ),
+  );
+
+  for (const offer of open) {
+    for (const { userId } of offer.claims) {
+      const day = occurrencesOnDay(rosters.get(userId) ?? [], offer.day);
+      const committed = accountsOf(day);
+      const alsoClaimed = open
+        .filter(
+          o =>
+            o.offerId !== offer.offerId &&
+            o.day === offer.day &&
+            o.claims.some(c => c.userId === userId),
+        )
+        .map(o => o.creatorId);
+      const inShift = coveringOccurrence(day, offer.windowStart, offer.windowEnd) !== null;
+
+      loads.set(`${offer.offerId}:${userId}`, {
+        shifts: day.map(o => ({
+          start: o.occurrenceStart,
+          end: o.occurrenceEnd,
+          creatorIds: [...new Set(o.creatorIds ?? [])],
+          overtimeCreatorIds: o.overtimeCreatorIds ?? [],
+          kind: o.paysWage === false ? 'cover' : isOvertimeShift(o) ? 'overtime' : 'regular',
+        })),
+        accountCount: committed.size,
+        alsoClaimedCreatorIds: [...new Set(alsoClaimed)],
+        inShift,
+        projected: new Set([...committed, ...alsoClaimed, offer.creatorId]).size,
+        limit: inShift ? MAX_ACCOUNTS_IN_SHIFT : MAX_ACCOUNTS_OUTSIDE_SHIFT,
+      });
+    }
+  }
+
+  return loads;
+}
+
 export interface AssignResult {
   shiftId: string;
   inShift: boolean;

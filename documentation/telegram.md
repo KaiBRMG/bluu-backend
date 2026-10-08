@@ -188,7 +188,7 @@ So the webhook decides the button on every outcome:
 
 **Also do not configure a menu button globally in BotFather** (Bot Settings → Menu Button). A global one appears in every chat with the bot and can only be suppressed by a per-chat override, so it turns the table above into a fight. Leave it Disabled and let the webhook own it.
 
-Its `web_app` URL must be on a domain registered for the bot in BotFather, which must match `PUBLIC_APP_ORIGIN` (`publicOrigin.ts`) — **not** the vercel.app host the Electron shell is pinned to, if those two ever diverge.
+Its `web_app` URL must be on a domain registered for the bot in BotFather, which must match `PUBLIC_APP_ORIGIN` (`publicOrigin.ts`, now `app.bluurock.com`). Buttons set before the 2026-10-08 domain move still name the legacy vercel.app host; that host keeps serving `/creator` in place (no redirect — the `initData` fragment would not survive one), and `scripts/fix-creator-menu-buttons.js` re-points them all once `app.bluurock.com` is registered for the bot.
 
 ### Admin surface
 

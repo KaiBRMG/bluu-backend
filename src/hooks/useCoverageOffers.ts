@@ -26,11 +26,38 @@ export interface CoverageOfferRow {
   status: 'available' | 'assigned' | 'cancelled';
   claimCount: number;
   myClaim: { userId: string; claimedAt: string; note?: string } | null;
-  claims?: Array<{ userId: string; displayName: string; claimedAt: string; note?: string }>;
+  claims?: Array<{
+    userId: string;
+    displayName: string;
+    claimedAt: string;
+    note?: string;
+    /** Only with `claimantDetail`, and only on an open offer. */
+    load?: ClaimantLoad | null;
+  }>;
   assignedTo: string | null;
   assignedToName: string | null;
   assignedInShift: boolean;
   leaveId: string | null;
+}
+
+/**
+ * What a claimant already carries on the offer's day — the admin's decision
+ * input on Coverage → To assign. Computed server-side by `getClaimantLoads`,
+ * with the same arithmetic the claim cap enforces.
+ */
+export interface ClaimantLoad {
+  shifts: Array<{
+    start: number;
+    end: number;
+    creatorIds: string[];
+    overtimeCreatorIds: string[];
+    kind: 'regular' | 'overtime' | 'cover';
+  }>;
+  accountCount: number;
+  alsoClaimedCreatorIds: string[];
+  inShift: boolean;
+  projected: number;
+  limit: number;
 }
 
 /**
@@ -59,7 +86,14 @@ interface CoverageState {
 }
 
 export function useCoverageOffers(
-  options: { from?: string; to?: string; status?: string; enabled?: boolean } = {},
+  options: {
+    from?: string;
+    to?: string;
+    status?: string;
+    enabled?: boolean;
+    /** Admin only: attach each claimant's load for the day (one roster read per claimant). */
+    claimantDetail?: boolean;
+  } = {},
 ) {
   const { user } = useAuth();
   // Callers that render the board conditionally still have to call the hook, so
@@ -68,6 +102,7 @@ export function useCoverageOffers(
   const from = options.from ?? addDays(currentDayKey(), -1);
   const to = options.to ?? addDays(currentDayKey(), 45);
   const status = options.status;
+  const claimantDetail = options.claimantDetail ?? false;
 
   const [state, setState] = useState<CoverageState>({
     offers: [],
@@ -85,6 +120,7 @@ export function useCoverageOffers(
       const token = await user.getIdToken();
       const params = new URLSearchParams({ from, to });
       if (status) params.set('status', status);
+      if (claimantDetail) params.set('detail', 'claimants');
 
       const res = await fetch(`/api/ca-coverage/offers?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -120,7 +156,7 @@ export function useCoverageOffers(
         error: err instanceof Error ? err.message : 'Could not load available shifts',
       }));
     }
-  }, [user, from, to, status, enabled]);
+  }, [user, from, to, status, enabled, claimantDetail]);
 
   useEffect(() => {
     void load();

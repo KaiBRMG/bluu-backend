@@ -18,7 +18,7 @@ import { notifications } from '@/lib/notificationContent';
 import { notifyUsers, syncCommissionTierNotice } from '@/lib/services/caNotifications';
 import { formatMonthLabel } from '@/lib/salary/salaryDate';
 import { formatPercent } from '@/lib/salary/salaryFormat';
-import { requireCaAdmin } from '@/lib/salary/salaryAuth';
+import { requireCaAdmin, refuseHiddenMonth } from '@/lib/salary/salaryAuth';
 import {
   buildSalaryMonth,
   clearDayOverrides,
@@ -58,6 +58,8 @@ async function guard(token: DecodedIdToken, userId: unknown, day: unknown) {
   if (!isDayKey(day)) {
     return NextResponse.json({ error: 'day must be YYYY-MM-DD' }, { status: 400 });
   }
+  const hidden = refuseHiddenMonth(monthOfDay(day));
+  if (hidden) return hidden;
   if (await getFinalizedMonth(userId, monthOfDay(day))) {
     return NextResponse.json(
       { error: 'This month is finalised. Reopen it before editing.' },

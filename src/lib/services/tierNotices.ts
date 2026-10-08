@@ -14,6 +14,7 @@
  */
 import { notifications } from '../notificationContent';
 import { formatMonthLabel, type SalaryMonthKey } from '../salary/salaryDate';
+import { isSalaryMonthVisible } from '../salary/salaryConstants';
 import { formatPercent } from '../salary/salaryFormat';
 import { buildSalaryMonthForUsers } from './caSalaryService';
 import { notifyUsers, syncCommissionTierNotice } from './caNotifications';
@@ -23,7 +24,8 @@ export async function announceTierCrossings(pairs: Iterable<string>): Promise<nu
   const byMonth = new Map<SalaryMonthKey, Set<string>>();
   for (const pair of pairs) {
     const [uid, month] = pair.split('|');
-    if (!uid || !month) continue;
+    // A month before the salary history floor is history, not news.
+    if (!uid || !month || !isSalaryMonthVisible(month)) continue;
     const set = byMonth.get(month) ?? new Set<string>();
     set.add(uid);
     byMonth.set(month, set);

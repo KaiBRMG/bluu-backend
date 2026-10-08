@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
-import { requireCaAdmin } from '@/lib/salary/salaryAuth';
+import { requireCaAdmin, refuseHiddenMonth } from '@/lib/salary/salaryAuth';
 import { buildSalaryMonthForUsers } from '@/lib/services/caSalaryService';
 import { adminDb } from '@/lib/firebase-admin';
 import { currentMonthKey, isMonthKey } from '@/lib/salary/salaryDate';
@@ -29,6 +29,8 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     if (!isMonthKey(month)) {
       return NextResponse.json({ error: 'month must be YYYY-MM' }, { status: 400 });
     }
+    const hidden = refuseHiddenMonth(month);
+    if (hidden) return hidden;
 
     // Chat agents are the CA group. Archived users are filtered out rather than
     // queried out — `isArchived` is absent on most documents, and an inequality

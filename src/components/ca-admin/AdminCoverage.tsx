@@ -10,8 +10,16 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
+import { CreatorChipList } from '@/components/creators/CreatorChip';
 import { useAuth } from '@/components/AuthProvider';
-import { useCoverageOffers, type CoverageOfferRow, type CoverageWithdrawalRow } from '@/hooks/useCoverageOffers';
+import {
+  useCoverageOffers,
+  type ClaimantLoad,
+  type CoverageOfferRow,
+  type CoverageWithdrawalRow,
+} from '@/hooks/useCoverageOffers';
+import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import {
   useAdminLeaveQueue,
   type AdminLeaveRow,
@@ -21,7 +29,7 @@ import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { LeaveHistory } from './LeaveHistory';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
-import { formatRelative, pluralise } from '@/lib/salary/salaryFormat';
+import { formatRelative, formatShiftWindow, pluralise } from '@/lib/salary/salaryFormat';
 
 /**
  * Coverage — the admin half of the absence pipeline.
@@ -59,10 +67,18 @@ import { formatRelative, pluralise } from '@/lib/salary/salaryFormat';
  */
 
 export default function AdminCoverage() {
-  const { offers, withdrawals, loading, error, refetch } = useCoverageOffers({});
+  const { offers, withdrawals, loading, error, refetch } = useCoverageOffers({ claimantDetail: true });
   const { rows: pendingLeave, loading: leaveLoading, decide } = useAdminLeaveQueue('pending');
 
-  const available = offers.filter(o => o.status === 'available');
+  // Captured once per mount, like the leave queue's clock — the board refetches
+  // on every action, and an hour-stale cutoff only means a just-ended window
+  // lingers until the tab is reopened.
+  const [now] = useState(() => Date.now());
+
+  // An unassigned offer whose window has already ended is no longer a decision:
+  // nobody can cover it now. Hidden rather than deleted — the offer document is
+  // untouched, and the tab badge counts only what can still be acted on.
+  const available = offers.filter(o => o.status === 'available' && o.windowEnd > now);
   const assigned = offers.filter(o => o.status === 'assigned');
 
   return (
@@ -392,6 +408,8 @@ function OfferRow({ offer, onChanged }: { offer: CoverageOfferRow; onChanged: ()
 
   const isAssigned = offer.status === 'assigned';
 
+  const photoById = useMemo(() => new Map(users.map(u => [u.uid, u.photoURL ?? null])), [users]);
+
   return (
     <li className="flex flex-wrap items-start justify-between gap-3 px-3 py-3">
       <div className="min-w-0 flex-1">
@@ -419,9 +437,12 @@ function OfferRow({ offer, onChanged }: { offer: CoverageOfferRow; onChanged: ()
           <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-400">
             <Users className="size-3" aria-hidden />
             {offer.claims?.map(claim => (
-              <span key={claim.userId} className="rounded bg-white/[0.08] px-1.5 py-px text-zinc-300">
-                {claim.displayName}
-              </span>
+              <ClaimantChip
+                key={claim.userId}
+                claim={claim}
+                day={offer.day}
+                photoURL={photoById.get(claim.userId) ?? null}
+              />
             )) ?? `${offer.claimCount} claimed`}
           </p>
         ) : (
@@ -489,5 +510,136 @@ function OfferRow({ offer, onChanged }: { offer: CoverageOfferRow; onChanged: ()
         )}
       </div>
     </li>
+  );
+}
+
+// ─── Claimant chip ───────────────────────────────────────────────────
+
+type Claim = NonNullable<CoverageOfferRow['claims']>[number];
+
+const SHIFT_KIND_LABEL: Record<ClaimantLoad['shifts'][number]['kind'], string | null> = {
+  regular: null,
+  overtime: 'Overtime shift',
+  cover: 'Cover record \u2014 sales only',
+};
+
+/**
+ * One claimant, with what they already carry that day.
+ *
+ * The account count is on the chip itself, not only in the card: it is the
+ * figure an admin compares claimants by, and a fact that lives only behind a
+ * hover is one a keyboard user never reaches (DESIGN.md §5). The card holds the
+ * detail behind it — their shifts that day, which accounts are on each, any
+ * other cover they have claimed, and where this assignment would leave them
+ * against the 5/4 cap. The trigger is a real button so focus opens it too.
+ *
+ * The cap figure is the claim route's own arithmetic (`getClaimantLoads`), so a
+ * claim the card shows as over the limit is one the roster has moved under
+ * since it was made — exactly the case an admin needs flagged.
+ */
+function ClaimantChip({ claim, day, photoURL }: { claim: Claim; day: string; photoURL: string | null }) {
+  const { timezone } = useViewerTimezone();
+  const load = claim.load;
+
+  if (!load) {
+    return <span className="rounded bg-white/[0.08] px-1.5 py-px text-zinc-300">{claim.displayName}</span>;
+  }
+
+  const overCap = load.projected > load.limit;
+
+  return (
+    <HoverCard openDelay={150} closeDelay={100}>
+      <HoverCardTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            'inline-flex items-center gap-1 rounded bg-white/[0.08] px-1.5 py-px text-zinc-300 outline-none',
+            'hover:bg-white/[0.12] focus-visible:ring-[3px] focus-visible:ring-ring/50',
+          )}
+        >
+          {claim.displayName}
+          <span className={cn('tabular-nums', overCap ? 'text-orange-400' : 'text-zinc-400')}>
+            <span aria-hidden>· </span>
+            {pluralise(load.accountCount, 'acct')}
+          </span>
+          {overCap && <TriangleAlert className="size-3 text-orange-400" aria-label="Over the account limit" />}
+        </button>
+      </HoverCardTrigger>
+
+      <HoverCardContent align="start" className="w-80 space-y-3 p-3">
+        <div className="flex items-center gap-2.5">
+          <Avatar className="size-8 shrink-0">
+            <AvatarImage src={photoURL ?? undefined} alt="" />
+            <AvatarFallback style={{ backgroundColor: getAvatarColor(claim.displayName) }}>
+              {getInitials(claim.displayName)}
+            </AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">{claim.displayName}</p>
+            <p className="text-[11px] text-zinc-400">
+              <span className="tabular-nums">{pluralise(load.accountCount, 'account')}</span> on{' '}
+              {formatDayLabelWithWeekday(day)} · claimed {formatRelative(claim.claimedAt)}
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-md border border-white/[0.07] bg-white/[0.025] px-2.5 py-2 text-xs">
+          <p className="text-zinc-300">
+            {load.inShift ? 'Inside their own shift \u2014 sales only' : 'Outside their hours \u2014 paid overtime'}
+          </p>
+          <p className={cn('mt-0.5 tabular-nums', overCap ? 'text-orange-400' : 'text-zinc-400')}>
+            Would be on {load.projected} of {load.limit} accounts
+            {load.alsoClaimedCreatorIds.length > 0 && ', counting their other claims'}
+            {overCap && ' \u2014 over the limit'}
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-zinc-400">Shifts that day</p>
+          {load.shifts.length === 0 ? (
+            <p className="text-xs text-zinc-400">No shift that day.</p>
+          ) : (
+            <ul className="space-y-2">
+              {load.shifts.map(shift => {
+                const kindLabel = SHIFT_KIND_LABEL[shift.kind];
+                const overtimeCount = shift.overtimeCreatorIds.length;
+                return (
+                  <li key={`${shift.start}-${shift.end}`} className="space-y-1">
+                    <p className="text-xs tabular-nums text-zinc-300">
+                      {formatShiftWindow(shift.start, (shift.end - shift.start) / 3_600_000, timezone)}
+                      {kindLabel && <span className="text-zinc-400"> · {kindLabel}</span>}
+                      {/* The ring's meaning, in words beside it (DESIGN.md §5).
+                          On a fully-overtime shift the kind label already says it. */}
+                      {shift.kind === 'regular' && overtimeCount > 0 && (
+                        <span className="text-orange-400"> · +{overtimeCount} OT</span>
+                      )}
+                    </p>
+                    <CreatorChipList
+                      creatorIds={shift.creatorIds}
+                      overtimeIds={shift.overtimeCreatorIds}
+                      size="xs"
+                      emptyLabel="No accounts assigned"
+                    />
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        {load.alsoClaimedCreatorIds.length > 0 && (
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-zinc-400">Also claimed that day</p>
+            <CreatorChipList creatorIds={load.alsoClaimedCreatorIds} size="xs" />
+          </div>
+        )}
+
+        {claim.note && (
+          <p className="max-w-[70ch] text-xs leading-relaxed text-zinc-400">
+            <span className="text-zinc-300">Note:</span> {claim.note}
+          </p>
+        )}
+      </HoverCardContent>
+    </HoverCard>
   );
 }

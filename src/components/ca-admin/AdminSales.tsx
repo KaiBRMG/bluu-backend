@@ -19,6 +19,7 @@ import { useUserData } from '@/hooks/useUserData';
 import { useBasicUsers } from '@/hooks/useBasicUsers';
 import { useBuddyxSync } from '@/hooks/useBuddyxSync';
 import { MonthPicker } from '@/components/salary/MonthPicker';
+import { SALARY_HISTORY_START_MONTH } from '@/lib/salary/salaryConstants';
 import { SyncStatus } from '@/components/buddyx/SyncStatus';
 import { CreatorCombobox } from '@/components/buddyx/CreatorCombobox';
 import { AttrChip, FanLabel, InfoTip, PPV_ATTRIBUTION, TIPS_ATTRIBUTION } from '@/components/buddyx/buddyxUi';
@@ -302,7 +303,7 @@ export default function AdminSales({
         </div>
         <div className="flex items-center gap-3">
           <SyncStatus scope="sales" onSynced={() => { void load(true); void loadRuns(); }} />
-          <MonthPicker month={month} onChange={onMonthChange} />
+          <MonthPicker month={month} onChange={onMonthChange} earliest={SALARY_HISTORY_START_MONTH} />
         </div>
       </div>
 

@@ -16,6 +16,18 @@
 import { NextResponse } from 'next/server';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { checkPageAccess } from '../middleware/apiHelpers';
+import { isSalaryMonthVisible } from './salaryConstants';
+
+/**
+ * Refuse a salary month before the history floor (`SALARY_HISTORY_START_MONTH`).
+ * The picker already stops there; this is what makes it true for a hand-typed
+ * URL too. Returns a 400, or null when the month is allowed.
+ */
+export function refuseHiddenMonth(month: string): NextResponse | null {
+  return isSalaryMonthVisible(month)
+    ? null
+    : NextResponse.json({ error: 'Salary history starts in September 2026.' }, { status: 400 });
+}
 
 /** The page permission that gates CA payroll operations. */
 export const CA_ADMIN_PAGE_ID = 'ca-admin';

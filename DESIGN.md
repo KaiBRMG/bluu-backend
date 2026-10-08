@@ -724,3 +724,29 @@ Near-black ground, `PANEL` overlay surfaces, hairline borders, no drop shadows, 
 5. **A download button sizes to its label** (`self-start`). Inside a `flex-col` step a button without it stretches to the column and reads as a slab rather than an action.
 6. **An option name never wraps.** The picker goes to three columns at `md`, not `sm` — at 640–767px three cards cannot hold a name, an icon and the check mark on one line. The names are short for the same reason (`Apple Silicon`, not `macOS · Apple Silicon`; the Apple mark beside it already says macOS), and the version floor lives on the spec line. A wrapped name leaves the row ragged and the three cards unequal.
 7. **Give a Radix tab panel its own focus ring.** `TabsContent` carries `tabIndex={0}` so a keyboard user can land in the panel, and shadcn's copy sets `outline-none` — which makes that landing invisible (WCAG 2.4.7). `TAB_PANEL` restores it. The same trap applies to any other shadcn primitive adopted on this surface.
+
+## 10. The front door (external skin) — "three doors"
+
+The **fifth** surface: [`/desktop-only`](src/app/desktop-only/page.tsx), public and unauthenticated. `src/middleware.ts` rewrites every browser request that is not on the allowlist to it, **the bare domain included**, so it is what anyone who types `app.bluurock.com` sees. Like §7–§9 this is an **authored divergence**, not drift.
+
+**The skin is [`src/app/desktop-only/_lib/theme.ts`](src/app/desktop-only/_lib/theme.ts).** It adds no colour: the ground is §8's `STAGE_GROUND`, re-exported, and the azure is the shared triad from [`publicSkin.ts`](src/lib/publicSkin.ts). Import those tokens; never inline a hex on this surface.
+
+### Who is reading it
+Three readers, in this order, and the page's only job is to send each one on:
+1. **A creator** → `@BluuRockBot` (`TELEGRAM_BOT_URL`). Telegram is the only way into the creator portal, so this door never links to `/creator` — from a browser that is a refusal screen.
+2. **A prospective creator** → `/model-submissions` (§8).
+3. **Staff** → `/download` (§9), with the instruction to open the desktop app if they already have it.
+
+Then a fourth door, **"Who is Bluu Rock?"** → `https://bluurock.com`. It is not an audience but a way out, for anyone who landed here and is none of the three, so it always comes last.
+
+### What differs (the authored part)
+- **A directory, not a pitch.** Equal doors (`DOOR`), each a whole-row link: glyph tile, the question as an `h2`, one line of copy, an azure action line. The question *is* the label, so there is no separate button to aim at — on a phone the full row is the hit area.
+- **No door is filled.** §7–§9 each allow one filled azure action per screen; here there is none, because filling one audience's door tells the other two they are in the wrong place. Azure appears on every door at the same weight, on the glyph tiles and the action lines.
+- **An off-site door says so.** It gets an `ArrowUpRight` that nudges out of the page on hover (`DOOR_ARROW_OUT`), opens a new tab, and carries an `sr-only` "(opens in a new tab)". An on-site door gets `ArrowRight` and `DOOR_ARROW`.
+- **Server-rendered, plain anchors.** No client JS, and no `<Link>` prefetch: three RSC requests per visit for readers who mostly leave the site is exactly what rule 9i forbids.
+- **Scale borrows §9's task-surface heading** (`2rem` → `sm:2.5rem`), not §8's display scale — someone is choosing a route, not being welcomed into one.
+
+### Surface rules (in addition to §1–6)
+1. **One door per audience, and the order is fixed:** creator, applicant, staff, then the bluurock.com way out. A new audience needs this section rewritten first, not another row squeezed in.
+2. **Every door must lead somewhere a browser can actually enter.** That is why the creator door is the bot, not the portal URL.
+3. **One glow.** The stage wash is borrowed from §8; do not add a second.

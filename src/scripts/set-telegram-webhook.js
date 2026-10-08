@@ -24,7 +24,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const DEFAULT_ORIGIN = 'https://bluu-backend.vercel.app';
+const DEFAULT_ORIGIN = 'https://app.bluurock.com';
 
 function loadEnvLocal() {
   const file = path.join(__dirname, '..', '.env.local');

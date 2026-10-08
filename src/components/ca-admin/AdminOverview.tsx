@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CreatorAvatar } from '@/components/creators/CreatorChip';
 import { MonthPicker } from '@/components/salary/MonthPicker';
+import { SALARY_HISTORY_START_MONTH } from '@/lib/salary/salaryConstants';
 import { useAuth } from '@/components/AuthProvider';
 import { useCreators } from '@/hooks/useCreators';
 import { getCache, setCache } from '@/lib/queryCache';
@@ -197,7 +198,7 @@ export default function AdminOverview({ month, onMonthChange }: { month: string;
               : 'Where the month’s money came from, and what it cost to run'}
           </p>
         </div>
-        <MonthPicker month={month} onChange={onMonthChange} />
+        <MonthPicker month={month} onChange={onMonthChange} earliest={SALARY_HISTORY_START_MONTH} />
       </div>
 
       {loading && (

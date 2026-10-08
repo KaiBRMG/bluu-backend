@@ -4,22 +4,33 @@ Spoke for the `electron/` desktop wrapper. Read this before changing anything in
 
 ## What it is
 
-A **thin Electron shell that loads the hosted Next.js web app** (`https://bluu-backend.vercel.app` — see [Two domains, one deployment](#two-domains-one-deployment)). It bundles almost no app code — the web app itself is served from Vercel. The shell exists to give employees a desktop app with native capabilities the browser can't offer (OS idle detection, screen capture, native notifications, deep-link OAuth) and to gate the app to desktop-only (`src/middleware.ts` admits requests whose UA contains `Electron/`).
+A **thin Electron shell that loads the hosted Next.js web app** (`https://app.bluurock.com` — see [Two domains, one deployment](#two-domains-one-deployment)). It bundles almost no app code — the web app itself is served from Vercel. The shell exists to give employees a desktop app with native capabilities the browser can't offer (OS idle detection, screen capture, native notifications, deep-link OAuth) and to gate the app to desktop-only (`src/middleware.ts` admits requests whose UA contains `Electron/`).
 
 ### Two domains, one deployment
 
-The same Vercel project serves **two hosts**, and the difference matters:
+The same Vercel project serves **two hosts**. **`app.bluurock.com` is the official domain**; `bluu-backend.vercel.app` is legacy and being phased out (2026-10-08).
 
 | Host | Who uses it |
 |---|---|
-| `bluu-backend.vercel.app` | **The Electron shell only** — hardcoded as `BASE_URL` in `electron/main.js`. |
-| `app.bluurock.com` | **Browser-facing pages** — `/creator`, `/download`, `/update`, `/terms`, `/raffle`. Exported as `PUBLIC_APP_ORIGIN` in [`src/lib/publicOrigin.ts`](../src/lib/publicOrigin.ts). |
+| `app.bluurock.com` | **Everything new.** `PUBLIC_APP_ORIGIN` in [`src/lib/publicOrigin.ts`](../src/lib/publicOrigin.ts) builds every user-facing link from it, and the Electron shell loads it from build **0.16.0** (`BASE_URL` in `electron/main.js`). |
+| `bluu-backend.vercel.app` | **Legacy — kept answering for backwards compatibility.** Shells older than 0.16.0 are pinned to it; old links, emails, Telegram menu buttons and provider webhooks still name it. Exported as `LEGACY_APP_HOST`. |
 
-`src/middleware.ts` is host-agnostic, so both domains expose exactly the same surface (browser traffic outside the allowlist rewrites to `/desktop-only`).
+**How the legacy host stays compatible** ([`src/middleware.ts`](../src/middleware.ts)):
 
-- **Never point the vercel.app host at a redirect to the custom domain.** `BASE_URL` is compared with `startsWith` in `will-navigate`, `did-fail-load` and `did-finish-load`; landing on a foreign origin makes the shell kick its own navigations out to the system browser and silently skips the offline-retry reset and the 0.9 zoom default.
-- **Never build a user-facing link from `window.location.origin`.** Staff run the app inside Electron, so that resolves to the vercel.app host. Use `PUBLIC_APP_ORIGIN` — as the "copy creator link" button in `src/app/(main)/creator-portal/custom-requests/page.tsx` and `APP_UPDATE.downloadUrl` do.
-- OAuth is unaffected: `redirect_uri` comes from the fixed `NEXT_PUBLIC_REDIRECT_URI` env var (vercel.app), not from the requesting host. Auth state is per-origin (Firebase uses IndexedDB, the app sets no cookies), so the two hosts have independent sessions by design.
+- **A browser page request on the legacy host gets a 308 to the same path + query on `app.bluurock.com`** — old shared snips (`/s`), prompts (`/p`), `/join` emails, `/download` links and bookmarks all land on the official domain.
+- **Exempt from that redirect:**
+  - **Electron user agents** — a pre-0.16 shell must never be redirected (see below).
+  - **`/auth`** — `NEXT_PUBLIC_REDIRECT_URI` still names the legacy host, so Google returns there.
+  - **`/creator`** — Telegram Mini App menu buttons set before the move name the legacy host, and a webview drops the `initData` fragment across a redirect.
+- **`/api` never reaches the middleware**, so old shells' API calls, the Resend / Telegram / OnlyFans webhooks, and old `/api/public/snip/*` image URLs all keep answering in place. Static files (anything with an extension, e.g. the email logo) are likewise served directly.
+- A **0.16+ shell** that is navigated to a legacy URL (an old notification `actionUrl`, a pasted link) rewrites it to `BASE_URL` in `will-navigate` and loads it in place, instead of handing it to the system browser.
+
+Rules:
+
+- **Never redirect Electron traffic on the legacy host.** `BASE_URL` is compared with `startsWith` in `will-navigate`, `did-fail-load` and `did-finish-load`; a pre-0.16 shell landing on a foreign origin kicks its own navigations out to the system browser and silently skips the offline-retry reset and the 0.9 zoom default. The same holds in reverse for any future domain move.
+- **Never build a user-facing link from `window.location.origin`.** A pre-0.16 shell resolves it to the legacy host. Use `PUBLIC_APP_ORIGIN`.
+- **The 0.16.0 origin switch logs every desktop user out once.** Auth state, `deviceId`, `sessionToken` and the time-tracking IndexedDB buffer are all per-origin (the app sets no cookies), so the first launch on the new origin starts clean and the user signs in again. The old origin's data stays on disk in the same Electron partition (a rollback build pointed at the legacy host would find it). The one hazard is an **unflushed time-tracking log** (see [time-tracking.md](time-tracking.md)): macOS is covered — `quitAndInstall` runs only after the renderer clocks out and flushes, and the old renderer has already booted and recovered any crashed session before the update dialog can be clicked. A Windows user who crashes mid-shift and reinstalls *before* relaunching would orphan that log; the stale-session cleanup closes the server side.
+- **To finish retiring the legacy host:** add `https://app.bluurock.com/auth/callback` to the Google OAuth client's authorised redirect URIs and set `NEXT_PUBLIC_REDIRECT_URI` to it on Vercel (then drop `/auth` from the passthrough); register `app.bluurock.com` for the bot in BotFather and run `scripts/fix-creator-menu-buttons.js` (then drop `/creator`); re-point the Resend and Telegram webhooks (`scripts/set-telegram-webhook.js` now defaults to the official domain). The legacy host must keep serving until no pre-0.16 shell remains.
 
 ### The core constraint: two update channels
 - **Renderer (the web app) updates instantly** via Vercel — but only reaches a user **on a full page load**, which a desktop app does not perform on its own. See [Renderer staleness](#renderer-staleness-the-app-that-is-never-closed).

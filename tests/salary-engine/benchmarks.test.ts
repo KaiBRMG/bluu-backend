@@ -7,7 +7,7 @@ import type { ChatterMetrics } from '@/lib/buddyx/analyticsTypes';
 
 function m(over: Partial<ChatterMetrics> = {}): ChatterMetrics {
   return {
-    ppvGross: 100, tipsGross: 0, tipsCount: 0, ppvsSent: 10, ppvsUnlocked: 5, unlockRate: 50, ppvRate: 0.1,
+    ppvGross: 100, tipsGross: 0, tipsCount: 0, ppvSales: 5, ppvsSent: 10, ppvsUnlocked: 5, unlockRate: 50, ppvRate: 0.1,
     fansChatted: 10, totalMessages: 100, onlineMs: 3_600_000, medianResponseTimeMs: 60_000, p75ResponseTimeMs: 90_000,
     revenuePerOnlineHour: 100, ...over,
   };
@@ -25,9 +25,22 @@ describe('computeBenchmarks', () => {
     const team = [
       { uid: 'me', metrics: m() },
       { uid: 'b', metrics: m() },
-      { uid: 'c', metrics: m({ onlineMs: 0 }) },
+      { uid: 'c', metrics: m({ onlineMs: 0, ppvGross: 0, tipsGross: 0 }) },
     ];
     expect(computeBenchmarks(m(), team, 'me')).toBeNull();
+  });
+
+  it('compares history (revenue, no BuddyX activity) on revenue only', () => {
+    const history = (ppvGross: number) =>
+      m({ ppvGross, onlineMs: null, totalMessages: null, fansChatted: null, unlockRate: null, medianResponseTimeMs: null, revenuePerOnlineHour: null });
+    const me = history(300);
+    const out = computeBenchmarks(me, [
+      { uid: 'me', metrics: me },
+      { uid: 'b', metrics: history(100) },
+      { uid: 'c', metrics: history(200) },
+    ], 'me')!;
+    expect(out.find(b => b.key === 'ppvGross')).toMatchObject({ beats: 2, of: 2 });
+    expect(out.find(b => b.key === 'onlineMs')).toMatchObject({ value: null, median: null });
   });
 
   it('counts whom I beat, direction-aware', () => {

@@ -9,6 +9,12 @@
  * Full claim lists are admin-only: who else put their name down is the admin's
  * decision input, not a leaderboard.
  *
+ * `&detail=claimants` (admin only, Coverage → To assign) adds a `load` to each
+ * open claim: the claimant's shifts and accounts on that day, and what assigning
+ * this offer would put them on against the 5/4 cap. Opt-in because it costs one
+ * roster read per claimant, and the agent calendar — which admins also open —
+ * renders none of it (rule 9i).
+ *
  * Admins also get `withdrawals` — absences that were cancelled after approval.
  * Those offers are *deleted* rather than left as history (the occurrence has to
  * be re-releasable), so without this an admin who saw four accounts on the board
@@ -18,7 +24,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError, checkPageAccess } from '@/lib/middleware/apiHelpers';
-import { getOffers } from '@/lib/services/caCoverageService';
+import { getOffers, getClaimantLoads } from '@/lib/services/caCoverageService';
 import { getRecentLeaveWithdrawals } from '@/lib/services/coverageNotices';
 import { isDayKey, currentDayKey, addDays } from '@/lib/salary/salaryDate';
 import { getUserById } from '@/lib/services/userService';
@@ -32,6 +38,7 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     const from = searchParams.get('from') ?? addDays(currentDayKey(), -1);
     const to = searchParams.get('to') ?? addDays(currentDayKey(), 45);
     const status = searchParams.get('status');
+    const withClaimantDetail = searchParams.get('detail') === 'claimants';
 
     if (!isDayKey(from) || !isDayKey(to)) {
       return NextResponse.json({ error: 'from and to must be YYYY-MM-DD' }, { status: 400 });
@@ -64,6 +71,8 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       }
     }
 
+    const loads = isAdmin && withClaimantDetail ? await getClaimantLoads(offers) : null;
+
     const rows = offers.map(offer => ({
       ...offer,
       originalUserName: names.get(offer.originalUserId) ?? null,
@@ -72,7 +81,11 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       myClaim: offer.claims.find(c => c.userId === token.uid) ?? null,
       // Who else claimed is an admin's decision input, not public information.
       claims: isAdmin
-        ? offer.claims.map(c => ({ ...c, displayName: names.get(c.userId) ?? c.userId }))
+        ? offer.claims.map(c => ({
+            ...c,
+            displayName: names.get(c.userId) ?? c.userId,
+            load: loads?.get(`${offer.offerId}:${c.userId}`) ?? null,
+          }))
         : undefined,
     }));
 

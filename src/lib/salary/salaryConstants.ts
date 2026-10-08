@@ -81,9 +81,9 @@ export const DEFAULT_WAGE_TIERS: Record<number, number> = {
  * `users.workEmail` (which covers anyone not yet migrated).
  *
  * An address that resolves to nothing is **reported, never guessed** — the
- * import result names it and the row count behind it. `jessy@bluurock.com`
- * appears in historical exports and is deliberately absent: that agent has left
- * and her rows are skipped.
+ * import result names it and the row count behind it. Agents who left without
+ * a Bluu account (mark@, vivian@, preston@ …) are skipped that way; Jessy,
+ * whose account exists but is archived, is mapped so her history lands on it.
  *
  * TEMPORARY in spirit — this whole mapping disappears when sales come from OF
  * Manager, which already knows the uid. See documentation/ca-salary.md.
@@ -97,6 +97,9 @@ export const SALES_EMAIL_MAP: Record<string, string> = {
   'ayo@bluurock.com': 'ayomideolujimi37@gmail.com',
   'mannie@bluurock.com': 'adebariadeniran@gmail.com',
   'dami@bluurock.com': 'ajisedamilolaferanmi@gmail.com',
+  // Jessy has left and her account is archived; her history is still hers
+  // (historical import, 2026-10-07). Archived accounts are matched on purpose.
+  'jessy@bluurock.com': 'sesejanetjessiree@gmail.com',
 };
 
 /** The columns the importer requires. A file missing any of these is rejected whole. */
@@ -125,6 +128,25 @@ export const OPTIONAL_SALES_COLUMNS = ['Rule', 'Assigned by', 'Status'] as const
  * the fan got back. A day can legitimately go negative as a result.
  */
 export type SaleStatus = 'complete' | 'reverse';
+
+// ─── The salary history floor ────────────────────────────────────────
+
+/**
+ * The first month any salary view shows. Earlier months exist in `ca-sales`
+ * (the Infloww history import reaches back to October 2025) but were paid
+ * outside Bluu Backend, so a computed "salary" for them would be a figure
+ * nobody was paid. They feed analytics only.
+ *
+ * Enforced server-side on every `/api/ca-salary/*` route (`refuseHiddenMonth`)
+ * and mirrored by the month pickers, which stop here. Plain data, safe for the
+ * client to import.
+ */
+export const SALARY_HISTORY_START_MONTH = '2026-09';
+
+/** Whether a salary view may show this month. */
+export function isSalaryMonthVisible(month: string): boolean {
+  return month >= SALARY_HISTORY_START_MONTH;
+}
 
 // ─── The Infloww → BuddyX cutover ────────────────────────────────────
 

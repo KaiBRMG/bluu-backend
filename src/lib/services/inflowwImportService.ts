@@ -41,14 +41,14 @@ export { XlsxError };
 /** Infloww buckets creator statistics in UTC+0. */
 const INFLOWW_STATS_TZ = 'Africa/Monrovia';
 
-async function readCreators(): Promise<Array<{ id: string; stageName: string }>> {
+async function readCreators(): Promise<Array<{ id: string; stageName: string; isSubAccount?: boolean }>> {
   const [creators, subs] = await Promise.all([
     adminDb.collection('creators').select('creatorID', 'stageName').get(),
     adminDb.collection('creator-subaccounts').select('stageName').get(),
   ]);
   return [
     ...creators.docs.map(d => ({ id: (d.get('creatorID') as string | undefined) ?? d.id, stageName: (d.get('stageName') as string) ?? '' })),
-    ...subs.docs.map(d => ({ id: d.id, stageName: (d.get('stageName') as string) ?? '' })),
+    ...subs.docs.map(d => ({ id: d.id, stageName: (d.get('stageName') as string) ?? '', isSubAccount: true })),
   ];
 }
 

@@ -166,7 +166,9 @@ The sales tool identifies agents by their old `@bluurock.com` addresses. Resolut
 1. `SALES_EMAIL_MAP` → `users.workEmail` (via `normalizeEmail`, the same folding login uses).
 2. The raw source address → `users.workEmail`, covering anyone not yet through the personal-email migration.
 
-**An address that resolves to nothing is reported, never guessed.** `jessy@bluurock.com` appears in historical exports and is deliberately absent from the map — that agent has left, and her rows skip with a named, counted entry in the import report.
+**An address that resolves to nothing is reported, never guessed.** Agents who left with no Bluu account (`mark@`, `vivian@`, `preston@`, `bella@` …) skip with a named, counted entry in the import report, as do two personal addresses (`angeladacutsilla@gmail.com`, `manniexx@outlook.com`) an admin chose to leave unmapped. `jessy@bluurock.com` *is* mapped, to her archived account, so her history is hers.
+
+**The salary views start at September 2026** (`SALARY_HISTORY_START_MONTH`). The Infloww history reaches back to October 2025 but was paid outside Bluu Backend, so every `/api/ca-salary/*` route refuses an earlier month (`refuseHiddenMonth`), the month pickers stop there, the dashboard never opens on one, and no tier notice is computed for one. The history feeds analytics only.
 
 ### Dry run
 
@@ -375,6 +377,16 @@ Claiming happens in a popover off the day cell: a month cell is ~90px and the de
 - **1 day's notice** to claim overtime. Enforced.
 - **4 days' notice to request leave is stated, not enforced.** Leave can be requested right up until the shift starts; the only hard boundary is a shift that has already begun. Blocking a late request would push an agent who is ill tomorrow into telling someone off-system, where no admin can see it — the approvals queue shows how much notice each request actually carries ("in 1 day") and an admin decides. The UI states the expectation in both places it appears.
 - Paid leave requires a stated reason; unpaid does not.
+
+**The cap counts the expanded roster.** `accountsCommittedOn` ([caCoverageService.ts](../src/lib/services/caCoverageService.ts)) used to be a bare `startTime` range query in the claim route — the same recurrence bug as the finders above, so an agent on a weekly roster looked committed to nothing and the cap never counted their own accounts. It now reads `occurrencesAround` and counts every occurrence that **overlaps** the salary day.
+
+### Coverage → To assign shows each claimant's load
+
+**Offers whose window has ended unassigned are hidden** from the tab and its badge — nobody can cover them any more, so they are not a decision. This is a client-side filter on `windowEnd`; the offer documents are untouched.
+
+Each claimant chip carries their account count for the offer's day (`Ana · 3 accts`), and hovering or focusing it opens a card with their shifts that day (window in the viewer's zone, accounts per shift with the overtime ring), any other cover they have claimed that day, where this assignment would leave them against the 5/4 cap, and their claim note. The count is on the chip itself because it is the figure claimants are compared by, and a fact only behind a hover is unreachable by keyboard (DESIGN.md §5).
+
+It comes from `GET /api/ca-coverage/offers?detail=claimants` — **admin-only and opt-in**. `getClaimantLoads` does one roster read per claimant across the board's date span and buckets by day in memory; the agent calendar calls the same route without the flag and pays nothing. The in-shift test and the projected count use the **same** functions as the claim cap and the assigner, so a chip flagged over the limit means the roster moved under the claim after it was made.
 
 ### Leave balances — the entitlement, and who spends it
 

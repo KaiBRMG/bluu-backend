@@ -23,41 +23,14 @@ import {
   getOffer,
   getOffers,
   findCoveringShift,
+  accountsCommittedOn,
+  MAX_ACCOUNTS_IN_SHIFT,
+  MAX_ACCOUNTS_OUTSIDE_SHIFT,
 } from '@/lib/services/caCoverageService';
-import { adminDb } from '@/lib/firebase-admin';
-import { Timestamp } from 'firebase-admin/firestore';
-import { dayKeyRange } from '@/lib/salary/salaryDate';
-import type { ShiftDocument } from '@/types/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
-/** Accounts an agent may work at once — inside their own shift, and outside it. */
-const MAX_ACCOUNTS_IN_SHIFT = 5;
-const MAX_ACCOUNTS_OUTSIDE_SHIFT = 4;
 /** Overtime must be claimed at least this far ahead. */
 const MIN_NOTICE_MS = 24 * 60 * 60 * 1000;
-
-/**
- * Accounts this agent is already committed to on a day: every non-deleted
- * shift's assignments, plus every offer already assigned to them.
- */
-async function accountsCommittedOn(userId: string, day: string): Promise<Set<string>> {
-  const [dayStart, dayEnd] = dayKeyRange(day);
-
-  const snap = await adminDb
-    .collection('shifts')
-    .where('userId', '==', userId)
-    .where('startTime', '>=', Timestamp.fromMillis(dayStart - 12 * 3_600_000))
-    .where('startTime', '<=', Timestamp.fromMillis(dayEnd))
-    .get();
-
-  const accounts = new Set<string>();
-  for (const doc of snap.docs) {
-    const shift = doc.data() as ShiftDocument;
-    if (shift.isDeleted) continue;
-    for (const id of shift.creatorIds ?? []) accounts.add(id);
-  }
-  return accounts;
-}
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {

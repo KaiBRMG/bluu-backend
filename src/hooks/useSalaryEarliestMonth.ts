@@ -2,6 +2,7 @@
 
 import { useUserData } from '@/hooks/useUserData';
 import { currentMonthKey, toMonthKey } from '@/lib/salary/salaryDate';
+import { SALARY_HISTORY_START_MONTH } from '@/lib/salary/salaryConstants';
 
 /**
  * The oldest month a salary surface should let someone walk back to.
@@ -19,17 +20,20 @@ import { currentMonthKey, toMonthKey } from '@/lib/salary/salaryDate';
  * runs against cached and serialised shapes too, so every plausible form is
  * handled and an unreadable one falls through to the picker's own default.
  */
-export function useSalaryEarliestMonth(): string | undefined {
+export function useSalaryEarliestMonth(): string {
   const { userData } = useUserData();
   const createdAt = userData?.createdAt as unknown;
 
+  // Never before the salary history floor: older months were paid outside
+  // Bluu Backend, and the server refuses them (`SALARY_HISTORY_START_MONTH`).
   const ms = toMillis(createdAt);
-  if (ms === null) return undefined;
+  if (ms === null) return SALARY_HISTORY_START_MONTH;
 
   // Never return a floor ahead of the current month: that would disable both
   // arrows and strand the viewer on a month they cannot leave.
   const month = toMonthKey(ms);
-  return month > currentMonthKey() ? undefined : month;
+  if (month > currentMonthKey()) return SALARY_HISTORY_START_MONTH;
+  return month > SALARY_HISTORY_START_MONTH ? month : SALARY_HISTORY_START_MONTH;
 }
 
 function toMillis(value: unknown): number | null {

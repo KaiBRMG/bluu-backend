@@ -8,22 +8,30 @@
 export const CHATTER_PERIODS = ['mtd', 'prev-month', '7d', '30d', 'custom'] as const;
 export type ChatterPeriod = (typeof CHATTER_PERIODS)[number];
 
-/** One chatter's figures for a period. Money is gross. */
+/**
+ * One chatter's figures for a period. Money is gross.
+ *
+ * Revenue comes from the sales ledger (Infloww history, then BuddyX) and is
+ * always present. Activity comes from BuddyX team reports only, so it is
+ * `null` for any part of a period before BuddyX started (`activityFrom`).
+ */
 export interface ChatterMetrics {
   ppvGross: number;
   tipsGross: number;
   tipsCount: number;
-  ppvsSent: number;
-  ppvsUnlocked: number;
-  unlockRate: number;
-  ppvRate: number;
-  fansChatted: number;
-  totalMessages: number;
-  onlineMs: number;
+  /** PPVs sold, from the ledger. */
+  ppvSales: number;
+  ppvsSent: number | null;
+  ppvsUnlocked: number | null;
+  unlockRate: number | null;
+  ppvRate: number | null;
+  fansChatted: number | null;
+  totalMessages: number | null;
+  onlineMs: number | null;
   /** `null` for a custom range that has not been pulled — medians cannot be summed from days. */
   medianResponseTimeMs: number | null;
   p75ResponseTimeMs: number | null;
-  /** (PPV + tips) ÷ online hours. `null` with no online time. */
+  /** BuddyX revenue ÷ BuddyX online hours. `null` with no online time. */
   revenuePerOnlineHour: number | null;
 }
 
@@ -80,6 +88,8 @@ export interface ChatterAnalytics {
   period: ChatterPeriod;
   from: string;
   to: string;
+  /** First day BuddyX activity exists; before it, only revenue does. */
+  activityFrom: string;
   /** False for a custom range nobody has pulled — the medians are absent. */
   hasMedians: boolean;
   /** The viewer's own figures (null when they have no BuddyX chatter mapped). */
@@ -88,7 +98,6 @@ export interface ChatterAnalytics {
   mass: MassMessageSummary;
   /** Null when fewer than 3 agents were active — comparing would identify a colleague. */
   benchmarks: Benchmark[] | null;
-  activeAgents: number;
   /** `ca-admin` only. */
   leaderboard: ChatterLeaderboardRow[] | null;
   /** `ca-admin` only: rostered agents with no BuddyX online time. */

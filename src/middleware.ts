@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { LEGACY_APP_HOST, PUBLIC_APP_ORIGIN } from '@/lib/publicOrigin';
 
 const BROWSER_ALLOWED_PREFIXES = [
   '/auth',
@@ -33,17 +34,44 @@ const BROWSER_ALLOWED_PREFIXES = [
   '/terms',
 ];
 
-export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+/**
+ * Paths a browser keeps using on the legacy host instead of being redirected.
+ *
+ * - `/auth` — `NEXT_PUBLIC_REDIRECT_URI` (the OAuth callback Google returns to)
+ *   is still registered on the legacy host. Redirect it only once that env var
+ *   and the Google client both point at the official domain.
+ * - `/creator` — the Telegram Mini App. Telegram launches it with its signed
+ *   `initData` in the URL fragment, and in-app webviews do not reliably carry a
+ *   fragment across a redirect (see `scripts/fix-creator-menu-buttons.js`), so
+ *   a creator whose menu button still names the legacy host must be served in
+ *   place.
+ */
+const LEGACY_HOST_PASSTHROUGH_PREFIXES = ['/auth', '/creator'];
 
-  for (const prefix of BROWSER_ALLOWED_PREFIXES) {
-    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) {
-      return NextResponse.next();
-    }
+function matchesPrefix(pathname: string, prefixes: string[]): boolean {
+  return prefixes.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+export function middleware(request: NextRequest) {
+  const { pathname, search, hostname } = request.nextUrl;
+  const isElectron = /Electron\//i.test(request.headers.get('user-agent') ?? '');
+
+  // The legacy host is being phased out: a browser following an old link (a
+  // shared snip or prompt, a /join email, a bookmark) lands on the same page on
+  // the official domain. Desktop shells older than 0.16.0 are still pinned to
+  // this host and must never be redirected — the shell compares every load
+  // against its BASE_URL, and a foreign origin breaks navigation and offline
+  // recovery (documentation/electron.md). `/api` never reaches this function,
+  // so webhooks and old shells' API calls keep answering here.
+  if (
+    hostname === LEGACY_APP_HOST &&
+    !isElectron &&
+    !matchesPrefix(pathname, LEGACY_HOST_PASSTHROUGH_PREFIXES)
+  ) {
+    return NextResponse.redirect(new URL(`${pathname}${search}`, PUBLIC_APP_ORIGIN), 308);
   }
 
-  const userAgent = request.headers.get('user-agent') ?? '';
-  if (/Electron\//i.test(userAgent)) {
+  if (matchesPrefix(pathname, BROWSER_ALLOWED_PREFIXES) || isElectron) {
     return NextResponse.next();
   }
 

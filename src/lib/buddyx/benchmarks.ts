@@ -5,8 +5,10 @@
  * quartile, and "faster than 3 of 4" — and never any colleague's figure or
  * name. Two rules keep it anonymous:
  *
- * - **Only agents who were online** (`onlineMs > 0`) are in the population; a
- *   chatter who never logged in is not a benchmark, just a zero.
+ * - **Only active agents** — who sold something or were online — are in the
+ *   population; an agent with neither is not a benchmark, just a zero. A
+ *   metric an agent has no figure for (BuddyX activity before BuddyX) leaves
+ *   them out of that metric's comparison only.
  * - **At least three of them**, or there is no benchmark at all. With two, the
  *   "median" is the other person's number.
  */
@@ -46,7 +48,9 @@ export function computeBenchmarks(
   team: Array<{ uid: string; metrics: ChatterMetrics }>,
   meUid: string,
 ): Benchmark[] | null {
-  const population = team.filter(t => t.metrics.onlineMs > 0);
+  // Active = sold something or was online. Historical periods have revenue
+  // but no BuddyX online time, and must still be comparable.
+  const population = team.filter(t => (t.metrics.onlineMs ?? 0) > 0 || t.metrics.ppvGross + t.metrics.tipsGross > 0);
   if (population.length < MIN_BENCHMARK_POPULATION || !me) return null;
 
   return BENCHMARK_KEYS.map(key => {

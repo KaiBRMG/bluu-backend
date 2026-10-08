@@ -16,9 +16,9 @@
  *   App, configured in BotFather. Opening `t.me/<bot>/<shortName>` loads the
  *   creator portal inside Telegram's webview with a signed `initData` payload.
  *   The URL BotFather points it at must be on `PUBLIC_APP_ORIGIN`, not the
- *   vercel.app host: `setChatMenuButton` refuses a `web_app` URL on a domain the
- *   bot has not had registered, and Electron's `BASE_URL` host is not that
- *   domain. See `publicOrigin.ts` and electron.md.
+ *   legacy vercel.app host: `setChatMenuButton` refuses a `web_app` URL on a
+ *   domain the bot has not had registered. See `publicOrigin.ts` and
+ *   electron.md.
  */
 
 export const TELEGRAM_BOT_USERNAME = 'BluuRockBot';

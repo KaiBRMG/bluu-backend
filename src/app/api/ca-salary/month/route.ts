@@ -16,7 +16,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
-import { resolveSalarySubject } from '@/lib/salary/salaryAuth';
+import { resolveSalarySubject, refuseHiddenMonth } from '@/lib/salary/salaryAuth';
 import { buildDashboardSalaryMonth, buildSalaryMonth } from '@/lib/services/caSalaryService';
 import { currentMonthKey, isMonthKey } from '@/lib/salary/salaryDate';
 import { getUserById } from '@/lib/services/userService';
@@ -30,6 +30,8 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     if (month !== 'open' && !isMonthKey(month)) {
       return NextResponse.json({ error: 'month must be YYYY-MM or "open"' }, { status: 400 });
     }
+    const hidden = month === 'open' ? null : refuseHiddenMonth(month);
+    if (hidden) return hidden;
 
     const subject = await resolveSalarySubject(token, searchParams.get('userId'));
     if (subject instanceof NextResponse) return subject;

@@ -25,7 +25,7 @@ export function foldName(name: string): string {
 }
 
 export function buildCreatorIdResolver(
-  creators: Array<{ id: string; stageName: string }>,
+  creators: Array<{ id: string; stageName: string; isSubAccount?: boolean }>,
 ): (name: string) => string | null {
   const exact = new Map<string, string>();
   for (const creator of creators) exact.set(foldName(creator.stageName), creator.id);
@@ -37,6 +37,13 @@ export function buildCreatorIdResolver(
     if (hit) return hit;
 
     const prefixed = creators.filter(c => foldName(c.stageName).startsWith(`${folded} `));
-    return prefixed.length === 1 ? prefixed[0].id : null;
+    if (prefixed.length === 1) return prefixed[0].id;
+    // "Cole" prefixes Cole Bentley *and* "Cole Bentley (Fansly)". A sub-account
+    // is named after its parent, so a tie made only of one creator and their
+    // own sub-accounts resolves to the creator — the Infloww export is an
+    // OnlyFans export, and the parent is the OnlyFans account. Two *creators*
+    // sharing the prefix are still ambiguous.
+    const parents = prefixed.filter(c => !c.isSubAccount);
+    return parents.length === 1 ? parents[0].id : null;
   };
 }
