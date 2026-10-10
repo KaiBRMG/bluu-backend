@@ -2,12 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
-import { getUserById, invalidateUserCache } from '@/lib/services/userService';
-import { isBalanceCharged, leaveCharge, remainingOf } from '@/lib/leave/leaveBalance';
+import { getUserById } from '@/lib/services/userService';
+import {
+  computeLeaveBalance,
+  formatLeavePeriod,
+  isWithinRequestWindow,
+  leavePeriodOf,
+  requestableMonths,
+} from '@/lib/leave/leaveBalance';
 import { recordLeaveLedgerEntry } from '@/lib/services/leaveLedger';
 import { notifications } from '@/lib/notificationContent';
 import { CA_LEAVE_ALERT_RECIPIENT_UID, notifyUsers } from '@/lib/services/caNotifications';
-import { formatDayLabelWithWeekday, toDayKey } from '@/lib/salary/salaryDate';
+import { formatDayLabelWithWeekday, formatMonthLabel, toDayKey } from '@/lib/salary/salaryDate';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { LeaveRequestDocument, UserDocument } from '@/types/firestore';
 
@@ -140,6 +146,18 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'That shift has already started.' }, { status: 400 });
     }
 
+    // Leave spends the allowance of the month the shift is in, and only this
+    // month's and next month's allowances can be spent (`leaveBalance.ts`).
+    if (!isWithinRequestWindow(occurrenceStart)) {
+      const [current, next] = requestableMonths();
+      return NextResponse.json(
+        {
+          error: `Leave can only be requested for shifts in ${formatMonthLabel(current)} or ${formatMonthLabel(next)}.`,
+        },
+        { status: 400 },
+      );
+    }
+
     // Paid leave needs a stated reason; unpaid does not. The asymmetry is the
     // existing policy, not an invention — paid leave is approved on its merits.
     const trimmedReason = typeof reason === 'string' ? reason.trim().slice(0, 500) : '';
@@ -160,20 +178,21 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'Paid leave is not enabled for this user' }, { status: 400 });
     }
 
-    // ── Requesting takes the day ──
+    // ── Requesting holds a day of the shift's period ──
     //
-    // The balance an agent sees is what they can still ask for, so a request
-    // comes off it immediately; a denial or a withdrawal gives it back (see the
-    // approve and DELETE routes, and `leaveBalance.ts`).
+    // The balance is derived from the agent's own requests (`leaveBalance.ts`),
+    // so a request holds its day simply by existing as pending, and a denial or
+    // withdrawal gives it back by no longer counting.
     //
     // A **transaction** reading the user document and the agent's own requests
-    // inside it, so the duplicate check, the balance check and the deduction are
-    // one operation. Two requests landing together cannot both see "1 left" and
-    // both take it.
+    // inside it, so the duplicate check and the balance check are one operation.
+    // Two requests landing together cannot both see "1 left" and both take it:
+    // the second one's read of the requests collides with the first's write.
     const leaveRef = adminDb.collection('leave_requests').doc();
     const leaveId = leaveRef.id;
     const userRef = adminDb.collection('users').doc(token.uid);
     const label = leaveType === 'paid' ? 'paid' : 'unpaid';
+    const period = leavePeriodOf(leaveType, occurrenceStart);
 
     try {
       await adminDb.runTransaction(async tx => {
@@ -189,25 +208,14 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
           throw new LeaveRefusal('Leave request already exists for this shift occurrence', 409);
         }
 
-        // Requests made before charging moved to request time are pending
-        // without having taken a day; they will take it at approval, so they
-        // still count against what is left. Zero once those have been decided.
-        const legacyPending = requests.filter(
-          r => r.status === 'pending' && r.leaveType === leaveType && !isBalanceCharged(r),
-        ).length;
-        const remaining = remainingOf(freshUser, leaveType);
-
-        if (remaining - legacyPending <= 0) {
+        const balance = computeLeaveBalance(freshUser, requests, leaveType, period);
+        if (balance.remaining <= 0) {
           throw new LeaveRefusal(
-            legacyPending > 0
-              ? `You have ${remaining} ${label} ${remaining === 1 ? 'day' : 'days'} left and ${legacyPending} ${legacyPending === 1 ? 'request' : 'requests'} already awaiting approval.`
-              : `No ${label} leave remaining.`,
+            `No ${label} leave left for ${formatLeavePeriod(period)}.`,
             400,
           );
         }
 
-        const charge = leaveCharge(freshUser, leaveType);
-        tx.update(userRef, charge.userUpdate);
         tx.set(leaveRef, {
           leaveId,
           shiftId,
@@ -219,7 +227,6 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
           resolvedAt: null,
           resolvedBy: null,
           reason: trimmedReason || null,
-          ...charge.leaveUpdate,
         });
         recordLeaveLedgerEntry(tx, {
           leaveId,
@@ -227,9 +234,10 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
           leaveType,
           occurrenceStart,
           action: 'requested',
-          before: remaining,
-          after: remaining - 1,
+          before: balance.remaining,
+          after: balance.remaining - 1,
           actorUid: token.uid,
+          period,
         });
       });
     } catch (txErr) {
@@ -238,9 +246,6 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       }
       throw txErr;
     }
-
-    // Rule 2: the balance on the user document just moved.
-    invalidateUserCache(token.uid);
 
     // Tell the person who approves leave that there is something to approve.
     //

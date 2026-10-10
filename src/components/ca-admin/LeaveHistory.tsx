@@ -11,6 +11,7 @@ import { useLeaveHistory, type LeaveHistoryEvent, type LeaveHistoryRow } from '@
 import { STATUS_COLORS } from '@/lib/campaignTracking';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { formatDayLabelWithWeekday, toDayKey } from '@/lib/salary/salaryDate';
+import { formatLeavePeriod, STANDING_PERIOD } from '@/lib/leave/leaveBalance';
 import { formatRelative } from '@/lib/salary/salaryFormat';
 
 /**
@@ -29,9 +30,10 @@ import { formatRelative } from '@/lib/salary/salaryFormat';
  * hidden:
  *
  * - a request decided before the ledger existed has no trail, and says so;
- * - the reset on finalising a month and a hand edit in CA Admin → Leave move balances
- *   without a request, so they never appear here. The footnote says that once,
- *   so nobody reads the trail as the whole story of a balance.
+ * - before 2026-10-10 a month's finalisation reset balances, and hand edits
+ *   moved them, without an entry. Since then balances are derived per period
+ *   and every admin change is its own `Adjusted` row, so the trail is complete
+ *   from that date. The footnote says so once.
  */
 
 type Outcome = LeaveHistoryRow['outcome'];
@@ -40,12 +42,14 @@ const OUTCOME_LABEL: Record<Outcome, string> = {
   approved: 'Approved',
   denied: 'Denied',
   withdrawn: 'Withdrawn',
+  adjusted: 'Adjusted',
 };
 
 const OUTCOME_PILL: Record<Outcome, string> = {
   approved: STATUS_COLORS.Completed,
   denied: STATUS_COLORS.Rejected,
   withdrawn: STATUS_COLORS.Archived,
+  adjusted: STATUS_COLORS.Archived,
 };
 
 const ACTION_LABEL: Record<LeaveHistoryEvent['action'], string> = {
@@ -53,6 +57,8 @@ const ACTION_LABEL: Record<LeaveHistoryEvent['action'], string> = {
   approved: 'approved',
   denied: 'denied',
   withdrawn: 'withdrawn',
+  adjusted: 'adjusted',
+  allotment: 'allowance changed',
 };
 
 const ALL = '__all__';
@@ -129,7 +135,7 @@ export function LeaveHistory() {
         </Select>
 
         <span className="text-xs tabular-nums text-zinc-400">
-          {filtered ? `${visible.length} of ${rows.length}` : `${rows.length} requests`}
+          {filtered ? `${visible.length} of ${rows.length}` : `${rows.length} entries`}
         </span>
       </div>
 
@@ -156,8 +162,9 @@ export function LeaveHistory() {
       )}
 
       <p className="max-w-[70ch] text-xs leading-relaxed text-zinc-400">
-        Balances shown are only the changes leave requests made. Finalising a salary month also resets leave, and
-        edits made in CA Admin → Leave change balances too. Neither is listed here.
+        Each balance is the days left in the month (unpaid) or year (paid) the leave falls in. Every request, adjustment
+        and allowance change since 10 Oct 2026 is listed; before that, month-end resets and hand edits were not
+        recorded.
       </p>
     </div>
   );
@@ -182,7 +189,7 @@ function HistoryRow({ row }: { row: LeaveHistoryRow }) {
             <span className="text-zinc-400"> · {row.leaveType} leave</span>
           </p>
           <p className="mt-0.5 text-[11px] text-zinc-400">
-            {formatDayLabelWithWeekday(toDayKey(row.occurrenceStart))}
+            {whenLabel(row)}
             <span aria-hidden> · </span>
             {describeOutcome(row)}
           </p>
@@ -198,8 +205,18 @@ function HistoryRow({ row }: { row: LeaveHistoryRow }) {
   );
 }
 
+/** The date a request was for, or the period an admin change applied to. */
+function whenLabel(row: LeaveHistoryRow): string {
+  if (row.outcome !== 'adjusted') return formatDayLabelWithWeekday(toDayKey(row.occurrenceStart));
+  if (row.period === STANDING_PERIOD) return 'Standing allowance';
+  return row.period ? formatLeavePeriod(row.period) : 'Unknown period';
+}
+
 function describeOutcome(row: LeaveHistoryRow): string {
   const when = row.decidedAt ? formatRelative(row.decidedAt) : 'at an unknown time';
+  if (row.outcome === 'adjusted') {
+    return `changed ${when}${row.decidedByName ? ` by ${row.decidedByName}` : ''}`;
+  }
   if (row.outcome === 'withdrawn') {
     const from = row.withdrawnFrom && row.withdrawnFrom !== 'pending' ? ` after it was ${row.withdrawnFrom}` : ' before a decision';
     return `withdrawn ${when}${from}`;
@@ -213,7 +230,13 @@ function describeOutcome(row: LeaveHistoryRow): string {
  * which reads as a typo.
  */
 function BalanceTrail({ row }: { row: LeaveHistoryRow }) {
-  const label = row.leaveType === 'paid' ? 'Paid balance' : 'Unpaid balance';
+  const paid = row.leaveType === 'paid';
+  const label =
+    row.period === STANDING_PERIOD
+      ? paid
+        ? 'Paid days per year'
+        : 'Unpaid days per month'
+      : `${paid ? 'Paid' : 'Unpaid'} days left${row.period ? ` in ${formatLeavePeriod(row.period)}` : ''}`;
 
   if (row.events.length === 0) {
     return (

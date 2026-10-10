@@ -1,10 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
-import { ArrowDown, ArrowUp, Loader2Icon } from 'lucide-react';
+import { Loader2Icon } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { toast } from 'sonner';
 import AppLayout from '@/components/AppLayout';
@@ -18,17 +16,16 @@ import { DatePicker } from '@/components/smm/shared/DatePicker';
 import { SyncStatus } from '@/components/buddyx/SyncStatus';
 import { BenchmarkStrip } from '@/components/buddyx/BenchmarkStrip';
 import { LegendSwatch, PPV_ATTRIBUTION, TIPS_ATTRIBUTION, KpiTile, Fact, LoadError, SEGMENT } from '@/components/buddyx/buddyxUi';
-import { PersonTag } from '@/components/disputes/disputeUi';
-import { CoverageMeter, CoverageScatter, FlagChips, FlagList } from '@/components/buddyx/integrityUi';
-import { COVERAGE_FLAG_RATIO } from '@/lib/buddyx/coverage';
+import { CoverageMeter, FlagList } from '@/components/buddyx/integrityUi';
+import { AgentRoster, CompareTable } from '@/components/buddyx/AgentRoster';
 import { CHATTER_PERIOD_OPTIONS, chatterAnalyticsUrl, chatterReportHref } from '@/components/buddyx/chatterPeriods';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
 import { formatUsd } from '@/lib/salary/salaryFormat';
 import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
-import { formatCount, formatDuration, formatRate, formatShare } from '@/lib/buddyx/analyticsFormat';
+import { formatCount, formatDuration, formatRate } from '@/lib/buddyx/analyticsFormat';
 import { SALE_KIND_COLORS } from '@/lib/buddyx/chartColors';
-import { MAX_CUSTOM_DAYS, type BenchmarkKey, type ChatterAnalytics, type ChatterLeaderboardRow, type ChatterPeriod, type IntegrityFlag } from '@/lib/buddyx/analyticsTypes';
+import { MAX_CUSTOM_DAYS, type BenchmarkKey, type ChatterAnalytics, type ChatterPeriod, type IntegrityFlag } from '@/lib/buddyx/analyticsTypes';
 
 /**
  * Chatter Analytics — `/ca-portal/chatter-analytics`.
@@ -293,76 +290,26 @@ function CustomMedianNote({ data, isAdmin, onPulled }: { data: ChatterAnalytics;
 
 // ─── Admin ───────────────────────────────────────────────────────────
 
-type SortKey =
-  | 'coverage'
-  | 'revenue'
-  | 'ppvGross'
-  | 'tipsGross'
-  | 'unlockRate'
-  | 'medianResponseTimeMs'
-  | 'onlineMs'
-  | 'revenuePerOnlineHour'
-  | 'revenuePerAccount';
-
-const COLUMNS: Array<{ key: Exclude<SortKey, 'coverage'>; label: string; render: (r: ChatterLeaderboardRow) => string }> = [
-  { key: 'revenue', label: 'Gross', render: r => formatUsd(r.ppvGross + r.tipsGross) },
-  { key: 'ppvGross', label: 'PPV gross', render: r => formatUsd(r.ppvGross) },
-  { key: 'tipsGross', label: 'Tips gross', render: r => formatUsd(r.tipsGross) },
-  { key: 'unlockRate', label: 'Unlock', render: r => formatRate(r.unlockRate, 1) },
-  { key: 'medianResponseTimeMs', label: 'Reply', render: r => formatDuration(r.medianResponseTimeMs) },
-  { key: 'onlineMs', label: 'Online', render: r => formatDuration(r.onlineMs) },
-  { key: 'revenuePerOnlineHour', label: 'Gross / online h', render: r => (r.revenuePerOnlineHour === null ? '—' : formatUsd(r.revenuePerOnlineHour)) },
-  { key: 'revenuePerAccount', label: 'Gross / account', render: r => (r.revenuePerAccount === null ? '—' : formatUsd(r.revenuePerAccount)) },
-];
-
-/** Lower-is-worse ascending by default: coverage and reply time sort worst-first. */
-const ASCENDING_FIRST: ReadonlySet<SortKey> = new Set(['coverage', 'medianResponseTimeMs']);
-
-function sortValue(r: ChatterLeaderboardRow, key: SortKey): number {
-  if (key === 'revenue') return r.ppvGross + r.tipsGross;
-  if (key === 'coverage') return r.coverage?.ratio ?? Infinity;
-  const v = r[key];
-  return typeof v === 'number' ? v : -Infinity;
-}
-
-const HEAD = 'text-[11px] font-semibold uppercase tracking-wide text-zinc-400';
-
+/**
+ * What an admin brings to this page — "was everyone actually working while
+ * clocked in, and who needs a look?" — answered top to bottom: the flag list,
+ * then one card per agent (their own small chart plus figures interpreted
+ * against the team), then the same figures side by side for sorting.
+ */
 function AdminView({ data, range }: { data: ChatterAnalytics; range: { from: string | null; to: string | null } }) {
-  const router = useRouter();
-  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'coverage', desc: false });
   const flags = useMemo(() => data.flags ?? [], [data.flags]);
   const flagsByUid = useMemo(() => {
     const map = new Map<string, IntegrityFlag[]>();
     for (const f of flags) map.set(f.uid, [...(map.get(f.uid) ?? []), f]);
     return map;
   }, [flags]);
-  const rows = useMemo(() => {
-    const list = [...(data.leaderboard ?? [])];
-    list.sort((a, b) => {
-      const d = sortValue(a, sort.key) - sortValue(b, sort.key);
-      return sort.desc ? -d : d;
-    });
-    return list;
-  }, [data.leaderboard, sort]);
+  const rows = useMemo(() => data.leaderboard ?? [], [data.leaderboard]);
   const hrefFor = (uid: string) => chatterReportHref(uid, data.period, range.from, range.to);
-  const agents = (data.leaderboard ?? []).filter(r => r.uid).length;
+  const agents = rows.filter(r => r.uid).length;
   const covered = data.to >= data.activityFrom;
 
-  const header = (key: SortKey, label: string) => (
-    <th key={key} scope="col" aria-sort={sort.key === key ? (sort.desc ? 'descending' : 'ascending') : 'none'} className="px-3 py-2.5 text-right">
-      <button
-        type="button"
-        onClick={() => setSort(s => ({ key, desc: s.key === key ? !s.desc : !ASCENDING_FIRST.has(key) }))}
-        className={cn('inline-flex items-center gap-1 rounded-sm hover:text-white focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50', HEAD)}
-      >
-        {label}
-        {sort.key === key && (sort.desc ? <ArrowDown className="size-3" aria-hidden /> : <ArrowUp className="size-3" aria-hidden />)}
-      </button>
-    </th>
-  );
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* ── What needs a look ── */}
       <section aria-labelledby="flags-heading" className="space-y-2">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -386,94 +333,30 @@ function AdminView({ data, range }: { data: ChatterAnalytics; range: { from: str
         )}
       </section>
 
-      {/* ── Coverage ── */}
-      {covered && (
-        <section className={cn('rounded-xl p-5', SURFACE)} aria-labelledby="coverage-heading">
-          <h2 id="coverage-heading" className="text-sm font-semibold">Online in BuddyX while clocked in</h2>
+      {/* ── One card per agent ── */}
+      <section aria-labelledby="roster-heading" className="space-y-3">
+        <div>
+          <h2 id="roster-heading" className="text-sm font-semibold">Every agent</h2>
           <p className="mt-0.5 text-[11px] text-zinc-400">
-            One dot per agent. Clocked working hours across — breaks, idle and pause excluded — and the hours of it they were online in BuddyX up.
-            Online time outside clocked time does not count.
+            Coverage is BuddyX online time inside clocked working time — breaks, idle and pause don&apos;t count against anyone. Each figure is placed
+            among the team: top quarter, above or below the median, bottom quarter.
           </p>
-          <CoverageScatter rows={data.leaderboard ?? []} hrefFor={hrefFor} />
+        </div>
+        <AgentRoster rows={rows} flagsByUid={flagsByUid} hrefFor={hrefFor} />
+      </section>
+
+      {/* ── Side by side ── */}
+      {rows.length > 0 && (
+        <section aria-labelledby="compare-heading" className="space-y-3">
+          <div>
+            <h2 id="compare-heading" className="text-sm font-semibold">Side by side</h2>
+            <p className="mt-0.5 text-[11px] text-zinc-400">
+              The same figures in one table, to sort by any of them. Every other metric is in the agent&apos;s report.
+            </p>
+          </div>
+          <CompareTable rows={rows} hrefFor={hrefFor} />
         </section>
       )}
-
-      {/* ── Every agent ── */}
-      <section className={cn('rounded-xl p-5', SURFACE)} aria-labelledby="leaderboard">
-        <h2 id="leaderboard" className="text-sm font-semibold">Every agent</h2>
-        <p className="mt-0.5 text-[11px] text-zinc-400">
-          Coverage is BuddyX online time inside Bluu clocked working time. Open an agent for their shifts, minute by minute.
-        </p>
-        <div
-          tabIndex={0}
-          role="region"
-          aria-label="Agent table, scrollable"
-          className="mt-3 overflow-x-auto rounded-lg border border-white/[0.07] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50"
-        >
-          <table className="w-full min-w-[1180px] border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-white/[0.07]">
-                <th scope="col" className={cn('sticky left-0 z-10 bg-[var(--card)] px-3 py-2.5 text-left', HEAD)}>Agent</th>
-                {header('coverage', 'Coverage')}
-                <th scope="col" className={cn('px-3 py-2.5 text-right', HEAD)}>Flags</th>
-                {COLUMNS.map(col => header(col.key, col.label))}
-                <th scope="col" className={cn('px-3 py-2.5 text-right', HEAD)}>Mass msgs</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/[0.045]">
-              {rows.map(r => (
-                // The whole row opens the report (the table's main action); the
-                // name link is the keyboard and screen-reader route to the same
-                // place. The sticky cell is opaque, so its wash is a `before:`
-                // overlay (DESIGN.md §5, the shaded matrix).
-                <tr
-                  key={r.uid ?? r.chatterId}
-                  onClick={r.uid ? () => router.push(hrefFor(r.uid!)) : undefined}
-                  className={cn('group', r.uid && 'cursor-pointer hover:bg-white/[0.055] active:bg-white/[0.08]')}
-                >
-                  <td className="sticky left-0 z-10 bg-[var(--card)] px-3 py-2 before:absolute before:inset-0 before:transition-colors group-hover:before:bg-white/[0.055]">
-                    {r.uid ? (
-                      <Link
-                        href={hrefFor(r.uid)}
-                        prefetch={false}
-                        onClick={e => e.stopPropagation()}
-                        className="relative inline-flex rounded-md focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                        aria-label={`Open ${r.name}’s report`}
-                      >
-                        <PersonTag name={r.name} photoURL={null} size="sm" />
-                      </Link>
-                    ) : (
-                      <span className="relative text-xs text-zinc-400">{r.name}</span>
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
-                    {r.coverage?.ratio != null ? (
-                      <>
-                        <span className={r.coverage.ratio < COVERAGE_FLAG_RATIO ? 'text-orange-400' : undefined}>{formatShare(r.coverage.ratio)}</span>
-                        <span className="block text-[11px] text-zinc-400">
-                          {formatDuration(r.coverage.onlineWhileClockedMs)} of {formatDuration(r.coverage.clockedMs)}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-zinc-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <FlagChips flags={r.uid ? flagsByUid.get(r.uid) ?? [] : []} />
-                  </td>
-                  {COLUMNS.map(col => (
-                    <td key={col.key} className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{col.render(r)}</td>
-                  ))}
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
-                    {r.mass.count}
-                    {r.mass.unsent > 0 && <span className="text-[11px] text-zinc-400"> · {r.mass.unsent} unsent</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
     </div>
   );
 }

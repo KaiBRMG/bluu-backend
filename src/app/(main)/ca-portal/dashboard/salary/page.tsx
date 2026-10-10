@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CommissionLadder } from '@/components/salary/CommissionLadder';
+import { SalaryDerivation } from '@/components/salary/SalaryDerivation';
 import { MonthPicker } from '@/components/salary/MonthPicker';
 
 import { useSalaryMonth } from '@/hooks/useSalaryMonth';
@@ -48,10 +49,9 @@ const SalesReport = dynamic(() => import('@/components/salary/SalesReport').then
  * ## The month lives in the URL
  *
  * It was component state, which quietly broke the reason above for this being a
- * route at all — nothing could point at a *month*. Nobody is notified when a
- * month is finalised (ca-salary.md §11); an admin tells each agent by hand, and
- * they could not paste a link to the month in question. `?month=YYYY-MM` fixes
- * that and costs nothing: an unparseable value falls back to the current month
+ * route at all — nothing could point at a *month*, including the
+ * `salaryFinalized` notification. `?month=YYYY-MM` fixes that and costs
+ * nothing: an unparseable value falls back to the month payroll still owes
  * rather than erroring.
  */
 
@@ -80,8 +80,8 @@ function SalaryPageContent() {
   // A future month has no data by definition, so a hand-edited or stale link to
   // one falls back rather than rendering an empty month as if it were real.
   const requested = searchParams.get('month');
-  const month =
-    requested && isMonthKey(requested) && requested <= currentMonthKey() ? requested : currentMonthKey();
+  const requestedMonth =
+    requested && isMonthKey(requested) && requested <= currentMonthKey() ? requested : null;
 
   const [inspectedDay, setInspectedDay] = useState<string | null>(null);
 
@@ -103,7 +103,10 @@ function SalaryPageContent() {
   const [tab, setTab] = useState('overview');
   const salesTabRef = useRef<HTMLButtonElement>(null);
 
-  const { data, loading, error, refetch } = useSalaryMonth(month);
+  // No `?month=` opens the month payroll still owes, the same one the dashboard
+  // card shows — on the 1st that is last month, not an empty new one.
+  const { data, loading, error, refetch } = useSalaryMonth(requestedMonth ?? 'open');
+  const month = requestedMonth ?? data?.month ?? currentMonthKey();
   const { timezone } = useViewerTimezone();
   const earliest = useSalaryEarliestMonth();
 
@@ -215,7 +218,9 @@ function Overview({ month, data }: { month: string; data: SalaryMonthResult }) {
       {/* The headline and the ladder together: the figure, then the one thing
           that would move it. */}
       <section className={cn('rounded-xl p-5', SURFACE)}>
-        <h2 className="text-sm font-semibold">{formatMonthLabel(month)} so far</h2>
+        <h2 className="text-sm font-semibold">
+          {data.status === 'finalized' ? `${formatMonthLabel(month)} salary` : `${formatMonthLabel(month)} so far`}
+        </h2>
         {/* The Earnings step (DESIGN.md §3) — the same size this figure carries on
             the dashboard card, deliberately, because it is the same number. */}
         <p className="mt-2 text-3xl font-semibold tabular-nums leading-none tracking-tight">
@@ -228,6 +233,8 @@ function Overview({ month, data }: { month: string; data: SalaryMonthResult }) {
         <div className="mt-5 border-t border-white/[0.07] pt-4">
           <CommissionLadder tier={tier} config={config} cumulativeGross={totals.grossEarnings} />
         </div>
+
+        <SalaryDerivation data={data} />
       </section>
 
       {/* Evidence. A plain definition grid rather than a row of identical cards —
@@ -238,14 +245,14 @@ function Overview({ month, data }: { month: string; data: SalaryMonthResult }) {
           {/* Signed, like the same figure in the day table. A month whose reversals
               exceed its sales is legal, and it rendered white here and red there. */}
           <Metric
-            label="Gross Earnings"
+            label="Gross earnings"
             value={formatUsd(totals.grossEarnings)}
             className={signedMoneyClass(totals.grossEarnings)}
           />
           <Metric
-            label="NET Earnings"
+            label="Net earnings"
             value={formatUsd(totals.netEarnings)}
-            hint={`${Math.round(100 - config.deductionRate * 100)}%`}
+            hint={`${Math.round(100 - config.deductionRate * 100)}% of gross`}
           />
           <Metric label="Hours worked" value={formatHours(totals.hours)} />
           <Metric label="Days worked" value={String(totals.daysWorked)} />
@@ -263,7 +270,7 @@ function Overview({ month, data }: { month: string; data: SalaryMonthResult }) {
               )}
             </>
           ) : (
-            'No sales have been imported for this month yet.'
+            'No sales recorded for this month yet. Sales sync from BuddyX a few times a day.'
           )}
         </p>
       </section>

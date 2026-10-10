@@ -6,13 +6,14 @@ import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { CreatorChipList } from '@/components/creators/CreatorChip';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
+import { HintedLabel, SALARY_DAY_HINT, ShiftWindow } from './SalaryClock';
 import { SalaryCellEditor } from './SalaryCellEditor';
 import { formatDayLabelWithWeekday, currentDayKey } from '@/lib/salary/salaryDate';
 import { splitShiftAccounts } from '@/lib/salary/shiftAccounts';
 import {
   formatHours,
   formatPercent,
-  formatShiftWindow,
+  formatSalaryField,
   formatUsd,
   pluralise,
   signedMoneyClass,
@@ -84,10 +85,15 @@ const MISSING_SHIFT_EXPLANATION =
   'Sales landed on this day but no shift is on record, so hours and hourly pay could not be worked out.';
 
 const COLUMNS: Array<{ key: string; label: string; field?: SalaryOverrideField; hint?: string }> = [
-  { key: 'day', label: 'Date' },
+  { key: 'day', label: 'Date', hint: SALARY_DAY_HINT },
   { key: 'gross', label: 'Gross', field: 'grossEarnings', hint: 'Total sales for the day, reversals deducted.' },
   { key: 'net', label: 'Net', hint: 'Gross less the platform deduction.' },
-  { key: 'pct', label: 'Rate', field: 'commissionPercent', hint: 'Commission rate earned on this day.' },
+  {
+    key: 'pct',
+    label: 'Comm. %',
+    field: 'commissionPercent',
+    hint: 'The commission rate this day earned, from your month-to-date gross that day. A day keeps its rate.',
+  },
   { key: 'commission', label: 'Commission', field: 'commission' },
   { key: 'hours', label: 'Hours', field: 'hours', hint: 'Tracked time plus the grace period, capped at the shift length.' },
   {
@@ -152,20 +158,7 @@ export function SalaryDayTable({
                 )}
               >
                 {column.hint ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      {/* `asChild` forwards props but adds no tabIndex, so without
-                          this the definition of every column is reachable by
-                          mouse only. */}
-                      <span
-                        tabIndex={0}
-                        className="cursor-help rounded-sm border-b border-dotted border-white/20 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                      >
-                        {column.label}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-56 text-center leading-relaxed">{column.hint}</TooltipContent>
-                  </Tooltip>
+                  <HintedLabel label={column.label} hint={column.hint} />
                 ) : (
                   column.label
                 )}
@@ -300,12 +293,12 @@ function DayRow({
                   {content}
                   <Pencil className="size-3 text-action-blue" aria-hidden />
                   <span className="sr-only">
-                    <OverrideExplanation override={override} />
+                    <OverrideExplanation field={field} override={override} />
                   </span>
                 </span>
               </TooltipTrigger>
               <TooltipContent className="max-w-64 leading-relaxed">
-                <OverrideExplanation override={override} />
+                <OverrideExplanation field={field} override={override} />
               </TooltipContent>
             </Tooltip>
           ) : (
@@ -424,7 +417,7 @@ function DayRow({
               needs no checking, so giving it a hue here would make a routine day
               read as a problem. */}
           {hasOvertime && (
-            <span className="shrink-0 rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-zinc-300">
+            <span className="shrink-0 rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-zinc-300">
               OT
             </span>
           )}
@@ -438,7 +431,7 @@ function DayRow({
           {day.leave?.map(type => (
             <span
               key={type}
-              className="shrink-0 rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-zinc-300"
+              className="shrink-0 rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-zinc-300"
             >
               {type === 'paid' ? 'Paid leave' : 'Unpaid leave'}
             </span>
@@ -464,9 +457,12 @@ function DayRow({
         day.accountCountSource === 'sales' ? 'text-orange-400' : undefined,
         // Suppressed on an overridden count, where the figure is an admin's
         // instruction and the union arithmetic below no longer describes it.
-        payingShifts.length > 1 && !day.overrides.accountCount
-          ? describeAccountUnion(payingShifts, day.accountCount)
-          : undefined,
+        // The orange count needs its reason in words: colour alone says nothing.
+        day.accountCountSource === 'sales' && !day.overrides.accountCount
+          ? 'No accounts were assigned on the shift, so this counts the creators you made sales on that day.'
+          : payingShifts.length > 1 && !day.overrides.accountCount
+            ? describeAccountUnion(payingShifts, day.accountCount)
+            : undefined,
       )}
 
       {/* `~` is the whole point of the fix in one character: it says the figure
@@ -556,14 +552,13 @@ function ShiftRow({
     : shift.isOvertime || split.isFullyOvertime
       ? 'Overtime'
       : 'Regular';
-  const window = formatShiftWindow(shift.occurrenceStart, shift.scheduledHours, timezone);
 
   return (
     <tr className="bg-white/[0.02] text-[13px] text-zinc-400">
       <th scope="row" className="py-1.5 pl-9 pr-3 text-left font-normal">
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="font-medium text-zinc-300">{kind}</span>
-          {window && <span className="tabular-nums">{window}</span>}
+          <ShiftWindow startMs={shift.occurrenceStart} scheduledHours={shift.scheduledHours} timezone={timezone} />
           <CreatorChipList
             creatorIds={shift.creatorIds}
             overtimeIds={shift.overtimeCreatorIds}
@@ -612,10 +607,14 @@ function ShiftRow({
 }
 
 function OverrideExplanation({
+  field,
   override,
 }: {
+  /** Typed optional only because the cell's `field` is; an override implies one. */
+  field?: SalaryOverrideField;
   override: NonNullable<SalaryDayResult['overrides'][SalaryOverrideField]>;
 }) {
+  const computed = field ? formatSalaryField(field, override.computed) : formatUsd(override.computed);
   return (
     <span className="block space-y-1">
       <span className="block">
@@ -623,7 +622,7 @@ function OverrideExplanation({
         {override.reason ? ` — ${override.reason}` : ''}
       </span>
       <span className="block text-zinc-400">
-        Calculated value: <span className="tabular-nums">{override.computed}</span>
+        Calculated value: <span className="tabular-nums">{computed}</span>
       </span>
     </span>
   );

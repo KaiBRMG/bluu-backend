@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
-import { getUserById, invalidateUserCache } from '@/lib/services/userService';
+import { getUserById } from '@/lib/services/userService';
 import { notifications } from '@/lib/notificationContent';
 import { CA_LEAVE_ALERT_RECIPIENT_UID, formatNameList, notifyUsers } from '@/lib/services/caNotifications';
 import { queueCoverageNotice, recordLeaveWithdrawal } from '@/lib/services/coverageNotices';
 import { revertOccurrenceCoverage } from '@/lib/services/leaveCoverage';
-import { leaveRefund, remainingOf } from '@/lib/leave/leaveBalance';
+import { computeLeaveBalance, leavePeriodOf, remainingAfterChange } from '@/lib/leave/leaveBalance';
 import { recordLeaveLedgerEntry } from '@/lib/services/leaveLedger';
 import { formatDayLabelWithWeekday, toDayKey } from '@/lib/salary/salaryDate';
 import { pluralise } from '@/lib/salary/salaryFormat';
@@ -19,7 +19,7 @@ import type { LeaveRequestDocument, UserDocument } from '@/types/firestore';
 //
 // - A **pending or denied** request is a row going away. Nobody has acted on it,
 //   so nobody is told — the only other effect is a pending request's day going
-//   back on the balance (a denied one was refunded at denial).
+//   back on its month's balance (a denied one held none).
 // - An **approved** one has already moved the world: the shift occurrence was
 //   tombstoned and every creator the agent was covering was posted to the
 //   overtime board, where somebody may now be assigned and being paid to cover
@@ -56,29 +56,26 @@ export const DELETE = withAuth(async (
 
     const wasApproved = leave.status === 'approved';
 
-    // ── The refund, and only where one is owed ──
+    // ── The day comes back by the request going away ──
     //
-    // Requesting takes a day, so withdrawing a **pending or approved** request
-    // gives it back. A denied one was refunded at denial and gives back nothing
-    // — refunding it again is how an agent would gain a day. `leaveRefund` reads
-    // the marker the request carries rather than its status, and declines when a
-    // reset has happened since the day was taken (the reset already restored
-    // the allotment).
-    //
-    // Transactional, reading the leave and the user inside it: the refund is
-    // computed from values read in the same operation, so a withdrawal racing a
-    // denial or a month's finalisation cannot refund twice or write back a pre-reset
-    // number.
+    // Balances are derived from requests (`leaveBalance.ts`), so deleting a
+    // pending or approved request is the refund; a denied one held nothing.
+    // Transactional so the ledger's before/after are read with the delete.
     await adminDb.runTransaction(async tx => {
       const userRef = adminDb.collection('users').doc(leave.userId);
-      const [freshLeaveSnap, userSnap] = await Promise.all([tx.get(leaveRef), tx.get(userRef)]);
+      const [freshLeaveSnap, userSnap, ownRequests] = await Promise.all([
+        tx.get(leaveRef),
+        tx.get(userRef),
+        tx.get(adminDb.collection('leave_requests').where('userId', '==', leave.userId)),
+      ]);
       const freshLeave = freshLeaveSnap.data() as LeaveRequestDocument | undefined;
       if (!freshLeave) return;
 
       const freshUser = userSnap.data() as UserDocument | undefined;
-      const before = remainingOf(freshUser, freshLeave.leaveType);
-      const refund = leaveRefund(freshUser, freshLeave);
-      if (refund) tx.update(userRef, refund);
+      const requests = ownRequests.docs.map(d => d.data() as LeaveRequestDocument);
+      const period = leavePeriodOf(freshLeave.leaveType, freshLeave.occurrenceStart);
+      const before = computeLeaveBalance(freshUser, requests, freshLeave.leaveType, period).remaining;
+      const after = remainingAfterChange(before, freshLeave, null);
 
       tx.delete(leaveRef);
       // The request document is gone after this; the ledger entry is what
@@ -90,13 +87,12 @@ export const DELETE = withAuth(async (
         occurrenceStart: freshLeave.occurrenceStart,
         action: 'withdrawn',
         before,
-        after: refund ? before + 1 : before,
+        after,
         actorUid: token.uid,
         priorStatus: freshLeave.status,
+        period,
       });
     });
-
-    invalidateUserCache(leave.userId);
 
     if (!wasApproved) {
       return NextResponse.json({ success: true, reverted: null });

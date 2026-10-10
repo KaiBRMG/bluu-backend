@@ -6,7 +6,9 @@
  * payroll grid. All of it is client-safe — no Firestore, no Node built-ins.
  */
 
+import type { SalaryOverrideField } from './salaryTypes';
 import { safeTimezone } from '../utils/timezone';
+import { SALARY_TIMEZONE } from './salaryConstants';
 
 /** `$1,234.56`. Negative amounts read `−$5.00` with a real minus, not a hyphen. */
 export function formatUsd(amount: number, options: { cents?: boolean } = {}): string {
@@ -96,6 +98,38 @@ function dateTimeFormatter(shape: string, timeZone: string, options: Intl.DateTi
   return formatter;
 }
 
+/** {@link formatSaleDateTime} on the salary clock (SAST). */
+export function formatSaleDateTimeInSalaryZone(iso: string): string {
+  return formatSaleDateTime(iso, SALARY_TIMEZONE);
+}
+
+/** `'GMT+8'` — the zone's UTC offset at that instant, so a DST zone reads correctly. */
+export function formatZoneOffset(ms: number, timeZone: string): string {
+  const part = dateTimeFormatter('offset', timeZone, { timeZoneName: 'shortOffset' })
+    .formatToParts(new Date(ms))
+    .find(p => p.type === 'timeZoneName');
+  // `Intl` writes UTC itself as a bare `GMT`.
+  return part?.value === 'GMT' ? 'GMT+0' : part?.value ?? 'GMT';
+}
+
+/**
+ * Whether the reader's clock *is* the salary clock at that instant — same
+ * offset, so a local time and a salary day can never disagree. Compared by
+ * offset rather than by zone name: Johannesburg, Harare and Maputo are all the
+ * salary clock, and listing them would be a list to keep current.
+ */
+export function readsSalaryClock(ms: number, timeZone: string): boolean {
+  return formatZoneOffset(ms, timeZone) === formatZoneOffset(ms, SALARY_TIMEZONE);
+}
+
+/** `YYYY-MM-DD` the instant falls on in the reader's zone — comparable to a `SalaryDayKey`. */
+export function localDayKey(ms: number, timeZone: string): string {
+  const parts = dateTimeFormatter('daykey', timeZone, { year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(new Date(ms));
+  const get = (type: string) => parts.find(p => p.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
 export function formatSaleTime(iso: string, timeZone: string): string {
   return dateTimeFormatter('time', timeZone, {
     hour: 'numeric',
@@ -161,4 +195,17 @@ export function formatShiftWindow(startMs: number, scheduledHours: number, timeZ
   const start = formatter.format(new Date(startMs));
   if (!Number.isFinite(scheduledHours) || scheduledHours <= 0) return start;
   return `${start} – ${formatter.format(new Date(startMs + scheduledHours * 3_600_000))}`;
+}
+
+/** {@link formatShiftWindow} on the salary clock — what the roster itself says. */
+export function formatShiftWindowInSalaryZone(startMs: number, scheduledHours: number): string {
+  return formatShiftWindow(startMs, scheduledHours, SALARY_TIMEZONE);
+}
+
+/** One overridable field's value the way the grid prints it — `$1,204.50`, `7.75 h`, `3%`, `4`. */
+export function formatSalaryField(field: SalaryOverrideField, value: number): string {
+  if (field === 'hours') return formatHours(value);
+  if (field === 'accountCount') return String(value);
+  if (field === 'commissionPercent') return formatPercent(value);
+  return formatUsd(value);
 }

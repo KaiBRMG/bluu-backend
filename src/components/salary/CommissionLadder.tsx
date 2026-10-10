@@ -76,11 +76,15 @@ export function CommissionLadder({
         ceiling: next?.minGross ?? null,
         span,
         fill: Math.min(1, Math.max(0, fill)),
-        isCurrent: t.percent === tier.currentPercent,
+        // By position, not by percent: two tiers sharing a rate would otherwise
+        // both light up. The band the month-to-date gross sits in is current;
+        // a negative month (reversals) sits in the first.
+        isCurrent:
+          (cumulativeGross >= t.minGross || i === 0) && (next === undefined || cumulativeGross < next.minGross),
         isPassed: next !== undefined && cumulativeGross >= next.minGross,
       };
     });
-  }, [config.commissionTiers, cumulativeGross, tier.currentPercent]);
+  }, [config.commissionTiers, cumulativeGross]);
 
   if (segments.length === 0) return null;
 

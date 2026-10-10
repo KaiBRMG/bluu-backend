@@ -87,8 +87,10 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
               buddyx.md. An approved dispute MOVES the sale here (Bluu is the
               source of truth for transfers; a sync never undoes one). Leave approval releases
               creator accounts to an overtime board that creates the shifts that pay.
-              FINALISING a month is what resets leave (unpaid → 4; a December
-              also resets paid → 10) — there is no calendar reset cron.
+              Leave balances are DERIVED too: allowance + adjustment − requests
+              whose SHIFT falls in the period (unpaid per month, paid per year;
+              src/lib/leave/leaveBalance.ts). Nothing resets — finalising a
+              month no longer touches leave. Requests: this month or next only.
  Firestore + Storage (Firebase Admin SDK) ← services (src/lib/services) ← API routes (src/app/api)
  Client hooks (src/hooks) ← contexts (src/contexts) ← React 19 / Next 16 App Router UI
  functions/ → generateThumbnail (Storage trigger) + daily stale-session cleanup

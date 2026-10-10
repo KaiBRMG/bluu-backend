@@ -1,16 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { CartesianGrid, ReferenceLine, Scatter, ScatterChart, XAxis, YAxis, ZAxis } from 'recharts';
-import { ChartContainer, ChartTooltip, type ChartConfig } from '@/components/ui/chart';
 import { cn } from '@/lib/utils';
-import { STATUS_HEX } from '@/lib/campaignTracking';
 import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
 import { formatDuration, formatShare } from '@/lib/buddyx/analyticsFormat';
-import { COVERAGE_FLAG_RATIO, HOUR_MS } from '@/lib/buddyx/coverage';
 import { SEQUENTIAL_COLOR } from '@/lib/buddyx/chartColors';
-import type { ChatterLeaderboardRow, CoverageFigures, IntegrityFlag, IntegritySummary } from '@/lib/buddyx/analyticsTypes';
+import type { CoverageFigures, IntegrityFlag, IntegritySummary } from '@/lib/buddyx/analyticsTypes';
 
 /**
  * The integrity layer of Chatter Analytics — admin views only, display only.
@@ -142,154 +137,10 @@ export function CoverageMeter({ coverage }: { coverage: CoverageFigures }) {
   );
 }
 
-/** The table's flag cell: one greyscale chip per signal that crossed its line, else an em dash. */
-export function FlagChips({ flags }: { flags: IntegrityFlag[] }) {
-  if (flags.length === 0) return <span className="text-zinc-400">—</span>;
-  const LABEL: Record<IntegrityFlag['kind'], string> = {
-    'never-online': 'Never online',
-    'low-coverage': 'Low coverage',
-    'regular-input': 'Regular typing',
-    'modifier-only': 'Modifier keys',
-    'static-screen': 'Static screen',
-    'input-permission': 'No permission',
-  };
-  return (
-    <span className="inline-flex flex-wrap justify-end gap-1">
-      {flags.map(f => (
-        <span
-          key={f.kind}
-          title={flagSentence(f, false)}
-          className="inline-flex items-center gap-1 rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-zinc-300"
-        >
-          <span className={cn('inline-block size-1.5 rounded-full', SEVERITY_DOT[f.severity])} aria-hidden />
-          <span className="sr-only">{SEVERITY_LABEL[f.severity]}:</span>
-          {LABEL[f.kind]}
-        </span>
-      ))}
-    </span>
-  );
-}
-
 /** "Monitored 6h 40m · 3 of 26 captures unchanged" — what the integrity numbers rest on. */
 export function integrityBasis(integrity: IntegritySummary | null): string {
   if (!integrity) return 'Not monitored';
   const parts = [`Monitored ${formatDuration(integrity.monitoredMinutes * MINUTE)}`];
   if (integrity.comparedCaptures > 0) parts.push(`${integrity.unchangedCaptures} of ${integrity.comparedCaptures} captures unchanged`);
   return parts.join(' · ');
-}
-
-// ─── Coverage scatter ────────────────────────────────────────────────
-
-type Point = { uid: string; name: string; x: number; y: number; ratio: number | null };
-
-const THRESHOLD = formatShare(COVERAGE_FLAG_RATIO);
-
-const scatterConfig = {
-  ok: { label: `At or above ${THRESHOLD}`, color: '#d4d4d8' },
-  low: { label: `Below ${THRESHOLD}`, color: STATUS_HEX.orange },
-  axis: { label: 'Axis', color: STATUS_HEX.zinc },
-  parity: { label: 'Every clocked hour online', color: '#71717a' },
-} satisfies ChartConfig;
-
-/**
- * Every agent's week in one picture: clocked working hours across, hours
- * online in BuddyX *while clocked in* up. The solid diagonal is parity (every
- * clocked hour online); the dashed one is the `COVERAGE_FLAG_RATIO` line. A point under the
- * dashed line is the question this page exists to raise, and is the one hue on
- * the chart (status-orange, warning). Click a point for that agent's report;
- * the table below carries the same figures for the keyboard.
- */
-export function CoverageScatter({ rows, hrefFor }: { rows: ChatterLeaderboardRow[]; hrefFor: (uid: string) => string }) {
-  const router = useRouter();
-  const points: Point[] = rows
-    .filter(r => r.uid && r.coverage && r.coverage.clockedMs > 0)
-    .map(r => ({
-      uid: r.uid!,
-      name: r.name,
-      x: Math.round((r.coverage!.clockedMs / HOUR_MS) * 10) / 10,
-      y: Math.round((r.coverage!.onlineWhileClockedMs / HOUR_MS) * 10) / 10,
-      ratio: r.coverage!.ratio,
-    }));
-  if (points.length === 0) {
-    return <p className="mt-3 text-sm text-zinc-400">Nobody was clocked in during this period.</p>;
-  }
-  const max = Math.max(1, ...points.map(p => Math.max(p.x, p.y))) * 1.08;
-  const isLow = (p: Point) => p.ratio !== null && p.ratio < COVERAGE_FLAG_RATIO;
-  const low = points.filter(isLow);
-  const ok = points.filter(p => !isLow(p));
-  const open = (data: unknown) => {
-    const uid = (data as { payload?: Point })?.payload?.uid;
-    if (uid) router.push(hrefFor(uid));
-  };
-
-  return (
-    <div>
-      {/* The dots are a mouse shortcut; the table below carries every figure and
-          every report link, so the chart itself is hidden from assistive tech
-          behind one summary sentence rather than exposing unreachable buttons. */}
-      <p className="sr-only">
-        Coverage for {points.length} agents: {low.length} below {THRESHOLD} of clocked working time online in BuddyX. Every agent is
-        also listed in the table below.
-      </p>
-      <ChartContainer config={scatterConfig} className="mt-3 aspect-auto h-[300px] w-full" aria-hidden>
-        <ScatterChart margin={{ left: 4, right: 16, top: 12, bottom: 8 }}>
-          <CartesianGrid strokeOpacity={0.15} />
-          <XAxis
-            type="number"
-            dataKey="x"
-            domain={[0, max]}
-            tickLine={false}
-            axisLine={false}
-            tickMargin={8}
-            tickFormatter={v => `${Math.round(v)}h`}
-            label={{ value: 'Clocked working', position: 'insideBottomRight', offset: -4, fill: 'var(--color-axis)', fontSize: 11 }}
-          />
-          <YAxis
-            type="number"
-            dataKey="y"
-            domain={[0, max]}
-            tickLine={false}
-            axisLine={false}
-            width={40}
-            tickFormatter={v => `${Math.round(v)}h`}
-            label={{ value: 'Online while clocked', angle: -90, position: 'insideLeft', fill: 'var(--color-axis)', fontSize: 11, dy: 60 }}
-          />
-          <ZAxis range={[64, 64]} />
-          <ReferenceLine segment={[{ x: 0, y: 0 }, { x: max, y: max }]} stroke="var(--color-parity)" strokeWidth={1} ifOverflow="hidden" />
-          <ReferenceLine
-            segment={[{ x: 0, y: 0 }, { x: max, y: max * COVERAGE_FLAG_RATIO }]}
-            stroke={STATUS_HEX.orange}
-            strokeOpacity={0.6}
-            strokeDasharray="4 4"
-            ifOverflow="hidden"
-          />
-          <ChartTooltip
-            cursor={false}
-            content={({ active, payload }) => {
-              const p = active ? (payload?.[0]?.payload as Point | undefined) : undefined;
-              if (!p) return null;
-              return (
-                <div className="rounded-lg border border-white/[0.07] bg-[var(--content-background)] px-3 py-2 text-xs">
-                  <div className="font-medium text-white">{p.name}</div>
-                  <div className="mt-0.5 text-zinc-400 tabular-nums">
-                    {formatShare(p.ratio)} · {p.y}h online of {p.x}h clocked
-                  </div>
-                  <div className="mt-1 text-[11px] text-zinc-400">Click for the report</div>
-                </div>
-              );
-            }}
-          />
-          <Scatter data={ok} fill="var(--color-ok)" className="cursor-pointer" onClick={open} isAnimationActive={false} />
-          <Scatter data={low} fill="var(--color-low)" className="cursor-pointer" onClick={open} isAnimationActive={false} />
-        </ScatterChart>
-      </ChartContainer>
-      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-zinc-400" aria-hidden>
-        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-px w-4 bg-zinc-500" /> Every clocked hour online</span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block w-4 border-t border-dashed" style={{ borderColor: STATUS_HEX.orange }} /> {THRESHOLD} line
-        </span>
-        <span className="inline-flex items-center gap-1.5"><span className="inline-block size-2 rounded-full" style={{ background: STATUS_HEX.orange }} /> Below it</span>
-      </div>
-    </div>
-  );
 }

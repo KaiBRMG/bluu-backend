@@ -3,7 +3,9 @@
 import { useState, useCallback, useEffect, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import { toast } from 'sonner';
+import { RotateCcw } from 'lucide-react';
 import AppLayout from "@/components/AppLayout";
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -19,11 +21,38 @@ import { useAuth } from '@/components/AuthProvider';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { DisputeDetailDialog } from '@/components/disputes/DisputeDetailDialog';
 
+// `salaries` is the Payroll tab's id — kept so existing `?tab=salaries` links
+// still land, while the label says Payroll everywhere it is read.
 const ADMIN_TABS = ['overview', 'salaries', 'sales', 'coverage', 'rates', 'disputes'];
 const noopSubscribe = () => () => {};
 function readRequestedTab(): string | null {
   const requested = new URLSearchParams(window.location.search).get('tab');
+  if (requested === 'payroll') return 'salaries';
   return requested && ADMIN_TABS.includes(requested) ? requested : null;
+}
+function readRequestedAgent(): string | null {
+  return new URLSearchParams(window.location.search).get('agent');
+}
+
+/**
+ * Mirror the tab and open agent into the URL without a navigation.
+ *
+ * `history.replaceState`, not `router.replace`: a router navigation is an RSC
+ * round-trip through middleware for state the page already holds (rule 9i), and
+ * it would remount the app shell (CLAUDE.md, the app-shell known issue). This
+ * only makes the current view linkable and survive a reload.
+ */
+function writeUrlState(tab: string, agent: string | null) {
+  try {
+    const url = new URL(window.location.href);
+    if (tab === 'overview') url.searchParams.delete('tab');
+    else url.searchParams.set('tab', tab);
+    if (agent && tab === 'salaries') url.searchParams.set('agent', agent);
+    else url.searchParams.delete('agent');
+    window.history.replaceState(window.history.state, '', url);
+  } catch {
+    /* a URL that cannot be written is only a lost deep link */
+  }
 }
 
 // ─── Column set ───────────────────────────────────────────────────────
@@ -143,16 +172,20 @@ function AdminPanel({
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [adminFilters, setAdminFilters] = useState<AdminFilters>({});
 
   const load = useCallback(async (p: number, af: AdminFilters) => {
     setLoading(true);
+    setLoadError(null);
     try {
       const result = await fetchDisputes(filter, p, af);
       setDisputes(result.disputes);
       setTotalPages(result.totalPages);
     } catch (err) {
+      // A failed read is a state, never an empty list (ca-salary.md §6).
       console.error('[AdminPanel] load failed:', err);
+      setLoadError(err instanceof Error ? err.message : 'Could not load disputes');
     } finally {
       setLoading(false);
     }
@@ -190,6 +223,15 @@ function AdminPanel({
         filters={adminFilters}
         onChange={handleFiltersChange}
       />
+      {loadError && !loading && (
+        <p className="mb-3 flex flex-wrap items-center gap-2 text-sm text-red-400">
+          Couldn&apos;t load disputes: {loadError}
+          <Button size="xs" variant="ghost" className="text-red-400 hover:text-red-300" onClick={() => void load(page, adminFilters)}>
+            <RotateCcw className="size-3" aria-hidden />
+            Retry
+          </Button>
+        </p>
+      )}
       <DisputeTable
         disputes={disputes}
         columns={columns}
@@ -302,8 +344,25 @@ export default function CaAdminPage() {
   // external value (server: none) rather than through `useSearchParams`, which
   // would suspend the page; the reader's own pick then wins.
   const requestedTab = useSyncExternalStore(noopSubscribe, readRequestedTab, () => null);
-  const [pickedTab, setTab] = useState<string | null>(null);
+  const requestedAgent = useSyncExternalStore(noopSubscribe, readRequestedAgent, () => null);
+  const [pickedTab, setPickedTab] = useState<string | null>(null);
   const tab = pickedTab ?? requestedTab ?? 'overview';
+  // `undefined` = nothing picked yet this visit, so the URL's `?agent=` applies.
+  const [pickedAgent, setPickedAgent] = useState<string | null | undefined>(undefined);
+  const agent = pickedAgent === undefined ? requestedAgent : pickedAgent;
+
+  const setTab = useCallback((next: string) => {
+    setPickedTab(next);
+    writeUrlState(next, agent);
+  }, [agent]);
+  const setAgent = useCallback((uid: string | null) => {
+    setPickedAgent(uid);
+    writeUrlState('salaries', uid);
+  }, []);
+  const openAgent = useCallback((uid: string) => {
+    setPickedTab('salaries');
+    setAgent(uid);
+  }, [setAgent]);
 
   // ── Dispute detail, shared by every Disputes tab ──
   const [detail, setDetail] = useState<DisputeDocument | null>(null);
@@ -381,7 +440,7 @@ export default function CaAdminPage() {
       <div className="max-w-7xl">
         <h1 className="text-2xl font-bold tracking-tight">CA Admin</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          Payroll, sales, coverage and disputes. Chat Agents should not have access to this page.
+          Payroll, sales, coverage, rates and disputes for every chat agent.
         </p>
 
         <div className="mt-6 rounded-lg border border-border-subtle bg-content-bg">
@@ -391,7 +450,7 @@ export default function CaAdminPage() {
             <div className="overflow-x-auto px-6 pb-1.5 pt-4">
               <TabsList>
                 <TabsTrigger value="overview">Overview</TabsTrigger>
-                <TabsTrigger value="salaries">Salaries</TabsTrigger>
+                <TabsTrigger value="salaries">Payroll</TabsTrigger>
                 <TabsTrigger value="sales">Sales</TabsTrigger>
                 <TabsTrigger value="coverage">Coverage</TabsTrigger>
                 <TabsTrigger value="rates">Rates</TabsTrigger>
@@ -401,10 +460,14 @@ export default function CaAdminPage() {
 
             <div className="min-h-[600px] p-6">
               <TabsContent value="overview">
-                {month ? <AdminOverview month={month} onMonthChange={setMonth} /> : <PanelSkeleton />}
+                {month ? <AdminOverview month={month} onMonthChange={setMonth} onOpenAgent={openAgent} /> : <PanelSkeleton />}
               </TabsContent>
               <TabsContent value="salaries">
-                {month ? <AdminSalaries month={month} onMonthChange={setMonth} /> : <PanelSkeleton />}
+                {month ? (
+                  <AdminSalaries month={month} onMonthChange={setMonth} agentUid={agent} onAgentChange={setAgent} />
+                ) : (
+                  <PanelSkeleton />
+                )}
               </TabsContent>
               <TabsContent value="sales">
                 {month ? <AdminSales month={month} onMonthChange={setMonth} timezone={userTimezone} /> : <PanelSkeleton />}

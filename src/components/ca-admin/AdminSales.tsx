@@ -10,6 +10,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -213,12 +222,16 @@ export default function AdminSales({
     return ids.map(uid => ({ uid, name: data.names[uid] ?? uid })).sort((a, b) => a.name.localeCompare(b.name));
   }, [data]);
 
-  const filtersActive = agent !== 'all' || creatorId !== null || kind !== 'all' || onlyUnassigned || query.trim() !== '';
+  // `showRemoved` is a filter too: left on, "Clear filters" left the ledger
+  // showing only removed rows and claiming nothing was filtered.
+  const filtersActive =
+    agent !== 'all' || creatorId !== null || kind !== 'all' || onlyUnassigned || showRemoved || query.trim() !== '';
   const clearFilters = () => {
     setAgent('all');
     setCreatorId(null);
     setKind('all');
     setOnlyUnassigned(false);
+    setShowRemoved(false);
     setQuery('');
   };
   const visible = showAll ? filtered : filtered.slice(0, INITIAL_ROWS);
@@ -298,7 +311,8 @@ export default function AdminSales({
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Sales</h2>
           <p className="mt-0.5 text-sm text-zinc-400">
-            Every agent&apos;s sales for the month, synced from BuddyX. Amounts are gross — net is 80%; OnlyFans keeps 20%.
+            Every agent&apos;s sales for the month, synced from BuddyX. Amounts are gross; net is gross less the platform
+            deduction set on Rates.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -519,6 +533,10 @@ function SalesWriteSwitch({ authed }: { authed: Authed }) {
   const { salesWriteEnabled, reloadStatus } = useBuddyxSync('sales');
   const [busy, setBusy] = useState<'preview' | 'toggle' | null>(null);
   const [preview, setPreview] = useState<PreviewRow[] | null>(null);
+  // The switch decides what everyone is paid from. It never flips on one
+  // click: turning it on says what the next sync will write; turning it off
+  // says what stops.
+  const [confirming, setConfirming] = useState<boolean | null>(null);
 
   const runPreview = async () => {
     setBusy('preview');
@@ -564,11 +582,42 @@ function SalesWriteSwitch({ authed }: { authed: Authed }) {
             Preview
           </Button>
           <label className="flex items-center gap-2 text-xs text-zinc-300">
-            <Switch checked={salesWriteEnabled} onCheckedChange={v => void toggle(v)} disabled={busy !== null} aria-label="Write BuddyX sales" />
+            <Switch checked={salesWriteEnabled} onCheckedChange={v => setConfirming(v)} disabled={busy !== null} aria-label="Write BuddyX sales" />
             Write sales
           </label>
         </div>
       </div>
+
+      <AlertDialog open={confirming !== null} onOpenChange={open => !open && busy === null && setConfirming(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirming ? 'Start writing BuddyX sales?' : 'Stop writing BuddyX sales?'}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirming
+                ? preview === null
+                  ? 'The next sync writes BuddyX sales into every open month, and agents’ commission is recalculated from them. You haven’t run a preview — check one against the BuddyX dashboard first.'
+                  : `The next sync writes BuddyX sales into every open month — ${pluralise(preview.length, 'agent-day')} in the window you previewed — and agents’ commission is recalculated from them.`
+                : 'Syncs keep running but stop writing sales. Sales already written stay, and any sold from now on are missing from commission until this is back on.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy !== null}>Cancel</AlertDialogCancel>
+            <Button
+              variant={confirming ? 'default' : 'destructive'}
+              disabled={busy !== null}
+              onClick={async event => {
+                event.preventDefault();
+                if (confirming === null) return;
+                await toggle(confirming);
+                setConfirming(null);
+              }}
+            >
+              {busy === 'toggle' && <Loader2Icon className="activity-spinner size-3.5 animate-spin" aria-hidden />}
+              {confirming ? 'Start writing sales' : 'Stop writing sales'}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {preview && (
         preview.length === 0 ? (
           <p className="text-sm text-zinc-400">BuddyX returned no sales after the cutover in the open window.</p>

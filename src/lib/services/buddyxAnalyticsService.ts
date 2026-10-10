@@ -67,7 +67,7 @@ import {
   sortFlags,
   summariseIntegrity,
 } from './chatterIntegrityService';
-import { displayNamesFor, getUserById } from './userService';
+import { displayNamesFor, getUserById, userLabelsFor } from './userService';
 import type {
   ActiveSessionDocument,
   TimeEntryLedgerDocument,
@@ -390,13 +390,19 @@ export async function getChatterAnalytics(params: {
     hasActivityWindow && activityStart > start ? rosterForWindow(activityStart, windowEnd) : Promise.resolve(null),
   ]);
   const offlineRoster = hasActivityWindow ? activityRoster ?? roster : new Map<string, { accounts: Set<string>; shifts: number }>();
-  const uids = [...new Set([...uidsWithData, ...roster.keys()])];
-  const [names, timeLedger, active, integrityDays] = await Promise.all([
-    displayNamesFor(uids),
-    hasActivityWindow ? getLedgerEntriesForUsers(uids, activityStart - LEDGER_LOOKBACK_MS, windowEnd) : Promise.resolve(new Map()),
-    hasActivityWindow ? getActiveSessionsForUsers(uids) : Promise.resolve(new Map()),
+  const candidates = [...new Set([...uidsWithData, ...roster.keys()])];
+  const [labels, timeLedger, active, integrityDays] = await Promise.all([
+    userLabelsFor(candidates),
+    hasActivityWindow ? getLedgerEntriesForUsers(candidates, activityStart - LEDGER_LOOKBACK_MS, windowEnd) : Promise.resolve(new Map()),
+    hasActivityWindow ? getActiveSessionsForUsers(candidates) : Promise.resolve(new Map()),
     cached(`integrity:${range.from}:${range.to}`, () => getIntegrityDays(range.from, range.to)),
   ]);
+  // Archived agents leave every admin list — cards, table and flags
+  // (user-management rule 6). Their data stays: the report still opens by
+  // link, and the anonymous team benchmark above is unchanged.
+  const isArchived = (uid: string) => labels.get(uid)?.isArchived === true;
+  const uids = candidates.filter(uid => !isArchived(uid));
+  const names = new Map([...labels].map(([uid, l]) => [uid, l.displayName] as const));
   const coverageByUid = new Map(
     uids.map(uid => [uid, coverageOf(uid, timeLedger.get(uid) ?? [], active.get(uid))] as const),
   );
@@ -417,6 +423,9 @@ export async function getChatterAnalytics(params: {
           : null,
       accounts,
       coverage: uid ? stripByDay(coverageByUid.get(uid) ?? null) : null,
+      days: uid
+        ? (coverageByUid.get(uid)?.byDay ?? []).map(d => ({ day: d.day, clockedMs: d.clockedMs, onlineWhileClockedMs: d.onlineWhileClockedMs }))
+        : [],
       integrity: uid ? summariseIntegrity(integrityDays.get(uid)) : null,
       revenuePerAccount: accounts > 0 ? round2((metrics.ppvGross + metrics.tipsGross) / accounts) : null,
       mass: massSummary(team.mass.filter(m => (uid ? m.uid === uid : m.sentBy === chatter?.chatterId))),
@@ -424,7 +433,12 @@ export async function getChatterAnalytics(params: {
   };
 
   result.leaderboard = [
-    ...teamMetrics.map(t => rowFor(t.uid, t.metrics, grouped.get(t.uid) ?? [])),
+    ...teamMetrics.filter(t => !isArchived(t.uid)).map(t => rowFor(t.uid, t.metrics, grouped.get(t.uid) ?? [])),
+    // Rostered but with no sales and no BuddyX activity — the agent the
+    // `never-online` flag is about must still have a card on the roster.
+    ...[...roster.keys()]
+      .filter(uid => !uidsWithData.has(uid) && !isArchived(uid))
+      .map(uid => rowFor(uid, metricsFrom([], undefined, team.hasMedians), [])),
     ...[...grouped.entries()]
       .filter(([k]) => k.startsWith('chatter:'))
       .map(([, rows]) => rowFor(null, metricsFrom(rows, undefined, team.hasMedians), rows)),

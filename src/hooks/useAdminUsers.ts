@@ -57,8 +57,6 @@ export interface AdminFullUser {
   enableIdleTimeout?: boolean;
   enableScreenshots?: boolean;
   hasPaidLeave?: boolean;
-  remainingUnpaidLeave?: number;
-  remainingPaidLeave?: number;
   timezone?: string;
   timezoneOffset?: string;
   additionalTimezones?: string[];

@@ -6,8 +6,7 @@ import { getShiftsByRange, getLedgerEntriesForUsers } from '@/lib/services/shift
 import { expandShiftsForWindow } from '@/lib/utils/recurrence';
 import { serialiseShift } from '@/lib/utils/shiftSerialise';
 import { matchLeaveToOccurrences, occurrenceKey } from '@/lib/utils/leaveMatch';
-import { computeAttendanceDetail, computeTimeWorked } from '@/lib/utils/shiftAttendance';
-import { mergeIntervals } from '@/lib/utils/analyticsAggregate';
+import { computeAttendanceDetail } from '@/lib/utils/shiftAttendance';
 import { eventsToSegments } from '@/lib/utils/sessionSegments';
 import {
   safeTimezone,
@@ -16,7 +15,6 @@ import {
   getDayBoundsUTC,
 } from '@/lib/utils/timezone';
 import {
-  UNROSTERED_ALERT_SECONDS,
   type OverviewPerson,
   type OverviewSession,
   type OverviewShift,
@@ -24,7 +22,7 @@ import {
   type ShiftOverviewResponse,
 } from '@/lib/shiftOverview';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-import type { ActiveSessionDocument, TimeEntryLedgerDocument } from '@/types/firestore';
+import type { ActiveSessionDocument } from '@/types/firestore';
 
 /**
  * GET /api/admin/shift-management/overview
@@ -152,14 +150,11 @@ export const GET = withAuth(async (_request: NextRequest, token: DecodedIdToken)
     // ── Sessions (today strip) + settled flags ─────────────────────
     const sessions: OverviewSession[] = [];
     const flags: SettledFlag[] = [];
-    const shiftsByUser = new Map<string, OverviewShift[]>();
-    for (const sh of shifts) shiftsByUser.set(sh.userId, [...(shiftsByUser.get(sh.userId) ?? []), sh]);
 
     for (const uid of ids) {
       const ledger = ledgerByUser.get(uid) ?? [];
       let yWorking = 0;
       let yBreak = 0;
-      const ySessions: TimeEntryLedgerDocument[] = [];
 
       for (const s of ledger) {
         // Per-person guard: one malformed doc must not 500 the roster (time-tracking.md trap 9).
@@ -187,7 +182,6 @@ export const GET = withAuth(async (_request: NextRequest, token: DecodedIdToken)
           if (start >= yesterdayBounds.start && start < yesterdayBounds.end && !s.isManual) {
             yWorking += s.workingSeconds ?? 0;
             yBreak += s.breakSeconds ?? 0;
-            ySessions.push(s);
           }
         } catch (err) {
           console.error('[shift-management/overview] skipped session', s?.sessionId, err);
@@ -198,20 +192,6 @@ export const GET = withAuth(async (_request: NextRequest, token: DecodedIdToken)
         flags.push({ kind: 'no-break', userId: uid, date: yesterday, workingSeconds: yWorking });
       }
 
-      const yClocked = yWorking + yBreak;
-      if (ySessions.length > 0 && yClocked > UNROSTERED_ALERT_SECONDS) {
-        const windows = mergeIntervals(
-          (shiftsByUser.get(uid) ?? [])
-            .filter(sh => sh.end > yesterdayBounds.start && sh.start < yesterdayBounds.end + BUFFER_MS)
-            .map(sh => [sh.start, sh.end] as [number, number]),
-        );
-        let inside = 0;
-        for (const [ws, we] of windows) inside += computeTimeWorked(ws, we, ySessions, undefined);
-        const outside = yClocked - inside;
-        if (outside >= UNROSTERED_ALERT_SECONDS) {
-          flags.push({ kind: 'unrostered', userId: uid, date: yesterday, outsideSeconds: outside });
-        }
-      }
     }
 
     const body: ShiftOverviewResponse = {

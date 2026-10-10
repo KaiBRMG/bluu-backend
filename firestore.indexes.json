@@ -2338,6 +2338,26 @@
       "collectionGroup": "integrity-state",
       "fieldPath": "fingerprints",
       "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "leaveAllotment",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "leaveAdjustments",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "leave-ledger",
+      "fieldPath": "period",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "leave-ledger",
+      "fieldPath": "note",
+      "indexes": []
     }
   ]
 }

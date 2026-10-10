@@ -9,7 +9,8 @@ import type { LeaveLedgerAction, LeaveLedgerDocument, LeaveRequestDocument } fro
 // ─── GET /api/shifts/leave/history ───────────────────────────────────────────
 //
 // Coverage → History: every decided or withdrawn leave request, its outcome,
-// and the balance trail from `leave-ledger` (see `leaveLedger.ts`).
+// and the balance trail from `leave-ledger` (see `leaveLedger.ts`) — plus every
+// adjustment and allowance change an admin made, each as its own row.
 //
 // Two sources, merged by `leaveId`, because neither is complete alone:
 // - `leave_requests` holds decided requests, including those decided before the
@@ -27,7 +28,7 @@ import type { LeaveLedgerAction, LeaveLedgerDocument, LeaveRequestDocument } fro
 const REQUEST_LIMIT = 400;
 const LEDGER_LIMIT = 600;
 
-type Outcome = 'approved' | 'denied' | 'withdrawn';
+type Outcome = 'approved' | 'denied' | 'withdrawn' | 'adjusted';
 
 export interface LeaveHistoryEvent {
   action: LeaveLedgerAction;
@@ -53,6 +54,11 @@ export interface LeaveHistoryRow {
   events: LeaveHistoryEvent[];
   /** For a withdrawal: whether it was pending, approved or denied at the time. */
   withdrawnFrom: string | null;
+  /**
+   * The leave period the change belongs to — `YYYY-MM` / `YYYY`, `'standing'`
+   * for an allowance change, `null` on entries from before periods were logged.
+   */
+  period: string | null;
 }
 
 const iso = (ts: unknown): string | null =>
@@ -75,8 +81,15 @@ export const GET = withAuth(async (_request, token: DecodedIdToken) => {
       getRecentLeaveLedger(LEDGER_LIMIT),
     ]);
 
+    // An admin's adjustment or allowance change is its own row, never grouped:
+    // two adjustments to the same month are two decisions.
+    const adminEntries: LeaveLedgerDocument[] = [];
     const eventsByLeave = new Map<string, LeaveLedgerDocument[]>();
     for (const entry of ledger) {
+      if (entry.action === 'adjusted' || entry.action === 'allotment') {
+        adminEntries.push(entry);
+        continue;
+      }
       const list = eventsByLeave.get(entry.leaveId);
       if (list) list.push(entry);
       else eventsByLeave.set(entry.leaveId, [entry]);
@@ -105,7 +118,24 @@ export const GET = withAuth(async (_request, token: DecodedIdToken) => {
         decidedAt: iso(leave.resolvedAt),
         decidedBy: leave.resolvedBy ?? null,
         withdrawnFrom: null,
+        period: null,
         entries: eventsByLeave.get(leave.leaveId) ?? [],
+      });
+    }
+
+    for (const entry of adminEntries) {
+      drafts.push({
+        leaveId: entry.entryId,
+        userId: entry.userId,
+        leaveType: entry.leaveType,
+        occurrenceStart: entry.occurrenceStart,
+        reason: entry.note ?? null,
+        outcome: 'adjusted',
+        decidedAt: iso(entry.at),
+        decidedBy: entry.actorUid,
+        withdrawnFrom: null,
+        period: entry.period ?? null,
+        entries: [entry],
       });
     }
 
@@ -126,6 +156,7 @@ export const GET = withAuth(async (_request, token: DecodedIdToken) => {
         decidedAt: iso(last.at),
         decidedBy: last.actorUid,
         withdrawnFrom: last.priorStatus ?? null,
+        period: last.period ?? null,
         entries,
       });
     }

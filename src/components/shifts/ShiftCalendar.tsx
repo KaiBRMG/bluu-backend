@@ -26,6 +26,7 @@ import { useShiftCalendar } from '@/hooks/useShiftCalendar';
 import { useCoverageOffers, type CoverageOfferRow } from '@/hooks/useCoverageOffers';
 import { useLeaveRequests, type LeaveRequest } from '@/hooks/useLeaveRequests';
 import { RequestLeaveDialog, MIN_LEAVE_NOTICE_DAYS, type LeaveTarget } from './RequestLeaveDialog';
+import { isWithinRequestWindow } from '@/lib/leave/leaveBalance';
 import {
   addDays,
   currentDayKey,
@@ -783,8 +784,8 @@ export function ShiftCalendar({
 
       {/* One quiet line rather than a legend nobody reads. */}
       <p className="mt-3 text-xs text-zinc-400">
-        Select the <CalendarX2 className="inline size-3.5 align-[-3px]" aria-hidden /> on a shift to request time off.
-        Leave not requested at least {MIN_LEAVE_NOTICE_DAYS} days in advance may be rejected.
+        Select the <CalendarX2 className="inline size-3.5 align-[-3px]" aria-hidden /> on a shift to request time off,
+        for this month or next. Leave not requested at least {MIN_LEAVE_NOTICE_DAYS} days in advance may be rejected.
       </p>
 
       {/* An unreadable leave list changes what every cell above means, so it is
@@ -992,7 +993,11 @@ function ShiftEntry({
   // Withdrawn entirely while the leave list failed to load: `leave` is null for
   // every shift in that state, so offering the button would invite a second
   // request for a day already booked off. "Unknown" must not render as "none".
-  const canRequestLeave = paysWage && !leave && !leaveBlocked && shift.occurrenceStart > now;
+  //
+  // Only for this salary month and next: each month's allowance is its own, and
+  // the server refuses anything further out (`leaveBalance.ts`).
+  const canRequestLeave =
+    paysWage && !leave && !leaveBlocked && shift.occurrenceStart > now && isWithinRequestWindow(shift.occurrenceStart, now);
 
   // The cap the salary page tells the agent about, in hours.
   const shiftHours = (shift.occurrenceEnd - shift.occurrenceStart) / 3_600_000;

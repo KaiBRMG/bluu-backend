@@ -205,6 +205,12 @@ export function formatMonthLabel(month: SalaryMonthKey): string {
   return `${MONTH_NAMES[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
 }
 
+/** `'2026-08'` → `'August'`, or `'Aug'` with `short`. */
+export function formatMonthName(month: SalaryMonthKey, short = false): string {
+  const name = MONTH_NAMES[Number(month.slice(5, 7)) - 1];
+  return short ? name.slice(0, 3) : name;
+}
+
 /** `'2026-08'` → `'Aug 2026'`. */
 export function formatMonthLabelShort(month: SalaryMonthKey): string {
   return `${MONTH_NAMES[Number(month.slice(5, 7)) - 1].slice(0, 3)} ${month.slice(0, 4)}`;

@@ -10,13 +10,26 @@
  * the tier ladder from it — the rates are a term of their employment, not a
  * secret. PUT is the **admin claim**: a tier change silently restates every
  * agent's month.
+ *
+ * `PUT ?preview=1` is the dry run: the same validation, nothing written, and
+ * back comes what the draft would do to every month still open — payroll
+ * before and after, and who changes tier — so the admin confirms a number, not
+ * a table. Uncached by nature; admin claim like the write.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
 import { requireAdminClaim } from '@/lib/salary/salaryAuth';
-import { getSalaryConfig, setSalaryConfig } from '@/lib/services/caSalaryService';
+import {
+  buildSalaryMonthForUsersUnder,
+  getFinalizedMonthsFor,
+  getSalaryConfig,
+  setSalaryConfig,
+} from '@/lib/services/caSalaryService';
+import { round2 } from '@/lib/salary/salaryEngine';
+import { adminDb } from '@/lib/firebase-admin';
+import { addMonths, currentMonthKey } from '@/lib/salary/salaryDate';
 import { getUserById } from '@/lib/services/userService';
 import type { SalaryConfig, WageRateBasis } from '@/lib/salary/salaryTypes';
 import type { DecodedIdToken } from 'firebase-admin/auth';
@@ -118,6 +131,10 @@ export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     const result = validate(await request.json());
     if ('error' in result) return NextResponse.json({ error: result.error }, { status: 400 });
 
+    if (new URL(request.url).searchParams.get('preview') === '1') {
+      return NextResponse.json(await previewImpact(result.config));
+    }
+
     const actor = await getUserById(token.uid);
     await setSalaryConfig(result.config, token.uid, actor?.displayName ?? token.email ?? token.uid);
 
@@ -126,3 +143,88 @@ export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     return handleApiError(err, 'ca-salary/config PUT');
   }
 });
+
+export interface RatesImpactAgent {
+  uid: string;
+  displayName: string;
+  before: number;
+  after: number;
+  tierBefore: number;
+  tierAfter: number;
+}
+
+export interface RatesImpactMonth {
+  month: string;
+  /** Agents whose month is open — the only ones a rate change restates. */
+  openAgents: number;
+  payrollBefore: number;
+  payrollAfter: number;
+  /** Open agents whose figure moves, biggest change first. */
+  changed: RatesImpactAgent[];
+}
+
+/**
+ * What a draft rate table would do to the months it would restate.
+ *
+ * Last month and this month — the only months payroll can still be working
+ * on — in parallel. Each is built once under both configs
+ * (`buildSalaryMonthForUsersUnder`), for its open agents only, so the dry run
+ * costs at most the reads of one roster build per month.
+ */
+async function previewImpact(draft: Omit<SalaryConfig, 'updatedBy' | 'updatedAt'>): Promise<{ months: RatesImpactMonth[] }> {
+  const live = await getSalaryConfig();
+  const proposed: SalaryConfig = { ...live, ...draft };
+
+  // Projected: only what the summary names (rule 9). Archived agents are
+  // filtered in memory — `isArchived` is absent on most documents (rule 6).
+  const snap = await adminDb
+    .collection('users')
+    .where('groups', 'array-contains', 'CA')
+    .select('displayName', 'isArchived')
+    .get();
+  const names = new Map(
+    snap.docs
+      .filter(d => d.get('isArchived') !== true)
+      .map(d => [d.id, (d.get('displayName') as string | undefined) ?? d.id] as const),
+  );
+  const ids = [...names.keys()];
+
+  const current = currentMonthKey();
+  const months = [addMonths(current, -1), current];
+
+  // A rate change never restates a finalised month, so only open agents are
+  // built — last month is usually mostly closed, and often entirely.
+  const out = await Promise.all(
+    months.map(async (month): Promise<RatesImpactMonth> => {
+      const finalized = await getFinalizedMonthsFor(ids, month);
+      const open = ids.filter(uid => !finalized.has(uid));
+      const empty = { month, openAgents: 0, payrollBefore: 0, payrollAfter: 0, changed: [] };
+      if (open.length === 0) return empty;
+
+      const [before, after] = await buildSalaryMonthForUsersUnder(open, month, [live, proposed]);
+      let payrollBefore = 0;
+      let payrollAfter = 0;
+      const changed: RatesImpactAgent[] = [];
+      for (const uid of open) {
+        const b = before.get(uid);
+        const a = after.get(uid);
+        if (!b || !a) continue;
+        payrollBefore += b.totals.salary;
+        payrollAfter += a.totals.salary;
+        if (Math.abs(a.totals.salary - b.totals.salary) >= 0.01 || a.tier.currentPercent !== b.tier.currentPercent) {
+          changed.push({
+            uid,
+            displayName: names.get(uid) ?? uid,
+            before: b.totals.salary,
+            after: a.totals.salary,
+            tierBefore: b.tier.currentPercent,
+            tierAfter: a.tier.currentPercent,
+          });
+        }
+      }
+      changed.sort((x, y) => Math.abs(y.after - y.before) - Math.abs(x.after - x.before));
+      return { month, openAgents: open.length, payrollBefore: round2(payrollBefore), payrollAfter: round2(payrollAfter), changed };
+    }),
+  );
+  return { months: out };
+}

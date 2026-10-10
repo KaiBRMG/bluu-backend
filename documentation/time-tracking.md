@@ -458,7 +458,7 @@ It `require`s the same `functions/rollup.js` module as the CF, so backfilled and
 GET /api/admin/shift-management/overview   ← settled: read once per view, `private, max-age=60`
   shifts (yesterday→tomorrow, CALLER's zone) + attendance + first clock-in + leave
   sessions overlapping today (decoded spans; empty = no event log = unknown)
-  flags: missed-clock-out · no-break (yesterday) · unrostered (yesterday, ≥ 1h)
+  flags: missed-clock-out · no-break (yesterday)
 useActiveUsers (snapshot listener)         ← live: idle / break length / silent / overrun / not-in
                      │
         deriveAttention(data, live, now)   ← pure; `now` is a MINUTE clock, never 1 Hz
@@ -467,6 +467,7 @@ useActiveUsers (snapshot listener)         ← live: idle / break length / silen
 - **Reads:** two parallel rounds — shifts ×2, roster ×1, one `leave_requests` range; then ledger ×⌈N/30⌉ and `active_sessions where userClockOut == false` (billed per open session, not per roster member). Attendance and first clock-in come from one pass of `computeAttendanceDetail`; shift windows merge through the exported `mergeIntervals`. No new query shapes, so **no new indexes**. Tier: `shift-management` page permission, same as the week and analytics routes.
 - **Nothing polls.** The route is fetched on mount and on the refresh button; everything that ages by the minute is derived client-side from the live snapshot.
 - **Thresholds** live in `shiftOverview.ts`: late/not-in reuse `LATE_AFTER_MS` (30 min); idle ≥ 20 min; break ≥ 45 min (one shift's allowance); working with no check-in for 35 min (two missed 15-min heartbeats + slack) = "app has stopped reporting"; clocked in ≥ 30 min after the day's last shift ended = overrun.
+- **Time worked outside a shift is never flagged**, and the 7-day panel does not show it: many people track time without a schedule, so "not covered by a shift" is normal, not an exception. (Removed 2026-10-10.)
 - **Approved leave suppresses** not-in / missed; pending leave is *annotated* on the item, not suppressed.
 - **Dismissals are per admin, per browser** (`localStorage`, 2-day expiry, read through `useSyncExternalStore`). A dismissal means "I've seen this", never "resolved". No Firestore state — so no rules change.
 - **The live timeline bar is honest about what it knows.** An open session has no event log on the server, so it draws neutral from clock-in to now; only the tail since the last *non-working* transition takes that state's hue (`lastUpdated` is exact there). A working session gets a cap at "now", not a fabricated green span.

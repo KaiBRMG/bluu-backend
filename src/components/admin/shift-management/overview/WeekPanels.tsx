@@ -124,11 +124,6 @@ export function WeekSummary({
               value={`${w.noBreakDays}`}
               meta={`days worked without one · ${w.usersOverAllowance} over allowance`}
             />
-            <Stat
-              label="Outside shifts"
-              value={formatDuration(a.unrosteredOvertimeSeconds)}
-              meta="clocked time no shift covered"
-            />
           </dl>
           <p className="mt-1 text-[11px] text-zinc-400">
             Computed nightly, so it ends yesterday

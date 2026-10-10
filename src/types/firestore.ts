@@ -150,21 +150,29 @@ export interface UserDocument {
    */
   pinnedGrowthAccounts?: string[];
   hasPaidLeave?: boolean;
-  remainingUnpaidLeave?: number;
-  remainingPaidLeave?: number;
   /**
-   * The leave periods this user's balances currently belong to — `YYYY-MM` for
-   * unpaid, a year for paid.
-   *
-   * Written only by `finalizeMonth` (finalising month M stamps M+1, and a
-   * December also stamps the next year). They only move forward, which is what
-   * makes a re-finalise after a reopen a no-op for leave. Refunds compare against
-   * them too. See `computeFinalizationReset` in
-   * [`leaveBalance.ts`](../lib/leave/leaveBalance.ts).
-   *
-   * Nothing queries either field, so both are index-exempt (rule 9).
+   * This person's standing leave allowance — unpaid days per salary month, paid
+   * days per salary year. A missing field means the default in
+   * [`leaveBalance.ts`](../lib/leave/leaveBalance.ts). Balances are derived from
+   * this, `leaveAdjustments` and the person's requests; nothing stores one.
+   * Index-exempt (rule 9).
    */
+  leaveAllotment?: { unpaidPerMonth?: number; paidPerYear?: number };
+  /**
+   * One-off ± days for one period: `unpaid['2026-11'] = 2`, `paid['2026'] = -1`.
+   * Every change is recorded in `leave-ledger`. Index-exempt (rule 9).
+   */
+  leaveAdjustments?: { unpaid?: Record<string, number>; paid?: Record<string, number> };
+  /**
+   * @deprecated Stored balances and reset stamps from before balances were
+   * derived (2026-10-10). Still present on old documents; nothing reads them.
+   */
+  remainingUnpaidLeave?: number;
+  /** @deprecated See `remainingUnpaidLeave`. */
+  remainingPaidLeave?: number;
+  /** @deprecated See `remainingUnpaidLeave`. */
   unpaidLeaveResetMonth?: string;
+  /** @deprecated See `remainingUnpaidLeave`. */
   paidLeaveResetYear?: number;
   // RESOLVED time-tracking settings (org → group → user), written only by
   // timeTrackingSettingsService. Never edit directly — edit the overrides.
@@ -354,25 +362,26 @@ export interface LeaveRequestDocument {
   releasedShiftId?: string | null;
   releasedOccurrenceStart?: number | null;
   /**
-   * The day this request holds against the balance, and which reset period it
-   * was taken from (`unpaidLeaveResetMonth` / `paidLeaveResetYear` as a string,
-   * or `null` when the user had no stamp). Written when the day is taken — at
-   * request time, or at approval for a request made before charging moved
-   * there — and cleared when it is given back. `chargedPeriod` is what stops a
-   * refund landing in a period that has already been reset. Index-exempt
-   * (rule 9). See `leaveBalance.ts`.
+   * @deprecated Charge markers from before balances were derived (2026-10-10).
+   * A request now holds a day exactly while it is pending or approved, in the
+   * period its `occurrenceStart` falls in. Old documents still carry these.
    */
   balanceCharged?: boolean;
+  /** @deprecated See `balanceCharged`. */
   chargedPeriod?: string | null;
 }
 
 // ─── Leave ledger ───────────────────────────────────────────────────
 
-export type LeaveLedgerAction = 'requested' | 'approved' | 'denied' | 'withdrawn';
+export type LeaveLedgerAction = 'requested' | 'approved' | 'denied' | 'withdrawn' | 'adjusted' | 'allotment';
 
 /**
- * `leave-ledger/{entryId}` — one balance change made by a leave request. Written
- * inside the transaction that moves the balance. See `leaveLedger.ts`.
+ * `leave-ledger/{entryId}` — one change to a leave balance: a request moving
+ * through its states, or an admin changing an allotment or an adjustment.
+ * Written inside the transaction that makes the change. See `leaveLedger.ts`.
+ *
+ * `balanceBefore`/`balanceAfter` are the remaining days **in `period`** either
+ * side of the change. For `allotment` they are the standing allotment instead.
  */
 export interface LeaveLedgerDocument {
   entryId: string;
@@ -386,6 +395,10 @@ export interface LeaveLedgerDocument {
   actorUid: string;
   at: Timestamp;
   priorStatus?: string;
+  /** `YYYY-MM` (unpaid) or `YYYY` (paid). Absent on entries from before 2026-10-10. */
+  period?: string;
+  /** For `adjusted`: the admin's note. */
+  note?: string;
 }
 
 // ─── Group ──────────────────────────────────────────────────────────

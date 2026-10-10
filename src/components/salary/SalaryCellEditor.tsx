@@ -11,6 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useAuth } from '@/components/AuthProvider';
 import type { SalaryDayResult, SalaryMonthResult, SalaryOverrideField } from '@/lib/salary/salaryTypes';
 import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
+import { formatSalaryField } from '@/lib/salary/salaryFormat';
 
 /**
  * Editing one figure on one day.
@@ -18,7 +19,8 @@ import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
  * A popover rather than an inline input, and that is the considered choice: this
  * is money. An inline cell commits on blur, which means a mis-key and a click
  * elsewhere silently changes what somebody gets paid. The popover shows what the
- * system calculated beside what you are typing, takes an optional reason, offers
+ * system calculated beside what you are typing, requires a reason (the agent
+ * sees it beside the edited figure), offers
  * the revert in the same place, and requires a deliberate Save.
  *
  * The response is the **recomputed month**, applied wholesale. A client-side
@@ -100,10 +102,15 @@ export function SalaryCellEditor({
           setSaving(false);
           return;
         }
+        if (reason.trim().length < 3) {
+          setError('Add a short reason. The agent sees it beside the edited figure.');
+          setSaving(false);
+          return;
+        }
         res = await fetch('/api/ca-salary/override', {
           method: 'PUT',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, day, field, value: parsed, reason: reason.trim() || undefined }),
+          body: JSON.stringify({ userId, day, field, value: parsed, reason: reason.trim() }),
         });
       } else {
         res = await fetch(
@@ -197,11 +204,14 @@ export function SalaryCellEditor({
 
           <div className="space-y-1.5">
             <Label htmlFor={`reason-${day}-${field}`} className="text-xs">
-              Reason <span className="text-zinc-400">(optional)</span>
+              Reason <span className="text-zinc-400">(shown to the agent)</span>
             </Label>
             <Input
               id={`reason-${day}-${field}`}
               value={reason}
+              required
+              minLength={3}
+              maxLength={280}
               onChange={event => setReason(event.target.value)}
               placeholder="Agreed with agent on 3 Sep"
               className="h-8"
@@ -211,7 +221,8 @@ export function SalaryCellEditor({
           {/* What the system said, so an admin can see what they are replacing
               rather than remembering it. */}
           <p className="rounded-md bg-white/[0.025] px-2.5 py-2 text-xs text-zinc-400">
-            Calculated value: <span className="tabular-nums text-foreground">{computedValue}</span>
+            Calculated value:{' '}
+            <span className="tabular-nums text-foreground">{formatSalaryField(field, computedValue)}</span>
             {override && (
               <>
                 {' · '}currently set by {override.setByName ?? 'an administrator'}

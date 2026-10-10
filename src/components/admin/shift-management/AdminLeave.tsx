@@ -1,175 +1,303 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Info } from 'lucide-react';
-import { useAdminUsers } from '@/hooks/useAdminUsers';
-import { LEAVE_ALLOTMENT } from '@/lib/leave/leaveBalance';
+import { RotateCcw } from 'lucide-react';
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+import { HAIRLINE } from '@/lib/surfaces';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useLeaveAllowances, type LeaveAllowanceRow } from '@/hooks/useLeaveAllowances';
+import {
+  MAX_ALLOTMENT,
+  describeLeaveBalance,
+  formatLeavePeriod,
+  formatRemaining,
+  isWholeDays,
+  signedDays,
+  type LeaveBalance,
+} from '@/lib/leave/leaveBalance';
+import { formatMonthName } from '@/lib/salary/salaryDate';
+import { pluralise } from '@/lib/salary/salaryFormat';
 
-interface LeaveEdits {
-  [uid: string]: {
-    remainingUnpaidLeave: number;
-    remainingPaidLeave: number;
-  };
-}
+/**
+ * Shift Management → Settings → Leave: how much leave each person gets, and
+ * what is left of it.
+ *
+ * Unpaid leave is a **monthly** allowance and paid leave a **yearly** one; a
+ * request is charged to the month (or year) its shift falls in, and nothing
+ * carries over or resets (`lib/leave/leaveBalance.ts`). So this table edits the
+ * standing allowance, and shows the balances for the two months leave can be
+ * requested in. One-off adjustments for a single month are made from the
+ * person's own Leave tab, where the note they need can be written.
+ */
+
+type Draft = Record<string, { unpaid?: string; paid?: string }>;
+
+const HEAD = 'px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400';
 
 export default function AdminLeave() {
-  const { users, loading, error, updateUser } = useAdminUsers();
-  const [edits, setEdits] = useState<LeaveEdits>({});
-  const [hasChanges, setHasChanges] = useState(false);
+  const { data, loading, error, reload, save } = useLeaveAllowances();
+  const [draft, setDraft] = useState<Draft>({});
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const sortedUsers = users
-    .filter(u => !u.isArchived)
-    .sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
-
-  // Rebuild baseline whenever users reload (after save)
-  useEffect(() => {
-    setEdits({});
-    setHasChanges(false);
-  }, [users]);
-
-  const getValue = useCallback(
-    (uid: string, field: 'remainingUnpaidLeave' | 'remainingPaidLeave') => {
-      if (edits[uid] !== undefined) return edits[uid][field];
-      const user = users.find(u => u.uid === uid);
-      // The allotment constants, not hand-typed numbers. These were `10` and `4`
-      // here while the agent-facing surfaces defaulted the same missing field to
-      // `0` — an admin and an agent reading different numbers off one document.
-      return user?.[field] ?? LEAVE_ALLOTMENT[field === 'remainingPaidLeave' ? 'paid' : 'unpaid'];
-    },
-    [edits, users]
-  );
-
-  const handleChange = (
-    uid: string,
-    field: 'remainingUnpaidLeave' | 'remainingPaidLeave',
-    raw: string
-  ) => {
-    const value = parseInt(raw, 10);
-    if (isNaN(value) || value < 0) return;
-
-    const user = users.find(u => u.uid === uid);
-    const baseline = {
-      remainingUnpaidLeave: user?.remainingUnpaidLeave ?? LEAVE_ALLOTMENT.unpaid,
-      remainingPaidLeave: user?.remainingPaidLeave ?? LEAVE_ALLOTMENT.paid,
-    };
-    const current = edits[uid] ?? baseline;
-    const updated = { ...current, [field]: value };
-
-    setEdits(prev => ({ ...prev, [uid]: updated }));
-    setHasChanges(true);
-    setSaveError(null);
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await Promise.all(
-        Object.entries(edits).map(([uid, values]) =>
-          updateUser(uid, {
-            remainingUnpaidLeave: values.remainingUnpaidLeave,
-            remainingPaidLeave: values.remainingPaidLeave,
-          })
-        )
+  const dirty = useMemo(() => {
+    if (!data) return [];
+    return data.people.filter(person => {
+      const d = draft[person.uid];
+      if (!d) return false;
+      return (
+        (d.unpaid !== undefined && d.unpaid !== String(person.allotment.unpaid)) ||
+        (d.paid !== undefined && d.paid !== String(person.allotment.paid))
       );
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Failed to save');
-    } finally {
-      setSaving(false);
+    });
+  }, [data, draft]);
+
+  const invalid = dirty.some(person => {
+    const d = draft[person.uid];
+    return (
+      (d.unpaid !== undefined && !isWholeDays(d.unpaid, MAX_ALLOTMENT.unpaid)) ||
+      (d.paid !== undefined && !isWholeDays(d.paid, MAX_ALLOTMENT.paid))
+    );
+  });
+
+  if (loading && !data) return <Skeleton className="h-64 w-full rounded-xl" />;
+
+  if (error && !data) {
+    return (
+      <p className="flex flex-wrap items-center gap-2 text-sm text-red-400">
+        Couldn&apos;t load leave allowances: {error}
+        <Button size="xs" variant="ghost" className="text-red-400 hover:text-red-300" onClick={() => void reload()}>
+          <RotateCcw className="size-3" aria-hidden />
+          Retry
+        </Button>
+      </p>
+    );
+  }
+
+  if (!data) return null;
+
+  const { defaults, periods } = data;
+
+  const [thisMonth, nextMonth] = periods.unpaid;
+  const year = periods.paid[0];
+
+  async function saveAll() {
+    setSaving(true);
+    // People are independent: save them together, report each failure by
+    // name, and reload the table once rather than once per person. The server
+    // treats a value equal to the default as "follow the default".
+    const results = await Promise.allSettled(
+      dirty.map(person => {
+        const d = draft[person.uid];
+        return save(
+          {
+            uid: person.uid,
+            allotment: {
+              ...(d.unpaid !== undefined ? { unpaidPerMonth: Number(d.unpaid) } : {}),
+              ...(d.paid !== undefined ? { paidPerYear: Number(d.paid) } : {}),
+            },
+          },
+          { reload: false },
+        );
+      }),
+    );
+    await reload();
+    setSaving(false);
+    const failed = results.flatMap((r, i) =>
+      r.status === 'rejected'
+        ? [`${dirty[i].displayName}: ${r.reason instanceof Error ? r.reason.message : 'failed'}`]
+        : [],
+    );
+    if (failed.length === 0) {
+      toast.success(
+        `Leave allowance saved for ${dirty.length === 1 ? dirty[0].displayName : pluralise(dirty.length, 'person', 'people')}`,
+      );
+      setDraft({});
+    } else {
+      toast.error('Some allowances were not saved', { description: failed.join(' · ') });
     }
-  };
-
-  if (loading) {
-    return <div className="text-sm text-zinc-400">Loading users…</div>;
   }
 
-  if (error) {
-    return <div className="text-sm text-destructive">{error}</div>;
-  }
+  const edit = (uid: string, field: 'unpaid' | 'paid', value: string) =>
+    setDraft(prev => ({ ...prev, [uid]: { ...prev[uid], [field]: value } }));
 
   return (
-    <div>
-      <div className="flex items-start justify-between gap-4 mb-4">
+    <section>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold">Leave balances</h2>
+          <h2 className="text-lg font-semibold">Leave</h2>
           <p className="mt-1 max-w-[70ch] text-sm text-zinc-400">
-            Days each person has left to request. One person&apos;s balance can also be changed from their panel.
+            Unpaid leave is a monthly allowance (default {defaults.unpaidPerMonth}) and paid leave a yearly one (default{' '}
+            {defaults.paidPerYear}). A request comes out of the month its shift is in, and unused days don&apos;t carry
+            over. Open a person to add or remove days for one month.
           </p>
         </div>
-        {hasChanges && (
-          <Button onClick={handleSave} disabled={saving} size="sm">
-            {saving ? 'Saving...' : 'Save Changes'}
-          </Button>
-        )}
-      </div>
-
-      {saveError && (
-        <p className="text-sm text-destructive mb-4">{saveError}</p>
-      )}
-
-      <div className="space-y-3">
-        <div className="grid grid-cols-[1fr_140px_140px] gap-4 px-3 pb-1">
-          <span className="text-xs font-medium text-zinc-400">Employee</span>
-          <span className="text-xs font-medium text-zinc-400">Unpaid Leave</span>
-          <span className="flex items-center gap-1 text-xs font-medium text-zinc-400">
-            Paid Leave
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Info className="size-3 cursor-default" />
-              </TooltipTrigger>
-              <TooltipContent className="max-w-64 text-center leading-relaxed">
-                Paid leave can be enabled in the user&apos;s profile information in{' '}
-                <Link
-                  href="/admin-portal/user-management"
-                  className="underline hover:opacity-80"
-                >
-                  User Management &gt; Employee Registry &gt; Time Tracking
-                </Link>
-              </TooltipContent>
-            </Tooltip>
-          </span>
-        </div>
-
-        {sortedUsers.map(user => (
-          <div
-            key={user.uid}
-            className="grid grid-cols-[1fr_140px_140px] gap-4 items-center rounded-md px-3 py-2"
-            style={{ background: 'var(--background)', border: '1px solid var(--border-subtle)' }}
-          >
-            <div className="min-w-0">
-              <p className="text-sm font-medium truncate">{user.displayName}</p>
-              <p className="text-xs text-zinc-400 truncate">{user.workEmail}</p>
-            </div>
-
-            <Input
-              type="number"
-              min={0}
-              value={getValue(user.uid, 'remainingUnpaidLeave')}
-              onChange={e => handleChange(user.uid, 'remainingUnpaidLeave', e.target.value)}
-              className="h-8 text-sm"
-            />
-
-            <Input
-              type="number"
-              min={0}
-              value={getValue(user.uid, 'remainingPaidLeave')}
-              onChange={e => handleChange(user.uid, 'remainingPaidLeave', e.target.value)}
-              disabled={!user.hasPaidLeave}
-              className="h-8 text-sm"
-            />
+        {dirty.length > 0 && (
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="ghost" onClick={() => setDraft({})} disabled={saving}>
+              Discard
+            </Button>
+            <Button size="sm" onClick={() => void saveAll()} disabled={saving || invalid}>
+              {saving ? 'Saving…' : dirty.length === 1 ? 'Save change' : `Save ${pluralise(dirty.length, 'change')}`}
+            </Button>
           </div>
-        ))}
-
-        {sortedUsers.length === 0 && (
-          <p className="text-sm text-zinc-400 px-3">No users found.</p>
         )}
       </div>
-    </div>
+
+      <div
+        tabIndex={0}
+        role="region"
+        aria-label="Leave allowances, scrollable"
+        className={cn(
+          'overflow-x-auto rounded-lg border',
+          HAIRLINE,
+          'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50',
+        )}
+      >
+        <table className="w-full min-w-[760px] border-collapse text-sm">
+          <thead>
+            <tr className={cn('border-b', HAIRLINE)}>
+              <th scope="col" className={cn(HEAD, 'text-left')}>Employee</th>
+              <th scope="col" className={cn(HEAD, 'text-left')}>Unpaid / month</th>
+              <th scope="col" className={cn(HEAD, 'text-left')}>Paid / year</th>
+              <th scope="col" className={cn(HEAD, 'text-right')}>Unpaid left · {shortMonth(thisMonth)}</th>
+              <th scope="col" className={cn(HEAD, 'text-right')}>Unpaid left · {shortMonth(nextMonth)}</th>
+              <th scope="col" className={cn(HEAD, 'text-right')}>Paid left · {year}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/[0.045]">
+            {data.people.map(person => (
+              <AllowanceRow
+                key={person.uid}
+                person={person}
+                draft={draft[person.uid]}
+                onEdit={edit}
+                disabled={saving}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {data.people.length === 0 && <p className="mt-3 text-sm text-zinc-400">No active employees.</p>}
+
+      <p className="mt-3 text-xs text-zinc-400">
+        Paid leave is switched on per person in{' '}
+        <Link href="/admin-portal/user-management" prefetch={false} className="text-zinc-200 underline-offset-2 hover:underline">
+          Employee Registry
+        </Link>
+        .
+      </p>
+    </section>
   );
+}
+
+function AllowanceRow({
+  person,
+  draft,
+  onEdit,
+  disabled,
+}: {
+  person: LeaveAllowanceRow;
+  draft: Draft[string] | undefined;
+  onEdit: (uid: string, field: 'unpaid' | 'paid', value: string) => void;
+  disabled: boolean;
+}) {
+  const unpaid = draft?.unpaid ?? String(person.allotment.unpaid);
+  const paid = draft?.paid ?? String(person.allotment.paid);
+  const [now, next] = person.balances.unpaid;
+  const year = person.balances.paid[0];
+
+  return (
+    <tr className="transition-colors duration-[120ms] hover:bg-white/[0.035]">
+      <th scope="row" className="px-3 py-2 text-left font-normal">
+        <span className="block truncate font-medium">{person.displayName}</span>
+        {person.workEmail && <span className="block truncate text-[11px] text-zinc-400">{person.workEmail}</span>}
+      </th>
+      <td className="px-3 py-2">
+        <AllowanceInput
+          label={`${person.displayName}: unpaid days per month`}
+          value={unpaid}
+          max={MAX_ALLOTMENT.unpaid}
+          custom={person.allotment.unpaidCustom}
+          onChange={v => onEdit(person.uid, 'unpaid', v)}
+          disabled={disabled}
+        />
+      </td>
+      <td className="px-3 py-2">
+        {person.hasPaidLeave ? (
+          <AllowanceInput
+            label={`${person.displayName}: paid days per year`}
+            value={paid}
+            max={MAX_ALLOTMENT.paid}
+            custom={person.allotment.paidCustom}
+            onChange={v => onEdit(person.uid, 'paid', v)}
+            disabled={disabled}
+          />
+        ) : (
+          <span className="text-xs text-zinc-400">No paid leave</span>
+        )}
+      </td>
+      <BalanceCell balance={now} />
+      <BalanceCell balance={next} />
+      <BalanceCell balance={year} />
+    </tr>
+  );
+}
+
+function AllowanceInput({
+  label,
+  value,
+  max,
+  custom,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  max: number;
+  custom: boolean;
+  onChange: (value: string) => void;
+  disabled: boolean;
+}) {
+  const valid = isWholeDays(value, max);
+  return (
+    <span className="flex items-center gap-2">
+      <Input
+        type="number"
+        inputMode="numeric"
+        min={0}
+        max={max}
+        aria-label={label}
+        aria-invalid={!valid}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        disabled={disabled}
+        className="h-8 w-20 text-sm tabular-nums"
+      />
+      {!custom && <span className="text-[11px] text-zinc-400">default</span>}
+    </span>
+  );
+}
+
+/** Days left, with what it is made of for anyone who asks. Negative shows as over. */
+function BalanceCell({ balance }: { balance: LeaveBalance | undefined }) {
+  if (!balance) return <td className="px-3 py-2 text-right text-zinc-400">—</td>;
+  const detail = `${formatLeavePeriod(balance.period)}: ${describeLeaveBalance(balance)}`;
+  return (
+    <td className="px-3 py-2 text-right tabular-nums" title={detail}>
+      <span className={cn(balance.remaining < 0 && 'text-orange-400')}>{formatRemaining(balance.remaining)}</span>
+      {balance.adjustment !== 0 && (
+        <span className="ml-1.5 text-[11px] text-zinc-400">({signedDays(balance.adjustment)})</span>
+      )}
+      <span className="sr-only"> — {detail}</span>
+    </td>
+  );
+}
+
+function shortMonth(period: string | undefined): string {
+  return period ? formatMonthName(period, true) : '';
 }

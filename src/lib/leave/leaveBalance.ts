@@ -1,254 +1,210 @@
 /**
- * Leave balances: the allotments, the defaults, and the finalisation reset.
+ * Leave balances: the allotments, the periods, and the one balance calculation.
  *
- * One module because the same three numbers were previously spelled out at six
- * call sites and **two of them disagreed**. `AdminLeave` and `UserDetailContent`
- * read a missing balance as `4` / `10`; the request route, `LeaveBalanceCard`
- * and `RequestLeaveDialog` read the same missing field as `0`. Since nothing
- * seeded the fields at user creation, that was the normal state of a new agent:
- * an admin saw four unpaid days, the agent saw "0 unpaid days left" and was
- * refused by the API. Neither side was wrong about the number it had — there was
- * no number.
+ * ## The model (2026-10-10)
  *
- * So: `resolveLeaveBalances` is the only way to read a balance off a user
- * document, and the allotment constants below are the only place the entitlement
- * is written down.
+ * **A balance is derived, never stored.** For one person, one leave type and one
+ * period:
  *
- * ## The entitlement
+ *     remaining = allotment + adjustment − days held by requests in that period
  *
- * - **Unpaid leave: 4 days per salary month.**
- * - **Paid leave: 10 days per year**, and only for users with `hasPaidLeave`.
+ * - **Unpaid leave is a monthly allowance; paid leave is a yearly one.** The
+ *   period is the salary month (`YYYY-MM`) or salary year (`YYYY`) of the
+ *   **shift the leave is for**, in `Africa/Harare` — the same clock the salary
+ *   day uses, so a day off cannot land in one month's roster and spend another
+ *   month's allowance.
+ * - **A request is charged to the period its shift falls in**, not the period
+ *   it was asked in. Leave for a shift next month spends next month's allowance.
+ * - **A request holds a day while it is pending or approved.** A denial or a
+ *   withdrawal (which deletes the request) gives it back simply by no longer
+ *   counting — there is no refund write, so there is nothing to get wrong.
+ * - **The allotment** is per person (`users.leaveAllotment`), falling back to
+ *   the defaults below. Set in Shift Management → Settings → Leave, or on the
+ *   person's own Leave tab.
+ * - **An adjustment** is a one-off ± for one person in one period
+ *   (`users.leaveAdjustments`), e.g. two extra unpaid days in November. Every
+ *   change is written to the leave ledger with who made it.
+ * - **Nothing carries over and nothing resets.** A new month simply has no
+ *   requests in it yet. Finalising a salary month no longer touches leave.
+ * - **Agents may ask for leave in this salary month or the next one**, never
+ *   further out (`isWithinRequestWindow`).
  *
- * **Balances reset when payroll finalises a month, not on a calendar date.**
- * Finalising an agent's month grants the *next* month's four unpaid days;
- * finalising their **December** also grants the next year's ten paid days. See
- * `computeFinalizationReset` below.
- *
- * Balances do not carry over. A reset is an assignment to the allotment, not an
- * increment, so an unused month does not compound into a fortnight.
+ * This replaced the stored `remainingUnpaidLeave` / `remainingPaidLeave` fields,
+ * the reset stamps and the charge/refund markers. Those fields may still sit on
+ * old documents; nothing reads them any more. Old requests need no migration —
+ * every request carries `occurrenceStart`, which is all the period needs.
  */
 
-import { addMonths, type SalaryMonthKey } from '@/lib/salary/salaryDate';
+import { addMonths, currentMonthKey, formatMonthLabel, toMonthKey } from '@/lib/salary/salaryDate';
 import type { UserDocument } from '@/types/firestore';
 
-/** Unpaid days granted each time a salary month is finalised. */
-export const UNPAID_LEAVE_DAYS_PER_MONTH = 4;
+/** Unpaid days a person gets each salary month unless their own allotment says otherwise. */
+export const DEFAULT_UNPAID_LEAVE_PER_MONTH = 4;
 
-/** Paid days granted when a December is finalised, for users with `hasPaidLeave`. */
-export const PAID_LEAVE_DAYS_PER_YEAR = 10;
+/** Paid days a person with `hasPaidLeave` gets each salary year unless their own allotment says otherwise. */
+export const DEFAULT_PAID_LEAVE_PER_YEAR = 10;
+
+export const DEFAULT_ALLOTMENT: Record<LeaveType, number> = {
+  unpaid: DEFAULT_UNPAID_LEAVE_PER_MONTH,
+  paid: DEFAULT_PAID_LEAVE_PER_YEAR,
+};
+
+/** The ledger's `period` for a change to the standing allotment rather than one period. */
+export const STANDING_PERIOD = 'standing';
+
+/** Sanity ceilings for what an admin can type. Not policy — a typo guard. */
+export const MAX_ALLOTMENT: Record<LeaveType, number> = { unpaid: 31, paid: 60 };
+export const MAX_ADJUSTMENT = 31;
 
 export type LeaveType = 'paid' | 'unpaid';
 
-/** The user-document field each leave type spends. */
-export const LEAVE_BALANCE_FIELD: Record<LeaveType, 'remainingPaidLeave' | 'remainingUnpaidLeave'> = {
-  paid: 'remainingPaidLeave',
-  unpaid: 'remainingUnpaidLeave',
-};
+/** `YYYY-MM` for unpaid leave, `YYYY` for paid leave. */
+export type LeavePeriod = string;
 
-/** The full allotment for a leave type — the ceiling a refund may not exceed. */
-export const LEAVE_ALLOTMENT: Record<LeaveType, number> = {
-  paid: PAID_LEAVE_DAYS_PER_YEAR,
-  unpaid: UNPAID_LEAVE_DAYS_PER_MONTH,
-};
+type LeaveUser = Pick<UserDocument, 'hasPaidLeave' | 'leaveAllotment' | 'leaveAdjustments'>;
 
+type HeldLeave = { leaveType: LeaveType; occurrenceStart: number; status: string };
 
-/**
- * What a user document actually says about leave, with the defaults applied once.
- *
- * Accepts a partial because every caller has a different shape of the same
- * document — the Admin SDK's `DocumentData`, the client's `UserDocument`, the
- * admin list row. All three only ever need these three fields.
- *
- * **`hasPaidLeave` gates the paid number, and the number is never the gate.**
- * `paid` is reported as `0` for a user without the entitlement even if the field
- * holds `10`, because a stale `10` on a user whose paid leave was switched off
- * is exactly how someone gets told they have ten days they cannot take. That was
- * a real bug in the request dialog; this is the fix, kept in one place.
- */
-export function resolveLeaveBalances(
-  user: Pick<UserDocument, 'hasPaidLeave' | 'remainingUnpaidLeave' | 'remainingPaidLeave'> | null | undefined,
-): { unpaid: number; paid: number; hasPaidLeave: boolean } {
-  const hasPaidLeave = user?.hasPaidLeave === true;
-  return {
-    unpaid: clampDays(user?.remainingUnpaidLeave, UNPAID_LEAVE_DAYS_PER_MONTH),
-    paid: hasPaidLeave ? clampDays(user?.remainingPaidLeave, PAID_LEAVE_DAYS_PER_YEAR) : 0,
-    hasPaidLeave,
-  };
+// ─── Periods ──────────────────────────────────────────────────────────────────
+
+/** The period a shift's leave is charged to. */
+export function leavePeriodOf(type: LeaveType, occurrenceStart: number): LeavePeriod {
+  const month = toMonthKey(occurrenceStart);
+  return type === 'paid' ? month.slice(0, 4) : month;
+}
+
+/** `'2026-11'` → `'November 2026'`; `'2026'` → `'2026'`. */
+export function formatLeavePeriod(period: LeavePeriod): string {
+  return period.length === 7 ? formatMonthLabel(period) : period;
+}
+
+/** Whether `period` is a well-formed key for this leave type. */
+export function isLeavePeriod(type: LeaveType, period: unknown): period is LeavePeriod {
+  if (typeof period !== 'string') return false;
+  return type === 'paid' ? /^\d{4}$/.test(period) : /^\d{4}-(0[1-9]|1[0-2])$/.test(period);
+}
+
+/** The salary months an agent may currently request leave in: this one and the next. */
+export function requestableMonths(now: number = Date.now()): [string, string] {
+  const current = currentMonthKey(now);
+  return [current, addMonths(current, 1)];
 }
 
 /**
- * A stored balance, or the allotment when nothing is stored.
- *
- * A *stored* value is trusted as-is above the allotment — an admin may
- * deliberately grant someone extra days in CA Admin → Leave, and silently
- * capping that would make the field lie about what was typed into it. Only the
- * floor is enforced, because a negative balance is never an instruction.
+ * Whether a shift is close enough to ask for. The shift must start in this
+ * salary month or the next — an allowance can only be spent once it is the
+ * month it belongs to, or the month before.
  */
-function clampDays(value: unknown, fallback: number): number {
+export function isWithinRequestWindow(occurrenceStart: number, now: number = Date.now()): boolean {
+  const month = toMonthKey(occurrenceStart);
+  const [current, next] = requestableMonths(now);
+  return month === current || month === next;
+}
+
+// ─── The allotment ───────────────────────────────────────────────────────────
+
+/**
+ * This person's standing allotment of one leave type, per period — their own
+ * figure or the default, **regardless of `hasPaidLeave`**. The entitlement gate
+ * is applied once, in `computeLeaveBalance`; admin screens read this directly
+ * so a person's paid allowance stays visible while the entitlement is off.
+ */
+export function leaveAllotmentOf(user: LeaveUser | null | undefined, type: LeaveType): number {
+  const value = type === 'paid' ? user?.leaveAllotment?.paidPerYear : user?.leaveAllotment?.unpaidPerMonth;
+  return wholeDays(value, DEFAULT_ALLOTMENT[type]);
+}
+
+/** Whether this person's allotment of a type is their own rather than the default. */
+export function hasCustomAllotment(user: LeaveUser | null | undefined, type: LeaveType): boolean {
+  const value = type === 'paid' ? user?.leaveAllotment?.paidPerYear : user?.leaveAllotment?.unpaidPerMonth;
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/** The one-off adjustment for one period, signed. `0` when there is none. */
+export function leaveAdjustmentOf(user: LeaveUser | null | undefined, type: LeaveType, period: LeavePeriod): number {
+  const value = user?.leaveAdjustments?.[type]?.[period];
+  return typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : 0;
+}
+
+function wholeDays(value: unknown, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
   return Math.max(0, Math.floor(value));
 }
 
-// ─── Charging and refunding a request ─────────────────────────────────────────
-//
-// **Requesting takes the day; a denial or a withdrawal gives it back.** The
-// balance an agent sees is therefore what they can still ask for — a pending
-// request is already off it, rather than being a second number they have to
-// subtract in their head.
-//
-// A request records *that* it took a day (`balanceCharged`) and *from which
-// period* (`chargedPeriod`, the user's reset stamp at the time). The period is
-// what makes a refund safe across a reset: a day taken from September's four
-// and denied after September was finalised must not come back, because the
-// finalisation already restored the balance to four — refunding it would hand
-// out a fifth day.
+// ─── The balance ─────────────────────────────────────────────────────────────
 
-type ResetStamps = {
-  unpaidLeaveResetMonth?: unknown;
-  paidLeaveResetYear?: unknown;
-};
+/** Whether a request is holding a day of its period's allowance. */
+export function holdsLeaveDay(leave: { status: string }): boolean {
+  return leave.status === 'pending' || leave.status === 'approved';
+}
 
-type LeaveUser = Pick<UserDocument, 'hasPaidLeave' | 'remainingUnpaidLeave' | 'remainingPaidLeave'> & ResetStamps;
-
-type ChargeableLeave = {
-  leaveType: LeaveType;
-  status: string;
-  balanceCharged?: boolean;
-  chargedPeriod?: string | null;
-};
-
-/**
- * The reset period a user's balance of this type currently belongs to — their
- * stored stamp, not the wall clock. The stamp changes at exactly the moment a
- * fresh allotment is assigned (when a salary month is finalised), which the
- * calendar says nothing about.
- */
-export function balancePeriodOf(user: ResetStamps | null | undefined, type: LeaveType): string | null {
-  const stamp = type === 'paid' ? user?.paidLeaveResetYear : user?.unpaidLeaveResetMonth;
-  return typeof stamp === 'string' || typeof stamp === 'number' ? String(stamp) : null;
+export interface LeaveBalance {
+  type: LeaveType;
+  period: LeavePeriod;
+  allotment: number;
+  adjustment: number;
+  /** Days held by pending and approved requests whose shift falls in the period. */
+  used: number;
+  /** May be negative when an adjustment was cut below what is already approved. */
+  remaining: number;
 }
 
 /**
- * Whether a request is currently holding a day of the balance.
+ * The balance for one person, type and period, from their requests.
  *
- * Requests made before charging moved to request time carry no marker: the old
- * flow took the day at **approval**, so an unmarked approved request holds one
- * and an unmarked pending or denied request does not.
+ * `requests` may be every request the person has made — anything of the other
+ * type, in another period, or no longer holding a day is ignored here.
+ *
+ * **`hasPaidLeave` gates paid leave here and only here.** A person without the
+ * entitlement has no paid allowance and no paid adjustment, whatever is stored,
+ * because a stale allotment on someone whose paid leave was switched off is
+ * exactly how they get told they have days they cannot take.
  */
-export function isBalanceCharged(leave: ChargeableLeave): boolean {
-  if (typeof leave.balanceCharged === 'boolean') return leave.balanceCharged;
-  return leave.status === 'approved';
-}
-
-/** The balance a request can spend, read through `resolveLeaveBalances`. */
-export function remainingOf(user: LeaveUser | null | undefined, type: LeaveType): number {
-  const balances = resolveLeaveBalances(user);
-  return type === 'paid' ? balances.paid : balances.unpaid;
-}
-
-/**
- * The writes that take one day for a request: the user update and the marker
- * for the leave document. The caller has already checked `remainingOf > 0`.
- */
-export function leaveCharge(
+export function computeLeaveBalance(
   user: LeaveUser | null | undefined,
+  requests: readonly HeldLeave[],
   type: LeaveType,
-): { userUpdate: Record<string, number>; leaveUpdate: { balanceCharged: true; chargedPeriod: string | null } } {
-  return {
-    userUpdate: { [LEAVE_BALANCE_FIELD[type]]: remainingOf(user, type) - 1 },
-    leaveUpdate: { balanceCharged: true, chargedPeriod: balancePeriodOf(user, type) },
-  };
+  period: LeavePeriod,
+): LeaveBalance {
+  const entitled = type === 'unpaid' || user?.hasPaidLeave === true;
+  const allotment = entitled ? leaveAllotmentOf(user, type) : 0;
+  const adjustment = entitled ? leaveAdjustmentOf(user, type, period) : 0;
+  let used = 0;
+  for (const request of requests) {
+    if (request.leaveType !== type || !holdsLeaveDay(request)) continue;
+    if (leavePeriodOf(type, request.occurrenceStart) === period) used++;
+  }
+  return { type, period, allotment, adjustment, used, remaining: allotment + adjustment - used };
 }
 
 /**
- * The user update that gives a request's day back, or `null` when nothing is
- * owed — the request never took one, or a reset has happened since it did.
- *
- * When the period it was taken from is known and still current, the day goes
- * back uncapped: it is exactly the day that was taken, and capping it would
- * swallow days an admin granted above the allotment. When the period is unknown
- * (a legacy approval, or a user who had no stamp), the refund is capped at the
- * allotment — the conservative guess, and the rule this code used before the
- * period was recorded.
+ * The balance after one request changes state — a request holds exactly one
+ * day while pending or approved, so the ledger's `after` is a ±1 of `before`
+ * rather than a second pass over the requests. `next` null means deleted.
  */
-export function leaveRefund(
-  user: LeaveUser | null | undefined,
-  leave: ChargeableLeave,
-): Record<string, number> | null {
-  if (!isBalanceCharged(leave)) return null;
-
-  const type = leave.leaveType;
-  const next = remainingOf(user, type) + 1;
-  const charged = typeof leave.chargedPeriod === 'string' ? leave.chargedPeriod : null;
-  const current = balancePeriodOf(user, type);
-
-  if (charged !== null && current !== null) {
-    return charged === current ? { [LEAVE_BALANCE_FIELD[type]]: next } : null;
-  }
-  return { [LEAVE_BALANCE_FIELD[type]]: Math.min(next, LEAVE_ALLOTMENT[type]) };
+export function remainingAfterChange(before: number, prev: { status: string }, next: { status: string } | null): number {
+  return before + (holdsLeaveDay(prev) ? 1 : 0) - (next && holdsLeaveDay(next) ? 1 : 0);
 }
 
-// ─── The reset: triggered by finalising a salary month ────────────────────────
-
-/**
- * The balance updates finalising `finalizedMonth` owes this agent, or `null`
- * when they are already reset for what comes next.
- *
- * - **Every month:** unpaid leave is assigned `4` for the month *after* the one
- *   finalised, and `unpaidLeaveResetMonth` is stamped with that month.
- * - **December:** paid leave is also assigned `10` for the following year (for
- *   users with `hasPaidLeave`), and `paidLeaveResetYear` is stamped with it.
- *
- * **Assigned, never added.** Days an agent did not use are gone, not carried
- * over. So finalising a month in which someone took no leave still leaves them
- * with 4, not 8.
- *
- * ## Why the stamp, and why it only moves forward
- *
- * The stamp records which period the current balance belongs to. A reset
- * applies only when that period is **later** than the stored stamp, and that
- * one comparison covers the awkward cases:
- * - **Reopen and finalise again** is a no-op. The stamp already says "October",
- *   so days the agent has used since the first finalise are not handed back.
- * - **Finalising out of order** is a no-op for the earlier month. Finalising
- *   September after October must not reset them back to a September balance.
- * - **Refunds use the same stamp** (`balancePeriodOf` → `leaveRefund`), so a day
- *   taken before a reset and denied after it is not refunded on top of the fresh
- *   allotment.
- *
- * A user with no stamp (never reset) is reset. Their first finalised month is
- * the first point at which an allotment is owed on these rules.
- *
- * Paid leave is stamped even for users without the entitlement. Switching
- * `hasPaidLeave` on mid-year therefore does not trigger a reset nobody granted.
- * The allotment at that moment is the admin's call.
- *
- * Pure, so it is testable without Firestore. The caller writes the result in
- * the same transaction as the finalised month.
- */
-export function computeFinalizationReset(
-  user: ResetStamps & Pick<UserDocument, 'hasPaidLeave'> | null | undefined,
-  finalizedMonth: SalaryMonthKey,
-): Record<string, string | number> | null {
-  const updates: Record<string, string | number> = {};
-
-  const nextMonth = addMonths(finalizedMonth, 1);
-  const storedMonth = typeof user?.unpaidLeaveResetMonth === 'string' ? user.unpaidLeaveResetMonth : null;
-  // `YYYY-MM` compares correctly as a string.
-  if (storedMonth === null || storedMonth < nextMonth) {
-    updates.remainingUnpaidLeave = UNPAID_LEAVE_DAYS_PER_MONTH;
-    updates.unpaidLeaveResetMonth = nextMonth;
-  }
-
-  if (finalizedMonth.endsWith('-12')) {
-    const nextYear = Number(finalizedMonth.slice(0, 4)) + 1;
-    const storedYear = typeof user?.paidLeaveResetYear === 'number' ? user.paidLeaveResetYear : null;
-    if (storedYear === null || storedYear < nextYear) {
-      updates.paidLeaveResetYear = nextYear;
-      if (user?.hasPaidLeave === true) updates.remainingPaidLeave = PAID_LEAVE_DAYS_PER_YEAR;
-    }
-  }
-
-  return Object.keys(updates).length > 0 ? updates : null;
+/** "4 allowed · +1 adjusted · 2 requested or approved" — what a balance is made of. */
+export function describeLeaveBalance(balance: LeaveBalance, options: { omitZeroUsed?: boolean } = {}): string {
+  const parts = [`${balance.allotment} allowed`];
+  if (balance.adjustment !== 0) parts.push(`${signedDays(balance.adjustment)} adjusted`);
+  if (balance.used > 0 || !options.omitZeroUsed) parts.push(`${balance.used} requested or approved`);
+  return parts.join(' · ');
 }
 
+/** `+2` / `-1` / `0`. */
+export function signedDays(n: number): string {
+  return `${n > 0 ? '+' : ''}${n}`;
+}
+
+/** A remaining figure as shown: the number, or "N over" when an adjustment cut below what is approved. */
+export function formatRemaining(remaining: number): string {
+  return remaining < 0 ? `${-remaining} over` : String(remaining);
+}
+
+/** Whether typed text is a whole number of days from 0 to `max`. */
+export function isWholeDays(value: string, max: number): boolean {
+  return /^\d+$/.test(value.trim()) && Number(value) <= max;
+}

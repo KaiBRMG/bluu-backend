@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { CircleAlert, RotateCcw, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SURFACE } from '@/lib/surfaces';
@@ -9,8 +9,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useBootPhase } from '@/contexts/BootLoaderContext';
 import { useUserData } from '@/hooks/useUserData';
 import { useLeaveRequests, type LeaveRequest } from '@/hooks/useLeaveRequests';
-import { resolveLeaveBalances } from '@/lib/leave/leaveBalance';
-import { formatDayLabelWithWeekday, toDayKey } from '@/lib/salary/salaryDate';
+import { computeLeaveBalance, describeLeaveBalance, leavePeriodOf, requestableMonths } from '@/lib/leave/leaveBalance';
+import { useNow } from '@/hooks/useNow';
+import { formatDayLabelWithWeekday, formatMonthName, toDayKey } from '@/lib/salary/salaryDate';
 import { pluralise } from '@/lib/salary/salaryFormat';
 
 /**
@@ -39,13 +40,17 @@ import { pluralise } from '@/lib/salary/salaryFormat';
  * not a fact anyone else needs, and a write per dismissal would be a document
  * update to say "I saw that".
  *
- * ## Balances come from the engine, never from the raw field
+ * ## Balances are per month (unpaid) and per year (paid)
  *
- * `resolveLeaveBalances` is the only reader of `remainingPaidLeave` /
- * `remainingUnpaidLeave` on this surface. It applies the defaults once and gates
- * the paid figure on `hasPaidLeave`, because `remainingPaidLeave` defaults to 10
- * whether or not the entitlement is set — rendering it unconditionally tells
- * someone with no paid leave that they have ten days of it.
+ * Derived by `computeLeaveBalance` from the allowance on the user document and
+ * the agent's own requests — the same function the request route checks
+ * against, so the card and the refusal cannot disagree. Unpaid shows **this
+ * month and next**, because those are the two months leave can be requested in
+ * and each has its own allowance; a request for a shift next month spends next
+ * month's. Paid shows the year, and only for someone with `hasPaidLeave`.
+ *
+ * The numbers wait for the request list: a balance computed from an empty list
+ * that has not loaded yet would show the full allowance as fact.
  */
 
 /** How long a decided request keeps announcing itself on the dashboard. */
@@ -76,6 +81,7 @@ function readDismissed(): string[] {
 export function LeaveBalanceCard({ className }: { className?: string }) {
   const { userData, loading } = useUserData();
   const { leaveRequests, loading: leaveLoading, error: leaveError, refetch } = useLeaveRequests();
+  const now = useNow();
 
   // Gated like every other async block on this dashboard, so the boot loader
   // lifts on a complete page rather than on one finished card over two skeletons.
@@ -99,7 +105,13 @@ export function LeaveBalanceCard({ className }: { className?: string }) {
     );
   }
 
-  const { unpaid, paid, hasPaidLeave } = resolveLeaveBalances(userData);
+  const hasPaidLeave = userData?.hasPaidLeave === true;
+  const known = !leaveLoading && !leaveError;
+  const [thisMonth, nextMonth] = requestableMonths(now);
+  const unpaidNow = computeLeaveBalance(userData, leaveRequests, 'unpaid', thisMonth);
+  const unpaidNext = computeLeaveBalance(userData, leaveRequests, 'unpaid', nextMonth);
+  const year = leavePeriodOf('paid', now);
+  const paid = computeLeaveBalance(userData, leaveRequests, 'paid', year);
   const pending = leaveRequests.filter(r => r.status === 'pending').length;
 
   return (
@@ -112,18 +124,19 @@ export function LeaveBalanceCard({ className }: { className?: string }) {
 
           <dl className="flex flex-wrap items-baseline gap-x-5 gap-y-1.5">
             {/* `flex-row-reverse`, not a reordered DOM: the number reads first, but
-                a definition list pairs each `dt` with the `dd` that follows it, and
-                these were emitted the other way round. */}
-            <div className="flex flex-row-reverse items-baseline gap-1.5">
-              <dt className="text-xs text-zinc-400">unpaid {unpaid === 1 ? 'day' : 'days'} left</dt>
-              <dd className="text-lg font-semibold tabular-nums">{unpaid}</dd>
-            </div>
-
+                a definition list pairs each `dt` with the `dd` that follows it. */}
+            <BalanceFigure
+              value={known ? unpaidNow.remaining : null}
+              label={`unpaid left in ${formatMonthName(thisMonth)}`}
+              title={describeLeaveBalance(unpaidNow, { omitZeroUsed: true })}
+            />
+            <BalanceFigure
+              value={known ? unpaidNext.remaining : null}
+              label={`in ${formatMonthName(nextMonth)}`}
+              title={describeLeaveBalance(unpaidNext, { omitZeroUsed: true })}
+            />
             {hasPaidLeave && (
-              <div className="flex flex-row-reverse items-baseline gap-1.5">
-                <dt className="text-xs text-zinc-400">paid {paid === 1 ? 'day' : 'days'} left</dt>
-                <dd className="text-lg font-semibold tabular-nums">{paid}</dd>
-              </div>
+              <BalanceFigure value={known ? paid.remaining : null} label={`paid left in ${year}`} title={describeLeaveBalance(paid, { omitZeroUsed: true })} />
             )}
           </dl>
         </div>
@@ -183,19 +196,7 @@ function DecisionPills({ leaveRequests }: { leaveRequests: LeaveRequest[] }) {
   // would keep a fortnight-old decision pinned to the dashboard forever.
   // Refreshed when the window comes back to the user, which is when they would
   // next look at it.
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    const sync = () => {
-      if (document.visibilityState === 'visible') setNow(Date.now());
-    };
-    window.addEventListener('focus', sync);
-    document.addEventListener('visibilitychange', sync);
-    return () => {
-      window.removeEventListener('focus', sync);
-      document.removeEventListener('visibilitychange', sync);
-    };
-  }, []);
+  const now = useNow();
 
   const dismiss = useCallback((leaveId: string) => {
     setDismissed(prev => {
@@ -257,5 +258,19 @@ function DecisionPills({ leaveRequests }: { leaveRequests: LeaveRequest[] }) {
         );
       })}
     </ul>
+  );
+}
+
+function BalanceFigure({ value, label, title }: { value: number | null; label: string; title: string }) {
+  return (
+    <div className="flex flex-row-reverse items-baseline gap-1.5" title={value === null ? undefined : title}>
+      <dt className="text-xs text-zinc-400">
+        {label}
+        {value !== null && <span className="sr-only"> ({title})</span>}
+      </dt>
+      <dd className="text-lg font-semibold tabular-nums">
+        {value === null ? <Skeleton className="inline-block h-4 w-4 rounded align-middle" /> : Math.max(0, value)}
+      </dd>
+    </div>
   );
 }

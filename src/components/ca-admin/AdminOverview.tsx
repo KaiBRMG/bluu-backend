@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { RotateCcw, TrendingDown, TrendingUp, TriangleAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { HAIRLINE, SURFACE } from '@/lib/surfaces';
@@ -129,7 +129,58 @@ interface OverviewResponse {
   };
 }
 
-export default function AdminOverview({ month, onMonthChange }: { month: string; onMonthChange: (month: string) => void }) {
+/**
+ * Opens an agent on the Payroll tab. A name in a finding, the matrix or the
+ * profitability table is a way *to* that agent, not just a mention of them —
+ * otherwise the band names someone and the reader has to remember the name,
+ * switch tabs and find the row.
+ */
+const OpenAgentContext = createContext<((uid: string) => void) | null>(null);
+
+function AgentName({ uid, name, className }: { uid: string; name: string; className?: string }) {
+  const open = useContext(OpenAgentContext);
+  if (!open) return <span className={className}>{name}</span>;
+  return (
+    <button
+      type="button"
+      onClick={() => open(uid)}
+      title={`Open ${name} in Payroll`}
+      className={cn(
+        'max-w-full rounded-sm text-left underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action-blue',
+        className,
+      )}
+    >
+      {name}
+    </button>
+  );
+}
+
+/** `A, B, C and 2 more`, each named agent a way to their month. */
+function AgentNameList({ people, max = 4, detail }: { people: Array<{ uid: string; name: string }>; max?: number; detail?: (uid: string) => string }) {
+  const shown = people.slice(0, max);
+  return (
+    <>
+      {shown.map((p, i) => (
+        <span key={p.uid}>
+          {i > 0 && ', '}
+          <AgentName uid={p.uid} name={p.name} className="text-zinc-200" />
+          {detail && ` (${detail(p.uid)})`}
+        </span>
+      ))}
+      {people.length > max && `, and ${people.length - max} more`}
+    </>
+  );
+}
+
+export default function AdminOverview({
+  month,
+  onMonthChange,
+  onOpenAgent,
+}: {
+  month: string;
+  onMonthChange: (month: string) => void;
+  onOpenAgent?: (uid: string) => void;
+}) {
   const { user } = useAuth();
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -219,7 +270,11 @@ export default function AdminOverview({ month, onMonthChange }: { month: string;
         </div>
       )}
 
-      {data && !loading && <Overview data={data} />}
+      {data && !loading && (
+        <OpenAgentContext.Provider value={onOpenAgent ?? null}>
+          <Overview data={data} />
+        </OpenAgentContext.Provider>
+      )}
     </div>
   );
 }
@@ -251,10 +306,10 @@ function Overview({ data }: { data: OverviewResponse }) {
         </>
       ) : (
         <div className={cn('rounded-xl p-6 text-center', SURFACE)}>
-          <p className="text-sm font-medium">No sales imported for {formatMonthLabel(data.month)}.</p>
+          <p className="text-sm font-medium">No sales recorded for {formatMonthLabel(data.month)}.</p>
           <p className="mx-auto mt-1 max-w-md text-sm text-zinc-400">
-            The breakdown by creator is built from the sales export. Upload this month’s <code>.xlsx</code> on the{' '}
-            <span className="text-foreground">Sales data</span> tab and it will appear here.
+            The breakdown by creator is built from the sales BuddyX syncs in. If the month has started and this is
+            still empty, check the sync status on the <span className="text-foreground">Sales</span> tab.
           </p>
         </div>
       )}
@@ -420,7 +475,7 @@ function AttentionBand({
   // makes one fact look like two.
   const lossMaking = agents
     .filter(a => a.saleCount > 0 && a.net - a.salary < 0)
-    .map(a => ({ name: a.displayName, profit: a.net - a.salary }))
+    .map(a => ({ uid: a.uid, name: a.displayName, profit: a.net - a.salary }))
     .sort((a, b) => a.profit - b.profit);
 
   if (totals.missingShiftDays > 0) {
@@ -431,8 +486,12 @@ function AttentionBand({
           <strong className="font-medium text-foreground">
             {pluralise(totals.missingShiftDays, 'day')} with sales but no shift
           </strong>{' '}
-          — hours could not be derived, so the hourly pay on those days is probably wrong. Open the agent in Payroll to
-          see which.
+          — hours could not be derived, so the hourly pay on those days is probably wrong:{' '}
+          <AgentNameList
+            people={agents.filter(a => a.missingShiftDays > 0).map(a => ({ uid: a.uid, name: a.displayName }))}
+            detail={uid => pluralise(agents.find(a => a.uid === uid)?.missingShiftDays ?? 0, 'day')}
+          />
+          .
         </>
       ),
     });
@@ -446,9 +505,12 @@ function AttentionBand({
           <strong className="font-medium text-foreground">
             {pluralise(lossMaking.length, 'agent')} paid more than they brought in
           </strong>{' '}
-          — {lossMaking.slice(0, 4).map(a => `${a.name} (${formatUsd(a.profit, { cents: false })})`).join(', ')}
-          {lossMaking.length > 4 && `, and ${lossMaking.length - 4} more`}. Net revenue did not cover their pay this
-          month.
+          —{' '}
+          <AgentNameList
+            people={lossMaking}
+            detail={uid => formatUsd(lossMaking.find(a => a.uid === uid)?.profit ?? 0, { cents: false })}
+          />
+          . Net revenue did not cover their pay this month.
         </>
       ),
     });
@@ -460,8 +522,11 @@ function AttentionBand({
       text: (
         <>
           <strong className="font-medium text-foreground">No sales recorded</strong> for{' '}
-          {attention.agentsWithoutSales.map(a => a.displayName).join(', ')} — either they did not work, or their rows
-          failed to map to an account on import.
+          <AgentNameList
+            people={attention.agentsWithoutSales.map(a => ({ uid: a.uid, name: a.displayName }))}
+            max={8}
+          />{' '}
+          — either they did not work, or their BuddyX chatter is not mapped to them (Sales → Mapping).
         </>
       ),
     });
@@ -526,7 +591,12 @@ function AttentionBand({
           <strong className="font-medium text-foreground">
             {pluralise(totals.overriddenDays, 'day')} edited by an administrator
           </strong>{' '}
-          — those figures no longer follow from the sales and shifts behind them.
+          — those figures no longer follow from the sales and shifts behind them:{' '}
+          <AgentNameList
+            people={agents.filter(a => a.overriddenDays > 0).map(a => ({ uid: a.uid, name: a.displayName }))}
+            detail={uid => pluralise(agents.find(a => a.uid === uid)?.overriddenDays ?? 0, 'day')}
+          />
+          .
         </>
       ),
     });
@@ -693,7 +763,7 @@ function EarningsMatrix({
                     <span className="relative flex items-center gap-2">
                       <AgentAvatar agent={agent} />
                       <span className="min-w-0">
-                        <span className="block max-w-[11rem] truncate font-medium">{agent.displayName}</span>
+                        <AgentName uid={agent.uid} name={agent.displayName} className="block max-w-[11rem] truncate font-medium" />
                         <span className="text-xs text-zinc-400">
                           {`${accounts}${cover}${noSales}`}
                         </span>
@@ -801,9 +871,12 @@ function BarCell({ value, scale }: { value: number | undefined; scale: number })
       title={exact}
       style={percent > 0 ? { backgroundColor: `color-mix(in oklab, ${hue} ${percent}%, transparent)` } : undefined}
     >
-      <span className={signedMoneyClass(value)} aria-label={exact}>
+      {/* The exact figure as text, not an `aria-label` on a bare span — many
+          screen readers ignore a label on an element with no role. */}
+      <span className={signedMoneyClass(value)} aria-hidden>
         {formatUsdCompact(value)}
       </span>
+      <span className="sr-only">{exact}</span>
     </td>
   );
 }
@@ -915,7 +988,7 @@ function AgentProfitability({
                   <span className="relative flex items-center gap-2">
                     <AgentAvatar agent={agent} />
                     <span className="min-w-0">
-                      <span className="block max-w-[14rem] truncate font-medium">{agent.displayName}</span>
+                      <AgentName uid={agent.uid} name={agent.displayName} className="block max-w-[14rem] truncate font-medium" />
                       <span className="text-xs text-zinc-400">
                         {agent.hours > 0 ? formatHours(agent.hours) : 'No hours'}
                         {agent.status === 'finalized' && ' · finalised'}
@@ -1079,10 +1152,11 @@ function CreatorLeaderboard({
                           are named in the attention band instead. */}
                       {creator.assignedAgentCount === 1 && creator.gross > 0 && (
                         <span
-                          className="shrink-0 rounded-full bg-orange-500/10 px-1.5 py-px text-[10px] font-medium text-orange-400"
+                          className="shrink-0 rounded-full bg-orange-500/10 px-1.5 py-px text-[11px] font-medium text-orange-400"
                           title="Only one agent is rostered on this account this month"
                         >
                           Sole cover
+                          <span className="sr-only"> — only one agent is rostered on this account this month</span>
                         </span>
                       )}
                     </span>

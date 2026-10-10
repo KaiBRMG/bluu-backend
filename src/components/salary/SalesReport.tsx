@@ -35,11 +35,21 @@ import {
   TIPS_ATTRIBUTION,
 } from '@/components/buddyx/buddyxUi';
 import { getCache, setCache } from '@/lib/queryCache';
-import { formatSaleDateTime, formatUsd, pluralise, signedMoneyClass } from '@/lib/salary/salaryFormat';
-import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
+import { formatUsd, pluralise, signedMoneyClass } from '@/lib/salary/salaryFormat';
+import { HintedLabel, SALARY_DAY_HINT, SaleWhen } from './SalaryClock';
+import { formatDayLabel, formatDayLabelWithWeekday, toDayKey } from '@/lib/salary/salaryDate';
+import { SALARY_TZ_OFFSET_MINUTES, SALES_CUTOVER_AT } from '@/lib/salary/salaryConstants';
 import { saleTypeLabel } from '@/lib/salary/saleTypes';
 import { SALE_KIND_COLORS } from '@/lib/buddyx/chartColors';
 import type { SalarySale } from '@/lib/salary/salaryTypes';
+
+/** When BuddyX took over from the Infloww export, in the salary clock — from the one constant, not retyped. */
+const CUTOVER_LABEL = (() => {
+  const local = new Date(SALES_CUTOVER_AT + SALARY_TZ_OFFSET_MINUTES * 60_000);
+  const hh = String(local.getUTCHours()).padStart(2, '0');
+  const mm = String(local.getUTCMinutes()).padStart(2, '0');
+  return `${hh}:${mm} on ${formatDayLabel(toDayKey(SALES_CUTOVER_AT))} ${local.getUTCFullYear()}`;
+})();
 
 /**
  * Every individual sale behind a month's figures — **breakdown first**.
@@ -278,7 +288,7 @@ export function SalesReport({
           basis="gross"
           tip={GROSS_NOTE}
           value={formatUsd(data.totals.gross)}
-          meta={`${pluralise(data.totals.count, 'sale')} · ${formatUsd(data.totals.net)} net after OnlyFans' 20%`}
+          meta={`${pluralise(data.totals.count, 'sale')} · ${formatUsd(data.totals.net)} net after the platform's share`}
         />
         <KpiTile
           label="Transfers"
@@ -312,7 +322,8 @@ export function SalesReport({
             </div>
           </div>
           <p className="mt-0.5 text-[11px] text-zinc-400">
-            Gross per salary day (SAST).{onSelectDay ? ' Select a day to see its sales below.' : ''}
+            Gross per salary day (SAST) <InfoTip text={SALARY_DAY_HINT} className="inline-flex align-[-2px]" />
+            {onSelectDay ? ' Select a day to see its sales below.' : ''}
           </p>
           <ChartContainer config={kindChartConfig} className="mt-3 h-[200px] w-full">
             <BarChart
@@ -420,7 +431,9 @@ export function SalesReport({
           />
 
           {data.spansCutover && (
-            <p className="text-[11px] text-zinc-400">Sales before 08:50 on 4 Oct came from Infloww.</p>
+            <p className="text-[11px] text-zinc-400">
+              Sales before {CUTOVER_LABEL} (salary time) came from Infloww; later sales come from BuddyX.
+            </p>
           )}
 
           {hiddenRows > 0 && (
@@ -494,6 +507,17 @@ export function SalesReport({
 // ─── Pieces ──────────────────────────────────────────────────────────
 
 
+const SALES_COLUMNS: Array<{ label: string; hint?: string }> = [
+  {
+    label: 'When',
+    hint: 'In your own timezone. Pay counts each sale on its SAST day, so a late-night sale can show a different date — hover a time for both.',
+  },
+  { label: 'Creator' },
+  { label: 'Type' },
+  { label: 'Fan' },
+  { label: 'Gross' },
+];
+
 function SalesTable({
   rows,
   names,
@@ -521,7 +545,7 @@ function SalesTable({
       <table className="w-full min-w-[720px] border-collapse text-sm">
         <thead>
           <tr className="border-b border-white/[0.07]">
-            {['When', 'Creator', 'Type', 'Fan', 'Gross'].map((label, index) => (
+            {SALES_COLUMNS.map(({ label, hint }, index) => (
               <th
                 key={label}
                 scope="col"
@@ -530,7 +554,7 @@ function SalesTable({
                   index === 4 ? 'text-right' : 'text-left',
                 )}
               >
-                {label}
+                {hint ? <HintedLabel label={label} hint={hint} /> : label}
               </th>
             ))}
             {renderAction && <th scope="col" className="w-10 px-3 py-2.5"><span className="sr-only">Actions</span></th>}
@@ -540,7 +564,7 @@ function SalesTable({
           {rows.map(sale => (
             <tr key={sale.saleId} className={cn(sale.status === 'reverse' && 'bg-red-500/[0.04]')}>
               <td className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-400">
-                {formatSaleDateTime(sale.occurredAt, timezone)}
+                <SaleWhen occurredAt={sale.occurredAt} day={sale.day} timezone={timezone} />
               </td>
               <td className="px-3 py-2">
                 {sale.creatorId ? (
@@ -591,7 +615,9 @@ function DayBanner({ day, onClear }: { day: string; onClear?: () => void }) {
   return (
     <div className={cn('flex items-center justify-between gap-3 rounded-lg px-3 py-2', SURFACE)}>
       <p className="text-sm">
-        Sales on <span className="font-medium">{formatDayLabelWithWeekday(day)}</span>
+        Sales on <span className="font-medium">{formatDayLabelWithWeekday(day)}</span>{' '}
+        <span className="text-zinc-400">(SAST salary day)</span>{' '}
+        <InfoTip text={SALARY_DAY_HINT} className="inline-flex align-[-2px]" />
       </p>
       {onClear && (
         <Button size="xs" variant="ghost" onClick={onClear} className="text-zinc-400">

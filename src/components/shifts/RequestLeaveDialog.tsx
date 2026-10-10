@@ -18,7 +18,9 @@ import {
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useUserData } from '@/hooks/useUserData';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
-import { resolveLeaveBalances } from '@/lib/leave/leaveBalance';
+import { useLeaveRequests } from '@/hooks/useLeaveRequests';
+import { computeLeaveBalance, formatLeavePeriod, leavePeriodOf } from '@/lib/leave/leaveBalance';
+import { pluralise } from '@/lib/salary/salaryFormat';
 import { safeTimezone } from '@/lib/utils/timezone';
 
 /**
@@ -52,6 +54,7 @@ interface RequestLeaveDialogProps {
 
 export function RequestLeaveDialog({ target, onClose, onSubmit }: RequestLeaveDialogProps) {
   const { userData } = useUserData();
+  const { leaveRequests } = useLeaveRequests();
   const { timezone } = useViewerTimezone();
 
   const [leaveType, setLeaveType] = useState<'paid' | 'unpaid'>('unpaid');
@@ -59,14 +62,22 @@ export function RequestLeaveDialog({ target, onClose, onSubmit }: RequestLeaveDi
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Through the engine, never off the raw fields. `?? 0` here disagreed with the
-  // `?? 4` / `?? 10` the admin screens used for the same document, so an agent
-  // whose balance had never been written was told they had none while an admin
-  // looking at that same person saw four. See `lib/leave/leaveBalance.ts`.
-  const { paid: paidRemaining, unpaid: unpaidRemaining, hasPaidLeave } =
-    resolveLeaveBalances(userData);
+  // The balance of the period this shift falls in — this month's or next
+  // month's unpaid allowance, this year's paid one — through the same function
+  // the server checks against (`lib/leave/leaveBalance.ts`). The calendar only
+  // opens this for a shift in the request window, and only once the request
+  // list has loaded, so `leaveRequests` is the real list here.
+  // `computeLeaveBalance` already gives no paid days without the entitlement.
+  const hasPaidLeave = userData?.hasPaidLeave === true;
+  const start = target?.occurrenceStart ?? 0;
+  const unpaidKey = leavePeriodOf('unpaid', start);
+  const paidKey = leavePeriodOf('paid', start);
+  const unpaidRemaining = Math.max(0, computeLeaveBalance(userData, leaveRequests, 'unpaid', unpaidKey).remaining);
+  const paidRemaining = Math.max(0, computeLeaveBalance(userData, leaveRequests, 'paid', paidKey).remaining);
+  const unpaidPeriod = formatLeavePeriod(unpaidKey);
+  const paidPeriod = formatLeavePeriod(paidKey);
 
-  const paidAvailable = hasPaidLeave && paidRemaining > 0;
+  const paidAvailable = paidRemaining > 0;
   const unpaidAvailable = unpaidRemaining > 0;
   // Paid leave is approved on its merits, so it needs a stated reason; unpaid
   // does not. The server enforces the same asymmetry.
@@ -170,7 +181,9 @@ export function RequestLeaveDialog({ target, onClose, onSubmit }: RequestLeaveDi
                 <span className="min-w-0">
                   <span className="block text-sm font-medium">Unpaid</span>
                   <span id="leave-type-unpaid-balance" className="block text-xs text-zinc-400">
-                    {unpaidAvailable ? `${unpaidRemaining} day${unpaidRemaining === 1 ? '' : 's'} left` : 'None left'}
+                    {unpaidAvailable
+                      ? `${pluralise(unpaidRemaining, 'day')} left in ${unpaidPeriod}`
+                      : `None left in ${unpaidPeriod}`}
                   </span>
                 </span>
               </label>
@@ -196,8 +209,8 @@ export function RequestLeaveDialog({ target, onClose, onSubmit }: RequestLeaveDi
                     {!hasPaidLeave
                       ? 'Not enabled on your account'
                       : paidRemaining > 0
-                        ? `${paidRemaining} day${paidRemaining === 1 ? '' : 's'} left`
-                        : 'None left'}
+                        ? `${pluralise(paidRemaining, 'day')} left in ${paidPeriod}`
+                        : `None left in ${paidPeriod}`}
                   </span>
                 </span>
               </label>
@@ -237,10 +250,10 @@ export function RequestLeaveDialog({ target, onClose, onSubmit }: RequestLeaveDi
             <p className="text-xs text-zinc-400">
               After this you will have{' '}
               <span className="tabular-nums text-foreground">
-                {remainingAfter} day{remainingAfter === 1 ? '' : 's'} of {leaveType} leave
+                {pluralise(remainingAfter, 'day')} of {leaveType} leave
               </span>{' '}
-              remaining. The day comes back if this is rejected. Approving it frees your accounts that day for
-              someone else to cover.
+              left in {leaveType === 'paid' ? paidPeriod : unpaidPeriod}. The day comes back if this is rejected.
+              Approving it frees your accounts that day for someone else to cover.
             </p>
           )}
 

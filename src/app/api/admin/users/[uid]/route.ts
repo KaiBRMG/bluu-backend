@@ -67,8 +67,6 @@ export const PUT = withAuth(async (
       'userComments',
       'photoURL',
       'hasPaidLeave',
-      'remainingUnpaidLeave',
-      'remainingPaidLeave',
       'isActive',
       'isArchived',
     ];

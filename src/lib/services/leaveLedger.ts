@@ -1,5 +1,6 @@
 /**
- * The leave ledger: one entry per change a leave request makes to a balance.
+ * The leave ledger: one entry per change to a leave balance — a request moving
+ * through its states, or an admin changing someone's allotment or adjustment.
  *
  * `leave-ledger/{autoId}` is the history behind Coverage → **History**. It
  * exists because the request document cannot carry that history on its own:
@@ -16,13 +17,17 @@
  * refused one writes nothing. That is also why an entry records `before` and
  * `after` as values read inside the transaction rather than an increment.
  *
- * ## What it does not record
+ * Balances are derived (see `leaveBalance.ts`), so `before`/`after` are the
+ * remaining days **in the request's period**, computed from the requests read
+ * inside the transaction.
  *
- * Only balance changes made **by a leave request**. The reset on finalising a month and
- * a hand edit in CA Admin → Leave move the same number without an entry; the
- * History view states that rather than implying the trail is complete.
- * Requests decided before the ledger existed have no entries either, and are
- * shown with their outcome and "not recorded" for the balance.
+ * ## What it records since 2026-10-10
+ *
+ * Everything that moves a balance: requests (`requested` / `approved` /
+ * `denied` / `withdrawn`), one-off adjustments (`adjusted`, with the admin's
+ * note) and allotment changes (`allotment`). Nothing resets on a schedule any
+ * more, so the trail is complete from that date. Requests decided before the
+ * ledger existed have no entries, and are shown with "not recorded".
  *
  * Index posture (rule 9): only `at` is queried (ordered, newest first). Every
  * other field is index-exempt.
@@ -38,14 +43,15 @@ export const LEAVE_LEDGER = 'leave-ledger';
 /**
  * Queue a ledger entry on a transaction.
  *
- * `before`/`after` are the balance of `leaveType` either side of this change —
- * equal when the action moved nothing (an approval of a request that already
- * took its day, a denial after a reset).
+ * `before`/`after` are the remaining days of `leaveType` in `period` either side
+ * of this change — equal when the action moved nothing (an approval: the
+ * request already held its day).
  */
 export function recordLeaveLedgerEntry(
   tx: Transaction,
   entry: {
-    leaveId: string;
+    /** The request this entry belongs to. Omitted for an admin change, which is its own row and takes its own entry id. */
+    leaveId?: string;
     userId: string;
     leaveType: LeaveType;
     occurrenceStart: number;
@@ -55,12 +61,15 @@ export function recordLeaveLedgerEntry(
     actorUid: string;
     /** For a withdrawal: what state the request was in when it was withdrawn. */
     priorStatus?: string;
+    /** The period the balance belongs to — `YYYY-MM` (unpaid) or `YYYY` (paid). */
+    period: string;
+    note?: string;
   },
 ): void {
   const ref = adminDb.collection(LEAVE_LEDGER).doc();
   const doc: LeaveLedgerDocument = {
     entryId: ref.id,
-    leaveId: entry.leaveId,
+    leaveId: entry.leaveId ?? ref.id,
     userId: entry.userId,
     leaveType: entry.leaveType,
     occurrenceStart: entry.occurrenceStart,
@@ -71,7 +80,9 @@ export function recordLeaveLedgerEntry(
     // A concrete timestamp rather than `serverTimestamp()`: the History view
     // orders by it, and a sentinel resolves to the commit time anyway.
     at: Timestamp.now(),
+    period: entry.period,
     ...(entry.priorStatus ? { priorStatus: entry.priorStatus } : {}),
+    ...(entry.note ? { note: entry.note } : {}),
   };
   tx.set(ref, doc);
 }
@@ -81,3 +92,4 @@ export async function getRecentLeaveLedger(limit: number): Promise<LeaveLedgerDo
   const snap = await adminDb.collection(LEAVE_LEDGER).orderBy('at', 'desc').limit(limit).get();
   return snap.docs.map(d => d.data() as LeaveLedgerDocument);
 }
+

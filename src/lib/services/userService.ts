@@ -301,8 +301,6 @@ export function buildNewUserDoc(record: NewUserRecord): Record<string, unknown> 
     timezone: '',
     timezoneOffset: '',
     hasPaidLeave: false,
-    remainingUnpaidLeave: 4,
-    remainingPaidLeave: 10,
     // Placeholders — the registration route resolves the real values from
     // org/group settings right after (recomputeTimeTrackingSettings).
     enableIdleTimeout: DEFAULT_TIME_TRACKING_SETTINGS.enableIdleTimeout,
@@ -361,6 +359,27 @@ export async function getUserById(uid: string): Promise<any> {
  * `uid → displayName` for a set of uids, in ONE batched `getAll` (never N+1).
  * Missing users are left out; callers decide what an unknown uid renders as.
  */
+/**
+ * `uid → { displayName, isArchived }` in the same single `getAll` as
+ * `displayNamesFor`, for a list that must drop archived users (user-management
+ * rule: filter them from lists, keep their data resolvable elsewhere). Missing
+ * users are left out.
+ */
+export async function userLabelsFor(
+  uids: (string | null | undefined)[],
+): Promise<Map<string, { displayName: string; isArchived: boolean }>> {
+  const unique = [...new Set(uids.filter((u): u is string => !!u))];
+  const out = new Map<string, { displayName: string; isArchived: boolean }>();
+  if (unique.length === 0) return out;
+  const snaps = await adminDb.getAll(...unique.map((uid) => adminDb.collection('users').doc(uid)));
+  for (const snap of snaps) {
+    if (!snap.exists) continue;
+    const data = snap.data();
+    out.set(snap.id, { displayName: data?.displayName ?? 'Unknown', isArchived: data?.isArchived === true });
+  }
+  return out;
+}
+
 export async function displayNamesFor(uids: (string | null | undefined)[]): Promise<Map<string, string>> {
   const unique = [...new Set(uids.filter((u): u is string => !!u))];
   const names = new Map<string, string>();

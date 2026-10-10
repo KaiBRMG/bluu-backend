@@ -42,7 +42,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useAdminData } from '@/hooks/useAdminData';
-import { LEAVE_ALLOTMENT } from '@/lib/leave/leaveBalance';
 
 interface UserDetailContentProps {
   user: AdminFullUser;
@@ -80,8 +79,6 @@ interface FormData {
   paymentInfo: string;
   userComments: string;
   hasPaidLeave: boolean;
-  remainingUnpaidLeave: string;
-  remainingPaidLeave: string;
 }
 
 /** Accordion section each validated field lives in, so a failed save can reveal it. */
@@ -92,8 +89,6 @@ const FIELD_SECTION: Partial<Record<keyof FormData, string>> = {
   personalEmail: 'contact',
   emergencyContactNumber: 'emergency-contact',
   emergencyContactEmail: 'emergency-contact',
-  remainingUnpaidLeave: 'time-tracking',
-  remainingPaidLeave: 'time-tracking',
 };
 
 const SECTION_LABELS: Record<string, string> = {
@@ -108,7 +103,6 @@ const SECTION_LABELS: Record<string, string> = {
 
 const EMPLOYMENT_TYPES = ['Full-time', 'Part-time', 'Contractor', 'Intern'];
 const NO_EMPLOYMENT_TYPE = '__none';
-const MAX_LEAVE_DAYS = 365;
 
 /**
  * Normalises a stored DOB to the `YYYY-MM-DD` the date input and Calendar use.
@@ -147,20 +141,7 @@ function buildFormData(user: AdminFullUser): FormData {
     paymentInfo: user.paymentInfo || '',
     userComments: user.userComments || '',
     hasPaidLeave: user.hasPaidLeave ?? false,
-    // The allotment constants — see `lib/leave/leaveBalance.ts`. Hand-typed here
-    // and disagreeing with the agent-facing default was how one document showed
-    // two different balances depending on who was looking.
-    remainingUnpaidLeave: String(user.remainingUnpaidLeave ?? LEAVE_ALLOTMENT.unpaid),
-    remainingPaidLeave: String(user.remainingPaidLeave ?? LEAVE_ALLOTMENT.paid),
   };
-}
-
-function validateLeaveDays(value: string, label: string): string | null {
-  if (value.trim() === '') return `${label} is required`;
-  if (!/^\d+$/.test(value.trim())) return `${label} must be a whole number`;
-  const parsed = Number(value);
-  if (parsed > MAX_LEAVE_DAYS) return `${label} cannot exceed ${MAX_LEAVE_DAYS}`;
-  return null;
 }
 
 function errorMessage(err: unknown, fallback: string): string {
@@ -436,10 +417,6 @@ export default function UserDetailContent({
     assign('phoneNumber', validatePhoneNumber(formData.phoneNumber));
     assign('emergencyContactNumber', validatePhoneNumber(formData.emergencyContactNumber));
     assign('emergencyContactEmail', validateEmail(formData.emergencyContactEmail));
-    assign('remainingUnpaidLeave', validateLeaveDays(formData.remainingUnpaidLeave, 'Unpaid leave'));
-    if (formData.hasPaidLeave) {
-      assign('remainingPaidLeave', validateLeaveDays(formData.remainingPaidLeave, 'Paid leave'));
-    }
 
     const invalidFields = Object.keys(newErrors) as (keyof FormData)[];
     if (invalidFields.length > 0) {
@@ -492,8 +469,6 @@ export default function UserDetailContent({
         paymentInfo: formData.paymentInfo,
         userComments: formData.userComments,
         hasPaidLeave: formData.hasPaidLeave,
-        remainingUnpaidLeave: Number(formData.remainingUnpaidLeave),
-        remainingPaidLeave: Number(formData.remainingPaidLeave),
       };
 
       await onUpdateUser(user.uid, profileUpdates);
@@ -877,7 +852,7 @@ export default function UserDetailContent({
                     <div className="flex items-center justify-between gap-4">
                       <Label
                         htmlFor={fid('hasPaidLeave')}
-                        className={cn('text-sm', !enableTimeTracking && 'text-zinc-500')}
+                        className={cn('text-sm', !enableTimeTracking && 'text-zinc-400')}
                       >
                         Has Paid Leave
                       </Label>
@@ -889,51 +864,12 @@ export default function UserDetailContent({
                       />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <Label
-                          htmlFor={fid('remainingUnpaidLeave')}
-                          className={cn('mb-1 block text-xs text-zinc-400', !enableTimeTracking && 'text-zinc-500')}
-                        >
-                          Unpaid Leave Remaining
-                        </Label>
-                        <Input
-                          type="number"
-                          inputMode="numeric"
-                          min={0}
-                          max={MAX_LEAVE_DAYS}
-                          className={`form-input w-full tabular-nums ${errors.remainingUnpaidLeave ? 'error' : ''}`}
-                          value={formData.remainingUnpaidLeave}
-                          onChange={(e) => handleChange('remainingUnpaidLeave', e.target.value)}
-                          disabled={!enableTimeTracking}
-                          {...fieldProps('remainingUnpaidLeave')}
-                        />
-                        {fieldError('remainingUnpaidLeave')}
-                      </div>
-                      <div>
-                        <Label
-                          htmlFor={fid('remainingPaidLeave')}
-                          className={cn(
-                            'mb-1 block text-xs text-zinc-400',
-                            (!enableTimeTracking || !formData.hasPaidLeave) && 'text-zinc-500'
-                          )}
-                        >
-                          Paid Leave Remaining
-                        </Label>
-                        <Input
-                          type="number"
-                          inputMode="numeric"
-                          min={0}
-                          max={MAX_LEAVE_DAYS}
-                          className={`form-input w-full tabular-nums ${errors.remainingPaidLeave ? 'error' : ''}`}
-                          value={formData.remainingPaidLeave}
-                          onChange={(e) => handleChange('remainingPaidLeave', e.target.value)}
-                          disabled={!enableTimeTracking || !formData.hasPaidLeave}
-                          {...fieldProps('remainingPaidLeave')}
-                        />
-                        {fieldError('remainingPaidLeave')}
-                      </div>
-                    </div>
+                    {/* Balances are derived per month and per year now
+                        (`lib/leave/leaveBalance.ts`); the allowance and one-off
+                        adjustments live with the rest of leave. */}
+                    <p className="text-xs text-zinc-400">
+                      How many days they get, and one-off adjustments, are set in Shift Management → Settings → Leave.
+                    </p>
                   </div>
                 </AccordionContent>
               </AccordionItem>

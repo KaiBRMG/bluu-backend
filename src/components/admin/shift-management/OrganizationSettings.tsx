@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Search } from 'lucide-react';
+import { Lock, Search } from 'lucide-react';
 import { useTimeTrackingSettings, type OverridePatch, type TimeTrackingSettingsGroup, type TimeTrackingSettingsUser } from '@/hooks/useTimeTrackingSettings';
 import {
   IDLE_INPUT_MODES,
@@ -20,6 +20,7 @@ import {
   type TimeTrackingSettings,
 } from '@/lib/timeTrackingSettings';
 import { DEFAULT_SHIFT_BREAK_POLICY, type ShiftBreakPolicy } from '@/lib/shiftBreakPolicy';
+import { SALARY_TIMEZONE } from '@/lib/salary/salaryConstants';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { SURFACE } from '@/lib/surfaces';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -116,6 +117,7 @@ export default function OrganizationSettings() {
         then the organization default. Anything not set at a level is inherited from the one below it.
       </p>
       <OrgDefaultsSection org={org} onSave={saveOrg} />
+      <OrgTimezoneSection />
       <ShiftBreaksSection policy={shiftBreaks ?? DEFAULT_SHIFT_BREAK_POLICY} onSave={saveShiftBreaks} />
       <GroupsSection org={org} groups={groups} onSave={saveGroup} />
       <UsersSection org={org} groups={groups} users={users} onSave={saveUser} />
@@ -299,6 +301,53 @@ function OrgDefaultsSection({
             </Button>
           </div>
         )}
+      </div>
+    </section>
+  );
+}
+
+// ─── Organization timezone (read-only) ─────────────────────────────────
+
+/**
+ * Shown, not editable — deliberately. The salary day boundary is compiled into
+ * `salaryDate.ts` as a fixed offset, stamped onto every stored sale, override
+ * and leave period, and has to match the zone BuddyX and the CRM exports report
+ * in. Changing it is an engineering change with a data migration, not a toggle
+ * (ca-salary.md §7). Surfacing it here is what makes it discoverable.
+ */
+function OrgTimezoneSection() {
+  return (
+    <section>
+      <SectionHeader
+        title="Organization timezone"
+        description="The clock every agent's pay days are counted on, wherever they work from."
+      />
+      <div className="divide-y divide-white/[0.07] rounded-xl border border-white/[0.07] bg-white/[0.025]">
+        <div className="flex items-start justify-between gap-6 px-4 py-4">
+          <div>
+            <p className="text-sm font-medium">SAST — South African Standard Time</p>
+            <p className="mt-1 text-xs text-zinc-400">
+              <span className="tabular-nums">UTC+2</span> all year, no daylight saving · {SALARY_TIMEZONE}
+            </p>
+          </div>
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/[0.06] px-2 py-0.5 text-[11px] font-medium text-zinc-300">
+            <Lock className="size-3" aria-hidden />
+            Fixed
+          </span>
+        </div>
+        <div className="px-4 py-4 text-xs text-zinc-400">
+          <p className="font-medium text-zinc-300">What it controls</p>
+          <ul className="mt-1.5 list-disc space-y-1 pl-4">
+            <li>Salary days and months run midnight to midnight SAST. A shift is paid on the day it starts; a sale counts on the day it happened.</li>
+            <li>Leave periods, month finalisation and the payday and overtime reminders.</li>
+            <li>The BuddyX sync and sales imports, which must match the zone the CRM reports in.</li>
+          </ul>
+          <p className="mt-3">
+            Everyone still <span className="text-zinc-300">reads</span> times in their own timezone; salary pages show
+            the SAST equivalent on hover. Changing this zone would re-date stored sales and pay, so it isn&apos;t
+            editable here.
+          </p>
+        </div>
       </div>
     </section>
   );

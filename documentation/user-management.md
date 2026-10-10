@@ -136,6 +136,7 @@ A user's timezone drives every time the product renders: shift times, salary day
 | `/api/users/display-names` (`useBasicUsers`) | Returns `isArchived` on each `BasicUser`; does **NOT** filter server-side | Some pages (`creators/custom-requests`, `ca-portal/campaigns`) resolve historical editor names by UID via `useUserName`, including archived users. **Filter at the consumer** when building a picker (see `AdminTimesheets`, `CreateNotificationDialog`) |
 | `/api/disputes/users` (`useDisputesData`) | **Filters archived server-side** | Only feeds CA assignee/filter pickers; dispute display names resolved separately in `/api/disputes`, so historical display is unaffected |
 | `/api/shifts/week` | Excludes archived from its `userMap` | Removes them from the shift grid + shift-assignment picker |
+| `/api/analytics/chatters` (Chatter Analytics, admin) | Excludes archived from the roster cards, the comparison table and the flag list, via `userLabelsFor` (same single `getAll` as the name lookup) | The anonymous team benchmark agents see is unchanged, and `/ca-portal/chatter-analytics/[uid]` still opens an archived agent's report by link — their data must still resolve |
 | `/api/admin/users` (`useAdminUsers`) | Returns archived **intact** | User-management is the surface that manages them (the index's **Archived** status facet). Filter archived only in action lists drawing from it (`AdminLeave`) |
 
 ### Intentional exceptions (keep archived users)

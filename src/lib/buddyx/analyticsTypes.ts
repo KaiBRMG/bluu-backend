@@ -131,6 +131,8 @@ export interface ChatterLeaderboardRow extends ChatterMetrics {
   clockedMs: number | null;
   /** BuddyX online vs clocked working time. Null for an unlinked chatter or a period before BuddyX. */
   coverage: CoverageFigures | null;
+  /** The same, day by day — each agent's small chart. Empty for an unlinked chatter. */
+  days: ReportDay[];
   /** Null when the agent had no monitored capture in the period. */
   integrity: IntegritySummary | null;
   /** Distinct accounts rostered across the agent's shifts in the period. */

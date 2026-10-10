@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
-import { getUserById, invalidateUserCache } from '@/lib/services/userService';
+import { getUserById } from '@/lib/services/userService';
 import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
+import { safeTimezone } from '@/lib/utils/timezone';
 import { sendTelegramNotification } from '@/lib/services/telegramService';
 import { releaseOccurrenceForCoverage } from '@/lib/services/leaveCoverage';
-import { isBalanceCharged, leaveCharge, leaveRefund, remainingOf } from '@/lib/leave/leaveBalance';
+import { computeLeaveBalance, leavePeriodOf, remainingAfterChange } from '@/lib/leave/leaveBalance';
 import { recordLeaveLedgerEntry } from '@/lib/services/leaveLedger';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { LeaveRequestDocument, UserDocument } from '@/types/firestore';
@@ -16,8 +17,8 @@ import type { LeaveRequestDocument, UserDocument } from '@/types/firestore';
  * A refusal the admin needs to read, raised from inside the transaction.
  *
  * Distinguished from a genuine failure so the catch can answer 409 with the
- * message rather than 500 with a stack — "they have no days left" is an outcome,
- * not an error.
+ * message rather than 500 with a stack — "already decided" is an outcome, not
+ * an error.
  */
 class LeaveConflict extends Error {}
 
@@ -69,7 +70,8 @@ export const POST = withAuth(async (
     }
 
     // Format date in the user's timezone for the notification message
-    const userTimezone = targetUser.timezone || 'UTC';
+    // Rule 9g: an unset timezone is '' and `Intl` throws on it.
+    const userTimezone = safeTimezone(targetUser.timezone);
     const dateStr = new Intl.DateTimeFormat('en-US', {
       timeZone: userTimezone,
       weekday: 'long',
@@ -84,19 +86,20 @@ export const POST = withAuth(async (
       ? notifications.leaveApproved(leaveLabel, dateStr)
       : notifications.leaveDenied(leaveLabel, dateStr);
 
-    // ── The request already took the day; denial gives it back ──
+    // ── The balance follows the status ──
     //
-    // Requesting is what spends the balance (see the request route). So an
-    // approval normally leaves the balance alone, and a denial refunds the day
-    // the request took — through `leaveRefund`, which declines when a reset has
-    // happened since, because the reset already restored the allotment.
-    //
-    // A **transaction**, reading the leave and the user document inside it, so
-    // the status check, the balance read and the write are one operation.
+    // A pending request already holds its day (`leaveBalance.ts`), so approving
+    // moves nothing, and denying gives the day back by no longer counting. The
+    // transaction only exists to make the status check and the ledger's
+    // before/after one read.
     try {
       await adminDb.runTransaction(async tx => {
         const userRef = adminDb.collection('users').doc(leave.userId);
-        const [freshLeaveSnap, userSnap] = await Promise.all([tx.get(leaveRef), tx.get(userRef)]);
+        const [freshLeaveSnap, userSnap, ownRequests] = await Promise.all([
+          tx.get(leaveRef),
+          tx.get(userRef),
+          tx.get(adminDb.collection('leave_requests').where('userId', '==', leave.userId)),
+        ]);
         const freshLeave = freshLeaveSnap.data() as LeaveRequestDocument | undefined;
         const freshUser = userSnap.data() as UserDocument | undefined;
 
@@ -106,54 +109,27 @@ export const POST = withAuth(async (
           throw new LeaveConflict('That request has already been decided.');
         }
 
-        const leaveUpdate: Record<string, unknown> = {
-          status: action === 'approve' ? 'approved' : 'denied',
+        const nextStatus = action === 'approve' ? 'approved' : 'denied';
+        const requests = ownRequests.docs.map(d => d.data() as LeaveRequestDocument);
+        const period = leavePeriodOf(leave.leaveType, leave.occurrenceStart);
+        const before = computeLeaveBalance(freshUser, requests, leave.leaveType, period).remaining;
+        const after = remainingAfterChange(before, freshLeave, { status: nextStatus });
+
+        tx.update(leaveRef, {
+          status: nextStatus,
           resolvedAt: FieldValue.serverTimestamp(),
           resolvedBy: token.uid,
-        };
-
-        const before = remainingOf(freshUser, leave.leaveType);
-        let after = before;
-
-        if (action === 'deny') {
-          const refund = leaveRefund(freshUser, freshLeave);
-          if (refund) {
-            tx.update(userRef, refund);
-            after = before + 1;
-          }
-          leaveUpdate.balanceCharged = false;
-        } else if (!isBalanceCharged(freshLeave)) {
-          // A request made before charging moved to request time never took its
-          // day, so approval takes it — the old rule, kept for those requests
-          // until the queue has drained.
-          //
-          // Refused rather than clamped. Approving leave the agent cannot afford
-          // is a payroll decision — it either costs the company a day it did not
-          // grant, or (clamped at zero) silently records an absence against a
-          // balance that never moved. An admin who means to allow it can raise
-          // the balance in CA Admin → Leave and approve again, which leaves a
-          // trail; a clamp leaves none.
-          if (before <= 0) {
-            throw new LeaveConflict(
-              `${targetUser.displayName ?? 'That agent'} has no ${leaveLabel} leave remaining. Adjust their balance in CA Admin → Leave to approve this.`,
-            );
-          }
-          const charge = leaveCharge(freshUser, leave.leaveType);
-          tx.update(userRef, charge.userUpdate);
-          Object.assign(leaveUpdate, charge.leaveUpdate);
-          after = before - 1;
-        }
-
-        tx.update(leaveRef, leaveUpdate);
+        });
         recordLeaveLedgerEntry(tx, {
           leaveId: leave.leaveId,
           userId: leave.userId,
           leaveType: leave.leaveType,
           occurrenceStart: leave.occurrenceStart,
-          action: action === 'approve' ? 'approved' : 'denied',
+          action: nextStatus,
           before,
           after,
           actorUid: token.uid,
+          period,
         });
       });
     } catch (txErr) {
@@ -162,11 +138,6 @@ export const POST = withAuth(async (
       }
       throw txErr;
     }
-
-    // A denial refunds, and a legacy approval charges — either way the balance
-    // may have moved (rule 2). Straight after the commit, so a notification
-    // failure below cannot leave the cache holding the old balance.
-    invalidateUserCache(leave.userId);
 
     // The notification is outside the transaction on purpose: a transaction that
     // retries would write the notification once per attempt.

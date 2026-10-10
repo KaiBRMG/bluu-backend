@@ -135,10 +135,10 @@ This is correct and it reads as an error, which is exactly how it was reported: 
 
 An admin can replace any of eight fields on any day: `grossEarnings`, `hours`, `accountCount`, `hourlyRate`, `commissionPercent`, `commission`, `wage`, `salary`.
 
-- Stored sparsely in `ca-salary-overrides/{userId}_{day}`, each with **who, when and why**.
+- Stored sparsely in `ca-salary-overrides/{userId}_{day}`, each with **who, when and why**. **The reason is required** (since 2026-10-10): the agent sees it beside the edited figure, and a pay number that moved with no stated cause is the moment a payslip loses trust. `PUT /api/ca-salary/override` refuses one under three characters.
 - The engine recomputes everything **downstream** of an override unless the downstream field is itself overridden. Overriding `grossEarnings` therefore moves month-to-date gross and can re-tier **every later day**.
 - Because of that, the override endpoints return the **recomputed month** and the client applies it wholesale. There is no optimistic patch, and there must not be — no client-side update can reproduce the ratchet.
-- Every edited cell shows a pencil, its tooltip carries the calculated value, and reverting is a `DELETE`, not a restore.
+- Every edited cell shows a pencil, its tooltip carries the calculated value (formatted as the grid prints it — `$1,204.50`, `7.75 h`), and reverting is a `DELETE`, not a restore.
 - Writes use **dotted field paths** (`fields.hours`), so two admins editing different fields of the same day cannot clobber each other.
 
 ---
@@ -197,9 +197,11 @@ An admin with the **admin claim** finalises a month:
 - Every derived figure is frozen into `ca-salary-months/{userId}_{month}`.
 - Later sales imports for that agent-month are refused; no override can be written.
 - **The agent is notified** (`salaryFinalized`) — see §11. Reopening is silent, deliberately.
-- **The agent's leave resets**, in the same transaction: unpaid → 4 for the next month, and on a December paid → 10 for the next year. Assigned, not added. See §6, *The reset*.
+- **Leave is not touched.** Until 2026-10-10 finalising also reset leave balances; balances are now derived per month and per year (§6, *Leave balances*), so there is nothing to reset.
 
-Reopening keeps the frozen `days` — that is the record of what was paid — and appends to `history`. Again, nobody is notified automatically. It **does not touch leave**, and a re-finalise after it is a no-op for leave, because the reset stamp only moves forward.
+Reopening keeps the frozen `days` — that is the record of what was paid — and appends to `history`. Again, nobody is notified automatically.
+
+**Closing the month is one action.** Payroll → **Finalise N ready agents** finalises every open agent whose month has no day with sales but no shift (`missingShiftDays === 0`, the roster's own "figures are still wrong" signal). The dialog lists who is included — each can be unticked — and who is **held back and why**, takes one optional note recorded on every month, and runs the single-agent `/api/ca-salary/finalize` route once per agent, sequentially, so a failure names exactly who was not closed while the rest stand. The dialog stays open on a partial failure, because it is where the names are. An agent's detail view has **previous / next** in roster order, and the open agent lives in `?agent=` (with `?tab=salaries`) via `history.replaceState`, so Overview can open someone on Payroll and a link can point at one person's month.
 
 ---
 
@@ -388,32 +390,36 @@ Each claimant chip carries their account count for the offer's day (`Ana · 3 ac
 
 It comes from `GET /api/ca-coverage/offers?detail=claimants` — **admin-only and opt-in**. `getClaimantLoads` does one roster read per claimant across the board's date span and buckets by day in memory; the agent calendar calls the same route without the flag and pays nothing. The in-shift test and the projected count use the **same** functions as the claim cap and the assigner, so a chip flagged over the limit means the roster moved under the claim after it was made.
 
-### Leave balances — the entitlement, and who spends it
+### Leave balances — derived per period, never stored (2026-10-10)
 
-**[`src/lib/leave/leaveBalance.ts`](../src/lib/leave/leaveBalance.ts) is the only place the allotments are written down, and `resolveLeaveBalances` is the only sanctioned way to read a balance off a user document.** Both matter: the numbers were previously spelled out at six call sites, and two of them disagreed — `AdminLeave` and `UserDetailContent` read a missing balance as `4`/`10` while the request route, `LeaveBalanceCard` and `RequestLeaveDialog` read the same missing field as `0`. An admin and the agent saw different numbers for one person. `resolveLeaveBalances` also gates the paid figure on `hasPaidLeave`, because `remainingPaidLeave` holds `10` whether or not the entitlement is switched on.
+**[`src/lib/leave/leaveBalance.ts`](../src/lib/leave/leaveBalance.ts) is the one balance calculation**, used by the request route, the approve/withdraw routes, the admin allowance route, the agent's card and the request dialog — so the number an agent sees and the number the server refuses on cannot disagree.
 
-- **Unpaid: 4 days per salary month. Paid: 10 days per year**, for users with `hasPaidLeave`. **Both reset only when payroll finalises the agent's month**, never on a calendar date (see *The reset* below). A reset **assigns** the allotment, so balances do not carry over.
-- **The period boundary is `Africa/Harare`**, the same as §7's salary day, so a day off cannot land in one month's roster and spend another month's balance. The period keys come from `salaryDate.ts` for exactly that reason.
+```
+remaining(person, type, period) = allotment + adjustment − requests in that period that are pending or approved
+```
 
-**Requesting takes the day. A denial or a withdrawal gives it back.** The balance an agent sees is therefore what they can still ask for: a pending request is already off it, rather than being a second number to subtract in their head. (An earlier version charged at approval. It was reversed on 2026-09-25 because agents saw a balance that did not move when they asked for time off.)
+- **Unpaid leave is a monthly allowance; paid leave a yearly one** (paid only for users with `hasPaidLeave`). The period is the salary month (`YYYY-MM`) or salary year (`YYYY`) **of the shift**, in `Africa/Harare` — the §7 clock — so a day off cannot land in one month's roster and spend another month's allowance.
+- **A request is charged to the period its shift falls in.** Leave for a shift next month spends next month's allowance.
+- **Agents can request leave for shifts in this salary month or the next only** (`isWithinRequestWindow`). The calendar hides the button outside that window and the request route refuses it.
+- **Nothing is stored and nothing resets.** Denial and withdrawal give the day back by the request no longer counting; a new month simply has no requests in it yet; unused days are gone because each period stands alone. The old stored balances (`remainingUnpaidLeave` / `remainingPaidLeave`), reset stamps (`unpaidLeaveResetMonth` / `paidLeaveResetYear`) and charge markers (`balanceCharged` / `chargedPeriod`) are deprecated — still on old documents, read by nothing. **No migration was needed**: every request carries `occurrenceStart`, which is all a period needs.
+- **The allotment** is per person, `users.leaveAllotment = { unpaidPerMonth?, paidPerYear? }`, falling back to `DEFAULT_UNPAID_LEAVE_PER_MONTH` (4) and `DEFAULT_PAID_LEAVE_PER_YEAR` (10). Typing the default back stores nothing, so the person follows the default again.
+- **An adjustment** is a signed one-off for one person and one period, `users.leaveAdjustments = { unpaid: { 'YYYY-MM': n }, paid: { 'YYYY': n } }` — e.g. two extra unpaid days in November. It **sets** the period's adjustment (0 removes it), **requires a note**, and is written to the ledger with who made it. A balance can go negative when an adjustment is cut below what is already approved; it is shown as "N over", never hidden.
+- Both fields are index-exempt (rule 9). Writes go through **`PUT /api/shifts/leave/allowance`**, which needs **shift-management and user-management** — exactly what editing a balance from Shift Management required before (that write went through `PUT /api/admin/users/{uid}`), so no access was widened. `GET` (everyone, or `?uid=`) needs shift-management or ca-admin and computes balances server-side from one range query on `leave_requests.occurrenceStart`.
+- **Where admins set it:** Shift Management → Settings → **Leave** (everyone's allowance, with this month's, next month's and this year's balance), and a person's **Leave** tab (allowance plus an *Adjust* control per period). The Employee Registry keeps only the `hasPaidLeave` switch and points here.
+- **Where agents see it:** `LeaveBalanceCard` shows unpaid days left this month and next, and paid days left this year; each figure explains itself (allowed · adjusted · requested). `RequestLeaveDialog` shows the balance of the period the chosen shift falls in.
+- **Every mutation reads the person's requests inside its transaction**, so two requests landing together cannot both see "1 left" — the second's read collides with the first's write.
 
-| Transition | Balance effect |
+| Transition | Effect on that period's balance |
 |---|---|
-| Request created | **−1**, in a transaction; refused at zero |
-| Approved | none |
-| Denied | **+1** (see the period rule below) |
-| Pending or approved request withdrawn | **+1** (same rule) |
-| Denied request withdrawn | none — it was refunded at denial |
-
-- **A request records that it took a day, and from which period.** `balanceCharged` / `chargedPeriod` on `leave_requests` (both index-exempt, rule 9). `chargedPeriod` is the user's reset stamp (`unpaidLeaveResetMonth` / `paidLeaveResetYear`) at the time of the charge, not the wall clock, because the stamp changes at exactly the moment finalisation assigns a fresh allotment. Refunds go through `leaveRefund` and are decided by the marker, never by `status`.
-- **No refund across a reset.** A day taken from September's four and denied on 2 October does not come back, because the reset already restored October to four. If the period is still current, the refund is **uncapped**: it returns exactly the day that was taken, and a cap would swallow days an admin granted above the allotment. If the period is unknown (a legacy approval, or a user with no stamp), the refund is capped at the allotment.
-- **Legacy requests.** Requests made before this change carry no marker. `isBalanceCharged` treats an unmarked **approved** request as charged, since the old flow charged at approval, and an unmarked pending or denied one as not charged. An unmarked pending request is charged **when it is approved** (the old rule, including the 409 at zero) and counts against the request gate until then. The branch goes dead once the old queue has drained.
-- **Every mutation is a `runTransaction`, reading the user document (and on request, the agent's own requests) inside it.** The old code paired an unrelated read with a blind `FieldValue.increment(-1)`, so two requests landing together both saw "1 left" and both decremented, and the balance could go negative. A deny racing a withdrawal can't refund twice, because both read the marker inside the transaction.
-- **Both approval call sites must surface a refusal.** `useAdminLeaveQueue` and `ShiftCard` both POST to the approve route (§6; `ShiftCard` is the one that gets forgotten). A legacy approval can still 409 at zero, and a double-decide 409s.
+| Request created | **−1**, refused at zero |
+| Approved | none — the request already held its day |
+| Denied | **+1** (it stops counting) |
+| Pending or approved request withdrawn | **+1** (the document is deleted) |
+| Denied request withdrawn | none |
 
 ### The leave ledger and Coverage → History
 
-**Every balance change a leave request makes is written to `leave-ledger` inside the same transaction that makes it** ([`leaveLedger.ts`](../src/lib/services/leaveLedger.ts)). One entry per step (`requested` / `approved` / `denied` / `withdrawn`), carrying the balance before and after as values read in the transaction, so the ledger and the balance cannot disagree. It exists because nothing else remembers. A balance is one number, and a withdrawal **deletes** its request document.
+**Every balance change is written to `leave-ledger` inside the same transaction that makes it** ([`leaveLedger.ts`](../src/lib/services/leaveLedger.ts)). One entry per step (`requested` / `approved` / `denied` / `withdrawn`), carrying the balance before and after as values read in the transaction, so the ledger and the balance cannot disagree. It exists because nothing else remembers. A balance is one number, and a withdrawal **deletes** its request document.
 
 **Coverage → History** ([`LeaveHistory.tsx`](../src/components/ca-admin/LeaveHistory.tsx), served by [`GET /api/shifts/leave/history`](../src/app/api/shifts/leave/history/route.ts), same access tier as the queue) lists every approved, denied or withdrawn request with its outcome and trail, e.g. *Unpaid balance 4 → 3 requested · 3 → 4 denied*. The route merges two sources by `leaveId`:
 - `leave_requests` for decided requests, including those from before the ledger, which render "not recorded" for the balance;
@@ -421,7 +427,7 @@ It comes from `GET /api/ca-coverage/offers?detail=claimants` — **admin-only an
 
 Both queries are bounded (400 requests, 600 entries) and names resolve in one `getAll`. It is uncached (rule 9i: the queue beside it writes it), and it fetches only while the tab is open.
 
-**The trail does not cover every way a balance moves.** The finalisation reset and hand edits in CA Admin → Leave change balances without a request and write no entry. The page states this in a footnote. If those ever need a history, give them their own ledger action rather than inferring them from gaps.
+**Since 2026-10-10 the trail is complete.** Each entry carries its `period`, and admin changes are entries too: `adjusted` (with the admin's `note`) and `allotment` (standing allowance, `period: 'standing'`). History shows each as its own **Adjusted** row rather than grouping it under a request. Before that date, month-end resets and hand edits moved balances without an entry; the page's footnote says so.
 
 ### Leave on the salary grid
 
@@ -429,29 +435,19 @@ Both queries are bounded (400 requests, 600 entries) and names resolve in one `g
 
 **The chip marks leave; it does not pay it.** Paid leave currently adds nothing to the salary.
 
-**The reset: finalising a month is what resets leave.** `finalizeMonth` ([`caSalaryService.ts`](../src/lib/services/caSalaryService.ts)) applies [`computeFinalizationReset`](../src/lib/leave/leaveBalance.ts) in the **same transaction** that freezes the month, so a month can't be paid with its reset lost, or reset without being paid:
-
-| Finalised | Unpaid | Paid |
-|---|---|---|
-| Any month M | **set to 4** for M+1; `unpaidLeaveResetMonth = M+1` | unchanged |
-| December of year Y | **set to 4** for January Y+1 | **set to 10** for Y+1 (users with `hasPaidLeave`); `paidLeaveResetYear = Y+1` |
-
-- **Assigned, never added.** Unused days are lost, so an agent who took nothing in September still has 4 for October, not 8.
-- **The stamp only moves forward.** A reset applies only when the new period is later than the stored stamp. **Reopening and re-finalising** is therefore a no-op for leave and doesn't hand back days used since the first finalise. **Finalising out of order** (September after October) doesn't wind the balance back. A user with no stamp is reset.
-- **Paid leave is stamped even without `hasPaidLeave`**, so switching the entitlement on mid-year doesn't trigger a reset nobody granted.
-- **Until a month is finalised, the agent is still spending the previous period's balance**, however far into the new calendar month it is. That is the intended behaviour: payroll closing the month is what hands out the next allotment. Refunds follow the same stamp, so a day taken before a finalisation and denied after it is not refunded on top of the fresh 4.
-- The finalise dialog names the reset before confirming, and the toast reports what actually happened (including "already reset" on a re-finalise). Nothing is sent to the agent for it; the existing `salaryFinalized` notification is the only message.
-- **There is no calendar cron any more.** `/api/cron/leave-reset` (daily, 22:30 UTC) was removed on 2026-09-25. Leave is a CA-only feature (the request dialog and balance card live on the CA dashboard), so an employee with no salary month never has a balance to reset.
-
 ---
 
 ## 7. Timezone
 
 **`Africa/Harare` (UTC+2, no DST) is the salary day boundary for every agent**, regardless of where they live. The export is stamped in it and the roster is managed in SAST. One company-wide boundary is what makes a month reconcile exactly against the source sheet and the CRM. An overnight shift crosses it, so its post-midnight sales land on the next calendar day — on purpose (§4).
 
+It is shown **read-only** under Shift Management → Organization settings → *Organization timezone* (`OrgTimezoneSection` in [`OrganizationSettings.tsx`](../src/components/admin/shift-management/OrganizationSettings.tsx)). Making it editable was considered and deliberately declined (2026-10-10): the zone is compiled into the helpers below, stamped onto stored `day`/`month` keys (sales, overrides, leave periods, finalised months), and must match the zone BuddyX and the CRM report in — so a change is an engineering change with a data migration, not a toggle.
+
 [`salaryDate.ts`](../src/lib/salary/salaryDate.ts) uses **fixed-offset arithmetic**, which is exact here and nowhere else. **Do not copy those helpers to a timezone that observes DST** — they would silently mis-bucket two days a year.
 
 Displayed *clock times* still render in the viewer's own timezone. Only the bucketing is fixed.
+
+For an agent outside UTC+2 the two clocks disagree (a 23:30 SAST tip is "5:30 AM" the next day on a UTC+8 clock), so every time on the salary surfaces names its clock. [`SalaryClock.tsx`](../src/components/salary/SalaryClock.tsx) owns this: the ledger's `SaleWhen` cell shows local time, adds an inline **"Counts {day}"** chip whenever the local date differs from the sale's salary day, and on hover gives both local and SAST times. `ShiftWindow` does the same for a shift's scheduled window, and `SALARY_DAY_HINT` is the one wording of the boundary used by the Date column, the daily chart and the day banner. "Same clock" is decided by **UTC offset at that instant** (`readsSalaryClock`), not zone name, so Johannesburg/Maputo readers see no redundant SAST line.
 
 ### Never hand a raw timezone to `Intl`
 
@@ -523,14 +519,17 @@ Helpers: [`salaryAuth.ts`](../src/lib/salary/salaryAuth.ts).
 /ca-portal/admin            (tabbed)
   Overview      the month above the roster — agent × creator matrix,
                 agent profitability, creator leaderboard, payroll share,
-                attention band
-  Salaries      roster → one agent's editable month
+                attention band (every agent name opens them on Payroll)
+  Payroll       sortable roster + "Finalise N ready" → one agent's editable
+                month, prev/next (tab id `salaries`; `?agent=` deep links)
   Sales         BuddyX sync status + write switch, attention band, every
                 agent's sales ledger · Mapping · Sync history · Historical
                 import (one-off) — see buddyx.md
   Coverage      leave approvals → offer board → assign · History (outcomes
                 + balance trail)
-  Rates         tiers, wage table, grace, deduction, rate basis
+  Rates         tiers, wage table, grace, deduction, rate basis — saved
+                through a dry run (`PUT ?preview=1`) that shows payroll
+                before/after for every open month and who changes tier
   Disputes      the admin desk — bulk bar, all filters (unchanged)
 
 /ca-portal/dashboard        LEFT  salary card · leave balance · shift calendar
@@ -538,7 +537,8 @@ Helpers: [`salaryAuth.ts`](../src/lib/salary/salaryAuth.ts).
                             RIGHT Sale Disputes — the open review queue, recent
                                   verdicts on your own claims, and what is still
                                   waiting. New dispute + All disputes (dialog).
-/ca-portal/dashboard/salary Overview · Daily breakdown · Sales report (breakdown
+/ca-portal/dashboard/salary Overview (+ "How this was calculated") · Daily
+                            breakdown · Sales report (breakdown
                             first: tips/PPV tiles, daily chart, by creator/type,
                             then the ledger; transfers in and away)
 /ca-portal/chatter-analytics · /ca-portal/fan-analytics   BuddyX analytics — buddyx.md
@@ -689,12 +689,16 @@ Three calls worth not re-litigating:
 | [`caSalaryService.ts`](../src/lib/services/caSalaryService.ts) | Firestore + the assembler |
 | [`caCoverageService.ts`](../src/lib/services/caCoverageService.ts) | Offers, claims, assignment |
 | [`leaveCoverage.ts`](../src/lib/services/leaveCoverage.ts) | Leave approval → release, and withdrawal → revert. `resolveLiveOccurrence` re-resolves a pinned request against the live roster first — see §6 |
-| [`leave/leaveBalance.ts`](../src/lib/leave/leaveBalance.ts) | The leave allotments, the one sanctioned balance reader (`resolveLeaveBalances`), charging/refunding a request, and the pure `computeFinalizationReset` that `finalizeMonth` applies — see §6 |
+| [`leave/leaveBalance.ts`](../src/lib/leave/leaveBalance.ts) | The leave model: periods, the request window, allotments, adjustments and `computeLeaveBalance` — pure, shared by server and client. See §6 |
+| [`shifts/leave/allowance/route.ts`](../src/app/api/shifts/leave/allowance/route.ts) + [`useLeaveAllowances.ts`](../src/hooks/useLeaveAllowances.ts) | Everyone's allowance and balances (GET), and allowance / adjustment writes with ledger entries (PUT) |
 | [`leaveMatch.ts`](../src/lib/utils/leaveMatch.ts) | The tiered leave ↔ occurrence matcher, shared by the release, the admin week view and the agent calendar |
 | [`caNotifications.ts`](../src/lib/services/caNotifications.ts) | Recipients, delivery, the tier gate and the payday latch |
 | [`coverageNotices.ts`](../src/lib/services/coverageNotices.ts) | The coalescing queue and the withdrawal record |
 | [`AdminOverview.tsx`](../src/components/ca-admin/AdminOverview.tsx) | The Overview tab — the matrix, agent profitability, the leaderboard and the attention band |
-| [`CommissionLadder.tsx`](../src/components/salary/CommissionLadder.tsx) | The stepped scale, drawn as steps |
+| [`CommissionLadder.tsx`](../src/components/salary/CommissionLadder.tsx) | The stepped scale, drawn as steps. The current band is chosen **by position**, never by percent — two tiers sharing a rate would both light up |
+| [`SalaryDerivation.tsx`](../src/components/salary/SalaryDerivation.tsx) | "How this was calculated" on the agent's salary page: commission by rate band (a run of days, because the ratchet only climbs) and hourly pay by rate, summed from the month result already on the page — so it cannot disagree with the headline. Edited days are counted where they land and named |
+| [`AdminSalaries.tsx`](../src/components/ca-admin/AdminSalaries.tsx) | Payroll: the sortable roster, **Finalise N ready** (§5), and one agent's month with prev/next |
+| [`AdminRates.tsx`](../src/components/ca-admin/AdminRates.tsx) | The rate tables. Tier order is checked while typing; saving goes through the dry run, priced by `buildSalaryMonthForUsersUnder` — one set of reads, two configs |
 | [`SalaryDayTable.tsx`](../src/components/salary/SalaryDayTable.tsx) | The month grid, read-only and editable |
 | [`useLeaveRequests.ts`](../src/hooks/useLeaveRequests.ts) | **Module-level shared store**, like `useCreators`. The CA dashboard mounts it twice by design (balance card + calendar); per-instance state meant two identical requests on mount and a badge that went stale while the calendar beside it refreshed. Exports `invalidateLeaveRequestsCache` for writers on other surfaces — see §6. |
 | [`useShiftCalendar.ts`](../src/hooks/useShiftCalendar.ts) | The agent's own roster, cached per month and revalidated on window focus. Exports `invalidateShiftCalendarCache` — see §6. |
@@ -838,7 +842,7 @@ One non-optimisation worth knowing: `loading="lazy"` on the avatar does nothing.
 cd tests/salary-engine && npm install && npm test
 ```
 
-92 tests over the pure engine, the date helpers, the importer, shift serialisation and timezone resolution, including an **end-to-end run of the real August export** that asserts the figures the spreadsheet produced (Queen: $12,621.99 gross, 5% tier, $337.78 commission). The engine is pure, so this is cheap and exact — and it is the money path.
+The suite covers the pure engine, the date helpers, the importer, shift serialisation, timezone resolution and the leave balance model (`leaveBalance.test.ts` — periods on the salary clock, the request window, adjustments, the paid gate), including an **end-to-end run of the real August export** that asserts the figures the spreadsheet produced (Queen: $12,621.99 gross, 5% tier, $337.78 commission). The engine is pure, so this is cheap and exact — and it is the money path.
 
 `shiftSerialise.test.ts` pins a regression worth knowing about: `recurrence.endDate` had two writers that disagreed — `createShift` stored the ISO **string** the shift modal sends, while `truncateSeriesAt` wrote a real `Timestamp` — and the reader assumed `Timestamp`, so one recurring shift with an end date 500'd the **whole** week view with `r.endDate.toDate is not a function`. The write side now normalises (`normaliseRecurrence`) and the read side tolerates every shape ever written (`toIsoString`). Keep both: one stops new bad documents, the other keeps existing ones from taking the roster down.
 

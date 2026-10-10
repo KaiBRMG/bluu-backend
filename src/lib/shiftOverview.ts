@@ -57,8 +57,7 @@ export interface OverviewSession {
 
 export type SettledFlag =
   | { kind: 'missed-clock-out'; userId: string; sessionId: string; start: number; end: number }
-  | { kind: 'no-break'; userId: string; date: string; workingSeconds: number }
-  | { kind: 'unrostered'; userId: string; date: string; outsideSeconds: number };
+  | { kind: 'no-break'; userId: string; date: string; workingSeconds: number };
 
 export interface ShiftOverviewResponse {
   generatedAt: number;
@@ -100,8 +99,6 @@ const BREAK_ALERT_MS = 45 * 60 * 1000;
 const SILENT_ALERT_MS = 35 * 60 * 1000;
 /** Still clocked in this long after the last shift of the day ended. */
 const OVERRUN_ALERT_MS = 30 * 60 * 1000;
-/** Unrostered time below this is noise (a few minutes either side of a shift). */
-export const UNROSTERED_ALERT_SECONDS = 60 * 60;
 
 export type AttentionKind =
   | 'not-in'
@@ -112,8 +109,7 @@ export type AttentionKind =
   | 'missed-shift'
   | 'late'
   | 'missed-clock-out'
-  | 'no-break'
-  | 'unrostered';
+  | 'no-break';
 
 /** `now` waits on someone this minute; `earlier` is a record to review. */
 export type AttentionTier = 'now' | 'earlier';
@@ -227,8 +223,8 @@ export function deriveAttention(
 
   // ── Shifts ──────────────────────────────────────────────────────
   // Overrun: clocked in, no shift running now, and the latest of today's
-  // shifts ended a while ago. Unrostered sessions with no shift at all are
-  // not flagged live — they show on tomorrow's "outside their shift" line.
+  // shifts ended a while ago. Working without a shift is never flagged —
+  // many people track time without a schedule.
   const shiftsByUser = new Map<string, OverviewShift[]>();
   for (const sh of data.shifts) {
     const list = shiftsByUser.get(sh.userId) ?? [];
@@ -296,19 +292,12 @@ export function deriveAttention(
         detail: `Session from ${formatClock(f.start, tz)} was closed by the system at ${formatClock(f.end, tz)} · check the hours`,
         at: f.end, target: 'timeline', date: day,
       });
-    } else if (f.kind === 'no-break') {
+    } else {
       items.push({
         id: `no-break:${f.userId}:${f.date}`, kind: 'no-break', tier: 'earlier', tone: 'yellow',
         userId: f.userId, title: 'Worked without a break',
         detail: `Yesterday · ${formatSpan(f.workingSeconds * 1000)} worked, no break taken`,
         at: data.todayBounds.start - 1, target: 'timeline', date: f.date,
-      });
-    } else {
-      items.push({
-        id: `unrostered:${f.userId}:${f.date}`, kind: 'unrostered', tier: 'earlier', tone: 'yellow',
-        userId: f.userId, title: `${formatSpan(f.outsideSeconds * 1000)} outside their shift`,
-        detail: 'Yesterday · clocked time not covered by a scheduled shift',
-        at: data.todayBounds.start - 2, target: 'timeline', date: f.date,
       });
     }
   }

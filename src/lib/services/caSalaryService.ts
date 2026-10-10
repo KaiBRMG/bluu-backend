@@ -26,10 +26,8 @@ import { serialiseShift } from '../utils/shiftSerialise';
 import { computeTimeWorked } from '../utils/shiftAttendance';
 import { computeSalaryMonth, DEFAULT_SALARY_CONFIG, sumMonth } from '../salary/salaryEngine';
 import { addMonths, currentMonthKey, monthKeyRange, toDayKey, type SalaryDayKey, type SalaryMonthKey } from '../salary/salaryDate';
-import { computeFinalizationReset } from '../leave/leaveBalance';
 import { isSalaryMonthVisible } from '../salary/salaryConstants';
 import { normaliseSaleType, saleKindOf, saleSourceOf } from '../salary/saleTypes';
-import { invalidateUserCache } from './userService';
 import type {
   DashboardSalaryMonth,
   RecentlyFinalizedSalary,
@@ -48,7 +46,6 @@ import type {
   CaSalaryOverrideDocument,
   LeaveRequestDocument,
   ShiftDocument,
-  UserDocument,
   TimeEntryLedgerDocument,
   ActiveSessionDocument,
 } from '@/types/firestore';
@@ -515,18 +512,15 @@ export async function getFinalizedMonthsFor(userIds: string[], month: SalaryMont
 }
 
 /**
- * Freeze a month at its current computed values, and reset the agent's leave.
+ * Freeze a month at its current computed values.
  *
  * The snapshot is taken here rather than by the caller so the thing written is
  * provably what the engine produced — a caller passing its own numbers is how a
  * payout record ends up disagreeing with the grid it was read from.
  *
- * **Finalising is what resets leave.** Unpaid leave goes to 4 for the next
- * month, and on a December paid leave also goes to 10 for the next year. The
- * reset is assigned, not added (`computeFinalizationReset`). It is written in
- * the **same transaction** as the frozen month, so a month cannot end up paid
- * with its reset lost, or reset without being paid. A re-finalise after a
- * reopen is a no-op for leave, because the stamp only moves forward.
+ * **Finalising does not touch leave** (since 2026-10-10). Leave balances are
+ * derived per month and per year from requests (`leaveBalance.ts`), so there is
+ * nothing to reset — a new month simply has no requests in it yet.
  */
 export async function finalizeMonth(params: {
   userId: string;
@@ -534,7 +528,7 @@ export async function finalizeMonth(params: {
   actorUid: string;
   actorName: string;
   reason?: string;
-}): Promise<{ month: CaSalaryMonthDocument; leaveReset: Record<string, string | number> | null }> {
+}): Promise<{ totals: SalaryMonthResult['totals'] }> {
   const { userId, month, actorUid, actorName, reason } = params;
 
   const computed = await buildSalaryMonth(userId, month, { ignoreFinalized: true });
@@ -559,23 +553,10 @@ export async function finalizeMonth(params: {
   };
 
   const monthRef = adminDb.collection(MONTHS).doc(monthId(userId, month));
-  const userRef = adminDb.collection('users').doc(userId);
+  await monthRef.set(doc, { merge: true });
 
-  const leaveReset = await adminDb.runTransaction(async tx => {
-    const userSnap = await tx.get(userRef);
-    const updates = userSnap.exists
-      ? computeFinalizationReset(userSnap.data() as UserDocument, month)
-      : null;
-    tx.set(monthRef, doc, { merge: true });
-    if (updates) tx.update(userRef, updates);
-    return updates;
-  });
-
-  // Rule 2: the balance on the user document just moved.
-  if (leaveReset) invalidateUserCache(userId);
-
-  const snap = await monthRef.get();
-  return { month: snap.data() as CaSalaryMonthDocument, leaveReset };
+  // What was just frozen is `computed` — no need to read it back.
+  return { totals: computed.totals };
 }
 
 /**
@@ -950,11 +931,29 @@ export async function buildSalaryMonthForUsers(
   month: SalaryMonthKey,
   options: { now?: number; salesByUser?: Map<string, SalarySale[]> } = {},
 ): Promise<Map<string, SalaryMonthResult>> {
-  const out = new Map<string, SalaryMonthResult>();
-  if (userIds.length === 0) return out;
+  const [result] = await buildSalaryMonthForUsersUnder(userIds, month, [await getSalaryConfig()], options);
+  return result;
+}
+
+/**
+ * The same build, priced under several rate configs from **one** set of reads.
+ *
+ * What the Rates dry run uses: the live config and the draft are compared over
+ * identical sales, shifts and overrides, so the difference is the rates and
+ * nothing else — and the comparison costs the reads of one build, not two.
+ * Finalised months come back from their snapshot under every config, because a
+ * rate change never restates them.
+ */
+export async function buildSalaryMonthForUsersUnder(
+  userIds: string[],
+  month: SalaryMonthKey,
+  configs: SalaryConfig[],
+  options: { now?: number; salesByUser?: Map<string, SalarySale[]> } = {},
+): Promise<Array<Map<string, SalaryMonthResult>>> {
+  const outs = configs.map(() => new Map<string, SalaryMonthResult>());
+  if (userIds.length === 0) return outs;
 
   const now = options.now ?? Date.now();
-  const config = await getSalaryConfig();
   const [windowStart, windowEnd] = monthKeyRange(month);
   const LEDGER_LOOKBACK_MS = 8 * 60 * 60 * 1000;
 
@@ -983,18 +982,20 @@ export async function buildSalaryMonthForUsers(
   for (const userId of userIds) {
     const frozen = frozenDocs.get(userId);
     if (frozen) {
-      out.set(userId, {
-        userId,
-        month,
-        days: frozen.days as SalaryMonthResult['days'],
-        totals: frozen.totals,
-        tier: computeSalaryMonth({ userId, month, days: [], overrides: [], config }).tier,
-        config,
-        status: 'finalized',
-        finalizedAt: frozen.finalizedAt?.toDate?.()?.toISOString() ?? null,
-        finalizedBy: frozen.finalizedBy ?? null,
-        finalizedByName: frozen.finalizedByName ?? null,
-      });
+      configs.forEach((config, i) =>
+        outs[i].set(userId, {
+          userId,
+          month,
+          days: frozen.days as SalaryMonthResult['days'],
+          totals: frozen.totals,
+          tier: computeSalaryMonth({ userId, month, days: [], overrides: [], config }).tier,
+          config,
+          status: 'finalized',
+          finalizedAt: frozen.finalizedAt?.toDate?.()?.toISOString() ?? null,
+          finalizedBy: frozen.finalizedBy ?? null,
+          finalizedByName: frozen.finalizedByName ?? null,
+        }),
+      );
       continue;
     }
 
@@ -1022,13 +1023,15 @@ export async function buildSalaryMonthForUsers(
       });
     }
 
-    out.set(
-      userId,
-      computeSalaryMonth({ userId, month, days, overrides: overridesByUser.get(userId) ?? [], config }),
+    configs.forEach((config, i) =>
+      outs[i].set(
+        userId,
+        computeSalaryMonth({ userId, month, days, overrides: overridesByUser.get(userId) ?? [], config }),
+      ),
     );
   }
 
-  return out;
+  return outs;
 }
 
 /** Re-export so callers need only this module. */

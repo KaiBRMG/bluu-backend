@@ -111,6 +111,17 @@ export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         );
       }
 
+      // An edited pay figure is shown to the agent beside the name of who
+      // changed it. Without a reason that is a number moving for no stated
+      // cause — the moment a pay screen loses trust — so one is required.
+      const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 280) : '';
+      if (reason.length < 3) {
+        return NextResponse.json(
+          { error: 'Add a short reason. The agent sees it beside the edited figure.' },
+          { status: 400 },
+        );
+      }
+
       await setOverrideField({
         userId,
         day,
@@ -118,7 +129,7 @@ export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         value: body.value,
         actorUid: token.uid,
         actorName,
-        reason: typeof body.reason === 'string' ? body.reason.trim().slice(0, 280) : undefined,
+        reason,
       });
     }
 
