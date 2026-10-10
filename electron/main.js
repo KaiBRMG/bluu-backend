@@ -5145,20 +5145,28 @@ function createWindow() {
 // "Quit" may never relaunch at all — and a start-up-only check would then never
 // re-run for them, no matter how long an armed release has been waiting.
 //
-// So the check now also re-runs on a slow interval, and on demand via
-// 'updater:check' (the renderer's "Check again" button). Finding an update is
-// not the same as interrupting one: a check only sets `pendingUpdate` and emits
-// 'updater:available'; `autoDownload` stays false and `UpdateAvailableBanner`
-// only renders while `clocked-out`, so nothing reaches a working user — the
-// original "no polling" note conflated discovering an update with delivering
-// one.
+// It then re-ran on a 4-hour interval as well — and both were wrong for a
+// different reason: they ran for EVERY Mac, armed or not. `appUpdateConfig.ts`
+// is meant to be the single gate on updates, but the shell asked GitHub on its
+// own, so a release that was public before its `latest-mac.yml` existed (the
+// v0.16.0 re-release) surfaced a raw 404 to users nobody had targeted.
+//
+// So the shell no longer checks on its own at all. The only caller is the
+// renderer, via 'updater:check': `UpdateAvailableBanner` when the config targets
+// this user and they are behind, and `CheckForUpdateDialog` when the user asks.
+// That also covers the never-relaunched app — the banner re-evaluates on every
+// clock-out and reads the live config over HTTP, so arming a release reaches it.
 const AUTO_UPDATE_SUPPORTED = process.platform === 'darwin';
 const INSTALL_FLUSH_TIMEOUT_MS = 10000;
-// Slow on purpose — the release cadence is weeks, and all this buys is that a
-// hidden, never-relaunched app still discovers a release within the interval
-// instead of never. Skipped entirely once an update is already known pending
-// (see `runUpdateCheck`), so this never turns into a poll loop against GitHub.
-const UPDATE_RECHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+// `electron-updater` puts the whole HTTP response — URL, headers, `node_modules`
+// stack — in `err.message`. The renderer gets the first line only (and still
+// translates it, see `src/lib/updateErrors.ts`); the full error stays in the
+// console log.
+function updaterErrorLine(err) {
+  const first = String((err && err.message) || '').split('\n')[0].trim();
+  return first.length > 200 ? first.slice(0, 200) : first;
+}
 
 let updateInstallStarted = false;
 // Set when the start-up check finds an update. The renderer mounts after this
@@ -5215,7 +5223,7 @@ function registerAutoUpdater() {
 
   autoUpdater.on('error', (err) => {
     console.error('autoUpdater error:', err);
-    sendToRenderer('updater:status', { status: 'error', message: err && err.message });
+    sendToRenderer('updater:status', { status: 'error', message: updaterErrorLine(err) });
   });
 
   // The renderer mounts well after this resolves; it reads the outcome from
@@ -5226,14 +5234,13 @@ function registerAutoUpdater() {
     if (!pendingUpdate) return;
     autoUpdater.downloadUpdate().catch((err) => {
       console.error('Update download failed:', err);
-      sendToRenderer('updater:status', { status: 'error', message: err && err.message });
+      sendToRenderer('updater:status', { status: 'error', message: updaterErrorLine(err) });
     });
   });
 
-  // Coalesced so the interval, the start-up call and a renderer-initiated
-  // 'updater:check' can never have two checks racing each other — and skipped
-  // once an update is already known, so a fleet stuck behind a compulsory
-  // prompt doesn't also hammer GitHub every 4 hours asking again.
+  // Coalesced so the banner, the manual dialog and a "Check again" click can
+  // never have two checks racing each other — and skipped once an update is
+  // already known.
   let checkInFlight = null;
   function runUpdateCheck() {
     if (updateInstallStarted || pendingUpdate) return Promise.resolve();
@@ -5241,7 +5248,7 @@ function registerAutoUpdater() {
     checkInFlight = autoUpdater.checkForUpdates()
       .catch((err) => {
         console.error('Update check failed:', err);
-        sendToRenderer('updater:status', { status: 'error', message: err && err.message });
+        sendToRenderer('updater:status', { status: 'error', message: updaterErrorLine(err) });
       })
       .finally(() => { checkInFlight = null; });
     return checkInFlight;
@@ -5251,10 +5258,8 @@ function registerAutoUpdater() {
   // so it silently fell back to re-reading a `getPending()` that could never
   // change. Real now: it re-asks GitHub, and the renderer polls `getPending()`
   // afterwards to pick up the answer.
+  // The ONLY way a check starts — see the note above `AUTO_UPDATE_SUPPORTED`.
   ipcMain.handle('updater:check', () => runUpdateCheck());
-
-  runUpdateCheck();
-  setInterval(runUpdateCheck, UPDATE_RECHECK_INTERVAL_MS);
 }
 
 // Forward native power/session transitions to the renderer so time-tracking can

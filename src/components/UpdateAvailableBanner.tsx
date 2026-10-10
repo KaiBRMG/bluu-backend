@@ -10,6 +10,7 @@ import { useTimeTrackingContext } from '@/contexts/TimeTrackingContext';
 import { useAuth } from '@/components/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { describeUpdateError } from '@/lib/updateErrors';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
   AlertDialog,
@@ -313,6 +314,11 @@ export default function UpdateAvailableBanner() {
           // the shell check GitHub again, and the update then installs itself.
           setTarget(cfg.latestVersion);
           setDelivery(platform === 'darwin' ? 'restart' : 'manual');
+          // From 0.16.1 the shell never checks GitHub on its own — this config
+          // is the gate, so asking is our job, and only once the user is
+          // targeted and behind. The restart path's poll picks up the answer.
+          // Older shells lack `check` and still check at launch by themselves.
+          if (platform === 'darwin') void updater?.check?.()?.catch(() => {});
         }
         setMode(compulsory ? 'blocking' : 'optional');
       } finally {
@@ -409,10 +415,10 @@ export default function UpdateAvailableBanner() {
       if (deliveryRef.current !== 'auto') {
         // Not a failed download — no download has been started. This is the
         // start-up check itself failing, which the restart copy reports.
-        setCheckError(s.message ?? null);
+        setCheckError(describeUpdateError(s.message).message);
         return;
       }
-      setErrorMsg(s.message ?? null);
+      setErrorMsg(describeUpdateError(s.message).message);
       setPhase('error');
       setUpdateInFlight(false); // nothing is running — a reload is safe again
     });
@@ -464,7 +470,7 @@ export default function UpdateAvailableBanner() {
   // anything on its own, it only re-runs the check that we are already polling.
   const needsRestart = delivery === 'restart';
   const restartLine = checkError
-    ? `Bluu Backend couldn’t reach the update server (${checkError}). Check your connection, then press Check again.`
+    ? `${checkError} Press Check again when you’re ready.`
     : pollExhausted
       // Used to say "quit and reopen the app" as a last resort — no longer
       // correct advice. On macOS the X button doesn't quit any more
@@ -513,7 +519,7 @@ export default function UpdateAvailableBanner() {
 
           {phase === 'error' && (
             <p className="text-xs text-destructive">
-              The update couldn’t be downloaded{errorMsg ? `: ${errorMsg}` : '.'} Check your connection and try again.
+              {errorMsg ?? 'The update couldn’t be downloaded. Check your connection and try again.'}
             </p>
           )}
 

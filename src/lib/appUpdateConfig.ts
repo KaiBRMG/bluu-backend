@@ -210,11 +210,11 @@ export const APP_UPDATE: AppUpdateConfig = {
   // set `allUsers: false` and list uids or group slugs instead — see
   // `UpdateCohort`. `allUsers: false` with both lists empty prompts nobody.
 
-  mac: { latestVersion: '0.15.2', compulsory: true, allUsers: false, uids: [], groups: ['CA'] },
+  mac: { latestVersion: '0.16.0', compulsory: true, allUsers: true, uids: [], groups: [] },
   // mac: null,
 
   // win: null,
-  win: { latestVersion: '0.15.2', compulsory: true, allUsers: false, uids: [], groups: ['CA'] },
+  win: { latestVersion: '0.16.0', compulsory: true, allUsers: true, uids: [], groups: [] },
 
   // `/update`, not `/download`: this link is only ever opened for someone who
   // ALREADY has the app, so it must not put the one-time certificate sequence in

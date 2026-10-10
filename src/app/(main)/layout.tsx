@@ -8,7 +8,6 @@ import ErrorLogger from "@/components/ErrorLogger";
 import AppVersionReporter from "@/components/AppVersionReporter";
 import PresenceReporter from "@/components/PresenceReporter";
 import TimezoneReporter from "@/components/TimezoneReporter";
-import UpdateBanner from "@/components/UpdateBanner";
 import UpdateAvailableBanner from "@/components/UpdateAvailableBanner";
 import EmailMigrationDialog from "@/components/migration/EmailMigrationDialog";
 import InputMonitoringPrompt from "@/components/time-tracking/InputMonitoringPrompt";
@@ -84,7 +83,6 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 {children}
               </AuthWrapper>
             </BootLoaderProvider>
-            <UpdateBanner />
             <UpdateAvailableBanner />
             {/* Inside LazyProviders because it reads clock state — the card must
                 never interrupt a shift. Renders nothing unless the user's cohort

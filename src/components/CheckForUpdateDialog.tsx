@@ -11,6 +11,7 @@ import { useTimeTrackingContext } from '@/contexts/TimeTrackingContext';
 import { useAuth } from '@/components/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { describeUpdateError } from '@/lib/updateErrors';
 import {
   Dialog,
   DialogContent,
@@ -253,7 +254,7 @@ export default function CheckForUpdateDialog({
     });
     updater.onStatus?.(s => {
       if (s.status !== 'error') return;
-      setErrorMsg(s.message ?? null);
+      setErrorMsg(describeUpdateError(s.message).message);
       setPhase(p => (p === 'downloading' ? 'error' : p));
       setUpdateInFlight(false); // nothing is running — a reload is safe again
     });
@@ -358,7 +359,7 @@ export default function CheckForUpdateDialog({
 
         {outcome === 'available' && phase === 'error' && (
           <p className="text-sm text-destructive">
-            The download failed{errorMsg ? `: ${errorMsg}` : '.'} You can try again.
+            {errorMsg ?? 'The download failed. You can try again.'}
           </p>
         )}
 
