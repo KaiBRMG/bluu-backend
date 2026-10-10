@@ -32,7 +32,14 @@ const COLUMNS: Column[] = [
  * The table IS the accessible view of the charts above — every metric is
  * available as a number here, so nothing is conveyed by colour alone.
  */
-export function UserComparisonTable({ byUser }: { byUser: AnalyticsUserRow[] }) {
+export function UserComparisonTable({
+  byUser,
+  onOpenPerson,
+}: {
+  byUser: AnalyticsUserRow[];
+  /** Opens the person sheet; the name becomes its keyboard route. */
+  onOpenPerson?: (uid: string) => void;
+}) {
   const [sortKey, setSortKey] = useState<SortKey>('workingSeconds');
   const [asc, setAsc] = useState(false);
 
@@ -94,14 +101,27 @@ export function UserComparisonTable({ byUser }: { byUser: AnalyticsUserRow[] }) 
           </thead>
           <tbody>
             {sorted.map(u => (
-              <tr key={u.userId} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+              <tr
+                key={u.userId}
+                style={{ borderBottom: '1px solid var(--border-subtle)' }}
+                className={onOpenPerson ? 'cursor-pointer transition-colors duration-[120ms] hover:bg-white/[0.055] active:bg-white/[0.08]' : undefined}
+                onClick={onOpenPerson ? () => onOpenPerson(u.userId) : undefined}
+              >
                 {COLUMNS.map(c => (
                   <td
                     key={c.key}
                     className="py-2 px-2 tabular-nums"
                     style={{ textAlign: c.align ?? 'right', whiteSpace: 'nowrap' }}
                   >
-                    {c.render(u)}
+                    {c.key === 'displayName' && onOpenPerson ? (
+                      <button
+                        type="button"
+                        className="rounded-sm text-left underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                        onClick={e => { e.stopPropagation(); onOpenPerson(u.userId); }}
+                      >
+                        {c.render(u)}
+                      </button>
+                    ) : c.render(u)}
                   </td>
                 ))}
               </tr>

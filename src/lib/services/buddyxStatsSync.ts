@@ -56,6 +56,7 @@ import {
   type SalaryMonthKey,
 } from '../salary/salaryDate';
 import { bump, outOfTime, type SyncContext } from './buddyxSyncContext';
+import { HOUR_MS, hourKey } from '../buddyx/coverage';
 import type { BuddyxMaps } from './buddyxMappingService';
 import type {
   BuddyxFanDocument,
@@ -68,6 +69,7 @@ import type {
 const CURSORS_DOC = 'buddyx-meta/cursors';
 const TEAM_DAYS = 'buddyx-team-days';
 const TEAM_PERIODS = 'buddyx-team-periods';
+const TEAM_HOURS = 'buddyx-team-hours';
 const MASS = 'buddyx-mass-messages';
 const CREATOR_DAYS = 'creator-stats-days';
 const SUBSCRIBERS = 'buddyx-subscribers';
@@ -77,6 +79,15 @@ const FAN_NAMES = 'buddyx-fan-names';
 
 /** Days backfilled per run, per series. Small: each creator day costs 1 + N expensive calls. */
 const TEAM_BACKFILL_PER_RUN = 4;
+/**
+ * Hourly overview calls per run. Steady state is ~8 (one per hour since the
+ * last run); the cap only bites while the first week backfills (~7 runs).
+ */
+const TEAM_HOURS_PER_RUN = 24;
+/** How far back the hourly series starts on its first run — the default 7-day view. */
+const TEAM_HOURS_BACKFILL_MS = 8 * 86_400_000;
+/** Recent hours re-pulled every run: an hour's online time can still settle after it ends. */
+const TEAM_HOURS_OVERLAP = 2;
 const CREATOR_BACKFILL_PER_RUN = 2;
 /** `series` cap on a link doc. */
 const LINK_SERIES_CAP = 400;
@@ -87,6 +98,8 @@ const PREV_MONTH_REFRESH_MS = 20 * 60 * 60 * 1000;
 
 type Cursors = {
   teamDaysThrough?: string;
+  /** Start (ms) of the last complete hour stored in `buddyx-team-hours`. */
+  teamHoursThrough?: number;
   creatorDaysThrough?: string;
   massMessagesSince?: number;
   subscribersSince?: Record<string, number>;
@@ -221,7 +234,9 @@ export async function syncChattersScope(ctx: SyncContext): Promise<void> {
   const [prevStart, prevEnd] = monthKeyRange(addMonths(month, -1));
   const periods: Array<{ id: string; start: number; end: number; from: string; to: string }> = [
     { id: 'mtd', start: monthStart, end: ctx.now, from: toDayKey(monthStart), to: today },
-    { id: '7d', start: ctx.now - 7 * 86_400_000, end: ctx.now, from: toDayKey(ctx.now - 7 * 86_400_000), to: today },
+    // The last 7 COMPLETE days — today is still moving and arrives with BuddyX's
+    // lag, so a half-synced day would show every agent with a coverage gap.
+    { id: '7d', start: dayKeyRange(addDays(today, -7))[0], end: dayKeyRange(today)[0] - 1, from: addDays(today, -7), to: yesterday },
     { id: '30d', start: ctx.now - 30 * 86_400_000, end: ctx.now, from: toDayKey(ctx.now - 30 * 86_400_000), to: today },
   ];
   const prevSnap = await adminDb.collection(TEAM_PERIODS).doc('prev-month').get();
@@ -244,6 +259,8 @@ export async function syncChattersScope(ctx: SyncContext): Promise<void> {
     });
     bump(ctx, 'chatters.periods');
   }
+
+  await syncTeamHours(ctx, cursors);
 
   // Mass messages: a rolling window with a day of overlap. No text, ever.
   if (outOfTime(ctx)) return;
@@ -276,6 +293,59 @@ export async function syncChattersScope(ctx: SyncContext): Promise<void> {
   await writer.close();
   bump(ctx, 'chatters.massMessages', rows.length);
   await writeCursors({ massMessagesSince: ctx.now });
+}
+
+/**
+ * Online time and messages per chatter **per hour** — what lets Chatter
+ * Analytics count only the online time that fell while the agent was clocked
+ * in, and draw a shift's timeline. One overview call per completed hour,
+ * forward from a cursor, re-pulling the last `TEAM_HOURS_OVERLAP` hours.
+ *
+ * Stored per salary day as `buddyx-team-hours/{day}`, hour index 0–23 from the
+ * day's start, as maps `online[chatterId][hour] = ms` and
+ * `messages[chatterId][hour] = n`, merged so each hour writes only itself.
+ */
+async function syncTeamHours(ctx: SyncContext, cursors: Cursors): Promise<void> {
+  const lastComplete = Math.floor(ctx.now / HOUR_MS) * HOUR_MS - HOUR_MS;
+  const floor = Math.floor((ctx.now - TEAM_HOURS_BACKFILL_MS) / HOUR_MS) * HOUR_MS;
+  const firstNew = cursors.teamHoursThrough !== undefined ? cursors.teamHoursThrough + HOUR_MS : floor;
+  const start = Math.max(floor, Math.min(firstNew, lastComplete - (TEAM_HOURS_OVERLAP - 1) * HOUR_MS));
+
+  // Gathered per day and written once per day touched (usually 1–2 writes a
+  // run), not once per hour into the same doc.
+  type DayPatch = {
+    online: Record<string, Record<string, number>>;
+    messages: Record<string, Record<string, number>>;
+    uids: Record<string, string | null>;
+    hours: Record<string, number>;
+  };
+  const patches = new Map<string, DayPatch>();
+  let through: number | undefined;
+  for (let hour = start, n = 0; hour <= lastComplete && n < TEAM_HOURS_PER_RUN; hour += HOUR_MS, n++) {
+    if (outOfTime(ctx)) break;
+    const data = await overview(rangeQuery(hour, hour + HOUR_MS - 1));
+    const { day, index } = hourKey(hour);
+    const patch = patches.get(day) ?? { online: {}, messages: {}, uids: {}, hours: {} };
+    for (const row of data.breakdown ?? []) {
+      const chatterId = normaliseId(row.chatterId);
+      if (!chatterId) continue;
+      (patch.online[chatterId] ??= {})[index] = row.onlineMs ?? 0;
+      (patch.messages[chatterId] ??= {})[index] = row.totalMessages ?? 0;
+      patch.uids[chatterId] = ctx.maps.chatters.get(chatterId)?.uid ?? null;
+    }
+    patch.hours[index] = Date.now();
+    patches.set(day, patch);
+    bump(ctx, 'chatters.hours');
+    through = hour;
+  }
+  await Promise.all(
+    [...patches].map(([day, patch]) =>
+      adminDb.collection(TEAM_HOURS).doc(day).set({ day, ...patch, syncedAt: FieldValue.serverTimestamp() }, { merge: true }),
+    ),
+  );
+  if (through !== undefined && through > (cursors.teamHoursThrough ?? -Infinity)) {
+    await writeCursors({ teamHoursThrough: through });
+  }
 }
 
 // ─── creators ────────────────────────────────────────────────────────

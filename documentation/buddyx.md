@@ -58,7 +58,7 @@ Requests are **sequential**. A page read never reaches the client.
 |---|---|---|
 | `directory` (always first) | `buddyx-chatters`, `buddyx-models` | 2 |
 | `sales` | `ca-sales` | ~4–8 |
-| `chatters` | `buddyx-team-days` (today, yesterday, +4 backfill), `buddyx-team-periods` (`mtd`, `7d`, `30d`, `prev-month` ≤ once/20h), `buddyx-mass-messages` | ~8 expensive + 1–2 |
+| `chatters` | `buddyx-team-days` (today, yesterday, +4 backfill), `buddyx-team-periods` (`mtd`, `7d` = the last 7 **complete** days, `30d`, `prev-month` ≤ once/20h), **`buddyx-team-hours`** (one overview per completed hour, ≤ 24/run, last 2 re-pulled), `buddyx-mass-messages` | ~16 expensive + 1–2 (≤ 32 while the first week of hours backfills) |
 | `creators` | `creator-stats-days` (earnings-breakdown + per-creator overview, today/yesterday/+2 backfill), `buddyx-subscribers`, `buddyx-links` (with a daily `series` snapshot, capped at 400) | ~20 expensive + ~25 |
 | `fans` (21:01 UTC run, or refresh) | `buddyx-fans`, `buddyx-fan-names` | links whose fan count moved, only |
 
@@ -110,13 +110,31 @@ All three read Firestore only, cache 60s server-side per scope key, and send `pr
 
 | Page | Route | Scope |
 |---|---|---|
-| Chatter Analytics `/ca-portal/chatter-analytics` | `/api/analytics/chatters` | **Two sources:** revenue (PPV / tips gross, counts sold, the daily trend) comes from the `ca-sales` ledger — Infloww history back to Oct 2025, BuddyX after, transfers applied, so it matches the Sales Report — while activity (messages, fans chatted, PPVs sent / unlock rate, online and reply times, mass messages) comes from BuddyX team reports only and is `null` ("—") before `BUDDYX_TEAM_STATS_START_DAY` (27 Sep 2026). Agent: own row, daily trend, **anonymous** benchmark (median + top quartile, only with ≥ 3 active agents — sold something or were online; a metric with no figure leaves an agent out of that comparison only). `ca-admin`: named leaderboard (every agent with sales or BuddyX activity, plus unlinked BuddyX chatters), BuddyX online vs Bluu clocked time over the part of the range BuddyX covers (gap stated past 15%), revenue per account, rostered-but-offline band (also BuddyX-covered days only). Custom ranges sum days; medians need an admin **Pull** (`/api/analytics/chatters/pull`, one live call, stored 7 days). |
+| Chatter Analytics `/ca-portal/chatter-analytics` (+ report `/[uid]`) | `/api/analytics/chatters`, `/api/analytics/chatters/[uid]`, `/api/analytics/chatters/[uid]/shift` | **Default period: the last 7 complete days.** See *Coverage and integrity* below. **Two sources:** revenue (PPV / tips gross, counts sold, the daily trend) comes from the `ca-sales` ledger — Infloww history back to Oct 2025, BuddyX after, transfers applied, so it matches the Sales Report — while activity (messages, fans chatted, PPVs sent / unlock rate, online and reply times, mass messages) comes from BuddyX team reports only and is `null` ("—") before `BUDDYX_TEAM_STATS_START_DAY` (27 Sep 2026). Agent: own row, daily trend, **anonymous** benchmark (median + top quartile, only with ≥ 3 active agents — sold something or were online; a metric with no figure leaves an agent out of that comparison only). `ca-admin`: the ranked flag list, the coverage scatter, and the named table (every agent with sales or BuddyX activity, plus unlinked BuddyX chatters) with coverage and flag columns; each agent opens a report. The old rostered-but-offline band is now the `never-online` flag. Custom ranges sum days; medians need an admin **Pull** (`/api/analytics/chatters/pull`, one live call, stored 7 days). |
 | Fan Analytics `/ca-portal/fan-analytics` | `/api/analytics/fans`, `/api/analytics/fans/{creatorId}/{fanId}` | Agent: creators on their own shifts this month. `ca-admin`: all + acquisition. The detail **404s** a fan outside scope. |
 | OnlyFans Analytics `/creator-portal/onlyfans-analytics` | `/api/analytics/creators` | Internal; every creator. Range back to 2025-10-04. |
 
 `buddyx-fans.spendByMonth` is rebuilt from `ca-sales` (both sources) for the open months by the `fans` scope, and for every imported month by the historical import. `spendMonths` (indexed array) is how a month's rebuild finds fans to clear. Lifetime spend, first seen and last purchase are derived on read.
 
 **Not mirrored, on purpose:** `/messages` (private text), mass-message `text`, `/fan-conversation`.
+
+### Coverage and integrity (admin only, display only)
+
+**Coverage** = BuddyX online time **while clocked in** ÷ Bluu clocked **working** time ([`coverage.ts`](../src/lib/buddyx/coverage.ts)). Per hour the credited online time is `min(BuddyX online, Bluu working)`, so online time outside a shift never counts, and breaks are excluded from the denominator (an agent on break is correctly offline). A day without complete hourly data falls back to `min(day online, day working)` — an upper bound — and is counted in `approximateDays`. An agent sees their own coverage figure; nothing else of this.
+
+**Flags** ([`chatterIntegrityService.ts`](../src/lib/services/chatterIntegrityService.ts)) — period totals, ranked severity then size:
+
+| Kind | Raised when | High at |
+|---|---|---|
+| `never-online` | rostered, zero BuddyX online | always |
+| `low-coverage` | coverage < 70% with ≥ 2h clocked | < 50% |
+| `regular-input` / `modifier-only` | ≥ 30 flagged minutes | ≥ 120 |
+| `static-screen` | ≥ 60 unchanged-screen minutes | ≥ 180 |
+| `input-permission` | Mac agent refused Input Monitoring | — |
+
+The input and screen signals come from `integrity-days` / `integrity-captures` — see [time-tracking.md §4b](time-tracking.md). **None of this feeds the salary engine** (rule 9f).
+
+**The report** (`/[uid]`) reuses the page's cached team reads and adds the agent's own: ledger, shifts, captures. Its shift table lists every scheduled occurrence (in-shift cover excluded) plus any session that overlapped no shift; each row opens `/shift`, the minute-grain timeline (Bluu state, BuddyX by hour, keys per minute, flagged stretches, captures). Screenshot thumbnails appear only for a viewer who already has `shift-management` or the admin claim — the report never widens screenshot access.
 
 ## 7. Alerting
 
@@ -134,6 +152,7 @@ All Admin-SDK only (`allow read, write: if false`). Bulky fields are index-exemp
 | `buddyx-models` | modelId | — |
 | `buddyx-team-days` | `YYYY-MM-DD` | by id |
 | `buddyx-team-periods` | `mtd` · `prev-month` · `7d` · `30d` · `custom-{from}-{to}` | by id · TTL `expireAt` |
+| `buddyx-team-hours` | `YYYY-MM-DD` (salary day) | by id. Maps `online` / `messages[chatterId][hour 0–23]`, `uids`, `hours` (presence = pulled); all index-exempt. Cursor `buddyx-meta/cursors.teamHoursThrough` |
 | `buddyx-mass-messages` | id | `day` range |
 | `creator-stats-days` | `{creatorId}_{day}` | `day` range |
 | `buddyx-subscribers` | event id | `day` range, `fanId`, `syncedAt` |

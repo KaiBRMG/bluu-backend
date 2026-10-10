@@ -10,7 +10,10 @@
 | `src/lib/services/analyticsService.ts` | Rollup reads + the `analytics_dirty` queue |
 | `src/lib/utils/analyticsAggregate.ts` | Pure aggregation over rollups (no Firestore) |
 | `src/lib/utils/shiftAttendance.ts` | `computeAttendance` / `computeTimeWorked` + rollup variants |
-| `src/components/admin/shift-management/analytics/` | The Analytics tab |
+| `src/components/admin/shift-management/analytics/` | The Analytics view (also embedded, locked to one person, in the person sheet) |
+| `src/lib/shiftOverview.ts` | Shift Management Overview: wire types + `deriveAttention` (the Needs-attention queue) — §5b |
+| `src/app/api/admin/shift-management/overview/route.ts` | Settled half of the Overview (shifts + attendance, today's sessions, yesterday's ledger flags) — §5b |
+| `src/components/admin/shift-management/overview/` | Overview dashboard, person sheet, Settings view |
 | `src/lib/localBuffer.ts` | Local event buffer (append-only event log) |
 | `src/lib/parseBuffer.ts` | `parseBuffer(events, nowMs)` + **`sessionCloseMs(buf, isActive, now)`** |
 | `src/contexts/TimeTrackingContext.tsx` | Orchestration: clock in/out, hydration, screenshot upload, `calcActivityPercent` |
@@ -133,7 +136,7 @@ The path that hit this: device A closes the app without pressing Clock Out (a **
 
 **RULE — write the event, apply the local state, *then* sync the server. Never `await` the `transition` call in a way that can skip a state update.**
 
-`/api/time-tracking/transition` only updates `active_sessions.currentState`/`lastUpdated` — presence bookkeeping for the admin Active Users view. **The event log is the source of truth**, and it is uploaded wholesale at clock-out. A transient failure of that request must therefore cost nothing.
+`/api/time-tracking/transition` only updates `active_sessions.currentState`/`lastUpdated` — presence bookkeeping for Shift Management's Overview (status line, today timeline, live queue items). **The event log is the source of truth**, and it is uploaded wholesale at clock-out. A transient failure of that request must therefore cost nothing.
 
 Every transition once ran:
 
@@ -189,7 +192,7 @@ The `lock` heuristic is retained deliberately (§4) on the strength of one prope
 
 ### 3f. Time-Tracking Settings: Organization → Group → User
 
-Idle timeout (on/off, length **and which input counts**) and screenshots are configured on **Admin → Shift Management → Organization Settings** ([`OrganizationSettings.tsx`](../src/components/admin/shift-management/OrganizationSettings.tsx)). They used to be two per-user switches in User Management with a hard-coded 15-min threshold; both are gone from there.
+Idle timeout (on/off, length **and which input counts**) and screenshots are configured on **Admin → Shift Management → Settings** ([`OrganizationSettings.tsx`](../src/components/admin/shift-management/OrganizationSettings.tsx)). They used to be two per-user switches in User Management with a hard-coded 15-min threshold; both are gone from there.
 
 | Level | Stored at | Notes |
 |---|---|---|
@@ -205,13 +208,14 @@ Idle timeout (on/off, length **and which input counts**) and screenshots are con
 - **Renderer threshold:** `idleThresholdSeconds(userData.idleTimeoutMinutes)` in `TimeTrackingContext`, clamped to 1–60 min with the 6-min default for absent/malformed values. Drives the idle poll, the resume poll and the `resume`/`unlock` check. A renderer still running a pre-change bundle keeps 15 min until `DeploymentRefresher` reloads it at clock-out (rule 9c).
 - **Idle input mode (`idleInputMode`: `any` | `keyboard` | `mouse`, default `any`).** Which input keeps a session out of idle. `any` is the original behaviour — idle only after *neither* keyboard nor mouse for the timeout. `keyboard` ignores mouse input (a mouse jiggler no longer holds a session open); `mouse` ignores typing. Renderer: `readIdleSeconds(api, normalizeIdleInputMode(userData.idleInputMode))` in `TimeTrackingContext` replaces every former `getIdleTime()` call — idle poll, resume poll, `lock` confirmation, and `resume`/`unlock` check — so the same input that keeps a user working is the only input that brings them back.
   - **Measured in the Electron main process** by `timeTracking.getInputIdleTimes()` → `{ any, keyboard, mouse }` (v0.15.0+, see [electron.md](electron.md#per-input-idle-keyboard-vs-mouse)). **Fallbacks:** an older build without the IPC, a platform that cannot split input (null field), a native-load failure, or an IPC that rejects/returns malformed data all read the combined `getIdleTime()` — i.e. silently behave as `any`. **RULE — `readIdleSeconds` must never throw on the per-input path**: it runs inside every idle poll, so a throw there means the user can never go idle. **A non-`any` policy only takes effect for users on v0.15.0+.**
-  - **Activity % is unchanged** — the 5s sampler still records combined idle, so in `keyboard` mode a mouse-only stretch below the timeout still scores as active. Change that separately if needed.
+  - **Activity % follows the mode too (v0.17.0+).** The 5s sampler now records per-input idle (`keyboardIdle` / `mouseIdle`) beside the combined counter, and `calcActivityPercentFromSamples` scores with the user's mode — so under `keyboard` a mouse mover no longer scores 100% while the idle check ignores it. Samples from an older build (or a platform that cannot split input) carry no per-input fields and score on combined idle, as before.
+- **Input monitoring (`inputMonitoring`, default off).** The fifth setting, resolved and denormalised like the rest. On: the desktop app collects key timings and key *kinds* for the integrity signals in §4b, and macOS users are prompted for Input Monitoring. Display only — it never touches idle, worked time or pay. The org save fills any key a caller did not send from the stored values, so an admin page loaded before a setting existed (rule 9c) can neither 400 nor wipe it.
 - **Authorisation:** the `shift-management` page permission (`/api/admin/time-tracking-settings`), the same tier as the rest of Shift Management. `PUT /api/admin/users/[uid]` no longer accepts `enableIdleTimeout`/`enableScreenshots`.
 - Leave fields (`hasPaidLeave`, balances) are per-person HR data, not policy — they stay in User Management under a section now titled **Leave**.
 
 ### 3g. No Breaks in the First or Last Hour of a Shift
 
-An **organization-only** policy on the same Organization Settings tab, in its own section *Breaks on scheduled shifts*. **Default off.** When on, a user may not *start* a break during the first hour or the last hour of a **scheduled shift** (Admin → Shift Management). A break already running is not ended.
+An **organization-only** policy on the same Settings view, in its own section *Breaks on scheduled shifts*. **Default off.** When on, a user may not *start* a break during the first hour or the last hour of a **scheduled shift** (Admin → Shift Management). A break already running is not ended.
 
 - **Only applies to time inside a scheduled shift occurrence.** Someone who tracks time without shifts, or works outside their shift, gets no windows and is never restricted. Leave-approved occurrences are tombstoned, so they drop out like they do everywhere else.
 - **Stored at `org-settings/shift-breaks`** (`{ restrictBreaksAtShiftEdges }`), deliberately **not** in `org-settings/time-tracking`: the org-defaults save is a whole-doc `set()` and would wipe it. Not part of the group/user resolver and **not denormalised** onto user docs. Saved via `PUT /api/admin/time-tracking-settings` `{ scope: 'shift-breaks', policy }` (same `shift-management` tier); no user recompute.
@@ -224,7 +228,7 @@ An **organization-only** policy on the same Organization Settings tab, in its ow
 
 ---
 
-## 4. Activity Percent (Screenshots & Active Users)
+## 4. Activity Percent (Screenshots)
 
 ### Current method (event-log fallback — active across all clients)
 `activityPercent` is derived from the session event log by comparing `workingSeconds` vs `idleSeconds` within each screenshot window (`TimeTrackingContext.tsx` → `calcActivityPercent`).
@@ -260,11 +264,25 @@ if (activityPercent === null && events.length > 0) {
 - IPC handler wired in `electron/main.js` (`timeTracking:getActivitySince`), exposed via `electron/preload.js`; type in `src/types/electron.d.ts`.
 - **Runtime selection:** the call site prefers samples when `getActivitySince` is present and falls back to the event-log method when it is absent *or* returns `null`.
 
+**Every capture now records which method produced its score** — `activityMethod: 'samples' | 'eventlog'` on the screenshot doc (and the integrity capture). That closes half of the analytics finding in §5: from v0.17.0 data onward a capture's method is known, not inferred.
+
+### Upload — direct to Storage (rule 9i)
+
+The bytes no longer cross Vercel. [`uploadCapture`](../src/lib/screenshotUpload.ts) runs three steps:
+
+1. `POST /api/time-tracking/screenshots/upload-url` `{ count }` → one v4 signed PUT per screen. The path is **server-chosen** — `screenshots/{uid}/{date}/{ts}_{captureGroup}_{i}.png` — so a slot can only write the caller's own capture.
+2. The renderer PUTs each PNG to its URL (needs `storage-cors.json` on the bucket).
+3. `POST /api/time-tracking/screenshots/finalize` `{ captureGroup, paths, …meta }` checks every path is a slot of *this* capture, in order, that exists under the 15MB ceiling (an oversized object is deleted), and writes the docs with ids `{captureGroup}_{i}` — so a retried finalise rewrites rather than duplicates.
+
+**Any failure on the signed path falls back to the legacy base64 route** (`/upload`), which records the same metadata — a CORS slip must cost bandwidth, never a screenshot — and **reports the fallback to Sentry** (`area: screenshots`, `step: sign | put | finalize`), so a fallback becoming the steady state is visible. The legacy route also stays for renderers loaded before this shipped (rule 9c).
+
+**Thumbnail ordering — no race by construction.** The bytes land *before* `/finalize` writes the doc, so neither side waits for the other: the object name carries `{captureGroup}_{i}`, which **is** the doc id, so `generateThumbnail` merges `thumbnailPath` straight into that doc, and `/finalize` merges its own fields and never writes `thumbnailPath`. Either order converges in one write each. Objects named the old way (`{ts}_{i}.png`) still take the `storagePath` query. A slot uploaded but never finalised leaves a stub doc holding only `thumbnailPath` — no `userId`, so no query, rule or cascade ever surfaces it.
+
 ### Absence of a value is not 0 — and not 100
 
-`activityPercent` is produced **only** by the screenshot upload path (`/api/time-tracking/screenshots/upload` → `updateActivityPercent` → `active_sessions.lastActivityPercent`), and that route hard-returns 403 when `enableScreenshots` is false. So for a screenshots-disabled user the field **never exists**, and for anyone else it is absent until the session's first capture lands (scheduled at a random offset within `SCREENSHOT_WINDOW_MS`, so up to 15 min).
+`activityPercent` is produced **only** by the screenshot upload path (`/api/time-tracking/screenshots/finalize` or the legacy `/upload` → `updateActivityPercent` → `active_sessions.lastActivityPercent`), and that route hard-returns 403 when `enableScreenshots` is false. So for a screenshots-disabled user the field **never exists**, and for anyone else it is absent until the session's first capture lands (scheduled at a random offset within `SCREENSHOT_WINDOW_MS`, so up to 15 min).
 
-**RULE — never substitute a number for a missing `lastActivityPercent`.** `AdminActiveUsers` previously rendered `lastActivityPercent ?? 100`, which showed every screenshots-off user as a permanently full 100% bar — an invented figure indistinguishable from a real measurement. Render the absence instead.
+**RULE — never substitute a number for a missing `lastActivityPercent`.** The former Active Users tab (`AdminActiveUsers`, removed 2026-10-09) once rendered `lastActivityPercent ?? 100`, which showed every screenshots-off user as a permanently full 100% bar — an invented figure indistinguishable from a real measurement. Render the absence instead.
 
 To let the UI separate the two absences, **`active_sessions.enableScreenshots` is stamped at clock-in** by `/api/time-tracking/start` (from the 60s-cached `getUserById`, so it is normally a free read). `useActiveUsers` maps it with `data.enableScreenshots !== false`, so sessions predating the field read as `true` (unknown → assume on → "No data yet"). The three render states are:
 
@@ -275,6 +293,45 @@ To let the UI separate the two absences, **`active_sessions.enableScreenshots` i
 | enabled, value present | `Progress` bar + `N%` |
 
 It is a **snapshot at clock-in**, not live — an admin toggling `enableScreenshots` mid-session does not update it. That matches the client, which also reads `enableScreenshots` once at hydration (`TimeTrackingContext` ← `/api/time-tracking/status`), so the stamp and the capture behaviour stay consistent for the life of a session.
+
+## 4b. Integrity Signals — Input Quality and Unchanged Screens
+
+Shown on Chatter Analytics to **CA admins only** (documentation/buddyx.md §Chatter Analytics). **Display only — none of this changes idle state, the time ledger or pay.** A flag is a lead to look at; the report shows the minutes behind it. Everything here is gated by the `inputMonitoring` setting (§3f).
+
+### What is collected (Electron main, v0.17.0+)
+
+When and what **kind** of key went down — typing / modifier / filler (F13–F24, Scroll/Num Lock) / unknown — **never which key**. Held in a 45-minute ring like the activity samples (`electron/main.js`, "Input-quality monitor").
+
+| Platform | Collector | Sees |
+|---|---|---|
+| Windows | the existing `uiohook-napi` hook (`ensureWinHook`), key code → kind in memory | exact times, kinds. No permission. |
+| macOS, Input Monitoring granted | listen-only `CGEventTap` on the main run loop (koffi) | exact times, kinds; autorepeat skipped |
+| macOS, not granted | `CGEventSourceCounterForEventType` polled each second | per-second key-down vs modifier-change counts — a Shift jiggler shows, F15 does not |
+
+The tap upgrades from counters on its own once the permission lands; a granted permission that still yields no tap sets `needsRestart` (macOS applies a new grant on relaunch). The renderer's [`InputMonitoringPrompt`](../src/components/time-tracking/InputMonitoringPrompt.tsx) asks — never blocks — and offers the relaunch only while clocked out. **The tap's callback path has not been exercised on a signed build yet; verify it on a real Mac before arming v0.17.0** (every failure falls back to counters).
+
+### What is concluded (renderer, [`inputQuality.ts`](../src/lib/inputQuality.ts))
+
+All analysis is web code, so thresholds tune with a Vercel deploy. Per screenshot window, working minutes only:
+
+- **Modifier-only minute** — keys pressed, none of them typing.
+- **Regular-rhythm minute** — inside a rolling 10-minute window whose gaps between key bursts (presses < 150ms apart are one burst) number ≥ 8, have a median ≥ 2s and a coefficient of variation < 0.12. The median floor is what stops sustained typing sampled at 1s resolution (the macOS fallback) reading as a metronome.
+
+### Unchanged screens ([`screenFingerprint.ts`](../src/lib/screenFingerprint.ts))
+
+Each screen is shrunk in the renderer to a 32×18 greyscale grid (576 bytes). Two captures are **unchanged** when no cell moves more than 12 levels and the mean moves ≤ 1.5. **Not a 64-bit perceptual hash**: at 9×8 a few new chat lines barely move a cell, and a working agent would read as static — the one mistake this must not make. The comparison runs on the **server**, against the previous capture's fingerprints.
+
+### Where it is stored — server-only, on purpose
+
+An agent can read their own `screenshots` and `active_sessions` docs from the client SDK, so nothing integrity-related is written there. [`integrityService.ts`](../src/lib/services/integrityService.ts):
+
+| Collection | Doc | Holds |
+|---|---|---|
+| `integrity-captures` | captureGroup | window, activity, `unchanged`, the input summary (`create`, so a replayed finalise cannot double-count) |
+| `integrity-days` | `{uid}_{day}` | counters (`FieldValue.increment`) — salary day, `Africa/Harare` |
+| `integrity-state` | uid | the previous capture's fingerprints |
+
+All three are `allow read, write: if false`, in the user-delete cascade, and written in `after()` so they can never slow or fail an upload. Cost: 1 read + 3 writes per capture, only for monitored users.
 
 ### Native session boundaries (screen lock / system suspend)
 The main process forwards `powerMonitor` `suspend`/`lock-screen`/`unlock-screen`/`resume` as a `power:event` IPC (`electron/preload.js` → `electronAPI.power.onEvent`), each carrying the native timestamp `at`. `TimeTrackingContext` stamps events at `at` rather than `Date.now()`, so boundaries are exact. Feature-detected — no-ops on Electron builds that don't forward power events.
@@ -298,7 +355,7 @@ The main process holds the window `close` (the single choke-point for both the X
 
 ## 5. Analytics (admin dashboard)
 
-> `/admin-portal/shift-management` → **Analytics** tab. Individual / group / company-wide views over up to 90 days.
+> `/admin-portal/shift-management` → **Analytics** view (and each person sheet's Analytics section, locked to that person). Individual / group / company-wide views over up to 90 days.
 
 ### Why rollups, not live queries
 
@@ -312,7 +369,7 @@ time_entries + screenshots ──► rollupDailyAnalytics (04:00 UTC, functions/
                                         │
       /api/admin/analytics/timetracking ┤ folds rollups + expanded shifts server-side
                                         ▼
-                         useAnalyticsData → the Analytics tab
+                         useAnalyticsData → the Analytics view + the Overview's 7-day panels
 ```
 
 ### Firestore
@@ -383,18 +440,44 @@ It `require`s the same `functions/rollup.js` module as the CF, so backfilled and
 
 ### Findings — investigated, not yet actioned
 
-- **`activityPercent` is two different metrics mixed at the per-capture level.** `TimeTrackingContext.tsx:819-829` prefers native 5s `powerMonitor` samples, but `calcActivityPercentFromSamples` returns `null` whenever the sample buffer can't answer (main process restarted, window predates the 45-min retention, no working slots) — and the caller then silently falls back to the coarse event-log method. **The method therefore varies per screenshot, not per Electron build**, so it cannot be inferred from `appVersion` even in principle (`appVersion` lives only on `active_sessions`, which is deleted at clock-out). The two are now closer in semantics — both exclude idle/break/pause from the denominator — but still diverge sharply below the 15-min idle threshold: a user reading on-screen for 10 minutes scores **100% by event-log and ~0% by samples**. **Cross-user activity comparisons are unsound until an `activityMethod: 'samples' | 'eventlog'` field is stamped on `ScreenshotDocument`** (one string per capture, no migration). The dashboard caveats this in the UI; the fix is cheap and worth doing before anyone acts on activity numbers.
+- **`activityPercent` is two different metrics mixed at the per-capture level** — *now stamped going forward (`activityMethod`, §4); the history below predates it.* `TimeTrackingContext.tsx:819-829` prefers native 5s `powerMonitor` samples, but `calcActivityPercentFromSamples` returns `null` whenever the sample buffer can't answer (main process restarted, window predates the 45-min retention, no working slots) — and the caller then silently falls back to the coarse event-log method. **The method therefore varies per screenshot, not per Electron build**, so it cannot be inferred from `appVersion` even in principle (`appVersion` lives only on `active_sessions`, which is deleted at clock-out). The two are now closer in semantics — both exclude idle/break/pause from the denominator — but still diverge sharply below the 15-min idle threshold: a user reading on-screen for 10 minutes scores **100% by event-log and ~0% by samples**. **Cross-user activity comparisons are unsound until an `activityMethod: 'samples' | 'eventlog'` field is stamped on `ScreenshotDocument`** (one string per capture, no migration). The dashboard caveats this in the UI; the fix is cheap and worth doing before anyone acts on activity numbers.
 - ~~**`SessionEvent.meta` is defined but populated at zero call sites.**~~ **Done** — `patchSleepGap` tags its synthetic pair `{ trigger: 'sleep-gap' }` (trap 2) and every state event now records its producer (§4). **Only logs written from this build forward carry tags**, so any analysis over `meta` must treat an absent tag as *unknown* and keep the pre-existing fallback, never read it as a distinct category.
 - **A historical repair is possible but not yet run.** Desynced spans are machine-identifiable by the `activity`-inside-a-non-working-span fingerprint (§3c), so a backfill could reclassify those stretches as working and re-run the affected `analytics_daily` rollups via `analytics_dirty`. The 45-day sample found ~43h across 9 users. Left undone deliberately: it rewrites settled hours, which is a payroll decision rather than an engineering one.
 - **Integrity + fleet analytics** (deliberately out of scope): `modifications[]` + `originalData` support a per-admin edit audit (who adjusted whose hours, by how much, and why); `isManual` and `didNotClockOut` rates are payroll-risk signals; `appVersion`/`platform` on `active_sessions` give an update-adoption curve — valuable precisely because Electron updates are manual; `captureGroup` + `screenIndex` implicitly record each user's monitor count and when it changes.
 - **Fidelity limits of rollups.** Intra-day activity percentiles are approximated by the decile histogram (±5% at bucket boundaries); cross-day and cross-user percentiles remain exact because every daily doc is fetched. Any new metric requires a `version` bump + backfill re-run. **Group history is as-of-now, not as-of-then**: moving a user between groups retroactively re-attributes their history (this is what people expect from "show me the CA team's last 90 days", and the UI says so).
 - **Interpretation caveat.** Activity % measures *input*, not value — reading, calls, and thinking all register as inactive. The dashboard surfaces a distribution rather than a bare mean and frames it as a coverage/wellbeing signal, deliberately not a ranking.
 
+
+## 5b. Shift Management Overview — the Needs-attention queue
+
+> `/admin-portal/shift-management` (default view). Replaced seven flat tabs on 2026-10-09: **Overview · Schedule · Analytics · Settings**, plus a **person sheet** opened from any name (Timesheet · Screenshots · Shifts · Analytics · Leave · Tracking settings). View and open person are in the query string (`?view=&person=&section=&date=`), written with `history.replaceState` — a view change must not issue an RSC request (rule 9i).
+
+**Two halves, deliberately.**
+
+```
+GET /api/admin/shift-management/overview   ← settled: read once per view, `private, max-age=60`
+  shifts (yesterday→tomorrow, CALLER's zone) + attendance + first clock-in + leave
+  sessions overlapping today (decoded spans; empty = no event log = unknown)
+  flags: missed-clock-out · no-break (yesterday) · unrostered (yesterday, ≥ 1h)
+useActiveUsers (snapshot listener)         ← live: idle / break length / silent / overrun / not-in
+                     │
+        deriveAttention(data, live, now)   ← pure; `now` is a MINUTE clock, never 1 Hz
+```
+
+- **Reads:** two parallel rounds — shifts ×2, roster ×1, one `leave_requests` range; then ledger ×⌈N/30⌉ and `active_sessions where userClockOut == false` (billed per open session, not per roster member). Attendance and first clock-in come from one pass of `computeAttendanceDetail`; shift windows merge through the exported `mergeIntervals`. No new query shapes, so **no new indexes**. Tier: `shift-management` page permission, same as the week and analytics routes.
+- **Nothing polls.** The route is fetched on mount and on the refresh button; everything that ages by the minute is derived client-side from the live snapshot.
+- **Thresholds** live in `shiftOverview.ts`: late/not-in reuse `LATE_AFTER_MS` (30 min); idle ≥ 20 min; break ≥ 45 min (one shift's allowance); working with no check-in for 35 min (two missed 15-min heartbeats + slack) = "app has stopped reporting"; clocked in ≥ 30 min after the day's last shift ended = overrun.
+- **Approved leave suppresses** not-in / missed; pending leave is *annotated* on the item, not suppressed.
+- **Dismissals are per admin, per browser** (`localStorage`, 2-day expiry, read through `useSyncExternalStore`). A dismissal means "I've seen this", never "resolved". No Firestore state — so no rules change.
+- **The live timeline bar is honest about what it knows.** An open session has no event log on the server, so it draws neutral from clock-in to now; only the tail since the last *non-working* transition takes that state's hue (`lastUpdated` is exact there). A working session gets a cap at "now", not a fabricated green span.
+- **Display only.** Nothing here writes to the ledger, pay or idle state; every item opens the record's own surface in the person sheet.
+- **Archived users** are excluded from the Overview (route filters them); their screenshots stay reachable through Settings → Screenshot storage → *Open a person's screenshots*, the one picker that keeps them.
+
 ---
 
 ## 6. Session Walkthrough (admin timesheets)
 
-> `/admin-portal/shift-management` → **Timesheets** → click any segment on a day bar. Renders the session's verbatim `eventLog` on a timeline spanning its start to its end.
+> `/admin-portal/shift-management` → any name → person sheet → **Timesheet** → click any segment on a day bar. Renders the session's verbatim `eventLog` on a timeline spanning its start to its end.
 
 ```
 GET /api/time-tracking/entries
@@ -451,7 +534,7 @@ The mapping mirrors the tick branch for branch, which is the whole point:
 - [ ] `calcActivityPercentFromSamples` must return `null` (never `0`) when it can't cover the window — `0` both libels an active user and kills the fallback.
 - [ ] Never count idle/break/pause minutes in the activity denominator.
 - [ ] Never default a missing `lastActivityPercent` to a number — screenshots-off users have no activity value at all. Use `active_sessions.enableScreenshots` to tell "off" from "not captured yet".
-- [ ] `active_sessions.lastUpdated` is a **client→server check-in time** (clock-in, state transition, 15-min heartbeat), *not* a last-user-input time — Active Users surfaces it as "Last Synced at" for exactly that reason. Never relabel it as activity/presence.
+- [ ] `active_sessions.lastUpdated` is a **client→server check-in time** (clock-in, state transition, 15-min heartbeat), *not* a last-user-input time. The Overview reads it only as *when a non-working state began* ("Went idle at") and as *last check-in* for a working session that has gone quiet. Never relabel it as activity/presence or "last input".
 - [ ] **Never gate a state transition on `/transition`** — append the event, apply local state, then `syncTransition()` fire-and-forget (§3c). Awaiting it strands the renderer out of step with the log and kills idle recovery.
 - [ ] Set `displayStateRef`/`entryStartTimeRef` eagerly in a transition, not just the React state — `isTransitioningRef` releases before the commit lands.
 - [ ] Tag every new state event with `meta.trigger`, and treat an **absent** tag as unknown (pre-existing logs have none).

@@ -309,6 +309,7 @@ export function buildNewUserDoc(record: NewUserRecord): Record<string, unknown> 
     idleTimeoutMinutes: DEFAULT_TIME_TRACKING_SETTINGS.idleTimeoutMinutes,
     idleInputMode: DEFAULT_TIME_TRACKING_SETTINGS.idleInputMode,
     enableScreenshots: DEFAULT_TIME_TRACKING_SETTINGS.enableScreenshots,
+    inputMonitoring: DEFAULT_TIME_TRACKING_SETTINGS.inputMonitoring,
     timeTrackingOverrides: {},
     // Rotated again on first login; a placeholder keeps the field's type stable.
     sessionToken: randomUUID(),

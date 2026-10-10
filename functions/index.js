@@ -37,14 +37,24 @@ exports.generateThumbnail = onObjectFinalized({ bucket: STORAGE_BUCKET }, async 
 
     await bucket.file(thumbPath).save(thumbBuffer, { contentType: 'image/png' });
 
-    const snap = await admin.firestore()
-      .collection('screenshots')
-      .where('storagePath', '==', filePath)
-      .limit(1)
-      .get();
-
-    if (!snap.empty) {
-      await snap.docs[0].ref.update({ thumbnailPath: thumbPath });
+    // Current object names carry the capture group and screen index
+    // (`{ts}_{captureGroup}_{i}.png`), and the screenshot doc's id is exactly
+    // `{captureGroup}_{i}` — so the doc is found without a query. The bytes land
+    // before /finalize writes the doc, so this merges into whichever exists
+    // first; /finalize merges its own fields and never touches thumbnailPath.
+    const named = /\/\d{13}_([0-9a-f-]{36})_(\d+)\.png$/.exec(filePath);
+    if (named) {
+      await admin.firestore().collection('screenshots').doc(`${named[1]}_${named[2]}`)
+        .set({ thumbnailPath: thumbPath }, { merge: true });
+    } else {
+      // Older objects (`{ts}_{i}.png`) have random doc ids and were written
+      // after their doc existed.
+      const snap = await admin.firestore()
+        .collection('screenshots')
+        .where('storagePath', '==', filePath)
+        .limit(1)
+        .get();
+      if (!snap.empty) await snap.docs[0].ref.update({ thumbnailPath: thumbPath });
     }
   } catch (err) {
     console.error(`[generateThumbnail] Failed for ${filePath}:`, err);

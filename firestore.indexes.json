@@ -543,6 +543,34 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "integrity-captures",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "uid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "at",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "integrity-days",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "uid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "day",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [
@@ -2279,6 +2307,36 @@
       "collectionGroup": "buddyx-team-periods",
       "fieldPath": "expireAt",
       "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-team-hours",
+      "fieldPath": "online",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-team-hours",
+      "fieldPath": "messages",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-team-hours",
+      "fieldPath": "uids",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-team-hours",
+      "fieldPath": "hours",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "integrity-captures",
+      "fieldPath": "input",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "integrity-state",
+      "fieldPath": "fingerprints",
       "indexes": []
     }
   ]

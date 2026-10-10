@@ -147,16 +147,19 @@ export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 
     if (scope === 'org') {
       const patch = parseOverridePatch(body.settings);
-      const complete =
-        patch && TIME_TRACKING_SETTING_KEYS.every(k => patch[k] !== undefined && patch[k] !== null);
-      if (!complete) {
+      // Merged, so a key the caller did not send keeps its stored value: an
+      // admin page loaded before a setting existed (rule 9c) posts the keys it
+      // knows about, and must neither 400 nor wipe the new one. A key that was
+      // never stored reads as its default (`normalizeOrgSettings`).
+      const valid = patch && TIME_TRACKING_SETTING_KEYS.every(k => patch[k] !== null);
+      if (!valid) {
         return NextResponse.json({ error: 'Invalid organization settings' }, { status: 400 });
       }
       await ORG_TIME_TRACKING_REF().set({
-        ...(patch as TimeTrackingSettings),
+        ...(patch as Partial<TimeTrackingSettings>),
         updatedAt: FieldValue.serverTimestamp(),
         updatedBy: token.uid,
-      });
+      }, { merge: true });
       affected = undefined; // everyone
     } else if (scope === 'group' || scope === 'user') {
       const id = typeof body.id === 'string' ? body.id : '';

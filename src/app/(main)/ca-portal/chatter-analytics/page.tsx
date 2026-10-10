@@ -1,6 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ArrowDown, ArrowUp, Loader2Icon } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
@@ -17,31 +19,31 @@ import { SyncStatus } from '@/components/buddyx/SyncStatus';
 import { BenchmarkStrip } from '@/components/buddyx/BenchmarkStrip';
 import { LegendSwatch, PPV_ATTRIBUTION, TIPS_ATTRIBUTION, KpiTile, Fact, LoadError, SEGMENT } from '@/components/buddyx/buddyxUi';
 import { PersonTag } from '@/components/disputes/disputeUi';
+import { CoverageMeter, CoverageScatter, FlagChips, FlagList } from '@/components/buddyx/integrityUi';
+import { COVERAGE_FLAG_RATIO } from '@/lib/buddyx/coverage';
+import { CHATTER_PERIOD_OPTIONS, chatterAnalyticsUrl, chatterReportHref } from '@/components/buddyx/chatterPeriods';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
 import { formatUsd } from '@/lib/salary/salaryFormat';
 import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
-import { formatCount, formatDuration, formatRate } from '@/lib/buddyx/analyticsFormat';
+import { formatCount, formatDuration, formatRate, formatShare } from '@/lib/buddyx/analyticsFormat';
 import { SALE_KIND_COLORS } from '@/lib/buddyx/chartColors';
-import type { BenchmarkKey, ChatterAnalytics, ChatterLeaderboardRow, ChatterPeriod } from '@/lib/buddyx/analyticsTypes';
+import { MAX_CUSTOM_DAYS, type BenchmarkKey, type ChatterAnalytics, type ChatterLeaderboardRow, type ChatterPeriod, type IntegrityFlag } from '@/lib/buddyx/analyticsTypes';
 
 /**
  * Chatter Analytics — `/ca-portal/chatter-analytics`.
  *
- * An agent asks "how am I doing against the team?"; an admin asks "who's
- * carrying, who's slipping, and does BuddyX online time match our clock?".
- * Question-led sections under a standing KPI row. The agent's comparison is
- * anonymous by construction — the server sends a median and a quartile, never
- * a colleague (D8) — and the admin's leaderboard is the only named view.
+ * An agent asks "how am I doing against the team?"; an admin asks "was
+ * everyone actually working while they were clocked in?" — so the admin view
+ * leads with what needs a look (the flag list), then everyone's coverage in one
+ * picture, then the named table, each row opening that agent's report
+ * (`./[uid]`). The default period is the last 7 complete days.
+ *
+ * The agent's comparison is anonymous by construction — the server sends a
+ * median and a quartile, never a colleague (D8). Integrity flags are admin
+ * only; an agent sees their own coverage figure and nothing else of it.
+ * Display only: nothing on this page changes worked time or pay.
  */
-
-const PERIODS: Array<{ value: ChatterPeriod; label: string }> = [
-  { value: 'mtd', label: 'MTD' },
-  { value: 'prev-month', label: 'Last month' },
-  { value: '7d', label: '7d' },
-  { value: '30d', label: '30d' },
-  { value: 'custom', label: 'Custom' },
-];
 
 const BENCHMARK_LABELS: Record<BenchmarkKey, { label: string; format: (v: number) => string }> = {
   ppvGross: { label: 'PPV revenue (gross)', format: v => formatUsd(v) },
@@ -60,15 +62,15 @@ const dailyConfig = {
 } satisfies ChartConfig;
 
 export default function ChatterAnalyticsPage() {
-  const [period, setPeriod] = useState<ChatterPeriod>('mtd');
+  const [period, setPeriod] = useState<ChatterPeriod>('7d');
   const [from, setFrom] = useState<Date | undefined>(undefined);
   const [to, setTo] = useState<Date | undefined>(undefined);
 
-  const url = useMemo(() => {
-    if (period !== 'custom') return `/api/analytics/chatters?period=${period}`;
-    if (!from || !to || to < from) return null;
-    return `/api/analytics/chatters?period=custom&from=${format(from, 'yyyy-MM-dd')}&to=${format(to, 'yyyy-MM-dd')}`;
-  }, [period, from, to]);
+  const range = useMemo(
+    () => ({ from: from ? format(from, 'yyyy-MM-dd') : null, to: to ? format(to, 'yyyy-MM-dd') : null }),
+    [from, to],
+  );
+  const url = useMemo(() => chatterAnalyticsUrl('/api/analytics/chatters', period, range.from, range.to), [period, range]);
   const { data, loading, error, reload } = useBuddyxAnalytics<ChatterAnalytics>(url);
 
   return (
@@ -78,13 +80,15 @@ export default function ChatterAnalyticsPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Chatter Analytics</h1>
             <p className="mt-1 text-sm text-zinc-400">
-              {data?.leaderboard ? 'Every chat agent, from BuddyX.' : 'How you are doing against the team, from BuddyX.'} Money is
-              gross — what fans paid; net is 80% after OnlyFans&apos; 20%.
+              {data?.leaderboard
+                ? 'Every chat agent — BuddyX activity against Bluu time tracking.'
+                : 'How you are doing against the team, from BuddyX.'}{' '}
+              Money is gross — what fans paid; net is 80% after OnlyFans&apos; 20%.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <ToggleGroup type="single" variant="outline" size="sm" value={period} onValueChange={v => v && setPeriod(v as ChatterPeriod)} aria-label="Period">
-              {PERIODS.map(p => <ToggleGroupItem key={p.value} value={p.value} className={SEGMENT}>{p.label}</ToggleGroupItem>)}
+              {CHATTER_PERIOD_OPTIONS.map(p => <ToggleGroupItem key={p.value} value={p.value} className={SEGMENT}>{p.label}</ToggleGroupItem>)}
             </ToggleGroup>
             <SyncStatus scope="chatters" onSynced={() => void reload(true)} />
           </div>
@@ -94,7 +98,7 @@ export default function ChatterAnalyticsPage() {
           <div className="flex flex-wrap items-center gap-2">
             <DatePicker value={from} onChange={setFrom} placeholder="From" className="h-8 w-44 text-sm" />
             <DatePicker value={to} onChange={setTo} placeholder="To" className="h-8 w-44 text-sm" />
-            <p className="text-[11px] text-zinc-400">Up to 92 days, as far back as October 2025. Totals are summed from days.</p>
+            <p className="text-[11px] text-zinc-400">Up to {MAX_CUSTOM_DAYS} days, as far back as October 2025. Totals are summed from days.</p>
           </div>
         )}
 
@@ -105,7 +109,7 @@ export default function ChatterAnalyticsPage() {
         ) : error && !data ? (
           <LoadError error={error} onRetry={() => void reload(true)} />
         ) : data ? (
-          <ChatterBody data={data} onPulled={() => void reload(true)} />
+          <ChatterBody data={data} range={range} onPulled={() => void reload(true)} />
         ) : null}
       </div>
     </AppLayout>
@@ -125,12 +129,29 @@ function PageSkeleton() {
 }
 
 
-function ChatterBody({ data, onPulled }: { data: ChatterAnalytics; onPulled: () => void }) {
+function ChatterBody({
+  data,
+  range,
+  onPulled,
+}: {
+  data: ChatterAnalytics;
+  range: { from: string | null; to: string | null };
+  onPulled: () => void;
+}) {
   const me = data.me;
   const isAdmin = data.leaderboard !== null;
 
   return (
     <div className="space-y-6">
+      {isAdmin && <AdminView data={data} range={range} />}
+
+      {isAdmin && me && (
+        <div className="border-t border-white/[0.07] pt-6">
+          <h2 className="text-sm font-semibold">Your own figures</h2>
+          <p className="mt-0.5 text-[11px] text-zinc-400">You chat too, so here is your own row as an agent sees it.</p>
+        </div>
+      )}
+
       {/* ── KPI row ── */}
       {me ? (
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
@@ -158,6 +179,19 @@ function ChatterBody({ data, onPulled }: { data: ChatterAnalytics; onPulled: () 
 
       {!data.hasMedians && data.to >= data.activityFrom && (
         <CustomMedianNote data={data} isAdmin={isAdmin} onPulled={onPulled} />
+      )}
+
+      {/* ── Online while clocked in (the agent's own coverage; never flags) ── */}
+      {!isAdmin && data.coverage && (
+        <section className={cn('rounded-xl p-5', SURFACE)} aria-labelledby="my-coverage">
+          <h2 id="my-coverage" className="text-sm font-semibold">Online while clocked in</h2>
+          <p className="mt-0.5 text-[11px] text-zinc-400">
+            Your BuddyX online time that fell inside your clocked working time. Breaks don&apos;t count against you.
+          </p>
+          <div className="mt-3">
+            <CoverageMeter coverage={data.coverage} />
+          </div>
+        </section>
       )}
 
       {/* ── You vs team ── */}
@@ -219,7 +253,6 @@ function ChatterBody({ data, onPulled }: { data: ChatterAnalytics; onPulled: () 
         </section>
       )}
 
-      {isAdmin && <AdminView data={data} />}
     </div>
   );
 }
@@ -260,9 +293,18 @@ function CustomMedianNote({ data, isAdmin, onPulled }: { data: ChatterAnalytics;
 
 // ─── Admin ───────────────────────────────────────────────────────────
 
-type SortKey = 'revenue' | 'ppvGross' | 'tipsGross' | 'unlockRate' | 'medianResponseTimeMs' | 'onlineMs' | 'revenuePerOnlineHour' | 'revenuePerAccount';
+type SortKey =
+  | 'coverage'
+  | 'revenue'
+  | 'ppvGross'
+  | 'tipsGross'
+  | 'unlockRate'
+  | 'medianResponseTimeMs'
+  | 'onlineMs'
+  | 'revenuePerOnlineHour'
+  | 'revenuePerAccount';
 
-const COLUMNS: Array<{ key: SortKey; label: string; render: (r: ChatterLeaderboardRow) => string }> = [
+const COLUMNS: Array<{ key: Exclude<SortKey, 'coverage'>; label: string; render: (r: ChatterLeaderboardRow) => string }> = [
   { key: 'revenue', label: 'Gross', render: r => formatUsd(r.ppvGross + r.tipsGross) },
   { key: 'ppvGross', label: 'PPV gross', render: r => formatUsd(r.ppvGross) },
   { key: 'tipsGross', label: 'Tips gross', render: r => formatUsd(r.tipsGross) },
@@ -273,22 +315,27 @@ const COLUMNS: Array<{ key: SortKey; label: string; render: (r: ChatterLeaderboa
   { key: 'revenuePerAccount', label: 'Gross / account', render: r => (r.revenuePerAccount === null ? '—' : formatUsd(r.revenuePerAccount)) },
 ];
 
+/** Lower-is-worse ascending by default: coverage and reply time sort worst-first. */
+const ASCENDING_FIRST: ReadonlySet<SortKey> = new Set(['coverage', 'medianResponseTimeMs']);
+
 function sortValue(r: ChatterLeaderboardRow, key: SortKey): number {
   if (key === 'revenue') return r.ppvGross + r.tipsGross;
+  if (key === 'coverage') return r.coverage?.ratio ?? Infinity;
   const v = r[key];
   return typeof v === 'number' ? v : -Infinity;
 }
 
-/** "online 31h · clocked 44h" — a fact, stated only past a 15% gap. */
-function clockGap(r: ChatterLeaderboardRow): { text: string; large: boolean } | null {
-  if (r.clockedMs === null || r.clockedMs <= 0 || r.onlineMs === null) return null;
-  const gap = Math.abs(r.onlineMs - r.clockedMs) / r.clockedMs;
-  if (gap <= 0.15) return null;
-  return { text: `online ${formatDuration(r.onlineMs)} · clocked ${formatDuration(r.clockedMs)}`, large: gap > 0.4 };
-}
+const HEAD = 'text-[11px] font-semibold uppercase tracking-wide text-zinc-400';
 
-function AdminView({ data }: { data: ChatterAnalytics }) {
-  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'revenue', desc: true });
+function AdminView({ data, range }: { data: ChatterAnalytics; range: { from: string | null; to: string | null } }) {
+  const router = useRouter();
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'coverage', desc: false });
+  const flags = useMemo(() => data.flags ?? [], [data.flags]);
+  const flagsByUid = useMemo(() => {
+    const map = new Map<string, IntegrityFlag[]>();
+    for (const f of flags) map.set(f.uid, [...(map.get(f.uid) ?? []), f]);
+    return map;
+  }, [flags]);
   const rows = useMemo(() => {
     const list = [...(data.leaderboard ?? [])];
     list.sort((a, b) => {
@@ -297,71 +344,132 @@ function AdminView({ data }: { data: ChatterAnalytics }) {
     });
     return list;
   }, [data.leaderboard, sort]);
+  const hrefFor = (uid: string) => chatterReportHref(uid, data.period, range.from, range.to);
+  const agents = (data.leaderboard ?? []).filter(r => r.uid).length;
+  const covered = data.to >= data.activityFrom;
+
+  const header = (key: SortKey, label: string) => (
+    <th key={key} scope="col" aria-sort={sort.key === key ? (sort.desc ? 'descending' : 'ascending') : 'none'} className="px-3 py-2.5 text-right">
+      <button
+        type="button"
+        onClick={() => setSort(s => ({ key, desc: s.key === key ? !s.desc : !ASCENDING_FIRST.has(key) }))}
+        className={cn('inline-flex items-center gap-1 rounded-sm hover:text-white focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50', HEAD)}
+      >
+        {label}
+        {sort.key === key && (sort.desc ? <ArrowDown className="size-3" aria-hidden /> : <ArrowUp className="size-3" aria-hidden />)}
+      </button>
+    </th>
+  );
 
   return (
-    <div className="space-y-4">
-      {data.rosteredOffline && data.rosteredOffline.length > 0 && (
-        <section aria-label="Rostered but never online" className="rounded-xl border border-orange-500/20 bg-orange-500/[0.06] px-4 py-3">
-          <ul className="space-y-1">
-            {data.rosteredOffline.map(a => (
-              <li key={a.uid} className="flex items-center gap-2 text-sm">
-                <span className="inline-block size-1.5 rounded-full bg-orange-400" aria-hidden />
-                {a.name} was rostered on {a.shifts} {a.shifts === 1 ? 'shift' : 'shifts'} and never online in BuddyX
-              </li>
-            ))}
-          </ul>
+    <div className="space-y-6">
+      {/* ── What needs a look ── */}
+      <section aria-labelledby="flags-heading" className="space-y-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="flags-heading" className="text-sm font-semibold">What needs a look</h2>
+          <p className="text-[11px] text-zinc-400">Leads, not verdicts — each opens the report with the minutes behind it.</p>
+        </div>
+        <FlagList
+          flags={flags}
+          withNames
+          hrefFor={f => hrefFor(f.uid)}
+          cleanLine={
+            covered
+              ? `${agents} ${agents === 1 ? 'agent' : 'agents'}, no flags this period.`
+              : 'BuddyX activity starts after this period, so there is nothing to check.'
+          }
+        />
+        {data.hourlyFrom && data.hourlyFrom > data.from && covered && (
+          <p className="text-[11px] text-zinc-400">
+            Hour-by-hour BuddyX data starts {formatDayLabelWithWeekday(data.hourlyFrom)}; earlier days are judged on daily totals, which can only overstate coverage.
+          </p>
+        )}
+      </section>
+
+      {/* ── Coverage ── */}
+      {covered && (
+        <section className={cn('rounded-xl p-5', SURFACE)} aria-labelledby="coverage-heading">
+          <h2 id="coverage-heading" className="text-sm font-semibold">Online in BuddyX while clocked in</h2>
+          <p className="mt-0.5 text-[11px] text-zinc-400">
+            One dot per agent. Clocked working hours across — breaks, idle and pause excluded — and the hours of it they were online in BuddyX up.
+            Online time outside clocked time does not count.
+          </p>
+          <CoverageScatter rows={data.leaderboard ?? []} hrefFor={hrefFor} />
         </section>
       )}
 
+      {/* ── Every agent ── */}
       <section className={cn('rounded-xl p-5', SURFACE)} aria-labelledby="leaderboard">
         <h2 id="leaderboard" className="text-sm font-semibold">Every agent</h2>
         <p className="mt-0.5 text-[11px] text-zinc-400">
-          Online time is BuddyX&apos;s; clocked time is Bluu&apos;s time tracking. A gap over 15% is stated beside the agent.
+          Coverage is BuddyX online time inside Bluu clocked working time. Open an agent for their shifts, minute by minute.
         </p>
         <div
           tabIndex={0}
           role="region"
-          aria-label="Agent leaderboard, scrollable"
+          aria-label="Agent table, scrollable"
           className="mt-3 overflow-x-auto rounded-lg border border-white/[0.07] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50"
         >
-          <table className="w-full min-w-[980px] border-collapse text-sm">
+          <table className="w-full min-w-[1180px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-white/[0.07]">
-                <th scope="col" className="sticky left-0 z-10 bg-[var(--card)] px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Agent</th>
-                {COLUMNS.map(col => (
-                  <th key={col.key} scope="col" aria-sort={sort.key === col.key ? (sort.desc ? 'descending' : 'ascending') : 'none'} className="px-3 py-2.5 text-right">
-                    <button
-                      type="button"
-                      onClick={() => setSort(s => ({ key: col.key, desc: s.key === col.key ? !s.desc : col.key !== 'medianResponseTimeMs' }))}
-                      className="inline-flex items-center gap-1 rounded-sm text-[11px] font-semibold uppercase tracking-wide text-zinc-400 hover:text-white focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                    >
-                      {col.label}
-                      {sort.key === col.key && (sort.desc ? <ArrowDown className="size-3" aria-hidden /> : <ArrowUp className="size-3" aria-hidden />)}
-                    </button>
-                  </th>
-                ))}
-                <th scope="col" className="px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Mass msgs</th>
+                <th scope="col" className={cn('sticky left-0 z-10 bg-[var(--card)] px-3 py-2.5 text-left', HEAD)}>Agent</th>
+                {header('coverage', 'Coverage')}
+                <th scope="col" className={cn('px-3 py-2.5 text-right', HEAD)}>Flags</th>
+                {COLUMNS.map(col => header(col.key, col.label))}
+                <th scope="col" className={cn('px-3 py-2.5 text-right', HEAD)}>Mass msgs</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.045]">
-              {rows.map(r => {
-                const gap = clockGap(r);
-                return (
-                  <tr key={r.uid ?? r.chatterId}>
-                    <td className="sticky left-0 z-10 bg-[var(--card)] px-3 py-2">
-                      {r.uid ? <PersonTag name={r.name} photoURL={null} size="sm" /> : <span className="text-xs text-zinc-400">{r.name}</span>}
-                      {gap && <span className={cn('block text-[11px]', gap.large ? 'text-orange-400' : 'text-zinc-400')}>{gap.text}</span>}
-                    </td>
-                    {COLUMNS.map(col => (
-                      <td key={col.key} className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{col.render(r)}</td>
-                    ))}
-                    <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
-                      {r.mass.count}
-                      {r.mass.unsent > 0 && <span className="text-[11px] text-zinc-400"> · {r.mass.unsent} unsent</span>}
-                    </td>
-                  </tr>
-                );
-              })}
+              {rows.map(r => (
+                // The whole row opens the report (the table's main action); the
+                // name link is the keyboard and screen-reader route to the same
+                // place. The sticky cell is opaque, so its wash is a `before:`
+                // overlay (DESIGN.md §5, the shaded matrix).
+                <tr
+                  key={r.uid ?? r.chatterId}
+                  onClick={r.uid ? () => router.push(hrefFor(r.uid!)) : undefined}
+                  className={cn('group', r.uid && 'cursor-pointer hover:bg-white/[0.055] active:bg-white/[0.08]')}
+                >
+                  <td className="sticky left-0 z-10 bg-[var(--card)] px-3 py-2 before:absolute before:inset-0 before:transition-colors group-hover:before:bg-white/[0.055]">
+                    {r.uid ? (
+                      <Link
+                        href={hrefFor(r.uid)}
+                        prefetch={false}
+                        onClick={e => e.stopPropagation()}
+                        className="relative inline-flex rounded-md focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                        aria-label={`Open ${r.name}’s report`}
+                      >
+                        <PersonTag name={r.name} photoURL={null} size="sm" />
+                      </Link>
+                    ) : (
+                      <span className="relative text-xs text-zinc-400">{r.name}</span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                    {r.coverage?.ratio != null ? (
+                      <>
+                        <span className={r.coverage.ratio < COVERAGE_FLAG_RATIO ? 'text-orange-400' : undefined}>{formatShare(r.coverage.ratio)}</span>
+                        <span className="block text-[11px] text-zinc-400">
+                          {formatDuration(r.coverage.onlineWhileClockedMs)} of {formatDuration(r.coverage.clockedMs)}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-zinc-400">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <FlagChips flags={r.uid ? flagsByUid.get(r.uid) ?? [] : []} />
+                  </td>
+                  {COLUMNS.map(col => (
+                    <td key={col.key} className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{col.render(r)}</td>
+                  ))}
+                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                    {r.mass.count}
+                    {r.mass.unsent > 0 && <span className="text-[11px] text-zinc-400"> · {r.mass.unsent} unsent</span>}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

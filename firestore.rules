@@ -595,6 +595,23 @@ service cloud.firestore {
     match /buddyx-team-periods/{periodId} {
       allow read, write: if false;
     }
+    match /buddyx-team-hours/{day} {
+      allow read, write: if false;
+    }
+
+    // 31b. Integrity signals (documentation/time-tracking.md §4b) — input
+    // quality and unchanged screens, per capture and per day. Admin SDK only:
+    // flags are shown to CA admins and NEVER to the agent, so they must not be
+    // readable by uid the way `screenshots` and `active_sessions` are.
+    match /integrity-captures/{captureGroup} {
+      allow read, write: if false;
+    }
+    match /integrity-days/{dayId} {
+      allow read, write: if false;
+    }
+    match /integrity-state/{uid} {
+      allow read, write: if false;
+    }
     match /buddyx-mass-messages/{messageId} {
       allow read, write: if false;
     }

@@ -24,6 +24,8 @@ interface AnalyticsFilterBarProps {
   preset: PresetId;
   range: DateRange;
   onRangeChange: (preset: PresetId, range: DateRange) => void;
+  /** Subject fixed by the caller — show only the range control. */
+  lockedToUser?: boolean;
 }
 
 const SCOPE_LABELS: Record<AnalyticsScope, string> = {
@@ -37,6 +39,7 @@ export function AnalyticsFilterBar({
   selectedUserId, onUserChange,
   selectedGroupId, onGroupChange,
   preset, range, onRangeChange,
+  lockedToUser = false,
 }: AnalyticsFilterBarProps) {
   const { users, groups, loading } = useBasicUsers();
   const [userOpen, setUserOpen] = useState(false);
@@ -52,6 +55,14 @@ export function AnalyticsFilterBar({
   const selectedUser = activeUsers.find(u => u.uid === selectedUserId);
   const selectedGroup = (groups as Array<{ groupId?: string; id?: string; name?: string }>)
     .find(g => (g.groupId ?? g.id) === selectedGroupId);
+
+  if (lockedToUser) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 mb-6">
+        <TimeRangePicker preset={preset} range={range} onChange={onRangeChange} />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-2 mb-6">

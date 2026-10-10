@@ -9,7 +9,7 @@
  *   org-settings/time-tracking         → TimeTrackingSettings (the defaults)
  *   groups/{id}.timeTrackingOverrides  → TimeTrackingOverrides
  *   users/{uid}.timeTrackingOverrides  → TimeTrackingOverrides
- *   users/{uid}.{enableIdleTimeout, idleTimeoutMinutes, idleInputMode, enableScreenshots}
+ *   users/{uid}.{enableIdleTimeout, idleTimeoutMinutes, idleInputMode, enableScreenshots, inputMonitoring}
  *     → the RESOLVED values, denormalised by timeTrackingSettingsService so the
  *       renderer reads them off its existing users/{uid} snapshot for free.
  *
@@ -23,6 +23,15 @@ export interface TimeTrackingSettings {
   /** Which input counts as activity for the idle timeout. */
   idleInputMode: IdleInputMode;
   enableScreenshots: boolean;
+  /**
+   * Input-quality monitoring: the desktop app records **when** keys are pressed
+   * and **what kind** of key (typing / modifier / filler) — never which key —
+   * so Chatter Analytics can flag a machine-regular rhythm or modifier-only
+   * input (a key jiggler). On macOS it also prompts for Input Monitoring.
+   * Display only: it never changes idle state, worked time or pay.
+   * See documentation/time-tracking.md §4b.
+   */
+  inputMonitoring: boolean;
 }
 
 /**
@@ -62,6 +71,7 @@ export const TIME_TRACKING_SETTING_KEYS: readonly TimeTrackingSettingKey[] = [
   'idleTimeoutMinutes',
   'idleInputMode',
   'enableScreenshots',
+  'inputMonitoring',
 ];
 
 export const DEFAULT_TIME_TRACKING_SETTINGS: TimeTrackingSettings = {
@@ -69,6 +79,7 @@ export const DEFAULT_TIME_TRACKING_SETTINGS: TimeTrackingSettings = {
   idleTimeoutMinutes: 6,
   idleInputMode: 'any',
   enableScreenshots: true,
+  inputMonitoring: false,
 };
 
 export const MIN_IDLE_TIMEOUT_MINUTES = 1;

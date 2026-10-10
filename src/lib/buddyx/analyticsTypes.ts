@@ -2,11 +2,18 @@
  * The wire shapes of the three BuddyX analytics routes. Plain data, imported by
  * both the server read models (`buddyxAnalyticsService.ts`) and the pages.
  */
+import type { CoverageFigures } from './coverage';
+import type { InputPermission, InputSource } from '../inputQuality';
+
+export type { CoverageFigures };
 
 // ─── Chatter Analytics ───────────────────────────────────────────────
 
 export const CHATTER_PERIODS = ['mtd', 'prev-month', '7d', '30d', 'custom'] as const;
 export type ChatterPeriod = (typeof CHATTER_PERIODS)[number];
+
+/** A custom range sums days; past this it stops being a page and becomes a report. */
+export const MAX_CUSTOM_DAYS = 92;
 
 /**
  * One chatter's figures for a period. Money is gross.
@@ -71,12 +78,61 @@ export interface ChatterDailyPoint {
   tipsGross: number;
 }
 
+// ─── Integrity (admin only) ──────────────────────────────────────────
+//
+// Coverage (BuddyX online while clocked in) plus the input-quality and
+// unchanged-screen signals. **Display only** — nothing here changes worked
+// time or pay — and never sent to an agent (documentation/time-tracking.md §4b).
+
+/** One agent's input-quality and screen counters over a period, summed from `integrity-days`. */
+export interface IntegritySummary {
+  monitoredMinutes: number;
+  keys: number;
+  regularMinutes: number;
+  modifierOnlyMinutes: number;
+  staticMinutes: number;
+  captures: number;
+  comparedCaptures: number;
+  unchangedCaptures: number;
+  /** The most recent collector and permission in the period. */
+  inputSource: InputSource | null;
+  permission: InputPermission | null;
+}
+
+export type IntegrityFlagKind =
+  | 'never-online'
+  | 'low-coverage'
+  | 'regular-input'
+  | 'modifier-only'
+  | 'static-screen'
+  | 'input-permission';
+
+/** One line on the flags list — a lead to look at, never a finding. */
+export interface IntegrityFlag {
+  uid: string;
+  name: string;
+  kind: IntegrityFlagKind;
+  severity: 'high' | 'medium';
+  /** Flagged minutes (input / static kinds). */
+  minutes: number | null;
+  /** Coverage ratio (low-coverage). */
+  ratio: number | null;
+  /** Shifts involved (never-online, low-coverage). */
+  shifts: number | null;
+  /** Salary days the signal appeared on, ascending. */
+  days: string[];
+}
+
 export interface ChatterLeaderboardRow extends ChatterMetrics {
   uid: string | null;
   chatterId: string;
   name: string;
   /** Bluu clocked-in time over the period, from the time ledger. */
   clockedMs: number | null;
+  /** BuddyX online vs clocked working time. Null for an unlinked chatter or a period before BuddyX. */
+  coverage: CoverageFigures | null;
+  /** Null when the agent had no monitored capture in the period. */
+  integrity: IntegritySummary | null;
   /** Distinct accounts rostered across the agent's shifts in the period. */
   accounts: number;
   /** (PPV + tips) ÷ accounts. */
@@ -100,8 +156,77 @@ export interface ChatterAnalytics {
   benchmarks: Benchmark[] | null;
   /** `ca-admin` only. */
   leaderboard: ChatterLeaderboardRow[] | null;
-  /** `ca-admin` only: rostered agents with no BuddyX online time. */
-  rosteredOffline: Array<{ uid: string; name: string; shifts: number }> | null;
+  /** The viewer's own coverage. Agents see this; they never see flags. */
+  coverage: CoverageFigures | null;
+  /** `ca-admin` only: the ranked flag list. */
+  flags: IntegrityFlag[] | null;
+  /** First day in the period with hourly BuddyX data; days before it are judged on day totals. */
+  hourlyFrom: string | null;
+}
+
+// ─── Per-chatter report (admin only) ─────────────────────────────────
+
+export interface ReportShift {
+  /** Scheduled window; for an unscheduled session, the session's own span. */
+  startMs: number;
+  endMs: number;
+  scheduled: boolean;
+  isOvertime: boolean;
+  accounts: number;
+  clockedMs: number;
+  onlineWhileClockedMs: number | null;
+  ratio: number | null;
+  /** BuddyX messages in the hours the shift touches (whole hours, so approximate). */
+  messages: number | null;
+  regularMinutes: number;
+  modifierOnlyMinutes: number;
+  staticMinutes: number;
+  /** Whether any capture in the shift carried an input summary. */
+  monitored: boolean;
+}
+
+export interface ReportDay {
+  day: string;
+  clockedMs: number;
+  onlineWhileClockedMs: number;
+}
+
+export interface ChatterReport {
+  uid: string;
+  name: string;
+  metrics: ChatterMetrics | null;
+  coverage: CoverageFigures | null;
+  integrity: IntegritySummary | null;
+  flags: IntegrityFlag[];
+  shifts: ReportShift[];
+  daily: ReportDay[];
+  /** Input monitoring is on for this agent right now. */
+  inputMonitoring: boolean;
+}
+
+export type SegmentStateCode = 'working' | 'idle' | 'on-break' | 'paused';
+
+/** One shift at minute grain, for the report's timeline. */
+export interface ShiftDetail {
+  /** The drawn window (the shift, widened to cover any session that spills past it). */
+  fromMs: number;
+  toMs: number;
+  scheduled: { startMs: number; endMs: number } | null;
+  segments: Array<{ startMs: number; endMs: number; state: SegmentStateCode }>;
+  /** `onlineMs` null = no hourly data for that hour. */
+  hours: Array<{ startMs: number; onlineMs: number | null; messages: number | null }>;
+  /** Keys per minute from `fromMs`; -1 = no data for that minute. */
+  keysPerMinute: number[];
+  intervals: Array<{ startMs: number; endMs: number; kind: 'regular' | 'modifier-only' | 'static' }>;
+  captures: Array<{
+    atMs: number;
+    activityPercent: number | null;
+    unchanged: boolean | null;
+    /** Signed thumbnail URLs; `null` for a viewer who may not see screenshots (shift-management). */
+    thumbnails: string[] | null;
+  }>;
+  inputSource: InputSource | null;
+  permission: InputPermission | null;
 }
 
 // ─── Fan Analytics ───────────────────────────────────────────────────

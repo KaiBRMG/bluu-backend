@@ -513,9 +513,12 @@ Helpers: [`salaryAuth.ts`](../src/lib/salary/salaryAuth.ts).
 
 ```
 /admin-portal/shift-management
-  Shifts        ← creator chips on each card + the picker in the modal,
+  Overview      ← needs-attention queue, today timeline, 7-day panels
+  Schedule      ← creator chips on each card + the picker in the modal,
                   each account marked Regular or Overtime (unpaid, in-shift)
-  Active Users · Timesheets · Screenshots · Leave (balances) · Analytics
+  Analytics · Settings (policy, leave balances, screenshot storage)
+  + person sheet from any name: Timesheet · Screenshots · Shifts ·
+    Analytics · Leave · Tracking settings
 
 /ca-portal/admin            (tabbed)
   Overview      the month above the roster — agent × creator matrix,

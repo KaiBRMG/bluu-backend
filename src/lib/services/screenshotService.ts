@@ -1,56 +1,176 @@
 import { adminDb, adminStorage } from '../firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { randomUUID } from 'crypto';
+import type { ActivityMethod } from '@/types/firestore';
 
 const COLLECTION = 'screenshots';
 
+/** Screens per capture — one per display. */
+export const MAX_SCREENS_PER_CAPTURE = 10;
+/** A full-resolution PNG of a 6K display is ~10MB; past this it is not a screenshot. */
+export const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024;
+/** How long the renderer has to finish the PUTs. */
+const SIGNED_WRITE_TTL_MS = 10 * 60 * 1000;
+
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export function isCaptureGroupId(v: unknown): v is string {
+  return typeof v === 'string' && UUID_RE.test(v);
+}
+
+/**
+ * The one shape of a screenshot object: `screenshots/{uid}/{date}/{ts}_{captureGroup}_{i}.png`.
+ * The capture group and index in the name are what let `finalise` check a slot
+ * without storing it, and let the thumbnail function find its doc
+ * (`{captureGroup}_{i}`) without a query.
+ */
+function screenshotPath(userId: string, at: Date, captureGroup: string, index: number): string {
+  return `screenshots/${userId}/${at.toISOString().split('T')[0]}/${at.getTime()}_${captureGroup}_${index}.png`;
+}
+const SLOT_NAME_RE = /^\d{4}-\d{2}-\d{2}\/\d{13}_([0-9a-f-]{36})_(\d+)\.png$/;
+
+/**
+ * Sign one upload slot per screen. The path is **server-chosen** — the caller
+ * picks neither folder nor name, so a signed URL can only ever write this
+ * user's own capture (the same posture as the OnlyFans media upload). The
+ * capture group id is embedded in each name, which is what lets `finalise`
+ * check a path belongs to the capture it claims without storing the slots.
+ */
+export async function signScreenshotSlots(userId: string, count: number): Promise<{
+  captureGroup: string;
+  slots: Array<{ path: string; uploadUrl: string }>;
+}> {
+  const now = new Date();
+  const captureGroup = randomUUID();
+  const bucket = adminStorage.bucket();
+  const slots = await Promise.all(
+    Array.from({ length: count }, async (_, i) => {
+      const path = screenshotPath(userId, now, captureGroup, i);
+      const [uploadUrl] = await bucket.file(path).getSignedUrl({
+        version: 'v4',
+        action: 'write',
+        expires: Date.now() + SIGNED_WRITE_TTL_MS,
+        contentType: 'image/png',
+      });
+      return { path, uploadUrl };
+    }),
+  );
+  return { captureGroup, slots };
+}
+
+/** The slot path `signScreenshotSlots` would have produced for screen `index`. */
+function isSlotPath(userId: string, captureGroup: string, index: number, path: unknown): path is string {
+  if (typeof path !== 'string') return false;
+  const prefix = `screenshots/${userId}/`;
+  if (!path.startsWith(prefix)) return false;
+  const match = SLOT_NAME_RE.exec(path.slice(prefix.length));
+  return Boolean(match && match[1] === captureGroup && Number(match[2]) === index);
+}
+
+/**
+ * Turn uploaded slots into screenshot docs. Every path must be a slot of this
+ * capture, in order, and must actually exist in the bucket under the size
+ * ceiling (an oversized object is deleted, not recorded). Doc ids are
+ * `{captureGroup}_{index}`, so a retried finalise rewrites the same docs
+ * rather than duplicating them.
+ *
+ * Returns null when the paths do not check out.
+ */
+export async function finaliseScreenshots(
+  userId: string,
+  captureGroup: string,
+  paths: unknown[],
+  activityPercent: number | null,
+  activityMethod: ActivityMethod | null,
+): Promise<string[] | null> {
+  if (!isCaptureGroupId(captureGroup)) return null;
+  if (paths.length === 0 || paths.length > MAX_SCREENS_PER_CAPTURE) return null;
+  if (!paths.every((p, i) => isSlotPath(userId, captureGroup, i, p))) return null;
+
+  const bucket = adminStorage.bucket();
+  // One metadata call per screen proves both existence (a 404 throws) and size.
+  const checks = await Promise.all(
+    (paths as string[]).map(async path => {
+      const file = bucket.file(path);
+      const meta = await file.getMetadata().then(([m]) => m, () => null);
+      if (!meta) return false;
+      if (Number(meta.size) > MAX_SCREENSHOT_BYTES) {
+        await file.delete().catch(() => {});
+        return false;
+      }
+      return true;
+    }),
+  );
+  if (!checks.every(Boolean)) return null;
+
+  return writeScreenshotDocs(userId, captureGroup, paths as string[], activityPercent, activityMethod);
+}
+
+async function writeScreenshotDocs(
+  userId: string,
+  captureGroup: string,
+  storagePaths: string[],
+  activityPercent: number | null,
+  activityMethod: ActivityMethod | null,
+): Promise<string[]> {
+  // Merged, and silent on `thumbnailPath`: the thumbnail function writes that
+  // field into the same deterministic doc id, in whichever order the two land
+  // (the bytes reach Storage before this runs). Readers treat an absent
+  // thumbnail as "use the full image".
+  const batch = adminDb.batch();
+  const ids = storagePaths.map((storagePath, i) => {
+    const ref = adminDb.collection(COLLECTION).doc(`${captureGroup}_${i}`);
+    batch.set(ref, {
+      userId,
+      timestampUTC: FieldValue.serverTimestamp(),
+      storagePath,
+      captureGroup,
+      screenIndex: i,
+      activityPercent: activityPercent ?? null,
+      activityMethod,
+    }, { merge: true });
+    return ref.id;
+  });
+  await batch.commit();
+  return ids;
+}
+
+/**
+ * Legacy path: base64 PNGs in a JSON body, relayed through the function.
+ * Kept for renderers loaded before the signed-URL upload shipped (rule 9c), and
+ * as the fallback when a signed PUT fails. New code uploads direct to Storage
+ * — see rule 9i.
+ */
 export async function saveScreenshots(
   userId: string,
   screens: string[],
   activityPercent?: number | null,
-): Promise<string[]> {
+  activityMethod: ActivityMethod | null = null,
+): Promise<{ ids: string[]; captureGroup: string }> {
   const now = new Date();
-  const dateStr = now.toISOString().split('T')[0];
-  const timestamp = now.getTime();
   const captureGroup = randomUUID();
-
   const bucket = adminStorage.bucket();
 
-  // Save all images to Storage in parallel, collecting (storagePath, docRef) pairs
-  const saved: Array<{ storagePath: string; docRef: FirebaseFirestore.DocumentReference }> = [];
+  const kept: Buffer[] = [];
+  for (const base64 of screens) {
+    if (!base64) continue;
+    const buffer = Buffer.from(base64, 'base64');
+    if (buffer.length > 0) kept.push(buffer);
+  }
+  if (kept.length === 0) return { ids: [], captureGroup };
 
-  await Promise.all(
-    screens.map(async (base64, i) => {
-      if (!base64 || base64.length === 0) return;
-      const buffer = Buffer.from(base64, 'base64');
-      if (buffer.length === 0) return;
-
-      // Full-size image — thumbnail is generated asynchronously by the Cloud Function
-      const storagePath = `screenshots/${userId}/${dateStr}/${timestamp}_${i}.png`;
+  // Full-size images — thumbnails are generated asynchronously by the Cloud Function
+  const storagePaths = await Promise.all(
+    kept.map(async (buffer, i) => {
+      const storagePath = screenshotPath(userId, now, captureGroup, i);
       await bucket.file(storagePath).save(buffer, { contentType: 'image/png' });
-
-      saved.push({ storagePath, docRef: adminDb.collection(COLLECTION).doc() });
+      return storagePath;
     }),
   );
 
-  if (saved.length === 0) return [];
-
-  // Write all Firestore docs in a single batch (one round-trip instead of N)
-  const batch = adminDb.batch();
-  saved.forEach(({ storagePath, docRef }, i) => {
-    batch.set(docRef, {
-      userId,
-      timestampUTC: FieldValue.serverTimestamp(),
-      storagePath,
-      thumbnailPath: null,
-      captureGroup,
-      screenIndex: i,
-      activityPercent: activityPercent ?? null,
-    });
-  });
-  await batch.commit();
-
-  return saved.map(({ docRef }) => docRef.id);
+  const ids = await writeScreenshotDocs(userId, captureGroup, storagePaths, activityPercent ?? null, activityMethod);
+  return { ids, captureGroup };
 }
 
 export interface ScreenshotRow {

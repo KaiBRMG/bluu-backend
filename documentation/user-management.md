@@ -139,8 +139,7 @@ A user's timezone drives every time the product renders: shift times, salary day
 | `/api/admin/users` (`useAdminUsers`) | Returns archived **intact** | User-management is the surface that manages them (the index's **Archived** status facet). Filter archived only in action lists drawing from it (`AdminLeave`) |
 
 ### Intentional exceptions (keep archived users)
-- **Screenshots tab** (`AdminScreenshots`) — archived users' screenshots still exist in storage and must remain viewable/deletable.
-- **`AdminActiveUsers`** — resolves names from the basic-user list; archived users have no active session, so they never render anyway.
+- **Screenshots** (`AdminScreenshots`, now inside the Shift Management person sheet) — archived users' screenshots still exist in storage and must remain viewable/deletable. The Overview excludes archived users, so the route in is **Settings → Screenshot storage → Open a person's screenshots**, a picker that deliberately lists archived people (marked *Archived*).
 
 **RULE:** When adding a new page/component that lists users **for selection**, filter `isArchived` out of the rendered list.
 

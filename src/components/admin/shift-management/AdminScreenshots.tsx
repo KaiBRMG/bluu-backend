@@ -24,19 +24,10 @@ import {
   AlertDialogFooter,
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
-import { ChevronDownIcon, InfoIcon } from 'lucide-react';
+import { ChevronDownIcon } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Pagination,
   PaginationContent,
@@ -44,7 +35,6 @@ import {
   PaginationPrevious,
   PaginationNext,
 } from '@/components/ui/pagination';
-import { useRouter } from 'next/navigation';
 
 function addDays(dateStr: string, days: number): string {
   const date = new Date(dateStr + 'T00:00:00');
@@ -70,8 +60,10 @@ function formatTime(isoString: string, timezone?: string): string {
 }
 
 interface AdminScreenshotsProps {
-  selectedUserId: string | null;
-  onUserChange: (userId: string | null) => void;
+  /** The person sheet's subject; bulk deletion lives in Settings → Screenshot storage. */
+  selectedUserId: string;
+  /** Day to open on (YYYY-MM-DD). */
+  initialDate?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,10 +72,10 @@ interface AdminScreenshotsProps {
 
 interface BatchDeleteDialogProps {
   onClose: () => void;
-  onDeleted: () => void;
+  onDeleted?: () => void;
 }
 
-function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
+export function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
   const { user } = useAuth();
   const { users, loading: usersLoading } = useBasicUsers();
   const today = toDateString(new Date());
@@ -176,7 +168,7 @@ function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
         throw new Error(data.error || 'Batch delete failed');
       }
       setShowConfirm(false);
-      onDeleted();
+      onDeleted?.();
       onClose();
     } catch (err) {
       console.error('[BatchDeleteDialog] Delete failed:', err);
@@ -353,31 +345,23 @@ function BatchDeleteDialog({ onClose, onDeleted }: BatchDeleteDialogProps) {
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function AdminScreenshots({ selectedUserId, onUserChange }: AdminScreenshotsProps) {
-  const router = useRouter();
+export default function AdminScreenshots({
+  selectedUserId,
+  initialDate,
+}: AdminScreenshotsProps) {
   const { user } = useAuth();
-  const { users, loading: usersLoading } = useBasicUsers();
   const { userData: viewerData } = useUserData();
   const viewerTimezone = viewerData?.timezone || 'UTC';
   const today = toDateString(new Date());
 
-  const [selectedDate, setSelectedDate] = useState(today);
+  const [selectedDate, setSelectedDate] = useState(initialDate && initialDate < today ? initialDate : today);
   const [dateOpen, setDateOpen] = useState(false);
-  const [employeeOpen, setEmployeeOpen] = useState(false);
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
   // Modal state: [groupIndex, screenIndexWithinGroup]
   const [modalPos, setModalPos] = useState<[number, number] | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [showBatchDelete, setShowBatchDelete] = useState(false);
 
-  const timeTrackedUsers = useMemo(() =>
-    [...users].sort((a, b) => {
-      const nameA = (a.displayName || `${a.firstName} ${a.lastName}`).toLowerCase();
-      const nameB = (b.displayName || `${b.firstName} ${b.lastName}`).toLowerCase();
-      return nameA.localeCompare(nameB);
-    }),
-  [users]);
 
   const { groups, loading, error, refetch } = useAdminScreenshots(
     selectedUserId,
@@ -502,83 +486,8 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
 
   return (
     <div>
-      {/* Header row with Batch Delete button */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold tracking-tight">
-            Screenshots
-          </h2>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <InfoIcon
-                style={{ width: '14px', height: '14px', cursor: 'default', flexShrink: 0, color: 'var(--foreground-muted)' }}
-              />
-            </TooltipTrigger>
-            <TooltipContent className="max-w-xs text-center">
-              Screenshots can be enabled in the user&apos;s profile information in{' '}
-              <span
-                className="underline cursor-pointer"
-                onClick={() => router.push('/admin-portal/user-management')}
-              >
-                User Management &gt; Employee Registry &gt; Time Tracking
-              </span>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        <Button
-          onClick={() => setShowBatchDelete(true)}
-          variant="outline"
-          size="sm"
-        >
-          Batch Delete
-        </Button>
-      </div>
-
       {/* Controls */}
       <div className="flex flex-wrap items-end gap-4 mb-6">
-        <div>
-          <label className="form-label block mb-1">Employee</label>
-          <Popover open={employeeOpen} onOpenChange={setEmployeeOpen}>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className="form-input flex items-center justify-between gap-2"
-                style={{ cursor: 'pointer', minWidth: '180px' }}
-                disabled={usersLoading}
-              >
-                <span>
-                  {selectedUserId
-                    ? (() => { const u = timeTrackedUsers.find((u) => u.uid === selectedUserId); return u ? (u.displayName || `${u.firstName} ${u.lastName}`) : 'Select a user...'; })()
-                    : 'Select a user...'}
-                </span>
-                <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[220px] p-0" align="start">
-              <Command>
-                <CommandInput placeholder="Search employee..." />
-                <CommandList>
-                  <CommandEmpty>No employee found.</CommandEmpty>
-                  <CommandGroup>
-                    <CommandItem onSelect={() => { onUserChange(null); setEmployeeOpen(false); }}>
-                      Select a user...
-                    </CommandItem>
-                    {timeTrackedUsers.map((u) => (
-                      <CommandItem
-                        key={u.uid}
-                        value={u.displayName || `${u.firstName} ${u.lastName}`}
-                        onSelect={() => { onUserChange(u.uid); setEmployeeOpen(false); }}
-                      >
-                        {u.displayName || `${u.firstName} ${u.lastName}`}
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-        </div>
-
         <div>
           <label className="form-label block mb-1">Date</label>
           <Popover open={dateOpen} onOpenChange={setDateOpen}>
@@ -818,14 +727,6 @@ export default function AdminScreenshots({ selectedUserId, onUserChange }: Admin
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* Batch delete dialog */}
-      {showBatchDelete && (
-        <BatchDeleteDialog
-          onClose={() => setShowBatchDelete(false)}
-          onDeleted={refetch}
-        />
-      )}
     </div>
   );
 }

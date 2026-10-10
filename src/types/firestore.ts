@@ -174,6 +174,8 @@ export interface UserDocument {
   /** Absent on users not yet recomputed — read via `normalizeIdleInputMode()`. */
   idleInputMode?: IdleInputMode;
   enableScreenshots?: boolean;
+  /** Absent = off. Resolved like the rest; see `TimeTrackingSettings.inputMonitoring`. */
+  inputMonitoring?: boolean;
   /** This user's own overrides; absent field = inherit. See lib/timeTrackingSettings.ts. */
   timeTrackingOverrides?: TimeTrackingOverrides;
 
@@ -776,7 +778,12 @@ export interface ScreenshotDocument {
   captureGroup: string; // shared ID to group multi-screen captures
   screenIndex: number;  // 0-based index of this screen in the capture group
   activityPercent?: number | null; // % of 1-min slots with input between this and previous screenshot
+  /** Which method produced `activityPercent` (absent before v0.17.0 data). See time-tracking.md §4. */
+  activityMethod?: ActivityMethod | null;
 }
+
+/** How a capture's activity % was measured: native input samples, or the coarser event log. */
+export type ActivityMethod = 'samples' | 'eventlog';
 
 // ─── Analytics rollups ───────────────────────────────────────────────
 
@@ -1676,6 +1683,23 @@ export interface BuddyxTeamDayDocument {
   day: string;
   totals: BuddyxTeamTotals;
   breakdown: BuddyxTeamRow[];
+  syncedAt: Timestamp;
+}
+
+/**
+ * `buddyx-team-hours/{day}` (salary-timezone day) — online time and messages
+ * per chatter per hour, hour index `'0'`–`'23'` from the day's start. Written
+ * one hour at a time by the chatters sync (merge), read by Chatter Analytics'
+ * coverage. Maps are index-exempt; nothing queries inside them.
+ */
+export interface BuddyxTeamHoursDocument {
+  day: string;
+  online: Record<string, Record<string, number>>;
+  messages: Record<string, Record<string, number>>;
+  /** chatterId → Bluu uid at sync time (null = unmapped). */
+  uids: Record<string, string | null>;
+  /** hour index → when it was last pulled (ms). Presence = the hour has data. */
+  hours: Record<string, number>;
   syncedAt: Timestamp;
 }
 

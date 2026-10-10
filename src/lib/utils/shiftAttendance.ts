@@ -45,12 +45,16 @@ function classify(shiftStartMs: number, clockIns: number[]): AttendanceStatus {
   return first <= shiftStartMs + LATE_AFTER_MS ? 'on-time' : 'late';
 }
 
-export function computeAttendance(
+/**
+ * Attendance plus the clock-in it was judged on — one pass over the same
+ * window rules, for callers that also show *when* someone arrived.
+ */
+export function computeAttendanceDetail(
   shiftStartMs: number,
   shiftEndMs: number,
   sessions: TimeEntryLedgerDocument[],
   activeSession: ActiveSessionDocument | undefined,
-): AttendanceStatus {
+): { status: AttendanceStatus; firstClockInMs: number | null } {
   const onTimeFrom = shiftStartMs - ON_TIME_BEFORE_MS;
 
   const bounds: Array<[number, number]> = sessions.map(s => [
@@ -70,7 +74,19 @@ export function computeAttendance(
     }
   }
 
-  return classify(shiftStartMs, clockIns);
+  return {
+    status: classify(shiftStartMs, clockIns),
+    firstClockInMs: clockIns.length ? Math.min(...clockIns) : null,
+  };
+}
+
+export function computeAttendance(
+  shiftStartMs: number,
+  shiftEndMs: number,
+  sessions: TimeEntryLedgerDocument[],
+  activeSession: ActiveSessionDocument | undefined,
+): AttendanceStatus {
+  return computeAttendanceDetail(shiftStartMs, shiftEndMs, sessions, activeSession).status;
 }
 
 export function computeTimeWorked(

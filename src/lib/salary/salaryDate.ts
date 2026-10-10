@@ -116,6 +116,13 @@ export function addMonths(month: SalaryMonthKey, delta: number): SalaryMonthKey 
 }
 
 /** Shift a day key by whole days. */
+/** Every day from `from` to `to` inclusive, capped at 400 so a bad range cannot run away. */
+export function enumerateDays(from: SalaryDayKey, to: SalaryDayKey): SalaryDayKey[] {
+  const out: SalaryDayKey[] = [];
+  for (let d = from; d <= to && out.length < 400; d = addDays(d, 1)) out.push(d);
+  return out;
+}
+
 export function addDays(day: SalaryDayKey, delta: number): SalaryDayKey {
   return toDayKey(dayKeyToStartMs(day) + delta * MS_PER_DAY);
 }

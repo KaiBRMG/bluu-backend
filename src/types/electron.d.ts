@@ -8,6 +8,8 @@
  * See documentation/electron.md.
  */
 
+import type { InputPermission, InputSource, RawInputEvents } from '@/lib/inputQuality';
+
 /** Result of a satellite-window request. */
 export interface SatelliteResult {
   success: boolean;
@@ -309,7 +311,19 @@ interface ElectronAPI {
     getInputIdleTimes?: () => Promise<{ any: number; keyboard: number | null; mouse: number | null }>;
     captureScreenshot: () => Promise<{ success: boolean; screens?: string[]; error?: string }>;
     setPowerSaveBlocker?: (enable: boolean) => Promise<{ success: boolean }>;
-    getActivitySince?: (sinceMs: number) => Promise<Array<{ sampleMs: number; idleSeconds: number }>>;
+    /**
+     * `keyboardIdle` / `mouseIdle` arrive with v0.17.0 and are null where the
+     * platform cannot split input; score with `idleSeconds` when absent.
+     */
+    getActivitySince?: (sinceMs: number) => Promise<Array<{
+      sampleMs: number;
+      idleSeconds: number;
+      keyboardIdle?: number | null;
+      mouseIdle?: number | null;
+    }>>;
+    /** Input-quality monitor (v0.17.0+). Feature-detect; absent on older builds. */
+    setInputMonitoring?: (enabled: boolean) => Promise<{ source: InputSource | null; permission: InputPermission }>;
+    getInputEvents?: (sinceMs: number) => Promise<RawInputEvents>;
   };
   /**
    * Always-visible session timer. Optional — absent on every installed build
@@ -588,6 +602,21 @@ interface ElectronAPI {
     /** The OS page where microphone access is granted. Exists on **both**
      *  platforms, unlike `requestScreenAccess` — see its note in main.js. */
     openMicrophoneSettings?: () => Promise<{ success: boolean }>;
+
+    /**
+     * macOS Input Monitoring, for the input-quality monitor. Optional — absent
+     * before v0.17.0. Same status / request / settings split as the microphone,
+     * for the same reason: once refused, macOS never prompts again.
+     * `needsRestart` is a granted permission that has not yet produced an event
+     * tap — macOS applies a new grant on relaunch.
+     */
+    inputMonitoringStatus?: () => Promise<{
+      supported: boolean;
+      status: InputPermission;
+      needsRestart: boolean;
+    }>;
+    requestInputMonitoring?: () => Promise<{ status: InputPermission; prompted: boolean; settingsOpened: boolean }>;
+    relaunchApp?: () => Promise<{ success: boolean }>;
   };
   /**
    * macOS auto-update. `getPending`/`onAvailable`/`download` land in v0.8.0 —

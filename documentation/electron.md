@@ -95,7 +95,10 @@ All renderer↔main communication goes through `preload.js` → `window.electron
 | `gologin.onOrbitaChanged(cb)` | main→renderer | `gologin:orbita-changed` | Download/install progress, throttled to 250ms. Fires **during a launch too**: the Orbita version a profile needs comes from its own user agent, so an update can start mid-session and the window blocks on it. Same `removeAllListeners` caveat |
 | `timeTracking.getIdleTime()` | invoke | `timeTracking:getIdleTime` | `powerMonitor.getSystemIdleTime()` |
 | `timeTracking.getInputIdleTimes()` | invoke | `timeTracking:getInputIdleTimes` | `{ any, keyboard, mouse }` seconds since last input of each kind; a per-type field is `null` where unmeasurable. Optional — v0.15.0+. See [Per-input idle](#per-input-idle-keyboard-vs-mouse) |
-| `timeTracking.getActivitySince(sinceMs)` | invoke | `timeTracking:getActivitySince` | 5s idle-time samples (45-min rolling buffer) for accurate activity % |
+| `timeTracking.getActivitySince(sinceMs)` | invoke | `timeTracking:getActivitySince` | 5s idle-time samples (45-min rolling buffer) for accurate activity %. From v0.17.0 each sample also carries `keyboardIdle` / `mouseIdle` (null where unmeasurable) |
+| `timeTracking.setInputMonitoring(bool)` | invoke | `timeTracking:setInputMonitoring` | Starts/stops the input-quality collector. Driven by the resolved `inputMonitoring` setting. Optional — v0.17.0+. See [Input-quality monitor](#input-quality-monitor-v0170) |
+| `timeTracking.getInputEvents(sinceMs)` | invoke | `timeTracking:getInputEvents` | `{ source, permission, startedAt, keys: [t, kind, …] }` — key timings and **kinds**, never keys. Optional — v0.17.0+ |
+| `permissions.inputMonitoringStatus()` / `requestInputMonitoring()` / `relaunchApp()` | invoke | `permissions:*` | macOS Input Monitoring: status (`IOHIDCheckAccess`), the one-time OS prompt (`IOHIDRequestAccess`) or the settings pane once refused, and a relaunch (macOS applies a new grant on restart). Optional — v0.17.0+ |
 | `timeTracking.captureScreenshot()` | invoke | `timeTracking:captureScreenshot` | `desktopCapturer`, all screens → base64 PNGs |
 | `timeTracking.setPowerSaveBlocker(bool)` | invoke | `timeTracking:setPowerSaveBlocker` | keep display awake while working |
 | `timerWidget.update(payload)` | send | `timer-widget:update` | Always-visible session timer. Carries an **anchor**, not a time; **main-window only**. Optional — feature-detect. See [Session timer widget](#session-timer-widget-tray-title--docked-hud) |
@@ -588,4 +591,19 @@ The reset repairs the **next** scheduled capture, not the one that just failed. 
 - **Any failure (native load, platform) yields `null` and the renderer falls back to combined idle** — the `any` behaviour. Never throw from this handler.
 - **Packaging:** `koffi` is pinned to **2.x** because 2.x bundles every platform's prebuilt binary in one package. koffi 3 moved binaries to per-arch optional deps, and the mac CI job builds **arm64 and x64 on one arm64 runner** — `npm ci` would install only the arm64 binary and Intel Macs would silently fall back to `any`. Unused koffi platforms and both packages' sources are excluded via `build.files`. uiohook-napi ships N-API prebuilds for both targets. **The Windows CI job passes `--config.npmRebuild=false`** — @electron/rebuild doesn't recognise uiohook-napi's prebuild (named `uiohook-napi.node`, not `node.napi.node`) and falls back to node-gyp, which fails on the runner with "Could not find any Visual Studio installation". Every Windows native dep is N-API and already correct after `npm ci`, so skipping the rebuild is safe there. Never copy that flag to the mac job: it relies on the rebuild to swap in x64 binaries.
 - **Windows caveat:** a global keyboard hook in an unsigned app can attract antivirus heuristics. If AV reports surface, that is where to look first.
+
+## Input-quality monitor (v0.17.0)
+
+Collects key **timings and kinds** (typing / modifier / filler / unknown — never the key) for the integrity signals in [time-tracking.md §4b](time-tracking.md). Only collects; all analysis is renderer code (`src/lib/inputQuality.ts`) so thresholds ship with Vercel. Off unless the renderer pushes `setInputMonitoring(true)` from the `inputMonitoring` setting.
+
+| Platform | Collector | Permission |
+|---|---|---|
+| Windows | the per-input-idle **uiohook** hook (now started by `ensureWinHook` whenever monitoring is on); key code → kind via `WIN_MODIFIER_KEYS` / `WIN_FILLER_KEYS` (libuiohook `VC_*` codes) | None |
+| macOS | a **listen-only `CGEventTap`** (`kCGSessionEventTap`, head-insert, listen-only) on `CFRunLoopGetMain()`, callback registered with koffi; `flagsChanged` → modifier, `keyDown` → filler for F13–F20 else typing, autorepeat skipped | **Input Monitoring** |
+| macOS, not granted | `CGEventSourceCounterForEventType` (HID state) polled each second: key-down and modifier-change deltas | None |
+
+- **The tap is untested on a signed build.** It is the one piece that can only be verified on a real Mac: a koffi callback fired from the main run loop. Every failure path (binding load, `CGEventTapCreate` returning null, a throw) falls back to counters and logs to the console; the callback swallows its own errors because a throw there is a throw on the main thread. **Verify on a Mac before step 5 of the release** (arming `appUpdateConfig`).
+- macOS disables a tap that times out; the callback re-enables it on `kCGEventTapDisabledByTimeout` / `…ByUserInput`.
+- A 60s timer prunes the ring and upgrades counters → tap once the permission lands. A granted permission that still yields no tap sets `needsRestart`; the renderer offers `relaunchApp` only while clocked out.
+- Ring: 45 minutes, hard cap 30k presses.
 

@@ -86,7 +86,7 @@ export default function AdminLeave() {
   };
 
   if (loading) {
-    return <div className="text-sm text-muted-foreground">Loading users...</div>;
+    return <div className="text-sm text-zinc-400">Loading users…</div>;
   }
 
   if (error) {
@@ -95,10 +95,13 @@ export default function AdminLeave() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold tracking-tight">
-          Assign the amount of leave days per user
-        </h2>
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <h2 className="text-lg font-semibold">Leave balances</h2>
+          <p className="mt-1 max-w-[70ch] text-sm text-zinc-400">
+            Days each person has left to request. One person&apos;s balance can also be changed from their panel.
+          </p>
+        </div>
         {hasChanges && (
           <Button onClick={handleSave} disabled={saving} size="sm">
             {saving ? 'Saving...' : 'Save Changes'}
@@ -112,9 +115,9 @@ export default function AdminLeave() {
 
       <div className="space-y-3">
         <div className="grid grid-cols-[1fr_140px_140px] gap-4 px-3 pb-1">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Employee</span>
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Unpaid Leave</span>
-          <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          <span className="text-xs font-medium text-zinc-400">Employee</span>
+          <span className="text-xs font-medium text-zinc-400">Unpaid Leave</span>
+          <span className="flex items-center gap-1 text-xs font-medium text-zinc-400">
             Paid Leave
             <Tooltip>
               <TooltipTrigger asChild>
@@ -141,7 +144,7 @@ export default function AdminLeave() {
           >
             <div className="min-w-0">
               <p className="text-sm font-medium truncate">{user.displayName}</p>
-              <p className="text-xs text-muted-foreground truncate">{user.workEmail}</p>
+              <p className="text-xs text-zinc-400 truncate">{user.workEmail}</p>
             </div>
 
             <Input
@@ -164,7 +167,7 @@ export default function AdminLeave() {
         ))}
 
         {sortedUsers.length === 0 && (
-          <p className="text-sm text-muted-foreground px-3">No users found.</p>
+          <p className="text-sm text-zinc-400 px-3">No users found.</p>
         )}
       </div>
     </div>

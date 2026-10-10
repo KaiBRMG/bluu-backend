@@ -158,7 +158,7 @@ async function deleteQueryDocs(query: FirebaseFirestore.Query): Promise<number> 
  * Admin-only. Permanently deletes a user and ALL of their personal data:
  * the user document, group membership, page permissions, active session,
  * time entries (timesheets), screenshots and snips (Firestore docs + Storage
- * files),
+ * files), integrity signals (input quality, unchanged screens),
  * shifts, leave requests, notifications, bug reports, and profile photo.
  *
  * Also releases their GoLogin seat, if they hold one (best-effort, first).
@@ -237,6 +237,11 @@ export const DELETE = withAuth(async (
       deleteQueryDocs(adminDb.collection('leave-ledger').where('userId', '==', targetUid)),
       deleteQueryDocs(adminDb.collection('notifications').where('userId', '==', targetUid)),
       deleteQueryDocs(adminDb.collection('bugs').where('uid', '==', targetUid)),
+      // Rule 6 — the integrity signals (input quality, unchanged screens) are
+      // per-person monitoring data and go with the person.
+      deleteQueryDocs(adminDb.collection('integrity-captures').where('uid', '==', targetUid)),
+      deleteQueryDocs(adminDb.collection('integrity-days').where('uid', '==', targetUid)),
+      adminDb.collection('integrity-state').doc(targetUid).delete(),
       // Rule 6 — a new per-user collection joins the cascade. Snips are also
       // live PUBLIC links, so leaving them behind would keep a departed
       // employee's screenshots served to anyone still holding a URL.

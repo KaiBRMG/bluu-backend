@@ -233,7 +233,20 @@ function macInputIdleSeconds() {
 
 let winInputHook = null; // null = not started, false = unavailable, else { lastKeyboardMs, lastMouseMs }
 
-function winInputIdleSeconds() {
+// uiohook (libuiohook VC_*) key codes, sorted into KINDS — see
+// src/lib/inputQuality.ts. Only the kind is ever recorded, never the code.
+const WIN_MODIFIER_KEYS = new Set([
+  0x002a, 0x0036, /* Shift L/R */ 0x001d, 0x0e1d, /* Ctrl L/R */
+  0x0038, 0x0e38, /* Alt L/R */ 0x0e5b, 0x0e5c, /* Meta L/R */ 0x003a, /* Caps Lock */
+]);
+const WIN_FILLER_KEYS = new Set([
+  0x0045, /* Num Lock */ 0x0046, /* Scroll Lock */
+  0x005b, 0x005c, 0x005d, /* F13–F15 */
+  0x0063, 0x0064, 0x0065, 0x0066, 0x0067, 0x0068, 0x0069, 0x006a, 0x006b, /* F16–F24 */
+]);
+
+/** Starts the Windows hook once. Returns its state, or null when unavailable. */
+function ensureWinHook() {
   if (winInputHook === null) {
     try {
       const { uIOhook } = require('uiohook-napi');
@@ -241,7 +254,13 @@ function winInputIdleSeconds() {
       // last input of EITHER kind, so neither type starts out looking active.
       const seed = Date.now() - powerMonitor.getSystemIdleTime() * 1000;
       const state = { lastKeyboardMs: seed, lastMouseMs: seed };
-      const onKeyboard = () => { state.lastKeyboardMs = Date.now(); };
+      const onKeyboard = (e) => {
+        state.lastKeyboardMs = Date.now();
+        if (inputMonitor.enabled && inputMonitor.source === 'hook') {
+          const code = e?.keycode;
+          recordKey(WIN_MODIFIER_KEYS.has(code) ? KEY_MODIFIER : WIN_FILLER_KEYS.has(code) ? KEY_FILLER : KEY_TYPING);
+        }
+      };
       const onMouse = () => { state.lastMouseMs = Date.now(); };
       uIOhook.on('keydown', onKeyboard);
       uIOhook.on('mousemove', onMouse);
@@ -257,11 +276,16 @@ function winInputIdleSeconds() {
       winInputHook = false;
     }
   }
-  if (!winInputHook) return null;
+  return winInputHook || null;
+}
+
+function winInputIdleSeconds() {
+  const hook = ensureWinHook();
+  if (!hook) return null;
   const now = Date.now();
   return {
-    keyboard: (now - winInputHook.lastKeyboardMs) / 1000,
-    mouse: (now - winInputHook.lastMouseMs) / 1000,
+    keyboard: (now - hook.lastKeyboardMs) / 1000,
+    mouse: (now - hook.lastMouseMs) / 1000,
   };
 }
 
@@ -280,13 +304,327 @@ ipcMain.handle('timeTracking:getInputIdleTimes', () => {
   return { any, keyboard: perType(split?.keyboard), mouse: perType(split?.mouse) };
 });
 
+// ─── Input-quality monitor ───────────────────────────────────────────
+// Records WHEN a key went down and what KIND of key it was (typing / modifier /
+// filler / unknown) — never which key — so Chatter Analytics can flag a
+// machine-regular rhythm or modifier-only input (a key jiggler). Everything
+// that decides what looks machine-made lives in src/lib/inputQuality.ts, so it
+// can be tuned without an app release; this only collects. Display only: it
+// never touches idle state or worked time. Gated by the `inputMonitoring`
+// time-tracking setting, which the renderer pushes in via setInputMonitoring.
+//   • win32  — the uiohook hook above (exact times, key kinds). No permission.
+//   • darwin — a listen-only CGEventTap when Input Monitoring is granted
+//     (exact times, key kinds); otherwise CoreGraphics' per-type event
+//     COUNTERS polled each second (no permission; sees modifier changes vs
+//     key-downs, so it catches a Shift jiggler but cannot tell F15 from typing).
+// Kept for INPUT_RETENTION_MS, the same rolling window as the activity samples.
+const KEY_TYPING = 0;
+const KEY_MODIFIER = 1;
+const KEY_FILLER = 2;
+const KEY_UNKNOWN = 3;
+const INPUT_RETENTION_MS = 45 * 60 * 1000;
+const INPUT_MAX_EVENTS = 60_000; // flat pairs → 30k presses; a hard memory ceiling
+
+// macOS virtual key codes for keys nobody types with (F13–F20).
+const MAC_FILLER_KEYS = new Set([105, 107, 113, 106, 64, 79, 80, 90]);
+const CG_EVENT_KEY_DOWN = 10;
+const CG_EVENT_FLAGS_CHANGED = 12;
+const CG_EVENT_TAP_DISABLED_BY_TIMEOUT = 0xfffffffe;
+const CG_EVENT_TAP_DISABLED_BY_USER_INPUT = 0xffffffff;
+const CG_KEYBOARD_EVENT_AUTOREPEAT = 8;
+const CG_KEYBOARD_EVENT_KEYCODE = 9;
+const IOHID_REQUEST_LISTEN_EVENT = 1;
+const INPUT_MONITORING_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent';
+
+const inputMonitor = {
+  enabled: false,
+  /** 'tap' | 'hook' | 'counters' | null */
+  source: null,
+  startedAt: null,
+  /** Flat [timestampMs, kind, …]. */
+  keys: [],
+  /** True once a granted permission failed to produce a tap — macOS wants a relaunch. */
+  needsRestart: false,
+  countersTimer: null,
+  lastCounts: null,
+  macTap: null, // { port, callback } while a tap is live
+};
+
+function recordKey(kind) {
+  const keys = inputMonitor.keys;
+  keys.push(Date.now(), kind);
+  if (keys.length > INPUT_MAX_EVENTS) keys.splice(0, keys.length - INPUT_MAX_EVENTS);
+}
+
+function pruneInputEvents() {
+  const cutoff = Date.now() - INPUT_RETENTION_MS;
+  const keys = inputMonitor.keys;
+  let i = 0;
+  while (i < keys.length && keys[i] < cutoff) i += 2;
+  if (i > 0) keys.splice(0, i);
+}
+
+let macNative = null; // null = not loaded, false = unavailable, else the bound functions
+
+function loadMacNative() {
+  if (macNative !== null) return macNative || null;
+  try {
+    const koffi = require('koffi');
+    const cg = koffi.load('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics');
+    const cf = koffi.load('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation');
+    const iokit = koffi.load('/System/Library/Frameworks/IOKit.framework/IOKit');
+    const TapCallback = koffi.proto('void *BluuEventTapCallBack(void *proxy, uint32_t type, void *event, void *userInfo)');
+    macNative = {
+      koffi,
+      TapCallback,
+      counter: cg.func('uint32_t CGEventSourceCounterForEventType(uint32_t, uint32_t)'),
+      tapCreate: cg.func('void *CGEventTapCreate(uint32_t tap, uint32_t place, uint32_t options, uint64_t mask, BluuEventTapCallBack *callback, void *userInfo)'),
+      tapEnable: cg.func('void CGEventTapEnable(void *tap, bool enable)'),
+      intField: cg.func('int64_t CGEventGetIntegerValueField(void *event, uint32_t field)'),
+      runLoopSource: cf.func('void *CFMachPortCreateRunLoopSource(void *allocator, void *port, long order)'),
+      mainRunLoop: cf.func('void *CFRunLoopGetMain()'),
+      addSource: cf.func('void CFRunLoopAddSource(void *rl, void *source, void *mode)'),
+      invalidate: cf.func('void CFMachPortInvalidate(void *port)'),
+      cfString: cf.func('void *CFStringCreateWithCString(void *alloc, const char *str, uint32_t encoding)'),
+      checkAccess: iokit.func('uint32_t IOHIDCheckAccess(uint32_t requestType)'),
+      requestAccess: iokit.func('bool IOHIDRequestAccess(uint32_t requestType)'),
+    };
+  } catch (err) {
+    console.error('[main] Input monitor native bindings unavailable:', err);
+    macNative = false;
+  }
+  return macNative || null;
+}
+
+/** macOS Input Monitoring, read fresh. IOHIDCheckAccess: 0 granted, 1 denied, 2 unknown. */
+function inputMonitoringPermission() {
+  if (process.platform === 'win32') return 'not-required';
+  if (process.platform !== 'darwin') return 'unknown';
+  const native = loadMacNative();
+  if (!native) return 'unknown';
+  try {
+    const access = native.checkAccess(IOHID_REQUEST_LISTEN_EVENT);
+    return access === 0 ? 'granted' : access === 1 ? 'denied' : 'not-determined';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * A listen-only event tap on the main run loop. Returns true when live.
+ * Listen-only is what Input Monitoring grants (an active tap would need
+ * Accessibility), and it can never delay or alter the user's input. The
+ * callback is kept tiny — push two numbers — and swallows every error, because
+ * a throw on the run loop is a throw in the app's main thread.
+ */
+function startMacTap() {
+  if (inputMonitor.macTap) return true;
+  const native = loadMacNative();
+  if (!native) return false;
+  try {
+    let port = null;
+    const callback = native.koffi.register((_proxy, type, event) => {
+      try {
+        if (type === CG_EVENT_TAP_DISABLED_BY_TIMEOUT || type === CG_EVENT_TAP_DISABLED_BY_USER_INPUT) {
+          if (port) native.tapEnable(port, true);
+          return event;
+        }
+        if (!inputMonitor.enabled) return event;
+        if (type === CG_EVENT_FLAGS_CHANGED) {
+          recordKey(KEY_MODIFIER);
+        } else if (type === CG_EVENT_KEY_DOWN) {
+          if (Number(native.intField(event, CG_KEYBOARD_EVENT_AUTOREPEAT)) !== 0) return event;
+          const code = Number(native.intField(event, CG_KEYBOARD_EVENT_KEYCODE));
+          recordKey(MAC_FILLER_KEYS.has(code) ? KEY_FILLER : KEY_TYPING);
+        }
+      } catch { /* never let the tap throw */ }
+      return event;
+    }, native.koffi.pointer(native.TapCallback));
+    const mask = (1n << BigInt(CG_EVENT_KEY_DOWN)) | (1n << BigInt(CG_EVENT_FLAGS_CHANGED));
+    // kCGSessionEventTap (1), kCGHeadInsertEventTap (0), kCGEventTapOptionListenOnly (1)
+    port = native.tapCreate(1, 0, 1, mask, callback, null);
+    if (!port) {
+      native.koffi.unregister(callback);
+      return false;
+    }
+    const source = native.runLoopSource(null, port, 0);
+    // kCFRunLoopCommonModes, built by value (CFStringEncodingUTF8 = 0x08000100):
+    // the run loop compares mode names with CFEqual, so an equal string works.
+    const commonModes = native.cfString(null, 'kCFRunLoopCommonModes', 0x08000100);
+    native.addSource(native.mainRunLoop(), source, commonModes);
+    native.tapEnable(port, true);
+    inputMonitor.macTap = { port, callback };
+    return true;
+  } catch (err) {
+    console.error('[main] Input monitor event tap failed:', err);
+    return false;
+  }
+}
+
+function stopMacTap() {
+  const tap = inputMonitor.macTap;
+  if (!tap) return;
+  const native = loadMacNative();
+  try {
+    native.tapEnable(tap.port, false);
+    native.invalidate(tap.port);
+    native.koffi.unregister(tap.callback);
+  } catch { /* best effort */ }
+  inputMonitor.macTap = null;
+}
+
+/** macOS fallback: per-second deltas of the HID event counters. */
+function pollMacCounters() {
+  const native = loadMacNative();
+  if (!native || !inputMonitor.enabled) return;
+  try {
+    const keyDown = native.counter(1, CG_EVENT_KEY_DOWN);
+    const flags = native.counter(1, CG_EVENT_FLAGS_CHANGED);
+    const last = inputMonitor.lastCounts;
+    inputMonitor.lastCounts = { keyDown, flags };
+    if (!last) return;
+    const typed = Math.max(0, keyDown - last.keyDown);
+    // A modifier press is two flag changes (down + up).
+    const modifiers = Math.ceil(Math.max(0, flags - last.flags) / 2);
+    for (let i = 0; i < Math.min(typed, 20); i++) recordKey(KEY_UNKNOWN);
+    for (let i = 0; i < Math.min(modifiers, 20); i++) recordKey(KEY_MODIFIER);
+  } catch { /* a failed read is a missing second, never a crash */ }
+}
+
+let lastTapAttemptMs = 0;
+
+/** Choose (and start) the best collector the platform currently allows. */
+function refreshInputSource() {
+  if (!inputMonitor.enabled) return;
+  if (process.platform === 'win32') {
+    if (ensureWinHook()) inputMonitor.source = 'hook';
+    return;
+  }
+  if (process.platform !== 'darwin') return;
+
+  if (inputMonitor.source !== 'tap' && inputMonitoringPermission() === 'granted' && Date.now() - lastTapAttemptMs > 30_000) {
+    lastTapAttemptMs = Date.now();
+    if (startMacTap()) {
+      inputMonitor.source = 'tap';
+      inputMonitor.needsRestart = false;
+      if (inputMonitor.countersTimer) clearInterval(inputMonitor.countersTimer);
+      inputMonitor.countersTimer = null;
+      return;
+    }
+    // Granted but no tap: macOS applies a new Input Monitoring grant on relaunch.
+    inputMonitor.needsRestart = true;
+  }
+  if (inputMonitor.source !== 'tap' && !inputMonitor.countersTimer && loadMacNative()) {
+    inputMonitor.lastCounts = null;
+    inputMonitor.countersTimer = setInterval(pollMacCounters, 1000);
+    inputMonitor.source = 'counters';
+  }
+}
+
+function setInputMonitoring(enabled) {
+  if (enabled === inputMonitor.enabled) {
+    refreshInputSource();
+    return;
+  }
+  inputMonitor.enabled = enabled;
+  if (enabled) {
+    inputMonitor.startedAt = Date.now();
+    inputMonitor.keys = [];
+    refreshInputSource();
+  } else {
+    stopMacTap();
+    if (inputMonitor.countersTimer) clearInterval(inputMonitor.countersTimer);
+    inputMonitor.countersTimer = null;
+    inputMonitor.source = null;
+    inputMonitor.startedAt = null;
+    inputMonitor.keys = [];
+  }
+}
+
+// Upgrade counters → tap once the user grants Input Monitoring mid-session.
+setInterval(() => {
+  pruneInputEvents();
+  if (inputMonitor.enabled && inputMonitor.source !== 'hook') refreshInputSource();
+}, 60_000);
+
+ipcMain.handle('timeTracking:setInputMonitoring', (_event, enabled) => {
+  setInputMonitoring(enabled === true);
+  return { source: inputMonitor.source, permission: inputMonitoringPermission() };
+});
+
+ipcMain.handle('timeTracking:getInputEvents', (_event, sinceMs) => {
+  const since = Number(sinceMs) || 0;
+  const keys = inputMonitor.keys;
+  let i = 0;
+  while (i < keys.length && keys[i] < since) i += 2;
+  return {
+    source: inputMonitor.enabled ? inputMonitor.source : null,
+    permission: inputMonitoringPermission(),
+    startedAt: inputMonitor.enabled ? inputMonitor.startedAt : null,
+    keys: keys.slice(i),
+  };
+});
+
+/**
+ * Input Monitoring status for the renderer's prompt. Same three-question shape
+ * as the microphone (status / request / settings): a refused permission shows
+ * no OS prompt ever again, so the caller must know which button to offer.
+ */
+ipcMain.handle('permissions:inputMonitoringStatus', () => {
+  const supported = process.platform === 'darwin';
+  if (supported && inputMonitor.enabled) refreshInputSource();
+  return {
+    supported,
+    status: supported ? inputMonitoringPermission() : 'not-required',
+    needsRestart: supported && inputMonitor.needsRestart,
+  };
+});
+
+ipcMain.handle('permissions:requestInputMonitoring', () => {
+  if (process.platform !== 'darwin') return { status: 'not-required', prompted: false, settingsOpened: false };
+  const before = inputMonitoringPermission();
+  if (before === 'granted') return { status: before, prompted: false, settingsOpened: false };
+  if (before === 'not-determined') {
+    const native = loadMacNative();
+    try {
+      native?.requestAccess(IOHID_REQUEST_LISTEN_EVENT);
+    } catch (err) {
+      console.error('[main] Input Monitoring prompt failed:', err);
+    }
+    lastTapAttemptMs = 0;
+    refreshInputSource();
+    return { status: inputMonitoringPermission(), prompted: true, settingsOpened: false };
+  }
+  // Refused once: only System Settings can change it now.
+  shell.openExternal(INPUT_MONITORING_SETTINGS_URL);
+  return { status: before, prompted: false, settingsOpened: true };
+});
+
+/** macOS applies a fresh Input Monitoring grant on relaunch. Offered only while clocked out. */
+ipcMain.handle('permissions:relaunchApp', () => {
+  app.relaunch();
+  app.quit();
+  return { success: true };
+});
+
 // Activity sampling for productivity % calculation (used at each screenshot interval)
 let activitySamples = [];
 const SAMPLE_RETENTION_MS = 45 * 60 * 1000;
 
 setInterval(() => {
   const now = Date.now();
-  activitySamples.push({ sampleMs: now, idleSeconds: powerMonitor.getSystemIdleTime() });
+  // Per-input idle rides along so the renderer can score activity % by the
+  // user's idle input mode (keyboard-only must not count a mouse mover). Only
+  // read where it is free: CoreGraphics on mac, and the Windows hook only if
+  // something else already started it — the sampler never installs a hook.
+  let split = null;
+  try {
+    if (process.platform === 'darwin') split = macInputIdleSeconds();
+    else if (process.platform === 'win32' && winInputHook) split = winInputIdleSeconds();
+  } catch { /* combined idle still recorded */ }
+  const idleSeconds = powerMonitor.getSystemIdleTime();
+  const perType = v => (typeof v === 'number' && Number.isFinite(v) ? Math.max(idleSeconds, Math.floor(v)) : null);
+  activitySamples.push({ sampleMs: now, idleSeconds, keyboardIdle: perType(split?.keyboard), mouseIdle: perType(split?.mouse) });
   const cutoff = now - SAMPLE_RETENTION_MS;
   if (activitySamples.length > 0 && activitySamples[0].sampleMs < cutoff) {
     activitySamples = activitySamples.filter(s => s.sampleMs >= cutoff);

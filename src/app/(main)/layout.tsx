@@ -11,6 +11,7 @@ import TimezoneReporter from "@/components/TimezoneReporter";
 import UpdateBanner from "@/components/UpdateBanner";
 import UpdateAvailableBanner from "@/components/UpdateAvailableBanner";
 import EmailMigrationDialog from "@/components/migration/EmailMigrationDialog";
+import InputMonitoringPrompt from "@/components/time-tracking/InputMonitoringPrompt";
 import AnnouncementCard from "@/components/announcements/AnnouncementCard";
 import DeploymentRefresher from "@/components/DeploymentRefresher";
 import NavigationWatchdog from "@/components/NavigationWatchdog";
@@ -89,6 +90,11 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 never interrupt a shift. Renders nothing unless the user's cohort
                 is armed in emailMigrationConfig.ts. */}
             <EmailMigrationDialog />
+            {/* Inside LazyProviders because it reads clock state — its
+                "Restart Bluu" step is only offered while clocked out. Renders
+                nothing off macOS, or unless the user's time-tracking settings
+                turn input monitoring on. */}
+            <InputMonitoringPrompt />
             {/* Inside LazyProviders because it reads clock state — a clock-out
                 is what re-arms a "remind me later". Mounted on the layout, not
                 in AppLayout, so the card persists across navigations instead of

@@ -22,6 +22,7 @@ import {
   currentDayKey,
   currentMonthKey,
   dayKeyRange,
+  enumerateDays,
   monthKeyRange,
   toDayKey,
   type SalaryDayKey,
@@ -38,6 +39,7 @@ import type {
   ChatterLeaderboardRow,
   ChatterMetrics,
   ChatterPeriod,
+  ChatterReport,
   CreatorAnalytics,
   CreatorDayPoint,
   FanAnalytics,
@@ -53,8 +55,22 @@ import { serialiseShift } from '../utils/shiftSerialise';
 import { expandShiftsForWindow } from '../utils/recurrence';
 import { computeTimeWorked } from '../utils/shiftAttendance';
 import { getActiveSessionsForUsers, getLedgerEntriesForUsers, getShiftsByRange } from './shiftService';
-import { displayNamesFor } from './userService';
+import { getIntegrityDays } from './integrityService';
+import { LEDGER_LOOKBACK_MS } from '../buddyx/coverage';
+import {
+  agentCoverage,
+  firstHourlyDay,
+  reportReads,
+  reportShifts,
+  flagsForAgent,
+  readTeamHours,
+  sortFlags,
+  summariseIntegrity,
+} from './chatterIntegrityService';
+import { displayNamesFor, getUserById } from './userService';
 import type {
+  ActiveSessionDocument,
+  TimeEntryLedgerDocument,
   BuddyxFanDocument,
   BuddyxLinkDocument,
   BuddyxMassMessageDocument,
@@ -82,11 +98,6 @@ async function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
 
 // ─── Shared reads ────────────────────────────────────────────────────
 
-function enumerateDays(from: SalaryDayKey, to: SalaryDayKey): SalaryDayKey[] {
-  const out: SalaryDayKey[] = [];
-  for (let d = from; d <= to && out.length < 400; d = addDays(d, 1)) out.push(d);
-  return out;
-}
 
 /**
  * Accounts each agent was rostered on in a window: the distinct `creatorIds`
@@ -252,13 +263,60 @@ function resolvePeriod(period: ChatterPeriod, from: string | null, to: string | 
       const [, end] = monthKeyRange(prev);
       return { from: `${prev}-01`, to: toDayKey(end - 1) };
     }
+    // The last 7 complete days, matching the synced `7d` period doc.
     case '7d':
-      return { from: toDayKey(now - 7 * 86_400_000), to: today };
+      return { from: addDays(today, -7), to: addDays(today, -1) };
     case '30d':
       return { from: toDayKey(now - 30 * 86_400_000), to: today };
     case 'custom':
       return { from: from!, to: to! };
   }
+}
+
+/**
+ * The team-wide reads behind Chatter Analytics, cached once per period and
+ * projected per viewer — an agent, an admin and an admin's per-chatter report
+ * all share them.
+ */
+async function loadChatterTeam(period: ChatterPeriod, range: { from: string; to: string }) {
+  const key = `chatters:${period}:${range.from}:${range.to}`;
+  const activityFrom = BUDDYX_TEAM_STATS_START_DAY;
+  const hasActivityWindow = range.to >= activityFrom;
+  return cached(key, async () => {
+    // BuddyX only holds activity from its start day; asking for earlier days is
+    // a read that can only miss.
+    const days = hasActivityWindow ? enumerateDays(range.from > activityFrom ? range.from : activityFrom, range.to) : [];
+    const periodId = period === 'custom' ? `custom-${range.from}-${range.to}` : period;
+    const [daySnaps, periodSnap, massSnap, ledger, hoursDocs] = await Promise.all([
+      days.length ? adminDb.getAll(...days.map(d => adminDb.collection('buddyx-team-days').doc(d))) : Promise.resolve([]),
+      hasActivityWindow ? adminDb.collection('buddyx-team-periods').doc(periodId).get() : Promise.resolve(null),
+      hasActivityWindow
+        ? adminDb
+            .collection('buddyx-mass-messages')
+            .where('day', '>=', range.from)
+            .where('day', '<=', range.to)
+            .select('uid', 'sentBy', 'price', 'unsent', 'sentDate')
+            .get()
+        : Promise.resolve(null),
+      readLedger(range.from, range.to),
+      // Hourly online time, for coverage (online only while clocked in).
+      readTeamHours(days),
+    ]);
+    const dayDocs = daySnaps.filter(s => s.exists).map(s => s.data() as BuddyxTeamDayDocument);
+    const periodDoc = periodSnap?.exists ? (periodSnap.data() as BuddyxTeamPeriodDocument) : null;
+
+    // Whole-period rows when we have them (exact medians); otherwise summed days.
+    const rows = periodDoc?.breakdown ?? dayDocs.flatMap(d => d.breakdown ?? []);
+    return {
+      rows,
+      days,
+      dayDocs: new Map(dayDocs.map(d => [d.day, d])),
+      hoursDocs,
+      hasMedians: Boolean(periodDoc),
+      ledger,
+      mass: (massSnap?.docs ?? []).map(d => d.data() as BuddyxMassMessageDocument),
+    };
+  });
 }
 
 export async function getChatterAnalytics(params: {
@@ -271,42 +329,14 @@ export async function getChatterAnalytics(params: {
 }): Promise<ChatterAnalytics> {
   const now = params.now ?? Date.now();
   const range = resolvePeriod(params.period, params.from, params.to, now);
-  const key = `chatters:${params.period}:${range.from}:${range.to}`;
   const activityFrom = BUDDYX_TEAM_STATS_START_DAY;
   const hasActivityWindow = range.to >= activityFrom;
 
-  // The team-wide part is cached once and projected per viewer below, so an
-  // agent and an admin share the same reads.
-  const team = await cached(key, async () => {
-    // BuddyX only holds activity from its start day; asking for earlier days is
-    // a read that can only miss.
-    const days = hasActivityWindow ? enumerateDays(range.from > activityFrom ? range.from : activityFrom, range.to) : [];
-    const periodId = params.period === 'custom' ? `custom-${range.from}-${range.to}` : params.period;
-    const [daySnaps, periodSnap, massSnap, ledger] = await Promise.all([
-      days.length ? adminDb.getAll(...days.map(d => adminDb.collection('buddyx-team-days').doc(d))) : Promise.resolve([]),
-      hasActivityWindow ? adminDb.collection('buddyx-team-periods').doc(periodId).get() : Promise.resolve(null),
-      hasActivityWindow
-        ? adminDb
-            .collection('buddyx-mass-messages')
-            .where('day', '>=', range.from)
-            .where('day', '<=', range.to)
-            .select('uid', 'sentBy', 'price', 'unsent', 'sentDate')
-            .get()
-        : Promise.resolve(null),
-      readLedger(range.from, range.to),
-    ]);
-    const dayDocs = daySnaps.filter(s => s.exists).map(s => s.data() as BuddyxTeamDayDocument);
-    const periodDoc = periodSnap?.exists ? (periodSnap.data() as BuddyxTeamPeriodDocument) : null;
-
-    // Whole-period rows when we have them (exact medians); otherwise summed days.
-    const rows = periodDoc?.breakdown ?? dayDocs.flatMap(d => d.breakdown ?? []);
-    return {
-      rows,
-      hasMedians: Boolean(periodDoc),
-      ledger,
-      mass: (massSnap?.docs ?? []).map(d => d.data() as BuddyxMassMessageDocument),
-    };
-  });
+  const team = await loadChatterTeam(params.period, range);
+  const coverageOf = (uid: string, entries: TimeEntryLedgerDocument[], active: ActiveSessionDocument | undefined) =>
+    hasActivityWindow
+      ? agentCoverage({ uid, days: team.days, now, hoursDocs: team.hoursDocs, dayDocs: team.dayDocs, entries, active })
+      : null;
 
   const grouped = groupRows(team.rows);
   const uidsWithData = new Set([...[...grouped.keys()].filter(k => !k.startsWith('chatter:')), ...team.ledger.keys()]);
@@ -330,9 +360,23 @@ export async function getChatterAnalytics(params: {
     mass: massSummary(team.mass.filter(m => m.uid === params.viewerUid)),
     benchmarks: computeBenchmarks(me, teamMetrics, params.viewerUid),
     leaderboard: null,
-    rosteredOffline: null,
+    coverage: null,
+    flags: null,
+    hourlyFrom: firstHourlyDay(team.days, team.hoursDocs, now),
   };
-  if (!params.isAdmin) return result;
+  if (!params.isAdmin) {
+    // The agent's own coverage — the one integrity figure they see (no flags).
+    if (hasActivityWindow && team.days.length > 0) {
+      const [start] = dayKeyRange(team.days[0]);
+      const [ledgerMine, activeMine] = await Promise.all([
+        getLedgerEntriesForUsers([params.viewerUid], start - LEDGER_LOOKBACK_MS, now),
+        getActiveSessionsForUsers([params.viewerUid]),
+      ]);
+      const mine = coverageOf(params.viewerUid, ledgerMine.get(params.viewerUid) ?? [], activeMine.get(params.viewerUid));
+      if (mine && (mine.clockedMs > 0 || mine.onlineMs > 0)) result.coverage = stripByDay(mine);
+    }
+    return result;
+  }
 
   // ── Admin: the named leaderboard, and the integrity check ──
   const [start] = dayKeyRange(range.from);
@@ -347,11 +391,15 @@ export async function getChatterAnalytics(params: {
   ]);
   const offlineRoster = hasActivityWindow ? activityRoster ?? roster : new Map<string, { accounts: Set<string>; shifts: number }>();
   const uids = [...new Set([...uidsWithData, ...roster.keys()])];
-  const [names, timeLedger, active] = await Promise.all([
+  const [names, timeLedger, active, integrityDays] = await Promise.all([
     displayNamesFor(uids),
-    hasActivityWindow ? getLedgerEntriesForUsers(uids, activityStart - 8 * 3_600_000, windowEnd) : Promise.resolve(new Map()),
+    hasActivityWindow ? getLedgerEntriesForUsers(uids, activityStart - LEDGER_LOOKBACK_MS, windowEnd) : Promise.resolve(new Map()),
     hasActivityWindow ? getActiveSessionsForUsers(uids) : Promise.resolve(new Map()),
+    cached(`integrity:${range.from}:${range.to}`, () => getIntegrityDays(range.from, range.to)),
   ]);
+  const coverageByUid = new Map(
+    uids.map(uid => [uid, coverageOf(uid, timeLedger.get(uid) ?? [], active.get(uid))] as const),
+  );
 
   const rowFor = (uid: string | null, metrics: ChatterMetrics, bxRows: BuddyxTeamRow[]): ChatterLeaderboardRow => {
     const accounts = uid ? roster.get(uid)?.accounts.size ?? 0 : 0;
@@ -368,6 +416,8 @@ export async function getChatterAnalytics(params: {
           ? computeTimeWorked(activityStart, windowEnd, timeLedger.get(uid) ?? [], active.get(uid)) * 1000
           : null,
       accounts,
+      coverage: uid ? stripByDay(coverageByUid.get(uid) ?? null) : null,
+      integrity: uid ? summariseIntegrity(integrityDays.get(uid)) : null,
       revenuePerAccount: accounts > 0 ? round2((metrics.ppvGross + metrics.tipsGross) / accounts) : null,
       mass: massSummary(team.mass.filter(m => (uid ? m.uid === uid : m.sentBy === chatter?.chatterId))),
     };
@@ -380,12 +430,94 @@ export async function getChatterAnalytics(params: {
       .map(([, rows]) => rowFor(null, metricsFrom(rows, undefined, team.hasMedians), rows)),
   ].sort((a, b) => b.ppvGross + b.tipsGross - (a.ppvGross + a.tipsGross));
 
-  const online = new Set(teamMetrics.filter(t => (t.metrics.onlineMs ?? 0) > 0).map(t => t.uid));
-  result.rosteredOffline = [...offlineRoster.entries()]
-    .filter(([uid, r]) => r.shifts > 0 && !online.has(uid))
-    .map(([uid, r]) => ({ uid, name: names.get(uid) ?? uid, shifts: r.shifts }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  result.flags = sortFlags(
+    uids.flatMap(uid =>
+      flagsForAgent({
+        uid,
+        name: names.get(uid) ?? uid,
+        coverage: coverageByUid.get(uid) ?? null,
+        rosteredShifts: offlineRoster.get(uid)?.shifts ?? 0,
+        integrityDays: integrityDays.get(uid),
+      }),
+    ),
+  );
   return result;
+}
+
+/** Coverage as the wire carries it — the per-day breakdown is for flags, not the page. */
+function stripByDay<T extends { byDay: unknown }>(c: T | null): Omit<T, 'byDay'> | null {
+  if (!c) return null;
+  const rest: Partial<T> = { ...c };
+  delete rest.byDay;
+  return rest as Omit<T, 'byDay'>;
+}
+
+/**
+ * One agent's report (admin only — the route enforces it): headline figures,
+ * coverage, integrity, the flags they earn, every shift and every day. Reuses
+ * the team cache, so opening a report from the page costs only this agent's
+ * own reads (ledger, captures, shifts, integrity days).
+ */
+export async function getChatterReport(params: {
+  uid: string;
+  period: ChatterPeriod;
+  from: string | null;
+  to: string | null;
+  now?: number;
+}): Promise<ChatterReport> {
+  const now = params.now ?? Date.now();
+  const range = resolvePeriod(params.period, params.from, params.to, now);
+  const team = await loadChatterTeam(params.period, range);
+  const allDays = enumerateDays(range.from, range.to);
+  const [user, reads, integrityDays] = await Promise.all([
+    getUserById(params.uid),
+    reportReads(params.uid, allDays, now),
+    getIntegrityDays(range.from, range.to, params.uid),
+  ]);
+  const name = user?.displayName || params.uid;
+  const grouped = groupRows(team.rows);
+  const ledger = team.ledger.get(params.uid);
+  const bxRows = grouped.get(params.uid) ?? [];
+  const metrics = ledger || bxRows.length ? metricsFrom(bxRows, ledger, team.hasMedians) : null;
+
+  const coverage = team.days.length
+    ? agentCoverage({ uid: params.uid, days: team.days, now, hoursDocs: team.hoursDocs, dayDocs: team.dayDocs, entries: reads.entries, active: reads.active })
+    : null;
+  const shifts = await reportShifts({
+    uid: params.uid,
+    start: reads.start,
+    end: reads.end,
+    now,
+    entries: reads.entries,
+    active: reads.active,
+    hoursDocs: team.hoursDocs,
+    captures: reads.captures,
+  });
+  const scheduledInActivity = shifts.filter(s => s.scheduled && toDayKey(s.startMs) >= BUDDYX_TEAM_STATS_START_DAY).length;
+  const coverageByDay = new Map((coverage?.byDay ?? []).map(d => [d.day, d]));
+
+  return {
+    uid: params.uid,
+    name,
+    metrics,
+    coverage: stripByDay(coverage),
+    integrity: summariseIntegrity(integrityDays.get(params.uid)),
+    flags: sortFlags(
+      flagsForAgent({
+        uid: params.uid,
+        name,
+        coverage,
+        rosteredShifts: scheduledInActivity,
+        integrityDays: integrityDays.get(params.uid),
+      }),
+    ),
+    shifts,
+    daily: allDays.map(day => {
+      const c = coverageByDay.get(day);
+      return { day, clockedMs: c?.clockedMs ?? 0, onlineWhileClockedMs: c?.onlineWhileClockedMs ?? 0 };
+    }),
+    inputMonitoring: user?.inputMonitoring === true,
+  };
 }
 
 // ─── Fan Analytics ───────────────────────────────────────────────────

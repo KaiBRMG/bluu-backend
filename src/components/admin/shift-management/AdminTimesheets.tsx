@@ -1,21 +1,12 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useBasicUsers } from '@/hooks/useBasicUsers';
 import { useTimesheetData } from '@/hooks/useTimesheetData';
 import { useUserData } from '@/hooks/useUserData';
 import TimesheetView from '@/components/timesheet/TimesheetView';
 import { ChevronDownIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
 
 function toDateString(date: Date): string {
   const y = date.getFullYear();
@@ -31,29 +22,28 @@ function addDays(dateStr: string, days: number): string {
   return toDateString(date);
 }
 
+/**
+ * One person's timesheet over a date range — the person sheet's Timesheet
+ * section. The person is chosen by the sheet, so there is no picker here.
+ */
 interface AdminTimesheetsProps {
-  selectedUserId: string | null;
-  onUserChange: (userId: string | null) => void;
+  selectedUserId: string;
+  /** Last day of the opening range (YYYY-MM-DD); the range runs 7 days to it. */
+  initialDate?: string;
 }
 
-export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminTimesheetsProps) {
-  const { users, loading: usersLoading } = useBasicUsers();
+export default function AdminTimesheets({
+  selectedUserId,
+  initialDate,
+}: AdminTimesheetsProps) {
   const { userData: viewerData } = useUserData();
   const viewerTimezone = viewerData?.timezone || 'UTC';
   const today = toDateString(new Date());
-  const [startDate, setStartDate] = useState(addDays(today, -6));
-  const [endDate, setEndDate] = useState(today);
+  const openingEnd = initialDate && initialDate < today ? initialDate : today;
+  const [startDate, setStartDate] = useState(addDays(openingEnd, -6));
+  const [endDate, setEndDate] = useState(openingEnd);
   const [startOpen, setStartOpen] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
-  const [employeeOpen, setEmployeeOpen] = useState(false);
-
-  const timeTrackedUsers = useMemo(() =>
-    users.filter((u) => !u.isArchived).sort((a, b) => {
-      const nameA = (a.displayName || `${a.firstName} ${a.lastName}`).toLowerCase();
-      const nameB = (b.displayName || `${b.firstName} ${b.lastName}`).toLowerCase();
-      return nameA.localeCompare(nameB);
-    }),
-  [users]);
 
   // Validate date range
   const dateError = useMemo(() => {
@@ -81,55 +71,8 @@ export default function AdminTimesheets({ selectedUserId, onUserChange }: AdminT
 
   return (
     <div>
-      <h2 className="text-lg font-semibold tracking-tight mb-4">
-        Timesheets
-      </h2>
-
       {/* Controls */}
       <div className="flex flex-wrap items-end gap-4 mb-6">
-        <div>
-          <label className="form-label block mb-1">Employee</label>
-          <Popover open={employeeOpen} onOpenChange={setEmployeeOpen}>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className="form-input flex items-center justify-between gap-2"
-                style={{ cursor: 'pointer', minWidth: '180px' }}
-                disabled={usersLoading}
-              >
-                <span>
-                  {selectedUserId
-                    ? (() => { const u = timeTrackedUsers.find((u) => u.uid === selectedUserId); return u ? (u.displayName || `${u.firstName} ${u.lastName}`) : 'Select a user...'; })()
-                    : 'Select a user...'}
-                </span>
-                <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[220px] p-0" align="start">
-              <Command>
-                <CommandInput placeholder="Search employee..." />
-                <CommandList>
-                  <CommandEmpty>No employee found.</CommandEmpty>
-                  <CommandGroup>
-                    <CommandItem onSelect={() => { onUserChange(null); setEmployeeOpen(false); }}>
-                      Select a user...
-                    </CommandItem>
-                    {timeTrackedUsers.map((u) => (
-                      <CommandItem
-                        key={u.uid}
-                        value={u.displayName || `${u.firstName} ${u.lastName}`}
-                        onSelect={() => { onUserChange(u.uid); setEmployeeOpen(false); }}
-                      >
-                        {u.displayName || `${u.firstName} ${u.lastName}`}
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-        </div>
-
         <div>
           <label className="form-label block mb-1">Start Date</label>
           <Popover open={startOpen} onOpenChange={setStartOpen}>

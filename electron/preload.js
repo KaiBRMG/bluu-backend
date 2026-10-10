@@ -128,6 +128,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     captureScreenshot: () => ipcRenderer.invoke('timeTracking:captureScreenshot'),
     setPowerSaveBlocker: (enable) => ipcRenderer.invoke('timeTracking:setPowerSaveBlocker', enable),
     getActivitySince: (sinceMs) => ipcRenderer.invoke('timeTracking:getActivitySince', sinceMs),
+    // Input-quality monitor (v0.17.0+): the renderer pushes the resolved
+    // `inputMonitoring` setting in, and reads key timings + KINDS (never keys)
+    // back at each screenshot. Analysis lives in src/lib/inputQuality.ts.
+    setInputMonitoring: (enabled) => ipcRenderer.invoke('timeTracking:setInputMonitoring', enabled),
+    getInputEvents: (sinceMs) => ipcRenderer.invoke('timeTracking:getInputEvents', sinceMs),
   },
 
   // Always-visible session timer (macOS tray title / Windows docked HUD).
@@ -397,6 +402,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     microphoneStatus: () => ipcRenderer.invoke('permissions:microphoneStatus'),
     requestMicrophoneAccess: () => ipcRenderer.invoke('permissions:requestMicrophoneAccess'),
     openMicrophoneSettings: () => ipcRenderer.invoke('permissions:openMicrophoneSettings'),
+    // macOS Input Monitoring, for the input-quality monitor (v0.17.0+).
+    inputMonitoringStatus: () => ipcRenderer.invoke('permissions:inputMonitoringStatus'),
+    requestInputMonitoring: () => ipcRenderer.invoke('permissions:requestInputMonitoring'),
+    relaunchApp: () => ipcRenderer.invoke('permissions:relaunchApp'),
   },
 
   // Auto-updater (macOS only; the main process no-ops elsewhere)

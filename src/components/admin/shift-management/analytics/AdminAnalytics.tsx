@@ -18,13 +18,23 @@ import {
 } from './analyticsTypes';
 
 interface AdminAnalyticsProps {
-  /** Shared with the Timesheets/Screenshots tabs so the selection carries across. */
-  selectedUserId: string | null;
-  onUserChange: (uid: string | null) => void;
+  /**
+   * Pin the view to one person and hide the scope/person pickers — the person
+   * sheet's Analytics section, where the subject is already chosen.
+   */
+  lockedUserId?: string;
+  /** Makes the By-employee rows open the person sheet. */
+  onOpenPerson?: (uid: string) => void;
 }
 
-export default function AdminAnalytics({ selectedUserId, onUserChange }: AdminAnalyticsProps) {
-  const [scope, setScope] = useState<AnalyticsScope>('company');
+export default function AdminAnalytics({
+  lockedUserId,
+  onOpenPerson,
+}: AdminAnalyticsProps) {
+  const [ownUserId, setOwnUserId] = useState<string | null>(null);
+  const selectedUserId = lockedUserId ?? ownUserId;
+  const [scopeState, setScope] = useState<AnalyticsScope>('company');
+  const scope: AnalyticsScope = lockedUserId ? 'user' : scopeState;
   const [groupId, setGroupId] = useState<string | null>(null);
   const [preset, setPreset] = useState<PresetId>('30d');
   const [range, setRange] = useState<DateRange>(() => presetRange('30d'));
@@ -50,7 +60,8 @@ export default function AdminAnalytics({ selectedUserId, onUserChange }: AdminAn
         scope={scope}
         onScopeChange={setScope}
         selectedUserId={selectedUserId}
-        onUserChange={onUserChange}
+        onUserChange={setOwnUserId}
+        lockedToUser={!!lockedUserId}
         selectedGroupId={groupId}
         onGroupChange={setGroupId}
         preset={preset}
@@ -115,7 +126,7 @@ export default function AdminAnalytics({ selectedUserId, onUserChange }: AdminAn
             {/* Individual scope is one person — a comparison table of one row is noise. */}
             {scope !== 'user' && (
               <div style={{ gridColumn: '1 / -1' }}>
-                <UserComparisonTable byUser={data.byUser} />
+                <UserComparisonTable byUser={data.byUser} onOpenPerson={onOpenPerson} />
               </div>
             )}
           </div>

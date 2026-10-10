@@ -21,6 +21,7 @@ import {
 } from '@/lib/timeTrackingSettings';
 import { DEFAULT_SHIFT_BREAK_POLICY, type ShiftBreakPolicy } from '@/lib/shiftBreakPolicy';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
+import { SURFACE } from '@/lib/surfaces';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,6 +42,7 @@ const SETTING_LABELS: Record<TimeTrackingSettingKey, string> = {
   idleTimeoutMinutes: 'Idle after',
   idleInputMode: 'Counts as activity',
   enableScreenshots: 'Screenshots',
+  inputMonitoring: 'Input monitoring',
 };
 
 const SOURCE_RANK: Record<SettingSource['kind'], number> = { org: 0, group: 1, user: 2 };
@@ -155,6 +157,7 @@ function OrgDefaultsSection({
     draft.enableIdleTimeout !== org.enableIdleTimeout ||
     draft.idleInputMode !== org.idleInputMode ||
     draft.enableScreenshots !== org.enableScreenshots ||
+    draft.inputMonitoring !== org.inputMonitoring ||
     minutesText.trim() !== String(org.idleTimeoutMinutes);
 
   const handleSave = async () => {
@@ -261,6 +264,20 @@ function OrgDefaultsSection({
             id="org-screenshots"
             checked={draft.enableScreenshots}
             onCheckedChange={c => setDraft(d => ({ ...d, enableScreenshots: c === true }))}
+          />
+        </div>
+
+        <div className="flex items-start justify-between gap-6 px-4 py-4">
+          <div>
+            <Label htmlFor="org-input-monitoring" className="text-sm">{SETTING_LABELS.inputMonitoring}</Label>
+            <p className="mt-1 text-xs text-zinc-400">
+              Records when keys are pressed and what kind of key — never which key — so Chatter Analytics can flag a machine-regular rhythm or modifier-only input. Mac users are asked to allow Input Monitoring. Shown to admins only; it never changes worked time. Needs app v0.17.0 or later.
+            </p>
+          </div>
+          <Switch
+            id="org-input-monitoring"
+            checked={draft.inputMonitoring}
+            onCheckedChange={c => setDraft(d => ({ ...d, inputMonitoring: c === true }))}
           />
         </div>
 
@@ -386,6 +403,7 @@ function toDraft(o: TimeTrackingOverrides): Draft {
     idleTimeoutMinutes: o.idleTimeoutMinutes ?? 'inherit',
     idleInputMode: o.idleInputMode ?? 'inherit',
     enableScreenshots: o.enableScreenshots ?? 'inherit',
+    inputMonitoring: o.inputMonitoring ?? 'inherit',
   };
 }
 
@@ -447,7 +465,7 @@ function OverrideEditor({
   const inheritsLine = (key: TimeTrackingSettingKey) =>
     `Inherits ${formatValue(key, inherited.values[key])} · ${sourceLabel(inherited.sources[key])}`;
 
-  const booleanRow = (key: 'enableIdleTimeout' | 'enableScreenshots') => (
+  const booleanRow = (key: 'enableIdleTimeout' | 'enableScreenshots' | 'inputMonitoring') => (
     <div>
       <div className="flex items-center justify-between gap-3">
         <span id={`ov-${key}`} className="text-sm">{SETTING_LABELS[key]}</span>
@@ -551,6 +569,7 @@ function OverrideEditor({
       </div>
 
       {booleanRow('enableScreenshots')}
+      {booleanRow('inputMonitoring')}
 
       <div className="flex items-center justify-between gap-2 border-t border-white/[0.07] pt-3">
         <Button
@@ -558,7 +577,7 @@ function OverrideEditor({
           size="xs"
           className="text-zinc-400"
           onClick={() =>
-            setDraft({ enableIdleTimeout: 'inherit', idleTimeoutMinutes: 'inherit', idleInputMode: 'inherit', enableScreenshots: 'inherit' })
+            setDraft({ enableIdleTimeout: 'inherit', idleTimeoutMinutes: 'inherit', idleInputMode: 'inherit', enableScreenshots: 'inherit', inputMonitoring: 'inherit' })
           }
           disabled={saving}
         >
@@ -618,6 +637,7 @@ function GroupsSection({
     idleTimeoutMinutes: { kind: 'org' },
     idleInputMode: { kind: 'org' },
     enableScreenshots: { kind: 'org' },
+    inputMonitoring: { kind: 'org' },
   };
 
   return (
@@ -633,6 +653,7 @@ function GroupsSection({
               <TableHead className="pl-4">Group</TableHead>
               <TableHead>Idle timeout</TableHead>
               <TableHead>Screenshots</TableHead>
+              <TableHead>Input monitoring</TableHead>
               <TableHead className="w-16 pr-4"><span className="sr-only">Actions</span></TableHead>
             </TableRow>
           </TableHeader>
@@ -662,6 +683,13 @@ function GroupsSection({
                     <ValueCell
                       text={formatValue('enableScreenshots', values.enableScreenshots)}
                       custom={o.enableScreenshots !== undefined}
+                      source="Organization default"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <ValueCell
+                      text={formatValue('inputMonitoring', values.inputMonitoring)}
+                      custom={o.inputMonitoring !== undefined}
                       source="Organization default"
                     />
                   </TableCell>
@@ -792,6 +820,7 @@ function UsersSection({
                 <TableHead className="pl-4">Person</TableHead>
                 <TableHead>Idle timeout</TableHead>
                 <TableHead>Screenshots</TableHead>
+                <TableHead>Input monitoring</TableHead>
                 <TableHead className="w-16 pr-4"><span className="sr-only">Actions</span></TableHead>
               </TableRow>
             </TableHeader>
@@ -829,6 +858,13 @@ function UsersSection({
                         custom={u.sources.enableScreenshots.kind === 'user'}
                       />
                     </TableCell>
+                    <TableCell>
+                      <ValueCell
+                        text={formatValue('inputMonitoring', u.effective.inputMonitoring)}
+                        source={sourceLabel(u.sources.inputMonitoring)}
+                        custom={u.sources.inputMonitoring.kind === 'user'}
+                      />
+                    </TableCell>
                     <TableCell className="pr-4 text-right">
                       <EditPopover
                         label={`Edit settings for ${name}`}
@@ -852,5 +888,43 @@ function UsersSection({
         </div>
       )}
     </section>
+  );
+}
+
+// ─── One person (the person sheet) ─────────────────────────────────────
+
+/**
+ * The Users-table editor for a single person, inline rather than in a popover —
+ * the person sheet's Settings section. Same editor, same save path, same
+ * inheritance read-out, so the two surfaces cannot disagree about a value.
+ */
+export function PersonTrackingSettings({ uid }: { uid: string }) {
+  const { org, groups, users, loading, error, saveUser } = useTimeTrackingSettings();
+  // Bumped on Cancel/Save so the inline editor re-seeds from the saved overrides.
+  const [rev, setRev] = useState(0);
+
+  if (loading) return <Skeleton className="h-80 w-full max-w-md rounded-xl" />;
+  if (error || !org) {
+    return <p className="text-sm text-zinc-400">Couldn&apos;t load settings: {error ?? 'unknown error'}</p>;
+  }
+
+  const u = users.find(x => x.uid === uid);
+  if (!u) return <p className="text-sm text-zinc-400">This person doesn&apos;t have time tracking access.</p>;
+
+  const groupById = new Map(groups.map(g => [g.id, g]));
+  const userGroups = u.groups.map(id => groupById.get(id)).filter((g): g is TimeTrackingSettingsGroup => !!g);
+  const inherited = resolveTimeTrackingSettings(org, userGroups, {});
+
+  return (
+    <div className={`max-w-md rounded-xl p-4 ${SURFACE}`}>
+      <OverrideEditor
+        key={`${rev}:${JSON.stringify(u.overrides)}`}
+        title="Time tracking for this person"
+        overrides={u.overrides}
+        inherited={inherited}
+        onSave={patch => saveUser(uid, patch)}
+        onDone={() => setRev(r => r + 1)}
+      />
+    </div>
   );
 }

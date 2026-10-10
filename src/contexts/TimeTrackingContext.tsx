@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo, ReactNode } from 'react';
 import { useAuth } from '@/components/AuthProvider';
-import type { TimerDisplayState, LocalSessionBuffer, SessionEvent } from '@/types/firestore';
+import type { ActivityMethod, TimerDisplayState, LocalSessionBuffer, SessionEvent } from '@/types/firestore';
 import { invalidateTimesheetCache } from '@/hooks/useTimesheetData';
 import {
   initBuffer,
@@ -19,6 +19,9 @@ import { markScreenshotBugFixed } from '@/lib/markScreenshotBugFixed';
 import { idleThresholdSeconds, normalizeIdleInputMode, type IdleInputMode } from '@/lib/timeTrackingSettings';
 import { breakBlockAt, breakBlockMessage, nextBreakBlockBoundary, type BreakBlockWindow } from '@/lib/shiftBreakPolicy';
 import { buildTimerWidgetPayload, pushTimerWidgetState, hideTimerWidget } from '@/lib/timerWidget';
+import { summariseInputWindow, type InputWindowSummary } from '@/lib/inputQuality';
+import { computeFingerprint } from '@/lib/screenFingerprint';
+import { decodeScreens, uploadCapture } from '@/lib/screenshotUpload';
 import { toast } from 'sonner';
 import * as Sentry from '@sentry/nextjs';
 
@@ -166,7 +169,13 @@ function stateAtMs(events: SessionEvent[], ms: number): TimerDisplayState {
 /**
  * Preferred method — compute activity % from powerMonitor idle-time samples
  * (native, per-minute granularity). Buckets the window into 1-minute slots and
- * marks each slot active if any OS-level keyboard/mouse input occurred in it.
+ * marks each slot active if any OS-level input occurred in it.
+ *
+ * **Scored by the user's idle input mode**, the same input that keeps them out
+ * of idle: under `keyboard`, a minute with only mouse movement is inactive —
+ * otherwise a mouse mover would score 100% while the idle check ignores it.
+ * Samples carry per-input idle from v0.17.0; an older build's samples (or a
+ * platform that cannot split input) fall back to the combined counter.
  *
  * Only minutes the user was actually expected to be working count toward the
  * denominator — idle/break/pause minutes are excluded, mirroring the event-log
@@ -178,11 +187,19 @@ function stateAtMs(events: SessionEvent[], ms: number): TimerDisplayState {
  * `null` — never 0 — is what lets callers fall back to the event-log method;
  * returning 0 here would report a fully active user as completely inactive.
  */
+type ActivitySample = { sampleMs: number; idleSeconds: number; keyboardIdle?: number | null; mouseIdle?: number | null };
+
+function sampleIdleSeconds(sample: ActivitySample, mode: IdleInputMode): number {
+  const perType = mode === 'keyboard' ? sample.keyboardIdle : mode === 'mouse' ? sample.mouseIdle : null;
+  return typeof perType === 'number' && Number.isFinite(perType) ? perType : sample.idleSeconds;
+}
+
 function calcActivityPercentFromSamples(
-  samples: Array<{ sampleMs: number; idleSeconds: number }>,
+  samples: ActivitySample[],
   windowStart: number,
   windowEnd: number,
   events: SessionEvent[] = [],
+  mode: IdleInputMode = 'any',
 ): number | null {
   if (samples.length === 0) return null;
 
@@ -203,8 +220,8 @@ function calcActivityPercentFromSamples(
   if (workingSlots.size === 0) return null; // nothing to score — let the fallback decide
 
   const activeSlots = new Set<number>();
-  for (const { sampleMs, idleSeconds } of samples) {
-    const lastActiveMs = sampleMs - idleSeconds * 1000;
+  for (const sample of samples) {
+    const lastActiveMs = sample.sampleMs - sampleIdleSeconds(sample, mode) * 1000;
     if (lastActiveMs >= effectiveStart && lastActiveMs < windowEnd) {
       const slot = Math.floor((lastActiveMs - effectiveStart) / 60_000);
       if (workingSlots.has(slot)) activeSlots.add(slot);
@@ -747,6 +764,17 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   // Which input counts as activity (keyboard, mouse, or either) — same
   // resolution path, so it also changes live.
   const idleInputMode = normalizeIdleInputMode(userData?.idleInputMode);
+  // Input-quality monitoring (rhythm, modifier-only input, unchanged screens).
+  // Pushed into the main process, which only collects while it is on; read at
+  // each screenshot below. Display only — never feeds idle or worked time.
+  const inputMonitoring = userData?.inputMonitoring === true;
+  const idleInputModeRef = useRef(idleInputMode);
+  const inputMonitoringRef = useRef(inputMonitoring);
+  useEffect(() => { idleInputModeRef.current = idleInputMode; }, [idleInputMode]);
+  useEffect(() => {
+    inputMonitoringRef.current = inputMonitoring;
+    window.electronAPI?.timeTracking?.setInputMonitoring?.(inputMonitoring).catch(() => {});
+  }, [inputMonitoring]);
 
   useEffect(() => {
     if (idleCheckRef.current) {
@@ -1139,6 +1167,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
               const windowStart = prevScreenshotMsRef.current ?? sessionStartMsRef.current ?? windowEnd;
 
               let activityPercent: number | null = null;
+              let activityMethod: ActivityMethod | null = null;
               const sid = sessionIdRef.current;
 
               // The event log serves both methods: it supplies the sample
@@ -1160,22 +1189,44 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
               if (electronAPI.timeTracking.getActivitySince) {
                 try {
                   const samples = await electronAPI.timeTracking.getActivitySince(windowStart);
-                  activityPercent = calcActivityPercentFromSamples(samples, windowStart, windowEnd, events);
+                  activityPercent = calcActivityPercentFromSamples(samples, windowStart, windowEnd, events, idleInputModeRef.current);
+                  if (activityPercent !== null) activityMethod = 'samples';
                 } catch {
                   // Non-critical — fall through to the event-log method
                 }
               }
               if (activityPercent === null && events.length > 0) {
                 activityPercent = calcActivityPercent(events, windowStart, windowEnd);
+                activityMethod = 'eventlog';
               }
 
-              await fetch('/api/time-tracking/screenshots/upload', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
-                body: JSON.stringify({
-                  screens: result.screens,
-                  ...(activityPercent !== null && { activityPercent }),
-                }),
+              // Integrity signals, only with input monitoring on. Each is
+              // best-effort: a failure drops that signal, never the capture.
+              let input: InputWindowSummary | null = null;
+              let fingerprints: string[] | null = null;
+              if (inputMonitoringRef.current) {
+                try {
+                  const raw = await electronAPI.timeTracking.getInputEvents?.(windowStart);
+                  input = summariseInputWindow(raw, windowStart, windowEnd, ms =>
+                    events.length === 0 || stateAtMs(events, ms) === 'working',
+                  );
+                } catch {
+                  // Older build or IPC failure — no input summary this window
+                }
+              }
+              const blobs = await decodeScreens(result.screens);
+              if (inputMonitoringRef.current) {
+                const fps = await Promise.all(blobs.map(computeFingerprint));
+                fingerprints = fps.every((f): f is string => f !== null) ? fps : null;
+              }
+
+              await uploadCapture(idToken, result.screens, blobs, {
+                activityPercent,
+                activityMethod,
+                windowStartMs: windowStart,
+                windowEndMs: windowEnd,
+                fingerprints,
+                input,
               });
               prevScreenshotMsRef.current = windowEnd;
               if (sid) {

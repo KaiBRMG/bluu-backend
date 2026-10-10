@@ -47,7 +47,7 @@ type ModalState =
 
 // ─── Component ───────────────────────────────────────────────────────
 
-export default function AdminShifts() {
+export default function AdminShifts({ onOpenPerson }: { onOpenPerson?: (uid: string) => void } = {}) {
   const { userData: viewerData } = useUserData();
   const viewerTimezone = viewerData?.timezone || 'UTC';
   const today      = todayStr(viewerTimezone);
@@ -288,7 +288,13 @@ export default function AdminShifts() {
                 <tr key={user.uid} style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                   {/* User cell */}
                   <td style={{ padding: '6px 10px', verticalAlign: 'middle', borderRight: '1px solid rgba(255,255,255,0.06)', height: '52px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenPerson?.(user.uid)}
+                      disabled={!onOpenPerson}
+                      aria-label={onOpenPerson ? `Open ${user.displayName}` : undefined}
+                      className="flex w-full min-w-0 items-center gap-[7px] rounded-md text-left enabled:hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    >
                       <Avatar className="size-7" style={{ background: getAvatarColor(user.displayName || 'User') }}>
                         {user.photoURL && <AvatarImage src={user.photoURL} alt={user.displayName} />}
                         <AvatarFallback style={{ background: getAvatarColor(user.displayName || 'User'), color: '#fff' }}>
@@ -298,7 +304,7 @@ export default function AdminShifts() {
                       <span style={{ fontSize: '12px', fontWeight: 400, color: 'var(--foreground)', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
                         {user.displayName}
                       </span>
-                    </div>
+                    </button>
                   </td>
 
                   {/* Day cells */}

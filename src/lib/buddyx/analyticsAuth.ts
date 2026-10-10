@@ -11,6 +11,8 @@ import { NextResponse } from 'next/server';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { checkPageAccess } from '../middleware/apiHelpers';
 import { CA_ADMIN_PAGE_ID } from '../salary/salaryAuth';
+import { isDayKey } from '../salary/salaryDate';
+import { CHATTER_PERIODS, MAX_CUSTOM_DAYS, type ChatterPeriod } from './analyticsTypes';
 
 export async function analyticsAccess(
   token: DecodedIdToken,
@@ -20,6 +22,29 @@ export async function analyticsAccess(
   const denied = await checkPageAccess(token.uid, pageId);
   if (denied) return denied;
   return { isAdmin: (await checkPageAccess(token.uid, CA_ADMIN_PAGE_ID)) === null };
+}
+
+/**
+ * `?period=…[&from&to]` for the Chatter Analytics routes — a validated period,
+ * or the 400 to return. Absent `period` → `fallback`.
+ */
+export function parseChatterPeriod(
+  searchParams: URLSearchParams,
+  fallback: ChatterPeriod,
+): { period: ChatterPeriod; from: string | null; to: string | null } | NextResponse {
+  const period = (searchParams.get('period') ?? fallback) as ChatterPeriod;
+  if (!CHATTER_PERIODS.includes(period)) return NextResponse.json({ error: 'Unknown period' }, { status: 400 });
+  const from = searchParams.get('from');
+  const to = searchParams.get('to');
+  if (period === 'custom') {
+    if (!isDayKey(from) || !isDayKey(to) || from > to) {
+      return NextResponse.json({ error: 'A custom range needs from ≤ to (YYYY-MM-DD).' }, { status: 400 });
+    }
+    if ((Date.parse(to) - Date.parse(from)) / 86_400_000 + 1 > MAX_CUSTOM_DAYS) {
+      return NextResponse.json({ error: `A custom range can span at most ${MAX_CUSTOM_DAYS} days.` }, { status: 400 });
+    }
+  }
+  return { period, from, to };
 }
 
 /** Per-viewer response: the browser may reuse it for a minute, never another user. */

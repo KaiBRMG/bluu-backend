@@ -139,7 +139,7 @@ function weekdayOf(dateStr: string): number {
 }
 
 /** Merge overlapping intervals so overlapping shifts can't double-count time. */
-function mergeIntervals(intervals: Array<[number, number]>): Array<[number, number]> {
+export function mergeIntervals(intervals: Array<[number, number]>): Array<[number, number]> {
   if (intervals.length === 0) return [];
   const sorted = [...intervals].sort((a, b) => a[0] - b[0]);
   const out: Array<[number, number]> = [sorted[0]];
