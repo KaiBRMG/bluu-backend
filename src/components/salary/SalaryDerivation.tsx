@@ -65,8 +65,7 @@ export function SalaryDerivation({ data }: { data: SalaryMonthResult }) {
         <div>
           <h3 className="font-medium">Commission · {formatUsd(totals.commission)}</h3>
           <p className="mt-1 max-w-[70ch] text-zinc-400">
-            Each day earns the rate your month-to-date gross had reached that day, on that day&apos;s net sales (
-            {keep}% of gross). A day keeps its rate, so days before you crossed a tier stay at the lower rate.
+            Your commission rate is follows a tiered structure and is applied to your NET sales. Commission rates reset each month. The more sales you make, the higher your commission rate for the rest of the month. 
           </p>
           {commissionBands.length === 0 ? (
             <p className="mt-2 text-zinc-400">No sales this month yet.</p>
@@ -106,8 +105,8 @@ export function SalaryDerivation({ data }: { data: SalaryMonthResult }) {
         <div>
           <h3 className="font-medium">Hourly pay · {formatUsd(totals.wage)}</h3>
           <p className="mt-1 max-w-[70ch] text-zinc-400">
-            Each shift pays its hours at the rate for the number of accounts on it. Hours are your tracked time plus{' '}
-            {config.graceMinutes} minutes, capped at the shift&apos;s length.
+            Each shift pays per hour at the rate for the number of accounts assigned to you. Hours are your tracked time plus a{' '}
+            {config.graceMinutes}-minute grace period. Your paid hours are capped at your shift time. 
           </p>
           {wageBands.length === 0 && editedWage.days === 0 ? (
             <p className="mt-2 text-zinc-400">No paid hours this month yet.</p>
