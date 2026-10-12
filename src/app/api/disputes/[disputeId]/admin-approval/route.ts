@@ -12,7 +12,7 @@ import type { ApprovalStatus } from '@/types/firestore';
  * Sets AdminApproval on a dispute. Caller must have the 'ca-admin' page permission.
  * Body: { AdminApproval: 'Approved' | 'Rejected', reason? }
  *
- * On a v2 dispute an approval **transfers the claimed tips** to the filer —
+ * On a v2 dispute an approval **transfers the claimed sales** (tips and PPVs) to the filer —
  * see `applyAdminVerdict`. The response carries `transferResult` so the admin
  * sees what moved and what was skipped, in words.
  */
@@ -34,7 +34,7 @@ export const PATCH = withAuth(async (
     }
 
     // One implementation of "what approving does", shared with the bulk bar:
-    // a v2 approval transfers the claimed tips to the filer, partial success
+    // a v2 approval transfers the claimed sales to the filer, partial success
     // recorded on the dispute; a v1 approval moves nothing, as it never did.
     // `resolvedAt` is stamped either way — it is what lets the filer's
     // dashboard say "decided in the last fortnight" rather than "filed" in it.

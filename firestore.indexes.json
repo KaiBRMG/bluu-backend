@@ -545,6 +545,20 @@
       ]
     },
     {
+      "collectionGroup": "ca-sales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "sourceUserId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "month",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "integrity-captures",
       "queryScope": "COLLECTION",
       "fields": [
@@ -1945,6 +1959,11 @@
     {
       "collectionGroup": "ca-sales",
       "fieldPath": "sourceUserId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "assignmentLog",
       "indexes": []
     },
     {

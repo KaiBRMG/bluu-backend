@@ -2,7 +2,7 @@
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { ChevronDown, Loader2Icon, RotateCcw, Search } from 'lucide-react';
+import { ChevronDown, Loader2Icon, RotateCcw, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { SURFACE } from '@/lib/surfaces';
@@ -10,6 +10,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -25,15 +28,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAuth } from '@/components/AuthProvider';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { useUserData } from '@/hooks/useUserData';
-import { useBasicUsers } from '@/hooks/useBasicUsers';
+import { activeChatAgents, useBasicUsers } from '@/hooks/useBasicUsers';
 import { useBuddyxSync } from '@/hooks/useBuddyxSync';
 import { MonthPicker } from '@/components/salary/MonthPicker';
-import { SALARY_HISTORY_START_MONTH } from '@/lib/salary/salaryConstants';
+import { DEFAULT_DEDUCTION_RATE, SALARY_HISTORY_START_MONTH } from '@/lib/salary/salaryConstants';
 import { SyncStatus } from '@/components/buddyx/SyncStatus';
 import { CreatorCombobox } from '@/components/buddyx/CreatorCombobox';
 import { AttrChip, FanLabel, InfoTip, PPV_ATTRIBUTION, TIPS_ATTRIBUTION } from '@/components/buddyx/buddyxUi';
 import { CreatorChip } from '@/components/creators/CreatorChip';
 import { PersonTag } from '@/components/disputes/disputeUi';
+import { buddyxCreditName, holderName, SaleHolderNote } from '@/components/salary/SaleHolderNote';
+import { reassignRefusal } from '@/lib/disputes/disputeRules';
+import { round2 } from '@/lib/salary/salaryEngine';
 import { getCache, setCache } from '@/lib/queryCache';
 import { formatRelative, formatSaleDateTime, formatUsd, pluralise, signedMoneyClass } from '@/lib/salary/salaryFormat';
 import { saleTypeLabel } from '@/lib/salary/saleTypes';
@@ -47,10 +53,17 @@ const HistoricalImport = dynamic(() => import('./HistoricalImport'), {
  * CA Admin → Sales — the sales ledger for the whole roster.
  *
  * A CA manager keeps the ledger trustworthy and answers "where did this
- * agent's money come from". So: the **attention band** first (what the sync
- * could not place, or placed against a rule), then **every agent's rows** for
- * the month, then the machinery in collapsed sections — the identity mapping,
- * the sync history, and the one-off historical import.
+ * agent's money come from". So: the **attention band** first — every anomaly
+ * the ledger can detect, each line naming its rows and offering a way to them
+ * — then **every row** for the month (every agent, unassigned and unmapped
+ * sales, removed rows), then the machinery in collapsed sections — the
+ * identity mapping, the sync history, and the one-off historical import.
+ *
+ * **Bluu Backend is the source of truth for sales.** Each row shows who holds
+ * it here *and* who BuddyX credits, with a `SaleHolderNote` wherever the two
+ * differ and why (an approved dispute, or an admin). An admin can reassign a
+ * BuddyX sale from its row — to an agent, to nobody, or back onto BuddyX's
+ * attribution — and every later sync keeps it.
  *
  * Replaced the "Sales data" `.xlsx` upload tab; sales now arrive from BuddyX.
  */
@@ -62,11 +75,27 @@ const SEGMENT = 'data-[state=on]:bg-[#2563eb]! data-[state=on]:text-white! text-
 interface AllSalesResponse {
   sales: SalarySale[];
   names: Record<string, string>;
+  deductionRate: number;
   totals: { gross: number; count: number; reversals: number };
   byKind: { tip: { gross: number; count: number }; ppv: { gross: number; count: number } };
-  unassigned: { tips: number; tipsGross: number; unmapped: number; claimed: number };
-  flags: { attributionConflicts: string[]; vanishedAfterFinalise: string[]; removed: number };
+  unassigned: { tips: number; tipsGross: number; ppv: number; ppvGross: number; unmapped: number; claimed: number };
+  mismatched: { dispute: number; admin: number; gross: number };
+  flags: {
+    attributionConflicts: string[];
+    vanishedAfterFinalise: string[];
+    removed: number;
+    staleLocks: string[];
+    possibleDuplicates: string[];
+    zeroGross: string[];
+    archivedHolders: Array<{ uid: string; gross: number; count: number }>;
+  };
   spansCutover: boolean;
+}
+
+/** An attention line's "Show them": the ledger narrowed to exactly those rows. */
+interface Focus {
+  label: string;
+  ids: Set<string>;
 }
 
 interface MappingResponse {
@@ -141,7 +170,10 @@ export default function AdminSales({
   const [creatorId, setCreatorId] = useState<string | null>(null);
   const [kind, setKind] = useState<KindFilter>('all');
   const [onlyUnassigned, setOnlyUnassigned] = useState(false);
+  const [onlyDiffers, setOnlyDiffers] = useState(false);
   const [showRemoved, setShowRemoved] = useState(false);
+  const [focus, setFocus] = useState<Focus | null>(null);
+  const [reassigning, setReassigning] = useState<SalarySale | null>(null);
   const [query, setQuery] = useState('');
   const [showAll, setShowAll] = useState(false);
   const deferredQuery = useDeferredValue(query);
@@ -205,16 +237,23 @@ export default function AdminSales({
     if (!data) return [];
     const needle = deferredQuery.trim().toLowerCase();
     return data.sales.filter(s => {
+      if (focus) return focus.ids.has(s.saleId);
       if (!showRemoved && s.removedAt) return false;
       if (showRemoved && !s.removedAt) return false;
       if (agent !== 'all' && s.userId !== agent) return false;
       if (creatorId && s.creatorId !== creatorId) return false;
       if (kind !== 'all' && s.kind !== kind) return false;
       if (onlyUnassigned && s.userId) return false;
+      if (onlyDiffers && s.matchesSource && !s.transfer) return false;
       if (!needle) return true;
-      return s.fanName.toLowerCase().includes(needle) || s.fanId.includes(needle) || s.employeeName.toLowerCase().includes(needle);
+      return (
+        s.fanName.toLowerCase().includes(needle) ||
+        s.fanId.includes(needle) ||
+        s.employeeName.toLowerCase().includes(needle) ||
+        s.saleId.toLowerCase().includes(needle)
+      );
     });
-  }, [data, deferredQuery, agent, creatorId, kind, onlyUnassigned, showRemoved]);
+  }, [data, deferredQuery, agent, creatorId, kind, onlyUnassigned, onlyDiffers, showRemoved, focus]);
 
   const agents = useMemo(() => {
     if (!data) return [];
@@ -225,15 +264,38 @@ export default function AdminSales({
   // `showRemoved` is a filter too: left on, "Clear filters" left the ledger
   // showing only removed rows and claiming nothing was filtered.
   const filtersActive =
-    agent !== 'all' || creatorId !== null || kind !== 'all' || onlyUnassigned || showRemoved || query.trim() !== '';
+    focus !== null ||
+    agent !== 'all' ||
+    creatorId !== null ||
+    kind !== 'all' ||
+    onlyUnassigned ||
+    onlyDiffers ||
+    showRemoved ||
+    query.trim() !== '';
   const clearFilters = () => {
+    setFocus(null);
     setAgent('all');
     setCreatorId(null);
     setKind('all');
     setOnlyUnassigned(false);
+    setOnlyDiffers(false);
     setShowRemoved(false);
     setQuery('');
   };
+  const showRows = (label: string, ids: string[]) => {
+    clearFilters();
+    setFocus({ label, ids: new Set(ids) });
+  };
+  // The engine's own formula (`salaryEngine.ts`), at the rate the server sent.
+  const net = (gross: number) => round2(gross * (1 - (data?.deductionRate ?? DEFAULT_DEDUCTION_RATE)));
+  const flagged = useMemo(() => {
+    if (!data) return { duplicates: new Set<string>(), stale: new Set<string>(), zero: new Set<string>() };
+    return {
+      duplicates: new Set(data.flags.possibleDuplicates),
+      stale: new Set(data.flags.staleLocks),
+      zero: new Set(data.flags.zeroGross),
+    };
+  }, [data]);
   const visible = showAll ? filtered : filtered.slice(0, INITIAL_ROWS);
 
   // ── Attention band ──
@@ -269,30 +331,88 @@ export default function AdminSales({
         action: { label: 'Open mapping', run: () => setMappingOpen(true) },
       });
     }
+    const unassignedIds = (k: 'tip' | 'ppv') => live.filter(s => !s.userId && !s.unmappedChatterId && s.kind === k).map(s => s.saleId);
     if (data.unassigned.tips > 0) {
       lines.push({
         key: 'unassigned',
         text: `${pluralise(data.unassigned.tips, 'unassigned tip')}, ${formatUsd(data.unassigned.tipsGross)}${data.unassigned.claimed ? ` · ${data.unassigned.claimed} claimed, awaiting you` : ''}`,
-        action: { label: 'Show them', run: () => { clearFilters(); setOnlyUnassigned(true); setKind('tip'); } },
+        action: { label: 'Show them', run: () => showRows('Unassigned tips', unassignedIds('tip')) },
+      });
+    }
+    if (data.unassigned.ppv > 0) {
+      lines.push({
+        key: 'unassigned-ppv',
+        text: `${pluralise(data.unassigned.ppv, 'PPV')} with no sender in BuddyX, ${formatUsd(data.unassigned.ppvGross)} — counting toward nobody`,
+        action: { label: 'Show them', run: () => showRows('Unassigned PPVs', unassignedIds('ppv')) },
       });
     }
     if (data.flags.attributionConflicts.length > 0) {
       lines.push({
         key: 'conflicts',
-        text: `${pluralise(data.flags.attributionConflicts.length, 'transferred sale')} BuddyX has since credited to someone else — the transfer stands`,
+        text: `${pluralise(data.flags.attributionConflicts.length, 'moved sale')} BuddyX has since credited to someone else — Bluu's assignment stands`,
+        action: { label: 'Show them', run: () => showRows('BuddyX changed since the move', data.flags.attributionConflicts) },
+      });
+    }
+    if (data.flags.staleLocks.length > 0) {
+      lines.push({
+        key: 'stale-locks',
+        text: `${pluralise(data.flags.staleLocks.length, 'sale')} still locked by a dispute that is already decided — it can't be claimed; reassigning it clears the lock`,
+        action: { label: 'Show them', run: () => showRows('Stale dispute locks', data.flags.staleLocks) },
+      });
+    }
+    if (data.flags.possibleDuplicates.length > 0) {
+      lines.push({
+        key: 'duplicates',
+        text: `${pluralise(data.flags.possibleDuplicates.length, 'sale')} share a creator, fan, time and amount with another row — check BuddyX for a double entry`,
+        action: { label: 'Show them', run: () => showRows('Possible duplicates', data.flags.possibleDuplicates) },
+      });
+    }
+    if (data.flags.zeroGross.length > 0) {
+      lines.push({
+        key: 'zero',
+        text: `${pluralise(data.flags.zeroGross.length, 'sale')} with a $0.00 amount`,
+        action: { label: 'Show them', run: () => showRows('$0 sales', data.flags.zeroGross) },
+      });
+    }
+    for (const holder of data.flags.archivedHolders) {
+      lines.push({
+        key: `archived-${holder.uid}`,
+        text: `${pluralise(holder.count, 'sale')}, ${formatUsd(holder.gross)}, held by ${data.names[holder.uid] ?? 'an agent'}, who is archived`,
+        action: {
+          label: 'Show them',
+          run: () => showRows(`Held by ${data.names[holder.uid] ?? 'an archived agent'}`, live.filter(s => s.userId === holder.uid).map(s => s.saleId)),
+        },
       });
     }
     if (data.flags.vanishedAfterFinalise.length > 0) {
       lines.push({
         key: 'vanished',
         text: `${pluralise(data.flags.vanishedAfterFinalise.length, 'sale')} vanished from BuddyX inside a finalised month and still count`,
+        action: { label: 'Show them', run: () => showRows('Vanished after finalising', data.flags.vanishedAfterFinalise) },
       });
     }
-    const refused = lastRun?.counts['sales.rejectedFinalized'] ?? 0;
+    const counts = lastRun?.counts ?? {};
+    const refused = counts['sales.rejectedFinalized'] ?? 0;
     if (refused > 0) {
       lines.push({ key: 'refused', text: `The last sync refused ${pluralise(refused, 'change')} to a finalised month` });
     }
+    const unplaceable = counts['sales.unplaceable'] ?? 0;
+    if (unplaceable > 0) {
+      lines.push({
+        key: 'unplaceable',
+        text: `The last sync could not place ${pluralise(unplaceable, 'BuddyX row')} (no id or no date) — they are not in the ledger`,
+      });
+    }
+    const ambiguous = counts['sales.rekeyAmbiguous'] ?? 0;
+    if (ambiguous > 0) {
+      lines.push({
+        key: 'rekey-ambiguous',
+        text: `The last sync saw ${pluralise(ambiguous, 'BuddyX row')} change id where more than one stored sale matched — any move on the old row did not carry over`,
+      });
+    }
     return lines;
+    // `showRows` only calls setters; listing it would re-derive the band every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, mapping, lastRun]);
 
   if (loading && !data) {
@@ -366,7 +486,7 @@ export default function AdminSales({
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative min-w-0 flex-1 sm:max-w-56">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-400" aria-hidden />
-                <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search fan, ID or chatter" className="h-8 pl-8" aria-label="Search sales" />
+                <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search fan, chatter or sale ID" className="h-8 pl-8" aria-label="Search sales" />
               </div>
               <Select value={agent} onValueChange={setAgent}>
                 <SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Agent" /></SelectTrigger>
@@ -388,14 +508,37 @@ export default function AdminSales({
                 Unassigned
               </label>
               <label className="flex items-center gap-1.5 text-xs text-zinc-300">
+                <Switch checked={onlyDiffers} onCheckedChange={setOnlyDiffers} aria-label="Only sales that differ from BuddyX" />
+                Differs from BuddyX
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-zinc-300">
                 <Switch checked={showRemoved} onCheckedChange={setShowRemoved} aria-label="Removed rows only" />
                 Removed
               </label>
             </div>
 
+            {focus && (
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-zinc-400">Showing</span>
+                <span className="font-medium">{focus.label}</span>
+                <Button size="xs" variant="ghost" className="h-6 text-zinc-300" onClick={() => setFocus(null)}>
+                  <X className="size-3" aria-hidden /> Back to the ledger
+                </Button>
+              </div>
+            )}
+
             <p className="text-sm text-zinc-400">
               {pluralise(filtered.length, 'sale')} ·{' '}
               <span className="tabular-nums text-foreground">{formatUsd(filtered.reduce((s, r) => s + (r.removedAt ? 0 : r.signedGross), 0))}</span> gross
+              {!filtersActive && data.mismatched.dispute + data.mismatched.admin > 0 && (
+                <>
+                  {' '}· {pluralise(data.mismatched.dispute + data.mismatched.admin, 'sale')} ({formatUsd(data.mismatched.gross)}) held differently from BuddyX
+                  {' '}— {data.mismatched.dispute} by dispute, {data.mismatched.admin} by admin{' '}
+                  <button type="button" onClick={() => setOnlyDiffers(true)} className="rounded-sm text-foreground underline underline-offset-2 hover:text-white focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+                    Show them
+                  </button>
+                </>
+              )}
               {filtersActive && (
                 <>
                   {' '}·{' '}
@@ -417,27 +560,38 @@ export default function AdminSales({
                 aria-label="All agents' sales, scrollable"
                 className="overflow-x-auto rounded-lg border border-white/[0.07] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50"
               >
-                <table className="w-full min-w-[860px] border-collapse text-sm">
+                <table className="w-full min-w-[1180px] border-collapse text-sm">
                   <thead>
                     <tr className="border-b border-white/[0.07]">
-                      {['When', 'Agent', 'Creator', 'Type', 'Fan', 'Gross'].map((label, i) => (
-                        <th key={label} scope="col" className={cn('whitespace-nowrap px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400', i === 5 ? 'text-right' : 'text-left')}>
+                      {LEDGER_COLUMNS.map(({ label, right }) => (
+                        <th key={label} scope="col" className={cn('whitespace-nowrap px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400', right ? 'text-right' : 'text-left')}>
                           {label}
                         </th>
                       ))}
+                      <th scope="col" className="px-3 py-2.5"><span className="sr-only">Actions</span></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/[0.045]">
                     {visible.map(sale => (
-                      <tr key={sale.saleId}>
+                      <tr key={sale.saleId} title={`Sale ${sale.saleId}`}>
                         <td className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-400">{formatSaleDateTime(sale.occurredAt, timezone)}</td>
-                        <td className="max-w-[12rem] px-3 py-2">
-                          {sale.userId ? (
-                            <PersonTag name={data.names[sale.userId] ?? ''} photoURL={null} size="sm" />
-                          ) : sale.unmappedChatterId ? (
-                            <span className="text-xs text-orange-400">{sale.employeeName || `Chatter ${sale.unmappedChatterId}`} (not linked)</span>
+                        <td className="max-w-[14rem] px-3 py-2">
+                          <span className="flex flex-col items-start gap-1">
+                            {sale.userId ? (
+                              <PersonTag name={data.names[sale.userId] ?? ''} photoURL={null} size="sm" />
+                            ) : (
+                              <span className="text-xs text-zinc-400">Unassigned</span>
+                            )}
+                            <SaleHolderNote sale={sale} names={data.names} />
+                          </span>
+                        </td>
+                        <td className="max-w-[12rem] px-3 py-2 text-xs">
+                          {sale.unmappedChatterId ? (
+                            <span className="text-orange-400">{sale.employeeName || `Chatter ${sale.unmappedChatterId}`} (not linked)</span>
+                          ) : sale.sourceUserId ? (
+                            <span className="text-zinc-300">{data.names[sale.sourceUserId] ?? sale.employeeName}</span>
                           ) : (
-                            <span className="text-xs text-zinc-400">Unassigned</span>
+                            <span className="text-zinc-400">Unassigned</span>
                           )}
                         </td>
                         <td className="px-3 py-2">
@@ -447,13 +601,15 @@ export default function AdminSales({
                           <span className="flex flex-wrap items-center gap-1.5">
                             <AttrChip>{saleTypeLabel(sale.type)}</AttrChip>
                             {data.spansCutover && <AttrChip>{sale.source === 'buddyx' ? 'BuddyX' : 'Infloww'}</AttrChip>}
-                            {sale.transfer && (
-                              <span className="text-[11px] text-zinc-300">
-                                Transferred{sale.transfer.fromUserId ? ` from ${data.names[sale.transfer.fromUserId] ?? 'another agent'}` : ''}
+                            {sale.status === 'reverse' && <span className="text-[11px] text-red-400">Reversed</span>}
+                            {sale.disputeId && (
+                              <span className={cn('text-[11px]', flagged.stale.has(sale.saleId) ? 'text-orange-400' : 'text-zinc-300')}>
+                                {flagged.stale.has(sale.saleId) ? 'Locked by a decided dispute' : 'Disputed'}
                               </span>
                             )}
-                            {sale.disputeId && <span className="text-[11px] text-zinc-300">Disputed</span>}
-                            {sale.attributionConflict && <span className="text-[11px] text-orange-400">BuddyX disagrees</span>}
+                            {flagged.duplicates.has(sale.saleId) && <span className="text-[11px] text-orange-400">Possible duplicate</span>}
+                            {flagged.zero.has(sale.saleId) && <span className="text-[11px] text-orange-400">$0</span>}
+                            {sale.vanishedAfterFinalise && <span className="text-[11px] text-orange-400">Gone from BuddyX after finalising</span>}
                             {sale.removedAt && (
                               <span className="text-[11px] text-zinc-400">
                                 Removed {formatSaleDateTime(sale.removedAt, timezone)} — no longer in BuddyX
@@ -464,6 +620,23 @@ export default function AdminSales({
                         <td className="max-w-[12rem] px-3 py-2"><FanLabel name={sale.fanName} fanId={sale.fanId} className="block" /></td>
                         <td className={cn('whitespace-nowrap px-3 py-2 text-right tabular-nums', sale.removedAt ? 'text-zinc-400 line-through' : signedMoneyClass(sale.signedGross))}>
                           {formatUsd(sale.signedGross)}
+                        </td>
+                        <td className={cn('whitespace-nowrap px-3 py-2 text-right tabular-nums', sale.removedAt ? 'text-zinc-400 line-through' : 'text-zinc-300')}>
+                          {formatUsd(net(sale.signedGross))}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-1 text-right">
+                          {sale.source === 'buddyx' && !sale.removedAt && (
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              className="h-6 text-zinc-300"
+                              disabled={Boolean(sale.disputeId) && !flagged.stale.has(sale.saleId)}
+                              title={sale.disputeId && !flagged.stale.has(sale.saleId) ? 'An open dispute holds this sale — rule on it first' : undefined}
+                              onClick={() => setReassigning(sale)}
+                            >
+                              Reassign
+                            </Button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -478,6 +651,20 @@ export default function AdminSales({
             )}
           </section>
         </>
+      )}
+
+      {data && (
+        <ReassignSaleDialog
+          sale={reassigning}
+          names={data.names}
+          timezone={timezone}
+          authed={authed}
+          onOpenChange={open => !open && setReassigning(null)}
+          onDone={async () => {
+            setReassigning(null);
+            await load(true);
+          }}
+        />
       )}
 
       {/* ── Machinery, collapsed ── */}
@@ -500,6 +687,192 @@ export default function AdminSales({
 }
 
 // ─── Pieces ──────────────────────────────────────────────────────────
+
+const LEDGER_COLUMNS: Array<{ label: string; right?: boolean }> = [
+  { label: 'When' },
+  { label: 'Held by' },
+  { label: 'BuddyX credits' },
+  { label: 'Creator' },
+  { label: 'Type' },
+  { label: 'Fan' },
+  { label: 'Gross', right: true },
+  { label: 'Net', right: true },
+];
+
+const NOBODY = '__nobody__';
+
+/**
+ * Reassign one BuddyX sale — Bluu Backend is the source of truth, so this is
+ * the fix an admin used to make in BuddyX (which cannot move a PPV at all).
+ * The choice that matches BuddyX is offered first and labelled, because
+ * "put it back" is the most common correction. A reason is required: it is
+ * shown on the row and on the agent's report.
+ *
+ * The server re-checks everything (open dispute, finalised months, archived
+ * target) inside a transaction; a refusal keeps the dialog open with the
+ * choice and the reason intact.
+ */
+function ReassignSaleDialog({
+  sale,
+  names,
+  timezone,
+  authed,
+  onOpenChange,
+  onDone,
+}: {
+  sale: SalarySale | null;
+  names: Record<string, string>;
+  timezone: string;
+  authed: Authed;
+  onOpenChange: (open: boolean) => void;
+  onDone: () => Promise<void>;
+}) {
+  const open = sale !== null;
+  const { users } = useBasicUsers(open);
+  const [target, setTarget] = useState<string>('');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setTarget('');
+    setReason('');
+    setError(null);
+  }, [sale?.saleId]);
+
+  const allNames = useMemo(
+    () => ({ ...Object.fromEntries(users.map(u => [u.uid, u.displayName])), ...names }),
+    [users, names],
+  );
+  const nameOf = (uid: string | null) => holderName(uid, allNames);
+  const agents = useMemo(() => activeChatAgents(users).filter(u => u.uid !== sale?.sourceUserId), [users, sale?.sourceUserId]);
+
+  if (!sale) return null;
+  const toUserId = target === NOBODY ? null : target || undefined;
+  const backToBuddyx = toUserId !== undefined && toUserId === sale.sourceUserId;
+  // The server's own rule, so the button and the refusal can never disagree.
+  const unchanged =
+    toUserId !== undefined &&
+    reassignRefusal(
+      { source: sale.source, userId: sale.userId, sourceUserId: sale.sourceUserId, hasTransfer: Boolean(sale.transfer), removed: false, disputeId: null, month: sale.month },
+      toUserId,
+      () => false,
+    ) === 'same';
+  const gross = formatUsd(sale.signedGross);
+  const consequence = unchanged
+    ? 'It is already held there.'
+    : [
+        backToBuddyx && 'Clears the override — the sale matches BuddyX again.',
+        sale.userId ? `${nameOf(sale.userId)} loses ${gross} gross.` : `${gross} gross, unassigned until now.`,
+        toUserId ? `${nameOf(toUserId)} gains it.` : 'It will count toward nobody.',
+        `Both agents’ ${sale.month} figures recompute.`,
+      ]
+        .filter(Boolean)
+        .join(' ');
+
+  async function submit() {
+    if (toUserId === undefined || !sale) return;
+    if (reason.trim().length < 3) {
+      setError('Say why — it is shown on the ledger and on the agent’s report.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await authed(`/api/ca-sales/${encodeURIComponent(sale.saleId)}/transfer`, {
+        method: 'PUT',
+        body: JSON.stringify({ toUserId, reason: reason.trim() }),
+      });
+      toast.success(backToBuddyx ? 'Sale back on BuddyX’s attribution' : `Sale reassigned to ${nameOf(toUserId)}`);
+      await onDone();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not reassign the sale';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={next => !busy && onOpenChange(next)}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Reassign sale</DialogTitle>
+          <DialogDescription>
+            Moves the sale in Bluu Backend. Pay follows it, and later BuddyX syncs keep it.
+          </DialogDescription>
+        </DialogHeader>
+
+        <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1.5 text-sm">
+          <dt className="text-zinc-400">Sale</dt>
+          <dd className="flex flex-wrap items-center gap-1.5">
+            <span className="tabular-nums">{formatUsd(sale.signedGross)}</span>
+            <span className="text-zinc-400">gross ·</span>
+            <AttrChip>{saleTypeLabel(sale.type)}</AttrChip>
+            <span className="tabular-nums text-zinc-400">{formatSaleDateTime(sale.occurredAt, timezone)}</span>
+          </dd>
+          <dt className="text-zinc-400">Creator · fan</dt>
+          <dd className="flex min-w-0 items-center gap-1.5">
+            {sale.creatorId ? <CreatorChip creatorId={sale.creatorId} name={sale.creatorName || undefined} size="xs" /> : sale.creatorName || '—'}
+            <span className="text-zinc-400">·</span>
+            <FanLabel name={sale.fanName} fanId={sale.fanId} className="min-w-0" />
+          </dd>
+          <dt className="text-zinc-400">BuddyX credits</dt>
+          <dd>{buddyxCreditName(sale, allNames)}</dd>
+          <dt className="text-zinc-400">Held by</dt>
+          <dd className="flex flex-wrap items-center gap-1.5">
+            {nameOf(sale.userId)}
+            <SaleHolderNote sale={sale} names={names} />
+          </dd>
+          <dt className="text-zinc-400">Sale ID</dt>
+          <dd className="font-mono text-xs text-zinc-300">{sale.saleId}</dd>
+        </dl>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="reassign-target" className="text-xs text-zinc-400">Move to</Label>
+          <Select value={target} onValueChange={v => { setTarget(v); setError(null); }}>
+            <SelectTrigger id="reassign-target" size="sm" className="w-full">
+              <SelectValue placeholder="Pick an agent" />
+            </SelectTrigger>
+            <SelectContent>
+              {sale.sourceUserId && (
+                <SelectItem value={sale.sourceUserId}>{nameOf(sale.sourceUserId)} — matches BuddyX</SelectItem>
+              )}
+              {agents.map(u => <SelectItem key={u.uid} value={u.uid}>{u.displayName}</SelectItem>)}
+              <SelectItem value={NOBODY}>Nobody (unassigned){sale.sourceUserId === null ? ' — matches BuddyX' : ''}</SelectItem>
+            </SelectContent>
+          </Select>
+          {toUserId !== undefined && (
+            <p className="text-[11px] text-zinc-400" aria-live="polite">{consequence}</p>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="reassign-reason" className="text-xs text-zinc-400">Why</Label>
+          <Textarea
+            id="reassign-reason"
+            value={reason}
+            maxLength={500}
+            rows={2}
+            onChange={e => { setReason(e.target.value); setError(null); }}
+            placeholder="Queen was on shift with this fan; BuddyX credited the sender's account."
+          />
+        </div>
+
+        {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
+          <Button onClick={() => void submit()} disabled={busy || toUserId === undefined || unchanged}>
+            {busy && <Loader2Icon className="activity-spinner size-3.5 animate-spin" aria-hidden />}
+            Reassign
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function Section({
   title,
@@ -715,11 +1088,7 @@ function MappingSection({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__">Automatic (by email)</SelectItem>
-                      {users
-                        // Rule 6: archived users stay out of pickers.
-                        .filter(u => u.groups?.includes('CA') && !u.isArchived)
-                        .sort((a, b) => a.displayName.localeCompare(b.displayName))
-                        .map(u => <SelectItem key={u.uid} value={u.uid}>{u.displayName}</SelectItem>)}
+                      {activeChatAgents(users).map(u => <SelectItem key={u.uid} value={u.uid}>{u.displayName}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 )}

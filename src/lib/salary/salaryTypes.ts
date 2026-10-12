@@ -248,20 +248,30 @@ export interface DashboardSalaryMonth extends SalaryMonthResult {
 // ─── Sales ───────────────────────────────────────────────────────────
 
 /**
- * A sale moved from one agent to another by an approved dispute.
+ * Bluu Backend's override of who holds a sale — an approved dispute, or an
+ * admin reassigning it on CA Admin → Sales.
  *
- * Bluu Backend is the source of truth for who holds a sale once a dispute has
- * moved it: a later sync never clears a transfer, whatever the source system
+ * Bluu Backend is the source of truth for who holds a sale once it has been
+ * moved: a later sync never clears a transfer, whatever the source system
  * says (documentation/buddyx.md §4).
  */
 export interface SaleTransfer {
-  /** The holder it was moved off. `null` for an unassigned tip. */
+  kind: 'dispute' | 'admin';
+  /** The holder it was moved off. `null` for an unassigned sale. */
   fromUserId: string | null;
-  toUserId: string;
-  disputeId: string;
+  /** `null` only when an admin reassigned the sale to nobody. */
+  toUserId: string | null;
+  disputeId: string | null;
+  reason: string | null;
   approvedBy: string;
   approvedAt: string;
 }
+
+/**
+ * Why a sale is held where it is — `source` means exactly where BuddyX (or the
+ * Infloww export) put it.
+ */
+export type SaleAssignment = 'source' | 'dispute' | 'admin';
 
 /** One sale row, serialised. Infloww rows were imported; BuddyX rows are synced. */
 export interface SalarySale {
@@ -297,6 +307,8 @@ export interface SalarySale {
   kind: SaleKind;
   /** Resolved creator or sub-account id, when known. */
   creatorId: string | null;
+  /** BuddyX model id; `null` on Infloww rows. Part of the duplicate fingerprint (`saleMatchKey`). */
+  modelId: string | null;
   /** The uid the source attributes the sale to, before any transfer. */
   sourceUserId: string | null;
   transfer: SaleTransfer | null;
@@ -306,8 +318,16 @@ export interface SalarySale {
   removedAt: string | null;
   /** BuddyX chatter id that matched no Bluu user. */
   unmappedChatterId: string | null;
-  /** BuddyX re-attributed a sale after a dispute had moved it. Admin attention. */
+  /** BuddyX re-attributed a sale after it had been moved here. Admin attention. */
   attributionConflict: boolean;
+  /** Why it is held where it is. Derived from `transfer`. */
+  assignment: SaleAssignment;
+  /**
+   * `false` when Bluu Backend holds the sale on someone other than the agent
+   * BuddyX credits (`sourceUserId`) — `assignment` says why. Always `true` for
+   * Infloww rows.
+   */
+  matchesSource: boolean;
   /** The row vanished from BuddyX inside a finalised month, so it was left counting. */
   vanishedAfterFinalise: boolean;
 }

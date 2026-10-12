@@ -203,6 +203,11 @@ export interface Creator {
   parentCreatorId?: string | null;
   /** The owning creator's name, for grouped display. */
   parentStageName?: string | null;
+  /**
+   * Archived (for a sub-account: it or its parent). Only `useCreatorMap` holds
+   * these — history must still name them; pickers never offer them.
+   */
+  isArchived?: boolean;
 }
 
 export const TYPE_LABELS: Record<CRType, string> = {

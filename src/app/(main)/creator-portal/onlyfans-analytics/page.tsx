@@ -23,7 +23,7 @@ import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
 import { formatCount, formatDuration, formatShare } from '@/lib/buddyx/analyticsFormat';
 import { CREATOR_HISTORY_START_DAY } from '@/lib/buddyx/constants';
 import { SEQUENTIAL_COLOR, SOURCE_MIX_COLORS } from '@/lib/buddyx/chartColors';
-import type { CreatorAnalytics } from '@/lib/buddyx/analyticsTypes';
+import type { CreatorAnalytics, CreatorIdentity } from '@/lib/buddyx/analyticsTypes';
 
 /**
  * OnlyFans Analytics — `/creator-portal/onlyfans-analytics` (internal only).
@@ -132,9 +132,54 @@ export default function OnlyFansAnalyticsPage() {
 }
 
 
+/**
+ * How an account that is not an active Bluu creator is marked. History keeps
+ * archived creators (named, greyed) and shows BuddyX creators Bluu cannot place
+ * (orange — someone should map them in CA Admin → Sales → Mapping).
+ */
+const STATUS_NOTE: Record<Exclude<CreatorIdentity['status'], 'active'>, { label: string; title: string; className: string }> = {
+  archived: {
+    label: 'Archived',
+    title: 'Archived in Bluu — shown only for periods with earnings.',
+    className: 'bg-white/[0.08] text-zinc-400',
+  },
+  unmapped: {
+    label: 'Not in Bluu',
+    title: 'A BuddyX creator not linked to any Bluu creator. Link it in CA Admin → Sales → Mapping.',
+    className: 'bg-orange-500/15 text-orange-400',
+  },
+  missing: {
+    label: 'Deleted in Bluu',
+    title: 'BuddyX is linked to a creator that no longer exists in Bluu. Re-link it in CA Admin → Sales → Mapping.',
+    className: 'bg-orange-500/15 text-orange-400',
+  },
+};
+
+function AccountStatus({ identity }: { identity: CreatorIdentity | undefined }) {
+  if (!identity || identity.status === 'active') return null;
+  const note = STATUS_NOTE[identity.status];
+  return (
+    <span title={note.title} className={cn('shrink-0 rounded-full px-1.5 py-px text-[10px] font-medium', note.className)}>
+      {note.label}
+    </span>
+  );
+}
+
 function Body({ data, selected, onSelect }: { data: CreatorAnalytics; selected: string | null; onSelect: (id: string | null) => void }) {
   const creators = useCreatorMap();
-  const name = (id: string | null) => (id ? creators.get(id)?.stageName ?? 'Unknown creator' : 'All creators');
+  const identity = (id: string | null) => (id ? data.identities[id] : undefined);
+  const name = (id: string | null) => (id ? identity(id)?.name ?? creators.get(id)?.stageName ?? 'Unknown creator' : 'All creators');
+  // The client store holds active creators only, so a non-active account's name
+  // and face come from the response.
+  const chip = (id: string) => {
+    const who = identity(id);
+    return (
+      <span className="inline-flex max-w-full items-center gap-1.5">
+        <CreatorChip creatorId={id} size="xs" name={who?.name} photoURL={who?.photoThumb} />
+        <AccountStatus identity={who} />
+      </span>
+    );
+  };
   const showCutover = data.from < data.cutoverDay && data.to >= data.cutoverDay;
   const subscriberDays = data.daily.filter(d => d.day < data.subscribersFrom);
 
@@ -184,8 +229,9 @@ function Body({ data, selected, onSelect }: { data: CreatorAnalytics; selected: 
                 )}
               >
                 <span className="flex items-center gap-2">
-                  <CreatorAvatar creatorId={card.creatorId} className="size-6" />
-                  <span className="min-w-0 truncate text-sm font-medium">{name(card.creatorId)}</span>
+                  <CreatorAvatar creatorId={card.creatorId} name={identity(card.creatorId)?.name} photoURL={identity(card.creatorId)?.photoThumb} className="size-6" />
+                  <span className={cn('min-w-0 truncate text-sm font-medium', identity(card.creatorId)?.status === 'archived' && 'text-zinc-400')}>{name(card.creatorId)}</span>
+                  <AccountStatus identity={identity(card.creatorId)} />
                 </span>
                 <span className="flex items-baseline justify-between gap-2">
                   <span className="text-lg font-semibold tabular-nums">
@@ -329,7 +375,7 @@ function Body({ data, selected, onSelect }: { data: CreatorAnalytics; selected: 
                       <span className="block truncate" title={l.url ?? undefined}>{l.name ?? l.linkId}</span>
                       <span className="text-[11px] text-zinc-400">{l.kind === 'free-trial' ? 'Free trial' : 'Tracking'}{l.archived ? ' · archived' : ''}</span>
                     </td>
-                    <td className="px-3 py-2">{l.creatorId ? <CreatorChip creatorId={l.creatorId} size="xs" /> : '—'}</td>
+                    <td className="px-3 py-2">{l.creatorId ? chip(l.creatorId) : '—'}</td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {l.transitions === null ? '—' : `${formatCount(l.transitions)} → ${formatCount(l.subscribers)}`}
                       {l.conversion !== null && <span className="block text-[11px] text-zinc-400">{formatShare(l.conversion)}</span>}
@@ -367,7 +413,7 @@ function Body({ data, selected, onSelect }: { data: CreatorAnalytics; selected: 
             <tbody className="divide-y divide-white/[0.045]">
               {data.comparison.map(row => (
                 <tr key={row.creatorId}>
-                  <td className="px-3 py-2"><CreatorChip creatorId={row.creatorId} size="xs" /></td>
+                  <td className="px-3 py-2">{chip(row.creatorId)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{formatUsd(row.gross)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{formatShare(row.share)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-zinc-400">

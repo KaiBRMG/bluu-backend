@@ -1,5 +1,6 @@
 /**
- * Disputes v2 — filing, verdicts and un-transfers, against `ca-sales`.
+ * Who holds a sale — disputes v2 (filing, verdicts, un-transfers) and admin
+ * reassignment from CA Admin → Sales, against `ca-sales`.
  *
  * Before BuddyX, an approved dispute changed nothing in Bluu Backend: an admin
  * fixed the CRM and the fix came back in the next export. BuddyX is read-only,
@@ -11,6 +12,10 @@
  *   change of its own.
  * - A sync never clears a transfer (`salesPlan.ts`); a BuddyX re-attribution
  *   after one is flagged for an admin, never applied.
+ * - An admin may also move a sale directly (`reassignSale`) — the same
+ *   `transfer` field with `kind: 'admin'` and a required reason, so it survives
+ *   a sync exactly as a dispute's move does.
+ * - Every change of holder appends to the sale's `assignmentLog`.
  * - A transfer never touches a finalised month, so "what we paid" never moves.
  *
  * The decisions are pure (`lib/disputes/disputeRules.ts`); this file runs them
@@ -24,7 +29,10 @@ import { adminDb } from '../firebase-admin';
 import {
   claimRefusal,
   groupByHolder,
+  lockIsStale,
   NO_ONE,
+  reassignRefusal,
+  REASSIGN_REFUSAL,
   transferDecision,
   TRANSFER_SKIP_LABEL,
   type ClaimableSale,
@@ -35,6 +43,12 @@ import { saleKindOf } from '../salary/saleTypes';
 import { notifyUsers } from './caNotifications';
 import { getUserById } from './userService';
 import type { CaSaleDocument } from '@/types/firestore';
+
+type AssignmentLogEntry = NonNullable<CaSaleDocument['assignmentLog']>[number];
+
+function logEntry(entry: Omit<AssignmentLogEntry, 'at'>): FieldValue {
+  return FieldValue.arrayUnion({ ...entry, at: Timestamp.now() });
+}
 
 const SALES = 'ca-sales';
 const DISPUTES = 'disputes';
@@ -90,7 +104,7 @@ export type FileOutcome =
   | { ok: false; refused: Array<{ saleId: string; reason: ClaimRefusal }> };
 
 /**
- * File one claim over up to 50 tips. All-or-nothing: if any tip cannot be
+ * File one claim over up to 50 sales. All-or-nothing: if any sale cannot be
  * claimed (it was locked by someone else a moment ago, say) nothing is written
  * and every refusal is returned, so the dialog can mark those rows and keep
  * the rest of the claim.
@@ -267,6 +281,9 @@ export async function applyAdminVerdict(params: {
         );
         if (decision === 'already') {
           result.transferred.push(ref.id);
+          // Held by the filer without this dispute moving it (BuddyX re-credited
+          // it meanwhile): nothing to move, but the claim's lock must go.
+          if (data?.disputeId === disputeId) tx.update(ref, { disputeId: null });
           continue;
         }
         if (decision !== 'transfer') {
@@ -278,15 +295,20 @@ export async function applyAdminVerdict(params: {
         const from = data!.userId ?? null;
         tx.update(ref, {
           transfer: {
+            kind: 'dispute',
             fromUserId: from,
             toUserId: createdBy,
             disputeId,
+            sourceUserIdAtTransfer: data!.sourceUserId ?? null,
+            reason: null,
             approvedBy: actorUid,
             approvedAt: Timestamp.now(),
           },
           transferFromUserId: from,
           userId: createdBy,
           disputeId: null,
+          attributionConflict: false,
+          assignmentLog: logEntry({ action: 'dispute', fromUserId: from, toUserId: createdBy, by: actorUid, reason: null, disputeId }),
         });
         result.transferred.push(ref.id);
         touched.add(`${createdBy}|${data!.month}`);
@@ -307,6 +329,15 @@ export async function applyAdminVerdict(params: {
           transferFromUserId: null,
           userId: data.sourceUserId ?? null,
           disputeId: null,
+          attributionConflict: false,
+          assignmentLog: logEntry({
+            action: 'revert',
+            fromUserId: data.userId ?? null,
+            toUserId: data.sourceUserId ?? null,
+            by: actorUid,
+            reason: 'Dispute verdict changed to rejected',
+            disputeId,
+          }),
         });
         touched.add(`${createdBy}|${data.month}`);
         if (data.sourceUserId) touched.add(`${data.sourceUserId}|${data.month}`);
@@ -338,48 +369,120 @@ export async function releaseDisputeLocks(disputeId: string): Promise<void> {
   });
 }
 
-// ─── Un-transfer ─────────────────────────────────────────────────────
+// ─── Reassignment and un-transfer ────────────────────────────────────
 
-export type UntransferOutcome =
-  | { ok: true; disputeId: string; touched: string[] }
+export type ReassignOutcome =
+  | { ok: true; disputeId: string | null; touched: string[] }
   | { ok: false; status: number; error: string };
 
 /**
- * Revert one transfer — the escape hatch for a wrong approval, which no longer
- * has a CRM to undo it in. Open months only, for both parties. The sale goes
- * back to whoever the source attributes it to *now*, and the dispute records
- * who reverted it, when and why.
+ * An admin moves one sale to `toUserId` (`null` = nobody, `'source'` = back
+ * onto whoever BuddyX credits now, read inside the transaction), from CA Admin →
+ * Sales. Bluu Backend is the source of truth for who holds a sale, so this is
+ * a `transfer` (`kind: 'admin'`, reason required) that every later sync keeps.
+ *
+ * Moving it to the agent BuddyX credits clears the transfer instead — the sale
+ * matches BuddyX again. If the transfer being replaced or cleared came from a
+ * dispute, the dispute records it under `untransfers`, so its detail shows
+ * that sale as reverted rather than still moved.
+ *
+ * The rules (`reassignRefusal`) run inside the transaction: open months only
+ * for both agents, never under an open dispute, BuddyX rows only.
  */
-export async function untransferSale(params: { saleId: string; actorUid: string; reason: string }): Promise<UntransferOutcome> {
+export async function reassignSale(params: {
+  saleId: string;
+  toUserId: string | null | 'source';
+  actorUid: string;
+  reason: string;
+}): Promise<ReassignOutcome> {
   const { saleId, actorUid, reason } = params;
   const ref = adminDb.collection(SALES).doc(saleId);
 
-  const outcome = await adminDb.runTransaction(async (tx): Promise<UntransferOutcome> => {
+  return adminDb.runTransaction(async (tx): Promise<ReassignOutcome> => {
     const snap = await tx.get(ref);
-    if (!snap.exists) return { ok: false, status: 404, error: 'Sale not found' };
-    const sale = snap.data() as CaSaleDocument;
-    if (!sale.transfer) return { ok: false, status: 409, error: 'This sale has not been transferred.' };
+    const sale = snap.exists ? (snap.data() as CaSaleDocument) : null;
 
-    const to = sale.transfer.toUserId;
-    const back = sale.sourceUserId ?? null;
-    const pairs = new Set([`${to}|${sale.month}`]);
-    if (back) pairs.add(`${back}|${sale.month}`);
+    const source = sale?.sourceUserId ?? null;
+    const toUserId = params.toUserId === 'source' ? source : params.toUserId;
+
+    // A lock whose dispute is already decided is stale: it does not block the
+    // move, and the move clears it.
+    let openLock = sale?.disputeId ?? null;
+    if (openLock && lockIsStale(await tx.get(adminDb.collection(DISPUTES).doc(openLock)))) openLock = null;
+
+    const pairs = new Set<string>();
+    if (sale?.userId) pairs.add(`${sale.userId}|${sale.month}`);
+    if (sale && toUserId) pairs.add(`${toUserId}|${sale.month}`);
     const finalized = await finalizedIn(tx, pairs);
-    if (finalized.size > 0) {
-      return { ok: false, status: 409, error: 'This month is finalised for one of the agents. Reopen it first.' };
+
+    const refusal = reassignRefusal(
+      sale && {
+        source: sale.source ?? 'infloww',
+        userId: sale.userId ?? null,
+        sourceUserId: source,
+        hasTransfer: Boolean(sale.transfer),
+        removed: Boolean(sale.removedAt),
+        disputeId: openLock,
+        month: sale.month,
+      },
+      toUserId,
+      (uid, month) => finalized.has(`${uid}|${month}`),
+    );
+    if (refusal || !sale) {
+      const { status, message } = REASSIGN_REFUSAL[refusal ?? 'not-found'];
+      return { ok: false, status, error: message };
     }
 
-    const disputeId = sale.transfer.disputeId;
-    tx.update(ref, { transfer: null, transferFromUserId: null, userId: back, disputeId: null });
-    tx.set(
-      adminDb.collection(DISPUTES).doc(disputeId),
-      { untransfers: FieldValue.arrayUnion({ saleId, by: actorUid, at: Timestamp.now(), reason }) },
-      { merge: true },
-    );
-    const touched = [`${to}|${sale.month}`];
-    if (back) touched.push(`${back}|${sale.month}`);
-    return { ok: true, disputeId, touched };
-  });
+    const from = sale.userId ?? null;
+    const backToSource = toUserId === source;
+    const replacedDisputeId = sale.transfer?.disputeId ?? null;
+    tx.update(ref, {
+      transfer: backToSource
+        ? null
+        : {
+            kind: 'admin',
+            fromUserId: from,
+            toUserId,
+            disputeId: null,
+            sourceUserIdAtTransfer: source,
+            reason,
+            approvedBy: actorUid,
+            approvedAt: Timestamp.now(),
+          },
+      transferFromUserId: backToSource ? null : from,
+      userId: toUserId,
+      disputeId: null,
+      attributionConflict: false,
+      assignmentLog: logEntry({
+        action: backToSource ? 'revert' : 'admin',
+        fromUserId: from,
+        toUserId,
+        by: actorUid,
+        reason,
+        disputeId: replacedDisputeId,
+      }),
+    });
+    if (replacedDisputeId) {
+      tx.set(
+        adminDb.collection(DISPUTES).doc(replacedDisputeId),
+        { untransfers: FieldValue.arrayUnion({ saleId, by: actorUid, at: Timestamp.now(), reason }) },
+        { merge: true },
+      );
+    }
 
-  return outcome;
+    const touched: string[] = [];
+    if (from) touched.push(`${from}|${sale.month}`);
+    if (toUserId && toUserId !== from) touched.push(`${toUserId}|${sale.month}`);
+    return { ok: true, disputeId: replacedDisputeId, touched };
+  });
+}
+
+/**
+ * Revert one transfer — dispute or admin — the escape hatch for a wrong
+ * approval. The sale goes back to whoever BuddyX attributes it to *now*.
+ * A thin front on `reassignSale`, so there is one implementation of a holder
+ * change.
+ */
+export function untransferSale(params: { saleId: string; actorUid: string; reason: string }): Promise<ReassignOutcome> {
+  return reassignSale({ ...params, toUserId: 'source' });
 }

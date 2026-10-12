@@ -54,7 +54,7 @@ export const PUT = withAuth(async (
     let assignedCreatorIds: string[] | undefined;
     let assignedOvertimeIds: string[] | undefined;
     if ('creatorIds' in body) {
-      const assigned = await normaliseAccountIds(creatorIds);
+      const assigned = await normaliseAccountIds(creatorIds, undefined, existing.creatorIds ?? []);
       if (assigned.invalid.length > 0) {
         return NextResponse.json(
           {

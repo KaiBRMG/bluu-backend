@@ -5,18 +5,18 @@
  *
  * The two attribution sentences are **copy of record** — the plan fixes their
  * wording, and they appear on the Sales Report, the dispute dialog, Chatter
- * Analytics and CA Admin → Sales. One constant each, so the sentence an agent
- * reads beside a tile is the sentence the server returns when it refuses a PPV.
+ * Analytics and CA Admin → Sales. One constant each. They describe how BuddyX
+ * attributes a sale; who Bluu Backend holds it on can differ after a dispute or
+ * an admin reassignment, which every ledger row states (`SaleHolderNote`).
  */
 import { Info, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { CLAIM_REFUSAL_LABEL } from '@/lib/disputes/disputeRules';
 
 export const TIPS_ATTRIBUTION = 'Tips are assigned to the chat agent on shift at the time of sale';
-export const PPV_ATTRIBUTION = CLAIM_REFUSAL_LABEL.ppv;
+export const PPV_ATTRIBUTION = 'PPV sales are assigned to the sender';
 
 /**
  * Gross vs net, said the same way everywhere. Every money figure on a BuddyX

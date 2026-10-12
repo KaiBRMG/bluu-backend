@@ -1,18 +1,21 @@
 /**
  * GET /api/ca-sales/search?creatorId&from=YYYY-MM-DD&to=YYYY-MM-DD[&fanId]
  *
- * The tip search behind the New dispute dialog — the one place an agent sees
+ * The sale search behind the New dispute dialog — the one place an agent sees
  * sales that are not their own, so it is deliberately narrow (D6):
  *
- * - **Tips only.** PPVs belong to their sender and never appear.
+ * - **Tips and PPVs.** PPVs were left out while a fix had to be made in BuddyX,
+ *   which cannot reassign one; an approval now moves the sale inside Bluu
+ *   Backend, so a PPV is claimable exactly like a tip.
  * - **Scoped.** A creator is required, and the window is at most 7 days, inside
  *   the open months, after the cutover. There is no "show me everything".
  * - **No totals.** Each row names its holder (so the agent knows whom they are
  *   claiming from), but nothing sums a colleague's month.
- * - The caller's own tips and removed rows are left out.
+ * - The caller's own sales and removed rows are left out.
  *
  * `ca-dashboard` page access — the same tier that may file. Served by the
- * `creatorId ASC, kind ASC, occurredAt ASC` composite index. Browser-cached
+ * `creatorId ASC, kind ASC, occurredAt ASC` composite index — `kind in
+ * ['tip', 'ppv']` is served as equality, so PPVs needed no new index. Browser-cached
  * 30s (`private` + `Vary: Authorization`, rule 9i): a search re-run while the
  * agent flips between two creators should not re-read the same rows.
  */
@@ -35,6 +38,7 @@ const MAX_ROWS = 500;
 export interface SaleSearchRow {
   saleId: string;
   occurredAt: string;
+  kind: 'tip' | 'ppv';
   type: string;
   gross: number;
   fanId: string;
@@ -80,12 +84,13 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     const snap = await adminDb
       .collection('ca-sales')
       .where('creatorId', '==', creatorId)
-      .where('kind', '==', 'tip')
+      .where('kind', 'in', ['tip', 'ppv'])
       .where('occurredAt', '>=', Timestamp.fromMillis(queryStart))
       .where('occurredAt', '<', Timestamp.fromMillis(end))
       .orderBy('occurredAt', 'asc')
       .limit(MAX_ROWS + 1)
       .get();
+    const truncated = snap.size > MAX_ROWS;
 
     const docs = snap.docs
       .slice(0, MAX_ROWS)
@@ -108,6 +113,7 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     const rows: SaleSearchRow[] = docs.map(s => ({
       saleId: s.saleId,
       occurredAt: s.occurredAt?.toDate?.()?.toISOString() ?? '',
+      kind: s.kind === 'ppv' ? 'ppv' : 'tip',
       type: s.type,
       gross: s.grossRevenue,
       fanId: s.fanId ?? '',
@@ -118,7 +124,7 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     }));
 
     return NextResponse.json(
-      { rows, truncated: snap.size > MAX_ROWS },
+      { rows, truncated },
       { headers: { 'Cache-Control': 'private, max-age=30', Vary: 'Authorization' } },
     );
   } catch (err) {

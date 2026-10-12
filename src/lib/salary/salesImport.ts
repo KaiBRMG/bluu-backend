@@ -236,6 +236,9 @@ export function parseSalesSheet(
       removedAt: null,
       unmappedChatterId: null,
       attributionConflict: false,
+      assignment: 'source',
+      modelId: null,
+      matchesSource: true,
       vanishedAfterFinalise: false,
     });
   }

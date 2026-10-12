@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { ArrowDownLeft, ArrowUpRight, Loader2Icon, RotateCcw, Search, Trash2, Undo2 } from 'lucide-react';
+import { ArrowUpRight, Loader2Icon, RotateCcw, Search, Trash2, Undo2 } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -37,6 +37,7 @@ import {
 import { getCache, setCache } from '@/lib/queryCache';
 import { formatUsd, pluralise, signedMoneyClass } from '@/lib/salary/salaryFormat';
 import { HintedLabel, SALARY_DAY_HINT, SaleWhen } from './SalaryClock';
+import { SaleHolderNote } from './SaleHolderNote';
 import { formatDayLabel, formatDayLabelWithWeekday, toDayKey } from '@/lib/salary/salaryDate';
 import { SALARY_TZ_OFFSET_MINUTES, SALES_CUTOVER_AT } from '@/lib/salary/salaryConstants';
 import { saleTypeLabel } from '@/lib/salary/saleTypes';
@@ -61,9 +62,14 @@ const CUTOVER_LABEL = (() => {
  * and then it is a dispute away.
  *
  * Reversals are shown, not hidden, in status red with a negative amount. A
- * refund the agent cannot see is a figure they cannot reconcile. Sales a
- * dispute moved away from the agent are listed at the foot, each naming the
- * dispute — what left their month, and why.
+ * refund the agent cannot see is a figure they cannot reconcile.
+ *
+ * Bluu Backend is the source of truth for sales, so this report can disagree
+ * with the agent's BuddyX dashboard — never silently. A sale held on them that
+ * BuddyX credits elsewhere carries a `SaleHolderNote` saying why (dispute or
+ * admin); sales BuddyX credits to them that are held elsewhere are listed at
+ * the foot ("In BuddyX, held elsewhere"). Between the two, every difference
+ * from BuddyX is on the page.
  */
 
 /** Matches `useSalaryMonth`: an agent who has just been told a figure changed
@@ -291,8 +297,9 @@ export function SalesReport({
           meta={`${pluralise(data.totals.count, 'sale')} · ${formatUsd(data.totals.net)} net after the platform's share`}
         />
         <KpiTile
-          label="Transfers"
+          label="Differs from BuddyX"
           basis="gross"
+          tip="Sales Bluu Backend holds differently from BuddyX — moved by an approved dispute or an admin. Pay follows Bluu Backend."
           value={
             data.transfers.inCount + data.transfers.outCount === 0
               ? '—'
@@ -300,8 +307,8 @@ export function SalesReport({
           }
           meta={
             data.transfers.inCount + data.transfers.outCount === 0
-              ? 'No disputes moved a sale'
-              : `${data.transfers.inCount} in · ${data.transfers.outCount} out`
+              ? 'Every sale matches BuddyX'
+              : `${data.transfers.inCount} moved to you · ${data.transfers.outCount} moved away`
           }
           href={data.transfers.outCount > 0 ? '#transferred-away' : undefined}
         />
@@ -420,6 +427,7 @@ export function SalesReport({
             names={data.names}
             timezone={timezone}
             showSource={data.spansCutover}
+            viewerUid={userId ?? user?.uid ?? null}
             renderAction={
               allowDelete
                 ? sale =>
@@ -493,9 +501,10 @@ export function SalesReport({
       {/* ── What left this month ── */}
       {data.transferredAway.length > 0 && (
         <section id="transferred-away" className="space-y-2 pt-2" aria-labelledby="transferred-away-title">
-          <h2 id="transferred-away-title" className="text-sm font-semibold">Transferred away</h2>
+          <h2 id="transferred-away-title" className="text-sm font-semibold">In BuddyX, held elsewhere</h2>
           <p className="text-[11px] text-zinc-400">
-            Sales an approved dispute moved to another agent. They no longer count toward this month.
+            BuddyX credits these to {userId && userId !== user?.uid ? 'this agent' : 'you'}, but an approved dispute or an admin moved them.
+            They don&apos;t count toward this month — pay follows Bluu Backend.
           </p>
           <SalesTable rows={data.transferredAway} names={data.names} timezone={timezone} showSource={false} away />
         </section>
@@ -525,12 +534,14 @@ function SalesTable({
   showSource,
   away = false,
   renderAction,
+  viewerUid = null,
 }: {
   rows: SalarySale[];
   names: Record<string, string>;
   timezone: string;
   showSource: boolean;
   away?: boolean;
+  viewerUid?: string | null;
   renderAction?: (sale: SalarySale) => React.ReactNode;
 }) {
   return (
@@ -580,17 +591,12 @@ function SalesTable({
                   {sale.status === 'reverse' && (
                     <span className="rounded-full bg-red-500/10 px-1.5 py-0.5 text-[11px] font-medium text-red-400">Reversed</span>
                   )}
-                  {!away && sale.transfer && (
-                    <span className="inline-flex items-center gap-1 text-[11px] text-zinc-300">
-                      <ArrowDownLeft className="size-3" aria-hidden />
-                      Transferred in
-                      {sale.transfer.fromUserId ? ` from ${names[sale.transfer.fromUserId] ?? 'another agent'}` : ''}
-                    </span>
-                  )}
+                  {!away && <SaleHolderNote sale={sale} names={names} viewerUid={viewerUid} />}
                   {away && (
                     <span className="inline-flex items-center gap-1 text-[11px] text-zinc-300">
                       <ArrowUpRight className="size-3" aria-hidden />
-                      Moved to {sale.userId ? names[sale.userId] ?? 'another agent' : 'another agent'}
+                      {sale.userId ? `Moved to ${names[sale.userId] ?? 'another agent'}` : 'Unassigned'}
+                      {sale.assignment === 'admin' ? ' by an admin' : ' by a dispute'}
                     </span>
                   )}
                   {!away && sale.disputeId && <span className="text-[11px] text-zinc-300">Disputed</span>}

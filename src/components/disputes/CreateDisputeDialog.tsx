@@ -1,20 +1,22 @@
 'use client';
 
 /**
- * File a dispute — v2: claim specific tips, found by search.
+ * File a dispute — v2: claim specific sales (tips and PPVs), found by search.
  *
  * An approved dispute now *moves the sale* inside Bluu Backend (BuddyX is
  * read-only), so the agent no longer types a sale's details; they pick the
- * tips themselves. The search is deliberately narrow (D6): one creator, a
- * window of at most 7 days, tips only, no totals.
+ * sales themselves. The search is deliberately narrow (D6): one creator, a
+ * window of at most 7 days, no totals. PPVs are claimable like tips — they were
+ * refused only while BuddyX, which cannot reassign a PPV, was where the fix
+ * had to be made.
  *
- * **Selection persists across filter changes** — tips from two creators can go
+ * **Selection persists across filter changes** — sales from two creators can go
  * into one claim. That is the opposite call from the admin bulk bar, and it is
  * deliberate: here the selection *is* the claim being built, not an action on
  * the rows in view. The footer shows it whole, with the split it will become
  * (one dispute per current holder, D5).
  *
- * A refused submission (a tip locked by someone else a moment ago) keeps the
+ * A refused submission (a sale locked by someone else a moment ago) keeps the
  * dialog open with those rows marked in words. Nothing typed is lost.
  */
 
@@ -31,6 +33,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { SEGMENT_ITEM_CLASS } from '@/components/growth/growthUi';
 import { DatePicker } from '@/components/smm/shared/DatePicker';
 import { useAuth } from '@/components/AuthProvider';
 import { useBuddyxCreators } from '@/hooks/useBuddyxSync';
@@ -50,6 +54,7 @@ const MAX_WINDOW_DAYS = 7;
 interface SearchRow {
   saleId: string;
   occurredAt: string;
+  kind: 'tip' | 'ppv';
   type: string;
   gross: number;
   fanId: string;
@@ -69,10 +74,10 @@ interface CreateDisputeDialogProps {
   onSubmitted?: () => void | Promise<void>;
 }
 
-/** "1 dispute to Queen (2 tips), 1 to admin (unassigned)" — the split D5 will make. */
+/** "1 dispute to Queen (2 sales), 1 to admin (unassigned)" — the split D5 will make. */
 function describeSplit(groups: Array<{ label: string; count: number }>): string {
   return groups
-    .map((g, i) => `${i === 0 ? '1 dispute' : '1'} to ${g.label}${groups.length > 1 ? ` (${pluralise(g.count, 'tip')})` : ''}`)
+    .map((g, i) => `${i === 0 ? '1 dispute' : '1'} to ${g.label}${groups.length > 1 ? ` (${pluralise(g.count, 'sale')})` : ''}`)
     .join(', ');
 }
 
@@ -88,6 +93,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
   const [from, setFrom] = useState<Date | undefined>(() => new Date());
   const [to, setTo] = useState<Date | undefined>(() => new Date());
   const [fanId, setFanId] = useState('');
+  const [kind, setKind] = useState<'all' | 'tip' | 'ppv'>('all');
 
   const [rows, setRows] = useState<SearchRow[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -103,14 +109,17 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const fanNeedle = fanId.trim();
-  const visibleRows = rows && fanNeedle ? rows.filter(r => r.fanId === fanNeedle) : rows;
+  const visibleRows =
+    rows && (fanNeedle || kind !== 'all')
+      ? rows.filter(r => (!fanNeedle || r.fanId === fanNeedle) && (kind === 'all' || r.kind === kind))
+      : rows;
 
   const windowDays = from && to ? daysBetween(from, to) : 0;
   const windowError =
     from && to && to < from ? 'The end is before the start.' : windowDays > MAX_WINDOW_DAYS ? `At most ${MAX_WINDOW_DAYS} days.` : null;
 
-  // ── Search ── (by creator and window only; the fan filter is applied to the
-  // rows in hand, so typing a fan id costs no request)
+  // ── Search ── (by creator and window only; the fan and kind filters are
+  // applied to the rows in hand, so changing them costs no request)
   useEffect(() => {
     if (!open || !user || !creatorId || !from || !to || windowError) {
       setRows(null);
@@ -168,13 +177,14 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
     setCommentError(null);
     setSubmitError(null);
     setFanId('');
+    setKind('all');
   };
 
   async function submit() {
     if (!user) return;
     const text = comment.trim();
     if (!text) {
-      setCommentError('Say why these tips are yours — it is the whole basis of the decision.');
+      setCommentError('Say why these sales are yours — it is the whole basis of the decision.');
       return;
     }
     setSubmitting(true);
@@ -194,7 +204,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
         return;
       }
       const count = Array.isArray(body.disputes) ? body.disputes.length : 1;
-      toast.success(count === 1 ? 'Dispute submitted' : `${count} disputes submitted — one per agent holding a tip`);
+      toast.success(count === 1 ? 'Dispute submitted' : `${count} disputes submitted — one per agent holding a sale`);
       reset();
       onOpenChange(false);
       await onSubmitted?.();
@@ -217,7 +227,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
         <DialogHeader>
           <DialogTitle>New dispute</DialogTitle>
           <DialogDescription>
-            Find the tips that should be yours. An admin&apos;s approval moves them to your sales report.
+            Find the tips and PPVs that should be yours. An admin&apos;s approval moves them to your sales report.
           </DialogDescription>
         </DialogHeader>
 
@@ -251,17 +261,24 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
         </p>
 
         {/* ── Results ── */}
-        <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-          Tips <InfoTip text={TIPS_ATTRIBUTION} /> · amounts are gross
+        <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+          <ToggleGroup type="single" variant="outline" size="sm" value={kind} onValueChange={v => v && setKind(v as typeof kind)} aria-label="Kind">
+            <ToggleGroupItem value="all" className={SEGMENT_ITEM_CLASS}>All</ToggleGroupItem>
+            <ToggleGroupItem value="tip" className={SEGMENT_ITEM_CLASS}>Tips</ToggleGroupItem>
+            <ToggleGroupItem value="ppv" className={SEGMENT_ITEM_CLASS}>PPV</ToggleGroupItem>
+          </ToggleGroup>
+          <span className="inline-flex items-center gap-1">Tips <InfoTip text={TIPS_ATTRIBUTION} /></span>
+          <span className="inline-flex items-center gap-1">PPV <InfoTip text={PPV_ATTRIBUTION} /></span>
+          <span>· amounts are gross</span>
         </div>
         <div
           tabIndex={0}
           role="region"
-          aria-label="Tips found, scrollable"
+          aria-label="Sales found, scrollable"
           className="max-h-72 min-h-24 overflow-y-auto rounded-lg border border-white/[0.07] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50"
         >
           {!creatorId ? (
-            <p className="p-3 text-sm text-zinc-400">Pick a creator and a day to find tips.</p>
+            <p className="p-3 text-sm text-zinc-400">Pick a creator and a day to find sales.</p>
           ) : searching && !rows ? (
             <div className="space-y-2 p-3">
               {[0, 1, 2].map(i => <Skeleton key={i} className="h-9 w-full rounded-md" />)}
@@ -275,7 +292,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
             </div>
           ) : visibleRows && visibleRows.length === 0 ? (
             <p className="p-3 text-sm text-zinc-400">
-              No tips {fanNeedle ? `from fan ${fanNeedle} ` : ''}from this creator between {from && format(from, 'd MMM')} and {to && format(to, 'd MMM')}, other than your own.
+              No {kind === 'tip' ? 'tips' : kind === 'ppv' ? 'PPVs' : 'sales'} {fanNeedle ? `from fan ${fanNeedle} ` : ''}from this creator between {from && format(from, 'd MMM')} and {to && format(to, 'd MMM')}, other than your own.
             </p>
           ) : (
             <ul className="divide-y divide-white/[0.07]">
@@ -283,7 +300,8 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
                 const reason = refused.get(row.saleId) ?? (row.disputed ? 'Disputed' : row.finalised ? 'Finalised month' : null);
                 const checked = picked.has(row.saleId);
                 const disabled = reason !== null && !checked;
-                const id = `tip-${row.saleId}`;
+                const id = `sale-${row.saleId}`;
+                const noun = row.kind === 'ppv' ? 'PPV' : 'tip';
                 return (
                   <li key={row.saleId} className={cn('flex items-center gap-3 px-3 py-2 text-sm', checked && 'bg-action-blue/[0.10]')}>
                     <Checkbox
@@ -291,7 +309,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
                       checked={checked}
                       disabled={disabled}
                       onCheckedChange={v => toggle(row, v === true)}
-                      aria-label={`Claim the ${formatUsd(row.gross)} tip at ${formatSaleDateTime(row.occurredAt, timezone)}`}
+                      aria-label={`Claim the ${formatUsd(row.gross)} ${noun} at ${formatSaleDateTime(row.occurredAt, timezone)}`}
                       className="data-[state=checked]:border-[#2563eb] data-[state=checked]:bg-[#2563eb] data-[state=checked]:text-white"
                     />
                     <label htmlFor={id} className="w-28 shrink-0 tabular-nums text-zinc-400">
@@ -313,9 +331,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
           )}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-zinc-400">
-          <span className="inline-flex items-center gap-1.5">
-            PPVs aren&apos;t listed <InfoTip text={PPV_ATTRIBUTION} />
-          </span>
+          <span>An approved PPV moves to you in Bluu Backend, even though BuddyX keeps it on the sender.</span>
           {truncated && <span>Showing the first 500 — narrow the window to see the rest.</span>}
         </div>
 
@@ -333,7 +349,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
                     size="icon-xs"
                     variant="ghost"
                     className="size-5 text-zinc-400"
-                    aria-label={`Remove the ${formatUsd(row.gross)} tip from the claim`}
+                    aria-label={`Remove the ${formatUsd(row.gross)} ${row.kind === 'ppv' ? 'PPV' : 'tip'} from the claim`}
                     onClick={() => toggle(row, false)}
                   >
                     <X className="size-3" aria-hidden />
@@ -366,8 +382,8 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
         <DialogFooter className="items-center gap-3 sm:justify-between">
           <p className="text-xs text-zinc-400" aria-live="polite">
             {selection.length === 0
-              ? `Pick up to ${MAX_DISPUTE_SALES} tips.`
-              : `${pluralise(selection.length, 'tip')} · ${formatUsd(selectedGross)} gross → ${describeSplit(split)}`}
+              ? `Pick up to ${MAX_DISPUTE_SALES} sales.`
+              : `${pluralise(selection.length, 'sale')} · ${formatUsd(selectedGross)} gross → ${describeSplit(split)}`}
           </p>
           <div className="flex gap-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={submitting}>

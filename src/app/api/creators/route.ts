@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
-import { getAssignableAccounts } from '@/lib/services/creatorAccountService';
+import { getCreatorAccounts } from '@/lib/services/creatorAccountService';
 
 /**
  * GET /api/creators
@@ -26,6 +26,12 @@ import { getAssignableAccounts } from '@/lib/services/creatorAccountService';
  * whether the creator can log into their own portal, so a merely-deactivated
  * creator's data must still appear here.
  *
+ * **Archived accounts are included, flagged `isArchived`.** History — shifts,
+ * sales, payslips, analytics — must still name a creator archived since, so the
+ * client store indexes them for lookups (`useCreatorMap`) while every picker
+ * (`useCreators`, `useAssignableAccounts`) filters them out. Renderers older
+ * than this change filter `isArchived` themselves, so they are unaffected.
+ *
  * `photoThumb` is a 64px WebP `data:` URI (a couple of KB each) and is why this
  * response is deliberately chunkier than it looks: inlining the avatars here is
  * what lets a thirty-avatar shift calendar render without issuing thirty image
@@ -36,7 +42,7 @@ import { getAssignableAccounts } from '@/lib/services/creatorAccountService';
  */
 export const GET = withAuth(async () => {
   try {
-    const accounts = await getAssignableAccounts();
+    const accounts = await getCreatorAccounts({ includeArchived: true });
 
     const creators = accounts.map(a => ({
       creatorID: a.creatorID,

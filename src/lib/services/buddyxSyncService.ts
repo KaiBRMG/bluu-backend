@@ -45,7 +45,10 @@ import {
   normalisePpv,
   normaliseTip,
   pairKey,
+  placeRow,
   planSalesSync,
+  resolveSaleIdentities,
+  saleMatchKey,
   type NormalisedSale,
   type StoredSale,
 } from '../buddyx/salesPlan';
@@ -298,7 +301,11 @@ async function readStoredSales(months: SalaryMonthKey[]): Promise<Map<string, St
         .collection(SALES)
         .where('month', '==', month)
         .where('source', '==', 'buddyx')
-        .select('userId', 'month', 'transfer', 'removedAt', 'syncHash', 'vanishedAfterFinalise')
+        .select(
+          'userId', 'month', 'transfer', 'removedAt', 'syncHash', 'vanishedAfterFinalise',
+          // Identity: the BuddyX id it tracks, and the facts for the re-key fallback.
+          'sourceId', 'kind', 'modelId', 'fanId', 'occurredAt', 'grossRevenue',
+        )
         .get(),
     ),
   );
@@ -306,11 +313,29 @@ async function readStoredSales(months: SalaryMonthKey[]): Promise<Map<string, St
     const month = months[i];
     for (const doc of snap.docs) {
       const data = doc.data() as Partial<CaSaleDocument>;
+      const kind = data.kind ?? (doc.id.startsWith('bx-ppv-') ? 'ppv' : 'tip');
+      const occurredAtMs = data.occurredAt?.toMillis?.();
       out.set(doc.id, {
         saleId: doc.id,
+        sourceId: data.sourceId ?? doc.id.replace(/^bx-(tip|ppv)-/, ''),
+        kind,
+        matchKey:
+          occurredAtMs !== undefined && typeof data.grossRevenue === 'number'
+            ? saleMatchKey({ kind, modelId: data.modelId ?? null, fanId: data.fanId ?? '', occurredAtMs, gross: data.grossRevenue })
+            : null,
         userId: data.userId ?? null,
         month: data.month ?? month,
-        transfer: data.transfer ? { fromUserId: data.transfer.fromUserId ?? null, toUserId: data.transfer.toUserId } : null,
+        transfer: data.transfer
+          ? {
+              toUserId: data.transfer.toUserId ?? null,
+              // Transfers written before the field existed: the holder it was
+              // moved off was BuddyX's attribution at the time.
+              sourceUserIdAtTransfer:
+                data.transfer.sourceUserIdAtTransfer !== undefined
+                  ? data.transfer.sourceUserIdAtTransfer
+                  : (data.transfer.fromUserId ?? null),
+            }
+          : null,
         removed: Boolean(data.removedAt),
         syncHash: data.syncHash ?? null,
         vanishedAfterFinalise: data.vanishedAfterFinalise === true,
@@ -377,20 +402,32 @@ export async function syncSalesScope(ctx: SyncContext, write: boolean): Promise<
   ]);
   const complete = true;
 
-  const sales: NormalisedSale[] = [];
+  // A row is dropped only for being Infloww's (at/before the cutover) — or for
+  // having no id or no parseable date, which BuddyX should never send. Those
+  // are counted (`sales.unplaceable`) and surface on CA Admin → Sales, so the
+  // ledger can never silently be short of a row BuddyX has.
+  const normalised: NormalisedSale[] = [];
+  let unplaceable = 0;
   for (const row of tipRows) {
     const sale = normaliseTip(row);
-    if (sale) sales.push(sale);
+    if (sale) normalised.push(sale);
+    else if (!placeRow(row.id, row.datePurchase)) unplaceable += 1;
   }
   for (const row of ppvRows) {
     const sale = normalisePpv(row);
-    if (sale) sales.push(sale);
+    if (sale) normalised.push(sale);
+    else if (!placeRow(row.id, row.unlockDate ?? row.createdAt)) unplaceable += 1;
   }
+  bump(ctx, 'sales.unplaceable', unplaceable);
 
   const stored = await readStoredSales(months);
+  // Resolved once: the holder pairs, the plan and the preview all key on the
+  // document a row belongs to, never on its raw BuddyX id.
+  const identity = resolveSaleIdentities(normalised, stored);
+  const sales = identity.sales;
   const finalized = await readFinalized(collectHolderPairs(sales, stored, ctx.maps.chatters, ctx.maps.models));
   const plan = planSalesSync({
-    sales,
+    identity,
     stored,
     chatters: ctx.maps.chatters,
     models: ctx.maps.models,
@@ -406,7 +443,8 @@ export async function syncSalesScope(ctx: SyncContext, write: boolean): Promise<
     const byKey = new Map<string, SalesPreviewRow>();
     for (const sale of sales) {
       const chatter = sale.chatterId ? ctx.maps.chatters.get(sale.chatterId) : undefined;
-      const uid = stored.get(sale.saleId)?.transfer?.toUserId ?? chatter?.uid ?? null;
+      const transfer = stored.get(sale.saleId)?.transfer;
+      const uid = transfer ? transfer.toUserId : (chatter?.uid ?? null);
       const day = toDayKey(sale.occurredAtMs);
       const key = `${uid ?? `chatter:${sale.chatterId ?? 'none'}`}|${day}`;
       const row = byKey.get(key) ?? {

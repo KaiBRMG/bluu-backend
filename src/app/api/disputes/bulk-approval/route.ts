@@ -17,7 +17,7 @@ import type { ApprovalStatus } from '@/types/firestore';
  * Body: `{ disputeIds: string[], AdminApproval: 'Approved' | 'Rejected', reason?: string }`
  *
  * **It is a loop over `applyAdminVerdict`**, the one implementation of what a
- * verdict does — on a v2 dispute an approval transfers the claimed tips, which
+ * verdict does — on a v2 dispute an approval transfers the claimed sales, which
  * is a transaction per dispute and cannot be folded into one batch. What the
  * route still saves over N client calls is the notifications: **one queued
  * notice per filer** (a person with six of the ten disputes is told once,

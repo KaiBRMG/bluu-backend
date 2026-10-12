@@ -338,6 +338,23 @@ export interface CreatorDayPoint {
   massMessages: number | null;
 }
 
+/**
+ * Who an account key on OnlyFans Analytics is. Resolved server-side because the
+ * client's creator store holds active creators only, and history must still name
+ * an archived one.
+ */
+export interface CreatorIdentity {
+  name: string;
+  /**
+   * `archived` — a Bluu creator (or sub-account) since archived.
+   * `missing` — mapped to a creator id that no longer exists in Bluu.
+   * `unmapped` — a BuddyX creator mapped to nobody in Bluu.
+   */
+  status: 'active' | 'archived' | 'missing' | 'unmapped';
+  /** Inline 64px avatar for non-active accounts; the client store has the active ones. */
+  photoThumb: string | null;
+}
+
 export interface CreatorRosterCard {
   creatorId: string;
   totalGross: number;
@@ -397,4 +414,6 @@ export interface CreatorAnalytics {
   /** Omitted (null) while no creator has a rev share configured. */
   revShareGross: number | null;
   comparison: Array<{ creatorId: string; gross: number; share: number; previousGross: number | null }>;
+  /** Every account key the response mentions (roster, links, best link). */
+  identities: Record<string, CreatorIdentity>;
 }

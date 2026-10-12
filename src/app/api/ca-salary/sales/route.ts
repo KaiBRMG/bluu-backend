@@ -8,9 +8,15 @@
  *
  * **Self-or-admin**, same as `/month` — an agent sees their own rows and nobody
  * else's. `userId=all` is the admin ledger (`ca-admin`): every agent's rows for
- * the month, plus the rows held by nobody (unassigned tips, unmapped chatters),
- * removed rows, and the flags the sync raised. A missing `userId` means "mine",
- * never "everyone's".
+ * the month, plus the rows held by nobody (unassigned sales, unmapped chatters),
+ * removed rows, and every **anomaly** the ledger can detect (`flags` — see
+ * `getLedgerAnomalies`). A missing `userId` means "mine", never "everyone's".
+ *
+ * Every row says whether Bluu holds it where BuddyX credits it
+ * (`matchesSource`) and, when not, why (`assignment`: a dispute or an admin).
+ * The agent view lists the sales BuddyX credits to them that are held
+ * elsewhere (`transferredAway`), so the two systems can be reconciled from
+ * either side.
  *
  * Fan names are included because the agent is the person who talked to that
  * fan; they are the least surprising column on the page.
@@ -25,6 +31,7 @@ import { handleApiError } from '@/lib/middleware/apiHelpers';
 import { requireCaAdmin, resolveSalarySubject, refuseHiddenMonth } from '@/lib/salary/salaryAuth';
 import {
   getAllSalesForMonth,
+  getLedgerAnomalies,
   getFinalizedMonth,
   getSalesForMonth,
   getTransferredAwaySales,
@@ -136,9 +143,18 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       const all = await getAllSalesForMonth(month);
       const rows = day ? all.filter(s => s.day === day) : all;
       const live = rows.filter(s => !s.removedAt);
-      const names = await displayNamesFor(rows.flatMap(s => [s.userId, s.transfer?.fromUserId ?? null]));
+      const { names, flags } = await getLedgerAnomalies(rows);
 
+      // Unmapped-chatter rows are reported per chatter (the mapping lines), so
+      // "unassigned" here means BuddyX assigned the sale to nobody.
       const unassigned = live.filter(s => !s.userId);
+      const unassignedOf = (kind: 'tip' | 'ppv') => {
+        const list = unassigned.filter(s => s.kind === kind && !s.unmappedChatterId);
+        return { count: list.length, gross: list.reduce((sum, s) => round2(sum + s.signedGross), 0) };
+      };
+      const tips = unassignedOf('tip');
+      const ppv = unassignedOf('ppv');
+      const mismatched = live.filter(s => !s.matchesSource);
       return NextResponse.json(
         {
           month,
@@ -148,17 +164,23 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
           names: Object.fromEntries(names),
           ...summarise(live, deductionRate),
           unassigned: {
-            tips: unassigned.filter(s => s.kind === 'tip' && !s.unmappedChatterId).length,
-            tipsGross: unassigned
-              .filter(s => s.kind === 'tip' && !s.unmappedChatterId)
-              .reduce((sum, s) => round2(sum + s.signedGross), 0),
+            tips: tips.count,
+            tipsGross: tips.gross,
+            ppv: ppv.count,
+            ppvGross: ppv.gross,
             unmapped: unassigned.filter(s => s.unmappedChatterId).length,
             claimed: unassigned.filter(s => s.disputeId).length,
           },
+          mismatched: {
+            dispute: mismatched.filter(s => s.assignment === 'dispute').length,
+            admin: mismatched.filter(s => s.assignment === 'admin').length,
+            gross: mismatched.reduce((sum, s) => round2(sum + s.signedGross), 0),
+          },
           flags: {
-            attributionConflicts: rows.filter(s => s.attributionConflict).map(s => s.saleId),
+            attributionConflicts: rows.filter(s => s.attributionConflict && !s.removedAt).map(s => s.saleId),
             vanishedAfterFinalise: rows.filter(s => s.vanishedAfterFinalise).map(s => s.saleId),
             removed: rows.filter(s => s.removedAt).length,
+            ...flags,
           },
           spansCutover,
         },
@@ -178,13 +200,15 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     const sales = day ? all.filter(s => s.day === day) : all;
     const transferredAway = day ? away.filter(s => s.day === day) : away;
 
-    // Names for "moved to X" and "moved from Y" — one batched lookup.
+    // Names for "moved to X", "BuddyX credits Y" and "reassigned by Z" — one batched lookup.
     const names = await displayNamesFor([
       ...transferredAway.map(s => s.userId),
-      ...sales.map(s => s.transfer?.fromUserId ?? null),
+      ...sales.flatMap(s => [s.sourceUserId, s.transfer?.approvedBy ?? null]),
     ]);
 
-    const inSales = all.filter(s => s.transfer?.toUserId === subject.userId);
+    // "In": held on this agent, though BuddyX credits someone else (or nobody).
+    // From the same (day-filtered) rows the tables show, so tile and tables agree.
+    const inSales = sales.filter(s => !s.matchesSource);
     return NextResponse.json(
       {
         month,
@@ -197,8 +221,8 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         transfers: {
           inGross: inSales.reduce((sum, s) => round2(sum + s.signedGross), 0),
           inCount: inSales.length,
-          outGross: away.reduce((sum, s) => round2(sum + s.signedGross), 0),
-          outCount: away.length,
+          outGross: transferredAway.reduce((sum, s) => round2(sum + s.signedGross), 0),
+          outCount: transferredAway.length,
         },
         finalized: Boolean(finalized),
         spansCutover,

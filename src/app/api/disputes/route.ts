@@ -147,13 +147,13 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 //
 // Body: `{ saleIds: string[], Comment: string }` — disputes v2.
 //
-// The agent picks tips from the sale search (`/api/ca-sales/search`) rather
+// The agent picks sales — tips and PPVs — from the sale search (`/api/ca-sales/search`) rather
 // than typing a sale's details, because an approval now *moves* the sale inside
 // Bluu Backend (documentation/buddyx.md §4). One submission becomes one dispute
-// per current holder, linked by `groupId`; an unassigned tip has no holder to
+// per current holder, linked by `groupId`; an unassigned sale has no holder to
 // approve, so its dispute goes straight to admin.
 //
-// All-or-nothing: if any tip cannot be claimed (a PPV, already disputed, a
+// All-or-nothing: if any sale cannot be claimed (already disputed, a
 // finalised month…) nothing is written and every refusal comes back, so the
 // dialog can mark those rows and keep the rest of the claim. The freeform v1
 // create path is gone; v1 disputes stay readable and decidable.
@@ -181,24 +181,21 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: `Keep the comment under ${MAX_COMMENT} characters.` }, { status: 400 });
     }
     if (!Array.isArray(saleIds) || saleIds.length === 0 || !saleIds.every(id => typeof id === 'string' && id)) {
-      return NextResponse.json({ error: 'Pick at least one tip to claim.' }, { status: 400 });
+      return NextResponse.json({ error: 'Pick at least one sale to claim.' }, { status: 400 });
     }
     const unique = [...new Set(saleIds as string[])];
     if (unique.length > MAX_DISPUTE_SALES) {
-      return NextResponse.json({ error: `A claim can include at most ${MAX_DISPUTE_SALES} tips.` }, { status: 400 });
+      return NextResponse.json({ error: `A claim can include at most ${MAX_DISPUTE_SALES} sales.` }, { status: 400 });
     }
 
     const outcome = await fileDisputes({ filerUid: token.uid, saleIds: unique, comment });
     if (!outcome.ok) {
-      const ppv = outcome.refused.some(r => r.reason === 'ppv');
       return NextResponse.json(
         {
-          error: ppv
-            ? CLAIM_REFUSAL_LABEL.ppv
-            : `${outcome.refused.length} of these tips can no longer be claimed.`,
+          error: `${outcome.refused.length} of these sales can no longer be claimed.`,
           refused: outcome.refused.map(r => ({ ...r, label: CLAIM_REFUSAL_LABEL[r.reason] })),
         },
-        { status: ppv ? 400 : 409 },
+        { status: 409 },
       );
     }
 

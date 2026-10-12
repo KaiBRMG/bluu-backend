@@ -35,6 +35,23 @@ export const BUDDYX_TEAM_STATS_START_DAY = '2026-09-27';
  */
 export const BUDDYX_CREATOR_STATS_START_DAY = '2026-10-04';
 
+/**
+ * The account key for a BuddyX creator (model) that is mapped to no Bluu
+ * creator. Its `creator-stats-days` rows are stored under `buddyx:{modelId}` so
+ * OnlyFans Analytics can still show the money, flagged as unmapped; once the
+ * model is mapped, the read side folds those rows into the creator.
+ */
+export const UNMAPPED_MODEL_PREFIX = 'buddyx:';
+
+export function unmappedModelKey(modelId: string): string {
+  return `${UNMAPPED_MODEL_PREFIX}${modelId}`;
+}
+
+/** The model id behind an unmapped key, or null for a real creator id. */
+export function modelIdOfUnmappedKey(key: string): string | null {
+  return key.startsWith(UNMAPPED_MODEL_PREFIX) ? key.slice(UNMAPPED_MODEL_PREFIX.length) : null;
+}
+
 /** The earliest day the creator history reaches (the Infloww export's first day). */
 export const CREATOR_HISTORY_START_DAY = '2025-10-04';
 

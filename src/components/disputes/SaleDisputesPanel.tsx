@@ -132,7 +132,7 @@ export function SaleDisputesPanel({
   const { summary, loading, refreshing, error, refetch } = useDisputeSummary();
 
   // The create dialog is mounted on first use only — it pulls in the date
-  // pickers and the tip search, which most visits never open.
+  // pickers and the sale search, which most visits never open.
   const [createMounted, setCreateMounted] = useState(false);
   const { setCaApproval } = useDisputesData();
 
@@ -475,11 +475,11 @@ function RowShell({
 
 /**
  * Amount + creator: the two facts that identify a sale at a glance. A v2 claim
- * over several tips says so instead — "3 tips · 2 creators" — because a chip
+ * over several sales says so instead — "3 sales · 2 creators" — because a chip
  * for one of them would misstate what is being decided.
  */
 function RowIdentity({ dispute }: { dispute: DisputeDocument }) {
-  const tips = dispute.version === 2 ? dispute.sales.length : 1;
+  const count = dispute.version === 2 ? dispute.sales.length : 1;
   const creators = dispute.version === 2 ? new Set(dispute.sales.map(s => s.creatorId ?? s.creatorName)).size : 1;
   return (
     <div className="flex min-w-0 items-center gap-1.5">
@@ -489,12 +489,12 @@ function RowIdentity({ dispute }: { dispute: DisputeDocument }) {
       <span aria-hidden className="text-zinc-400">·</span>
       {creators > 1 || dispute.Creator === 'multiple' ? (
         <span className="min-w-0 truncate text-xs text-zinc-300">
-          {tips} tips · {creators} creators
+          {count} sales · {creators} creators
         </span>
       ) : (
         <>
           <DisputeCreatorChip dispute={dispute} size="xs" className="min-w-0 text-zinc-300" />
-          {tips > 1 && <span className="shrink-0 text-xs text-zinc-400">· {tips} tips</span>}
+          {count > 1 && <span className="shrink-0 text-xs text-zinc-400">· {count} sales</span>}
         </>
       )}
     </div>
@@ -651,7 +651,7 @@ function DecidedRow({
   const stage = disputeStage(dispute);
   const approved = stage === 'approved';
   const money = formatMoney(dispute.saleAmount);
-  // A v2 approval has already moved the tips; a legacy one was fixed by hand.
+  // A v2 approval has already moved the sales; a legacy one was fixed by hand.
   const outcome = approved
     ? dispute.version === 2
       ? 'Approved — moved to your sales report'

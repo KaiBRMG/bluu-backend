@@ -24,7 +24,9 @@ import { getShiftsByRange, getLedgerEntriesForUsers, getActiveSessionsForUsers }
 import { expandShiftsForWindow } from '../utils/recurrence';
 import { serialiseShift } from '../utils/shiftSerialise';
 import { computeTimeWorked } from '../utils/shiftAttendance';
-import { computeSalaryMonth, DEFAULT_SALARY_CONFIG, sumMonth } from '../salary/salaryEngine';
+import { computeSalaryMonth, DEFAULT_SALARY_CONFIG, round2, sumMonth } from '../salary/salaryEngine';
+import { saleMatchKey } from '../buddyx/salesPlan';
+import { lockIsStale } from '../disputes/disputeRules';
 import { addMonths, currentMonthKey, monthKeyRange, toDayKey, type SalaryDayKey, type SalaryMonthKey } from '../salary/salaryDate';
 import { isSalaryMonthVisible } from '../salary/salaryConstants';
 import { normaliseSaleType, saleKindOf, saleSourceOf } from '../salary/saleTypes';
@@ -141,6 +143,7 @@ export async function setSalaryConfig(
 
 export function serialiseSale(doc: CaSaleDocument): SalarySale {
   const transfer = doc.transfer ?? null;
+  const sourceUserId = doc.sourceUserId !== undefined ? doc.sourceUserId : (doc.userId ?? null);
   return {
     saleId: doc.saleId,
     userId: doc.userId ?? null,
@@ -165,12 +168,15 @@ export function serialiseSale(doc: CaSaleDocument): SalarySale {
     source: saleSourceOf(doc, doc.occurredAt?.toMillis?.() ?? 0),
     kind: saleKindOf(doc),
     creatorId: doc.creatorId ?? null,
-    sourceUserId: doc.sourceUserId !== undefined ? doc.sourceUserId : (doc.userId ?? null),
+    modelId: doc.modelId ?? null,
+    sourceUserId,
     transfer: transfer
       ? {
+          kind: transferKindOf(transfer),
           fromUserId: transfer.fromUserId ?? null,
-          toUserId: transfer.toUserId,
-          disputeId: transfer.disputeId,
+          toUserId: transfer.toUserId ?? null,
+          disputeId: transfer.disputeId ?? null,
+          reason: transfer.reason ?? null,
           approvedBy: transfer.approvedBy,
           approvedAt: transfer.approvedAt?.toDate?.()?.toISOString() ?? new Date(0).toISOString(),
         }
@@ -180,7 +186,14 @@ export function serialiseSale(doc: CaSaleDocument): SalarySale {
     unmappedChatterId: doc.unmappedChatterId ?? null,
     attributionConflict: doc.attributionConflict === true,
     vanishedAfterFinalise: doc.vanishedAfterFinalise === true,
+    assignment: transfer ? transferKindOf(transfer) : 'source',
+    matchesSource: (doc.userId ?? null) === sourceUserId,
   };
+}
+
+/** Transfers written before admin reassignment existed carry no `kind`; all of them were disputes. */
+function transferKindOf(transfer: NonNullable<CaSaleDocument['transfer']>): 'dispute' | 'admin' {
+  return transfer.kind ?? (transfer.disputeId ? 'dispute' : 'admin');
 }
 
 /**
@@ -250,18 +263,105 @@ export async function getAllSalesForMonth(month: SalaryMonthKey): Promise<Salary
 }
 
 /**
- * Sales a dispute moved **off** this agent in this month — what left their
- * report, and why. Served by the `transferFromUserId ASC, month ASC` index.
+ * Everything on a month's ledger that needs an admin's eye beyond what the
+ * sync flags itself, plus the display names the ledger shows. One field-masked
+ * `getAll` over every user the ledger names (holders, BuddyX attributions,
+ * approvers — names and archived state together) and one over the locking
+ * disputes. Never a query.
+ *
+ * - **Stale dispute locks** — `lockIsStale`.
+ * - **Possible duplicates** — live BuddyX rows sharing a `saleMatchKey` (the
+ *   sync's own "same sale" fingerprint) under different ids. BuddyX ids are the
+ *   identity, so both count; only a person can tell a double tip from a double row.
+ * - **$0 rows** — a BuddyX data fault or a comped unlock; never silent.
+ * - **Archived holders** — sales counting toward an agent who has left.
+ */
+export async function getLedgerAnomalies(rows: SalarySale[]) {
+  const live = rows.filter(s => !s.removedAt);
+  const uids = [
+    ...new Set(rows.flatMap(s => [s.userId, s.sourceUserId, s.transfer?.approvedBy ?? null]).filter((v): v is string => Boolean(v))),
+  ];
+  const lockIds = [...new Set(live.map(s => s.disputeId).filter((v): v is string => Boolean(v)))];
+  const [userSnaps, lockSnaps] = await Promise.all([
+    uids.length ? adminDb.getAll(...uids.map(id => adminDb.collection('users').doc(id)), { fieldMask: ['displayName', 'isArchived'] }) : [],
+    lockIds.length ? adminDb.getAll(...lockIds.map(id => adminDb.collection('disputes').doc(id)), { fieldMask: ['AdminApproval', 'CaApproval'] }) : [],
+  ]);
+
+  const names = new Map<string, string>();
+  const archived = new Set<string>();
+  for (const snap of userSnaps) {
+    if (!snap.exists) {
+      archived.add(snap.id);
+      continue;
+    }
+    names.set(snap.id, snap.get('displayName') ?? 'Unknown');
+    if (snap.get('isArchived') === true) archived.add(snap.id);
+  }
+  const staleDisputes = new Set(lockSnaps.filter(lockIsStale).map(snap => snap.id));
+
+  const byFacts = new Map<string, string[]>();
+  const archivedHolders = new Map<string, { gross: number; count: number }>();
+  for (const s of live) {
+    if (s.source === 'buddyx') {
+      const key = saleMatchKey({ kind: s.kind, modelId: s.modelId, fanId: s.fanId, occurredAtMs: Date.parse(s.occurredAt), gross: s.grossRevenue });
+      const ids = byFacts.get(key);
+      if (ids) ids.push(s.saleId);
+      else byFacts.set(key, [s.saleId]);
+    }
+    if (s.userId && archived.has(s.userId)) {
+      const sum = archivedHolders.get(s.userId) ?? { gross: 0, count: 0 };
+      sum.gross = round2(sum.gross + s.signedGross);
+      sum.count += 1;
+      archivedHolders.set(s.userId, sum);
+    }
+  }
+
+  return {
+    names,
+    flags: {
+      staleLocks: live.filter(s => s.disputeId && staleDisputes.has(s.disputeId)).map(s => s.saleId),
+      possibleDuplicates: [...byFacts.values()].filter(ids => ids.length > 1).flat(),
+      zeroGross: live.filter(s => s.grossRevenue === 0).map(s => s.saleId),
+      archivedHolders: [...archivedHolders].map(([uid, sum]) => ({ uid, ...sum })),
+    },
+  };
+}
+
+/**
+ * Sales BuddyX credits to this agent that Bluu Backend holds on someone else
+ * (or on nobody) — moved by an approved dispute or by an admin. What is in
+ * their BuddyX but not in their report, and why. Served by the
+ * `sourceUserId ASC, month ASC` index.
+ *
+ * A sale moved off this agent that BuddyX has *since* re-credited elsewhere is
+ * deliberately not here: neither system credits it to them any more, so there
+ * is nothing for them to reconcile.
+ *
+ * Until that index is deployed the query fails precondition, and this falls
+ * back to the older `transferFromUserId` read (dispute moves only) rather than
+ * taking the whole report down with it.
  */
 export async function getTransferredAwaySales(userId: string, month: SalaryMonthKey): Promise<SalarySale[]> {
-  const snap = await adminDb
-    .collection(SALES)
-    .where('transferFromUserId', '==', userId)
-    .where('month', '==', month)
-    .get();
-  return snap.docs
-    .map(d => d.data() as CaSaleDocument)
-    .filter(counts)
+  let docs: CaSaleDocument[];
+  try {
+    const snap = await adminDb
+      .collection(SALES)
+      .where('sourceUserId', '==', userId)
+      .where('month', '==', month)
+      .get();
+    docs = snap.docs.map(d => d.data() as CaSaleDocument);
+  } catch (err) {
+    if ((err as { code?: number }).code !== 9) throw err; // FAILED_PRECONDITION: index not built yet
+    console.warn('[getTransferredAwaySales] sourceUserId index missing — falling back to transferFromUserId');
+    const snap = await adminDb
+      .collection(SALES)
+      .where('transferFromUserId', '==', userId)
+      .where('month', '==', month)
+      .get();
+    docs = snap.docs.map(d => d.data() as CaSaleDocument).filter(d => d.sourceUserId === userId);
+  }
+  return docs
+    .filter(d => counts(d) && d.userId !== userId)
     .map(serialiseSale)
     .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
 }

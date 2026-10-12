@@ -85,3 +85,13 @@ export function useBasicUsers(enabled = true) {
     refetch: () => fetchData(true),
   }), [state, fetchData]);
 }
+
+/**
+ * The chat agents a pay-affecting picker may offer: in the `CA` group and not
+ * archived (rule 6), by name. One definition, so no picker forgets either test.
+ */
+export function activeChatAgents(users: BasicUser[]): BasicUser[] {
+  return users
+    .filter(u => !u.isArchived && u.groups?.includes('CA'))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+}

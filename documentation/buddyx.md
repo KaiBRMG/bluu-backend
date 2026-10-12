@@ -80,9 +80,11 @@ Requests are **sequential**. A page read never reaches the client.
 
 **Window:** from the oldest month payroll still owes (`resolvePayrollMonth`) to now, never before the cutover. The whole window is re-pulled every run — that is what makes vanished-row detection and late re-attribution correct.
 
-Row id `bx-tip-{id}` / `bx-ppv-{id}`. `planSalesSync` decides; the service reads and writes around it:
+Row id `bx-tip-{id}` / `bx-ppv-{id}`, minted from the BuddyX id the first time and **never changed** (disputes and `assignmentLog` reference it). `planSalesSync` decides; the service reads and writes around it:
 
-1. **Attribution invariant.** `userId = transfer ? transfer.toUserId : sourceUserId`. **A sync never clears a transfer** — the write is `merge` and never names `transfer` or `disputeId` on an existing row. If BuddyX re-attributes a transferred sale away from `transfer.fromUserId`, the transfer stands and the row gets `attributionConflict: true`.
+0. **Identity — a re-sync updates the right document.** A BuddyX row is matched to its document by its BuddyX id (`sourceId`), never by who it is attributed to, so a reassignment in BuddyX rewrites `sourceUserId`/`userId` on the **same** document (pinned in `salesWrite.test.ts`). BuddyX's spec does not say whether a tip-allocation keeps its id when a manager reassigns it, so `resolveSaleIdentities` also pairs a new id with a vanished one when both carry the same facts (`saleMatchKey`: kind, model, fan, instant, gross in cents) **and the pairing is unique on both sides** — the document is *re-keyed* (same id, new `sourceId`) and any transfer or dispute lock on it survives. An ambiguous pairing is never guessed: it falls through to remove + create and is counted (`sales.rekeyAmbiguous`, shown on CA Admin → Sales). A document id a re-keyed row still holds is never reused (`~2` suffix).
+1. **Attribution invariant.** `userId = transfer ? transfer.toUserId : sourceUserId`. **A sync never clears a transfer** — whether an approved dispute or an admin reassignment (§5) made it — the write is `merge` and never names `transfer` or `disputeId` on an existing row. If BuddyX later credits a transferred sale to someone other than whom it credited when the transfer was made (`transfer.sourceUserIdAtTransfer`, falling back to `fromUserId` on older transfers) **and** other than the agent Bluu holds it on, the transfer stands and the row gets `attributionConflict: true`. BuddyX coming round to Bluu's answer is not a conflict.
+1b. **Nothing is dropped silently.** Rows at/before the cutover are Infloww's. A row with no id or no parseable date is counted as `sales.unplaceable` and surfaces on CA Admin → Sales. Both endpoints are called without `chatterId`/`modelIds`, so the window covers every allowed model and every chatter, **assigned and unassigned** (`chatterId: null` on either endpoint → `userId: null`).
 2. **Write only what changed** — every synced field is fingerprinted into `syncHash`.
 3. **Finalised guard** — a change touching a month finalised for the stored *or* new holder is refused and counted (`sales.rejectedFinalized`).
 4. **Vanished rows** — a stored row the API stopped returning is soft-removed (`removedAt`) **only when both endpoints paginated to completion**, and never inside a finalised month (flagged `vanishedAfterFinalise`, left counting). A row that reappears is restored. Reads drop `removedAt` rows in memory; no index change.
@@ -94,15 +96,38 @@ Row id `bx-tip-{id}` / `bx-ppv-{id}`. `planSalesSync` decides; the service reads
 
 `POST /api/admin/buddyx/historical-import` (admin claim; CA Admin → Sales → Historical import). `kind=sales` runs the old `parseSalesSheet` (now cutover-aware, and stamping `source`/`kind`/`creatorId`/`sourceUserId`); because sale ids are content hashes, already-stored rows are **backfilled in place**. It also seeds `buddyx-fan-names` and rebuilds `buddyx-fans` spend for every month touched. `kind=creator-stats` reads sheet "Creator Statistics Detail" and keeps only the fields BuddyX continues. `/api/ca-salary/import` (the `.xlsx` upload) was **deleted**; the historical route replaces it. **Delete the historical route, `inflowwImportService.ts` and `HistoricalImport.tsx` once the history is in.**
 
-## 5. Disputes v2 — Bluu Backend is the source of truth
+## 5. Disputes v2 and admin reassignment — Bluu Backend is the source of truth
 
-BuddyX is read-only, so an approved dispute **moves the sale here**.
+BuddyX is read-only (and cannot reassign a PPV at all), so who holds a sale is decided **here**: an approved dispute or an admin moves the sale in `ca-sales`, and no sync undoes it.
 
-- **Filing** (`POST /api/disputes { saleIds, Comment }`): the agent picks tips from `GET /api/ca-sales/search` (one creator, ≤ 7 days, open months, after the cutover, **tips only**, no totals, never their own). In one transaction every sale is re-read and checked by `claimRefusal` (`disputeRules.ts`); any refusal rejects the whole submission and returns each one (`refused[]`) so the dialog marks those rows. One dispute per current holder, linked by `groupId` (+ `groupSize`); unassigned tips go to `'No One'` → straight to admin. Every claimed sale is locked with `disputeId`. A PPV is refused with *"PPV sales are assigned to the sender"*.
+- **Filing** (`POST /api/disputes { saleIds, Comment }`): the agent picks **tips and PPVs** from `GET /api/ca-sales/search` (one creator, ≤ 7 days, open months, after the cutover, no totals, never their own; one `kind in ['tip','ppv']` query on the existing `(creatorId, kind, occurredAt)` index). In one transaction every sale is re-read and checked by `claimRefusal` (`disputeRules.ts`); any refusal rejects the whole submission and returns each one (`refused[]`) so the dialog marks those rows. One dispute per current holder, linked by `groupId` (+ `groupSize`); unassigned sales go to `'No One'` → straight to admin. Every claimed sale is locked with `disputeId`. **PPVs were refused until 2026-10-12** — only because the fix had to be made in BuddyX, which cannot move one; that refusal is gone.
 - **CA rejection** releases the locks (`releaseDisputeLocks`).
-- **Admin verdict** (`applyAdminVerdict`, shared by the single and bulk routes): v2 approval transfers each sale still held as claimed, in a month open for both, setting `transfer`, `userId = createdBy`, `transferFromUserId`; others are skipped with a reason. **Partial success is recorded in `transferResult`, never thrown.** Rejection releases locks and — if the dispute had been approved — gives its transfers back. v1 disputes move nothing ("Legacy — adjust manually").
-- **Un-transfer** `DELETE /api/ca-sales/{saleId}/transfer { reason }` (`ca-admin`, open months): the escape hatch for a wrong approval; recorded as `untransfers[]` on the dispute.
+- **Admin verdict** (`applyAdminVerdict`, shared by the single and bulk routes): v2 approval transfers each sale still held as claimed, in a month open for both, setting `transfer` (`kind: 'dispute'`, `sourceUserIdAtTransfer`), `userId = createdBy`, `transferFromUserId`; others are skipped with a reason. A sale BuddyX re-credited to the filer while the claim was open counts as already moved, and its lock is released. **Partial success is recorded in `transferResult`, never thrown.** Rejection releases locks and — if the dispute had been approved — gives its transfers back. v1 disputes move nothing ("Legacy — adjust manually").
+- **Admin reassignment** `PUT /api/ca-sales/{saleId}/transfer { toUserId | null, reason }` (`ca-admin`; CA Admin → Sales → row → **Reassign**): moves a BuddyX sale to an agent or to nobody, as a `transfer` with `kind: 'admin'` and the reason (≥ 3 chars) — so it survives every sync exactly as a dispute's move does. Moving it to the agent BuddyX credits **clears** the transfer (the sale matches BuddyX again). Refused (`reassignRefusal`) for Infloww rows, removed rows, a sale an **open** dispute holds (a stale lock — `lockIsStale` — is cleared instead), and a month finalised for the current or new holder. The target must be an existing, non-archived user. Replacing or clearing a dispute's transfer appends to that dispute's `untransfers[]`, so its detail shows the sale as reverted.
+- **Un-transfer** `DELETE /api/ca-sales/{saleId}/transfer { reason }` (`ca-admin`, open months): the escape hatch for a wrong approval — a reassignment back onto BuddyX's attribution (`untransferSale` → `reassignSale`).
+- **Audit:** every change of holder (dispute, admin, revert) appends `{ action, fromUserId, toUserId, by, at, reason, disputeId }` to the sale's `assignmentLog` (index-exempt).
+- **Where a mismatch shows.** Every serialised sale carries `assignment` (`source` · `dispute` · `admin`) and `matchesSource`. `SaleHolderNote` renders it identically on CA Admin → Sales and on the agent's Sales Report (*Moved by dispute* / *Reassigned by admin*, blue; *· BuddyX changed since*, orange; *· BuddyX agrees*, grey). The agent's report also lists **In BuddyX, held elsewhere** — sales BuddyX credits to them that Bluu holds on someone else — from the `(sourceUserId, month)` index (falls back to the old `transferFromUserId` read until that index is built).
 - Tier notices for both agents run from `after()`.
+
+## 5b. CA Admin → Sales — the ledger and its anomalies
+
+The whole month's ledger: every agent's rows, unassigned and unmapped sales, and removed rows (toggle). Columns: when · **held by** (+ `SaleHolderNote`) · **BuddyX credits** · creator · type (+ flags) · fan · gross · net · **Reassign**. Filters: agent, creator, kind, unassigned, **differs from BuddyX**, removed, and search (fan, chatter, sale id). The summary line counts sales held differently from BuddyX, split by dispute/admin.
+
+The **attention band** lists every anomaly the ledger can detect, each with *Show them* (narrows the ledger to exactly those rows):
+
+| Anomaly | Source |
+|---|---|
+| Unmapped BuddyX chatter / creator | mapping |
+| Unassigned tips · PPVs with no sender | `unassigned` |
+| Moved sale BuddyX has since re-credited | `attributionConflict` |
+| Locked by an already-decided dispute | `flags.staleLocks` (`lockIsStale`) |
+| Possible duplicates (same kind, creator, fan, instant, gross; different ids) | `flags.possibleDuplicates` |
+| $0 sales | `flags.zeroGross` |
+| Sales held by an archived agent | `flags.archivedHolders` |
+| Vanished from BuddyX inside a finalised month | `vanishedAfterFinalise` |
+| Last sync: changes refused to a finalised month · rows it could not place · ambiguous id changes | run counts `sales.rejectedFinalized` · `sales.unplaceable` · `sales.rekeyAmbiguous` |
+
+Detection runs in `GET /api/ca-salary/sales?userId=all` (`detectAnomalies`) — two field-masked `getAll`s (locking disputes, holders), no queries.
 
 ## 6. Analytics
 
@@ -112,7 +137,7 @@ All three read Firestore only, cache 60s server-side per scope key, and send `pr
 |---|---|---|
 | Chatter Analytics `/ca-portal/chatter-analytics` (+ report `/[uid]`) | `/api/analytics/chatters`, `/api/analytics/chatters/[uid]`, `/api/analytics/chatters/[uid]/shift` | **Default period: the last 7 complete days.** See *Coverage and integrity* below. **Two sources:** revenue (PPV / tips gross, counts sold, the daily trend) comes from the `ca-sales` ledger — Infloww history back to Oct 2025, BuddyX after, transfers applied, so it matches the Sales Report — while activity (messages, fans chatted, PPVs sent / unlock rate, online and reply times, mass messages) comes from BuddyX team reports only and is `null` ("—") before `BUDDYX_TEAM_STATS_START_DAY` (27 Sep 2026). Agent: own row, daily trend, **anonymous** benchmark (median + top quartile, only with ≥ 3 active agents — sold something or were online; a metric with no figure leaves an agent out of that comparison only). `ca-admin`: the ranked flag list, then **one card per agent** (every agent with sales, BuddyX activity or a rostered shift) with a day-by-day coverage chart on a shared scale, a plain-language verdict, and three figures each ranked against the team (top quarter → bottom quarter), then a compact five-column comparison table that also lists unlinked BuddyX chatters; every agent opens a report. Rows carry `days[]` (per-day clocked / online-while-clocked) for the cards. **Archived agents are left out** of the cards, table and flags (their report still opens by link; the anonymous benchmark is unchanged). The old rostered-but-offline band is now the `never-online` flag. Custom ranges sum days; medians need an admin **Pull** (`/api/analytics/chatters/pull`, one live call, stored 7 days). |
 | Fan Analytics `/ca-portal/fan-analytics` | `/api/analytics/fans`, `/api/analytics/fans/{creatorId}/{fanId}` | Agent: creators on their own shifts this month. `ca-admin`: all + acquisition. The detail **404s** a fan outside scope. |
-| OnlyFans Analytics `/creator-portal/onlyfans-analytics` | `/api/analytics/creators` | Internal; every creator. Range back to 2025-10-04. |
+| OnlyFans Analytics `/creator-portal/onlyfans-analytics` | `/api/analytics/creators` | Internal; every creator. Range back to 2025-10-04. **Names are resolved server-side** (`identities` in the response — the client creator store holds active creators only). Every active mapped creator gets a roster card; an **archived** creator, one **deleted** in Bluu, or a BuddyX creator **mapped to nobody** gets one only for a period it earned in, marked *Archived* (grey) / *Deleted in Bluu* / *Not in Bluu* (orange). An unmapped model's daily stats are stored under `buddyx:{modelId}` and folded into the creator once mapped (a real row for the same day wins). |
 
 `buddyx-fans.spendByMonth` is rebuilt from `ca-sales` (both sources) for the open months by the `fans` scope, and for every imported month by the historical import. `spendMonths` (indexed array) is how a month's rebuild finds fans to clear. Lifetime spend, first seen and last purchase are derived on read.
 
@@ -154,13 +179,13 @@ All Admin-SDK only (`allow read, write: if false`). Bulky fields are index-exemp
 | `buddyx-team-periods` | `mtd` · `prev-month` · `7d` · `30d` · `custom-{from}-{to}` | by id · TTL `expireAt` |
 | `buddyx-team-hours` | `YYYY-MM-DD` (salary day) | by id. Maps `online` / `messages[chatterId][hour 0–23]`, `uids`, `hours` (presence = pulled); all index-exempt. Cursor `buddyx-meta/cursors.teamHoursThrough` |
 | `buddyx-mass-messages` | id | `day` range |
-| `creator-stats-days` | `{creatorId}_{day}` | `day` range |
+| `creator-stats-days` | `{creatorId}_{day}` — `creatorId` is `buddyx:{modelId}` for an unmapped model | `day` range |
 | `buddyx-subscribers` | event id | `day` range, `fanId`, `syncedAt` |
 | `buddyx-links` | `{modelId}_{linkId}` | `modelId` |
 | `buddyx-fans` | `{creatorId}_{fanId}` | `creatorId in`, `spendMonths array-contains` |
 | `buddyx-fan-names` | fanId | by id |
 
-`ca-sales` gained `source`, `sourceId`, `kind`, `creatorId`, `modelId`, `modelHandle`, `chatterId`, `sourceUserId`, `transfer`, `transferFromUserId`, `disputeId`, `removedAt`, `unmappedChatterId`, `attributionConflict`, `vanishedAfterFinalise`, `syncHash`, `syncedAt`; `userId` may now be `null`. New composite indexes: `(creatorId, kind, occurredAt)` for the dispute search, `(transferFromUserId, month)` for "transferred away". `fanId` is no longer index-exempt (the fan drawer queries it). `disputes` gained `version`, `groupId`, `groupSize`, `saleIds`, `sales`, `totalGross`, `transferResult`, `untransfers` (all exempt).
+`ca-sales` gained `source`, `sourceId`, `kind`, `creatorId`, `modelId`, `modelHandle`, `chatterId`, `sourceUserId`, `transfer` (`kind`, `fromUserId`, `toUserId` — nullable for an admin move to nobody — `disputeId` — null for an admin move — `sourceUserIdAtTransfer`, `reason`, `approvedBy`, `approvedAt`), `transferFromUserId`, `disputeId`, `assignmentLog`, `removedAt`, `unmappedChatterId`, `attributionConflict`, `vanishedAfterFinalise`, `syncHash`, `syncedAt`; `userId` may now be `null`. Composite indexes: `(creatorId, kind, occurredAt)` for the dispute search, `(sourceUserId, month)` for the agent's "In BuddyX, held elsewhere", and `(transferFromUserId, month)` — the old "transferred away" read, now only its fallback. `fanId` is no longer index-exempt (the fan drawer queries it). `disputes` gained `version`, `groupId`, `groupSize`, `saleIds`, `sales`, `totalGross`, `transferResult`, `untransfers` (all exempt).
 
 Delete cascade: a deleted user's manual chatter links are cleared; `ca-sales.userId` is kept (pay history).
 
@@ -170,3 +195,4 @@ Delete cascade: a deleted user's manual chatter links are cleared; `ca-sales.use
 - Then delete the historical-import route, its service and `HistoricalImport.tsx` (§4).
 - `revShare` is null for every creator in BuddyX; the OnlyFans Analytics rev-share fact stays hidden until it is configured there.
 - Open questions from the plan: creator-facing analytics in the Mini App; a live, admin-only fan conversation in the fan drawer.
+- **Unverified against the live API (rule 9j — not probed):** whether a BuddyX tip-allocation keeps its `id` when a manager reassigns it (the re-key fallback covers either answer), and whether `/team-reports/ppv-revenue` returns PPVs sent by someone outside the team (e.g. the creator) with `chatterId: null` or omits them. If it omits them, those PPVs are not in the ledger — check the PPV total on the BuddyX dashboard against CA Admin → Sales.

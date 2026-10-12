@@ -61,6 +61,18 @@ export interface AssignableAccount {
  * inequality filter would drop exactly those.
  */
 export async function getAssignableAccounts(): Promise<AssignableAccount[]> {
+  return getCreatorAccounts({ includeArchived: false });
+}
+
+/**
+ * Every creator account, **archived ones included** and flagged `isArchived`.
+ *
+ * For display, never for picking: a shift, a sale or a payslip from before a
+ * creator was archived must still name them, and a name lookup that only knew
+ * active creators rendered a raw uid there. A sub-account counts as archived
+ * when it or its parent is.
+ */
+export async function getCreatorAccounts({ includeArchived }: { includeArchived: boolean }): Promise<AssignableAccount[]> {
   const [creatorSnap, subSnap] = await Promise.all([
     adminDb
       .collection(CREATORS)
@@ -72,13 +84,14 @@ export async function getAssignableAccounts(): Promise<AssignableAccount[]> {
   const creators = new Map<string, AssignableAccount>();
   for (const doc of creatorSnap.docs) {
     const data = doc.data() as Partial<CreatorFullDocument>;
-    if (data.isArchived === true) continue;
+    const archived = data.isArchived === true;
+    if (archived && !includeArchived) continue;
     creators.set(doc.id, {
       creatorID: (data.creatorID as string) ?? doc.id,
       stageName: (data.stageName as string) ?? doc.id,
       photoURL: data.photoURL ?? null,
       photoThumb: data.photoThumb ?? null,
-      isArchived: false,
+      isArchived: archived,
       defaultTimezone: (data as { defaultTimezone?: string }).defaultTimezone,
       isSubAccount: false,
       parentCreatorId: null,
@@ -89,7 +102,7 @@ export async function getAssignableAccounts(): Promise<AssignableAccount[]> {
   const subAccounts: AssignableAccount[] = [];
   for (const doc of subSnap.docs) {
     const data = doc.data() as CreatorSubAccountDocument;
-    if (data.isArchived === true) continue;
+    if (data.isArchived === true && !includeArchived) continue;
 
     // A sub-account whose parent is archived or gone is not assignable — it
     // would render as an orphan chip nobody can explain.
@@ -102,7 +115,7 @@ export async function getAssignableAccounts(): Promise<AssignableAccount[]> {
       // Inherit the parent's face unless this account has its own.
       photoURL: data.photoURL ?? parent.photoURL,
       photoThumb: data.photoThumb ?? parent.photoThumb,
-      isArchived: false,
+      isArchived: data.isArchived === true || parent.isArchived,
       isSubAccount: true,
       parentCreatorId: data.parentCreatorId,
       parentStageName: parent.stageName,
@@ -139,6 +152,13 @@ export async function getSubAccountsForCreator(parentCreatorId: string): Promise
 export async function normaliseAccountIds(
   raw: unknown,
   maxAccounts = 20,
+  /**
+   * Ids the shift already holds. An archived account stays valid here, so
+   * editing a shift worked before its creator was archived neither fails nor
+   * drops the account — dropping it would re-tier the agent's wage for work
+   * already done. A *new* assignment of an archived account is still refused.
+   */
+  retained: readonly string[] = [],
 ): Promise<{ accountIds: string[]; invalid: string[] }> {
   if (raw === undefined || raw === null) return { accountIds: [], invalid: [] };
   if (!Array.isArray(raw)) return { accountIds: [], invalid: ['(not a list)'] };
@@ -157,13 +177,14 @@ export async function normaliseAccountIds(
 
   const valid: string[] = [];
   const invalid: string[] = [];
+  const kept = new Set(retained);
 
   for (let i = 0; i < ids.length; i++) {
     const creator = creatorDocs[i].exists ? (creatorDocs[i].data() as CreatorFullDocument) : null;
     const sub = subDocs[i].exists ? (subDocs[i].data() as CreatorSubAccountDocument) : null;
 
-    if (creator && creator.isArchived !== true) valid.push(ids[i]);
-    else if (sub && sub.isArchived !== true) valid.push(ids[i]);
+    if (creator && (creator.isArchived !== true || kept.has(ids[i]))) valid.push(ids[i]);
+    else if (sub && (sub.isArchived !== true || kept.has(ids[i]))) valid.push(ids[i]);
     else invalid.push(ids[i]);
   }
 

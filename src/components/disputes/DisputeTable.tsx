@@ -63,7 +63,7 @@ interface DisputeTableProps {
    * mixed selection would quietly flip decisions the reviewer never looked at.
    */
   selectable?: boolean;
-  /** Opens the full record — the tips a v2 claim covers, and what an approval moved. */
+  /** Opens the full record — the sales a v2 claim covers, and what an approval moved. */
   onOpenDetail?: (dispute: DisputeDocument) => void;
   /** Required for `selectable` to do anything. Resolves once the write lands. */
   onBulkAction?: (
@@ -545,7 +545,7 @@ function DisputeRow({
     switch (col) {
       case 'saleAmount': {
         const amount = `$${dispute.saleAmount.toLocaleString()}`;
-        // A v2 claim covers specific tips and an approval moves them; the
+        // A v2 claim covers specific sales and an approval moves them; the
         // row says how many, what moved, and opens the full record.
         const v2 = dispute.version === 2;
         const moved = dispute.transferResult?.transferred.length ?? 0;
@@ -565,7 +565,7 @@ function DisputeRow({
             )}
             {v2 && (
               <span className="text-[11px] text-zinc-400">
-                {dispute.sales.length} {dispute.sales.length === 1 ? 'tip' : 'tips'}
+                {dispute.sales.length} {dispute.sales.length === 1 ? 'sale' : 'sales'}
                 {dispute.transferResult && ` · ${moved} moved${skipped ? ` · ${skipped} skipped` : ''}`}
               </span>
             )}

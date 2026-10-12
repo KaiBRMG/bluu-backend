@@ -641,14 +641,36 @@ export interface CaSaleDocument {
   chatterId?: string | null;
   /** The uid the source attributes the sale to, before any transfer. */
   sourceUserId?: string | null;
-  /** Index-exempt map. A sync never clears it. */
+  /**
+   * Index-exempt map. Bluu Backend's override of the source attribution — an
+   * approved dispute, or an admin reassigning the sale on CA Admin → Sales.
+   * A sync never clears it.
+   */
   transfer?: {
+    /** Absent on transfers written before admin reassignment existed → `'dispute'`. */
+    kind?: 'dispute' | 'admin';
     fromUserId: string | null;
-    toUserId: string;
-    disputeId: string;
+    /** `null` only for an admin reassignment to nobody. */
+    toUserId: string | null;
+    /** The approving dispute; `null` for an admin reassignment. */
+    disputeId: string | null;
+    /** BuddyX's attribution when the transfer was made — what `attributionConflict` compares against. */
+    sourceUserIdAtTransfer?: string | null;
+    /** Admin reassignments only. */
+    reason?: string | null;
     approvedBy: string;
     approvedAt: Timestamp;
   } | null;
+  /** Every change of holder Bluu Backend made, oldest first. Index-exempt; audit only. */
+  assignmentLog?: Array<{
+    action: 'dispute' | 'admin' | 'revert';
+    fromUserId: string | null;
+    toUserId: string | null;
+    by: string;
+    at: Timestamp;
+    reason: string | null;
+    disputeId: string | null;
+  }>;
   /** Denormalised from `transfer.fromUserId` for the "transferred away" query. */
   transferFromUserId?: string | null;
   /** An open dispute holds this sale. */
@@ -1753,6 +1775,7 @@ export interface BuddyxMassMessageDocument {
  * keeps only the fields BuddyX continues, so every chart is one series.
  */
 export interface CreatorStatsDayDocument {
+  /** A creator / sub-account id, or `buddyx:{modelId}` for a BuddyX model mapped to no creator. */
   creatorId: string;
   day: string;
   source: 'infloww' | 'buddyx';

@@ -14,7 +14,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import { useAssignableAccounts } from '@/hooks/useCreators';
+import { useAssignableAccounts, useCreatorMap } from '@/hooks/useCreators';
 import { formatUsd } from '@/lib/salary/salaryFormat';
 import { splitShiftAccounts } from '@/lib/salary/shiftAccounts';
 import { CreatorChip } from '@/components/creators/CreatorChip';
@@ -89,13 +89,10 @@ export function CreatorAssignmentField({
   disabled,
 }: CreatorAssignmentFieldProps) {
   const accounts = useAssignableAccounts();
+  // Names for what is already assigned come from the full index: a shift worked
+  // before its creator was archived still holds that account, and still pays on it.
+  const byId = useCreatorMap();
   const [open, setOpen] = useState(false);
-
-  const byId = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const account of accounts) map.set(account.creatorID, account.stageName);
-    return map;
-  }, [accounts]);
 
   const overtimeSet = useMemo(() => new Set(overtimeValue), [overtimeValue]);
   // The count that sets the rate. Normally the assignment minus the overtime
@@ -198,7 +195,8 @@ export function CreatorAssignmentField({
         <ul className="space-y-1 pt-0.5">
           {value.map(id => {
             const isOvertime = overtimeSet.has(id);
-            const name = byId.get(id) ?? id;
+            const name = byId.get(id)?.stageName ?? id;
+            const archived = byId.get(id)?.isArchived === true;
             return (
               <li
                 key={id}
@@ -210,6 +208,7 @@ export function CreatorAssignmentField({
                 )}
               >
                 <CreatorChip creatorId={id} overtime={isOvertime && paysWage} className="min-w-0 bg-transparent pr-0" />
+                {archived && <span className="shrink-0 text-[10px] text-zinc-400">Archived</span>}
 
                 {/* Two buttons, not a checkbox: "regular" is a claim about pay,
                     and it should be read rather than inferred from an empty box.

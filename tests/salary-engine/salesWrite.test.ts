@@ -11,6 +11,8 @@ import {
   normaliseTip,
   pairKey,
   planSalesSync,
+  resolveSaleIdentities,
+  saleMatchKey,
   tipSaleId,
   type ChatterRef,
   type ModelRef,
@@ -48,9 +50,10 @@ function tipRow(over: Partial<BuddyxTipRow> = {}): BuddyxTipRow {
 const tip = (over: Partial<BuddyxTipRow> = {}) => normaliseTip(tipRow(over)) as NormalisedSale;
 
 function plan(sales: NormalisedSale[], stored: StoredSale[] = [], opts: { finalized?: string[]; complete?: boolean } = {}) {
+  const storedMap = new Map(stored.map(s => [s.saleId, s]));
   return planSalesSync({
-    sales,
-    stored: new Map(stored.map(s => [s.saleId, s])),
+    identity: resolveSaleIdentities(sales, storedMap),
+    stored: storedMap,
     chatters,
     models,
     finalized: new Set(opts.finalized ?? []),
@@ -62,6 +65,9 @@ function storedFrom(sale: NormalisedSale, over: Partial<StoredSale> = {}): Store
   const first = plan([sale]).upserts[0].sale;
   return {
     saleId: sale.saleId,
+    sourceId: sale.sourceId,
+    kind: sale.kind,
+    matchKey: saleMatchKey(sale),
     userId: first.userId,
     month: first.month,
     transfer: null,
@@ -123,7 +129,7 @@ describe('attribution', () => {
 
   it('never clears a transfer, even when BuddyX re-attributes the sale', () => {
     const sale = tip();
-    const stored = storedFrom(sale, { userId: 'u-jen', transfer: { fromUserId: 'u-queen', toUserId: 'u-jen' } });
+    const stored = storedFrom(sale, { userId: 'u-jen', transfer: { sourceUserIdAtTransfer: 'u-queen', toUserId: 'u-jen' } });
 
     // Same source attribution as when it was transferred → still the filer's, no conflict.
     const same = plan([sale], [stored]);
@@ -133,6 +139,63 @@ describe('attribution', () => {
     const moved = plan([tip({ chatterId: 999 })], [stored]);
     expect(moved.upserts[0].sale).toMatchObject({ userId: 'u-jen', attributionConflict: true });
     expect(moved.counts.attributionConflicts).toBe(1);
+  });
+});
+
+describe('transfers — disputes and admin reassignment', () => {
+  it('is not a conflict when BuddyX comes round to the agent Bluu holds it on', () => {
+    const stored = storedFrom(tip(), { userId: 'u-jen', transfer: { sourceUserIdAtTransfer: 'u-queen', toUserId: 'u-jen' } });
+    const agreed = plan([tip({ chatterId: 102 })], [stored]);
+    expect(agreed.upserts[0].sale).toMatchObject({ userId: 'u-jen', sourceUserId: 'u-jen', attributionConflict: false });
+  });
+
+  it('compares against BuddyX at the time of the move, not the holder it was moved off', () => {
+    // A dispute moved Queen → Jenelle; an admin then moved Jenelle → nobody.
+    const stored = storedFrom(tip(), {
+      userId: null,
+      transfer: { toUserId: null, sourceUserIdAtTransfer: 'u-queen' },
+    });
+    const p = plan([tip()], [stored]);
+    expect(p.upserts[0].sale).toMatchObject({ userId: null, sourceUserId: 'u-queen', attributionConflict: false });
+    expect(plan([tip({ chatterId: 102 })], [stored]).upserts[0].sale.attributionConflict).toBe(true);
+  });
+});
+
+describe('identity — a re-sync updates the right document', () => {
+  it('updates the existing document when BuddyX reassigns a sale, keeping its id', () => {
+    const p = plan([tip({ chatterId: 102 })], [storedFrom(tip())]);
+    expect(p.upserts).toHaveLength(1);
+    expect(p.upserts[0]).toMatchObject({ isNew: false, sale: { saleId: tipSaleId('t1'), userId: 'u-jen', sourceUserId: 'u-jen' } });
+    expect(p.counts.new).toBe(0);
+  });
+
+  it('re-keys when BuddyX gives the same sale a new id, so a transfer survives', () => {
+    const stored = storedFrom(tip(), { userId: 'u-jen', transfer: { sourceUserIdAtTransfer: 'u-queen', toUserId: 'u-jen' } });
+    const p = plan([tip({ id: 't9', chatterId: 102 })], [stored]);
+    expect(p.counts).toMatchObject({ rekeyed: 1, new: 0, removed: 0 });
+    expect(p.removals).toEqual([]);
+    expect(p.upserts[0].sale).toMatchObject({ saleId: tipSaleId('t1'), sourceId: 't9', userId: 'u-jen' });
+    expect(p.rekeyed).toEqual([{ saleId: tipSaleId('t1'), fromSourceId: 't1', toSourceId: 't9' }]);
+
+    // The next run finds it by its new BuddyX id directly.
+    const next = plan([tip({ id: 't9', chatterId: 102 })], [{ ...stored, sourceId: 't9', syncHash: p.upserts[0].sale.syncHash }]);
+    expect(next.counts).toMatchObject({ unchanged: 1, rekeyed: 0 });
+  });
+
+  it('never guesses between two identical sales', () => {
+    const a = storedFrom(tip({ id: 'a' }));
+    const b = storedFrom(tip({ id: 'b' }));
+    const p = plan([tip({ id: 'c' })], [a, b]);
+    expect(p.counts).toMatchObject({ rekeyed: 0, rekeyAmbiguous: 1, new: 1, removed: 2 });
+  });
+
+  it('never reuses a document id a re-keyed row still holds', () => {
+    // Doc bx-tip-t1 now tracks BuddyX id t9; BuddyX hands id t1 to a different sale.
+    const kept = { ...storedFrom(tip({ id: 't9' })), saleId: tipSaleId('t1') };
+    const p = plan([tip({ id: 't9' }), tip({ id: 't1', amount: { gross: 75, net: 60 } })], [kept]);
+    const byId = new Map(p.upserts.map(u => [u.sale.saleId, u]));
+    expect(byId.get(tipSaleId('t1'))).toMatchObject({ isNew: false, sale: { sourceId: 't9', grossRevenue: 50 } });
+    expect(byId.get(`${tipSaleId('t1')}~2`)).toMatchObject({ isNew: true, sale: { sourceId: 't1', grossRevenue: 75 } });
   });
 });
 

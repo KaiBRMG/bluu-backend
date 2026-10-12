@@ -27,19 +27,19 @@ import { saleTypeLabel } from '@/lib/salary/saleTypes';
 
 const UNTRANSFER_COPY: ReasonBarCopy = {
   label: 'Why this transfer is being reverted',
-  placeholder: 'Reason (required) — recorded on the dispute',
+  placeholder: 'Reason (required) — recorded on the sale and the dispute',
   confirm: 'Revert transfer',
   busy: 'Reverting…',
   required: true,
 };
 
-/** "2 tips moved to Jenelle's sales · 1 skipped — month finalised". */
+/** "2 sales moved to Jenelle's report · 1 skipped — month finalised". */
 function describeTransfer(dispute: DisputeDocument): string | null {
   const result = dispute.transferResult;
   if (!result) return null;
   const who = dispute.createdByName ? `${dispute.createdByName}'s` : "the filer's";
   const moved = result.transferred.length;
-  const parts = [`${moved} ${moved === 1 ? 'tip' : 'tips'} moved to ${who} sales`];
+  const parts = [`${moved} ${moved === 1 ? 'sale' : 'sales'} moved to ${who} report`];
   const reasons = [...new Set(result.skipped.map(s => s.reason))];
   if (result.skipped.length > 0) parts.push(`${result.skipped.length} skipped — ${reasons.join(', ')}`);
   return parts.join(' · ');
@@ -88,8 +88,8 @@ export function DisputeDetailDialog({
   /** Absent unless the viewer is the assigned reviewer and it is still open. */
   onAction?: (id: string, verdict: DisputeVerdict, reason?: string) => Promise<void>;
   /**
-   * CA Admin only: revert one transferred tip — the escape hatch for a wrong
-   * approval. Offered per moved tip on an approved v2 dispute.
+   * CA Admin only: revert one transferred sale — the escape hatch for a wrong
+   * approval. Offered per moved sale on an approved v2 dispute.
    */
   onUntransfer?: (saleId: string, reason: string) => Promise<void>;
 }) {
@@ -186,12 +186,12 @@ export function DisputeDetailDialog({
               )}
             </dl>
 
-            {/* A v2 claim names its tips; each one's state is what the admin's
+            {/* A v2 claim names its sales; each one's state is what the admin's
                 approval did to it. */}
             {dispute.version === 2 && dispute.sales.length > 0 && (
               <div className={cn('border-t pt-4', HAIRLINE)}>
                 <h3 className="text-xs font-semibold text-zinc-400">
-                  {dispute.sales.length === 1 ? 'The tip' : `${dispute.sales.length} tips`}
+                  {dispute.sales.length === 1 ? 'The sale' : `${dispute.sales.length} sales`}
                   {dispute.groupSize > 1 && (
                     <span className="font-normal">
                       {' '}· filed with {dispute.groupSize - 1} other {dispute.groupSize === 2 ? 'dispute' : 'disputes'}

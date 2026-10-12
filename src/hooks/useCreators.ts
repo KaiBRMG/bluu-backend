@@ -6,7 +6,16 @@ import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
 import type { Creator } from '@/lib/campaignTracking';
 
 /**
- * The active creator list, as a **module-level shared store**.
+ * The creator list, as a **module-level shared store**.
+ *
+ * ## Archived accounts are in the store, not in the pickers
+ *
+ * The store holds every account, archived ones flagged `isArchived`. The id
+ * index (`useCreatorMap`, which every chip and avatar resolves through) spans
+ * all of them, because history — a shift, a sale, a payslip — must still name a
+ * creator archived since. The list views (`useCreators`,
+ * `useAssignableAccounts`) are what pickers iterate, and they drop archived
+ * accounts.
  *
  * ## Why a store rather than per-hook state
  *
@@ -27,7 +36,8 @@ import type { Creator } from '@/lib/campaignTracking';
  * one — returning a fresh `[]` or a `.filter()` here would make React loop.
  */
 
-const CACHE_KEY = 'bluu_creators_v2';
+// v3: the cached list now includes archived accounts.
+const CACHE_KEY = 'bluu_creators_v3';
 const TTL = 5 * 60 * 1000;
 
 /** Stable empty snapshot. A new `[]` per call would spin `useSyncExternalStore`. */
@@ -43,6 +53,10 @@ const listeners = new Set<() => void>();
 /** Derived id→account index, rebuilt only when the snapshot itself changes. */
 let indexSource: Creator[] = EMPTY;
 let index: Map<string, Creator> = new Map();
+
+/** Derived non-archived view, rebuilt on the same trigger. */
+let activeSource: Creator[] = EMPTY;
+let active: Creator[] = EMPTY;
 
 /** Derived creators-only view, rebuilt on the same trigger. */
 let creatorsOnlySource: Creator[] = EMPTY;
@@ -100,14 +114,14 @@ function ensureLoaded(getToken: () => Promise<string>): void {
       const res = await fetch('/api/creators', { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) return;
 
-      const data = (await res.json()) as { creators?: Array<Creator & { isArchived?: boolean }> };
+      const data = (await res.json()) as { creators?: Creator[] };
 
-      // Employee-facing visibility is governed by `isArchived` only — an
-      // inactive (portal-login-disabled) creator's data must still show here.
-      const visible = (data.creators ?? []).filter(c => c.isArchived !== true);
+      // Everything, archived included — the views below decide what a picker
+      // sees. An inactive (portal-login-disabled) creator is not archived.
+      const all = data.creators ?? [];
 
-      setCache(CACHE_KEY, visible);
-      setSnapshot(visible);
+      setCache(CACHE_KEY, all);
+      setSnapshot(all);
     } catch {
       // A failed load leaves the previous snapshot in place. Creator names are
       // decoration on most surfaces; blanking them on a transient error would be
@@ -133,25 +147,36 @@ function getIndex(): Map<string, Creator> {
   return index;
 }
 
+/** Accounts that are not archived — what a picker may offer. */
+function getActive(): Creator[] {
+  if (activeSource !== snapshot) {
+    activeSource = snapshot;
+    const filtered = snapshot.filter(c => c.isArchived !== true);
+    active = filtered.length === snapshot.length ? snapshot : filtered;
+  }
+  return active;
+}
+
 /**
- * Creators without their sub-accounts.
+ * Active creators without their sub-accounts.
  *
  * Cached on the snapshot's identity rather than filtered per consumer: a fresh
  * `.filter()` inside `getSnapshot` returns a new array every call, which is the
  * one thing `useSyncExternalStore` cannot tolerate — it would re-render forever.
  */
 function getCreatorsOnly(): Creator[] {
-  if (creatorsOnlySource !== snapshot) {
-    creatorsOnlySource = snapshot;
-    const filtered = snapshot.filter(c => !c.isSubAccount);
-    // Reuse the full snapshot when nothing was filtered, so the two views share
-    // an identity for the (common) case of no sub-accounts at all.
-    creatorsOnly = filtered.length === snapshot.length ? snapshot : filtered;
+  const source = getActive();
+  if (creatorsOnlySource !== source) {
+    creatorsOnlySource = source;
+    const filtered = source.filter(c => !c.isSubAccount);
+    // Reuse the active view when nothing was filtered, so the two share an
+    // identity for the (common) case of no sub-accounts at all.
+    creatorsOnly = filtered.length === source.length ? source : filtered;
   }
   return creatorsOnly;
 }
 
-const getSnapshot = () => snapshot;
+const getActiveSnapshot = () => getActive();
 const getCreatorsOnlySnapshot = () => getCreatorsOnly();
 const getIndexSnapshot = () => getIndex();
 /** SSR: a stable empty index, for the same reason as the empty list. */
@@ -161,7 +186,7 @@ const getServerIndexSnapshot = () => EMPTY_INDEX;
 const getServerSnapshot = () => EMPTY;
 
 /**
- * Creators, **without** their sub-accounts (5-min sessionStorage TTL).
+ * Active creators, **without** their sub-accounts (5-min sessionStorage TTL).
  *
  * The default view, because most surfaces are about the creator as a brand — a
  * custom request, a campaign, a content plan are raised against Cole, not
@@ -195,7 +220,7 @@ export function useCreators(): Creator[] {
 export function useAssignableAccounts(): Creator[] {
   const { user } = useAuth();
 
-  const accounts = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const accounts = useSyncExternalStore(subscribe, getActiveSnapshot, getServerSnapshot);
 
   useEffect(() => {
     if (user) ensureLoaded(() => user.getIdToken());
@@ -205,7 +230,8 @@ export function useAssignableAccounts(): Creator[] {
 }
 
 /**
- * Every assignable account keyed by id — creators and sub-accounts both.
+ * Every account keyed by id — creators and sub-accounts both, **archived
+ * included** (check `isArchived`). A lookup, never a list to pick from.
  *
  * For surfaces that look an id up rather than iterate: a chip resolving one, a
  * calendar cell resolving four. It must span both kinds, because

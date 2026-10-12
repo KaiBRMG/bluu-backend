@@ -31,7 +31,13 @@ import { round2 } from '../salary/salaryEngine';
 import { saleKindOf, saleSourceOf } from '../salary/saleTypes';
 import { mappedCreatorIds } from './buddyxMappingService';
 import { computeBenchmarks } from '../buddyx/benchmarks';
-import { BUDDYX_CREATOR_STATS_START_DAY, BUDDYX_SUBSCRIBERS_START_DAY, BUDDYX_TEAM_STATS_START_DAY } from '../buddyx/constants';
+import {
+  BUDDYX_CREATOR_STATS_START_DAY,
+  BUDDYX_SUBSCRIBERS_START_DAY,
+  BUDDYX_TEAM_STATS_START_DAY,
+  modelIdOfUnmappedKey,
+  unmappedModelKey,
+} from '../buddyx/constants';
 import type {
   AcquisitionRow,
   ChatterAnalytics,
@@ -41,6 +47,7 @@ import type {
   ChatterPeriod,
   ChatterReport,
   CreatorAnalytics,
+  CreatorIdentity,
   CreatorDayPoint,
   FanAnalytics,
   FanDetail,
@@ -833,6 +840,74 @@ async function readCreatorDays(from: string, to: string): Promise<CreatorStatsDa
   });
 }
 
+interface ModelEntry { modelId: string; creatorId: string | null; name: string | null }
+
+/** The BuddyX model directory, field-masked. Small, and changes a few times a year. */
+async function readModelDirectory(): Promise<ModelEntry[]> {
+  return cached('models:directory', async () => {
+    const snap = await adminDb.collection('buddyx-models').select('handle', 'customName', 'creatorId').get();
+    return snap.docs.map(d => {
+      const handle = d.get('handle') as string | null | undefined;
+      return {
+        modelId: d.id,
+        creatorId: (d.get('creatorId') as string | null | undefined) ?? null,
+        name: (d.get('customName') as string | null | undefined) || (handle ? `@${handle}` : null),
+      };
+    });
+  });
+}
+
+interface AccountEntry { name: string; archived: boolean; photoThumb: string | null }
+
+/**
+ * Every creator and sub-account, **archived included** — history must still
+ * name them. Two field-masked reads, cached; never one read per creator (rule 9).
+ */
+async function readCreatorAccounts(): Promise<Map<string, AccountEntry>> {
+  return cached('creator-accounts', async () => {
+    const [creatorSnap, subSnap] = await Promise.all([
+      adminDb.collection('creators').select('stageName', 'isArchived', 'photoThumb').get(),
+      adminDb.collection('creator-subaccounts').select('stageName', 'label', 'parentCreatorId', 'isArchived', 'photoThumb').get(),
+    ]);
+    const accounts = new Map<string, AccountEntry>();
+    for (const d of creatorSnap.docs) {
+      accounts.set(d.id, {
+        name: (d.get('stageName') as string | undefined) || d.id,
+        archived: d.get('isArchived') === true,
+        photoThumb: (d.get('photoThumb') as string | null | undefined) ?? null,
+      });
+    }
+    for (const d of subSnap.docs) {
+      const parent = accounts.get(d.get('parentCreatorId') as string);
+      const label = d.get('label') as string | undefined;
+      accounts.set(d.id, {
+        name: (d.get('stageName') as string | undefined) || (parent ? `${parent.name}${label ? ` (${label})` : ''}` : d.id),
+        archived: d.get('isArchived') === true || !parent || parent.archived,
+        photoThumb: (d.get('photoThumb') as string | null | undefined) ?? parent?.photoThumb ?? null,
+      });
+    }
+    return accounts;
+  });
+}
+
+/**
+ * Rows stored under an unmapped model's key (`buddyx:{modelId}`) are folded into
+ * the creator once that model is mapped, so mapping late never splits a
+ * creator's history across two cards. A real row for the same day wins.
+ */
+function foldUnmappedDays(rows: CreatorStatsDayDocument[], modelCreator: Map<string, string>): CreatorStatsDayDocument[] {
+  if (!rows.some(r => modelIdOfUnmappedKey(r.creatorId))) return rows;
+  const real = new Set(rows.filter(r => !modelIdOfUnmappedKey(r.creatorId)).map(r => `${r.creatorId}_${r.day}`));
+  const out: CreatorStatsDayDocument[] = [];
+  for (const r of rows) {
+    const modelId = modelIdOfUnmappedKey(r.creatorId);
+    const mapped = modelId ? modelCreator.get(modelId) : undefined;
+    if (!mapped) out.push(r);
+    else if (!real.has(`${mapped}_${r.day}`)) out.push({ ...r, creatorId: mapped });
+  }
+  return out;
+}
+
 export async function getCreatorAnalytics(params: { from: string; to: string; creatorId: string | null; now?: number }): Promise<CreatorAnalytics> {
   const now = params.now ?? Date.now();
   const { from, to, creatorId } = params;
@@ -843,7 +918,7 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
   const monthFrom = `${month}-01`;
   const today = currentDayKey(now);
 
-  const [rangeDays, prevDays, mtdDays, linkSnap, massSnap, subsSnap, modelSnap] = await Promise.all([
+  const [rawRangeDays, rawPrevDays, rawMtdDays, linkSnap, massSnap, subsSnap, models, accounts] = await Promise.all([
     readCreatorDays(from, to),
     readCreatorDays(prevFrom, prevTo),
     readCreatorDays(monthFrom, today),
@@ -857,15 +932,38 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
         .collection('buddyx-subscribers')
         .where('day', '>=', from > BUDDYX_SUBSCRIBERS_START_DAY ? from : BUDDYX_SUBSCRIBERS_START_DAY)
         .where('day', '<=', to)
-        .select('creatorId', 'subType', 'isTrial', 'isCreator', 'day')
+        .select('modelId', 'creatorId', 'subType', 'isTrial', 'isCreator', 'day')
         .get()
-        .then(s => s.docs.map(d => d.data() as { creatorId: string | null; subType: string | null; isTrial: boolean; isCreator: boolean; day: string })),
+        .then(s => s.docs.map(d => d.data() as { modelId: string | null; creatorId: string | null; subType: string | null; isTrial: boolean; isCreator: boolean; day: string })),
     ),
-    mappedCreatorIds(),
+    readModelDirectory(),
+    readCreatorAccounts(),
   ]);
 
-  const mappedIds = new Set(modelSnap);
-  const scoped = <T extends { creatorId: string | null }>(rows: T[]) => (creatorId ? rows.filter(r => r.creatorId === creatorId) : rows);
+  const modelCreator = new Map(models.flatMap(m => (m.creatorId ? [[m.modelId, m.creatorId] as const] : [])));
+  const modelName = new Map(models.map(m => [m.modelId, m.name]));
+  const mappedIds = new Set(modelCreator.values());
+  const rangeDays = foldUnmappedDays(rawRangeDays, modelCreator);
+  const prevDays = foldUnmappedDays(rawPrevDays, modelCreator);
+  const mtdDays = foldUnmappedDays(rawMtdDays, modelCreator);
+
+  /** The account a BuddyX-side row belongs to — an unmapped model keeps its own key. */
+  const keyOf = (r: { creatorId: string | null; modelId?: string | null }): string | null =>
+    (r.modelId ? modelCreator.get(r.modelId) : undefined) ?? r.creatorId ?? (r.modelId ? unmappedModelKey(r.modelId) : null);
+  const scoped = <T extends { creatorId: string | null; modelId?: string | null }>(rows: T[]) => (creatorId ? rows.filter(r => keyOf(r) === creatorId) : rows);
+
+  const identityOf = (key: string): CreatorIdentity => {
+    const modelId = modelIdOfUnmappedKey(key);
+    if (modelId) return { name: modelName.get(modelId) ?? `BuddyX creator ${modelId}`, status: 'unmapped', photoThumb: null };
+    const account = accounts.get(key);
+    if (account) return { name: account.name, status: account.archived ? 'archived' : 'active', photoThumb: account.archived ? account.photoThumb : null };
+    const viaModel = models.find(m => m.creatorId === key)?.name;
+    return { name: viaModel ?? 'Deleted creator', status: 'missing', photoThumb: null };
+  };
+  const identities: Record<string, CreatorIdentity> = {};
+  const identify = (key: string | null) => {
+    if (key && !identities[key]) identities[key] = identityOf(key);
+  };
 
   // ── Roster cards — always every creator, so the roster can be the selector ──
   const byCreator = new Map<string, CreatorStatsDayDocument[]>();
@@ -891,7 +989,13 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
       messagesGross: sum('messagesGross'),
       spark: days.map(day => ({ day, value: byDay.get(day)?.totalGross ?? null })),
     };
-  }).sort((a, b) => b.totalGross - a.totalGross);
+  })
+    // An archived, deleted or unmapped account earns nothing going forward, so it
+    // shows only for a period it actually earned in. Active mapped creators
+    // always show — the roster is the selector.
+    .filter(card => card.totalGross > 0 || identityOf(card.creatorId).status === 'active')
+    .sort((a, b) => b.totalGross - a.totalGross);
+  for (const card of roster) identify(card.creatorId);
 
   // ── Daily series for the selection (summed across creators for "All") ──
   const selected = scoped(rangeDays);
@@ -940,7 +1044,7 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
     .map(l => {
       const series = Object.entries(l.series ?? {}).sort(([a], [b]) => a.localeCompare(b));
       return {
-        creatorId: l.creatorId,
+        creatorId: keyOf(l),
         linkId: l.linkId,
         kind: l.kind,
         name: l.name,
@@ -964,8 +1068,11 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
 
   const best = linkSnap
     .filter(l => l.fansCount >= 5)
-    .map(l => ({ name: l.name, creatorId: l.creatorId, revenuePerFan: round2(l.revenue / l.fansCount) }))
+    .map(l => ({ name: l.name, creatorId: keyOf(l), revenuePerFan: round2(l.revenue / l.fansCount) }))
     .sort((a, b) => b.revenuePerFan - a.revenuePerFan)[0] ?? null;
+  for (const l of links.slice(0, 60)) identify(l.creatorId);
+  identify(best?.creatorId ?? null);
+  identify(creatorId);
 
   // ── Mass messages ──
   const mass = scoped(massSnap).filter(m => m.sentDate);
@@ -1015,5 +1122,6 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
         share: total > 0 ? Math.round((r.totalGross / total) * 1000) / 1000 : 0,
         previousGross: r.previousGross,
       })),
+    identities,
   };
 }

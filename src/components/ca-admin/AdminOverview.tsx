@@ -11,7 +11,7 @@ import { CreatorAvatar } from '@/components/creators/CreatorChip';
 import { MonthPicker } from '@/components/salary/MonthPicker';
 import { SALARY_HISTORY_START_MONTH } from '@/lib/salary/salaryConstants';
 import { useAuth } from '@/components/AuthProvider';
-import { useCreators } from '@/hooks/useCreators';
+import { useCreatorMap } from '@/hooks/useCreators';
 import { getCache, setCache } from '@/lib/queryCache';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { formatMonthLabel, formatMonthLabelShort } from '@/lib/salary/salaryDate';
@@ -1221,14 +1221,18 @@ function normalise(name: string): string {
  * renders — `CreatorAvatar` falls back to initials on a colour hashed from that
  * same string (rule 7), so an unrecognised creator looks like a creator rather
  * than like a rendering failure. The roster itself costs nothing here:
- * `useCreators` is a module-level shared store the rest of the page is already
+ * `useCreatorMap` is a module-level shared store the rest of the page is already
  * reading.
  */
 function useCreatorPhotos(): Map<string, string | null> {
-  const creators = useCreators();
+  // The full index, archived creators included — last month's sales can name one.
+  const creators = useCreatorMap();
   return useMemo(() => {
     const out = new Map<string, string | null>();
-    for (const creator of creators) out.set(normalise(creator.stageName), creator.photoURL ?? null);
+    for (const creator of creators.values()) {
+      if (creator.isSubAccount) continue;
+      out.set(normalise(creator.stageName), creator.photoThumb ?? creator.photoURL ?? null);
+    }
     return out;
   }, [creators]);
 }

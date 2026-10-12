@@ -6,7 +6,9 @@
 import {
   claimRefusal,
   groupByHolder,
+  lockIsStale,
   NO_ONE,
+  reassignRefusal,
   transferDecision,
   type ClaimableSale,
 } from '@/lib/disputes/disputeRules';
@@ -37,8 +39,11 @@ describe('claimRefusal', () => {
     expect(claimRefusal(sale({ userId: null }), 'u-filer', never)).toBeNull();
   });
 
+  it('allows a PPV — the move happens in Bluu Backend, not BuddyX', () => {
+    expect(claimRefusal(sale({ kind: 'ppv' }), 'u-filer', never)).toBeNull();
+  });
+
   it.each([
-    ['ppv', sale({ kind: 'ppv' })],
     ['before-cutover', sale({ occurredAtMs: SALES_CUTOVER_AT })],
     ['removed', sale({ removed: true })],
     ['yours', sale({ userId: 'u-filer' })],
@@ -104,5 +109,65 @@ describe('transferDecision', () => {
 
   it('treats approving twice as already done', () => {
     expect(transferDecision(live({ userId: 'u-filer', transferDisputeId: 'd1', disputeId: null }), dispute, never)).toBe('already');
+  });
+});
+
+describe('transferDecision — the filer already holds it', () => {
+  it('reports a sale BuddyX re-credited to the filer as already done', () => {
+    const held = { ...sale({ userId: 'u-filer', disputeId: 'd1' }), transferDisputeId: null };
+    expect(transferDecision(held, { id: 'd1', assignedTo: 'u-holder', createdBy: 'u-filer' }, never)).toBe('already');
+  });
+});
+
+describe('reassignRefusal', () => {
+  const row = (over: Partial<Parameters<typeof reassignRefusal>[0] & object> = {}) => ({
+    source: 'buddyx' as const,
+    userId: 'u-a',
+    sourceUserId: 'u-a',
+    hasTransfer: false,
+    removed: false,
+    disputeId: null,
+    month: '2026-10',
+    ...over,
+  });
+
+  it('allows moving a BuddyX sale to another agent or to nobody', () => {
+    expect(reassignRefusal(row(), 'u-b', never)).toBeNull();
+    expect(reassignRefusal(row(), null, never)).toBeNull();
+  });
+
+  it.each([
+    ['not-found', null, 'u-b'],
+    ['not-buddyx', row({ source: 'infloww' }), 'u-b'],
+    ['removed', row({ removed: true }), 'u-b'],
+    ['disputed', row({ disputeId: 'd1' }), 'u-b'],
+    ['same', row(), 'u-a'],
+  ] as const)('refuses %s', (reason, r, to) => {
+    expect(reassignRefusal(r, to, never)).toBe(reason);
+  });
+
+  it('allows clearing a transfer BuddyX has since agreed with', () => {
+    expect(reassignRefusal(row({ hasTransfer: true }), 'u-a', never)).toBeNull();
+  });
+
+  it('refuses a month finalised for the current or the new holder', () => {
+    expect(reassignRefusal(row(), 'u-b', uid => uid === 'u-a')).toBe('finalised');
+    expect(reassignRefusal(row(), 'u-b', uid => uid === 'u-b')).toBe('finalised');
+  });
+});
+
+describe('lockIsStale', () => {
+  const snap = (exists: boolean, fields: Record<string, string> = {}) => ({ exists, get: (f: string) => fields[f] });
+
+  it('holds while the dispute can still move the sale', () => {
+    expect(lockIsStale(snap(true, { CaApproval: 'Pending', AdminApproval: 'Pending' }))).toBe(false);
+    expect(lockIsStale(snap(true, { CaApproval: 'Approved', AdminApproval: 'Pending' }))).toBe(false);
+  });
+
+  it('is stale once decided, declined, or gone', () => {
+    expect(lockIsStale(snap(true, { AdminApproval: 'Approved' }))).toBe(true);
+    expect(lockIsStale(snap(true, { AdminApproval: 'Rejected' }))).toBe(true);
+    expect(lockIsStale(snap(true, { CaApproval: 'Rejected', AdminApproval: 'Pending' }))).toBe(true);
+    expect(lockIsStale(snap(false))).toBe(true);
   });
 });

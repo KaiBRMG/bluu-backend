@@ -10,11 +10,29 @@
  * A sale's **effective holder** is `transfer?.toUserId ?? sourceUserId`, and
  * `userId` always equals it. The source attribution (`sourceUserId`) is
  * re-read every run, because BuddyX can re-attribute a tip after the fact, but
- * **a sync never clears a transfer**: once an approved dispute has moved a
- * sale, Bluu Backend is the source of truth. If BuddyX later re-attributes a
- * transferred sale to someone other than the agent it was moved off, the
- * transfer stands and the row is flagged `attributionConflict` for an admin —
- * never resolved silently.
+ * **a sync never clears a transfer**: once an approved dispute or an admin
+ * (CA Admin → Sales) has moved a sale, Bluu Backend is the source of truth.
+ * If BuddyX later re-attributes a transferred sale to anyone other than whom
+ * it credited when the transfer was made — and other than the agent Bluu now
+ * holds it on — the transfer stands and the row is flagged
+ * `attributionConflict` for an admin, never resolved silently. BuddyX coming
+ * round to Bluu's answer is not a conflict.
+ *
+ * ## Identity — which stored sale a BuddyX row is
+ *
+ * A row is matched to its stored document by its **BuddyX id** (`sourceId`),
+ * never by who it is attributed to, so a re-attribution in BuddyX updates the
+ * same document rather than creating a second one. The document id is minted
+ * from the BuddyX id the first time (`bx-tip-{id}`) and **never changes** —
+ * disputes and the audit log reference it.
+ *
+ * Whether BuddyX keeps a tip-allocation's id when a manager reassigns it is
+ * not stated in its spec. So, as a fallback, a row whose id is new is matched
+ * to a stored row whose id vanished this run **when both carry the same facts**
+ * (`saleMatchKey`: kind, model, fan, instant, gross) and the pairing is unique
+ * on both sides. That row is *re-keyed*: same document, new `sourceId`, and a
+ * transfer or dispute lock on it survives. An ambiguous pairing (two identical
+ * tips) is never guessed — it falls through to remove + create, and is counted.
  *
  * ## Write only what changed
  *
@@ -65,13 +83,24 @@ export const tipSaleId = (id: string) => `bx-tip-${id}`;
 export const ppvSaleId = (id: string) => `bx-ppv-${id}`;
 
 /**
- * A tip row, or `null` when it cannot be placed: no id, no timestamp, or dated
+ * A row's id and instant, or `null` when it has neither a usable id nor a
+ * parseable date — a row that cannot be placed at all. The one rule the
+ * normalisers and the sync's `sales.unplaceable` count share.
+ */
+export function placeRow(rawId: string | number | null | undefined, rawDate: string | null | undefined): { id: string; at: number } | null {
+  const id = normaliseId(rawId);
+  const at = rawDate ? Date.parse(rawDate) : NaN;
+  return id && Number.isFinite(at) ? { id, at } : null;
+}
+
+/**
+ * A tip row, or `null` when it cannot be placed (`placeRow`) or is dated
  * at/before the cutover (Infloww owns that side — `salesSourceFor`).
  */
 export function normaliseTip(row: BuddyxTipRow): NormalisedSale | null {
-  const id = normaliseId(row.id);
-  const at = row.datePurchase ? Date.parse(row.datePurchase) : NaN;
-  if (!id || !Number.isFinite(at) || salesSourceFor(at) !== 'buddyx') return null;
+  const placed = placeRow(row.id, row.datePurchase);
+  if (!placed || salesSourceFor(placed.at) !== 'buddyx') return null;
+  const { id, at } = placed;
   const gross = round2(Number(row.amount?.gross ?? 0));
   return {
     saleId: tipSaleId(id),
@@ -93,10 +122,9 @@ export function normaliseTip(row: BuddyxTipRow): NormalisedSale | null {
 
 /** A PPV row. PPVs have no `type`; they are dated by `unlockDate`. */
 export function normalisePpv(row: BuddyxPpvRow): NormalisedSale | null {
-  const id = normaliseId(row.id);
-  const raw = row.unlockDate ?? row.createdAt;
-  const at = raw ? Date.parse(raw) : NaN;
-  if (!id || !Number.isFinite(at) || salesSourceFor(at) !== 'buddyx') return null;
+  const placed = placeRow(row.id, row.unlockDate ?? row.createdAt);
+  if (!placed || salesSourceFor(placed.at) !== 'buddyx') return null;
+  const { id, at } = placed;
   const gross = round2(Number(row.revenue?.gross ?? 0));
   return {
     saleId: ppvSaleId(id),
@@ -128,15 +156,46 @@ export interface ModelRef {
   handle: string | null;
 }
 
+/** A stored row's transfer, as far as the planner cares. */
+export interface StoredTransfer {
+  toUserId: string | null;
+  /**
+   * BuddyX's attribution when the transfer was made. The reader resolves the
+   * legacy case (transfers written before the field existed → `fromUserId`).
+   */
+  sourceUserIdAtTransfer: string | null;
+}
+
 /** A stored BuddyX row, field-masked to what the planner needs. */
 export interface StoredSale {
   saleId: string;
+  /** The BuddyX row id the document currently tracks. */
+  sourceId: string;
+  kind: 'tip' | 'ppv';
+  /** `saleMatchKey` of the stored facts, for the re-key fallback. `null` when unknown. */
+  matchKey: string | null;
   userId: string | null;
   month: string;
-  transfer: { fromUserId: string | null; toUserId: string } | null;
+  transfer: StoredTransfer | null;
   removed: boolean;
   syncHash: string | null;
   vanishedAfterFinalise: boolean;
+}
+
+/**
+ * The facts that identify a sale independently of its BuddyX id: what kind,
+ * which model, which fan, the instant, and the gross in cents. Used only to
+ * pair a vanished id with a new one (see "Identity" above), and to spot
+ * possible duplicates on CA Admin → Sales.
+ */
+export function saleMatchKey(sale: {
+  kind: 'tip' | 'ppv';
+  modelId: string | null;
+  fanId: string;
+  occurredAtMs: number;
+  gross: number;
+}): string {
+  return [sale.kind, sale.modelId ?? '', sale.fanId, sale.occurredAtMs, Math.round(sale.gross * 100)].join('|');
 }
 
 /** `uid|month` — the key a finalised agent-month is looked up by. */
@@ -217,7 +276,7 @@ export function deriveSale(
     // The invariant: a transfer is never cleared by a sync.
     userId: transfer ? transfer.toUserId : sourceUserId,
     unmappedChatterId: sale.chatterId && !sourceUserId ? sale.chatterId : null,
-    attributionConflict: transfer ? sourceUserId !== transfer.fromUserId : false,
+    attributionConflict: transfer ? isAttributionConflict(transfer, sourceUserId) : false,
     removedAt: null,
     vanishedAfterFinalise: false,
   };
@@ -226,7 +285,91 @@ export function deriveSale(
   return { ...base, syncHash };
 }
 
-/** Every agent-month a run could touch, so the caller can read finalisation in one batch. */
+/**
+ * BuddyX now credits the sale to someone it did not credit when the transfer
+ * was made, and who is not the agent Bluu holds it on. A move that BuddyX has
+ * since agreed with is not a conflict.
+ */
+export function isAttributionConflict(transfer: StoredTransfer, sourceUserId: string | null): boolean {
+  return sourceUserId !== transfer.sourceUserIdAtTransfer && sourceUserId !== transfer.toUserId;
+}
+
+/** `map.get(key).push(value)`, creating the list on first use. */
+function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+  const list = map.get(key);
+  if (list) list.push(value);
+  else map.set(key, [value]);
+}
+
+/** Rows pointed at their documents — what the planner and the preview work on. */
+export interface ResolvedSales {
+  /** Each row with `saleId` set to its document id. */
+  sales: NormalisedSale[];
+  rekeyed: Array<{ saleId: string; fromSourceId: string; toSourceId: string }>;
+  ambiguous: number;
+}
+
+/**
+ * Point each BuddyX row at the stored document it belongs to — by BuddyX id,
+ * then by the unique-facts fallback — and mint ids for the genuinely new.
+ * Run **once** per sync; every consumer takes the result. Pure.
+ */
+export function resolveSaleIdentities(incoming: NormalisedSale[], stored: Map<string, StoredSale>): ResolvedSales {
+  const bySource = new Map<string, StoredSale>();
+  for (const row of stored.values()) bySource.set(`${row.kind}:${row.sourceId}`, row);
+
+  // A restarted pagination can yield a row twice; the BuddyX id is the identity.
+  const unique = new Map<string, NormalisedSale>();
+  for (const sale of incoming) unique.set(`${sale.kind}:${sale.sourceId}`, sale);
+
+  const out: NormalisedSale[] = [];
+  const claimed = new Set<string>();
+  const unmatched: NormalisedSale[] = [];
+  for (const [key, sale] of unique) {
+    const doc = bySource.get(key);
+    if (doc) {
+      claimed.add(doc.saleId);
+      out.push({ ...sale, saleId: doc.saleId });
+    } else {
+      unmatched.push(sale);
+    }
+  }
+
+  // Fallback: pair a new id with a vanished one carrying identical facts —
+  // only when the pairing is unique on both sides.
+  const newByKey = new Map<string, NormalisedSale[]>();
+  for (const sale of unmatched) pushTo(newByKey, saleMatchKey(sale), sale);
+  const goneByKey = new Map<string, StoredSale[]>();
+  for (const row of stored.values()) {
+    if (!claimed.has(row.saleId) && row.matchKey) pushTo(goneByKey, row.matchKey, row);
+  }
+
+  const rekeyed: ResolvedSales['rekeyed'] = [];
+  let ambiguous = 0;
+  const taken = new Set(stored.keys());
+  for (const [key, fresh] of newByKey) {
+    const gone = goneByKey.get(key);
+    if (gone && fresh.length === 1 && gone.length === 1) {
+      const doc = gone[0];
+      claimed.add(doc.saleId);
+      out.push({ ...fresh[0], saleId: doc.saleId });
+      rekeyed.push({ saleId: doc.saleId, fromSourceId: doc.sourceId, toSourceId: fresh[0].sourceId });
+      continue;
+    }
+    if (gone) ambiguous += fresh.length;
+    for (const sale of fresh) {
+      // A document id is never reused: a re-keyed row keeps its original id,
+      // so BuddyX handing that old id to a different sale must not overwrite it.
+      let id = sale.saleId;
+      for (let n = 2; taken.has(id); n++) id = `${sale.saleId}~${n}`;
+      taken.add(id);
+      out.push({ ...sale, saleId: id });
+    }
+  }
+  return { sales: out, rekeyed, ambiguous };
+}
+
+/** Every agent-month a run could touch, so the caller can read finalisation in one batch. Takes resolved rows. */
 export function collectHolderPairs(
   sales: NormalisedSale[],
   stored: Map<string, StoredSale>,
@@ -259,6 +402,8 @@ export interface SalesPlan {
   touched: Set<string>;
   /** Chatter ids carrying sales that resolve to no user, with what they carry. */
   unmappedChatters: Map<string, { name: string | null; rows: number; gross: number }>;
+  /** Documents whose BuddyX id changed, matched by their facts (see "Identity"). */
+  rekeyed: Array<{ saleId: string; fromSourceId: string; toSourceId: string }>;
   counts: {
     fetched: number;
     new: number;
@@ -270,11 +415,15 @@ export interface SalesPlan {
     rejectedFinalized: number;
     attributionConflicts: number;
     unassigned: number;
+    rekeyed: number;
+    /** New ids that matched a vanished row's facts, but not uniquely — not guessed. */
+    rekeyAmbiguous: number;
   };
 }
 
 export function planSalesSync(params: {
-  sales: NormalisedSale[];
+  /** From `resolveSaleIdentities` — the same result the caller fed `collectHolderPairs`. */
+  identity: ResolvedSales;
   stored: Map<string, StoredSale>;
   chatters: Map<string, ChatterRef>;
   models: Map<string, ModelRef>;
@@ -283,11 +432,10 @@ export function planSalesSync(params: {
   /** Both endpoints paginated to completion — the only condition under which anything is removed. */
   complete: boolean;
 }): SalesPlan {
-  const { stored, chatters, models, finalized, complete } = params;
+  const { identity, stored, chatters, models, finalized, complete } = params;
 
-  // A restarted pagination can yield a row twice; the id is the identity.
   const sales = new Map<string, NormalisedSale>();
-  for (const sale of params.sales) sales.set(sale.saleId, sale);
+  for (const sale of identity.sales) sales.set(sale.saleId, sale);
 
   const plan: SalesPlan = {
     upserts: [],
@@ -296,6 +444,7 @@ export function planSalesSync(params: {
     rejectedFinalized: [],
     touched: new Set(),
     unmappedChatters: new Map(),
+    rekeyed: identity.rekeyed,
     counts: {
       fetched: sales.size,
       new: 0,
@@ -307,6 +456,8 @@ export function planSalesSync(params: {
       rejectedFinalized: 0,
       attributionConflicts: 0,
       unassigned: 0,
+      rekeyed: identity.rekeyed.length,
+      rekeyAmbiguous: identity.ambiguous,
     },
   };
 

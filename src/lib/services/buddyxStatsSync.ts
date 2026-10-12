@@ -28,6 +28,7 @@ import {
   BUDDYX_CREATOR_STATS_START_DAY,
   BUDDYX_SUBSCRIBERS_START_DAY,
   BUDDYX_TEAM_STATS_START_DAY,
+  unmappedModelKey,
 } from '../buddyx/constants';
 import {
   normaliseId,
@@ -369,11 +370,12 @@ export async function syncCreatorsScope(ctx: SyncContext): Promise<void> {
     for (const row of rows ?? []) {
       if (outOfTime(ctx)) break;
       const modelId = normaliseId(row.modelId);
-      const creatorId = modelId ? ctx.maps.modelCreator.get(modelId) : undefined;
-      if (!modelId || !creatorId) {
-        bump(ctx, 'creators.unmappedModelRows');
-        continue;
-      }
+      if (!modelId) continue;
+      // An unmapped model's earnings are still kept, under its own key, so
+      // OnlyFans Analytics can show a BuddyX creator Bluu does not know (flagged).
+      const mapped = ctx.maps.modelCreator.get(modelId);
+      if (!mapped) bump(ctx, 'creators.unmappedModelRows');
+      const creatorId = mapped ?? unmappedModelKey(modelId);
 
       let chat: BuddyxOverviewTotals | undefined;
       try {
