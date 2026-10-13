@@ -49,7 +49,9 @@ import type {
  *
  * Beside them, greyscale attribute chips: `OT` for overtime, and **Paid leave**
  * / **Unpaid leave** for a day with approved leave (`day.leave`, attached on
- * read by `buildSalaryMonth` — the engine does not price leave).
+ * read by `buildSalaryMonth`). Sales made during a leave shift are not on the
+ * row at all, and paid leave pays as a `paidLeave` shift — expand the day to
+ * see the 8 hours and whose accounts they were rated on.
  *
  * ## Multi-shift days expand
  *
@@ -247,7 +249,7 @@ function DayRow({
   // shift, or in-shift cover (which adds accounts while paying no wage).
   const expandable =
     shifts.length > 1 ||
-    shifts.some(s => s.isOvertime || !s.paysWage || (s.overtimeCreatorIds?.length ?? 0) > 0);
+    shifts.some(s => s.isOvertime || s.paidLeave || !s.paysWage || (s.overtimeCreatorIds?.length ?? 0) > 0);
   // A hand-built overtime shift carries no `isOvertime` flag — it is overtime
   // because every account on it is. The header badge has to agree with the
   // sub-row's own label, or the same shift is two different kinds on one screen.
@@ -547,11 +549,13 @@ function ShiftRow({
   const split = splitShiftAccounts(shift.creatorIds, shift.overtimeCreatorIds);
   const overtimeIds = split.overtimeIds;
 
-  const kind = !shift.paysWage
-    ? 'In-shift cover'
-    : shift.isOvertime || split.isFullyOvertime
-      ? 'Overtime'
-      : 'Regular';
+  const kind = shift.paidLeave
+    ? 'Paid leave'
+    : !shift.paysWage
+      ? 'In-shift cover'
+      : shift.isOvertime || split.isFullyOvertime
+        ? 'Overtime'
+        : 'Regular';
 
   return (
     <tr className="bg-white/[0.02] text-[13px] text-zinc-400">
@@ -564,8 +568,18 @@ function ShiftRow({
             overtimeIds={shift.overtimeCreatorIds}
             max={4}
             size="xs"
-            emptyLabel="No accounts assigned"
+            emptyLabel={shift.paidLeave ? 'No accounts in the last 7 days' : 'No accounts assigned'}
           />
+          {/* Paid leave has no shift of its own: its accounts are borrowed from
+              the last day that had some, and the row has to say which day, or
+              the count is unverifiable. */}
+          {shift.paidLeave && (
+            <span className="text-[11px] text-zinc-400">
+              {shift.paidLeaveBasisDay
+                ? `${shift.payableHours}h on ${formatDayLabelWithWeekday(shift.paidLeaveBasisDay)}’s accounts`
+                : 'No recent accounts to rate it on — an admin sets the count'}
+            </span>
+          )}
           {shift.paysWage && overtimeIds.length > 0 && !split.isFullyOvertime && (
             <span
               className="text-[11px] text-orange-400"

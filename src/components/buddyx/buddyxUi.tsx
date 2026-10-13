@@ -9,11 +9,13 @@
  * attributes a sale; who Bluu Backend holds it on can differ after a dispute or
  * an admin reassignment, which every ledger row states (`SaleHolderNote`).
  */
+import Link from 'next/link';
 import { Info, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { profileLinkForKey } from '@/lib/fans/fanIdentity';
 
 export const TIPS_ATTRIBUTION = 'Tips are assigned to the chat agent on shift at the time of sale';
 export const PPV_ATTRIBUTION = 'PPV sales are assigned to the sender';
@@ -54,22 +56,51 @@ export function InfoTip({ text, className }: { text: string; className?: string 
   );
 }
 
+/** The fan report for a fan id or registry key. */
+export const fanReportHref = (fanKey: string) => `/ca-portal/fan-analytics/${encodeURIComponent(fanKey)}`;
+
+const FAN_LINK =
+  'rounded-sm underline-offset-2 hover:text-white hover:underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
+
 /**
- * A fan: the name when we know it, otherwise the OnlyFans id in mono linked to
- * the profile. Never "Unknown" — an id is a fact, "Unknown" is a shrug.
+ * A fan: the name when we know it, otherwise the OnlyFans id in mono. Never
+ * "Unknown" — an id is a fact, "Unknown" is a shrug.
+ *
+ * `linkToReport` (pass it only when the viewer has Fan Analytics) makes either
+ * form open the fan's report; without it an unnamed fan links to their
+ * OnlyFans profile instead.
  */
-export function FanLabel({ name, fanId, className }: { name: string | null | undefined; fanId: string; className?: string }) {
-  if (name) return <span className={cn('truncate', className)} title={fanId ? `Fan ${fanId}` : undefined}>{name}</span>;
-  if (!fanId) return <span className={cn('text-zinc-400', className)}>—</span>;
+export function FanLabel({
+  name,
+  fanId,
+  className,
+  linkToReport = false,
+}: {
+  name: string | null | undefined;
+  fanId: string;
+  className?: string;
+  linkToReport?: boolean;
+}) {
+  if (!fanId) return <span className={cn(name ? 'truncate' : 'text-zinc-400', className)}>{name || '—'}</span>;
+  if (linkToReport) {
+    return (
+      <Link
+        href={fanReportHref(fanId)}
+        prefetch={false}
+        title={`Fan ${fanId}`}
+        className={cn(FAN_LINK, name ? 'truncate' : 'font-mono text-xs text-zinc-300', className)}
+      >
+        {name || fanId}
+      </Link>
+    );
+  }
+  if (name) return <span className={cn('truncate', className)} title={`Fan ${fanId}`}>{name}</span>;
   return (
     <a
-      href={`https://onlyfans.com/u${encodeURIComponent(fanId)}`}
+      href={profileLinkForKey(fanId)}
       target="_blank"
       rel="noreferrer"
-      className={cn(
-        'rounded-sm font-mono text-xs text-zinc-300 underline-offset-2 hover:text-white hover:underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-        className,
-      )}
+      className={cn(FAN_LINK, 'font-mono text-xs text-zinc-300', className)}
     >
       {fanId}
     </a>

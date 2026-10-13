@@ -1,5 +1,6 @@
 'use client';
 
+import { usePermissions } from '@/hooks/usePermissions';
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { ChevronDown, Loader2Icon, RotateCcw, Search, X } from 'lucide-react';
@@ -154,6 +155,7 @@ export default function AdminSales({
   const { user } = useAuth();
   const { userData } = useUserData();
   const isAdmin = userData?.groups?.includes('admin') === true || userData?.role === 'admin';
+  const fanReports = usePermissions().canAccess('/ca-portal/fan-analytics');
 
   const [data, setData] = useState<AllSalesResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -617,7 +619,7 @@ export default function AdminSales({
                             )}
                           </span>
                         </td>
-                        <td className="max-w-[12rem] px-3 py-2"><FanLabel name={sale.fanName} fanId={sale.fanId} className="block" /></td>
+                        <td className="max-w-[12rem] px-3 py-2"><FanLabel name={sale.fanName} fanId={sale.fanId} className="block" linkToReport={fanReports} /></td>
                         <td className={cn('whitespace-nowrap px-3 py-2 text-right tabular-nums', sale.removedAt ? 'text-zinc-400 line-through' : signedMoneyClass(sale.signedGross))}>
                           {formatUsd(sale.signedGross)}
                         </td>

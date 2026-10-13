@@ -1872,7 +1872,55 @@ export interface BuddyxFanDocument {
   acquisition: { kind: 'tracking' | 'free-trial'; linkId: string; linkName: string | null } | null;
   linkTotalSpent: number | null;
   isStacker: boolean;
+  /**
+   * The fan's name when it was set by hand or taken from their customs —
+   * written through by `fanRegistryService` so the analytics read needs no
+   * registry lookup. Absent when the name is only the synced one (`name`).
+   */
+  displayName?: string | null;
+  displayNameSource?: 'manual' | 'customs' | null;
   updatedAt: Timestamp;
+}
+
+/**
+ * `buddyx-fan-names/{fanKey}` — the fan registry. One fan across every
+ * creator, keyed by OnlyFans id, or `h_<handle>` for a fan known only from a
+ * custom whose link carries a handle. Server-only (rules deny clients).
+ *
+ * The sync owns `name`/`source`; staff own `manualName`; customs own the
+ * `customs*` rollup, recomputed whenever one of the fan's customs changes.
+ * Name resolution lives in `lib/fans/fanIdentity.ts`.
+ */
+export interface FanRegistryDocument {
+  fanId: string | null;
+  handle?: string | null;
+  /** Handles of `h_` entries that were linked into this id. */
+  handles?: string[];
+  /** On an `h_` entry that has been linked: the id it now lives under. */
+  mergedInto?: string | null;
+  /** The synced name — a BuddyX link list or the Infloww export. */
+  name?: string | null;
+  source?: 'buddyx-link' | 'infloww' | null;
+  lastSeenAt?: Timestamp;
+  manualName?: string | null;
+  manualNameBy?: string | null;
+  manualNameByName?: string | null;
+  manualNameAt?: Timestamp | null;
+  /** The name staff use on this fan's customs (most common, then most recent). */
+  customsName?: string | null;
+  customsNameVotes?: number;
+  customsCount?: number;
+  customsByType?: Record<string, number>;
+  customsOutstandingCount?: number;
+  customsOutstandingAmount?: number;
+  customsAbandonedCount?: number;
+  customsRejectedCount?: number;
+  /** Creators the fan's customs were for — an agent's directory scope. */
+  customsCreatorIds?: string[];
+  lastCustomAt?: Timestamp | null;
+  linkedBy?: string | null;
+  linkedAt?: Timestamp | null;
+  updatedAt?: Timestamp;
 }
 
 /** `buddyx-fan-names/{fanId}` — a fan's name is the same on every creator. */

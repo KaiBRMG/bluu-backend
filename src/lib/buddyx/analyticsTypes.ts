@@ -4,16 +4,22 @@
  */
 import type { CoverageFigures } from './coverage';
 import type { InputPermission, InputSource } from '../inputQuality';
+import type { FanNameSource } from '../fans/fanIdentity';
 
 export type { CoverageFigures };
 
 // ─── Chatter Analytics ───────────────────────────────────────────────
 
-export const CHATTER_PERIODS = ['mtd', 'prev-month', '7d', '30d', 'custom'] as const;
+/**
+ * `mtd` is the current month, `prev-month` and `month-2` the two before it,
+ * `3m` / `6m` / `12m` rolling windows through today. `30d` is no longer offered
+ * but is still accepted, for renderers loaded before it was removed (rule 9c).
+ */
+export const CHATTER_PERIODS = ['7d', 'mtd', 'prev-month', 'month-2', '3m', '6m', '12m', '30d', 'custom'] as const;
 export type ChatterPeriod = (typeof CHATTER_PERIODS)[number];
 
-/** A custom range sums days; past this it stops being a page and becomes a report. */
-export const MAX_CUSTOM_DAYS = 92;
+/** A custom range sums days; past a year it stops being a page and becomes a report. */
+export const MAX_CUSTOM_DAYS = 366;
 
 /**
  * One chatter's figures for a period. Money is gross.
@@ -196,6 +202,10 @@ export interface ReportDay {
 export interface ChatterReport {
   uid: string;
   name: string;
+  period: ChatterPeriod;
+  /** The days the period resolved to (salary timezone). */
+  from: string;
+  to: string;
   metrics: ChatterMetrics | null;
   coverage: CoverageFigures | null;
   integrity: IntegritySummary | null;
@@ -241,6 +251,8 @@ export interface FanSummary {
   fanId: string;
   /** `null` → render the mono id, never "Unknown". */
   name: string | null;
+  /** Where the name came from (`fanIdentity.resolveFanName`). */
+  nameSource: FanNameSource | null;
   periodSpend: number;
   periodTips: number;
   periodPpv: number;
@@ -302,6 +314,7 @@ export interface FanAnalytics {
 export interface FanPurchase {
   saleId: string;
   occurredAt: string;
+  creatorId: string | null;
   kind: 'tip' | 'ppv';
   type: string;
   gross: number;
@@ -310,14 +323,109 @@ export interface FanPurchase {
   earnedBy: string | null;
 }
 
-export interface FanDetail {
-  fan: FanSummary;
+// ─── Fan base (directory + per-fan report) ───────────────────────────
+
+export const FAN_DIRECTORY_FILTERS = ['all', 'customs', 'owes', 'unnamed', 'unmatched'] as const;
+export type FanDirectoryFilter = (typeof FAN_DIRECTORY_FILTERS)[number];
+export const FAN_DIRECTORY_SORTS = ['spend', 'recent', 'customs', 'name'] as const;
+export type FanDirectorySort = (typeof FAN_DIRECTORY_SORTS)[number];
+
+/** One fan in the directory — every creator they buy from folded together. */
+export interface FanDirectoryRow {
+  fanKey: string;
+  fanId: string | null;
+  handle: string | null;
+  name: string | null;
+  nameSource: FanNameSource | null;
+  creatorIds: string[];
+  lifetimeSpend: number;
+  lastPurchaseAt: number | null;
+  customs: number;
+  outstandingAmount: number;
+  /** Known only by an OnlyFans handle: customs, but no id to join sales on. */
+  unmatched: boolean;
+}
+
+export interface FanDirectory {
+  rows: FanDirectoryRow[];
+  total: number;
+  /** Counts behind each filter, for the filter chips. */
+  counts: Record<FanDirectoryFilter, number>;
+}
+
+/** A wizard search hit — just enough to recognise the right fan. */
+export interface FanLookupHit {
+  fanKey: string;
+  fanId: string | null;
+  handle: string | null;
+  name: string | null;
+  nameSource: FanNameSource | null;
+  profileLink: string;
+  /** Gross lifetime spend with the creator the wizard is for (0 when unknown). */
+  spendWithCreator: number;
+  customs: number;
+}
+
+export interface FanCustomItem {
+  id: string;
+  CR: string | null;
+  type: string;
+  status: string;
+  isCampaign: boolean;
+  isArchived: boolean;
+  creatorId: string;
+  /** The name on this custom, which may differ from the fan's. */
+  fanName: string;
+  description: string;
+  createdTime: string | null;
+  totalAmount: number;
+  amountPaid: number;
+  outstanding: number;
+  abandoned: boolean;
+  abandonedAmount: number | null;
+}
+
+export interface FanReport {
+  fanKey: string;
+  fanId: string | null;
+  handle: string | null;
+  /** Handles that were linked into this id. */
+  handles: string[];
+  profileLink: string;
+  name: string | null;
+  nameSource: FanNameSource | null;
+  /** Who set the manual name, and when. */
+  manual: { by: string | null; at: string | null } | null;
+  /** What the name would be without the manual one — "Revert to automatic". */
+  automatic: { name: string | null; source: FanNameSource | null };
+  /** The customs vote behind a customs name: "4 of 6 customs". */
+  customsVote: { votes: number; total: number } | null;
+  canLink: boolean;
+  spend: {
+    lifetime: number;
+    tips: number;
+    ppv: number;
+    lastPurchaseAt: number | null;
+    firstSeenAt: number | null;
+    usual: 'tips' | 'ppv' | 'mixed' | null;
+    byCreator: Array<{ creatorId: string; lifetime: number; tips: number; ppv: number; lastPurchaseAt: number | null }>;
+    /** `YYYY-MM`, oldest first, every creator summed. */
+    monthly: Array<{ month: string; tips: number; ppv: number }>;
+  };
   isStacker: boolean;
-  acquisition: { kind: 'tracking' | 'free-trial'; linkId: string; linkName: string | null } | null;
-  linkTotalSpent: number | null;
+  acquisition: Array<{ creatorId: string; kind: 'tracking' | 'free-trial'; linkId: string; linkName: string | null }>;
   purchases: FanPurchase[];
-  subscriptions: Array<{ id: string; at: string | null; subType: string | null; isTrial: boolean; priceGross: number }>;
   earnedBy: Array<{ label: string; gross: number; count: number }>;
+  subscriptions: Array<{ id: string; creatorId: string | null; at: string | null; subType: string | null; isTrial: boolean; priceGross: number }>;
+  customs: {
+    total: number;
+    byType: Array<{ type: string; count: number }>;
+    outstanding: { count: number; amount: number };
+    abandoned: { count: number; amount: number; unknownAmount: number };
+    rejected: number;
+    completed: number;
+    items: FanCustomItem[];
+  };
 }
 
 // ─── OnlyFans Analytics ──────────────────────────────────────────────

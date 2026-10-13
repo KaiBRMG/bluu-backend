@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -10,6 +10,8 @@ import { sendTelegramNotification } from '@/lib/services/telegramService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { CRType, CallType } from '@/lib/campaignTracking';
 import { formatCR, CAMPAIGN_TYPES } from '@/lib/campaignTracking';
+import { cleanFanName } from '@/lib/fans/fanIdentity';
+import { refreshFanCustomsQuietly, resolveFanKeyForLink } from '@/lib/services/fanRegistryService';
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
@@ -36,10 +38,11 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         length?: string;
       };
 
-      if (!fanName || !profileLink || !description || !(Number(totalAmount) > 0)) {
+      if (!cleanFanName(fanName) || !profileLink || !description || !(Number(totalAmount) > 0)) {
         return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
       }
 
+      const fanKey = await resolveFanKeyForLink(profileLink);
       const creatorSnap = await adminDb.collection('creators').doc(creatorID).get();
       if (!creatorSnap.exists) return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
 
@@ -47,8 +50,9 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       const entryData: Record<string, unknown> = {
         creatorID,
         type,
-        fanName,
+        fanName: cleanFanName(fanName),
         profileLink: profileLink ?? '',
+        fanKey,
         description: description ?? '',
         totalAmount: Number(totalAmount),
         amountPaid: Number(amountPaid ?? 0),
@@ -64,6 +68,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       if (type === 'BFE') entryData.length = length ?? '';
 
       await entryRef.set(entryData);
+      // Join the fan base after the response — it never fails the create.
+      after(() => refreshFanCustomsQuietly([fanKey], 'campaign-tracking/create'));
       return NextResponse.json({ success: true, id: entryRef.id });
     }
 
@@ -100,10 +106,11 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       dueDateTimezone?: string | null;
     };
 
-    if (!fanName || !profileLink || !description || !(Number(totalAmount) > 0)) {
+    if (!cleanFanName(fanName) || !profileLink || !description || !(Number(totalAmount) > 0)) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
+    const fanKey = await resolveFanKeyForLink(profileLink);
     const creatorRef = adminDb.collection('creators').doc(creatorID);
     const entryRef = adminDb.collection('campaign-tracking').doc();
 
@@ -122,8 +129,9 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         type,
         status: 'Awaiting Approval',
         priority: null,
-        fanName,
+        fanName: cleanFanName(fanName),
         profileLink,
+        fanKey,
         description,
         totalAmount: Number(totalAmount),
         amountPaid: Number(amountPaid ?? 0),
@@ -155,6 +163,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
 
       return { id: entryRef.id, CR: cr, stageName };
     });
+
+    after(() => refreshFanCustomsQuietly([fanKey], 'campaign-tracking/create'));
 
     // Notify OFAM
     const ofamUids = await getOFAMUids();

@@ -34,6 +34,15 @@ export interface CampaignEntry {
   createdTime: string;
   lastEditedTime: string;
   isArchived: boolean;
+  /**
+   * The fan-registry key (`lib/fans/fanIdentity.ts`), derived from
+   * `profileLink` on the server. `null` for a link that is not an OnlyFans profile.
+   */
+  fanKey?: string | null;
+  /** Stamped when a custom request is archived — archiving zeroes the balance. */
+  originalTotalAmount?: number | null;
+  /** Stamped when a campaign is archived — archiving marks it paid in full. */
+  originalAmountPaid?: number | null;
 }
 
 export interface CampaignEntryFirestore extends Omit<CampaignEntry, 'id' | 'createdTime' | 'lastEditedTime' | 'dueDate'> {

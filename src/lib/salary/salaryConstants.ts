@@ -34,6 +34,21 @@ export const DEFAULT_SHIFT_HOURS = 8;
 export const DEFAULT_GRACE_MINUTES = 15;
 
 /**
+ * Hours a day of approved **paid** leave pays, at the rate for the accounts the
+ * agent held on their last worked day. The shift itself is gone — approval
+ * tombstones it and releases its accounts — so nothing tracked exists to pay.
+ */
+export const PAID_LEAVE_HOURS = 8;
+
+/**
+ * How far back a paid-leave day looks for "the previous day's accounts". The
+ * day before is usually a day off or more leave, so it walks back to the most
+ * recent day with an assignment — but not indefinitely: past this, the day
+ * pays on no accounts and an admin sets the count.
+ */
+export const PAID_LEAVE_ACCOUNT_LOOKBACK_DAYS = 7;
+
+/**
  * Commission tiers, on a sliding scale keyed to **month-to-date gross**.
  *
  * The scale ratchets: the day a threshold is crossed takes the new rate, and so

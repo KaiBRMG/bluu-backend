@@ -32,6 +32,7 @@ import {
 } from "@/lib/campaignTracking";
 import { useUserData } from "@/hooks/useUserData";
 import { apiRequest } from "@/lib/clientApi";
+import { EMPTY_FAN_PICK, FanPicker, isFanPickComplete, type FanPickValue } from "@/components/fans/FanPicker";
 import { toast } from "sonner";
 import { TransferDialog, ConfirmDialog, ARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
 import { OutstandingPaymentsDonut } from "@/components/campaign/OutstandingPaymentsDonut";
@@ -296,15 +297,20 @@ function NewCampaignWizard({ creators, defaultCreatorID, onClose }: WizardProps)
     length: "",
   });
   const [submitting, setSubmitting] = useState(false);
+  // The fan is picked from the fan base first; the picker owns name + link.
+  const [fan, setFan] = useState<FanPickValue>(EMPTY_FAN_PICK);
 
   const setField = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }));
   const setVal = (k: string) => (v: string) => setForm(prev => ({ ...prev, [k]: v }));
+  const setFanPick = (value: FanPickValue) => {
+    setFan(value);
+    setForm(prev => ({ ...prev, fanName: value.fanName, profileLink: value.profileLink }));
+  };
 
   const canAdvanceStep2 =
     !!form.creatorID &&
-    !!form.fanName.trim() &&
-    !!form.profileLink.trim() &&
+    isFanPickComplete(fan) &&
     !!form.description.trim() &&
     Number(form.totalAmount) > 0;
 
@@ -383,14 +389,7 @@ function NewCampaignWizard({ creators, defaultCreatorID, onClose }: WizardProps)
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">Fan Name</label>
-              <input value={form.fanName} onChange={setField("fanName")} required className={inputClass} />
-            </div>
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">Profile Link</label>
-              <input value={form.profileLink} onChange={setField("profileLink")} className={inputClass} />
-            </div>
+            <FanPicker creatorId={form.creatorID} value={fan} onChange={setFanPick} inputClass={inputClass} />
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Description</label>
               <textarea value={form.description} onChange={setField("description")} rows={3} className={`${inputClass} resize-none`} />

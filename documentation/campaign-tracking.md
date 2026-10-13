@@ -18,6 +18,9 @@
 ## Firestore
 
 - `campaign-tracking/{id}` — **both** custom requests and campaigns.
+- `fanKey` — the fan this entry belongs to, **derived on the server from `profileLink`** at create and on any edit of the link (`resolveFanKeyForLink`); `null` for a non-OnlyFans link. Every create/edit/delete that touches the fan, the name, the amounts or the status recomputes the fan's registry entry. See [fan-base.md](fan-base.md).
+- `originalTotalAmount` (custom requests) / `originalAmountPaid` (campaigns) — stamped by `PATCH` when an entry is archived, cleared on unarchive. Archiving rewrites the money (below); these keep what was given up, so the fan report can count **abandoned** customs.
+- **The create wizards pick the fan from the fan base** (`components/fans/FanPicker.tsx`) and cannot continue without a fan name — see [fan-base.md](fan-base.md#the-wizard-rule--every-new-fan-gets-a-name).
 
 ---
 

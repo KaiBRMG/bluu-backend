@@ -58,8 +58,12 @@ export const CREATOR_HISTORY_START_DAY = '2025-10-04';
 /** Subscriber events are backfilled from here on the first run. */
 export const BUDDYX_SUBSCRIBERS_START_DAY = '2026-09-25';
 
-/** The four preset periods stored whole in `buddyx-team-periods` (medians cannot be summed from days). */
-export const TEAM_PERIODS = ['mtd', 'prev-month', '7d', '30d'] as const;
+/**
+ * The preset periods stored whole in `buddyx-team-periods` (medians cannot be
+ * summed from days). Every other preset sums days, like a custom range, and
+ * reads a pulled `custom-{from}-{to}` doc for its medians.
+ */
+export const TEAM_PERIODS = ['mtd', 'prev-month', '7d'] as const;
 export type TeamPeriod = (typeof TEAM_PERIODS)[number];
 
 /** The page each scope's manual refresh is offered from — and so the permission it requires. */

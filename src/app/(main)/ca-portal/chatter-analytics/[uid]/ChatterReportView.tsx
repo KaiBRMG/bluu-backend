@@ -9,14 +9,13 @@ import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { cn } from '@/lib/utils';
 import { SURFACE } from '@/lib/surfaces';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
-import { DatePicker } from '@/components/smm/shared/DatePicker';
+import { PeriodPicker, dayKeyToDate } from '@/components/buddyx/PeriodPicker';
 import { SyncStatus } from '@/components/buddyx/SyncStatus';
-import { KpiTile, LegendSwatch, LoadError, SEGMENT } from '@/components/buddyx/buddyxUi';
+import { KpiTile, LegendSwatch, LoadError } from '@/components/buddyx/buddyxUi';
 import { FlagList, integrityBasis } from '@/components/buddyx/integrityUi';
 import { ShiftTimeline } from '@/components/buddyx/ShiftTimeline';
-import { CHATTER_PERIOD_OPTIONS, chatterAnalyticsUrl, chatterReportHref } from '@/components/buddyx/chatterPeriods';
+import { chatterPeriodOptions, chatterAnalyticsUrl, chatterReportHref } from '@/components/buddyx/chatterPeriods';
 import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { formatUsd } from '@/lib/salary/salaryFormat';
@@ -25,7 +24,7 @@ import { formatCount, formatDuration, formatShare } from '@/lib/buddyx/analytics
 import { SEQUENTIAL_COLOR } from '@/lib/buddyx/chartColors';
 import { STATUS_HEX } from '@/lib/campaignTracking';
 import { COVERAGE_FLAG_RATIO, HOUR_MS } from '@/lib/buddyx/coverage';
-import { CHATTER_PERIODS, MAX_CUSTOM_DAYS, type ChatterPeriod, type ChatterReport, type ReportShift } from '@/lib/buddyx/analyticsTypes';
+import { CHATTER_PERIODS, type ChatterPeriod, type ChatterReport, type ReportShift } from '@/lib/buddyx/analyticsTypes';
 
 /**
  * One chat agent's report — `/ca-portal/chatter-analytics/[uid]`, `ca-admin`
@@ -64,6 +63,8 @@ export function ReportView({ uid }: { uid: string }) {
     [uid, period, range],
   );
   const { data, loading, error, reload } = useBuddyxAnalytics<ChatterReport>(url);
+  // A preset's days are resolved on the server (salary timezone); show the ones it answered with.
+  const presetData = period !== 'custom' && data?.period === period ? data : null;
 
   const choosePeriod = (next: ChatterPeriod) => {
     setPeriod(next);
@@ -90,23 +91,24 @@ export function ReportView({ uid }: { uid: string }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <ToggleGroup type="single" variant="outline" size="sm" value={period} onValueChange={v => v && choosePeriod(v as ChatterPeriod)} aria-label="Period">
-            {CHATTER_PERIOD_OPTIONS.map(p => <ToggleGroupItem key={p.value} value={p.value} className={SEGMENT}>{p.label}</ToggleGroupItem>)}
-          </ToggleGroup>
+          <PeriodPicker
+            options={chatterPeriodOptions()}
+            value={period}
+            onPresetChange={choosePeriod}
+            from={period === 'custom' ? from : dayKeyToDate(presetData?.from)}
+            to={period === 'custom' ? to : dayKeyToDate(presetData?.to)}
+            onRangeChange={(nextFrom, nextTo) => {
+              setPeriod('custom');
+              setFrom(nextFrom);
+              setTo(nextTo);
+            }}
+          />
           <SyncStatus scope="chatters" onSynced={() => void reload(true)} />
         </div>
       </div>
 
-      {period === 'custom' && (
-        <div className="flex flex-wrap items-center gap-2">
-          <DatePicker value={from} onChange={setFrom} placeholder="From" className="h-8 w-44 text-sm" />
-          <DatePicker value={to} onChange={setTo} placeholder="To" className="h-8 w-44 text-sm" />
-          <p className="text-[11px] text-zinc-400">Up to {MAX_CUSTOM_DAYS} days.</p>
-        </div>
-      )}
-
       {!url ? (
-        <p className="text-sm text-zinc-400">Pick a start and an end day.</p>
+        <p className="text-sm text-zinc-400">{from && to ? 'The end date must be on or after the start date.' : 'Pick a start and an end date.'}</p>
       ) : loading && !data ? (
         <ReportSkeleton />
       ) : error && !data ? (

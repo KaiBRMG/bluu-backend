@@ -309,7 +309,14 @@ export function computeSalaryMonth(input: SalaryMonthInput): SalaryMonthResult {
     // from its own accounts or from the day's total.
     const dayRate = hourlyRateFor(accountCount, config);
     const shifts: SalaryShiftBreakdown[] = shiftInputs.map(s => {
-      const payable = s.paysWage ? payableHoursFor(s.trackedSeconds, s.scheduledHours, config) : 0;
+      // Paid leave has no tracked time to forgive or cap: it pays its stated
+      // hours outright. Everything else about it — the rate from its accounts,
+      // overrides, the per-day basis — is an ordinary paying shift's.
+      const payable = !s.paysWage
+        ? 0
+        : s.paidLeave
+          ? round2h(Math.max(0, s.scheduledHours))
+          : payableHoursFor(s.trackedSeconds, s.scheduledHours, config);
       // The shift's *paying* accounts. Overtime accounts added to a shift the
       // agent already works do not buy a higher tier — a 3-account agent
       // covering 2 more stays on the 3-account rate — but a shift that is
@@ -334,6 +341,7 @@ export function computeSalaryMonth(input: SalaryMonthInput): SalaryMonthResult {
         paysWage: s.paysWage,
         creatorIds: s.creatorIds,
         overtimeCreatorIds: split.overtimeIds,
+        ...(s.paidLeave ? { paidLeave: true, paidLeaveBasisDay: s.paidLeaveBasisDay ?? null } : {}),
       };
     });
 
@@ -413,6 +421,7 @@ export function computeSalaryMonth(input: SalaryMonthInput): SalaryMonthResult {
  *
  * `daysWorked` counts days with payable hours or a sale — not days with a
  * non-zero salary, which would miss a worked day that happened to earn nothing.
+ * Paid-leave hours are paid but not worked, so they do not make a day count.
  */
 export function sumMonth(days: SalaryDayResult[]): SalaryMonthTotals {
   const totals: SalaryMonthTotals = {
@@ -434,7 +443,8 @@ export function sumMonth(days: SalaryDayResult[]): SalaryMonthTotals {
     totals.salary = round2(totals.salary + d.salary);
     totals.hours = round2(totals.hours + d.hours);
     totals.saleCount += d.saleCount;
-    if (d.hours > 0 || d.saleCount > 0) totals.daysWorked += 1;
+    const leaveHours = (d.shifts ?? []).reduce((sum, s) => sum + (s.paidLeave ? s.payableHours : 0), 0);
+    if (d.hours - leaveHours > 0 || d.saleCount > 0) totals.daysWorked += 1;
   }
 
   return totals;

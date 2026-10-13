@@ -2317,6 +2317,121 @@
       "indexes": []
     },
     {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "handle",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "handles",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "mergedInto",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "manualName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "manualNameBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "manualNameByName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "manualNameAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "customsName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "customsNameVotes",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "customsByType",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "customsOutstandingCount",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "customsOutstandingAmount",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "customsAbandonedCount",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "customsRejectedCount",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "customsCreatorIds",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "lastCustomAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "linkedBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "linkedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fan-names",
+      "fieldPath": "updatedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fans",
+      "fieldPath": "displayName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "buddyx-fans",
+      "fieldPath": "displayNameSource",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "campaign-tracking",
+      "fieldPath": "originalTotalAmount",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "campaign-tracking",
+      "fieldPath": "originalAmountPaid",
+      "indexes": []
+    },
+    {
       "collectionGroup": "buddyx-sync-runs",
       "fieldPath": "expireAt",
       "ttl": true,

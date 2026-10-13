@@ -38,6 +38,7 @@ import {
 import { useUserData } from "@/hooks/useUserData";
 import { useBasicUsers } from "@/hooks/useBasicUsers";
 import { apiRequest } from "@/lib/clientApi";
+import { EMPTY_FAN_PICK, FanPicker, isFanPickComplete, type FanPickValue } from "@/components/fans/FanPicker";
 import { toast } from "sonner";
 import { TransferDialog, ConfirmDialog, ARCHIVE_CR_TEXT, UNARCHIVE_CR_TEXT } from "@/components/campaign/entryActions";
 import { CreatorAvatar } from '@/components/creators/CreatorChip';
@@ -1342,10 +1343,19 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
     dueDateTimezone: "",
   });
   const [submitting, setSubmitting] = useState(false);
+  // The fan is picked from the fan base first; the picker owns name + link.
+  const [fan, setFan] = useState<FanPickValue>(EMPTY_FAN_PICK);
 
   const setField = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }));
   const setVal = (k: string) => (v: string) => setForm(prev => ({ ...prev, [k]: v }));
+  const setFanPick = (value: FanPickValue) => {
+    setFan(value);
+    setForm(prev => ({ ...prev, fanName: value.fanName, profileLink: value.profileLink }));
+  };
+  // The create route refuses anything less; say so before Next, not after Submit.
+  const canAdvanceStep2 =
+    !!form.creatorID && isFanPickComplete(fan) && !!form.description.trim() && Number(form.totalAmount) > 0;
   const setCreator = (creatorID: string) => {
     const creator = creators.find(c => c.creatorID === creatorID);
     setForm(prev => ({
@@ -1415,8 +1425,7 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Fan Name"><input value={form.fanName} onChange={setField("fanName")} required className={inputClass} /></Field>
-            <Field label="Profile Link"><input value={form.profileLink} onChange={setField("profileLink")} className={inputClass} /></Field>
+            <FanPicker creatorId={form.creatorID} value={fan} onChange={setFanPick} inputClass={inputClass} />
             <Field label="Description"><textarea value={form.description} onChange={setField("description")} rows={3} required className={`${inputClass} resize-none`} /></Field>
             {(type === "CR" || type === "Call") && <Field label="Length"><input value={form.length} onChange={setField("length")} className={inputClass} /></Field>}
             {type === "Item" && <Field label="Address"><input value={form.address} onChange={setField("address")} className={inputClass} /></Field>}
@@ -1472,7 +1481,7 @@ function NewEntryWizard({ creators, onClose, onCreated }: NewEntryWizardProps) {
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setStep(s => s - 1)}>Back</Button>
               <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={() => setStep(s => s + 1)}>Next</Button>
+              <Button onClick={() => setStep(s => s + 1)} disabled={!canAdvanceStep2}>Next</Button>
             </div>
           </div>
         )}

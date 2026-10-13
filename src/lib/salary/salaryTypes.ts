@@ -112,6 +112,14 @@ export interface SalaryShiftInput {
    * neither payable hours nor accounts to the rate tier.
    */
   paysWage: boolean;
+  /**
+   * A day of approved paid leave, standing in for the shift approval removed.
+   * Pays a flat `scheduledHours` (no tracked time, no grace) on `creatorIds`,
+   * which are the accounts held on `paidLeaveBasisDay` — see `leavePay.ts`.
+   */
+  paidLeave?: boolean;
+  /** The day `creatorIds` were taken from, or null when none was found in the lookback. */
+  paidLeaveBasisDay?: SalaryDayKey | null;
 }
 
 export interface SalaryDayInput {
@@ -152,6 +160,9 @@ export interface SalaryShiftBreakdown {
   creatorIds: string[];
   /** Which of `creatorIds` were unpaid in-shift overtime, so the row can say so. */
   overtimeCreatorIds: string[];
+  /** Paid leave, not a worked shift. Absent on snapshots from before it was paid. */
+  paidLeave?: boolean;
+  paidLeaveBasisDay?: SalaryDayKey | null;
 }
 
 export interface SalaryDayResult {
@@ -184,9 +195,11 @@ export interface SalaryDayResult {
   overrides: Partial<Record<SalaryOverrideField, SalaryOverrideEntry & { computed: number }>>;
   note?: string | null;
   /**
-   * Approved leave taken on this day, by type. **Display only** — the engine
-   * does not price leave. Attached on read by `buildSalaryMonth`, never by
-   * `computeSalaryMonth`, so it is absent on the roster/overview paths.
+   * Approved leave taken on this day, by type — the chip on the grid. The pay
+   * consequences are not read from here: sales inside a leave shift are dropped
+   * and paid leave arrives as a `paidLeave` shift, both before the engine runs.
+   * Attached on read by `buildSalaryMonth`, so it is absent on the
+   * roster/overview paths, which render no days.
    */
   leave?: Array<'paid' | 'unpaid'>;
 }
@@ -330,6 +343,11 @@ export interface SalarySale {
   matchesSource: boolean;
   /** The row vanished from BuddyX inside a finalised month, so it was left counting. */
   vanishedAfterFinalise: boolean;
+  /**
+   * Set by the agent's sales report on a sale made inside one of their approved
+   * leave shifts. Such a sale is not counted toward their pay (`leavePay.ts`).
+   */
+  duringLeave?: 'paid' | 'unpaid';
 }
 
 // ─── Import reporting ────────────────────────────────────────────────

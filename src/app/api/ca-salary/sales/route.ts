@@ -33,6 +33,7 @@ import {
   getAllSalesForMonth,
   getLedgerAnomalies,
   getFinalizedMonth,
+  getLeaveWindowsForMonth,
   getSalesForMonth,
   getTransferredAwaySales,
   getSalaryConfig,
@@ -42,6 +43,7 @@ import { displayNamesFor } from '@/lib/services/userService';
 import { currentMonthKey, isDayKey, isMonthKey, monthKeyRange } from '@/lib/salary/salaryDate';
 import { SALES_CUTOVER_AT } from '@/lib/salary/salaryConstants';
 import { round2 } from '@/lib/salary/salaryEngine';
+import { leaveAt } from '@/lib/salary/leavePay';
 import { adminDb } from '@/lib/firebase-admin';
 import type { CaSaleDocument } from '@/types/firestore';
 import type { SalarySale } from '@/lib/salary/salaryTypes';
@@ -192,12 +194,20 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     const subject = await resolveSalarySubject(token, searchParams.get('userId'));
     if (subject instanceof NextResponse) return subject;
 
-    const [all, away, finalized] = await Promise.all([
+    const [all, away, finalized, leaveWindows] = await Promise.all([
       getSalesForMonth(subject.userId, month),
       getTransferredAwaySales(subject.userId, month),
       getFinalizedMonth(subject.userId, month),
+      getLeaveWindowsForMonth(subject.userId, month),
     ]);
-    const sales = day ? all.filter(s => s.day === day) : all;
+    // A sale inside an approved leave shift is listed but not paid — the same
+    // rule the grid applies — so it is marked and left out of the totals below.
+    const marked = leaveWindows.length === 0 ? all : all.map(s => {
+      const leave = leaveAt(Date.parse(s.occurredAt), leaveWindows);
+      return leave ? { ...s, duringLeave: leave.leaveType } : s;
+    });
+    const sales = day ? marked.filter(s => s.day === day) : marked;
+    const counted = sales.filter(s => !s.duringLeave);
     const transferredAway = day ? away.filter(s => s.day === day) : away;
 
     // Names for "moved to X", "BuddyX credits Y" and "reassigned by Z" — one batched lookup.
@@ -208,7 +218,7 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 
     // "In": held on this agent, though BuddyX credits someone else (or nobody).
     // From the same (day-filtered) rows the tables show, so tile and tables agree.
-    const inSales = sales.filter(s => !s.matchesSource);
+    const inSales = counted.filter(s => !s.matchesSource);
     return NextResponse.json(
       {
         month,
@@ -216,7 +226,11 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
         view: 'agent',
         sales,
         names: Object.fromEntries(names),
-        ...summarise(sales, deductionRate),
+        ...summarise(counted, deductionRate),
+        excludedForLeave: {
+          count: sales.length - counted.length,
+          gross: sales.filter(s => s.duringLeave).reduce((sum, s) => round2(sum + s.signedGross), 0),
+        },
         transferredAway,
         transfers: {
           inGross: inSales.reduce((sum, s) => round2(sum + s.signedGross), 0),

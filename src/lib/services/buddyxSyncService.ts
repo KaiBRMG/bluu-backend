@@ -30,6 +30,7 @@
 import 'server-only';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { adminDb } from '../firebase-admin';
+import { resolvedFanNames } from './fanRegistryService';
 import { buddyxAll, isBuddyxConfigured, requestCount, resetRequestCount } from '../buddyx/client';
 import { isBuddyxError } from '../buddyx/errors';
 import { serializeTimestamp } from '../middleware/apiHelpers';
@@ -363,20 +364,6 @@ async function readFinalized(pairs: Set<string>): Promise<Set<string>> {
   return out;
 }
 
-/** Fan names for the rows being written — only those, never the whole window. */
-async function fanNamesFor(fanIds: string[]): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
-  const ids = [...new Set(fanIds.filter(Boolean))];
-  for (let i = 0; i < ids.length; i += 300) {
-    const refs = ids.slice(i, i + 300).map(id => adminDb.collection('buddyx-fan-names').doc(id));
-    for (const snap of await adminDb.getAll(...refs, { fieldMask: ['name'] })) {
-      const name = snap.get('name');
-      if (snap.exists && typeof name === 'string' && name) out.set(snap.id, name);
-    }
-  }
-  return out;
-}
-
 /**
  * The `sales` scope. Re-pulls the whole window every run — a few hundred rows a
  * month, 2–4 pages per endpoint — because a full re-pull is what makes
@@ -474,7 +461,8 @@ export async function syncSalesScope(ctx: SyncContext, write: boolean): Promise<
   }
 
   // ── Write ──
-  const names = await fanNamesFor(plan.upserts.map(u => u.sale.fanId));
+  // Resolved (manual → customs → synced), the name every other surface shows.
+  const names = await resolvedFanNames(plan.upserts.map(u => u.sale.fanId));
   const writer = adminDb.bulkWriter();
   const syncedAt = Timestamp.fromMillis(ctx.now);
   for (const { sale, isNew } of plan.upserts) {

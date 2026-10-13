@@ -206,7 +206,7 @@ async function seedFanNames(sales: Array<{ fanId: string; fanName: string; occur
       name,
       source: 'infloww',
       lastSeenAt: new Date(at),
-    });
+    }, { merge: true }); // keeps staff's manual name and the customs rollup
     written += 1;
   }
   await writer.close();

@@ -1,19 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import { format, subDays } from 'date-fns';
+import { addDays, endOfMonth, format, startOfMonth, subMonths } from 'date-fns';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ReferenceLine, XAxis, YAxis } from 'recharts';
 import AppLayout from '@/components/AppLayout';
 import { cn } from '@/lib/utils';
 import { SURFACE } from '@/lib/surfaces';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
-import { DatePicker } from '@/components/smm/shared/DatePicker';
+import { PeriodPicker, monthName } from '@/components/buddyx/PeriodPicker';
 import { SyncStatus } from '@/components/buddyx/SyncStatus';
 import { SourceMixBar } from '@/components/buddyx/SourceMixBar';
-import { LegendSwatch, KpiTile, Fact, LoadError, SEGMENT, LINK_REVENUE_NOTE } from '@/components/buddyx/buddyxUi';
+import { LegendSwatch, KpiTile, Fact, LoadError, LINK_REVENUE_NOTE } from '@/components/buddyx/buddyxUi';
 import { CreatorAvatar, CreatorChip } from '@/components/creators/CreatorChip';
 import { Sparkline } from '@/components/growth/Sparkline';
 import { useCreatorMap } from '@/hooks/useCreators';
@@ -21,7 +20,6 @@ import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
 import { formatUsd } from '@/lib/salary/salaryFormat';
 import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
 import { formatCount, formatDuration, formatShare } from '@/lib/buddyx/analyticsFormat';
-import { CREATOR_HISTORY_START_DAY } from '@/lib/buddyx/constants';
 import { SEQUENTIAL_COLOR, SOURCE_MIX_COLORS } from '@/lib/buddyx/chartColors';
 import type { CreatorAnalytics, CreatorIdentity } from '@/lib/buddyx/analyticsTypes';
 
@@ -36,13 +34,14 @@ import type { CreatorAnalytics, CreatorIdentity } from '@/lib/buddyx/analyticsTy
  * the cutover is drawn where the source changes.
  */
 
-type Preset = 'mtd' | '30d' | '90d' | 'all' | 'custom';
-const PRESETS: Array<{ value: Preset; label: string }> = [
-  { value: 'mtd', label: 'MTD' },
-  { value: '30d', label: '30d' },
-  { value: '90d', label: '90d' },
-  { value: 'all', label: 'Since Oct 2025' },
-  { value: 'custom', label: 'Custom' },
+type Preset = 'mtd' | 'prev-month' | 'month-2' | '3m' | '6m' | '12m';
+const presetOptions = (now: Date): Array<{ value: Preset; label: string }> => [
+  { value: 'mtd', label: monthName(0, now) },
+  { value: 'prev-month', label: monthName(1, now) },
+  { value: 'month-2', label: monthName(2, now) },
+  { value: '3m', label: 'Last 3 months' },
+  { value: '6m', label: 'Last 6 months' },
+  { value: '12m', label: 'Last year' },
 ];
 
 const earningsConfig = {
@@ -60,30 +59,35 @@ const subsConfig = {
 
 const newSubsConfig = { newSubs: { label: 'New subscribers', color: SEQUENTIAL_COLOR } } satisfies ChartConfig;
 
-function rangeFor(preset: Preset, from?: Date, to?: Date): { from: string; to: string } | null {
-  const today = new Date();
-  const fmt = (d: Date) => format(d, 'yyyy-MM-dd');
+/** A preset's days: whole calendar months, or a rolling window through today. */
+function presetRange(preset: Preset, today: Date): { from: Date; to: Date } {
+  const month = (back: number) => ({ from: startOfMonth(subMonths(today, back)), to: endOfMonth(subMonths(today, back)) });
+  const rolling = (months: number) => ({ from: addDays(subMonths(today, months), 1), to: today });
   switch (preset) {
     case 'mtd':
-      return { from: format(today, 'yyyy-MM-01'), to: fmt(today) };
-    case '30d':
-      return { from: fmt(subDays(today, 29)), to: fmt(today) };
-    case '90d':
-      return { from: fmt(subDays(today, 89)), to: fmt(today) };
-    case 'all':
-      return { from: CREATOR_HISTORY_START_DAY, to: fmt(today) };
-    case 'custom':
-      return from && to && to >= from ? { from: fmt(from), to: fmt(to) } : null;
+      return { from: startOfMonth(today), to: today };
+    case 'prev-month':
+      return month(1);
+    case 'month-2':
+      return month(2);
+    case '3m':
+      return rolling(3);
+    case '6m':
+      return rolling(6);
+    case '12m':
+      return rolling(12);
   }
 }
 
 export default function OnlyFansAnalyticsPage() {
-  const [preset, setPreset] = useState<Preset>('mtd');
-  const [from, setFrom] = useState<Date | undefined>();
-  const [to, setTo] = useState<Date | undefined>();
+  const [preset, setPreset] = useState<Preset | 'custom'>('mtd');
+  const [custom, setCustom] = useState<{ from: Date | undefined; to: Date | undefined }>({ from: undefined, to: undefined });
   const [creatorId, setCreatorId] = useState<string | null>(null);
 
-  const range = rangeFor(preset, from, to);
+  const today = new Date();
+  const shown = preset === 'custom' ? custom : presetRange(preset, today);
+  const fmt = (d: Date) => format(d, 'yyyy-MM-dd');
+  const range = shown.from && shown.to && shown.to >= shown.from ? { from: fmt(shown.from), to: fmt(shown.to) } : null;
   const url = range
     ? `/api/analytics/creators?from=${range.from}&to=${range.to}${creatorId ? `&creatorId=${encodeURIComponent(creatorId)}` : ''}`
     : null;
@@ -98,22 +102,23 @@ export default function OnlyFansAnalyticsPage() {
             <p className="mt-1 text-sm text-zinc-400">Each creator&apos;s earnings, subscribers and links — Infloww history, then BuddyX. Earnings are gross (what fans paid); net is 80% after OnlyFans&apos; 20%.</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <ToggleGroup type="single" variant="outline" size="sm" value={preset} onValueChange={v => v && setPreset(v as Preset)} aria-label="Date range">
-              {PRESETS.map(p => <ToggleGroupItem key={p.value} value={p.value} className={SEGMENT}>{p.label}</ToggleGroupItem>)}
-            </ToggleGroup>
+            <PeriodPicker
+              options={presetOptions(today)}
+              value={preset}
+              onPresetChange={setPreset}
+              from={shown.from}
+              to={shown.to}
+              onRangeChange={(from, to) => {
+                setPreset('custom');
+                setCustom({ from, to });
+              }}
+            />
             <SyncStatus scope="creators" onSynced={() => void reload(true)} />
           </div>
         </div>
 
-        {preset === 'custom' && (
-          <div className="flex flex-wrap items-center gap-2">
-            <DatePicker value={from} onChange={setFrom} placeholder="From" className="h-8 w-44 text-sm" />
-            <DatePicker value={to} onChange={setTo} placeholder="To" className="h-8 w-44 text-sm" />
-          </div>
-        )}
-
         {!url ? (
-          <p className="text-sm text-zinc-400">Pick a start and an end day.</p>
+          <p className="text-sm text-zinc-400">{shown.from && shown.to ? 'The end date must be on or after the start date.' : 'Pick a start and an end date.'}</p>
         ) : loading && !data ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">{[0, 1, 2, 3].map(i => <Skeleton key={i} className="h-[92px] rounded-xl" />)}</div>

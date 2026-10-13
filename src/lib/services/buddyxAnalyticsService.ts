@@ -14,7 +14,6 @@
  * - OnlyFans Analytics — everyone with the page sees every creator (internal).
  */
 import 'server-only';
-import { Timestamp } from 'firebase-admin/firestore';
 import { adminDb } from '../firebase-admin';
 import {
   addDays,
@@ -22,19 +21,22 @@ import {
   currentDayKey,
   currentMonthKey,
   dayKeyRange,
+  daysInMonth,
   enumerateDays,
   monthKeyRange,
   toDayKey,
   type SalaryDayKey,
 } from '../salary/salaryDate';
 import { round2 } from '../salary/salaryEngine';
-import { saleKindOf, saleSourceOf } from '../salary/saleTypes';
+import { saleKindOf } from '../salary/saleTypes';
+import { resolveFanName } from '../fans/fanIdentity';
 import { mappedCreatorIds } from './buddyxMappingService';
 import { computeBenchmarks } from '../buddyx/benchmarks';
 import {
   BUDDYX_CREATOR_STATS_START_DAY,
   BUDDYX_SUBSCRIBERS_START_DAY,
   BUDDYX_TEAM_STATS_START_DAY,
+  TEAM_PERIODS,
   modelIdOfUnmappedKey,
   unmappedModelKey,
 } from '../buddyx/constants';
@@ -50,9 +52,7 @@ import type {
   CreatorIdentity,
   CreatorDayPoint,
   FanAnalytics,
-  FanDetail,
   FanPeriod,
-  FanPurchase,
   FanSummary,
   LinkRow,
   MassMessageSummary,
@@ -74,7 +74,7 @@ import {
   sortFlags,
   summariseIntegrity,
 } from './chatterIntegrityService';
-import { displayNamesFor, getUserById, userLabelsFor } from './userService';
+import { getUserById, userLabelsFor } from './userService';
 import type {
   ActiveSessionDocument,
   TimeEntryLedgerDocument,
@@ -259,20 +259,38 @@ function massSummary(docs: BuddyxMassMessageDocument[]): MassMessageSummary {
   };
 }
 
+/** A whole calendar month, `delta` months from the current one. */
+function wholeMonth(month: string, delta: number) {
+  const m = addMonths(month, delta);
+  return { from: `${m}-01`, to: `${m}-${String(daysInMonth(m)).padStart(2, '0')}` };
+}
+
+/** `months` back to the day, through today: 12 Oct → 13 Jul … 12 Oct for 3 (a short month clamps). */
+function rollingMonths(today: SalaryDayKey, months: number) {
+  const m = addMonths(today.slice(0, 7), -months);
+  const day = Math.min(Number(today.slice(8, 10)), daysInMonth(m));
+  return { from: addDays(`${m}-${String(day).padStart(2, '0')}`, 1), to: today };
+}
+
 function resolvePeriod(period: ChatterPeriod, from: string | null, to: string | null, now: number) {
   const today = currentDayKey(now);
   const month = currentMonthKey(now);
   switch (period) {
     case 'mtd':
       return { from: `${month}-01`, to: today };
-    case 'prev-month': {
-      const prev = addMonths(month, -1);
-      const [, end] = monthKeyRange(prev);
-      return { from: `${prev}-01`, to: toDayKey(end - 1) };
-    }
+    case 'prev-month':
+      return wholeMonth(month, -1);
+    case 'month-2':
+      return wholeMonth(month, -2);
     // The last 7 complete days, matching the synced `7d` period doc.
     case '7d':
       return { from: addDays(today, -7), to: addDays(today, -1) };
+    case '3m':
+      return rollingMonths(today, 3);
+    case '6m':
+      return rollingMonths(today, 6);
+    case '12m':
+      return rollingMonths(today, 12);
     case '30d':
       return { from: toDayKey(now - 30 * 86_400_000), to: today };
     case 'custom':
@@ -293,7 +311,9 @@ async function loadChatterTeam(period: ChatterPeriod, range: { from: string; to:
     // BuddyX only holds activity from its start day; asking for earlier days is
     // a read that can only miss.
     const days = hasActivityWindow ? enumerateDays(range.from > activityFrom ? range.from : activityFrom, range.to) : [];
-    const periodId = period === 'custom' ? `custom-${range.from}-${range.to}` : period;
+    // Only the synced presets have a doc of their own; every other range finds
+    // its medians in the doc an admin's Pull writes for exactly those days.
+    const periodId = (TEAM_PERIODS as readonly string[]).includes(period) ? period : `custom-${range.from}-${range.to}`;
     const [daySnaps, periodSnap, massSnap, ledger, hoursDocs] = await Promise.all([
       days.length ? adminDb.getAll(...days.map(d => adminDb.collection('buddyx-team-days').doc(d))) : Promise.resolve([]),
       hasActivityWindow ? adminDb.collection('buddyx-team-periods').doc(periodId).get() : Promise.resolve(null),
@@ -520,6 +540,9 @@ export async function getChatterReport(params: {
   return {
     uid: params.uid,
     name,
+    period: params.period,
+    from: range.from,
+    to: range.to,
     metrics,
     coverage: stripByDay(coverage),
     integrity: summariseIntegrity(integrityDays.get(params.uid)),
@@ -569,7 +592,22 @@ function periodMonths(period: FanPeriod, now: number): string[] | null {
   }
 }
 
-function summariseFan(doc: BuddyxFanDocument, months: string[] | null): FanSummary {
+/**
+ * A rollup's name through the one resolution order (`resolveFanName`): the
+ * registry's manual/customs name (written through as `displayName`), then the
+ * synced name, then the name on the fan's latest sale.
+ */
+function fanNameOf(doc: BuddyxFanDocument): { name: string | null; nameSource: FanSummary['nameSource'] } {
+  const { name, source } = resolveFanName({
+    manualName: doc.displayNameSource === 'manual' ? doc.displayName : null,
+    customsName: doc.displayNameSource === 'customs' ? doc.displayName : null,
+    name: doc.name || doc.salesName || null,
+    source: doc.name ? doc.nameSource : 'buddyx-link',
+  });
+  return { name, nameSource: source };
+}
+
+export function summariseFan(doc: BuddyxFanDocument, months: string[] | null): FanSummary {
   let lifetimeTips = 0;
   let lifetimePpv = 0;
   let periodTips = 0;
@@ -592,7 +630,9 @@ function summariseFan(doc: BuddyxFanDocument, months: string[] | null): FanSumma
   return {
     creatorId: doc.creatorId,
     fanId: doc.fanId,
-    name: doc.name || doc.salesName || null,
+    // A name set by hand or taken from customs is written through by the fan
+    // registry; the synced name is the fallback (fanIdentity.resolveFanName).
+    ...fanNameOf(doc),
     periodSpend: round2(periodTips + periodPpv),
     periodTips: round2(periodTips),
     periodPpv: round2(periodPpv),
@@ -605,17 +645,23 @@ function summariseFan(doc: BuddyxFanDocument, months: string[] | null): FanSumma
   };
 }
 
-async function readFans(creatorIds: string[]): Promise<BuddyxFanDocument[]> {
-  const out: BuddyxFanDocument[] = [];
-  for (let i = 0; i < creatorIds.length; i += 30) {
-    const snap = await adminDb
-      .collection('buddyx-fans')
-      .where('creatorId', 'in', creatorIds.slice(i, i + 30))
-      .select('creatorId', 'fanId', 'name', 'salesName', 'spendByMonth', 'acquisition', 'subscriptions', 'isStacker', 'linkTotalSpent')
-      .get();
-    for (const doc of snap.docs) out.push(doc.data() as BuddyxFanDocument);
-  }
-  return out;
+/**
+ * Every `buddyx-fans` row for a set of creators, cached 60s per scope — the
+ * Fan Analytics insights and the fan directory read the same rows.
+ */
+export async function readFans(creatorIds: string[]): Promise<BuddyxFanDocument[]> {
+  return cached(`fan-docs:${[...creatorIds].sort().join(',')}`, async () => {
+    const chunks: string[][] = [];
+    for (let i = 0; i < creatorIds.length; i += 30) chunks.push(creatorIds.slice(i, i + 30));
+    const snaps = await Promise.all(chunks.map(ids =>
+      adminDb
+        .collection('buddyx-fans')
+        .where('creatorId', 'in', ids)
+        .select('creatorId', 'fanId', 'name', 'nameSource', 'salesName', 'displayName', 'displayNameSource', 'spendByMonth', 'acquisition', 'subscriptions', 'isStacker', 'linkTotalSpent')
+        .get(),
+    ));
+    return snaps.flatMap(snap => snap.docs.map(doc => doc.data() as BuddyxFanDocument));
+  });
 }
 
 export async function resolveFanScope(params: { viewerUid: string; isAdmin: boolean; requested: string | null }) {
@@ -738,75 +784,6 @@ export async function getFanAnalytics(params: {
       trial: periodSubs.filter(s => s.isTrial || s.subType === 'new_subscriber_trial').length,
     },
     acquisition,
-  };
-}
-
-/** The fan drawer. `null` when the fan does not exist **or** is outside the viewer's scope. */
-export async function getFanDetail(params: {
-  viewerUid: string;
-  isAdmin: boolean;
-  creatorId: string;
-  fanId: string;
-}): Promise<FanDetail | null> {
-  const { scope } = await resolveFanScope({ viewerUid: params.viewerUid, isAdmin: params.isAdmin, requested: null });
-  if (!scope.includes(params.creatorId)) return null;
-
-  const [fanSnap, salesSnap, subsSnap] = await Promise.all([
-    adminDb.collection('buddyx-fans').doc(`${params.creatorId}_${params.fanId}`).get(),
-    adminDb
-      .collection('ca-sales')
-      .where('fanId', '==', params.fanId)
-      .where('creatorId', '==', params.creatorId)
-      .select('saleId', 'occurredAt', 'kind', 'type', 'signedGross', 'source', 'userId', 'removedAt')
-      .get(),
-    adminDb.collection('buddyx-subscribers').where('fanId', '==', params.fanId).get(),
-  ]);
-  if (!fanSnap.exists) return null;
-  const fan = fanSnap.data() as BuddyxFanDocument;
-  const sales = salesSnap.docs.map(d => d.data() as CaSaleDocument).filter(s => !s.removedAt);
-  const names = params.isAdmin ? await displayNamesFor(sales.map(s => s.userId)) : new Map<string, string>();
-  const label = (uid: string | null) =>
-    !uid ? null : params.isAdmin ? names.get(uid) ?? 'Unknown' : uid === params.viewerUid ? 'You' : 'Team';
-
-  const purchases: FanPurchase[] = sales
-    .map(s => ({
-      saleId: s.saleId,
-      occurredAt: s.occurredAt?.toDate?.()?.toISOString() ?? '',
-      kind: saleKindOf(s),
-      type: s.type,
-      gross: s.signedGross,
-      source: saleSourceOf(s, s.occurredAt?.toMillis?.() ?? 0),
-      earnedBy: label(s.userId ?? null),
-    }))
-    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)) as FanPurchase[];
-
-  const earned = new Map<string, { label: string; gross: number; count: number }>();
-  for (const p of purchases) {
-    const key = p.earnedBy ?? 'Unassigned';
-    const entry = earned.get(key) ?? { label: key, gross: 0, count: 0 };
-    entry.gross = round2(entry.gross + p.gross);
-    entry.count += 1;
-    earned.set(key, entry);
-  }
-
-  return {
-    fan: summariseFan(fan, null),
-    isStacker: fan.isStacker === true,
-    acquisition: fan.acquisition ?? null,
-    linkTotalSpent: fan.linkTotalSpent ?? null,
-    purchases,
-    subscriptions: subsSnap.docs
-      .map(d => d.data())
-      .filter(s => s.creatorId === params.creatorId)
-      .map(s => ({
-        id: String(s.id),
-        at: (s.subscribedAt as Timestamp | null)?.toDate?.()?.toISOString() ?? null,
-        subType: (s.subType as string | null) ?? null,
-        isTrial: s.isTrial === true,
-        priceGross: Number(s.priceGross ?? 0),
-      }))
-      .sort((a, b) => (b.at ?? '').localeCompare(a.at ?? '')),
-    earnedBy: [...earned.values()].sort((a, b) => b.gross - a.gross),
   };
 }
 

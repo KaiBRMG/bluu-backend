@@ -1,5 +1,5 @@
 /**
- * GET /api/analytics/chatters?period=7d|mtd|prev-month|30d|custom[&from&to] (default 7d)
+ * GET /api/analytics/chatters?period=7d|mtd|prev-month|month-2|3m|6m|12m|custom[&from&to] (default 7d)
  *
  * Chatter Analytics (`ca-chatter-analytics`). An agent gets their own figures,
  * their daily trend and an **anonymous** team benchmark — no colleague's id or

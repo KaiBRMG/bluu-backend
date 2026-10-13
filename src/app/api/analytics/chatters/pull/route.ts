@@ -1,6 +1,6 @@
 /**
  * POST /api/analytics/chatters/pull `{ from, to }` — one live team overview for
- * a custom range, stored for 7 days (`ca-admin`).
+ * any range that is not a synced preset, stored for 7 days (`ca-admin`).
  *
  * Medians and p75s cannot be summed from days, so a custom range renders them
  * as "—" until an admin pulls the whole range at once. This is the only BuddyX
@@ -14,6 +14,8 @@ import { requireCaAdmin } from '@/lib/salary/salaryAuth';
 import { isBuddyxConfigured } from '@/lib/buddyx/client';
 import { isBuddyxError } from '@/lib/buddyx/errors';
 import { isDayKey } from '@/lib/salary/salaryDate';
+import { MAX_CUSTOM_DAYS } from '@/lib/buddyx/analyticsTypes';
+import { BUDDYX_TEAM_STATS_START_DAY } from '@/lib/buddyx/constants';
 import { loadBuddyxMaps } from '@/lib/services/buddyxMappingService';
 import { pullCustomTeamPeriod } from '@/lib/services/buddyxStatsSync';
 import type { DecodedIdToken } from 'firebase-admin/auth';
@@ -32,8 +34,11 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     if (!isDayKey(from) || !isDayKey(to) || from > to) {
       return NextResponse.json({ error: 'from ≤ to (YYYY-MM-DD) are required.' }, { status: 400 });
     }
-    if ((Date.parse(to) - Date.parse(from)) / 86_400_000 + 1 > 92) {
-      return NextResponse.json({ error: 'A custom range can span at most 92 days.' }, { status: 400 });
+    if ((Date.parse(to) - Date.parse(from)) / 86_400_000 + 1 > MAX_CUSTOM_DAYS) {
+      return NextResponse.json({ error: `A range can span at most ${MAX_CUSTOM_DAYS} days.` }, { status: 400 });
+    }
+    if (to < BUDDYX_TEAM_STATS_START_DAY) {
+      return NextResponse.json({ error: 'BuddyX has no activity for this range.' }, { status: 400 });
     }
 
     try {

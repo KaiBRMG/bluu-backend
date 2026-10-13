@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import AppLayout from '@/components/AppLayout';
 import { cn } from '@/lib/utils';
@@ -10,11 +11,11 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
 import { SyncStatus } from '@/components/buddyx/SyncStatus';
 import { CreatorCombobox } from '@/components/buddyx/CreatorCombobox';
-import { FanDrawer } from '@/components/buddyx/FanDrawer';
-import { FanLabel, LegendSwatch, KpiTile, LoadError, SEGMENT } from '@/components/buddyx/buddyxUi';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { FanDirectory } from '@/components/fans/FanDirectory';
+import { LegendSwatch, KpiTile, LoadError, SEGMENT, fanReportHref } from '@/components/buddyx/buddyxUi';
 import { CreatorChip } from '@/components/creators/CreatorChip';
 import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
-import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { formatUsd, pluralise } from '@/lib/salary/salaryFormat';
 import { daysAgo, formatShare } from '@/lib/buddyx/analyticsFormat';
 import { SALE_KIND_COLORS, SEQUENTIAL_COLOR } from '@/lib/buddyx/chartColors';
@@ -26,8 +27,10 @@ import type { FanAnalytics, FanPeriod, FanSummary } from '@/lib/buddyx/analytics
  * An agent asks "who should I be messaging?"; an admin asks "how healthy is
  * each creator's fan base, and where do good fans come from?". The focal
  * section is **Worth a message**: people who spent recently and then went
- * quiet. Agents see the creators they are rostered on this month; the server
- * enforces it (D9).
+ * quiet. **All fans** is the fan base itself — every fan, searchable, with
+ * their customs folded in — and every fan opens their own report
+ * (`[fanKey]/`). Agents see the creators they are rostered on this month; the
+ * server enforces it (D9).
  */
 
 const PERIODS: Array<{ value: FanPeriod; label: string }> = [
@@ -41,11 +44,10 @@ const USUAL: Record<string, string> = { tips: 'Tips', ppv: 'PPVs', mixed: 'Tips 
 const distributionConfig = { fans: { label: 'Spenders', color: SEQUENTIAL_COLOR } } satisfies ChartConfig;
 
 export default function FanAnalyticsPage() {
-  const { timezone } = useViewerTimezone();
+  const [view, setView] = useState<'insights' | 'fans'>('insights');
   const [period, setPeriod] = useState<FanPeriod>('month');
   const [creatorId, setCreatorId] = useState<string | null>(null);
   const [lifetimeTop, setLifetimeTop] = useState(false);
-  const [openFan, setOpenFan] = useState<{ creatorId: string; fanId: string } | null>(null);
 
   const url = `/api/analytics/fans?period=${period}${creatorId ? `&creatorId=${encodeURIComponent(creatorId)}` : ''}`;
   const { data, loading, error, reload } = useBuddyxAnalytics<FanAnalytics>(url);
@@ -64,12 +66,26 @@ export default function FanAnalyticsPage() {
             {data && data.scope.length > 1 && (
               <CreatorCombobox value={creatorId} onChange={setCreatorId} allowedIds={data.scope} allLabel="All my creators" />
             )}
-            <ToggleGroup type="single" variant="outline" size="sm" value={period} onValueChange={v => v && setPeriod(v as FanPeriod)} aria-label="Period">
-              {PERIODS.map(p => <ToggleGroupItem key={p.value} value={p.value} className={SEGMENT}>{p.label}</ToggleGroupItem>)}
-            </ToggleGroup>
+            {view === 'insights' && (
+              <ToggleGroup type="single" variant="outline" size="sm" value={period} onValueChange={v => v && setPeriod(v as FanPeriod)} aria-label="Period">
+                {PERIODS.map(p => <ToggleGroupItem key={p.value} value={p.value} className={SEGMENT}>{p.label}</ToggleGroupItem>)}
+              </ToggleGroup>
+            )}
             <SyncStatus scope="fans" onSynced={() => void reload(true)} />
           </div>
         </div>
+
+        <Tabs value={view} onValueChange={v => setView(v as 'insights' | 'fans')} className="gap-5">
+          <TabsList variant="line">
+            <TabsTrigger value="insights">Insights</TabsTrigger>
+            <TabsTrigger value="fans">All fans</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="fans">
+            <FanDirectory creatorId={creatorId} />
+          </TabsContent>
+
+          <TabsContent value="insights" className="space-y-6">
 
         {loading && !data ? (
           <div className="space-y-4">
@@ -116,7 +132,7 @@ export default function FanAnalyticsPage() {
               {data.atRisk.length === 0 ? (
                 <p className="mt-3 text-sm text-zinc-400">No spender has gone quiet.</p>
               ) : (
-                <FanList fans={data.atRisk} onOpen={setOpenFan} mode="at-risk" />
+                <FanList fans={data.atRisk} mode="at-risk" />
               )}
             </section>
 
@@ -140,7 +156,6 @@ export default function FanAnalyticsPage() {
               ) : (
                 <FanList
                   fans={lifetimeTop ? [...data.topSpenders].sort((a, b) => b.lifetimeSpend - a.lifetimeSpend) : data.topSpenders}
-                  onOpen={setOpenFan}
                   mode={lifetimeTop ? 'lifetime' : 'period'}
                 />
               )}
@@ -217,28 +232,15 @@ export default function FanAnalyticsPage() {
             )}
           </>
         ) : null}
+          </TabsContent>
+        </Tabs>
       </div>
-
-      <FanDrawer
-        creatorId={openFan?.creatorId ?? null}
-        fanId={openFan?.fanId ?? null}
-        timezone={timezone}
-        onOpenChange={open => !open && setOpenFan(null)}
-      />
     </AppLayout>
   );
 }
 
 
-function FanList({
-  fans,
-  onOpen,
-  mode,
-}: {
-  fans: FanSummary[];
-  onOpen: (fan: { creatorId: string; fanId: string }) => void;
-  mode: 'at-risk' | 'period' | 'lifetime';
-}) {
+function FanList({ fans, mode }: { fans: FanSummary[]; mode: 'at-risk' | 'period' | 'lifetime' }) {
   return (
     <ul className="mt-3 divide-y divide-white/[0.07]">
       {fans.slice(0, 25).map(fan => {
@@ -247,16 +249,16 @@ function FanList({
         const total = Math.max(tips + ppv, 0.01);
         return (
           <li key={`${fan.creatorId}-${fan.fanId}`} className="relative">
-            <button
-              type="button"
-              onClick={() => onOpen({ creatorId: fan.creatorId, fanId: fan.fanId })}
-              className="absolute inset-0 rounded-md hover:bg-white/[0.055] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50"
+            {/* The whole row opens the fan's report. */}
+            <Link
+              href={fanReportHref(fan.fanId)}
+              prefetch={false}
+              className="absolute inset-0 rounded-md hover:bg-white/[0.055] active:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50"
               aria-label={`Open ${fan.name ?? `fan ${fan.fanId}`}`}
             />
             <div className="pointer-events-none relative flex items-center gap-3 px-2 py-2 text-sm">
               <span className="min-w-0 flex-1">
-                {/* Only the id link is its own target; a name is part of the row's. */}
-                <span className={cn('relative', !fan.name && 'pointer-events-auto')}><FanLabel name={fan.name} fanId={fan.fanId} /></span>
+                <span className={cn('block truncate', !fan.name && 'font-mono text-xs text-zinc-300')}>{fan.name ?? fan.fanId}</span>
                 <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-zinc-400">
                   <CreatorChip creatorId={fan.creatorId} size="xs" />
                   {mode === 'at-risk' && <>· last bought {daysAgo(fan.lastPurchaseAt)} · usually {fan.usual ? USUAL[fan.usual] : '—'}</>}

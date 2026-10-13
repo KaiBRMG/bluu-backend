@@ -89,6 +89,8 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
               the source of truth for who holds a sale; a sync never undoes
               one, and every row says when it differs from BuddyX and why). Leave approval releases
               creator accounts to an overtime board that creates the shifts that pay.
+              Leave pays on read too: no sales count inside a leave shift, and
+              paid leave pays 8h on the previous day's accounts (src/lib/salary/leavePay.ts).
               Leave balances are DERIVED too: allowance + adjustment − requests
               whose SHIFT falls in the period (unpaid per month, paid per year;
               src/lib/leave/leaveBalance.ts). Nothing resets — finalising a
@@ -255,6 +257,7 @@ Fixing the `AppLayout` hoist is therefore not only the navigation speed-up alrea
 | [growth-tracking.md](documentation/growth-tracking.md) | **Growth Tracking** — nightly Apify follower scrape, `growth-accounts` + its year-keyed series, the Apify cost rules. **Unrelated to `twitterx-accounts` by design** |
 | [ca-salary.md](documentation/ca-salary.md) | **Chat-agent salary & coverage** — the commission/wage engine, the `.xlsx` sales import, month close, creator assignment on shifts, the leave → overtime marketplace, and the eight CA notifications |
 | [buddyx.md](documentation/buddyx.md) | **BuddyX** — Chatter Analytics' **coverage** (online while clocked in), integrity flags and per-chatter report; the read-only API client, the scheduled/refresh sync and its lease, identity mapping, the BuddyX sales written into `ca-sales` (cutover, sale identity + re-keying, attribution invariant, vanished rows, the write switch), disputes v2 transfers (tips and PPVs), admin reassignment and the ledger's anomaly band, the Infloww historical import, and Chatter / Fan / OnlyFans Analytics |
+| [fan-base.md](documentation/fan-base.md) | **Fan base** — one fan across creators: the fan registry (`buddyx-fan-names`), name resolution (manual → customs → synced) and its write-through to sales, the `/ca-portal/fan-analytics/[fanKey]` report, the All fans directory, and the wizard `FanPicker` that guarantees every new fan a name |
 | [campaign-tracking.md](documentation/campaign-tracking.md) | Custom requests vs campaigns, the two archive mechanisms, transfer |
 | [resources.md](documentation/resources.md) | `apps-resources` page (reading **and** managing — there is no separate admin page), `app-resources` collection, the group-based read/write access matrix |
 | [snipping-tool.md](documentation/snipping-tool.md) | **Snipping Tool** — the native region capture (global shortcut + menu-bar/tray item), the transparent selection surface, **screen recording with mic/system audio**, the public `/s/[shareId]` link, and the auto-delete retention sweep |

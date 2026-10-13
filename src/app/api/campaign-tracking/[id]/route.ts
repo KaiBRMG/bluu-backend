@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -10,12 +10,18 @@ import { sendTelegramNotification, sendTelegramToCreator, escapeHtml } from '@/l
 import { formatAmount, formatDueDate } from '@/lib/campaignTracking';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { CRStatus } from '@/lib/campaignTracking';
+import { CAMPAIGN_TYPES } from '@/lib/campaignTracking';
+import { cleanFanName } from '@/lib/fans/fanIdentity';
+import { refreshFanCustomsQuietly, resolveFanKeyForLink } from '@/lib/services/fanRegistryService';
 
 const EDITABLE_FIELDS = [
   'fanName', 'profileLink', 'description', 'length', 'totalAmount', 'amountPaid',
   'address', 'socialUsername', 'socialPlatform', 'callType', 'dueDate', 'dueDateTimezone',
   'status', 'priority', 'managerComment', 'isArchived',
 ] as const;
+
+/** Fields whose change moves the fan's name or customs rollup. */
+const FAN_FIELDS = ['fanName', 'profileLink', 'totalAmount', 'amountPaid', 'status', 'isArchived'] as const;
 
 export const PATCH = withAuth(async (request: NextRequest, token: DecodedIdToken, params: Promise<{ id: string }>) => {
   try {
@@ -52,7 +58,43 @@ export const PATCH = withAuth(async (request: NextRequest, token: DecodedIdToken
       }
     }
 
+    if ('fanName' in update) {
+      update.fanName = cleanFanName(String(update.fanName ?? ''));
+      if (!update.fanName) return NextResponse.json({ error: 'A fan name is required.' }, { status: 400 });
+    }
+
+    // The fan this custom belongs to follows its profile link.
+    const prevFanKey = (current.fanKey as string | null | undefined) ?? null;
+    let nextFanKey = prevFanKey;
+    if ('profileLink' in update && update.profileLink !== current.profileLink) {
+      nextFanKey = await resolveFanKeyForLink(String(update.profileLink ?? ''));
+      update.fanKey = nextFanKey;
+    }
+
+    // Archiving rewrites the money (a custom's total drops to what was paid; a
+    // campaign's paid rises to the total), so keep the figure it replaced —
+    // that is how the fan report can say what was abandoned.
+    const isCampaign = (CAMPAIGN_TYPES as readonly string[]).includes(String(current.type));
+    if (!isCampaign && update.status === 'Archived' && current.status !== 'Archived' && current.originalTotalAmount === undefined) {
+      update.originalTotalAmount = Number(current.totalAmount) || 0;
+    }
+    if (!isCampaign && 'status' in update && update.status !== 'Archived' && current.status === 'Archived') {
+      update.originalTotalAmount = FieldValue.delete();
+    }
+    if (isCampaign && update.isArchived === true && current.isArchived !== true && current.originalAmountPaid === undefined) {
+      update.originalAmountPaid = Number(current.amountPaid) || 0;
+    }
+    if (isCampaign && update.isArchived === false && current.isArchived === true) {
+      update.originalAmountPaid = FieldValue.delete();
+    }
+
     await docRef.update(update);
+
+    // Only a real change re-reads the fan's customs; an edit that resends the
+    // same values costs nothing. After the response — it never fails the edit.
+    if (FAN_FIELDS.some(f => f in update && update[f] !== current[f])) {
+      after(() => refreshFanCustomsQuietly([prevFanKey, nextFanKey], 'campaign-tracking/[id] PATCH'));
+    }
 
     const newStatus = (body.status ?? prevStatus) as CRStatus;
 
@@ -125,7 +167,10 @@ export const DELETE = withAuth(async (_request: NextRequest, token: DecodedIdTok
     }
 
     const { id } = await params;
-    await adminDb.collection('campaign-tracking').doc(id).delete();
+    const ref = adminDb.collection('campaign-tracking').doc(id);
+    const fanKey = (await ref.get()).get('fanKey') as string | null | undefined;
+    await ref.delete();
+    if (fanKey) after(() => refreshFanCustomsQuietly([fanKey], 'campaign-tracking/[id] DELETE'));
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

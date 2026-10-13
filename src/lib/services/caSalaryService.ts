@@ -28,7 +28,8 @@ import { computeSalaryMonth, DEFAULT_SALARY_CONFIG, round2, sumMonth } from '../
 import { saleMatchKey } from '../buddyx/salesPlan';
 import { lockIsStale } from '../disputes/disputeRules';
 import { addMonths, currentMonthKey, monthKeyRange, toDayKey, type SalaryDayKey, type SalaryMonthKey } from '../salary/salaryDate';
-import { isSalaryMonthVisible } from '../salary/salaryConstants';
+import { isSalaryMonthVisible, PAID_LEAVE_ACCOUNT_LOOKBACK_DAYS } from '../salary/salaryConstants';
+import { leaveAt, paidAccountsByDay, paidLeaveShifts, type LeaveWindow } from '../salary/leavePay';
 import { normaliseSaleType, saleKindOf, saleSourceOf } from '../salary/saleTypes';
 import type {
   DashboardSalaryMonth,
@@ -757,35 +758,91 @@ function foldSales(sales: SalarySale[]): Map<SalaryDayKey, { gross: number; coun
   return byDay;
 }
 
-/**
- * Approved leave in a month, by salary day.
- *
- * A **read-time annotation**, not an engine input: the engine does not price
- * leave, and an approved absence has already removed its shift from the roster
- * (the occurrence is tombstoned), so without this the day simply reads as a day
- * not worked. Attributed by `toDayKey(occurrenceStart)` — the same "the day the
- * shift starts on" rule the shifts themselves are paid by.
- *
- * Applied to a finalised snapshot too, and replacing whatever it stored: leave
- * can still be withdrawn after a month is paid, and the marker should say what
- * is true now. One query on two equality filters, which single-field indexes
- * serve (rule 9).
- */
-async function getApprovedLeaveByDay(
-  userId: string,
-  month: SalaryMonthKey,
-): Promise<Map<SalaryDayKey, Array<'paid' | 'unpaid'>>> {
-  const snap = await adminDb
-    .collection('leave_requests')
-    .where('userId', '==', userId)
-    .where('status', '==', 'approved')
-    .get();
+const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Shift docs are read from this far before the month: far enough for a paid
+ * leave day on the 1st to find "the previous day's accounts" (`leavePay.ts`),
+ * and so also past the 8h the time ledger looks back.
+ */
+const SHIFT_LOOKBACK_MS = PAID_LEAVE_ACCOUNT_LOOKBACK_DAYS * DAY_MS;
+
+/** A leave request's live start: where approval actually released it (§6), else the pinned one. */
+function leaveStart(leave: LeaveRequestDocument): number {
+  return leave.releasedOccurrenceStart ?? leave.occurrenceStart;
+}
+
+/**
+ * Approved leave whose shift starts in the month, or up to a day before it — a
+ * late shift on the last day of the previous month still owns its sales past
+ * midnight. Pass a `userId` for one agent (two equalities, single-field
+ * indexes); omit it for everyone (one range on `occurrenceStart`, the query the
+ * allowance route already runs). Neither needs a composite index (rule 9).
+ */
+async function getApprovedLeave(userId: string | null, month: SalaryMonthKey): Promise<LeaveRequestDocument[]> {
+  const [windowStart, windowEnd] = monthKeyRange(month);
+  const from = windowStart - DAY_MS;
+
+  const snap = userId
+    ? await adminDb.collection('leave_requests').where('userId', '==', userId).where('status', '==', 'approved').get()
+    : await adminDb
+        .collection('leave_requests')
+        .where('occurrenceStart', '>=', from - DAY_MS)
+        .where('occurrenceStart', '<', windowEnd + DAY_MS)
+        .get();
+
+  return snap.docs
+    .map(doc => doc.data() as LeaveRequestDocument)
+    .filter(leave => leave.status === 'approved')
+    .filter(leave => {
+      const start = leaveStart(leave);
+      return start >= from && start < windowEnd;
+    });
+}
+
+/**
+ * Each leave request as the window its shift occupied.
+ *
+ * The request pins only a start, and approval removed the shift from the
+ * roster — but not from Firestore: a recurring date is tombstoned by an
+ * override document carrying the occurrence's `startTime`/`endTime`, and a
+ * one-off is soft-deleted in place. Both are in `shiftDocs` already, so the end
+ * is looked up rather than queried. A shift that cannot be found (deleted
+ * outright) falls back to the configured shift length.
+ */
+function resolveLeaveWindows(
+  leaves: readonly LeaveRequestDocument[],
+  shiftDocs: readonly ShiftDocument[],
+  config: SalaryConfig,
+): Map<string, LeaveWindow[]> {
+  const endByStart = new Map<string, number>();
+  for (const doc of shiftDocs) {
+    const start = doc.startTime?.toMillis?.();
+    const end = doc.endTime?.toMillis?.();
+    if (typeof start === 'number' && typeof end === 'number' && end > start) {
+      endByStart.set(`${doc.userId}:${start}`, end);
+    }
+  }
+
+  const byUser = new Map<string, LeaveWindow[]>();
+  for (const leave of leaves) {
+    const start = leaveStart(leave);
+    const end =
+      endByStart.get(`${leave.userId}:${start}`) ??
+      endByStart.get(`${leave.userId}:${leave.occurrenceStart}`) ??
+      start + config.defaultShiftHours * 3_600_000;
+    const list = byUser.get(leave.userId) ?? [];
+    list.push({ leaveId: leave.leaveId, leaveType: leave.leaveType, start, end });
+    byUser.set(leave.userId, list);
+  }
+  return byUser;
+}
+
+/** Leave by salary day, for the grid's chip. Days are "the day the shift starts". */
+function leaveTypesByDay(leaves: readonly LeaveRequestDocument[]): Map<SalaryDayKey, Array<'paid' | 'unpaid'>> {
   const byDay = new Map<SalaryDayKey, Array<'paid' | 'unpaid'>>();
-  for (const doc of snap.docs) {
-    const leave = doc.data() as LeaveRequestDocument;
-    const day = toDayKey(leave.occurrenceStart);
-    if (day.slice(0, 7) !== month) continue;
+  for (const leave of leaves) {
+    const day = toDayKey(leaveStart(leave));
     const types = byDay.get(day) ?? [];
     if (!types.includes(leave.leaveType)) types.push(leave.leaveType);
     byDay.set(day, types);
@@ -793,6 +850,11 @@ async function getApprovedLeaveByDay(
   return byDay;
 }
 
+/**
+ * Attach the chip. Applied to a finalised snapshot too, replacing whatever it
+ * stored: leave can be withdrawn after payday and the chip should say what is
+ * true now — though the snapshot's pay, correctly, does not move.
+ */
 function withLeave(
   result: SalaryMonthResult,
   leaveByDay: Map<SalaryDayKey, Array<'paid' | 'unpaid'>>,
@@ -800,13 +862,81 @@ function withLeave(
   return {
     ...result,
     days: result.days.map(day => {
-      // Replace rather than keep a stored value: see `getApprovedLeaveByDay`.
       const leave = leaveByDay.get(day.day);
       const rest = { ...day };
       delete rest.leave;
       return leave ? { ...rest, leave } : rest;
     }),
   };
+}
+
+/**
+ * One agent's engine input for the month — the step both builders share, so
+ * the single-agent grid and the roster cannot price leave differently.
+ *
+ * Sales inside a leave window are dropped before folding, and paid leave is
+ * added as a shift (`leavePay.ts`).
+ */
+function assembleDays(params: {
+  userId: string;
+  month: SalaryMonthKey;
+  shiftDocs: ShiftDocument[];
+  sales: SalarySale[];
+  leaveWindows: LeaveWindow[];
+  sessions: TimeEntryLedgerDocument[];
+  activeSession: ActiveSessionDocument | undefined;
+  now: number;
+}): SalaryDayInput[] {
+  const { userId, month, shiftDocs, sales, leaveWindows, sessions, activeSession, now } = params;
+  const [windowStart, windowEnd] = monthKeyRange(month);
+
+  const shiftsByDay = resolveShiftInputs(shiftDocs, userId, windowStart, windowEnd, sessions, activeSession, now);
+
+  if (leaveWindows.some(w => w.leaveType === 'paid')) {
+    const raw = shiftDocs
+      .filter(s => s.userId === userId)
+      .map(s => ({ ...serialiseShift(s), timeWorkedSeconds: null, attendanceStatus: null }));
+    const accounts = paidAccountsByDay(expandShiftsForWindow(raw, windowStart - SHIFT_LOOKBACK_MS, windowEnd));
+    for (const [day, inputs] of paidLeaveShifts(leaveWindows, accounts)) {
+      shiftsByDay.set(day, [...(shiftsByDay.get(day) ?? []), ...inputs]);
+    }
+  }
+
+  const counted = leaveWindows.length > 0 ? sales.filter(s => !leaveAt(Date.parse(s.occurredAt), leaveWindows)) : sales;
+  const salesByDay = foldSales(counted);
+
+  const days: SalaryDayInput[] = [];
+  for (const day of new Set([...salesByDay.keys(), ...shiftsByDay.keys()])) {
+    // A shift or a sale can fall just outside the month once timezones are
+    // applied; the engine only reads days inside the month, but filtering here
+    // keeps the input honest.
+    if (day.slice(0, 7) !== month) continue;
+    const sale = salesByDay.get(day);
+    days.push({
+      day,
+      grossEarnings: sale?.gross ?? 0,
+      saleCount: sale?.count ?? 0,
+      salesCreatorNames: sale?.creators ?? [],
+      shifts: shiftsByDay.get(day) ?? [],
+    });
+  }
+  return days;
+}
+
+/**
+ * The approved-leave windows covering one agent's month, for the sales report:
+ * it has to mark the same rows the grid dropped. Costs the shift range read
+ * the window ends come from.
+ */
+export async function getLeaveWindowsForMonth(userId: string, month: SalaryMonthKey): Promise<LeaveWindow[]> {
+  const leaves = await getApprovedLeave(userId, month);
+  if (leaves.length === 0) return [];
+  const [windowStart, windowEnd] = monthKeyRange(month);
+  const [shiftDocs, config] = await Promise.all([
+    getShiftsByRange(windowStart - DAY_MS, windowEnd, userId),
+    getSalaryConfig(),
+  ]);
+  return resolveLeaveWindows(leaves, shiftDocs, config).get(userId) ?? [];
 }
 
 export interface BuildSalaryMonthOptions {
@@ -832,17 +962,18 @@ export async function buildSalaryMonth(
 ): Promise<SalaryMonthResult> {
   const now = options.now ?? Date.now();
   const config = options.config ?? (await getSalaryConfig());
-  // Started now, awaited at each return, so it runs alongside everything below.
-  // Non-fatal: a marker that could not be read must not take down a payslip,
-  // and the catch also keeps an early throw below from orphaning a rejection.
-  const leavePromise = getApprovedLeaveByDay(userId, month).catch(err => {
-    console.error('[caSalaryService] leave overlay failed', err);
-    return new Map<SalaryDayKey, Array<'paid' | 'unpaid'>>();
-  });
+  // Started now so it runs alongside everything below. Leave moves pay, so an
+  // open month fails without it; a frozen one only loses the chip.
+  const leavePromise = getApprovedLeave(userId, month);
+  leavePromise.catch(() => {}); // awaited on every path; this only stops an early throw orphaning it
 
   if (!options.ignoreFinalized) {
     const frozen = await getFinalizedMonth(userId, month);
     if (frozen) {
+      const leaves = await leavePromise.catch(err => {
+        console.error('[caSalaryService] leave overlay failed', err);
+        return [] as LeaveRequestDocument[];
+      });
       return withLeave({
         userId,
         month,
@@ -854,7 +985,7 @@ export async function buildSalaryMonth(
         finalizedAt: frozen.finalizedAt?.toDate?.()?.toISOString() ?? null,
         finalizedBy: frozen.finalizedBy ?? null,
         finalizedByName: frozen.finalizedByName ?? null,
-      }, await leavePromise);
+      }, leaveTypesByDay(leaves));
     }
   }
 
@@ -864,46 +995,28 @@ export async function buildSalaryMonth(
   // ledger is fetched from 8h earlier — longer than any shift plus its overrun.
   const LEDGER_LOOKBACK_MS = 8 * 60 * 60 * 1000;
 
-  const [sales, overrides, shiftDocs, ledgerByUser, activeSessions] = await Promise.all([
+  const [sales, overrides, shiftDocs, ledgerByUser, activeSessions, leaves] = await Promise.all([
     getSalesForMonth(userId, month),
     getOverridesForMonth(userId, month),
-    getShiftsByRange(windowStart - LEDGER_LOOKBACK_MS, windowEnd, userId),
+    getShiftsByRange(windowStart - SHIFT_LOOKBACK_MS, windowEnd, userId),
     getLedgerEntriesForUsers([userId], windowStart - LEDGER_LOOKBACK_MS, windowEnd),
     getActiveSessionsForUsers([userId]),
+    leavePromise,
   ]);
 
-  const shiftsByDay = resolveShiftInputs(
-    shiftDocs,
+  const days = assembleDays({
     userId,
-    windowStart,
-    windowEnd,
-    ledgerByUser.get(userId) ?? [],
-    activeSessions.get(userId),
+    month,
+    shiftDocs,
+    sales,
+    leaveWindows: resolveLeaveWindows(leaves, shiftDocs, config).get(userId) ?? [],
+    sessions: ledgerByUser.get(userId) ?? [],
+    activeSession: activeSessions.get(userId),
     now,
-  );
-  const salesByDay = foldSales(sales);
-
-  const days: SalaryDayInput[] = [];
-  for (const day of new Set([...salesByDay.keys(), ...shiftsByDay.keys()])) {
-    // A shift or a sale can fall just outside the month once timezones are
-    // applied; the engine only reads days inside the month, but filtering here
-    // keeps the input honest.
-    if (day.slice(0, 7) !== month) continue;
-    const sale = salesByDay.get(day);
-    days.push({
-      day,
-      grossEarnings: sale?.gross ?? 0,
-      saleCount: sale?.count ?? 0,
-      salesCreatorNames: sale?.creators ?? [],
-      shifts: shiftsByDay.get(day) ?? [],
-    });
-  }
+  });
 
   const result = computeSalaryMonth({ userId, month, days, overrides, config });
-
-  // A month that was finalised and then reopened keeps its record; surface the
-  // reopen so the UI can say "previously paid" rather than implying it never was.
-  return withLeave(result, await leavePromise);
+  return withLeave(result, leaveTypesByDay(leaves.filter(l => toDayKey(leaveStart(l)).slice(0, 7) === month)));
 }
 
 /**
@@ -1057,14 +1170,18 @@ export async function buildSalaryMonthForUsersUnder(
   const [windowStart, windowEnd] = monthKeyRange(month);
   const LEDGER_LOOKBACK_MS = 8 * 60 * 60 * 1000;
 
-  const [salesByUser, overridesByUser, shiftDocs, ledgerByUser, activeSessions, finalized] = await Promise.all([
+  const [salesByUser, overridesByUser, shiftDocs, ledgerByUser, activeSessions, finalized, leaves] = await Promise.all([
     options.salesByUser ?? getSalesForMonthByUser(month),
     getOverridesForMonthByUser(month),
-    getShiftsByRange(windowStart - LEDGER_LOOKBACK_MS, windowEnd),
+    getShiftsByRange(windowStart - SHIFT_LOOKBACK_MS, windowEnd),
     getLedgerEntriesForUsers(userIds, windowStart - LEDGER_LOOKBACK_MS, windowEnd),
     getActiveSessionsForUsers(userIds),
     getFinalizedMonthsFor(userIds, month),
+    getApprovedLeave(null, month),
   ]);
+  // Priced once for everyone; every config below shares the same windows, since
+  // a draft rate table changes what leave pays, never which days it covers.
+  const leaveWindowsByUser = resolveLeaveWindows(leaves, shiftDocs, configs[0] ?? DEFAULT_SALARY_CONFIG);
 
   // Finalised months are served from their snapshot, which needs a document
   // read each — but only for the few agents actually finalised.
@@ -1099,29 +1216,16 @@ export async function buildSalaryMonthForUsersUnder(
       continue;
     }
 
-    const shiftsByDay = resolveShiftInputs(
-      shiftDocs,
+    const days = assembleDays({
       userId,
-      windowStart,
-      windowEnd,
-      ledgerByUser.get(userId) ?? [],
-      activeSessions.get(userId),
+      month,
+      shiftDocs,
+      sales: salesByUser.get(userId) ?? [],
+      leaveWindows: leaveWindowsByUser.get(userId) ?? [],
+      sessions: ledgerByUser.get(userId) ?? [],
+      activeSession: activeSessions.get(userId),
       now,
-    );
-    const salesByDay = foldSales(salesByUser.get(userId) ?? []);
-
-    const days: SalaryDayInput[] = [];
-    for (const day of new Set([...salesByDay.keys(), ...shiftsByDay.keys()])) {
-      if (day.slice(0, 7) !== month) continue;
-      const sale = salesByDay.get(day);
-      days.push({
-        day,
-        grossEarnings: sale?.gross ?? 0,
-        saleCount: sale?.count ?? 0,
-        salesCreatorNames: sale?.creators ?? [],
-        shifts: shiftsByDay.get(day) ?? [],
-      });
-    }
+    });
 
     configs.forEach((config, i) =>
       outs[i].set(

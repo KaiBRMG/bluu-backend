@@ -1,5 +1,6 @@
 'use client';
 
+import { usePermissions } from '@/hooks/usePermissions';
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { ArrowUpRight, Loader2Icon, RotateCcw, Search, Trash2, Undo2 } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
@@ -96,6 +97,8 @@ interface SalesReportResponse {
   byCreator: Array<Sum & { creatorId: string | null; name: string }>;
   byType: Array<Sum & { name: string }>;
   byDay: Array<{ day: string; tips: number; ppv: number }>;
+  /** Sales inside the agent's approved leave shifts: listed, not paid. Agent view only. */
+  excludedForLeave?: { count: number; gross: number };
   transferredAway: SalarySale[];
   transfers: { inGross: number; inCount: number; outGross: number; outCount: number };
   finalized: boolean;
@@ -225,7 +228,7 @@ export function SalesReport({
   }, [data, deferredQuery, creator, type, day]);
 
   const filtersActive = deferredQuery.trim() !== '' || creator !== 'all' || type !== 'all';
-  const filteredGross = filtered.reduce((sum, sale) => sum + sale.signedGross, 0);
+  const filteredGross = filtered.reduce((sum, sale) => sum + (sale.duringLeave ? 0 : sale.signedGross), 0);
   const visible = showAllRows ? filtered : filtered.slice(0, INITIAL_ROWS);
   const hiddenRows = filtered.length - visible.length;
   const clearFilters = () => {
@@ -491,6 +494,9 @@ export function SalesReport({
                   {pluralise(filtered.length, 'sale')} ·{' '}
                   <span className="tabular-nums text-foreground">{formatUsd(filteredGross)}</span> gross
                   {data.totals.reversals > 0 && !day && <> · {pluralise(data.totals.reversals, 'reversal')} deducted</>}
+                  {(data.excludedForLeave?.count ?? 0) > 0 && (
+                    <> · {pluralise(data.excludedForLeave!.count, 'sale')} during leave not counted</>
+                  )}
                 </>
               )}
             </p>
@@ -544,6 +550,8 @@ function SalesTable({
   viewerUid?: string | null;
   renderAction?: (sale: SalarySale) => React.ReactNode;
 }) {
+  // A fan's name opens their report — for anyone who can read Fan Analytics.
+  const fanReports = usePermissions().canAccess('/ca-portal/fan-analytics');
   return (
     // Focusable and named: a region that scrolls only under a pointer is a
     // WCAG 2.1.1 failure.
@@ -600,12 +608,17 @@ function SalesTable({
                     </span>
                   )}
                   {!away && sale.disputeId && <span className="text-[11px] text-zinc-300">Disputed</span>}
+                  {!away && sale.duringLeave && (
+                    <AttrChip title="Made during an approved leave shift, so it does not count toward pay.">
+                      During leave — not counted
+                    </AttrChip>
+                  )}
                 </span>
               </td>
               <td className="max-w-[14rem] px-3 py-2">
-                <FanLabel name={sale.fanName} fanId={sale.fanId} className="block" />
+                <FanLabel name={sale.fanName} fanId={sale.fanId} className="block" linkToReport={fanReports} />
               </td>
-              <td className={cn('whitespace-nowrap px-3 py-2 text-right tabular-nums', away ? 'text-zinc-400 line-through' : signedMoneyClass(sale.signedGross))}>
+              <td className={cn('whitespace-nowrap px-3 py-2 text-right tabular-nums', away || sale.duringLeave ? 'text-zinc-400 line-through' : signedMoneyClass(sale.signedGross))}>
                 {formatUsd(sale.signedGross)}
               </td>
               {renderAction && <td className="px-1 py-1 text-right">{renderAction(sale)}</td>}

@@ -191,7 +191,9 @@ export async function pullCustomTeamPeriod(
   from: SalaryDayKey,
   to: SalaryDayKey,
 ): Promise<void> {
-  const [start] = dayKeyRange(from);
+  // BuddyX holds no activity before its start day, so a long range (Last year)
+  // asks only for the days that exist. The doc keeps the requested range's id.
+  const [start] = dayKeyRange(from > BUDDYX_TEAM_STATS_START_DAY ? from : BUDDYX_TEAM_STATS_START_DAY);
   const [, end] = dayKeyRange(to);
   const data = await overview(rangeQuery(start, end - 1));
   await adminDb.collection(TEAM_PERIODS).doc(`custom-${from}-${to}`).set({
@@ -238,7 +240,6 @@ export async function syncChattersScope(ctx: SyncContext): Promise<void> {
     // The last 7 COMPLETE days — today is still moving and arrives with BuddyX's
     // lag, so a half-synced day would show every agent with a coverage gap.
     { id: '7d', start: dayKeyRange(addDays(today, -7))[0], end: dayKeyRange(today)[0] - 1, from: addDays(today, -7), to: yesterday },
-    { id: '30d', start: ctx.now - 30 * 86_400_000, end: ctx.now, from: toDayKey(ctx.now - 30 * 86_400_000), to: today },
   ];
   const prevSnap = await adminDb.collection(TEAM_PERIODS).doc('prev-month').get();
   const prevSynced = (prevSnap.get('syncedAt') as Timestamp | undefined)?.toMillis?.() ?? 0;
@@ -684,7 +685,9 @@ export async function syncFansScope(ctx: SyncContext): Promise<void> {
       name,
       source: 'buddyx-link',
       lastSeenAt: FieldValue.serverTimestamp(),
-    });
+      // `merge`: the registry also holds staff's manual name and the customs
+      // rollup (`fanRegistryService`) — a sync owns only these fields.
+    }, { merge: true });
   }
   await writer.close();
   bump(ctx, 'fans.rollupsWritten', patches.size);
