@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { ArrowUpRight } from 'lucide-react';
 import { useTimeTracking } from '@/hooks/useTimeTracking';
 import { useUserData } from '@/hooks/useUserData';
@@ -16,7 +16,6 @@ function formatTime(totalSeconds: number): string {
 export default function TimerPill() {
   const { userData } = useUserData();
   const { displayState, elapsedSeconds, breakRemainingSeconds } = useTimeTracking();
-  const router = useRouter();
 
   if (!userData?.permittedPageIds?.includes('time-tracking')) return null;
 
@@ -24,9 +23,16 @@ export default function TimerPill() {
   const isOnBreak = displayState === 'on-break';
   const displaySeconds = isOnBreak && breakRemainingSeconds !== null ? breakRemainingSeconds : elapsedSeconds;
 
+  // A real anchor, not a `router.push` button: `NavigationWatchdog` only
+  // observes `<a href>` clicks, so an imperative push here was the one top-bar
+  // navigation it could not rescue after a deploy. As a link it is armed on
+  // click *and* re-evaluated on every repeat click — the escape hatch when a
+  // wedged main thread starves the watchdog's timer. No prefetch: persistent
+  // chrome (rule 9i).
   return (
-    <button
-      onClick={() => router.push('/applications/time-tracking')}
+    <Link
+      href="/applications/time-tracking"
+      prefetch={false}
       className="flex items-center gap-2.5 px-4 py-1.5 transition-opacity hover:opacity-80"
       style={{
         borderRadius: '9999px',
@@ -43,6 +49,6 @@ export default function TimerPill() {
         {formatTime(displaySeconds)}
       </span>
       <ArrowUpRight style={{ color, width: 16, height: 16, flexShrink: 0 }} />
-    </button>
+    </Link>
   );
 }

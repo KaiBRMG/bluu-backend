@@ -1,30 +1,17 @@
 /**
- * Chatter Analytics' integrity layer — coverage (BuddyX online while clocked
- * in), the ranked flag list, the per-chatter report and one shift's minute
- * detail. Firestore only, like the rest of the analytics read models.
+ * Chatter Analytics' integrity layer — the ranked flag list, the per-chatter
+ * report's shift table and one shift's minute detail. Firestore only, like the
+ * rest of the analytics read models.
  *
  * **Display only.** Nothing here writes, and nothing feeds the salary engine
  * (rule 9f): a flag is a lead for an admin to look at, never a deduction.
- * **Admin only**, except an agent's own `coverage` figure — the routes enforce
- * that; this module never decides who may see what.
+ * **Admin only** — the routes enforce that; this module never decides who may
+ * see what.
  */
 import 'server-only';
 import { adminDb } from '../firebase-admin';
 import { dayKeyRange, enumerateDays, toDayKey, type SalaryDayKey } from '../salary/salaryDate';
-import {
-  COVERAGE_FLAG_RATIO,
-  COVERAGE_HIGH_RATIO,
-  COVERAGE_MIN_CLOCKED_MS,
-  HOUR_MS,
-  LEDGER_LOOKBACK_MS,
-  coverageFor,
-  hourKey,
-  msPerHour,
-  sessionSpans,
-  workingSpans,
-  type CoverageDay,
-  type CoverageFigures,
-} from '../buddyx/coverage';
+import { HOUR_MS, LEDGER_LOOKBACK_MS, hourKey, sessionSpans, workingSpans } from '../buddyx/coverage';
 import { INTERVAL_MODIFIER_ONLY } from '../inputQuality';
 import { serialiseShift } from '../utils/shiftSerialise';
 import { expandShiftsForWindow } from '../utils/recurrence';
@@ -32,7 +19,7 @@ import { getActiveSessionsForUsers, getLedgerEntriesForUsers, getShiftsByRange }
 import { getIntegrityCaptures, type IntegrityCaptureDocument, type IntegrityDayDocument } from './integrityService';
 import { getScreenshotUrl } from './screenshotService';
 import type { IntegrityFlag, IntegritySummary, ReportShift, ShiftDetail } from '../buddyx/analyticsTypes';
-import type { ActiveSessionDocument, BuddyxTeamDayDocument, BuddyxTeamHoursDocument, TimeEntryLedgerDocument } from '@/types/firestore';
+import type { ActiveSessionDocument, BuddyxTeamHoursDocument, TimeEntryLedgerDocument } from '@/types/firestore';
 
 // ─── Flag thresholds ─────────────────────────────────────────────────
 // Leads, not verdicts. Each is a total over the period, so a single odd
@@ -44,8 +31,6 @@ const INPUT_HIGH_MINUTES = 120;
 /** Unchanged-screen minutes this many in a period flags. */
 const STATIC_FLAG_MINUTES = 60;
 const STATIC_HIGH_MINUTES = 180;
-/** A day with less clocked working time than this is not judged on its own coverage. */
-const DAY_MIN_CLOCKED_MS = 30 * 60_000;
 
 // ─── Hourly BuddyX data ──────────────────────────────────────────────
 
@@ -60,15 +45,6 @@ export async function readTeamHours(days: SalaryDayKey[]): Promise<Map<string, B
 function hourPulled(hoursDocs: Map<string, BuddyxTeamHoursDocument>, hourStartMs: number): boolean {
   const { day, index } = hourKey(hourStartMs);
   return hoursDocs.get(day)?.hours?.[index] !== undefined;
-}
-
-/** True when every hour of the day that has ended (by `now`) has been pulled. */
-function dayHasAllHours(hoursDocs: Map<string, BuddyxTeamHoursDocument>, day: SalaryDayKey, now: number): boolean {
-  if (!hoursDocs.has(day)) return false;
-  const [start, end] = dayKeyRange(day);
-  const last = Math.min(end, Math.floor(now / HOUR_MS) * HOUR_MS);
-  for (let h = start; h < last; h += HOUR_MS) if (!hourPulled(hoursDocs, h)) return false;
-  return true;
 }
 
 type HourIndex = { online: Map<string, Map<number, number>>; messages: Map<string, Map<number, number>> };
@@ -104,47 +80,10 @@ function hourIndex(hoursDocs: Map<string, BuddyxTeamHoursDocument>): HourIndex {
 
 const EMPTY = new Map<number, number>();
 
-/** The first day in the list that has complete hourly data, or null. */
-export function firstHourlyDay(days: SalaryDayKey[], hoursDocs: Map<string, BuddyxTeamHoursDocument>, now: number): string | null {
-  return days.find(d => dayHasAllHours(hoursDocs, d, now)) ?? null;
-}
-
 /** `[start, min(now, end)]` of a run of days. */
 function windowOf(days: SalaryDayKey[], now: number): [number, number] {
   if (days.length === 0) return [now, now];
   return [dayKeyRange(days[0])[0], Math.min(now, dayKeyRange(days[days.length - 1])[1])];
-}
-
-/**
- * One agent's coverage over `days`. `dayDocs` supplies the day-total fallback
- * for days without complete hourly data.
- */
-export function agentCoverage(params: {
-  uid: string;
-  days: SalaryDayKey[];
-  now: number;
-  hoursDocs: Map<string, BuddyxTeamHoursDocument>;
-  dayDocs: Map<string, BuddyxTeamDayDocument>;
-  entries: TimeEntryLedgerDocument[];
-  active: ActiveSessionDocument | undefined;
-}): CoverageFigures & { byDay: CoverageDay[] } {
-  const { uid, days, now, hoursDocs, dayDocs } = params;
-  const [windowStart, windowEnd] = windowOf(days, now);
-  const spans = workingSpans(params.entries, params.active, windowStart, windowEnd, now);
-  return coverageFor({
-    days: days.map(day => {
-      const [start, end] = dayKeyRange(day);
-      return {
-        day,
-        start,
-        end: Math.min(end, now),
-        hasHours: dayHasAllHours(hoursDocs, day, now),
-        dayOnlineMs: (dayDocs.get(day)?.breakdown ?? []).filter(r => r.uid === uid).reduce((s, r) => s + (r.onlineMs ?? 0), 0),
-      };
-    }),
-    workingByHour: msPerHour(spans),
-    onlineByHour: hourIndex(hoursDocs).online.get(uid) ?? EMPTY,
-  });
 }
 
 export function summariseIntegrity(docs: IntegrityDayDocument[] | undefined): IntegritySummary | null {
@@ -169,9 +108,8 @@ export function summariseIntegrity(docs: IntegrityDayDocument[] | undefined): In
 
 const SEVERITY_RANK = { high: 0, medium: 1 } as const;
 
-/** Rank: severity, then size (minutes, or how far below the coverage line). */
+/** Rank: severity, then size (flagged minutes). */
 function flagMagnitude(f: IntegrityFlag): number {
-  if (f.kind === 'low-coverage') return 1 - (f.ratio ?? 1);
   if (f.kind === 'never-online') return 1;
   return (f.minutes ?? 0) / 600;
 }
@@ -186,27 +124,19 @@ export function sortFlags(flags: IntegrityFlag[]): IntegrityFlag[] {
 export function flagsForAgent(params: {
   uid: string;
   name: string;
-  coverage: (CoverageFigures & { byDay: CoverageDay[] }) | null;
+  /** BuddyX online time over the part of the period BuddyX covers; null = no BuddyX row at all. */
+  onlineMs: number | null;
   rosteredShifts: number;
   integrityDays: IntegrityDayDocument[] | undefined;
 }): IntegrityFlag[] {
-  const { uid, name, coverage } = params;
+  const { uid, name } = params;
   const out: IntegrityFlag[] = [];
-  const base = { uid, name, minutes: null, ratio: null, shifts: null };
+  const base = { uid, name, minutes: null, shifts: null };
 
-  if (params.rosteredShifts > 0 && coverage && coverage.onlineMs === 0) {
+  // Rostered, yet BuddyX never saw them: absent, or working under a chatter id
+  // nobody has linked. Either way an admin needs to know.
+  if (params.rosteredShifts > 0 && !params.onlineMs) {
     out.push({ ...base, kind: 'never-online', severity: 'high', shifts: params.rosteredShifts, days: [] });
-  } else if (coverage && coverage.ratio !== null && coverage.clockedMs >= COVERAGE_MIN_CLOCKED_MS && coverage.ratio < COVERAGE_FLAG_RATIO) {
-    out.push({
-      ...base,
-      kind: 'low-coverage',
-      severity: coverage.ratio < COVERAGE_HIGH_RATIO ? 'high' : 'medium',
-      ratio: coverage.ratio,
-      shifts: params.rosteredShifts || null,
-      days: coverage.byDay
-        .filter(d => d.clockedMs >= DAY_MIN_CLOCKED_MS && d.onlineWhileClockedMs / d.clockedMs < COVERAGE_FLAG_RATIO)
-        .map(d => d.day),
-    });
   }
 
   const days = params.integrityDays ?? [];
@@ -242,8 +172,8 @@ async function occurrencesFor(uid: string, start: number, end: number) {
 
 /**
  * The report's shift table: every scheduled shift in the window, then any
- * session that overlapped no shift at all (worked off-roster). Coverage per
- * shift is the same per-hour min() as the page, restricted to the shift.
+ * session that overlapped no shift at all (worked off-roster). Each row carries
+ * the gross the agent holds from sales made inside its window.
  */
 export async function reportShifts(params: {
   uid: string;
@@ -254,29 +184,24 @@ export async function reportShifts(params: {
   active: ActiveSessionDocument | undefined;
   hoursDocs: Map<string, BuddyxTeamHoursDocument>;
   captures: IntegrityCaptureDocument[];
+  /** The agent's own sales in the window (ledger, transfers applied). */
+  sales: Array<{ at: number; gross: number }>;
 }): Promise<ReportShift[]> {
-  const { uid, start, end, now, entries, active, hoursDocs, captures } = params;
+  const { uid, start, end, now, entries, active, hoursDocs, captures, sales } = params;
   const occurrences = await occurrencesFor(uid, start, end);
-  const index = hourIndex(hoursDocs);
-  const online = index.online.get(uid) ?? EMPTY;
-  const messages = index.messages.get(uid) ?? EMPTY;
+  const messages = hourIndex(hoursDocs).messages.get(uid) ?? EMPTY;
 
   const row = (s: number, e: number, scheduled: boolean, isOvertime: boolean, accounts: number): ReportShift => {
     const spans = workingSpans(entries, active, s, e, now);
-    const working = msPerHour(spans);
     const clockedMs = spans.reduce((t, [a, b]) => t + (b - a), 0);
     let hasHours = true;
-    let overlap = 0;
     let messageCount = 0;
     for (let h = Math.floor(s / HOUR_MS) * HOUR_MS; h < Math.min(e, now); h += HOUR_MS) {
       if (!hourPulled(hoursDocs, h)) hasHours = false;
-      // The part of the hour inside the shift, so a shift starting at :30 is
-      // not credited a whole hour of someone else's online time.
-      const inShift = Math.min(e, h + HOUR_MS) - Math.max(s, h);
-      overlap += Math.min(inShift, online.get(h) ?? 0, working.get(h) ?? 0);
       messageCount += messages.get(h) ?? 0;
     }
     const inShift = captures.filter(c => c.at.toMillis() > s && c.at.toMillis() <= e + 15 * 60_000);
+    const shiftSales = sales.filter(x => x.at >= s && x.at < e);
     return {
       startMs: s,
       endMs: e,
@@ -284,8 +209,8 @@ export async function reportShifts(params: {
       isOvertime,
       accounts,
       clockedMs,
-      onlineWhileClockedMs: hasHours ? overlap : null,
-      ratio: hasHours && clockedMs > 0 ? Math.round((overlap / clockedMs) * 1000) / 1000 : null,
+      gross: Math.round(shiftSales.reduce((t, x) => t + x.gross, 0) * 100) / 100,
+      salesCount: shiftSales.length,
       messages: hasHours ? messageCount : null,
       regularMinutes: inShift.reduce((t, c) => t + (c.input?.regularMinutes ?? 0), 0),
       modifierOnlyMinutes: inShift.reduce((t, c) => t + (c.input?.modifierOnlyMinutes ?? 0), 0),

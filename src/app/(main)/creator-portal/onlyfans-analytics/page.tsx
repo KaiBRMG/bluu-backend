@@ -136,6 +136,12 @@ export default function OnlyFansAnalyticsPage() {
   );
 }
 
+/** "+12% vs previous period" — "—" when the previous window has no history or was zero. */
+function vsPrevious(current: number, previous: number | null): string {
+  if (previous === null || previous === 0) return 'No previous period to compare';
+  const delta = (current - previous) / previous;
+  return `${delta >= 0 ? '+' : '−'}${Math.abs(Math.round(delta * 100))}% vs previous period`;
+}
 
 /**
  * How an account that is not an active Bluu creator is marked. History keeps
@@ -190,17 +196,21 @@ function Body({ data, selected, onSelect }: { data: CreatorAnalytics; selected: 
 
   return (
     <>
-      {/* ── Standing KPIs: range-independent on purpose (the metric-roster rule) ── */}
+      {/* ── Period KPIs: every creator, over the selected range (not the selection) ── */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <KpiTile label="Earnings MTD" basis="gross" value={formatUsd(data.kpis.earningsMtd)} />
-        <KpiTile label="New subscribers MTD" value={formatCount(data.kpis.newSubsMtd)} />
+        <KpiTile label="Earnings" basis="gross" value={formatUsd(data.kpis.earnings)} meta={vsPrevious(data.kpis.earnings, data.kpis.previousEarnings)} />
+        <KpiTile label="New subscribers" value={formatCount(data.kpis.newSubs)} meta={vsPrevious(data.kpis.newSubs, data.kpis.previousNewSubs)} />
         <KpiTile
-          label="Best link by revenue per fan"
-          tip={LINK_REVENUE_NOTE}
-          value={data.kpis.bestLink ? formatUsd(data.kpis.bestLink.revenuePerFan) : '—'}
-          meta={data.kpis.bestLink ? `${data.kpis.bestLink.name ?? 'Unnamed link'} · ${name(data.kpis.bestLink.creatorId)}` : 'No link with 5+ fans yet'}
+          label="Top link"
+          tip={`Revenue the link brought in during this period. ${LINK_REVENUE_NOTE}`}
+          value={data.kpis.topLink ? formatUsd(data.kpis.topLink.revenue) : '—'}
+          meta={data.kpis.topLink ? `${data.kpis.topLink.name ?? 'Unnamed link'} · ${name(data.kpis.topLink.creatorId)}` : 'No link revenue synced for this period'}
         />
-        <KpiTile label="Creators active in BuddyX" value={String(data.kpis.activeCreators)} meta="Streamed stats in the last 7 days" />
+        <KpiTile
+          label="Creators earning"
+          value={String(data.kpis.earningCreators)}
+          meta={data.kpis.topCreator ? `Top: ${name(data.kpis.topCreator.creatorId)} · ${formatShare(data.kpis.topCreator.share)}` : 'No earnings in this period'}
+        />
       </div>
 
       {/* ── Roster (focal) ── */}

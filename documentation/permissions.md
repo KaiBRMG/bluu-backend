@@ -152,7 +152,7 @@ Three pages, each its own permission, granted on Sharing like any other:
 
 | pageId | Teamspace | What `ca-admin` adds |
 |---|---|---|
-| `ca-chatter-analytics` | CA Portal | the named leaderboard (agents otherwise see themselves + an anonymous benchmark) |
+| `ca-chatter-analytics` | CA Portal | the team's sales and the named sales board (sales only) for everyone; `ca-admin` adds the per-agent reports and integrity flags |
 | `ca-fan-analytics` | CA Portal | every creator and the acquisition table (agents otherwise see creators they are rostered on this month) |
 | `creators-of-analytics` | Creator Portal | — (internal page; not in the Telegram Mini App) |
 

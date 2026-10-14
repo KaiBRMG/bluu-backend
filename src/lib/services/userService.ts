@@ -367,15 +367,15 @@ export async function getUserById(uid: string): Promise<any> {
  */
 export async function userLabelsFor(
   uids: (string | null | undefined)[],
-): Promise<Map<string, { displayName: string; isArchived: boolean }>> {
+): Promise<Map<string, { displayName: string; isArchived: boolean; photoURL: string | null }>> {
   const unique = [...new Set(uids.filter((u): u is string => !!u))];
-  const out = new Map<string, { displayName: string; isArchived: boolean }>();
+  const out = new Map<string, { displayName: string; isArchived: boolean; photoURL: string | null }>();
   if (unique.length === 0) return out;
   const snaps = await adminDb.getAll(...unique.map((uid) => adminDb.collection('users').doc(uid)));
   for (const snap of snaps) {
     if (!snap.exists) continue;
     const data = snap.data();
-    out.set(snap.id, { displayName: data?.displayName ?? 'Unknown', isArchived: data?.isArchived === true });
+    out.set(snap.id, { displayName: data?.displayName ?? 'Unknown', isArchived: data?.isArchived === true, photoURL: data?.photoURL || null });
   }
   return out;
 }

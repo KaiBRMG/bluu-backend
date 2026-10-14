@@ -1,12 +1,11 @@
 /**
  * GET /api/analytics/chatters?period=7d|mtd|prev-month|month-2|3m|6m|12m|custom[&from&to] (default 7d)
  *
- * Chatter Analytics (`ca-chatter-analytics`). An agent gets their own figures,
- * their daily trend and an **anonymous** team benchmark — no colleague's id or
- * name crosses the wire, and with fewer than three active agents there is no
- * benchmark at all (D8). `ca-admin` also gets the named leaderboard, BuddyX
- * online time against Bluu clocked-in time, and rostered agents who were never
- * online.
+ * Chatter Analytics (`ca-chatter-analytics`). Everyone gets their own figures,
+ * their daily trend, the team's sales and the **named sales board** — sales
+ * only (`SalesBoardRow`): no colleague's activity, reply times or integrity
+ * data ever reaches an agent. `ca-admin` also gets unlinked BuddyX chatters on
+ * the board and the integrity flags.
  *
  * Firestore only; the API is never called on a page read.
  */

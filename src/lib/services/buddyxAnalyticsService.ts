@@ -7,8 +7,9 @@
  * so a page revisited inside a minute costs nothing at all.
  *
  * Scope is enforced here, not in the client:
- * - Chatter Analytics — an agent gets their own row plus an anonymous benchmark;
- *   `ca-admin` gets the named leaderboard (D8).
+ * - Chatter Analytics — everyone gets the named **sales** board (gross, counts,
+ *   per clocked hour, accounts — nothing else of a colleague); `ca-admin` also
+ *   gets unlinked BuddyX chatters and the integrity flags.
  * - Fan Analytics — an agent gets the creators they are rostered on this month;
  *   `ca-admin` gets all (D9). The fan detail refuses a fan outside that scope.
  * - OnlyFans Analytics — everyone with the page sees every creator (internal).
@@ -31,9 +32,9 @@ import { round2 } from '../salary/salaryEngine';
 import { saleKindOf } from '../salary/saleTypes';
 import { resolveFanName } from '../fans/fanIdentity';
 import { mappedCreatorIds } from './buddyxMappingService';
-import { computeBenchmarks } from '../buddyx/benchmarks';
 import {
   BUDDYX_CREATOR_STATS_START_DAY,
+  CREATOR_HISTORY_START_DAY,
   BUDDYX_SUBSCRIBERS_START_DAY,
   BUDDYX_TEAM_STATS_START_DAY,
   TEAM_PERIODS,
@@ -44,7 +45,6 @@ import type {
   AcquisitionRow,
   ChatterAnalytics,
   ChatterDailyPoint,
-  ChatterLeaderboardRow,
   ChatterMetrics,
   ChatterPeriod,
   ChatterReport,
@@ -56,8 +56,12 @@ import type {
   FanSummary,
   LinkRow,
   MassMessageSummary,
+  ReportAccount,
+  SalesBoardRow,
   SpendBucket,
+  TeamSales,
 } from '../buddyx/analyticsTypes';
+import { BOARD_RATE_MAX_DAYS } from '../buddyx/analyticsTypes';
 import { serialiseShift } from '../utils/shiftSerialise';
 import { expandShiftsForWindow } from '../utils/recurrence';
 import { computeTimeWorked } from '../utils/shiftAttendance';
@@ -65,8 +69,6 @@ import { getActiveSessionsForUsers, getLedgerEntriesForUsers, getShiftsByRange }
 import { getIntegrityDays } from './integrityService';
 import { LEDGER_LOOKBACK_MS } from '../buddyx/coverage';
 import {
-  agentCoverage,
-  firstHourlyDay,
   reportReads,
   reportShifts,
   flagsForAgent,
@@ -76,8 +78,6 @@ import {
 } from './chatterIntegrityService';
 import { getUserById, userLabelsFor } from './userService';
 import type {
-  ActiveSessionDocument,
-  TimeEntryLedgerDocument,
   BuddyxFanDocument,
   BuddyxLinkDocument,
   BuddyxMassMessageDocument,
@@ -153,6 +153,19 @@ export async function rosteredCreatorsFor(uid: string, now = Date.now()): Promis
 //   `BUDDYX_TEAM_STATS_START_DAY`. Before that it is `null` — rendered "—",
 //   never 0 — and the page says why.
 
+/** One sale, as the read models need it. */
+interface LedgerSale {
+  userId: string;
+  day: string;
+  /** `occurredAt`, ms. */
+  at: number;
+  kind: 'ppv' | 'tip';
+  gross: number;
+  /** Creator id when the sale has one, else the name it was imported under. */
+  accountKey: string;
+  accountName: string;
+}
+
 /** One agent's ledger revenue over a range. */
 interface LedgerTotals {
   ppvGross: number;
@@ -163,40 +176,75 @@ interface LedgerTotals {
 }
 
 /**
- * Every sale in a range, folded per holder. One field-masked query per month
- * the range touches (a custom range is at most 92 days, so at most 4).
- * Unassigned and removed rows count toward nobody, exactly as on the payslip.
+ * One month of the sales ledger, field-masked and cached per month — a period
+ * and the one it is compared against usually share a month, so the comparison
+ * does not read it twice. Unassigned and removed rows count toward nobody,
+ * exactly as on the payslip.
  */
-async function readLedger(from: SalaryDayKey, to: SalaryDayKey): Promise<Map<string, LedgerTotals>> {
-  const months: string[] = [];
-  for (let m = from.slice(0, 7); m <= to.slice(0, 7); m = addMonths(m, 1)) months.push(m);
-  const snaps = await Promise.all(
-    months.map(m =>
-      adminDb.collection('ca-sales').where('month', '==', m).select('userId', 'day', 'kind', 'type', 'signedGross', 'removedAt').get(),
-    ),
-  );
-  const out = new Map<string, LedgerTotals>();
-  for (const snap of snaps) {
+function readLedgerMonth(month: string): Promise<LedgerSale[]> {
+  return cached(`sales:${month}`, async () => {
+    const snap = await adminDb
+      .collection('ca-sales')
+      .where('month', '==', month)
+      .select('userId', 'day', 'kind', 'type', 'signedGross', 'removedAt', 'occurredAt', 'creatorId', 'creatorName')
+      .get();
+    const out: LedgerSale[] = [];
     for (const doc of snap.docs) {
       const sale = doc.data() as Partial<CaSaleDocument>;
-      if (!sale.userId || sale.removedAt || !sale.day || sale.day < from || sale.day > to) continue;
-      const t = out.get(sale.userId) ?? { ppvGross: 0, tipsGross: 0, tipsCount: 0, ppvSales: 0, byDay: new Map() };
-      const gross = Number(sale.signedGross ?? 0);
-      const day = t.byDay.get(sale.day) ?? { ppv: 0, tips: 0 };
-      if (saleKindOf(sale) === 'ppv') {
-        t.ppvGross += gross;
-        t.ppvSales += 1;
-        day.ppv += gross;
-      } else {
-        t.tipsGross += gross;
-        t.tipsCount += 1;
-        day.tips += gross;
-      }
-      t.byDay.set(sale.day, day);
-      out.set(sale.userId, t);
+      if (!sale.userId || sale.removedAt || !sale.day) continue;
+      out.push({
+        userId: sale.userId,
+        day: sale.day,
+        at: sale.occurredAt?.toMillis?.() ?? 0,
+        kind: saleKindOf(sale) === 'ppv' ? 'ppv' : 'tip',
+        gross: Number(sale.signedGross ?? 0),
+        accountKey: sale.creatorId || sale.creatorName || '',
+        accountName: sale.creatorName || '',
+      });
     }
+    return out;
+  });
+}
+
+/** Every held sale in a range — one cached month read per month it touches. */
+async function readSales(from: SalaryDayKey, to: SalaryDayKey): Promise<LedgerSale[]> {
+  const months: string[] = [];
+  for (let m = from.slice(0, 7); m <= to.slice(0, 7); m = addMonths(m, 1)) months.push(m);
+  const perMonth = await Promise.all(months.map(readLedgerMonth));
+  return perMonth.flat().filter(x => x.day >= from && x.day <= to);
+}
+
+/** Sales folded per holder. */
+function foldLedger(sales: LedgerSale[]): Map<string, LedgerTotals> {
+  const out = new Map<string, LedgerTotals>();
+  for (const sale of sales) {
+    const t = out.get(sale.userId) ?? { ppvGross: 0, tipsGross: 0, tipsCount: 0, ppvSales: 0, byDay: new Map() };
+    const day = t.byDay.get(sale.day) ?? { ppv: 0, tips: 0 };
+    if (sale.kind === 'ppv') {
+      t.ppvGross += sale.gross;
+      t.ppvSales += 1;
+      day.ppv += sale.gross;
+    } else {
+      t.tipsGross += sale.gross;
+      t.tipsCount += 1;
+      day.tips += sale.gross;
+    }
+    t.byDay.set(sale.day, day);
+    out.set(sale.userId, t);
   }
   return out;
+}
+
+/** Sales by day and kind, every day of `days` present (a quiet day is a zero bar, not a gap). */
+function dailyOf(sales: LedgerSale[], days: SalaryDayKey[]): ChatterDailyPoint[] {
+  const byDay = new Map<string, { ppv: number; tips: number }>(days.map(d => [d, { ppv: 0, tips: 0 }]));
+  for (const sale of sales) {
+    const d = byDay.get(sale.day);
+    if (!d) continue;
+    if (sale.kind === 'ppv') d.ppv += sale.gross;
+    else d.tips += sale.gross;
+  }
+  return [...byDay].map(([day, v]) => ({ day, ppvGross: round2(v.ppv), tipsGross: round2(v.tips) }));
 }
 
 /**
@@ -314,7 +362,7 @@ async function loadChatterTeam(period: ChatterPeriod, range: { from: string; to:
     // Only the synced presets have a doc of their own; every other range finds
     // its medians in the doc an admin's Pull writes for exactly those days.
     const periodId = (TEAM_PERIODS as readonly string[]).includes(period) ? period : `custom-${range.from}-${range.to}`;
-    const [daySnaps, periodSnap, massSnap, ledger, hoursDocs] = await Promise.all([
+    const [daySnaps, periodSnap, massSnap, sales] = await Promise.all([
       days.length ? adminDb.getAll(...days.map(d => adminDb.collection('buddyx-team-days').doc(d))) : Promise.resolve([]),
       hasActivityWindow ? adminDb.collection('buddyx-team-periods').doc(periodId).get() : Promise.resolve(null),
       hasActivityWindow
@@ -325,9 +373,7 @@ async function loadChatterTeam(period: ChatterPeriod, range: { from: string; to:
             .select('uid', 'sentBy', 'price', 'unsent', 'sentDate')
             .get()
         : Promise.resolve(null),
-      readLedger(range.from, range.to),
-      // Hourly online time, for coverage (online only while clocked in).
-      readTeamHours(days),
+      readSales(range.from, range.to),
     ]);
     const dayDocs = daySnaps.filter(s => s.exists).map(s => s.data() as BuddyxTeamDayDocument);
     const periodDoc = periodSnap?.exists ? (periodSnap.data() as BuddyxTeamPeriodDocument) : null;
@@ -336,14 +382,143 @@ async function loadChatterTeam(period: ChatterPeriod, range: { from: string; to:
     const rows = periodDoc?.breakdown ?? dayDocs.flatMap(d => d.breakdown ?? []);
     return {
       rows,
-      days,
-      dayDocs: new Map(dayDocs.map(d => [d.day, d])),
-      hoursDocs,
+      grouped: groupRows(rows),
       hasMedians: Boolean(periodDoc),
-      ledger,
+      sales,
+      ledger: foldLedger(sales),
       mass: (massSnap?.docs ?? []).map(d => d.data() as BuddyxMassMessageDocument),
     };
   });
+}
+
+/**
+ * The period the board compares against. A month-shaped period compares with
+ * the month before (month to date with the same days of last month); every
+ * other period with the same number of days immediately before it. None past
+ * `BOARD_RATE_MAX_DAYS`, and none reaching before the sales history starts —
+ * against an empty period every change reads as infinite growth.
+ */
+function comparisonRange(period: ChatterPeriod, range: { from: string; to: string }): { from: string; to: string } | null {
+  const length = enumerateDays(range.from, range.to).length;
+  if (length > BOARD_RATE_MAX_DAYS) return null;
+  let prev: { from: string; to: string };
+  if (period === 'prev-month' || period === 'month-2') {
+    prev = wholeMonth(range.from.slice(0, 7), -1);
+  } else if (period === 'mtd') {
+    const m = addMonths(range.from.slice(0, 7), -1);
+    const lastDay = Math.min(Number(range.to.slice(8, 10)), daysInMonth(m));
+    prev = { from: `${m}-01`, to: `${m}-${String(lastDay).padStart(2, '0')}` };
+  } else {
+    prev = { from: addDays(range.from, -length), to: addDays(range.from, -1) };
+  }
+  return prev.from >= CREATOR_HISTORY_START_DAY ? prev : null;
+}
+
+type ChatterTeam = Awaited<ReturnType<typeof loadChatterTeam>>;
+
+/**
+ * The sales board — one row per agent, ranked by gross — plus the team's
+ * totals. Identical for every viewer, so it is built once per period and
+ * cached; an agent's request and an admin's share it.
+ *
+ * Rows: every agent who held a sale, had BuddyX activity, or was rostered (a
+ * rostered agent who sold nothing is a $0 row, not a missing one). Archived
+ * agents are left out (rule 6); their sales still count in the team total,
+ * which is the team's money, not the board's sum.
+ */
+async function loadBoard(period: ChatterPeriod, range: { from: string; to: string }, team: ChatterTeam, now: number) {
+  return cached(`board:${period}:${range.from}:${range.to}`, async () => {
+    const [start] = dayKeyRange(range.from);
+    const [, end] = dayKeyRange(range.to);
+    const windowEnd = Math.min(end, now);
+    const prevRange = comparisonRange(period, range);
+    // Per-hour rates need every agent's time ledger over the period, a read
+    // that grows with the range — so, like the comparison, only up to a quarter.
+    const withRates = enumerateDays(range.from, range.to).length <= BOARD_RATE_MAX_DAYS;
+
+    const linkedUids = [...team.grouped.keys()].filter(k => !k.startsWith('chatter:'));
+    const roster = await rosterForWindow(start, windowEnd);
+    const candidates = [...new Set([...linkedUids, ...team.ledger.keys(), ...roster.keys()])];
+    const [labels, timeLedger, active, prevSales] = await Promise.all([
+      userLabelsFor(candidates),
+      withRates ? getLedgerEntriesForUsers(candidates, start - LEDGER_LOOKBACK_MS, windowEnd) : Promise.resolve(null),
+      withRates ? getActiveSessionsForUsers(candidates) : Promise.resolve(null),
+      prevRange ? readSales(prevRange.from, prevRange.to) : Promise.resolve(null),
+    ]);
+    const prevLedger = prevSales ? foldLedger(prevSales) : null;
+
+    const rows: SalesBoardRow[] = candidates
+      .filter(uid => labels.get(uid)?.isArchived !== true)
+      .map(uid => {
+        const ledger = team.ledger.get(uid);
+        const label = labels.get(uid);
+        const ppvGross = round2(ledger?.ppvGross ?? 0);
+        const tipsGross = round2(ledger?.tipsGross ?? 0);
+        const clockedMs = timeLedger && active ? computeTimeWorked(start, windowEnd, timeLedger.get(uid) ?? [], active.get(uid)) * 1000 : null;
+        const prev = prevLedger?.get(uid);
+        return {
+          uid,
+          name: label?.displayName ?? team.grouped.get(uid)?.[0]?.chatterName ?? uid,
+          photoURL: label?.photoURL ?? null,
+          ppvGross,
+          tipsGross,
+          ppvSales: ledger?.ppvSales ?? 0,
+          tipsCount: ledger?.tipsCount ?? 0,
+          clockedMs,
+          grossPerHour: clockedMs !== null && clockedMs >= 3_600_000 ? round2((ppvGross + tipsGross) / (clockedMs / 3_600_000)) : null,
+          accounts: roster.get(uid)?.accounts.size ?? 0,
+          prevGross: prevLedger ? round2((prev?.ppvGross ?? 0) + (prev?.tipsGross ?? 0)) : null,
+        };
+      });
+    rows.sort(byGross);
+
+    // A BuddyX chatter mapped to nobody: its revenue is BuddyX's own (it holds
+    // no ledger sale). Admin only — the route never sends these to an agent.
+    const unlinked: SalesBoardRow[] = [...team.grouped.entries()]
+      .filter(([k]) => k.startsWith('chatter:'))
+      .map(([, bxRows]) => {
+        const m = metricsFrom(bxRows, undefined, false);
+        const chatter = bxRows[0];
+        return {
+          uid: null,
+          name: `${chatter?.chatterName ?? `Chatter ${chatter?.chatterId}`} (not linked)`,
+          photoURL: null,
+          ppvGross: m.ppvGross,
+          tipsGross: m.tipsGross,
+          ppvSales: m.ppvSales,
+          tipsCount: m.tipsCount,
+          clockedMs: null,
+          grossPerHour: null,
+          accounts: 0,
+          prevGross: null,
+        };
+      })
+      .filter(r => r.ppvGross + r.tipsGross !== 0)
+      .sort(byGross);
+
+    let ppvGross = 0;
+    let tipsGross = 0;
+    for (const t of team.ledger.values()) {
+      ppvGross += t.ppvGross;
+      tipsGross += t.tipsGross;
+    }
+    const teamSales: TeamSales = {
+      ppvGross: round2(ppvGross),
+      tipsGross: round2(tipsGross),
+      prev: prevRange && prevSales ? { ...prevRange, gross: round2(prevSales.reduce((s, x) => s + x.gross, 0)) } : null,
+      daily: dailyOf(team.sales, enumerateDays(range.from, range.to)),
+    };
+    return { rows, unlinked, roster, team: teamSales };
+  });
+}
+
+/** Gross, then sales made, then name — so a tie still reads in a stable order. */
+function byGross(a: SalesBoardRow, b: SalesBoardRow): number {
+  return (
+    b.ppvGross + b.tipsGross - (a.ppvGross + a.tipsGross) ||
+    b.ppvSales + b.tipsCount - (a.ppvSales + a.tipsCount) ||
+    a.name.localeCompare(b.name)
+  );
 }
 
 export async function getChatterAnalytics(params: {
@@ -360,16 +535,10 @@ export async function getChatterAnalytics(params: {
   const hasActivityWindow = range.to >= activityFrom;
 
   const team = await loadChatterTeam(params.period, range);
-  const coverageOf = (uid: string, entries: TimeEntryLedgerDocument[], active: ActiveSessionDocument | undefined) =>
-    hasActivityWindow
-      ? agentCoverage({ uid, days: team.days, now, hoursDocs: team.hoursDocs, dayDocs: team.dayDocs, entries, active })
-      : null;
-
-  const grouped = groupRows(team.rows);
-  const uidsWithData = new Set([...[...grouped.keys()].filter(k => !k.startsWith('chatter:')), ...team.ledger.keys()]);
-  const metricsFor = (uid: string) => metricsFrom(grouped.get(uid) ?? [], team.ledger.get(uid), team.hasMedians);
-  const teamMetrics = [...uidsWithData].map(uid => ({ uid, metrics: metricsFor(uid) }));
-  const me = uidsWithData.has(params.viewerUid) ? metricsFor(params.viewerUid) : null;
+  const board = await loadBoard(params.period, range, team, now);
+  const metricsFor = (uid: string) => metricsFrom(team.grouped.get(uid) ?? [], team.ledger.get(uid), team.hasMedians);
+  const hasData = (uid: string) => team.ledger.has(uid) || team.grouped.has(uid);
+  const me = hasData(params.viewerUid) ? metricsFor(params.viewerUid) : null;
 
   const myDays = team.ledger.get(params.viewerUid)?.byDay ?? new Map<string, { ppv: number; tips: number }>();
   const daily: ChatterDailyPoint[] = [...myDays.entries()]
@@ -382,122 +551,53 @@ export async function getChatterAnalytics(params: {
     to: range.to,
     activityFrom,
     hasMedians: team.hasMedians,
+    isAdmin: params.isAdmin,
     me,
     daily,
     mass: massSummary(team.mass.filter(m => m.uid === params.viewerUid)),
-    benchmarks: computeBenchmarks(me, teamMetrics, params.viewerUid),
-    leaderboard: null,
-    coverage: null,
+    // The named board goes to everyone, as sales only (`SalesBoardRow`).
+    // Unlinked BuddyX chatters are an admin's mapping problem, not a colleague.
+    board: params.isAdmin ? [...board.rows, ...board.unlinked] : board.rows,
+    team: board.team,
     flags: null,
-    hourlyFrom: firstHourlyDay(team.days, team.hoursDocs, now),
   };
-  if (!params.isAdmin) {
-    // The agent's own coverage — the one integrity figure they see (no flags).
-    if (hasActivityWindow && team.days.length > 0) {
-      const [start] = dayKeyRange(team.days[0]);
-      const [ledgerMine, activeMine] = await Promise.all([
-        getLedgerEntriesForUsers([params.viewerUid], start - LEDGER_LOOKBACK_MS, now),
-        getActiveSessionsForUsers([params.viewerUid]),
-      ]);
-      const mine = coverageOf(params.viewerUid, ledgerMine.get(params.viewerUid) ?? [], activeMine.get(params.viewerUid));
-      if (mine && (mine.clockedMs > 0 || mine.onlineMs > 0)) result.coverage = stripByDay(mine);
-    }
-    return result;
-  }
+  if (!params.isAdmin) return result;
 
-  // ── Admin: the named leaderboard, and the integrity check ──
+  // ── Admin: the integrity flags ──
+  // "Never online" only means anything where BuddyX could have seen the agent,
+  // so its roster is the part of the range BuddyX covers.
   const [start] = dayKeyRange(range.from);
   const [, end] = dayKeyRange(range.to);
   const windowEnd = Math.min(end, now);
-  // Online-vs-clocked and "never online" only mean anything where BuddyX could
-  // have seen the agent, so both use the part of the range it covers.
   const activityStart = Math.max(start, dayKeyRange(activityFrom)[0]);
-  const [roster, activityRoster] = await Promise.all([
-    rosterForWindow(start, windowEnd),
+  const [activityRoster, integrityDays] = await Promise.all([
     hasActivityWindow && activityStart > start ? rosterForWindow(activityStart, windowEnd) : Promise.resolve(null),
-  ]);
-  const offlineRoster = hasActivityWindow ? activityRoster ?? roster : new Map<string, { accounts: Set<string>; shifts: number }>();
-  const candidates = [...new Set([...uidsWithData, ...roster.keys()])];
-  const [labels, timeLedger, active, integrityDays] = await Promise.all([
-    userLabelsFor(candidates),
-    hasActivityWindow ? getLedgerEntriesForUsers(candidates, activityStart - LEDGER_LOOKBACK_MS, windowEnd) : Promise.resolve(new Map()),
-    hasActivityWindow ? getActiveSessionsForUsers(candidates) : Promise.resolve(new Map()),
     cached(`integrity:${range.from}:${range.to}`, () => getIntegrityDays(range.from, range.to)),
   ]);
-  // Archived agents leave every admin list — cards, table and flags
-  // (user-management rule 6). Their data stays: the report still opens by
-  // link, and the anonymous team benchmark above is unchanged.
-  const isArchived = (uid: string) => labels.get(uid)?.isArchived === true;
-  const uids = candidates.filter(uid => !isArchived(uid));
-  const names = new Map([...labels].map(([uid, l]) => [uid, l.displayName] as const));
-  const coverageByUid = new Map(
-    uids.map(uid => [uid, coverageOf(uid, timeLedger.get(uid) ?? [], active.get(uid))] as const),
-  );
-
-  const rowFor = (uid: string | null, metrics: ChatterMetrics, bxRows: BuddyxTeamRow[]): ChatterLeaderboardRow => {
-    const accounts = uid ? roster.get(uid)?.accounts.size ?? 0 : 0;
-    const chatter = bxRows[0];
-    return {
-      ...metrics,
-      uid,
-      chatterId: chatter?.chatterId ?? '',
-      name: uid
-        ? names.get(uid) ?? chatter?.chatterName ?? uid
-        : `${chatter?.chatterName ?? `Chatter ${chatter?.chatterId}`} (not linked)`,
-      clockedMs:
-        uid && hasActivityWindow
-          ? computeTimeWorked(activityStart, windowEnd, timeLedger.get(uid) ?? [], active.get(uid)) * 1000
-          : null,
-      accounts,
-      coverage: uid ? stripByDay(coverageByUid.get(uid) ?? null) : null,
-      days: uid
-        ? (coverageByUid.get(uid)?.byDay ?? []).map(d => ({ day: d.day, clockedMs: d.clockedMs, onlineWhileClockedMs: d.onlineWhileClockedMs }))
-        : [],
-      integrity: uid ? summariseIntegrity(integrityDays.get(uid)) : null,
-      revenuePerAccount: accounts > 0 ? round2((metrics.ppvGross + metrics.tipsGross) / accounts) : null,
-      mass: massSummary(team.mass.filter(m => (uid ? m.uid === uid : m.sentBy === chatter?.chatterId))),
-    };
-  };
-
-  result.leaderboard = [
-    ...teamMetrics.filter(t => !isArchived(t.uid)).map(t => rowFor(t.uid, t.metrics, grouped.get(t.uid) ?? [])),
-    // Rostered but with no sales and no BuddyX activity — the agent the
-    // `never-online` flag is about must still have a card on the roster.
-    ...[...roster.keys()]
-      .filter(uid => !uidsWithData.has(uid) && !isArchived(uid))
-      .map(uid => rowFor(uid, metricsFrom([], undefined, team.hasMedians), [])),
-    ...[...grouped.entries()]
-      .filter(([k]) => k.startsWith('chatter:'))
-      .map(([, rows]) => rowFor(null, metricsFrom(rows, undefined, team.hasMedians), rows)),
-  ].sort((a, b) => b.ppvGross + b.tipsGross - (a.ppvGross + a.tipsGross));
+  const offlineRoster = hasActivityWindow ? activityRoster ?? board.roster : new Map<string, { accounts: Set<string>; shifts: number }>();
 
   result.flags = sortFlags(
-    uids.flatMap(uid =>
-      flagsForAgent({
-        uid,
-        name: names.get(uid) ?? uid,
-        coverage: coverageByUid.get(uid) ?? null,
-        rosteredShifts: offlineRoster.get(uid)?.shifts ?? 0,
-        integrityDays: integrityDays.get(uid),
-      }),
+    board.rows.flatMap(row =>
+      row.uid
+        ? flagsForAgent({
+            uid: row.uid,
+            name: row.name,
+            onlineMs: metricsFor(row.uid).onlineMs,
+            rosteredShifts: offlineRoster.get(row.uid)?.shifts ?? 0,
+            integrityDays: integrityDays.get(row.uid),
+          })
+        : [],
     ),
   );
   return result;
 }
 
-/** Coverage as the wire carries it — the per-day breakdown is for flags, not the page. */
-function stripByDay<T extends { byDay: unknown }>(c: T | null): Omit<T, 'byDay'> | null {
-  if (!c) return null;
-  const rest: Partial<T> = { ...c };
-  delete rest.byDay;
-  return rest as Omit<T, 'byDay'>;
-}
-
 /**
- * One agent's report (admin only — the route enforces it): headline figures,
- * coverage, integrity, the flags they earn, every shift and every day. Reuses
- * the team cache, so opening a report from the page costs only this agent's
- * own reads (ledger, captures, shifts, integrity days).
+ * One agent's report (admin only — the route enforces it): sales first — by
+ * day, by account, by shift, and their place on the board — then the flags
+ * they earn and every shift. Reuses the team and board caches, so opening a
+ * report from the page costs only this agent's own reads (time ledger,
+ * captures, shifts, integrity days) and the hourly BuddyX docs.
  */
 export async function getChatterReport(params: {
   uid: string;
@@ -510,20 +610,33 @@ export async function getChatterReport(params: {
   const range = resolvePeriod(params.period, params.from, params.to, now);
   const team = await loadChatterTeam(params.period, range);
   const allDays = enumerateDays(range.from, range.to);
-  const [user, reads, integrityDays] = await Promise.all([
+  const activityDays =
+    range.to >= BUDDYX_TEAM_STATS_START_DAY
+      ? enumerateDays(range.from > BUDDYX_TEAM_STATS_START_DAY ? range.from : BUDDYX_TEAM_STATS_START_DAY, range.to)
+      : [];
+  const [user, reads, integrityDays, hoursDocs, board] = await Promise.all([
     getUserById(params.uid),
     reportReads(params.uid, allDays, now),
     getIntegrityDays(range.from, range.to, params.uid),
+    // Hourly messages for the shift table; cached so paging between agents is free.
+    cached(`hours:${activityDays[0] ?? ''}:${range.to}`, () => readTeamHours(activityDays)),
+    loadBoard(params.period, range, team, now),
   ]);
   const name = user?.displayName || params.uid;
-  const grouped = groupRows(team.rows);
   const ledger = team.ledger.get(params.uid);
-  const bxRows = grouped.get(params.uid) ?? [];
+  const bxRows = team.grouped.get(params.uid) ?? [];
   const metrics = ledger || bxRows.length ? metricsFrom(bxRows, ledger, team.hasMedians) : null;
+  const mySales = team.sales.filter(x => x.userId === params.uid);
 
-  const coverage = team.days.length
-    ? agentCoverage({ uid: params.uid, days: team.days, now, hoursDocs: team.hoursDocs, dayDocs: team.dayDocs, entries: reads.entries, active: reads.active })
-    : null;
+  const byAccount = new Map<string, ReportAccount>();
+  for (const sale of mySales) {
+    const key = sale.accountKey || 'unknown';
+    const a = byAccount.get(key) ?? { key, name: sale.accountName || 'Unknown account', gross: 0, sales: 0 };
+    a.gross += sale.gross;
+    a.sales += 1;
+    byAccount.set(key, a);
+  }
+
   const shifts = await reportShifts({
     uid: params.uid,
     start: reads.start,
@@ -531,11 +644,12 @@ export async function getChatterReport(params: {
     now,
     entries: reads.entries,
     active: reads.active,
-    hoursDocs: team.hoursDocs,
+    hoursDocs,
     captures: reads.captures,
+    sales: mySales.map(x => ({ at: x.at, gross: x.gross })),
   });
   const scheduledInActivity = shifts.filter(s => s.scheduled && toDayKey(s.startMs) >= BUDDYX_TEAM_STATS_START_DAY).length;
-  const coverageByDay = new Map((coverage?.byDay ?? []).map(d => [d.day, d]));
+  const position = board.rows.findIndex(r => r.uid === params.uid);
 
   return {
     uid: params.uid,
@@ -544,22 +658,23 @@ export async function getChatterReport(params: {
     from: range.from,
     to: range.to,
     metrics,
-    coverage: stripByDay(coverage),
+    clockedMs: computeTimeWorked(reads.start, reads.end, reads.entries, reads.active) * 1000,
+    rank: position >= 0 ? { position: position + 1, of: board.rows.length } : null,
     integrity: summariseIntegrity(integrityDays.get(params.uid)),
     flags: sortFlags(
       flagsForAgent({
         uid: params.uid,
         name,
-        coverage,
+        onlineMs: metrics?.onlineMs ?? null,
         rosteredShifts: scheduledInActivity,
         integrityDays: integrityDays.get(params.uid),
       }),
     ),
     shifts,
-    daily: allDays.map(day => {
-      const c = coverageByDay.get(day);
-      return { day, clockedMs: c?.clockedMs ?? 0, onlineWhileClockedMs: c?.onlineWhileClockedMs ?? 0 };
-    }),
+    daily: dailyOf(mySales, allDays),
+    accounts: [...byAccount.values()]
+      .map(a => ({ ...a, gross: round2(a.gross) }))
+      .sort((a, b) => b.gross - a.gross),
     inputMonitoring: user?.inputMonitoring === true,
   };
 }
@@ -885,20 +1000,15 @@ function foldUnmappedDays(rows: CreatorStatsDayDocument[], modelCreator: Map<str
   return out;
 }
 
-export async function getCreatorAnalytics(params: { from: string; to: string; creatorId: string | null; now?: number }): Promise<CreatorAnalytics> {
-  const now = params.now ?? Date.now();
+export async function getCreatorAnalytics(params: { from: string; to: string; creatorId: string | null }): Promise<CreatorAnalytics> {
   const { from, to, creatorId } = params;
   const span = enumerateDays(from, to).length;
   const prevFrom = addDays(from, -span);
   const prevTo = addDays(from, -1);
-  const month = currentMonthKey(now);
-  const monthFrom = `${month}-01`;
-  const today = currentDayKey(now);
 
-  const [rawRangeDays, rawPrevDays, rawMtdDays, linkSnap, massSnap, subsSnap, models, accounts] = await Promise.all([
+  const [rawRangeDays, rawPrevDays, linkSnap, massSnap, subsSnap, models, accounts] = await Promise.all([
     readCreatorDays(from, to),
     readCreatorDays(prevFrom, prevTo),
-    readCreatorDays(monthFrom, today),
     cached('links:all', () => adminDb.collection('buddyx-links').get().then(s => s.docs.map(d => d.data() as BuddyxLinkDocument))),
     cached(`mass:${from}:${to}`, () =>
       adminDb.collection('buddyx-mass-messages').where('day', '>=', from).where('day', '<=', to).get()
@@ -922,7 +1032,6 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
   const mappedIds = new Set(modelCreator.values());
   const rangeDays = foldUnmappedDays(rawRangeDays, modelCreator);
   const prevDays = foldUnmappedDays(rawPrevDays, modelCreator);
-  const mtdDays = foldUnmappedDays(rawMtdDays, modelCreator);
 
   /** The account a BuddyX-side row belongs to — an unmapped model keeps its own key. */
   const keyOf = (r: { creatorId: string | null; modelId?: string | null }): string | null =>
@@ -1043,12 +1152,28 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
     })
     .sort((a, b) => b.revenue - a.revenue);
 
-  const best = linkSnap
-    .filter(l => l.fansCount >= 5)
-    .map(l => ({ name: l.name, creatorId: keyOf(l), revenuePerFan: round2(l.revenue / l.fansCount) }))
-    .sort((a, b) => b.revenuePerFan - a.revenuePerFan)[0] ?? null;
+  // The link that brought in the most revenue *inside the period*. A link's
+  // series is cumulative, so the period's figure is the last value at or before
+  // `to` minus the last value before `from`; a link first synced inside the
+  // period has no baseline and counts from its first entry, as its sparkline does.
+  const topLink = linkSnap
+    .map(l => {
+      const series = Object.entries(l.series ?? {}).sort(([a], [b]) => a.localeCompare(b));
+      const inRange = series.filter(([day]) => day >= from && day <= to);
+      if (inRange.length === 0) return null;
+      const base = series.filter(([day]) => day < from).at(-1)?.[1] ?? inRange[0][1];
+      const end = inRange[inRange.length - 1][1];
+      return {
+        name: l.name,
+        creatorId: keyOf(l),
+        revenue: round2(Math.max(0, end.revenue - base.revenue)),
+        subs: Math.max(0, end.subs - base.subs),
+      };
+    })
+    .filter((l): l is NonNullable<typeof l> => l !== null && l.revenue > 0)
+    .sort((a, b) => b.revenue - a.revenue)[0] ?? null;
   for (const l of links.slice(0, 60)) identify(l.creatorId);
-  identify(best?.creatorId ?? null);
+  identify(topLink?.creatorId ?? null);
   identify(creatorId);
 
   // ── Mass messages ──
@@ -1061,7 +1186,11 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
   const revShareRows = selected.filter(d => typeof d.revShareGross === 'number');
 
   const total = roster.reduce((s, r) => s + r.totalGross, 0);
-  const recent = toDayKey(now - 7 * 86_400_000);
+  const earning = roster.filter(r => r.totalGross > 0);
+  const newSubs = rangeDays.reduce((s, d) => s + (d.newSubs ?? 0), 0);
+  // No rows at all in the previous window means it predates the history, not
+  // that it earned nothing — say "—", not "+100%".
+  const hasPrevious = prevDays.length > 0;
 
   return {
     from,
@@ -1069,10 +1198,20 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
     creatorId,
     cutoverDay: BUDDYX_CREATOR_STATS_START_DAY,
     kpis: {
-      earningsMtd: round2(mtdDays.reduce((s, d) => s + (d.totalGross ?? 0), 0)),
-      newSubsMtd: mtdDays.reduce((s, d) => s + (d.newSubs ?? 0), 0),
-      bestLink: best,
-      activeCreators: new Set(mtdDays.filter(d => d.source === 'buddyx' && d.day >= recent).map(d => d.creatorId)).size,
+      earnings: round2(total),
+      previousEarnings: hasPrevious ? round2(prevDays.reduce((s, d) => s + (d.totalGross ?? 0), 0)) : null,
+      newSubs,
+      previousNewSubs: hasPrevious ? prevDays.reduce((s, d) => s + (d.newSubs ?? 0), 0) : null,
+      topLink,
+      earningCreators: earning.length,
+      topCreator: earning[0] ? { creatorId: earning[0].creatorId, gross: earning[0].totalGross, share: total > 0 ? Math.round((earning[0].totalGross / total) * 1000) / 1000 : 0 } : null,
+      // Legacy keys for renderers loaded before the tiles followed the period
+      // (rule 9c). They now carry the period's figures; drop them once stale
+      // clients have cycled.
+      earningsMtd: round2(total),
+      newSubsMtd: newSubs,
+      bestLink: null,
+      activeCreators: earning.length,
     },
     roster,
     daily,

@@ -5,37 +5,33 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
 import { ArrowLeft, ChevronRight } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { cn } from '@/lib/utils';
 import { SURFACE } from '@/lib/surfaces';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
 import { PeriodPicker, dayKeyToDate } from '@/components/buddyx/PeriodPicker';
 import { SyncStatus } from '@/components/buddyx/SyncStatus';
-import { KpiTile, LegendSwatch, LoadError } from '@/components/buddyx/buddyxUi';
+import { BasisTag, KpiTile, LegendSwatch, LoadError } from '@/components/buddyx/buddyxUi';
 import { FlagList, integrityBasis } from '@/components/buddyx/integrityUi';
 import { ShiftTimeline } from '@/components/buddyx/ShiftTimeline';
+import { DailySalesChart } from '@/components/buddyx/SalesBoard';
 import { chatterPeriodOptions, chatterAnalyticsUrl, chatterReportHref } from '@/components/buddyx/chatterPeriods';
 import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { formatUsd } from '@/lib/salary/salaryFormat';
-import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
-import { formatCount, formatDuration, formatShare } from '@/lib/buddyx/analyticsFormat';
-import { SEQUENTIAL_COLOR } from '@/lib/buddyx/chartColors';
-import { STATUS_HEX } from '@/lib/campaignTracking';
-import { COVERAGE_FLAG_RATIO, HOUR_MS } from '@/lib/buddyx/coverage';
-import { CHATTER_PERIODS, type ChatterPeriod, type ChatterReport, type ReportShift } from '@/lib/buddyx/analyticsTypes';
+import { formatCount, formatDuration } from '@/lib/buddyx/analyticsFormat';
+import { SALE_KIND_COLORS, SEQUENTIAL_COLOR } from '@/lib/buddyx/chartColors';
+import { CHATTER_PERIODS, type ChatterPeriod, type ChatterReport, type ReportAccount, type ReportShift } from '@/lib/buddyx/analyticsTypes';
 
 /**
  * One chat agent's report — `/ca-portal/chatter-analytics/[uid]`, `ca-admin`
  * only (the API refuses anyone else; the page inherits Chatter Analytics'
  * permission by path).
  *
- * Reads top to bottom as the question an admin brings to it: how much of the
- * clocked time was real (coverage), what was flagged and when, how that moved
- * day to day, and then every shift — each opening to its minute-level
- * timeline, which is the evidence behind every number above it. Display only:
- * nothing here changes worked time or pay.
+ * Reads top to bottom as the question an admin brings to it: what did this
+ * agent sell and where do they stand, which accounts and which days it came
+ * from, what was flagged, and then every shift with the sales made in it —
+ * each opening to its minute-level timeline. Display only: nothing here
+ * changes worked time or pay.
  */
 
 /**
@@ -87,7 +83,7 @@ export function ReportView({ uid }: { uid: string }) {
           </Link>
           <h1 className="mt-1 text-2xl font-bold tracking-tight">{data?.name ?? (loading ? ' ' : 'Agent report')}</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            BuddyX activity against Bluu time tracking, shift by shift. Display only — nothing here changes pay.
+            Sales by day, by account and by shift, then the shift-by-shift evidence. Display only — nothing here changes pay.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -133,39 +129,28 @@ export function ReportSkeleton() {
   );
 }
 
-const dayConfig = {
-  clockedHours: { label: 'Clocked working', color: STATUS_HEX.zinc },
-  onlineHours: { label: 'Online while clocked', color: SEQUENTIAL_COLOR },
-} satisfies ChartConfig;
-
 function ReportBody({ report }: { report: ChatterReport }) {
-  const { coverage, integrity, metrics } = report;
+  const { integrity, metrics } = report;
   const flaggedMinutes = integrity ? integrity.regularMinutes + integrity.modifierOnlyMinutes + integrity.staticMinutes : null;
-  const days = report.daily.map(d => ({
-    day: d.day,
-    clockedHours: Math.round((d.clockedMs / HOUR_MS) * 10) / 10,
-    onlineHours: Math.round((d.onlineWhileClockedMs / HOUR_MS) * 10) / 10,
-  }));
-  const anyDay = days.some(d => d.clockedHours > 0 || d.onlineHours > 0);
+  const gross = (metrics?.ppvGross ?? 0) + (metrics?.tipsGross ?? 0);
+  const hours = report.clockedMs / 3_600_000;
+  const anySales = report.daily.some(d => d.ppvGross !== 0 || d.tipsGross !== 0);
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <KpiTile
-          label="Coverage"
-          value={formatShare(coverage?.ratio)}
-          meta={coverage ? `${formatDuration(coverage.onlineWhileClockedMs)} online of ${formatDuration(coverage.clockedMs)} clocked` : 'No clocked time'}
-        />
-        <KpiTile
-          label="Clocked working"
-          value={formatDuration(coverage?.clockedMs ?? null)}
-          meta={coverage ? `${formatDuration(coverage.onlineMs)} online in BuddyX in total` : undefined}
-        />
-        <KpiTile
-          label="Revenue"
+          label="Sales"
           basis="gross"
-          value={formatUsd((metrics?.ppvGross ?? 0) + (metrics?.tipsGross ?? 0))}
-          meta={metrics ? `${formatUsd(metrics.ppvGross)} PPV · ${formatUsd(metrics.tipsGross)} tips` : undefined}
+          value={formatUsd(gross)}
+          meta={metrics ? `${formatUsd(metrics.ppvGross)} PPV · ${formatUsd(metrics.tipsGross)} tips` : 'No sales'}
+        />
+        <KpiTile label="Place on the board" value={report.rank ? `#${report.rank.position}` : '—'} meta={report.rank ? `of ${report.rank.of} agents` : undefined} />
+        <KpiTile
+          label="Per clocked hour"
+          basis="gross"
+          value={hours >= 1 ? formatUsd(gross / hours) : '—'}
+          meta={`${formatDuration(report.clockedMs)} clocked`}
         />
         <KpiTile label="Messages" value={formatCount(metrics?.totalMessages ?? null)} meta={metrics?.fansChatted != null ? `${formatCount(metrics.fansChatted)} fans chatted` : undefined} />
         <KpiTile
@@ -175,6 +160,22 @@ function ReportBody({ report }: { report: ChatterReport }) {
         />
       </div>
 
+      {anySales && (
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
+          <section className={cn('min-w-0 rounded-xl p-5', SURFACE)} aria-labelledby="by-day">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h2 id="by-day" className="text-sm font-semibold">Sales by day</h2>
+              <div className="flex items-center gap-3 text-xs text-zinc-300">
+                <span className="inline-flex items-center gap-1.5"><LegendSwatch color={SALE_KIND_COLORS.ppv} /> PPV</span>
+                <span className="inline-flex items-center gap-1.5"><LegendSwatch color={SALE_KIND_COLORS.tip} /> Tips</span>
+              </div>
+            </div>
+            <DailySalesChart daily={report.daily} className="mt-3" />
+          </section>
+          <AccountList accounts={report.accounts} />
+        </div>
+      )}
+
       <MonitoringLine report={report} />
 
       <section aria-labelledby="report-flags" className="space-y-2">
@@ -182,30 +183,41 @@ function ReportBody({ report }: { report: ChatterReport }) {
         <FlagList flags={report.flags} withNames={false} cleanLine="Nothing flagged this period." />
       </section>
 
-      {anyDay && (
-        <section className={cn('rounded-xl p-5', SURFACE)} aria-labelledby="by-day">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 id="by-day" className="text-sm font-semibold">Clocked vs online, by day</h2>
-            <div className="flex items-center gap-3 text-xs text-zinc-300">
-              <span className="inline-flex items-center gap-1.5"><LegendSwatch color={dayConfig.clockedHours.color} /> Clocked working</span>
-              <span className="inline-flex items-center gap-1.5"><LegendSwatch color={SEQUENTIAL_COLOR} /> Online while clocked</span>
-            </div>
-          </div>
-          <ChartContainer config={dayConfig} className="mt-3 h-[200px] w-full">
-            <BarChart data={days} margin={{ left: 4, right: 8, top: 8 }} barGap={2}>
-              <CartesianGrid vertical={false} strokeOpacity={0.15} />
-              <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} minTickGap={12} tickFormatter={d => formatDayLabelWithWeekday(String(d)).split(' ').slice(0, 2).join(' ')} />
-              <YAxis tickLine={false} axisLine={false} width={36} tickFormatter={v => `${v}h`} />
-              <ChartTooltip content={<ChartTooltipContent labelFormatter={l => formatDayLabelWithWeekday(String(l))} formatter={(v, n) => [` ${v}h`, n === 'clockedHours' ? 'Clocked working' : 'Online while clocked']} />} />
-              <Bar dataKey="clockedHours" fill="var(--color-clockedHours)" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="onlineHours" fill="var(--color-onlineHours)" radius={[3, 3, 0, 0]} />
-            </BarChart>
-          </ChartContainer>
-        </section>
-      )}
-
       <ShiftTable report={report} />
     </div>
+  );
+}
+
+/** Where the agent's money came from: one bar per account on a shared scale, largest first. */
+function AccountList({ accounts }: { accounts: ReportAccount[] }) {
+  const scale = Math.max(0, ...accounts.map(a => a.gross));
+  return (
+    <section className={cn('min-w-0 rounded-xl p-5', SURFACE)} aria-labelledby="by-account">
+      <h2 id="by-account" className="flex items-center gap-1.5 text-sm font-semibold">
+        By account <BasisTag basis="gross" />
+      </h2>
+      <ul className="mt-3 space-y-3">
+        {accounts.map(a => (
+          <li key={a.key}>
+            <div className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="truncate">{a.name}</span>
+              <span className="shrink-0 font-semibold tabular-nums">{formatUsd(a.gross)}</span>
+            </div>
+            <div className="mt-1 flex items-center gap-3">
+              <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.06]" aria-hidden>
+                <span
+                  className="block h-full rounded-full"
+                  style={{ width: scale > 0 ? `${(Math.max(a.gross, 0) / scale) * 100}%` : '0%', background: SEQUENTIAL_COLOR }}
+                />
+              </span>
+              <span className="w-16 shrink-0 text-right text-[11px] tabular-nums text-zinc-400">
+                {formatCount(a.sales)} {a.sales === 1 ? 'sale' : 'sales'}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -239,16 +251,15 @@ function ShiftTable({ report }: { report: ChatterReport }) {
     <section className={cn('rounded-xl p-5', SURFACE)} aria-labelledby="shifts">
       <h2 id="shifts" className="text-sm font-semibold">Shifts</h2>
       <p className="mt-0.5 text-[11px] text-zinc-400">
-        Newest first, with any session worked off-roster. Open a shift for its minute-by-minute timeline. Messages count whole hours, so a shift starting mid-hour reads slightly high.
+        Newest first, with any session worked off-roster. Sales are those made inside the shift&apos;s window. Open a shift for its minute-by-minute timeline. Messages count whole hours, so a shift starting mid-hour reads slightly high.
       </p>
       <div tabIndex={0} role="region" aria-label="Shifts, scrollable" className="mt-3 overflow-x-auto rounded-lg border border-white/[0.07] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50">
-        <table className="w-full min-w-[860px] border-collapse text-sm">
+        <table className="w-full min-w-[720px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-white/[0.07] text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
               <th scope="col" className="px-3 py-2.5 text-left">Shift</th>
               <th scope="col" className="px-3 py-2.5 text-right">Clocked</th>
-              <th scope="col" className="px-3 py-2.5 text-right">Online while clocked</th>
-              <th scope="col" className="px-3 py-2.5 text-right">Coverage</th>
+              <th scope="col" className="px-3 py-2.5 text-right">Sales (gross)</th>
               <th scope="col" className="px-3 py-2.5 text-right">Messages</th>
               <th scope="col" className="px-3 py-2.5 text-right">Flagged</th>
             </tr>
@@ -279,16 +290,24 @@ function ShiftTable({ report }: { report: ChatterReport }) {
                     </button>
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{formatDuration(s.clockedMs)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{s.onlineWhileClockedMs === null ? <Pending /> : formatDuration(s.onlineWhileClockedMs)}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
-                    {s.ratio === null ? <span className="text-zinc-400">—</span> : <span className={s.ratio < COVERAGE_FLAG_RATIO ? 'text-orange-400' : undefined}>{formatShare(s.ratio)}</span>}
+                    {s.salesCount === 0 ? (
+                      <span className="text-zinc-400">None</span>
+                    ) : (
+                      <>
+                        {formatUsd(s.gross)}
+                        <span className="block text-[11px] text-zinc-400">
+                          {s.salesCount} {s.salesCount === 1 ? 'sale' : 'sales'}
+                        </span>
+                      </>
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{s.messages === null ? <Pending /> : formatCount(s.messages)}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{flaggedCell(s)}</td>
                 </tr>
                 {open === i && (
                   <tr>
-                    <td colSpan={6} className="px-3 pt-2 pb-4">
+                    <td colSpan={5} className="px-3 pt-2 pb-4">
                       <ShiftTimeline uid={report.uid} startMs={s.startMs} endMs={s.endMs} scheduled={s.scheduled} />
                     </td>
                   </tr>

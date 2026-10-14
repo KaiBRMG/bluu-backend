@@ -2,11 +2,8 @@
  * The wire shapes of the three BuddyX analytics routes. Plain data, imported by
  * both the server read models (`buddyxAnalyticsService.ts`) and the pages.
  */
-import type { CoverageFigures } from './coverage';
 import type { InputPermission, InputSource } from '../inputQuality';
 import type { FanNameSource } from '../fans/fanIdentity';
-
-export type { CoverageFigures };
 
 // ─── Chatter Analytics ───────────────────────────────────────────────
 
@@ -48,30 +45,6 @@ export interface ChatterMetrics {
   revenuePerOnlineHour: number | null;
 }
 
-export type BenchmarkKey =
-  | 'ppvGross'
-  | 'tipsGross'
-  | 'unlockRate'
-  | 'fansChatted'
-  | 'totalMessages'
-  | 'onlineMs'
-  | 'medianResponseTimeMs'
-  | 'revenuePerOnlineHour';
-
-/** Where one agent sits against the team on one metric — no colleague named. */
-export interface Benchmark {
-  key: BenchmarkKey;
-  value: number | null;
-  median: number | null;
-  /** The top-quartile mark: p75 when higher is better, p25 when lower is (reply time). */
-  topQuartile: number | null;
-  lowerIsBetter: boolean;
-  /** How many of the *other* agents this agent beats. */
-  beats: number;
-  /** Other agents compared against. */
-  of: number;
-}
-
 export interface MassMessageSummary {
   count: number;
   avgPrice: number | null;
@@ -86,8 +59,7 @@ export interface ChatterDailyPoint {
 
 // ─── Integrity (admin only) ──────────────────────────────────────────
 //
-// Coverage (BuddyX online while clocked in) plus the input-quality and
-// unchanged-screen signals. **Display only** — nothing here changes worked
+// "Never online" plus the input-quality and unchanged-screen signals. **Display only** — nothing here changes worked
 // time or pay — and never sent to an agent (documentation/time-tracking.md §4b).
 
 /** One agent's input-quality and screen counters over a period, summed from `integrity-days`. */
@@ -107,7 +79,6 @@ export interface IntegritySummary {
 
 export type IntegrityFlagKind =
   | 'never-online'
-  | 'low-coverage'
   | 'regular-input'
   | 'modifier-only'
   | 'static-screen'
@@ -121,32 +92,51 @@ export interface IntegrityFlag {
   severity: 'high' | 'medium';
   /** Flagged minutes (input / static kinds). */
   minutes: number | null;
-  /** Coverage ratio (low-coverage). */
-  ratio: number | null;
-  /** Shifts involved (never-online, low-coverage). */
+  /** Shifts involved (never-online). */
   shifts: number | null;
   /** Salary days the signal appeared on, ascending. */
   days: string[];
 }
 
-export interface ChatterLeaderboardRow extends ChatterMetrics {
+/**
+ * One agent on the sales board — the page's primary figure is `ppvGross +
+ * tipsGross`, and the board is ranked by it. **Sales only, on purpose**: this
+ * row goes to every agent (the board is named), so it must never carry
+ * activity, integrity or anything else an agent may not see of a colleague.
+ */
+export interface SalesBoardRow {
+  /** Null for a BuddyX chatter linked to nobody — admin only. */
   uid: string | null;
-  chatterId: string;
   name: string;
-  /** Bluu clocked-in time over the period, from the time ledger. */
+  photoURL: string | null;
+  ppvGross: number;
+  tipsGross: number;
+  ppvSales: number;
+  tipsCount: number;
+  /**
+   * Bluu clocked time over the period. Null when not computed — a range past
+   * `BOARD_RATE_MAX_DAYS`, or an unlinked chatter.
+   */
   clockedMs: number | null;
-  /** BuddyX online vs clocked working time. Null for an unlinked chatter or a period before BuddyX. */
-  coverage: CoverageFigures | null;
-  /** The same, day by day — each agent's small chart. Empty for an unlinked chatter. */
-  days: ReportDay[];
-  /** Null when the agent had no monitored capture in the period. */
-  integrity: IntegritySummary | null;
+  /** Gross ÷ clocked hours; null under an hour clocked or when `clockedMs` is. */
+  grossPerHour: number | null;
   /** Distinct accounts rostered across the agent's shifts in the period. */
   accounts: number;
-  /** (PPV + tips) ÷ accounts. */
-  revenuePerAccount: number | null;
-  mass: MassMessageSummary;
+  /** The same agent's gross over the comparison period; null when there is none. */
+  prevGross: number | null;
 }
+
+/** The whole team's money for a period, against the period before it. */
+export interface TeamSales {
+  ppvGross: number;
+  tipsGross: number;
+  /** Null for a range past `BOARD_RATE_MAX_DAYS` — no comparison is read. */
+  prev: { from: string; to: string; gross: number } | null;
+  daily: ChatterDailyPoint[];
+}
+
+/** Past this many days the board skips per-hour rates and the comparison (both cost a read that grows with the range). */
+export const BOARD_RATE_MAX_DAYS = 93;
 
 export interface ChatterAnalytics {
   period: ChatterPeriod;
@@ -156,20 +146,16 @@ export interface ChatterAnalytics {
   activityFrom: string;
   /** False for a custom range nobody has pulled — the medians are absent. */
   hasMedians: boolean;
-  /** The viewer's own figures (null when they have no BuddyX chatter mapped). */
+  isAdmin: boolean;
+  /** The viewer's own figures (null when they have no sales or BuddyX activity). */
   me: ChatterMetrics | null;
   daily: ChatterDailyPoint[];
   mass: MassMessageSummary;
-  /** Null when fewer than 3 agents were active — comparing would identify a colleague. */
-  benchmarks: Benchmark[] | null;
-  /** `ca-admin` only. */
-  leaderboard: ChatterLeaderboardRow[] | null;
-  /** The viewer's own coverage. Agents see this; they never see flags. */
-  coverage: CoverageFigures | null;
+  /** Everyone, named, ranked by gross. Archived agents are left out. */
+  board: SalesBoardRow[];
+  team: TeamSales;
   /** `ca-admin` only: the ranked flag list. */
   flags: IntegrityFlag[] | null;
-  /** First day in the period with hourly BuddyX data; days before it are judged on day totals. */
-  hourlyFrom: string | null;
 }
 
 // ─── Per-chatter report (admin only) ─────────────────────────────────
@@ -182,8 +168,9 @@ export interface ReportShift {
   isOvertime: boolean;
   accounts: number;
   clockedMs: number;
-  onlineWhileClockedMs: number | null;
-  ratio: number | null;
+  /** Gross of the agent's sales made inside the shift's window. */
+  gross: number;
+  salesCount: number;
   /** BuddyX messages in the hours the shift touches (whole hours, so approximate). */
   messages: number | null;
   regularMinutes: number;
@@ -193,10 +180,13 @@ export interface ReportShift {
   monitored: boolean;
 }
 
-export interface ReportDay {
-  day: string;
-  clockedMs: number;
-  onlineWhileClockedMs: number;
+/** One account's share of an agent's sales. */
+export interface ReportAccount {
+  /** Creator id when the sale carried one, else the creator name it was imported with. */
+  key: string;
+  name: string;
+  gross: number;
+  sales: number;
 }
 
 export interface ChatterReport {
@@ -207,11 +197,17 @@ export interface ChatterReport {
   from: string;
   to: string;
   metrics: ChatterMetrics | null;
-  coverage: CoverageFigures | null;
+  /** Bluu clocked time over the period. */
+  clockedMs: number;
+  /** Where the agent's own place on the board is (1-based), and of how many. */
+  rank: { position: number; of: number } | null;
   integrity: IntegritySummary | null;
   flags: IntegrityFlag[];
   shifts: ReportShift[];
-  daily: ReportDay[];
+  /** Every day in the period, sales by kind. */
+  daily: ChatterDailyPoint[];
+  /** Gross by account, largest first. */
+  accounts: ReportAccount[];
   /** Input monitoring is on for this agent right now. */
   inputMonitoring: boolean;
 }
@@ -500,10 +496,21 @@ export interface CreatorAnalytics {
   creatorId: string | null;
   /** The first day BuddyX owns — the chart's "Infloww → BuddyX" hairline. */
   cutoverDay: string;
+  /** Every creator, over the selected period — never scoped by `creatorId`. */
   kpis: {
+    earnings: number;
+    /** The same-length window before `from`; null when it predates the history. */
+    previousEarnings: number | null;
+    newSubs: number;
+    previousNewSubs: number | null;
+    /** The link with the most revenue added inside the period (as BuddyX reports it). */
+    topLink: { name: string | null; creatorId: string | null; revenue: number; subs: number } | null;
+    earningCreators: number;
+    topCreator: { creatorId: string; gross: number; share: number } | null;
+    /** @deprecated Legacy keys for stale renderers (rule 9c) — period figures now. */
     earningsMtd: number;
     newSubsMtd: number;
-    bestLink: { name: string | null; creatorId: string | null; revenuePerFan: number } | null;
+    bestLink: null;
     activeCreators: number;
   };
   roster: CreatorRosterCard[];

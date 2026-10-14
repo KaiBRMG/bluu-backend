@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useTimeTracking } from "@/hooks/useTimeTracking";
 import { useUserData } from "@/hooks/useUserData";
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { STATE_CONFIG } from "@/lib/stateColors";
+import { todayStr } from "@/lib/utils/timezone";
 
 /* ── Loading skeletons ───────────────────────────────────────────────
    Shaped to each tab's final layout (DESIGN.md § Loading & Empty States).
@@ -113,7 +114,87 @@ function formatTime(totalSeconds: number): string {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
+/* ── Stale-page refresh ──────────────────────────────────────────────
+   Every "today" on this page — the day total, Today's Timesheet, the
+   Previous Timesheets range, the Screenshots date — is resolved once, on
+   mount. The renderer is never reloaded (rule 9c), so a page left open
+   overnight kept showing yesterday's timesheet, and a user could clock in
+   against it. When the local day rolls over, or the page comes back into view
+   after a long absence, the body is remounted so every one of those re-derives.
+
+   Only while clocked out: a live session is attributed to the day it started
+   (time-tracking.md §5), so remounting mid-shift would buy nothing but a
+   skeleton flash. The day check is a pure clock read — no network — and a
+   remount after STALE_AFTER_MS lands past the timesheet cache's 5-min TTL, so
+   it refetches exactly once (rule 9). */
+
+const STALE_AFTER_MS = 30 * 60 * 1000;
+const DAY_CHECK_INTERVAL_MS = 60 * 1000;
+
+function useStaleRefreshKey(timezone: string, canRefresh: boolean): number {
+  const [refreshKey, setRefreshKey] = useState(0);
+  const loadedAtRef = useRef(0);
+  const loadedDayRef = useRef("");
+  const canRefreshRef = useRef(canRefresh);
+  useEffect(() => {
+    canRefreshRef.current = canRefresh;
+  }, [canRefresh]);
+
+  useEffect(() => {
+    // Anchored here, not in render (purity). A late-arriving or changed
+    // timezone is not staleness — it only re-anchors the day.
+    if (loadedAtRef.current === 0) loadedAtRef.current = Date.now();
+    loadedDayRef.current = todayStr(timezone);
+
+    const refresh = () => {
+      loadedAtRef.current = Date.now();
+      loadedDayRef.current = todayStr(timezone);
+      setRefreshKey(k => k + 1);
+    };
+
+    const dayChanged = () => todayStr(timezone) !== loadedDayRef.current;
+
+    // Day rollover — caught within a minute even if the window never loses focus.
+    const id = setInterval(() => {
+      if (canRefreshRef.current && dayChanged()) refresh();
+    }, DAY_CHECK_INTERVAL_MS);
+
+    // Returning to the page after a long absence — other devices may have
+    // committed sessions in the meantime.
+    const onReturn = () => {
+      if (document.visibilityState !== "visible" || !canRefreshRef.current) return;
+      if (dayChanged() || Date.now() - loadedAtRef.current > STALE_AFTER_MS) refresh();
+    };
+
+    document.addEventListener("visibilitychange", onReturn);
+    window.addEventListener("focus", onReturn);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onReturn);
+      window.removeEventListener("focus", onReturn);
+    };
+  }, [timezone]);
+
+  return refreshKey;
+}
+
 export default function TimeTrackingPage() {
+  const { displayState, isLoading, isHydrating } = useTimeTracking();
+  const { userData } = useUserData();
+  const timezone = userData?.timezone || 'UTC';
+  const refreshKey = useStaleRefreshKey(
+    timezone,
+    displayState === 'clocked-out' && !isLoading && !isHydrating,
+  );
+
+  return (
+    <AppLayout>
+      <TimeTrackingContent key={refreshKey} />
+    </AppLayout>
+  );
+}
+
+function TimeTrackingContent() {
   const {
     displayState,
     elapsedSeconds,
@@ -160,8 +241,7 @@ export default function TimeTrackingPage() {
   }, [displayState, isLoading, isHydrating]);
 
   return (
-    <AppLayout>
-      <div className="w-full max-w-5xl">
+    <div className="w-full max-w-5xl">
         <h1 className="text-2xl font-bold tracking-tight mb-2">
           Time Tracking
         </h1>
@@ -361,7 +441,6 @@ export default function TimeTrackingPage() {
           <TabsContent value="previous" className="mt-4"><UserTimesheet /></TabsContent>
           <TabsContent value="screenshots" className="mt-4"><UserScreenshots /></TabsContent>
         </Tabs>
-      </div>
-    </AppLayout>
+    </div>
   );
 }
