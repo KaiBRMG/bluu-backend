@@ -111,4 +111,11 @@ describe('customMoney', () => {
     expect(customMoney({ ...bfe, isArchived: true, amountPaid: 200, originalAmountPaid: 50 })).toMatchObject({ abandoned: true, abandonedAmount: 150 });
     expect(customMoney({ ...bfe, isArchived: true, amountPaid: 200 })).toMatchObject({ abandoned: false, outstanding: 0 });
   });
+  it('collects what was actually paid, not what archiving wrote', () => {
+    expect(customMoney(cr)).toMatchObject({ collected: 40 });
+    expect(customMoney({ ...cr, status: 'Archived', totalAmount: 40, originalTotalAmount: 100 })).toMatchObject({ collected: 40 });
+    const bfe = { type: 'BFE', status: 'In Progress', totalAmount: 200, amountPaid: 50 };
+    expect(customMoney({ ...bfe, isArchived: true, amountPaid: 200, originalAmountPaid: 50 })).toMatchObject({ collected: 50 });
+    expect(customMoney({ ...bfe, isArchived: true, amountPaid: 200 })).toMatchObject({ collected: 200 });
+  });
 });

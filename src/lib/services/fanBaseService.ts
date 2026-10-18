@@ -400,6 +400,7 @@ export async function getFanReport(params: {
         createdTime: (c.createdTime as Timestamp | undefined)?.toDate?.()?.toISOString() ?? null,
         totalAmount: Number(c.totalAmount ?? 0),
         amountPaid: Number(c.amountPaid ?? 0),
+        collected: money.collected,
         outstanding: money.outstanding,
         abandoned: money.abandoned,
         abandonedAmount: money.abandonedAmount,
@@ -457,6 +458,7 @@ export async function getFanReport(params: {
       .sort((a, b) => (b.at ?? '').localeCompare(a.at ?? '')),
     customs: {
       total: items.length,
+      collected: round2(items.reduce((s, i) => s + i.collected, 0)),
       byType: [...byType].map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count),
       outstanding: { count: outstandingItems.length, amount: round2(outstandingItems.reduce((s, i) => s + i.outstanding, 0)) },
       abandoned: {

@@ -376,6 +376,8 @@ export interface FanCustomItem {
   createdTime: string | null;
   totalAmount: number;
   amountPaid: number;
+  /** What the fan actually paid — `amountPaid` is rewritten when a campaign is archived. */
+  collected: number;
   outstanding: number;
   abandoned: boolean;
   abandonedAmount: number | null;
@@ -415,6 +417,8 @@ export interface FanReport {
   subscriptions: Array<{ id: string; creatorId: string | null; at: string | null; subType: string | null; isTrial: boolean; priceGross: number }>;
   customs: {
     total: number;
+    /** Money actually received across every order, any status. */
+    collected: number;
     byType: Array<{ type: string; count: number }>;
     outstanding: { count: number; amount: number };
     abandoned: { count: number; amount: number; unknownAmount: number };

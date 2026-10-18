@@ -30,10 +30,11 @@ export const SESSION_STATES: Record<string, { label: string; dot: string; text: 
  * retyped in the list, the members panel and the close guard, and a fifth
  * spelling would have been invisible until two surfaces disagreed on screen.
  */
-export const TONE_CHIP: Record<'green' | 'blue' | 'zinc' | 'red', string> = {
+export const TONE_CHIP: Record<'green' | 'blue' | 'zinc' | 'orange' | 'red', string> = {
   green: 'bg-green-500/10 text-green-400',
   blue: 'bg-blue-500/10 text-blue-400',
   zinc: 'bg-white/[0.08] text-zinc-300',
+  orange: 'bg-orange-500/10 text-orange-400',
   red: 'bg-red-500/10 text-red-400',
 };
 

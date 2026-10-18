@@ -30,6 +30,7 @@ import { lockIsStale } from '../disputes/disputeRules';
 import { addMonths, currentMonthKey, monthKeyRange, toDayKey, type SalaryDayKey, type SalaryMonthKey } from '../salary/salaryDate';
 import { isSalaryMonthVisible, PAID_LEAVE_ACCOUNT_LOOKBACK_DAYS } from '../salary/salaryConstants';
 import { leaveAt, paidAccountsByDay, paidLeaveShifts, type LeaveWindow } from '../salary/leavePay';
+import { matchSalesToSchedule, type ScheduleMatch } from '../salary/scheduleMatch';
 import { normaliseSaleType, saleKindOf, saleSourceOf } from '../salary/saleTypes';
 import type {
   DashboardSalaryMonth,
@@ -54,7 +55,6 @@ import type {
 } from '@/types/firestore';
 
 const SALES = 'ca-sales';
-const IMPORTS = 'ca-sales-imports';
 const OVERRIDES = 'ca-salary-overrides';
 const MONTHS = 'ca-salary-months';
 const CONFIG = 'ca-salary-config';
@@ -232,7 +232,7 @@ export async function getSalesForMonth(userId: string, month: SalaryMonthKey): P
  * expensive thing in the subsystem.
  *
  * Rows held by nobody (an unassigned tip, an unmapped chatter) and removed rows
- * are left out: neither counts toward anyone's pay. `getAllSalesForMonth` is
+ * are left out: neither counts toward anyone's pay. `getAllSalesInRange` is
  * the admin ledger's read, which keeps both.
  */
 export async function getSalesForMonthByUser(month: SalaryMonthKey): Promise<Map<string, SalarySale[]>> {
@@ -252,22 +252,40 @@ export async function getSalesForMonthByUser(month: SalaryMonthKey): Promise<Map
 }
 
 /**
- * Every row in a month — every agent, unassigned and unmapped rows, and removed
- * rows — oldest first. CA Admin → Sales reads this; nothing on the pay path
- * does.
+ * Every row whose sale instant falls in `[startMs, endMs)` — every agent,
+ * unassigned and unmapped rows, removed rows — **newest first**. CA Admin →
+ * Sales reads this for its date range. Served by the automatic single-field
+ * `occurredAt` index (not exempt); the caller bounds the window.
  */
-export async function getAllSalesForMonth(month: SalaryMonthKey): Promise<SalarySale[]> {
-  const snap = await adminDb.collection(SALES).where('month', '==', month).get();
-  return snap.docs
-    .map(d => serialiseSale(d.data() as CaSaleDocument))
-    .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+export async function getAllSalesInRange(startMs: number, endMs: number): Promise<SalarySale[]> {
+  const snap = await adminDb
+    .collection(SALES)
+    .where('occurredAt', '>=', Timestamp.fromMillis(startMs))
+    .where('occurredAt', '<', Timestamp.fromMillis(endMs))
+    .orderBy('occurredAt', 'desc')
+    .get();
+  return snap.docs.map(d => serialiseSale(d.data() as CaSaleDocument));
+}
+
+/**
+ * The shift schedule against each sale in a window — who was scheduled on the
+ * sale's creator account at its instant, and whether its holder was one of
+ * them (`matchSalesToSchedule`). One `getShiftsByRange` for every agent (the
+ * same read the admin payroll grid makes), expanded in memory; the day of
+ * lookback catches an overnight shift that began before the window.
+ */
+export async function getScheduleMatches(sales: SalarySale[], startMs: number, endMs: number) {
+  if (sales.length === 0) return new Map<string, ScheduleMatch>();
+  const shiftDocs = await getShiftsByRange(startMs - DAY_MS, endMs);
+  const raw = shiftDocs.map(s => ({ ...serialiseShift(s), timeWorkedSeconds: null, attendanceStatus: null }));
+  return matchSalesToSchedule(sales, expandShiftsForWindow(raw, startMs - DAY_MS, endMs));
 }
 
 /**
  * Everything on a month's ledger that needs an admin's eye beyond what the
  * sync flags itself, plus the display names the ledger shows. One field-masked
  * `getAll` over every user the ledger names (holders, BuddyX attributions,
- * approvers — names and archived state together) and one over the locking
+ * approvers, plus `extraUids` — names and archived state together) and one over the locking
  * disputes. Never a query.
  *
  * - **Stale dispute locks** — `lockIsStale`.
@@ -277,10 +295,12 @@ export async function getAllSalesForMonth(month: SalaryMonthKey): Promise<Salary
  * - **$0 rows** — a BuddyX data fault or a comped unlock; never silent.
  * - **Archived holders** — sales counting toward an agent who has left.
  */
-export async function getLedgerAnomalies(rows: SalarySale[]) {
+export async function getLedgerAnomalies(rows: SalarySale[], extraUids: string[] = []) {
   const live = rows.filter(s => !s.removedAt);
   const uids = [
-    ...new Set(rows.flatMap(s => [s.userId, s.sourceUserId, s.transfer?.approvedBy ?? null]).filter((v): v is string => Boolean(v))),
+    ...new Set(
+      [...rows.flatMap(s => [s.userId, s.sourceUserId, s.transfer?.approvedBy ?? null]), ...extraUids].filter((v): v is string => Boolean(v)),
+    ),
   ];
   const lockIds = [...new Set(live.map(s => s.disputeId).filter((v): v is string => Boolean(v)))];
   const [userSnaps, lockSnaps] = await Promise.all([
@@ -367,122 +387,11 @@ export async function getTransferredAwaySales(userId: string, month: SalaryMonth
     .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
 }
 
-/**
- * Write imported sales.
- *
- * `bulkWriter` rather than chunked batches (rule 9), and `set` rather than
- * `create` so a re-upload of an overlapping export rewrites the same documents
- * instead of failing. The count of pre-existing ids is read first so the import
- * report can distinguish "imported" from "already had it" — that number is how
- * an admin knows a re-upload did nothing rather than silently doubling a month.
- */
-export async function writeSales(
-  sales: SalarySale[],
-  existingIds?: Set<string>,
-): Promise<{ written: number; duplicates: number }> {
-  if (sales.length === 0) return { written: 0, duplicates: 0 };
-
-  const existing = new Set<string>();
-  if (existingIds) {
-    for (const sale of sales) if (existingIds.has(sale.saleId)) existing.add(sale.saleId);
-  } else {
-    for (const id of (await getExistingSaleStamps(sales.map(s => s.saleId))).keys()) existing.add(id);
-  }
-
-  const writer = adminDb.bulkWriter();
-  for (const sale of sales) {
-    // Only the facts an import owns. `merge` keeps anything a later stage wrote
-    // onto the same document — a transfer, a dispute lock — which a wholesale
-    // `set` from a re-uploaded file would otherwise erase.
-    writer.set(
-      adminDb.collection(SALES).doc(sale.saleId),
-      {
-        saleId: sale.saleId,
-        userId: sale.userId,
-        day: sale.day,
-        month: sale.month,
-        occurredAt: Timestamp.fromMillis(Date.parse(sale.occurredAt)),
-        employeeName: sale.employeeName,
-        sourceEmail: sale.sourceEmail,
-        creatorName: sale.creatorName,
-        fanName: sale.fanName,
-        fanId: sale.fanId,
-        grossRevenue: sale.grossRevenue,
-        netRevenue: sale.netRevenue,
-        signedGross: sale.signedGross,
-        type: sale.type,
-        rule: sale.rule,
-        assignedBy: sale.assignedBy,
-        status: sale.status,
-        importId: sale.importId,
-        source: sale.source,
-        sourceId: sale.saleId,
-        kind: sale.kind,
-        creatorId: sale.creatorId,
-        sourceUserId: sale.sourceUserId,
-        createdAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-  }
-  await writer.close();
-
-  return { written: sales.length - existing.size, duplicates: existing.size };
-}
-
-/**
- * The day and month each already-stored sale is stamped with, by sale id.
- *
- * Read before an import writes, for three reasons: the report's duplicate
- * count, the count of stored sales a re-upload moves, and the finalised-month
- * guard. A stored stamp can differ from the one a re-upload computes — sales
- * imported between 2026-09-30 and 2026-10-01 were stamped with their shift's
- * start day, and re-uploading is what moves them back to the day they were
- * made — so a row stored in a paid month must not be quietly moved out of it
- * into an open one, where it would be paid a second time. Field-masked: only
- * the two stamps are read.
- */
-export async function getExistingSaleStamps(
-  saleIds: string[],
-): Promise<Map<string, { day: SalaryDayKey; month: SalaryMonthKey }>> {
-  const out = new Map<string, { day: SalaryDayKey; month: SalaryMonthKey }>();
-  const refs = saleIds.map(id => adminDb.collection(SALES).doc(id));
-  for (let i = 0; i < refs.length; i += 300) {
-    const snaps = await adminDb.getAll(...refs.slice(i, i + 300), { fieldMask: ['day', 'month'] });
-    for (const snap of snaps) {
-      if (snap.exists) out.set(snap.id, { day: snap.get('day'), month: snap.get('month') });
-    }
-  }
-  return out;
-}
-
-/** Remove a single sale. Used when a source export retracts a row an earlier one carried. */
+/** Remove a single Infloww sale — the agent's Sales Report's delete for a row an export retracted. */
 export async function deleteSale(saleId: string): Promise<void> {
   await adminDb.collection(SALES).doc(saleId).delete();
 }
 
-/** Delete every sale from one import — the undo for a file uploaded by mistake. */
-export async function deleteSalesByImport(importId: string): Promise<number> {
-  const snap = await adminDb.collection(SALES).where('importId', '==', importId).get();
-  if (snap.empty) return 0;
-
-  const writer = adminDb.bulkWriter();
-  for (const doc of snap.docs) writer.delete(doc.ref);
-  await writer.close();
-  return snap.size;
-}
-
-export async function recordImport(doc: Record<string, unknown> & { importId: string }): Promise<void> {
-  await adminDb.collection(IMPORTS).doc(doc.importId).set({ ...doc, uploadedAt: FieldValue.serverTimestamp() });
-}
-
-export async function getRecentImports(limit = 20) {
-  const snap = await adminDb.collection(IMPORTS).orderBy('uploadedAt', 'desc').limit(limit).get();
-  return snap.docs.map(d => {
-    const data = d.data();
-    return { ...data, uploadedAt: data.uploadedAt?.toDate?.()?.toISOString() ?? null };
-  });
-}
 
 // ─── Overrides ───────────────────────────────────────────────────────
 

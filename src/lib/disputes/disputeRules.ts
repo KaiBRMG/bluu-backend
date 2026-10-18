@@ -131,14 +131,10 @@ export function lockIsStale(dispute: { exists: boolean; get(field: string): unkn
   return admin === 'Approved' || admin === 'Rejected' || dispute.get('CaApproval') === 'Rejected';
 }
 
-export type ReassignRefusal = 'not-found' | 'not-buddyx' | 'removed' | 'disputed' | 'same' | 'finalised';
+export type ReassignRefusal = 'not-found' | 'removed' | 'disputed' | 'same' | 'finalised';
 
 export const REASSIGN_REFUSAL: Record<ReassignRefusal, { status: number; message: string }> = {
   'not-found': { status: 404, message: 'Sale not found.' },
-  'not-buddyx': {
-    status: 409,
-    message: 'Only BuddyX sales can be reassigned here — Infloww history was settled in the CRM.',
-  },
   removed: { status: 409, message: 'This sale is no longer in BuddyX, so it counts toward nobody.' },
   disputed: { status: 409, message: 'An open dispute holds this sale. Rule on the dispute first.' },
   same: { status: 409, message: 'The sale is already held there.' },
@@ -149,8 +145,8 @@ export const REASSIGN_REFUSAL: Record<ReassignRefusal, { status: number; message
  * Whether an admin may move this sale to `toUserId` (`null` = nobody) — or why
  * not. Pure; `reassignSale` re-runs it inside its transaction.
  *
- * BuddyX rows only: an Infloww row predates the cutover and its month was
- * settled in the CRM. A sale an *open* dispute holds (pass `disputeId: null`
+ * Any sale — BuddyX or Infloww history — is an ordinary `ca-sales` row and
+ * moves the same way. A sale an *open* dispute holds (pass `disputeId: null`
  * for a stale lock — `lockIsStale`) must be ruled on first —
  * moving it underneath the claim would leave the verdict acting on a sale that
  * is no longer where the claim says. Finalised for the current holder **or**
@@ -158,7 +154,6 @@ export const REASSIGN_REFUSAL: Record<ReassignRefusal, { status: number; message
  */
 export function reassignRefusal(
   sale: {
-    source: 'infloww' | 'buddyx';
     userId: string | null;
     sourceUserId: string | null;
     hasTransfer: boolean;
@@ -170,7 +165,6 @@ export function reassignRefusal(
   isFinalized: (uid: string, month: string) => boolean,
 ): ReassignRefusal | null {
   if (!sale) return 'not-found';
-  if (sale.source !== 'buddyx') return 'not-buddyx';
   if (sale.removed) return 'removed';
   if (sale.disputeId) return 'disputed';
   // Moving a sale back onto BuddyX's attribution is never "the same" while a

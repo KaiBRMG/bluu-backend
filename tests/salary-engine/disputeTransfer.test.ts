@@ -121,7 +121,6 @@ describe('transferDecision — the filer already holds it', () => {
 
 describe('reassignRefusal', () => {
   const row = (over: Partial<Parameters<typeof reassignRefusal>[0] & object> = {}) => ({
-    source: 'buddyx' as const,
     userId: 'u-a',
     sourceUserId: 'u-a',
     hasTransfer: false,
@@ -131,14 +130,13 @@ describe('reassignRefusal', () => {
     ...over,
   });
 
-  it('allows moving a BuddyX sale to another agent or to nobody', () => {
+  it('allows moving a sale — BuddyX or Infloww history — to another agent or to nobody', () => {
     expect(reassignRefusal(row(), 'u-b', never)).toBeNull();
     expect(reassignRefusal(row(), null, never)).toBeNull();
   });
 
   it.each([
     ['not-found', null, 'u-b'],
-    ['not-buddyx', row({ source: 'infloww' }), 'u-b'],
     ['removed', row({ removed: true }), 'u-b'],
     ['disputed', row({ disputeId: 'd1' }), 'u-b'],
     ['same', row(), 'u-a'],

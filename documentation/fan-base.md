@@ -47,6 +47,7 @@ Three owners, one document, disjoint fields (`FanRegistryDocument`):
 - **Outstanding** — a live custom (not archived, not rejected; for campaigns, not `isArchived`) paid below its total.
 - **Abandoned** — archived without being paid in full. Archiving rewrites the figures (a custom's total drops to what was paid; a campaign's paid rises to the total), so `PATCH` now stamps **`originalTotalAmount`** (custom requests) / **`originalAmountPaid`** (campaigns) on archive and clears it on unarchive. A custom request archived before this counts as abandoned with an **unknown** amount; a campaign archived before it counts as paid (what campaign archiving meant).
 - **Rejected** — counted separately.
+- **Collected** — what the fan actually paid: `amountPaid`, except an archived campaign with `originalAmountPaid` kept, where archiving raised `amountPaid` to the total. The report's customs strip shows the sum as **Lifetime value** beside Unpaid and Abandoned, and each order row's "paid" figure uses it.
 
 ## Scope & permissions
 

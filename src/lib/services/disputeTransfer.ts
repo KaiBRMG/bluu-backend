@@ -387,7 +387,8 @@ export type ReassignOutcome =
  * that sale as reverted rather than still moved.
  *
  * The rules (`reassignRefusal`) run inside the transaction: open months only
- * for both agents, never under an open dispute, BuddyX rows only.
+ * for both agents, never under an open dispute, never a removed row. Infloww
+ * history moves like any other sale.
  */
 export async function reassignSale(params: {
   saleId: string;
@@ -402,7 +403,11 @@ export async function reassignSale(params: {
     const snap = await tx.get(ref);
     const sale = snap.exists ? (snap.data() as CaSaleDocument) : null;
 
-    const source = sale?.sourceUserId ?? null;
+    // An Infloww row written before `sourceUserId` existed was attributed to
+    // its holder — the same default `serialiseSale` reads — and the move pins
+    // it, so the original attribution survives the first transfer.
+    const source = sale ? (sale.sourceUserId !== undefined ? sale.sourceUserId : (sale.userId ?? null)) : null;
+    const pinSource = sale !== null && sale.sourceUserId === undefined;
     const toUserId = params.toUserId === 'source' ? source : params.toUserId;
 
     // A lock whose dispute is already decided is stale: it does not block the
@@ -417,7 +422,6 @@ export async function reassignSale(params: {
 
     const refusal = reassignRefusal(
       sale && {
-        source: sale.source ?? 'infloww',
         userId: sale.userId ?? null,
         sourceUserId: source,
         hasTransfer: Boolean(sale.transfer),
@@ -451,6 +455,7 @@ export async function reassignSale(params: {
           },
       transferFromUserId: backToSource ? null : from,
       userId: toUserId,
+      ...(pinSource ? { sourceUserId: source } : {}),
       disputeId: null,
       attributionConflict: false,
       assignmentLog: logEntry({

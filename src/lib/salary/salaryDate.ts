@@ -161,38 +161,6 @@ export function enumerateWeekDays(weekStart: SalaryDayKey): SalaryDayKey[] {
   return out;
 }
 
-/**
- * `"2026-08-31 23:52:34"` from the export → a UTC instant.
- *
- * The exporter writes wall-clock time already in the salary timezone and names
- * it in the column header, so the string carries no offset of its own and must
- * not be handed to `new Date()` — that would read it as local time on whatever
- * machine happens to be running the import. Returns `null` for anything that is
- * not this exact shape, which the importer reports as an unparseable row rather
- * than silently bucketing to the epoch.
- */
-export function parseExportTimestamp(raw: string): number | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(raw.trim());
-  if (!m) return null;
-
-  const [, y, mo, d, h, mi, s] = m;
-  const year = Number(y);
-  const month = Number(mo);
-  const date = Number(d);
-  const hour = Number(h);
-  const minute = Number(mi);
-  const second = Number(s ?? '0');
-
-  if (month < 1 || month > 12 || date < 1 || date > 31 || hour > 23 || minute > 59 || second > 59) {
-    return null;
-  }
-
-  const utc = Date.UTC(year, month - 1, date, hour, minute, second) - OFFSET_MS;
-  // Reject an impossible calendar date (2026-02-31) that Date.UTC would roll over.
-  if (toDayKey(utc) !== `${y}-${mo}-${d}`) return null;
-  return utc;
-}
-
 // ─── Presentation ────────────────────────────────────────────────────
 
 const MONTH_NAMES = [

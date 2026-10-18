@@ -14,6 +14,7 @@ import {
   RefreshCcw,
   Search,
   Share2,
+  ShieldOff,
   Trash2,
   Unlock,
   Users,
@@ -189,7 +190,6 @@ export default function GoLoginPage() {
     holder: string;
   } | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
-  const listRef = useRef<HTMLUListElement | null>(null);
 
   // Client-side convenience only. Every route behind these re-checks on the
   // server (rule 3), so hiding a button is not the control — and every flag is
@@ -328,15 +328,29 @@ export default function GoLoginPage() {
    * Locked-by-someone-else counts as live: it is the other row you need to find
    * quickly, because it is the one you have to go and ask about.
    */
-  const base = useMemo(
-    () =>
-      activeFolder === PINNED
-        ? searchMatches.filter((p) => pinnedIds.has(p.id))
-        : activeFolder
-          ? searchMatches.filter((p) => p.folders.includes(activeFolder))
-          : searchMatches,
-    [searchMatches, activeFolder, pinnedIds],
-  );
+  /**
+   * Profiles open on THIS machine — starting, running or saving — in the
+   * provider's order. They live in the Open panel above the list, outside every
+   * search and folder filter: an open browser is the thing an operator must be
+   * able to find and stop whatever they are looking at.
+   */
+  const openProfiles = useMemo(() => {
+    const ids = new Set(busyProfiles.map((b) => b.profileId));
+    return profiles.filter((p) => ids.has(p.id));
+  }, [busyProfiles, profiles]);
+
+  const base = useMemo(() => {
+    // An open profile is listed once, in the panel. Taking it out of the list
+    // is also what keeps the list still under the cursor: the launched row
+    // leaves the list as it joins the panel, so the rows below it stay put.
+    const openIds = new Set(openProfiles.map((p) => p.id));
+    const listable = searchMatches.filter((p) => !openIds.has(p.id));
+    return activeFolder === PINNED
+      ? listable.filter((p) => pinnedIds.has(p.id))
+      : activeFolder
+        ? listable.filter((p) => p.folders.includes(activeFolder))
+        : listable;
+  }, [searchMatches, activeFolder, pinnedIds, openProfiles]);
 
   // Any change to *what is being listed* starts the window over. Adjusted
   // during render against a key rather than in an effect: an effect would paint
@@ -349,8 +363,8 @@ export default function GoLoginPage() {
    * search, chip, Refresh — and never re-taken because of the reader's own click.
    * It used to re-rank on every session change, so pressing Launch on row 12
    * moved that row to the top the same instant and the next click landed on a
-   * different row's Launch: a different live account. A launched row now keeps
-   * its place and gains its "Open" chip; it rises on the next refresh.
+   * different row's Launch: a different live account. A launched row now leaves
+   * the list for the Open panel instead, so the rows beneath it stay put.
    * Profiles not in the snapshot (one just created) sort first, where the
    * person who made it is looking.
    */
@@ -407,6 +421,36 @@ export default function GoLoginPage() {
   }, [hasMore, visible.length]);
 
   const isFiltered = !!query.trim() || !!activeFolder;
+
+  const renderRow = (profile: GoLoginProfile) => (
+    <ProfileRow
+      key={profile.id}
+      profile={profile}
+      folders={visibleFolders.get(profile.id) ?? []}
+      session={sessions[profile.id]}
+      lock={locks[profile.id]}
+      myUid={userData?.uid}
+      canLaunch={sessionsSupported}
+      isAdmin={isAdmin}
+      releasing={releasing === profile.id}
+      onLaunch={requestLaunch}
+      onStop={stopSession}
+      onForceRelease={(p, holder) =>
+        setConfirmRelease({
+          id: p.id,
+          name: p.name || 'this profile',
+          holder,
+        })
+      }
+      pinned={pinnedIds.has(profile.id)}
+      caps={caps}
+      onTogglePin={(p) => void togglePin(p.id)}
+      onEdit={(p) => setEditingId(p.id)}
+      onAddToFolder={setFolderTarget}
+      onShare={openSharing}
+      onDelete={setConfirmDelete}
+    />
+  );
 
   /**
    * How old the listing is, in words, kept honest by a one-minute tick.
@@ -467,7 +511,8 @@ export default function GoLoginPage() {
     if (event.key !== 'j' && event.key !== 'k') return;
 
     const buttons = Array.from(
-      listRef.current?.querySelectorAll<HTMLButtonElement>('button[data-row-action]') ?? [],
+      // Both row lists — the Open panel first, then the listing — in DOM order.
+      event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-profile-rows] button[data-row-action]'),
     ).filter((el) => !el.disabled);
     if (!buttons.length) return;
 
@@ -944,6 +989,39 @@ export default function GoLoginPage() {
         )}
       </header>
 
+      {/*
+        The Open panel: every profile open on this machine, pinned above the
+        list and outside its scroll, so stopping one never means hunting for it.
+        Always present while launching is possible — a panel that popped in on
+        the first launch would shove the whole list down under the cursor. It
+        scrolls on its own past a few rows so it cannot crowd the list out.
+      */}
+      {sessionsSupported && (
+        <section
+          aria-labelledby="gologin-open-heading"
+          className="shrink-0 border-b border-white/[0.07] bg-white/[0.02] px-6 py-2"
+        >
+          <h3
+            id="gologin-open-heading"
+            className="flex items-center gap-1.5 pt-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-zinc-400"
+          >
+            Open on this machine
+            {openProfiles.length > 0 && (
+              <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${TONE_CHIP.green}`}>
+                {openProfiles.length}
+              </span>
+            )}
+          </h3>
+          {openProfiles.length > 0 ? (
+            <ul data-profile-rows className="max-h-[40vh] divide-y divide-white/[0.07] overflow-y-auto overscroll-contain">
+              {openProfiles.map(renderRow)}
+            </ul>
+          ) : (
+            <p className="py-1.5 text-[11px] text-zinc-400">No profiles open. Launch one below.</p>
+          )}
+        </section>
+      )}
+
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-2">
         {error ? (
           // Persistent state, rendered inline with a way out — not a toast that
@@ -989,36 +1067,8 @@ export default function GoLoginPage() {
           )
         ) : (
           <>
-            <ul ref={listRef} className="divide-y divide-white/[0.07]">
-              {visible.map((profile) => (
-                <ProfileRow
-                  key={profile.id}
-                  profile={profile}
-                  folders={visibleFolders.get(profile.id) ?? []}
-                  session={sessions[profile.id]}
-                  lock={locks[profile.id]}
-                  myUid={userData?.uid}
-                  canLaunch={sessionsSupported}
-                  isAdmin={isAdmin}
-                  releasing={releasing === profile.id}
-                  onLaunch={requestLaunch}
-                  onStop={stopSession}
-                  onForceRelease={(p, holder) =>
-                    setConfirmRelease({
-                      id: p.id,
-                      name: p.name || 'this profile',
-                      holder,
-                    })
-                  }
-                  pinned={pinnedIds.has(profile.id)}
-                  caps={caps}
-                  onTogglePin={(p) => void togglePin(p.id)}
-                  onEdit={(p) => setEditingId(p.id)}
-                  onAddToFolder={setFolderTarget}
-                  onShare={openSharing}
-                  onDelete={setConfirmDelete}
-                />
-              ))}
+            <ul data-profile-rows className="divide-y divide-white/[0.07]">
+              {visible.map(renderRow)}
             </ul>
             {hasMore && <div ref={sentinelRef} className="h-px" aria-hidden />}
           </>
@@ -1354,10 +1404,12 @@ function ProfileRow({
   // always visible rather than revealed on hover, because launching a profile is
   // now this page's whole job (the decision-queue rule, not the index one).
   const meta: string[] = [];
-  if (profile.proxyType && profile.proxyType !== 'none') {
+  // A profile without a proxy launches on whatever IP the desk has — the trap
+  // the proxy exists to avoid — so it is flagged as a chip by the name rather
+  // than left as one more grey word in the meta line.
+  const noProxy = !profile.proxyType || profile.proxyType === 'none';
+  if (!noProxy) {
     meta.push(profile.proxyRegion ? `${profile.proxyType} · ${profile.proxyRegion}` : profile.proxyType);
-  } else {
-    meta.push('No proxy');
   }
   const seen = relativeTime(profile.lastActivityMs);
   if (seen) meta.push(`Active ${seen}`);
@@ -1417,6 +1469,18 @@ function ProfileRow({
           {liveElsewhere && (
             <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${TONE_CHIP.zinc}`}>
               {profile.runningUserEmail ? `In use · ${profile.runningUserEmail}` : 'In use elsewhere'}
+            </span>
+          )}
+          {/* Orange — a warning, not a failure: the profile launches, just
+              not behind a proxy. Hidden once the proxy has failed, which says
+              more. */}
+          {noProxy && !proxyFailed && (
+            <span
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${TONE_CHIP.orange}`}
+              title="Launches on this machine's own IP"
+            >
+              <ShieldOff className="size-3" aria-hidden />
+              No proxy
             </span>
           )}
           {/* Red, because unlike every other chip on this row it reports

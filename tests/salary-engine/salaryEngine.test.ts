@@ -1,19 +1,14 @@
 /**
- * Chat-agent salary — engine and importer.
+ * Chat-agent salary — the engine.
  *
  * This is the money path: every figure a chat agent is paid comes out of
- * `computeSalaryMonth`. The engine is pure, so it is cheap to pin exactly, and
- * the last section runs the real August export end to end and asserts the
- * figures the spreadsheet produced.
+ * `computeSalaryMonth`. The engine is pure, so it is cheap to pin exactly.
  *
  * Run: `cd tests/salary-engine && npm install && npm test`
  *
  * When a rule genuinely changes, change the assertion **and** the rule's entry
  * in documentation/ca-salary.md in the same commit.
  */
-
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
 
 import {
   computeSalaryMonth,
@@ -25,16 +20,12 @@ import {
   round2,
 } from '@/lib/salary/salaryEngine';
 import {
-  parseExportTimestamp,
   toDayKey,
   toMonthKey,
   enumerateMonthDays,
   addMonths,
   daysInMonth,
 } from '@/lib/salary/salaryDate';
-import { readXlsxSheet, XlsxError } from '@/lib/salary/xlsx';
-import { parseSalesSheet, buildUserResolver, parseMoney, normaliseStatus } from '@/lib/salary/salesImport';
-import { normalizeEmail } from '@/lib/authEmail';
 import type { SalaryDayInput, SalaryShiftInput } from '@/lib/salary/salaryTypes';
 
 const C = DEFAULT_SALARY_CONFIG;
@@ -344,27 +335,12 @@ describe('the month grid', () => {
 // ─── Dates ───────────────────────────────────────────────────────────
 
 describe('salary dates', () => {
-  it('reads the export’s wall-clock stamp as Harare time, not the server’s', () => {
-    // 2026-08-31 23:52:34 CAT is 21:52:34 UTC.
-    const ms = parseExportTimestamp('2026-08-31 23:52:34')!;
-    expect(new Date(ms).toISOString()).toBe('2026-08-31T21:52:34.000Z');
-    expect(toDayKey(ms)).toBe('2026-08-31');
-  });
-
-  it('keeps a late-evening sale on its own local day', () => {
+  it('keeps a late-evening sale on its own Harare day', () => {
     // 00:08 CAT on the 1st is 22:08 UTC on the 31st — the bug a naive UTC
     // bucketing would introduce.
-    const ms = parseExportTimestamp('2026-08-01 00:08:11')!;
-    expect(new Date(ms).toISOString()).toBe('2026-07-31T22:08:11.000Z');
+    const ms = Date.UTC(2026, 6, 31, 22, 8, 11);
     expect(toDayKey(ms)).toBe('2026-08-01');
     expect(toMonthKey(ms)).toBe('2026-08');
-  });
-
-  it('rejects an unparseable or impossible date rather than bucketing to the epoch', () => {
-    expect(parseExportTimestamp('not a date')).toBeNull();
-    expect(parseExportTimestamp('')).toBeNull();
-    expect(parseExportTimestamp('2026-02-31 10:00:00')).toBeNull();
-    expect(parseExportTimestamp('2026-13-01 10:00:00')).toBeNull();
   });
 
   it('enumerates and steps months correctly across year boundaries', () => {
@@ -373,118 +349,5 @@ describe('salary dates', () => {
     expect(addMonths('2026-01', -1)).toBe('2025-12');
     expect(addMonths('2026-12', 1)).toBe('2027-01');
     expect(daysInMonth('2024-02')).toBe(29);
-  });
-});
-
-// ─── Importer ────────────────────────────────────────────────────────
-
-describe('money parsing', () => {
-  it.each([
-    ['$30.00', 30],
-    ['1,234.56', 1234.56],
-    ['(30.00)', -30],
-    ['-$5', -5],
-    ['$0.00', 0],
-  ])('parses %p as %p', (input, expected) => {
-    expect(parseMoney(input)).toBe(expected);
-  });
-
-  it('returns null rather than a free zero for anything unreadable', () => {
-    for (const input of ['', '-', 'abc', '   ']) expect(parseMoney(input)).toBeNull();
-  });
-
-  it('treats only an explicit reversal as one', () => {
-    expect(normaliseStatus('Reverse')).toBe('reverse');
-    expect(normaliseStatus('Complete')).toBe('complete');
-    // An unrecognised future status must not silently zero a real sale.
-    expect(normaliseStatus('Settled')).toBe('complete');
-  });
-});
-
-describe('xlsx reader', () => {
-  it('names the problem for a file that is not a workbook', () => {
-    expect(() => readXlsxSheet(Buffer.from('not a zip at all, just text'))).toThrow(XlsxError);
-    expect(() => readXlsxSheet(Buffer.alloc(0))).toThrow(/empty or truncated/);
-    expect(() => readXlsxSheet(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, ...new Array(20).fill(0)]))).toThrow(/legacy \.xls/);
-  });
-});
-
-// ─── End to end, against the real export ─────────────────────────────
-
-const FIXTURE = join(__dirname, '..', '..', '518a0404-5517-4931-818b-82b7f77d4c32.xlsx');
-
-// Skipped rather than failed when the sample export is not checked out — it is
-// a real sales file and may not stay in the repo.
-const describeExport = existsSync(FIXTURE) ? describe : describe.skip;
-
-describeExport('the August 2026 export, end to end', () => {
-  const REGISTRY = [
-    ['jenelle.monterde77@gmail.com', 'Jenelle'],
-    ['demilademichael13@gmail.com', 'Michael'],
-    ['angelasilla0399@gmail.com', 'Angela'],
-    ['describes101@gmail.com', 'Olu'],
-    ['agboolaq20@gmail.com', 'Queen'],
-    ['ayomideolujimi37@gmail.com', 'Ayo'],
-    ['adebariadeniran@gmail.com', 'Mannie'],
-    ['ajisedamilolaferanmi@gmail.com', 'Dami'],
-  ].map(([workEmail, displayName], i) => ({ uid: `uid${i}`, workEmail, displayName }));
-
-  const sheet = readXlsxSheet(readFileSync(FIXTURE));
-  const parsed = parseSalesSheet(sheet, buildUserResolver(REGISTRY, normalizeEmail), 'import-test');
-
-  it('reads every row of the workbook', () => {
-    expect(parsed.totalRows).toBe(686);
-    expect(sheet.headers).toContain('Date & time Africa/Harare');
-  });
-
-  it('resolves every agent who still has an account', () => {
-    expect(parsed.sales).toHaveLength(612);
-  });
-
-  it('reports the departed agent’s rows instead of dropping them silently', () => {
-    expect(parsed.skips).toEqual([
-      expect.objectContaining({ reason: 'unmapped-email', detail: 'jessy@bluurock.com', rowCount: 74 }),
-    ]);
-  });
-
-  it('gives every sale a stable, unique id so a re-upload cannot double-count', () => {
-    expect(new Set(parsed.sales.map(s => s.saleId)).size).toBe(612);
-
-    const second = parseSalesSheet(sheet, buildUserResolver(REGISTRY, normalizeEmail), 'a-different-import');
-    expect(second.sales.map(s => s.saleId)).toEqual(parsed.sales.map(s => s.saleId));
-  });
-
-  it('resolves an address whose registry spelling is dotted or aliased', () => {
-    const resolver = buildUserResolver(
-      [{ uid: 'x', workEmail: 'A.Gboola.Q20+work@googlemail.com', displayName: 'Queen' }],
-      normalizeEmail,
-    );
-    expect(resolver('queen@bluurock.com')?.uid).toBe('x');
-  });
-
-  it('reproduces the spreadsheet’s figures for the agent who crossed every tier', () => {
-    const byDay = new Map<string, SalaryDayInput>();
-    for (const sale of parsed.sales.filter(s => s.userId === 'uid4')) {
-      const entry = byDay.get(sale.day) ?? day({ day: sale.day });
-      entry.grossEarnings += sale.signedGross;
-      entry.saleCount += 1;
-      entry.salesCreatorNames.push(sale.creatorName);
-      byDay.set(sale.day, entry);
-    }
-
-    const result = computeSalaryMonth({
-      userId: 'uid4',
-      month: '2026-08',
-      days: [...byDay.values()],
-      overrides: [],
-      config: C,
-    });
-
-    // 12,631.99 raw, less a $5 reversal counted twice over (removed as a
-    // positive, added as a negative).
-    expect(result.totals.grossEarnings).toBe(12621.99);
-    expect(result.tier.currentPercent).toBe(5);
-    expect(result.totals.commission).toBe(337.78);
-    expect(result.days.filter(d => d.saleCount > 0)[0].commissionPercent).toBe(2.5);
   });
 });

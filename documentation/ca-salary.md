@@ -145,50 +145,15 @@ An admin can replace any of eight fields on any day: `grossEarnings`, `hours`, `
 
 ---
 
-## 4. Sales import
+## 4. Where sales come from
 
-> **Sales now come from BuddyX** (2026-10). Everything after the cutover (2026-10-04 08:50:31 SAST) is written by the BuddyX sync, and the `.xlsx` upload (`POST /api/ca-salary/import`, the old Sales data tab) was **deleted**. What follows describes the Infloww parser, which survives only inside the one-off historical import (`/api/admin/buddyx/historical-import`, admin claim) and refuses every row after the cutover. Rows it writes now also carry `source: 'infloww'`, `kind`, `creatorId` and `sourceUserId`, and their `type` is stored in the shared vocabulary of `saleTypes.ts` (`tips_messages` … `ppv`). See [buddyx.md](buddyx.md).
+**Sales come from BuddyX** (2026-10). Everything after the cutover (2026-10-04 08:50:31 SAST) is written by the BuddyX sync — see [buddyx.md §4](buddyx.md). Everything before it is **Infloww history**: rows imported from the old CRM's `.xlsx` exports, identified by a SHA-1 of their facts. Both the `.xlsx` upload (`/api/ca-salary/import`) and the one-off historical import (`/api/admin/buddyx/historical-import`, with `inflowwImportService.ts`, `salesImport.ts`, `xlsx.ts` and the email map) are **deleted** (the latter 2026-10-18); nothing writes Infloww rows any more.
 
-The manual bridge until sales came from BuddyX. Multipart, `.xlsx`.
+An Infloww row is an ordinary `ca-sales` document. It is paid, disputed and **reassigned** exactly like a BuddyX row (CA Admin → Sales; `reassignRefusal` no longer looks at `source`). A row written before `sourceUserId` existed reads its holder as its original attribution (`serialiseSale`), and the first move pins that value on the document so it survives the transfer.
 
-### Zero-dependency reader
+**The salary views start at September 2026** (`SALARY_HISTORY_START_MONTH`). The Infloww history reaches back to October 2025 but was paid outside Bluu Backend, so every `/api/ca-salary/*` route refuses an earlier month (`refuseHiddenMonth`) and the month pickers stop there.
 
-[`xlsx.ts`](../src/lib/salary/xlsx.ts) parses the ZIP with Node's `zlib` and reads the sheet XML directly. It handles shared strings (including rich-text runs), inline strings, numbers, booleans, formula cells and **date-formatted numerics resolved through `styles.xml`**. It does not handle Zip64, encrypted workbooks or legacy `.xls` — each throws a named `XlsxError` the route surfaces verbatim.
-
-### Idempotency
-
-A sale's document id is a **SHA-1 of the facts that identify it**: when, who, which fan, which creator, how much, what type, its status, and an occurrence index that disambiguates genuinely identical rows within one file.
-
-Re-uploading an overlapping export therefore rewrites the same documents instead of double-counting. The exports are cumulative, so this is the normal case, not an edge one. The response separates `imported` from `duplicates` so an admin can see a re-upload did nothing.
-
-### Email mapping
-
-The sales tool identifies agents by their old `@bluurock.com` addresses. Resolution order, first hit wins:
-
-1. `SALES_EMAIL_MAP` → `users.workEmail` (via `normalizeEmail`, the same folding login uses).
-2. The raw source address → `users.workEmail`, covering anyone not yet through the personal-email migration.
-
-**An address that resolves to nothing is reported, never guessed.** Agents who left with no Bluu account (`mark@`, `vivian@`, `preston@`, `bella@` …) skip with a named, counted entry in the import report, as do two personal addresses (`angeladacutsilla@gmail.com`, `manniexx@outlook.com`) an admin chose to leave unmapped. `jessy@bluurock.com` *is* mapped, to her archived account, so her history is hers.
-
-**The salary views start at September 2026** (`SALARY_HISTORY_START_MONTH`). The Infloww history reaches back to October 2025 but was paid outside Bluu Backend, so every `/api/ca-salary/*` route refuses an earlier month (`refuseHiddenMonth`), the month pickers stop there, the dashboard never opens on one, and no tier notice is computed for one. The history feeds analytics only.
-
-### Dry run
-
-The admin screen always previews first (`dryRun=true`), showing per-agent gross for reconciliation against the source sheet and every skipped row grouped by reason. The skip list is the reason the preview exists — an agent whose rows silently vanish is an agent who is underpaid and nobody notices.
-
-### A sale is dated by its own clock, not its shift
-
-**A sale's `day`/`month` is its calendar day in the salary timezone** — the day the external CRM reports it on. A sale made at 02:00 on a 23:00–07:00 shift belongs to the *next* calendar day, even though the shift itself is paid on the day it starts (`resolveShiftInputs`). That split is deliberate: the app's sales figures must reconcile day-for-day with the CRM, and the CRM dates a sale by when it happened.
-
-> **History — shift attribution was tried and reverted.** From 2026-09-30 to 2026-10-01 the import re-stamped each sale with the start day of the shift containing it (`attributeSalesToShifts`). The app's daily and monthly figures then disagreed with the CRM, so it was removed. **Sales imported in that window are still stored with their shift's start day.** Re-uploading the exports that cover them re-stamps them to their calendar day: the sale id is a hash of the row, not of its day, so the same document is rewritten. Do not reintroduce attribution without changing what the CRM reports.
-
-- **A re-upload can move a stored sale.** The import reads every stored sale's stamp first (`getExistingSaleStamps`) and reports how many it moves (`restamped` on the import record, stated in the preview). A move into **or out of** a finalised month is refused (next section), because moving a row out of a paid month would pay it twice.
-
-### Finalised months refuse rows
-
-Rows belonging to an already-finalised agent-month are held back and the months are named. Reopen to accept them.
-
-Because a stored sale's month can now change on re-upload, the guard runs **both ways**: a row moving *into* a finalised month is refused, and so is a stored row moving *out* of one — otherwise it would be paid twice, once in the frozen month and again in the open one. The stored stamps are read once per import (`getExistingSaleStamps`, field-masked to `day`/`month`) and the same read feeds the duplicate count.
+**A sale is dated by its own clock, not its shift.** A sale's `day`/`month` is its calendar day in the salary timezone — the day the CRM reports it on. A sale made at 02:00 on a 23:00–07:00 shift belongs to the *next* calendar day, even though the shift itself is paid on the day it starts. (Shift attribution was tried from 2026-09-30 to 2026-10-01 and reverted: the app's figures then disagreed with the CRM's.)
 
 ---
 
@@ -478,7 +443,7 @@ Two rules, and both are load-bearing:
 | Collection | Doc id | What |
 |---|---|---|
 | `ca-sales` | content hash (Infloww) · `bx-tip-{id}` / `bx-ppv-{id}` (BuddyX) | One sale row — see [buddyx.md](buddyx.md#8-collections) for the BuddyX fields |
-| `ca-sales-imports` | auto | Audit record for one upload |
+| `ca-sales-imports` | auto | Audit record for one upload — **no longer written** (the importers are deleted); old records remain |
 | `ca-salary-overrides` | `{uid}_{YYYY-MM-DD}` | An admin's edits to one day |
 | `ca-salary-months` | `{uid}_{YYYY-MM}` | Frozen payout record |
 | `ca-salary-config` | `current` | The rate tables |
@@ -533,9 +498,10 @@ Helpers: [`salaryAuth.ts`](../src/lib/salary/salaryAuth.ts).
                 attention band (every agent name opens them on Payroll)
   Payroll       sortable roster + "Finalise N ready" → one agent's editable
                 month, prev/next (tab id `salaries`; `?agent=` deep links)
-  Sales         BuddyX sync status + write switch, attention band, every
-                agent's sales ledger · Mapping · Sync history · Historical
-                import (one-off) — see buddyx.md
+  Sales         every sale in a date range (≤ 93 salary days), newest first,
+                paged: attention band, assign/reassign per row or in bulk,
+                the off-schedule check against shifts.creatorIds · Mapping
+                — see buddyx.md §5b
   Coverage      leave approvals → offer board → assign · History (outcomes
                 + balance trail)
   Rates         tiers, wage table, grace, deduction, rate basis — saved
@@ -694,9 +660,8 @@ Three calls worth not re-litigating:
 |---|---|
 | [`salaryEngine.ts`](../src/lib/salary/salaryEngine.ts) | The whole calculation. Pure. |
 | [`salaryDate.ts`](../src/lib/salary/salaryDate.ts) | Day/month keys in the salary timezone |
-| [`salaryConstants.ts`](../src/lib/salary/salaryConstants.ts) | Defaults + the email map |
-| [`xlsx.ts`](../src/lib/salary/xlsx.ts) | Zero-dependency workbook reader |
-| [`salesImport.ts`](../src/lib/salary/salesImport.ts) | Rows → sales + skip report |
+| [`salaryConstants.ts`](../src/lib/salary/salaryConstants.ts) | Defaults, the history floor, the cutover |
+| [`scheduleMatch.ts`](../src/lib/salary/scheduleMatch.ts) | Sales against the shift schedule — the off-schedule flag (display only) |
 | [`caSalaryService.ts`](../src/lib/services/caSalaryService.ts) | Firestore + the assembler |
 | [`caCoverageService.ts`](../src/lib/services/caCoverageService.ts) | Offers, claims, assignment |
 | [`leaveCoverage.ts`](../src/lib/services/leaveCoverage.ts) | Leave approval → release, and withdrawal → revert. `resolveLiveOccurrence` re-resolves a pinned request against the live roster first — see §6 |
@@ -796,7 +761,7 @@ All five are Admin-SDK-only (`allow read, write: if false`) and every field on t
 
 ## 11c. Admin Overview: sales names vs creator ids
 
-`GET /api/ca-salary/overview` is the one place in this subsystem that has to join **sales** to **shifts**, and the two do not share a key. A sale carries a creator *name* typed into the `.xlsx` export ([`salesImport.ts`](../src/lib/salary/salesImport.ts) trims the `Creator` column and stores it verbatim); a shift carries `creatorIds`, real creator document ids. Anything spanning both needs `buildCreatorIdResolver`.
+`GET /api/ca-salary/overview` is the one place in this subsystem that has to join **sales** to **shifts**, and the two do not share a key. An Infloww sale carries only the creator *name* typed into the old `.xlsx` export (BuddyX rows also carry `creatorId`); a shift carries `creatorIds`, real creator document ids. Anything spanning both needs `buildCreatorIdResolver`.
 
 The export's names are also routinely shorter than the roster's stage names — "Liam" for Liam Heng, "Adam" for Adam Horváth, "Cole" for Cole Bentley — so an exact folded match resolves only some of them. The resolver takes an exact match first, then a **word-boundary prefix**, and **only when exactly one creator matches**: "noah" is a prefix of both Noah Green and Noah Ryder, and guessing there would attribute one creator's coverage to another. Ambiguous or unmatched resolves to `null`.
 
@@ -870,6 +835,6 @@ It landed as BuddyX rather than OF Manager, and the prediction held: **the engin
 - `userId` can be `null` (an unassigned tip, an unmapped chatter) — such a row counts toward nobody, and `getSalesForMonthByUser` skips it.
 - A row can be soft-removed (`removedAt`) when BuddyX stops returning it; every pay read drops those in memory.
 - A row can be **transferred** by an approved dispute (`transfer`, `userId = transfer.toUserId`) — Bluu Backend is the source of truth for that, and a sync never undoes it.
-- `/api/ca-salary/import` is gone. `SALES_EMAIL_MAP`, `buildUserResolver`, `xlsx.ts` and `salesImport.ts` remain only for the one-off historical import, and go with it.
+- Both importers are gone (`/api/ca-salary/import`, and the historical import on 2026-10-18), with `SALES_EMAIL_MAP`, `buildUserResolver`, `xlsx.ts` and `salesImport.ts`.
 
 Keep `signedGross` as the only column the engine sums; it is what makes reversals work without a special case.

@@ -14,8 +14,9 @@
  *
  * `ca-admin` page permission — the tier that approves disputes, which move the
  * same money. Open months only, for both agents; never under an open dispute;
- * BuddyX rows only. A reason is required either way: it is shown on the ledger,
- * written to the sale's `assignmentLog`, and to the dispute when one is undone.
+ * any source — Infloww history moves like a BuddyX sale. A reason is required
+ * either way: it is shown on the ledger, written to the sale's `assignmentLog`,
+ * and to the dispute when one is undone.
  * Tier notices for both agents run from `after()`. Uncached — a mutation.
  */
 import { NextRequest, NextResponse, after } from 'next/server';

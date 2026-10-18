@@ -191,32 +191,35 @@ export interface CustomMoneyFields {
  *   A custom request archived before that was recorded counts as abandoned
  *   with an unknown amount; a campaign archived then counts as paid, which is
  *   what archiving a campaign meant.
+ * - **Collected** — what the fan actually paid. Not `amountPaid` on an archived
+ *   campaign, which archiving raised to the total; its kept original is used.
  */
 export function customMoney(entry: CustomMoneyFields): {
   outstanding: number;
   abandoned: boolean;
   abandonedAmount: number | null;
   rejected: boolean;
+  collected: number;
 } {
   const total = Number(entry.totalAmount) || 0;
   const paid = Number(entry.amountPaid) || 0;
   if ((CAMPAIGN_TYPES as readonly string[]).includes(entry.type)) {
     if (entry.isArchived) {
       const before = entry.originalAmountPaid;
-      if (typeof before === 'number' && before < total) return { outstanding: 0, abandoned: true, abandonedAmount: round2(total - before), rejected: false };
-      return { outstanding: 0, abandoned: false, abandonedAmount: null, rejected: false };
+      if (typeof before === 'number' && before < total) return { outstanding: 0, abandoned: true, abandonedAmount: round2(total - before), rejected: false, collected: before };
+      return { outstanding: 0, abandoned: false, abandonedAmount: null, rejected: false, collected: paid };
     }
-    return { outstanding: Math.max(0, round2(total - paid)), abandoned: false, abandonedAmount: null, rejected: false };
+    return { outstanding: Math.max(0, round2(total - paid)), abandoned: false, abandonedAmount: null, rejected: false, collected: paid };
   }
-  if (entry.status === 'Rejected') return { outstanding: 0, abandoned: false, abandonedAmount: null, rejected: true };
+  if (entry.status === 'Rejected') return { outstanding: 0, abandoned: false, abandonedAmount: null, rejected: true, collected: paid };
   if (entry.status === 'Archived') {
     const before = entry.originalTotalAmount;
     if (typeof before === 'number') {
       return before > paid
-        ? { outstanding: 0, abandoned: true, abandonedAmount: round2(before - paid), rejected: false }
-        : { outstanding: 0, abandoned: false, abandonedAmount: null, rejected: false };
+        ? { outstanding: 0, abandoned: true, abandonedAmount: round2(before - paid), rejected: false, collected: paid }
+        : { outstanding: 0, abandoned: false, abandonedAmount: null, rejected: false, collected: paid };
     }
-    return { outstanding: 0, abandoned: true, abandonedAmount: null, rejected: false };
+    return { outstanding: 0, abandoned: true, abandonedAmount: null, rejected: false, collected: paid };
   }
-  return { outstanding: Math.max(0, round2(total - paid)), abandoned: false, abandonedAmount: null, rejected: false };
+  return { outstanding: Math.max(0, round2(total - paid)), abandoned: false, abandonedAmount: null, rejected: false, collected: paid };
 }

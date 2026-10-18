@@ -87,54 +87,6 @@ export const DEFAULT_WAGE_TIERS: Record<number, number> = {
 };
 
 /**
- * Source-export email → the agent's Bluu Backend login address.
- *
- * The third-party sales tool still identifies agents by their old
- * `@bluurock.com` address; this app authorises on the personal Google account
- * they migrated to. The importer resolves in this order, and stops at the first
- * hit: this table → `users.workEmail`, then the raw source address →
- * `users.workEmail` (which covers anyone not yet migrated).
- *
- * An address that resolves to nothing is **reported, never guessed** — the
- * import result names it and the row count behind it. Agents who left without
- * a Bluu account (mark@, vivian@, preston@ …) are skipped that way; Jessy,
- * whose account exists but is archived, is mapped so her history lands on it.
- *
- * TEMPORARY in spirit — this whole mapping disappears when sales come from OF
- * Manager, which already knows the uid. See documentation/ca-salary.md.
- */
-export const SALES_EMAIL_MAP: Record<string, string> = {
-  'jenelle@bluurock.com': 'jenelle.monterde77@gmail.com',
-  'michael@bluurock.com': 'demilademichael13@gmail.com',
-  'angela@bluurock.com': 'angelasilla0399@gmail.com',
-  'olu@bluurock.com': 'describes101@gmail.com',
-  'queen@bluurock.com': 'agboolaq20@gmail.com',
-  'ayo@bluurock.com': 'ayomideolujimi37@gmail.com',
-  'mannie@bluurock.com': 'adebariadeniran@gmail.com',
-  'dami@bluurock.com': 'ajisedamilolaferanmi@gmail.com',
-  // Jessy has left and her account is archived; her history is still hers
-  // (historical import, 2026-10-07). Archived accounts are matched on purpose.
-  'jessy@bluurock.com': 'sesejanetjessiree@gmail.com',
-};
-
-/** The columns the importer requires. A file missing any of these is rejected whole. */
-export const REQUIRED_SALES_COLUMNS = [
-  'Date & time Africa/Harare',
-  'Employee',
-  'Email',
-  'Creator',
-  'Fan',
-  'Fan ID',
-  'Earnings',
-  'Gross revenue',
-  'Net revenue',
-  'Type',
-] as const;
-
-/** Columns the export also carries and we keep, but do not require. */
-export const OPTIONAL_SALES_COLUMNS = ['Rule', 'Assigned by', 'Status'] as const;
-
-/**
  * A sale's disposition in the source system.
  *
  * `reverse` is a refund or chargeback. It is stored as a **negative** signed

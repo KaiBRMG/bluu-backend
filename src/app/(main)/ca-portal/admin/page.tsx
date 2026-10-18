@@ -470,7 +470,7 @@ export default function CaAdminPage() {
                 )}
               </TabsContent>
               <TabsContent value="sales">
-                {month ? <AdminSales month={month} onMonthChange={setMonth} timezone={userTimezone} /> : <PanelSkeleton />}
+                <AdminSales timezone={userTimezone} />
               </TabsContent>
               <TabsContent value="coverage"><AdminCoverage /></TabsContent>
               <TabsContent value="rates"><AdminRates /></TabsContent>

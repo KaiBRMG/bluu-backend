@@ -138,7 +138,7 @@ function ReportBody({ report, onChanged }: { report: FanReport; onChanged: () =>
         <KpiTile
           label="Customs ordered"
           value={String(report.customs.total)}
-          meta={topType ? `Mostly ${(TYPE_LABELS as Record<string, string>)[topType.type] ?? topType.type} · ${topType.count} of ${report.customs.total}` : 'None yet'}
+          meta={topType ? `Mostly ${typeLabel(topType.type)} · ${topType.count} of ${report.customs.total}` : 'None yet'}
         />
         <KpiTile
           label="Owed on customs"
@@ -461,36 +461,39 @@ function CustomsSection({ report, timezone }: { report: FanReport; timezone: str
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             {customs.byType.map(t => (
               <AttrChip key={t.type}>
-                {(TYPE_LABELS as Record<string, string>)[t.type] ?? t.type} <span className="ml-1 tabular-nums text-zinc-400">{t.count}</span>
+                {typeLabel(t.type)} <span className="ml-1 tabular-nums text-zinc-400">{t.count}</span>
               </AttrChip>
             ))}
           </div>
 
-          {(customs.outstanding.count > 0 || customs.abandoned.count > 0) && (
-            <dl className="mt-4 grid grid-cols-2 gap-4 rounded-lg bg-white/[0.04] p-3">
-              <div>
-                <dt className="text-xs text-zinc-400">Unpaid</dt>
-                <dd className={cn('text-lg font-semibold tabular-nums', customs.outstanding.amount > 0 && 'text-red-400')}>
-                  {formatUsd(customs.outstanding.amount)}
-                </dd>
-                <dd className="text-[11px] text-zinc-400">
-                  {customs.outstanding.count ? `owed on ${pluralise(customs.outstanding.count, 'live custom')}` : 'nothing owed'}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-zinc-400">Abandoned</dt>
-                <dd className="text-lg font-semibold tabular-nums">{customs.abandoned.count}</dd>
-                <dd className="text-[11px] text-zinc-400">
-                  {customs.abandoned.count === 0
-                    ? 'none archived unpaid'
-                    : [
-                        customs.abandoned.amount > 0 ? `${formatUsd(customs.abandoned.amount)} never paid` : null,
-                        customs.abandoned.unknownAmount > 0 ? `${customs.abandoned.unknownAmount} archived before amounts were kept` : null,
-                      ].filter(Boolean).join(' · ')}
-                </dd>
-              </div>
-            </dl>
-          )}
+          <dl className="mt-4 grid grid-cols-3 gap-4 rounded-lg bg-white/[0.04] p-3">
+            <div>
+              <dt className="text-xs text-zinc-400">Lifetime value</dt>
+              <dd className="text-lg font-semibold tabular-nums">{formatUsd(customs.collected)}</dd>
+              <dd className="text-[11px] text-zinc-400">paid across {pluralise(customs.total, 'order')}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-400">Unpaid</dt>
+              <dd className={cn('text-lg font-semibold tabular-nums', customs.outstanding.amount > 0 && 'text-red-400')}>
+                {formatUsd(customs.outstanding.amount)}
+              </dd>
+              <dd className="text-[11px] text-zinc-400">
+                {customs.outstanding.count ? `owed on ${pluralise(customs.outstanding.count, 'live custom')}` : 'nothing owed'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-400">Abandoned</dt>
+              <dd className="text-lg font-semibold tabular-nums">{customs.abandoned.count}</dd>
+              <dd className="text-[11px] text-zinc-400">
+                {customs.abandoned.count === 0
+                  ? 'none archived unpaid'
+                  : [
+                      customs.abandoned.amount > 0 ? `${formatUsd(customs.abandoned.amount)} never paid` : null,
+                      customs.abandoned.unknownAmount > 0 ? `${customs.abandoned.unknownAmount} archived before amounts were kept` : null,
+                    ].filter(Boolean).join(' · ')}
+              </dd>
+            </div>
+          </dl>
 
           <ul className="mt-3 divide-y divide-white/[0.07]">
             {customs.items.map(item => <CustomRow key={item.id} item={item} fanName={report.name} timezone={timezone} />)}
@@ -499,6 +502,10 @@ function CustomsSection({ report, timezone }: { report: FanReport; timezone: str
       )}
     </section>
   );
+}
+
+function typeLabel(type: string): string {
+  return (TYPE_LABELS as Record<string, string>)[type] ?? type;
 }
 
 function customStatus(item: FanCustomItem): { label: string; className: string } {
@@ -519,7 +526,7 @@ function CustomRow({ item, fanName, timezone }: { item: FanCustomItem; fanName: 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', status.className)}>{status.label}</span>
-          <AttrChip>{(TYPE_LABELS as Record<string, string>)[item.type] ?? item.type}</AttrChip>
+          <AttrChip>{typeLabel(item.type)}</AttrChip>
           {item.CR && <span className="font-mono text-xs text-zinc-300">{item.CR}</span>}
           {item.creatorId && <CreatorChip creatorId={item.creatorId} size="xs" />}
         </div>
@@ -530,7 +537,7 @@ function CustomRow({ item, fanName, timezone }: { item: FanCustomItem; fanName: 
         </p>
       </div>
       <div className="w-32 shrink-0 text-right text-sm tabular-nums">
-        <div>{formatUsd(item.abandoned && item.abandonedAmount !== null ? item.amountPaid + item.abandonedAmount : item.totalAmount)}</div>
+        <div>{formatUsd(item.abandoned && item.abandonedAmount !== null ? item.collected + item.abandonedAmount : item.totalAmount)}</div>
         <div className="text-[11px]">
           {item.outstanding > 0 ? (
             <span className="text-red-400">owes {formatUsd(item.outstanding)}</span>
@@ -541,7 +548,7 @@ function CustomRow({ item, fanName, timezone }: { item: FanCustomItem; fanName: 
           ) : item.status === 'Rejected' ? (
             <span className="text-zinc-400">rejected</span>
           ) : (
-            <span className="text-zinc-400">paid {formatUsd(item.amountPaid)}</span>
+            <span className="text-zinc-400">paid {formatUsd(item.collected)}</span>
           )}
         </div>
       </div>
