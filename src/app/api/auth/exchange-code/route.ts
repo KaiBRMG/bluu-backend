@@ -148,6 +148,13 @@ export async function POST(request: NextRequest) {
           .updateUser(uid, { email })
           .catch((err) => console.error('[exchange-code] Auth email reconcile failed:', err));
       }
+      // Offboarding disables the Auth account; a restore re-enables it, but that
+      // step is best-effort. The doc (checked above) is the authority, so an
+      // active user whose account is still disabled is repaired here rather
+      // than failing at signInWithCustomToken.
+      if (authUser.disabled) {
+        await adminAuth.updateUser(uid, { disabled: false });
+      }
     } catch (error: unknown) {
       if ((error as { code?: string })?.code === 'auth/user-not-found') {
         await adminAuth.createUser({

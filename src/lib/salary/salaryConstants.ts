@@ -142,5 +142,5 @@ export function salesSourceFor(occurredAtMs: number): SalesSource {
   return occurredAtMs <= SALES_CUTOVER_AT ? 'infloww' : 'buddyx';
 }
 
-/** What kind of sale a row is. PPVs belong to their sender; tips to the agent on shift. */
+/** What kind of sale a row is. In BuddyX a PPV belongs to its sender; the sync credits both kinds to the agent on shift (`scheduleHolder`). */
 export type SaleKind = 'tip' | 'ppv';

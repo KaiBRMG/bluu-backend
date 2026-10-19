@@ -90,16 +90,24 @@ export function serialiseDispute(
           reason: String(u.reason ?? ''),
         }))
       : [],
+    approvedAt: serializeTimestamp(data.approvedAt),
+    approvedByName: data.approvedBy ? (userMap[data.approvedBy]?.displayName ?? '') : null,
+    approvedVia: data.approvedVia === 'ca' || data.approvedVia === 'admin' ? data.approvedVia : null,
+    overturnedAt: serializeTimestamp(data.overturnedAt),
+    overturnedByName: data.overturnedBy ? (userMap[data.overturnedBy]?.displayName ?? '') : null,
+    overturnReason: typeof data.overturnReason === 'string' ? data.overturnReason : null,
   };
 }
 
 export async function resolveNames(
-  ids: { createdBy: string; assignedTo: string; Creator: string; saleCreators?: string[] }[],
+  ids: { createdBy: string; assignedTo: string; Creator: string; saleCreators?: string[]; deciders?: string[] }[],
 ): Promise<NameMaps> {
-  // Batch-fetch all unique user docs in one round-trip
+  // Batch-fetch all unique user docs in one round-trip — filers, holders, and
+  // whoever approved or overturned.
   const uniqueUids = [...new Set([
     ...ids.map(d => d.createdBy),
     ...ids.filter(d => d.assignedTo !== 'No One').map(d => d.assignedTo),
+    ...ids.flatMap(d => d.deciders ?? []),
   ])].filter(Boolean);
   const userMap: Record<string, UserInfo> = {};
   if (uniqueUids.length > 0) {
@@ -234,6 +242,7 @@ export async function serialiseDisputes(
       Creator: d.Creator,
       // A v2 claim across creators carries `Creator: 'multiple'`; its tips name them.
       saleCreators: Array.isArray(d.sales) ? d.sales.map((s: DocumentData) => s.creatorId).filter(Boolean) : [],
+      deciders: [d.approvedBy, d.overturnedBy].filter((uid): uid is string => typeof uid === 'string'),
     })),
   );
   return docs.map(d => serialiseDispute(d._id, d, userMap, creatorMap));

@@ -4,8 +4,9 @@
  *
  * Before BuddyX, an approved dispute changed nothing in Bluu Backend: an admin
  * fixed the CRM and the fix came back in the next export. BuddyX is read-only,
- * so **an admin approval now transfers the sale here**, and Bluu Backend becomes
- * the source of truth for who holds it (documentation/buddyx.md §4):
+ * so **an approval now transfers the sale here** — since 2026-10-19 the
+ * holder's, which is the only approval a dispute needs — and Bluu Backend is the
+ * source of truth for who holds it (documentation/buddyx.md §5):
  *
  * - A sale's effective holder is `transfer?.toUserId ?? sourceUserId`, and
  *   `userId` always equals it — so every pay path follows the transfer with no
@@ -19,9 +20,9 @@
  * - A transfer never touches a finalised month, so "what we paid" never moves.
  *
  * The decisions are pure (`lib/disputes/disputeRules.ts`); this file runs them
- * inside transactions. Every route that rules on a dispute — the single admin
- * verdict, the bulk bar, the CA verdict — goes through here, so there is one
- * implementation of "what approving does".
+ * inside transactions. Both routes that rule on a dispute — the holder's verdict
+ * and the admin's — go through `applyVerdict`, so there is one implementation
+ * of "what approving does".
  */
 import 'server-only';
 import { FieldValue, Timestamp, type DocumentReference, type Transaction } from 'firebase-admin/firestore';
@@ -209,39 +210,67 @@ export interface TransferResult {
   skipped: Array<{ saleId: string; reason: string }>;
 }
 
-export interface VerdictOutcome {
+interface VerdictOutcome {
   found: boolean;
+  /**
+   * Nothing was written. `decided` / `not-assigned`: the dispute was not open
+   * to this holder (only a CA verdict returns these — an admin may rule on any
+   * dispute). `reason-required`: an admin overturn with no reason.
+   */
+  conflict?: 'decided' | 'not-assigned' | 'reason-required';
   version: 1 | 2;
   createdBy: string | null;
   transferResult: TransferResult | null;
   /**
    * `uid|month` pairs whose gross moved. The caller hands them to
    * `announceTierCrossings` from `after()`, so a verdict never waits on a month
-   * recomputation — and a bulk verdict recomputes once, not once per dispute.
+   * recomputation.
    */
   touched: string[];
 }
 
+/** Who is ruling: the agent who holds the claimed sales, or a CA admin. */
+type VerdictVia = 'ca' | 'admin';
+
 /**
- * The admin's verdict on one dispute. Shared by the single route and the bulk
- * bar (which is a loop over this).
+ * A verdict on one dispute — the one implementation of "what approving does".
  *
+ * **There is one approval, not two.** Since 2026-10-19 the agent who holds the
+ * claimed sales (`assignedTo`) is the only approval a dispute needs: their
+ * Approve moves the sales, in this transaction. An admin rules only where no
+ * holder exists (`No One` — BuddyX credits the sale to nobody, or to a chatter
+ * not mapped yet), may rule in a holder's place, and may overturn.
+ *
+ * `AdminApproval` is therefore the **final verdict**, whoever gave it: a CA
+ * approval writes `AdminApproval: 'Approved'` too, and `approvedVia: 'ca'` says
+ * who actually decided. Every reader that asks "is this decided?" —
+ * `lockIsStale`, the filer's summary, the salary lock read, the list filters —
+ * keeps working unchanged because of that.
+ *
+ * - **CA (`via: 'ca'`):** only the holder, only while both approvals are
+ *   `Pending` — re-checked inside the transaction, since this moves money.
+ *   Rejected releases the locks and is terminal for the filer.
  * - **v1 (legacy):** sets the verdict and moves nothing — those disputes were
  *   adjusted by hand in the CRM, and the detail dialog says so.
  * - **v2, Approved:** each sale still held as claimed, in a month open for both
  *   parties, is transferred to the filer; the rest are skipped with a reason.
- *   **Partial success is recorded in `transferResult`, never thrown.**
- * - **v2, Rejected:** the sales are released for a fresh claim. A dispute that
- *   had been *approved* and is now rejected (the Resolved tab can flip a
- *   verdict) also gives its transfers back, where the month is still open —
- *   otherwise the status would say "rejected" while the money said otherwise.
+ *   **Partial success is recorded in `transferResult`, never thrown.** Stamps
+ *   `approvedAt`, which CA Admin → Sales' "Moved by dispute" feed orders on.
+ * - **Admin, Rejected:** the sales are released for a fresh claim. An approved
+ *   dispute is **overturned**: its transfers go back where the month is still
+ *   open, and who and why is recorded on it — otherwise the status would say
+ *   "rejected" while the money said otherwise.
  */
-export async function applyAdminVerdict(params: {
+export async function applyVerdict(params: {
   disputeId: string;
   verdict: 'Approved' | 'Rejected';
   actorUid: string;
+  via: VerdictVia;
+  /** Recorded on an overturn, which refuses to run without one (≥ 3 chars). */
+  reason?: string;
 }): Promise<VerdictOutcome> {
-  const { disputeId, verdict, actorUid } = params;
+  const { disputeId, verdict, actorUid, via } = params;
+  const reason = params.reason?.trim() || null;
   const disputeRef = adminDb.collection(DISPUTES).doc(disputeId);
 
   const outcome = await adminDb.runTransaction(async (tx): Promise<VerdictOutcome> => {
@@ -249,9 +278,46 @@ export async function applyAdminVerdict(params: {
     if (!disputeSnap.exists) return { found: false, version: 1, createdBy: null, transferResult: null, touched: [] };
     const dispute = disputeSnap.data()!;
     const createdBy = String(dispute.createdBy ?? '');
+    const version: 1 | 2 = dispute.version === 2 ? 2 : 1;
 
-    if (dispute.version !== 2) {
-      tx.update(disputeRef, { AdminApproval: verdict, resolvedAt: FieldValue.serverTimestamp() });
+    if (via === 'ca') {
+      if (dispute.assignedTo !== actorUid) {
+        return { found: true, conflict: 'not-assigned', version, createdBy, transferResult: null, touched: [] };
+      }
+      if (dispute.CaApproval !== 'Pending' || dispute.AdminApproval !== 'Pending') {
+        return { found: true, conflict: 'decided', version, createdBy, transferResult: null, touched: [] };
+      }
+    }
+
+    const overturn = via === 'admin' && verdict === 'Rejected' && dispute.AdminApproval === 'Approved';
+    // It takes back money an agent was told they have, so it must say why.
+    if (overturn && (reason?.length ?? 0) < 3) {
+      return { found: true, conflict: 'reason-required', version, createdBy, transferResult: null, touched: [] };
+    }
+
+    const approval: Record<string, unknown> = {
+      ...(via === 'ca' ? { CaApproval: 'Approved' } : {}),
+      AdminApproval: 'Approved',
+      resolvedAt: FieldValue.serverTimestamp(),
+      approvedAt: FieldValue.serverTimestamp(),
+      approvedBy: actorUid,
+      approvedVia: via,
+    };
+    // A CA rejection never touches AdminApproval (it is terminal for the filer
+    // all the same); an admin rejection of an approved dispute is an overturn.
+    const rejection: Record<string, unknown> =
+      via === 'ca'
+        ? { CaApproval: 'Rejected', resolvedAt: FieldValue.serverTimestamp() }
+        : {
+            AdminApproval: 'Rejected',
+            resolvedAt: FieldValue.serverTimestamp(),
+            ...(overturn
+              ? { overturnedAt: FieldValue.serverTimestamp(), overturnedBy: actorUid, overturnReason: reason }
+              : {}),
+          };
+
+    if (version !== 2) {
+      tx.update(disputeRef, verdict === 'Approved' ? approval : rejection);
       return { found: true, version: 1, createdBy, transferResult: null, touched: [] };
     }
 
@@ -314,7 +380,7 @@ export async function applyAdminVerdict(params: {
         touched.add(`${createdBy}|${data!.month}`);
         if (from) touched.add(`${from}|${data!.month}`);
       }
-      tx.update(disputeRef, { AdminApproval: verdict, resolvedAt: FieldValue.serverTimestamp(), transferResult: result });
+      tx.update(disputeRef, { ...approval, transferResult: result });
       return { found: true, version: 2, createdBy, transferResult: result, touched: [...touched] };
     }
 
@@ -345,28 +411,11 @@ export async function applyAdminVerdict(params: {
         tx.update(ref, { disputeId: null });
       }
     }
-    tx.update(disputeRef, { AdminApproval: verdict, resolvedAt: FieldValue.serverTimestamp() });
+    tx.update(disputeRef, rejection);
     return { found: true, version: 2, createdBy, transferResult: null, touched: [...touched] };
   });
 
   return outcome;
-}
-
-/**
- * Release a v2 dispute's locks without a transfer — a CA (the holder)
- * rejecting the claim. The sales become disputable again. A no-op for v1.
- */
-export async function releaseDisputeLocks(disputeId: string): Promise<void> {
-  const snap = await adminDb.collection(DISPUTES).doc(disputeId).get();
-  if (!snap.exists || snap.get('version') !== 2) return;
-  const saleIds: string[] = snap.get('saleIds') ?? [];
-  if (saleIds.length === 0) return;
-  await adminDb.runTransaction(async tx => {
-    const snaps = await tx.getAll(...saleIds.map(id => adminDb.collection(SALES).doc(id)));
-    for (const sale of snaps) {
-      if (sale.exists && sale.get('disputeId') === disputeId) tx.update(sale.ref, { disputeId: null });
-    }
-  });
 }
 
 // ─── Reassignment and un-transfer ────────────────────────────────────

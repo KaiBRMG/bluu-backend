@@ -2,10 +2,12 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper: authenticated Firebase user only.
-    // Domain enforcement happens at token issuance (exchange-code route),
-    // so we do not repeat the email regex here — it costs a string match
-    // on every rule evaluation and the token was already validated server-side.
+    // Helper: ANY valid Firebase token — NOT proof of being an employee.
+    // Creators (Telegram sessions) hold tokens, and the browser login's
+    // signInWithPopup issues one to any Google account before the allowlist is
+    // consulted. So `isSignedIn()` alone must never gate a read: pair it with an
+    // ownership match, isAdmin(), hasPagePermission() (which needs a users doc)
+    // or isTelegramCreator().
     function isSignedIn() {
       return request.auth != null;
     }
@@ -37,10 +39,19 @@ service cloud.firestore {
     // (1 Firestore read) and checks the permittedPageIds array, which is kept
     // up-to-date by recomputeUserPermissions / recomputePermissionsForGroup
     // whenever group membership or page permissions change.
+    //
+    // Also requires the account to be active and unarchived — the same test
+    // `withAuth` applies on the API. Deactivation revokes refresh tokens, but an
+    // ID token already issued stays valid for up to an hour, and without this a
+    // just-offboarded employee could keep reading permission-gated collections
+    // directly. Free: it is the same document this function already reads.
     function hasPagePermission(pageId) {
       // get() returns null for missing docs — guard before chaining .data
       let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
-      return userDoc != null && userDoc.data.get('permittedPageIds', []).hasAny([pageId]);
+      return userDoc != null
+        && userDoc.data.get('isActive', true) != false
+        && userDoc.data.get('isArchived', false) != true
+        && userDoc.data.get('permittedPageIds', []).hasAny([pageId]);
     }
 
     // 1. Users collection
@@ -63,20 +74,18 @@ service cloud.firestore {
     }
 
     // 2. Groups collection
-    // No client-side listeners; read via API routes (Admin SDK).
-    // Keeping a permissive read rule here in case a future client listener
-    // needs it, but writes remain server-only.
+    // No client reads — served by API routes (Admin SDK). Group docs list their
+    // members' uids, and `isSignedIn()` is not an employee check (see above), so
+    // this stays closed rather than "permissive in case a listener needs it".
     match /groups/{groupId} {
-      allow read: if isSignedIn();
-      allow write: if false;
+      allow read, write: if false;
     }
 
     // 3. Page permissions collection
-    // Client listener: hooks/useAdminData.ts (onSnapshot page-permissions)
-    // Full collection read — authenticated users only.
+    // No client reads — useAdminData fetches through /api/admin/pages (it gave
+    // up its onSnapshot listener). Closed for the same reason as /groups.
     match /page-permissions/{pageId} {
-      allow read: if isSignedIn();
-      allow write: if false;
+      allow read, write: if false;
     }
 
     // 4. Time entries
@@ -478,12 +487,12 @@ service cloud.firestore {
     // 27. GoLogin session locks: doc id = a GoLogin profile id, body = who has
     // that profile open right now.
     //
-    // READABLE by any signed-in user, and deliberately so — this is what lets a
-    // profile row say "In use · Kai" the instant someone else launches it,
-    // without polling GoLogin (a 429 there revokes the API token permanently).
-    // The payload is a profile id and a colleague's display name: internal, not
-    // secret, and useless without the `apps-gologin` permission that gates every
-    // route which can act on it.
+    // READABLE by anyone who can open GoLogin — this is what lets a profile row
+    // say "In use · Kai" the instant someone else launches it, without polling
+    // GoLogin (a 429 there revokes the API token permanently). Gated on the same
+    // `apps-gologin` permission as every route that can act on it
+    // (requireGoLoginAccess), not on `isSignedIn()`: a creator session or a bare
+    // Google sign-in also holds a token, and colleagues' names are not theirs.
     //
     // NOT writable. The lock is the only thing standing between two operators
     // and one account open on two machines, so claiming, heart-beating and
@@ -491,7 +500,7 @@ service cloud.firestore {
     // lock could be deleted out from under its holder — i.e. it would not be a
     // lock. `secretHash` is a SHA-256 of the lease and yields nothing usable.
     match /gologin-sessions/{profileId} {
-      allow read: if request.auth != null;
+      allow read: if hasPagePermission('apps-gologin');
       allow write: if false;
     }
 

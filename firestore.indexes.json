@@ -1963,6 +1963,16 @@
     },
     {
       "collectionGroup": "ca-sales",
+      "fieldPath": "buddyxUserId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "attributedBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
       "fieldPath": "assignmentLog",
       "indexes": []
     },
@@ -2039,6 +2049,31 @@
     {
       "collectionGroup": "disputes",
       "fieldPath": "version",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "disputes",
+      "fieldPath": "approvedBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "disputes",
+      "fieldPath": "approvedVia",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "disputes",
+      "fieldPath": "overturnedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "disputes",
+      "fieldPath": "overturnedBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "disputes",
+      "fieldPath": "overturnReason",
       "indexes": []
     },
     {

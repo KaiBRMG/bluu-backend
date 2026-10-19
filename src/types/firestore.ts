@@ -639,8 +639,16 @@ export interface CaSaleDocument {
   /** Index-exempt. */
   modelHandle?: string | null;
   chatterId?: string | null;
-  /** The uid the source attributes the sale to, before any transfer. */
+  /**
+   * The uid the source attributes the sale to, before any transfer — what a
+   * revert returns to. BuddyX rows: the agent the shift schedule had on the
+   * account, else BuddyX's chatter (`attributedBy`; buddyx.md §4).
+   */
   sourceUserId?: string | null;
+  /** BuddyX rows: the uid BuddyX itself credits (its chatter, mapped). Index-exempt. Absent on rows synced before 2026-10-19 → `sourceUserId`. */
+  buddyxUserId?: string | null;
+  /** BuddyX rows: whether `sourceUserId` came from the shift schedule or from BuddyX. Index-exempt. Absent → `'buddyx'`. */
+  attributedBy?: 'schedule' | 'buddyx';
   /**
    * Index-exempt map. Bluu Backend's override of the source attribution — an
    * approved dispute, or an admin reassigning the sale on CA Admin → Sales.
@@ -990,6 +998,18 @@ export interface DisputeDocument {
   transferResult: { transferred: string[]; skipped: Array<{ saleId: string; reason: string }> } | null;
   /** Transfers an admin reverted afterwards. */
   untransfers: Array<{ saleId: string; by: string; at: string | null; reason: string }>;
+
+  // ── The approval that took effect (2026-10-19+). Since then the holder's
+  //    Approve is final, so `AdminApproval` is the verdict whoever gave it and
+  //    these say who did. Absent (null) on disputes approved before. ──
+  approvedAt: string | null;
+  approvedByName: string | null;
+  /** `ca` — the holder approved (the normal path); `admin` — an admin ruled. */
+  approvedVia: 'ca' | 'admin' | null;
+  /** An admin reversed an approval: every moved sale went back. */
+  overturnedAt: string | null;
+  overturnedByName: string | null;
+  overturnReason: string | null;
 }
 
 export interface DisputeSaleSnapshot {

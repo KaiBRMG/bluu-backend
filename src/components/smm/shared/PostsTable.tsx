@@ -30,7 +30,7 @@ const ACTION_LABELS: Record<PostAction, string> = {
   bonus: '💰 Submit for Bonus',
 };
 
-/** Long captions truncate to a hover-card trigger (DisputeTable CommentCell pattern). */
+/** Long captions truncate to a hover-card trigger (the retired admin dispute table's CommentCell pattern). */
 function CaptionCell({ caption }: { caption: string }) {
   if (!caption) return <span className="text-muted-foreground">—</span>;
   if (caption.length <= 30) return <span>{caption}</span>;

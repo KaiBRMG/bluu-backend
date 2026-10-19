@@ -26,7 +26,7 @@ import { addDays, addMonths, currentDayKey, enumerateDays, formatDayLabel, forma
 import { SyncStatus } from '@/components/buddyx/SyncStatus';
 import { PeriodPicker, dayKeyToDate } from '@/components/buddyx/PeriodPicker';
 import { CreatorCombobox } from '@/components/buddyx/CreatorCombobox';
-import { AttrChip, FanLabel, InfoTip, PPV_ATTRIBUTION, SEGMENT, TIPS_ATTRIBUTION } from '@/components/buddyx/buddyxUi';
+import { AttrChip, FanLabel, InfoTip, LEDGER_PPV_ATTRIBUTION, SEGMENT, LEDGER_TIPS_ATTRIBUTION } from '@/components/buddyx/buddyxUi';
 import { CreatorChip } from '@/components/creators/CreatorChip';
 import { PersonTag } from '@/components/disputes/disputeUi';
 import { buddyxCreditName, holderName, SaleHolderNote } from '@/components/salary/SaleHolderNote';
@@ -39,6 +39,13 @@ import { saleTypeLabel } from '@/lib/salary/saleTypes';
 import type { SalarySale } from '@/lib/salary/salaryTypes';
 import type { ScheduleMatch } from '@/lib/salary/scheduleMatch';
 import { format } from 'date-fns';
+import type { DisputeDocument } from '@/types/firestore';
+import type { SaleDisputeMark, SaleDisputeOutcome } from '@/lib/disputes/disputeRules';
+import { PILL_CLASS } from '@/components/disputes/disputeUi';
+import { useDisputesData } from '@/hooks/useDisputesData';
+import { DisputeDetailDialog } from '@/components/disputes/DisputeDetailDialog';
+import { disputeStage, formatMoney, OUTCOME_LABEL, outcomePillClass, verdictToast } from '@/components/disputes/disputeStatus';
+import { DisputeMovesFeed } from './DisputeMovesFeed';
 
 /**
  * CA Admin → Sales — every sale in a period, for the whole roster, newest
@@ -62,6 +69,18 @@ import { format } from 'date-fns';
  * it here *and* who BuddyX credits, with a `SaleHolderNote` wherever the two
  * differ and why (an approved dispute, or an admin). Every later sync keeps a move.
  *
+ * **Disputes live here too** (2026-10-19; there is no Disputes tab any more).
+ * A dispute needs one approval — the agent holding the sale — and moves the
+ * sale the moment it is given, so the admin's job is oversight, not a queue:
+ * - **Moved by dispute** leads the tab (`DisputeMovesFeed`): every claim
+ *   approved in the last 14 days, whatever the period below, each with
+ *   *Overturn*.
+ * - **The attention band** names any claim only an admin can rule on — a sale
+ *   nobody holds — with *Review*.
+ * - **The Disputed view** is the archive: every sale in the period a dispute
+ *   ever claimed, with its outcome (`disputes`, joined server-side), opening
+ *   the claim behind it.
+ *
  * The server sends the whole period at once (≤ 93 days) and the page filters
  * and pages it in memory, so paging costs no Firestore reads (rule 9).
  */
@@ -82,6 +101,8 @@ interface AllSalesResponse {
   unassigned: { tips: number; tipsGross: number; ppv: number; ppvGross: number; unmapped: number; claimed: number };
   mismatched: { dispute: number; admin: number; gross: number };
   schedule: Record<string, ScheduleMatch>;
+  /** Only the sales a dispute ever claimed: the latest claim and what it did here. */
+  disputes: Record<string, SaleDisputeMark>;
   flags: {
     attributionConflicts: string[];
     vanishedAfterFinalise: string[];
@@ -129,18 +150,28 @@ interface SyncRun {
 }
 
 type KindFilter = 'all' | 'tip' | 'ppv';
-type View = 'all' | 'unassigned' | 'off-schedule' | 'differs' | 'removed';
+export type SalesView = 'all' | 'unassigned' | 'off-schedule' | 'differs' | 'disputed' | 'removed';
+type OutcomeFilter = SaleDisputeOutcome | 'all';
 type Period = 'today' | '7d' | 'month' | 'last-month';
 
-const VIEWS: Array<{ value: View; label: string }> = [
+const VIEWS: Array<{ value: SalesView; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'unassigned', label: 'Unassigned' },
   { value: 'off-schedule', label: 'Off schedule' },
   { value: 'differs', label: 'Differs from BuddyX' },
+  { value: 'disputed', label: 'Disputed' },
   { value: 'removed', label: 'Removed' },
 ];
 
-function inView(s: SalarySale, view: View, schedule: Record<string, ScheduleMatch>): boolean {
+/** The Disputed view's outcome filter, in the order a reader scans for trouble. */
+const OUTCOMES: SaleDisputeOutcome[] = ['moved', 'open', 'skipped', 'declined', 'overturned', 'reverted', 'rejected'];
+
+function inView(
+  s: SalarySale,
+  view: SalesView,
+  schedule: Record<string, ScheduleMatch>,
+  disputes: Record<string, SaleDisputeMark>,
+): boolean {
   switch (view) {
     case 'all':
       return !s.removedAt;
@@ -149,7 +180,11 @@ function inView(s: SalarySale, view: View, schedule: Record<string, ScheduleMatc
     case 'off-schedule':
       return schedule[s.saleId]?.offSchedule === true;
     case 'differs':
-      return !s.removedAt && (!s.matchesSource || Boolean(s.transfer));
+      // Moved by a dispute or an admin, or credited to the agent on shift rather than BuddyX's chatter.
+      return !s.removedAt && (!s.matchesSource || Boolean(s.transfer) || s.buddyxUserId !== s.userId);
+    case 'disputed':
+      // Removed rows included: a dispute's outcome is history worth keeping.
+      return Boolean(disputes[s.saleId]);
     case 'removed':
       return Boolean(s.removedAt);
   }
@@ -183,7 +218,7 @@ function movable(sale: SalarySale, staleLocks: Set<string>): boolean {
   return !sale.removedAt && (!sale.disputeId || staleLocks.has(sale.saleId));
 }
 
-export default function AdminSales({ timezone }: { timezone: string }) {
+export default function AdminSales({ timezone, initialView = 'all' }: { timezone: string; initialView?: SalesView }) {
   const { user } = useAuth();
   const { userData } = useUserData();
   const isAdmin = userData?.groups?.includes('admin') === true || userData?.role === 'admin';
@@ -220,7 +255,12 @@ export default function AdminSales({ timezone }: { timezone: string }) {
   const [lastRun, setLastRun] = useState<SyncRun | null>(null);
 
   // ── Filters ──
-  const [view, setView] = useState<View>('all');
+  // Derived, not copied into state: the page reads `?tab=disputes` after its
+  // first render (an external store with no server value), so a late
+  // `initialView` must still land until the reader picks a view themselves.
+  const [pickedView, setView] = useState<SalesView | null>(null);
+  const view = pickedView ?? initialView;
+  const [outcome, setOutcome] = useState<OutcomeFilter>('all');
   const [agent, setAgent] = useState('all');
   const [creatorId, setCreatorId] = useState<string | null>(null);
   const [kind, setKind] = useState<KindFilter>('all');
@@ -287,6 +327,7 @@ export default function AdminSales({ timezone }: { timezone: string }) {
   }, [loadMapping, loadLastRun]);
 
   const schedule = useMemo(() => data?.schedule ?? {}, [data]);
+  const disputeMarks = useMemo(() => data?.disputes ?? {}, [data]);
   const staleLocks = useMemo(() => new Set(data?.flags.staleLocks ?? []), [data]);
   const flagged = useMemo(
     () => ({ duplicates: new Set(data?.flags.possibleDuplicates ?? []), zero: new Set(data?.flags.zeroGross ?? []) }),
@@ -313,16 +354,26 @@ export default function AdminSales({ timezone }: { timezone: string }) {
   }, [data, deferredQuery, agent, creatorId, kind]);
 
   const viewCounts = useMemo(() => {
-    const counts = { all: 0, unassigned: 0, 'off-schedule': 0, differs: 0, removed: 0 } as Record<View, number>;
-    for (const s of base) for (const v of VIEWS) if (inView(s, v.value, schedule)) counts[v.value] += 1;
-    return counts;
-  }, [base, schedule]);
+    const views = Object.fromEntries(VIEWS.map(v => [v.value, 0])) as Record<SalesView, number>;
+    const outcomes = Object.fromEntries(OUTCOMES.map(o => [o, 0])) as Record<SaleDisputeOutcome, number>;
+    for (const s of base) {
+      for (const v of VIEWS) if (inView(s, v.value, schedule, disputeMarks)) views[v.value] += 1;
+      const mark = disputeMarks[s.saleId];
+      if (mark) outcomes[mark.outcome] += 1;
+    }
+    return { views, outcomes };
+  }, [base, schedule, disputeMarks]);
+  const outcomeCounts = viewCounts.outcomes;
 
   const filtered = useMemo(() => {
     if (!data) return [];
     if (focus) return data.sales.filter(s => focus.ids.has(s.saleId));
-    return base.filter(s => inView(s, view, schedule));
-  }, [data, base, view, schedule, focus]);
+    return base.filter(
+      s =>
+        inView(s, view, schedule, disputeMarks) &&
+        (view !== 'disputed' || outcome === 'all' || disputeMarks[s.saleId]?.outcome === outcome),
+    );
+  }, [data, base, view, outcome, schedule, disputeMarks, focus]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -333,7 +384,7 @@ export default function AdminSales({ timezone }: { timezone: string }) {
   // the next action (DESIGN.md — the decision queue).
   useEffect(() => {
     setPage(1);
-  }, [range.from, range.to, view, agent, creatorId, kind, deferredQuery, focus]);
+  }, [range.from, range.to, view, outcome, agent, creatorId, kind, deferredQuery, focus]);
   const selected = useMemo(() => pageRows.filter(s => picked.has(s.saleId) && movable(s, staleLocks)), [pageRows, picked, staleLocks]);
   const pageMovable = useMemo(() => pageRows.filter(s => movable(s, staleLocks)), [pageRows, staleLocks]);
   const allPicked = pageMovable.length > 0 && selected.length === pageMovable.length;
@@ -350,10 +401,12 @@ export default function AdminSales({ timezone }: { timezone: string }) {
     return ids.map(uid => ({ uid, name: data.names[uid] ?? uid })).sort((a, b) => a.name.localeCompare(b.name));
   }, [data]);
 
-  const filtersActive = focus !== null || view !== 'all' || agent !== 'all' || creatorId !== null || kind !== 'all' || query.trim() !== '';
+  const filtersActive =
+    focus !== null || view !== 'all' || outcome !== 'all' || agent !== 'all' || creatorId !== null || kind !== 'all' || query.trim() !== '';
   const clearFilters = () => {
     setFocus(null);
     setView('all');
+    setOutcome('all');
     setAgent('all');
     setCreatorId(null);
     setKind('all');
@@ -363,7 +416,7 @@ export default function AdminSales({ timezone }: { timezone: string }) {
     clearFilters();
     setFocus({ label, ids: new Set(ids) });
   };
-  const showView = (next: View) => {
+  const showView = (next: SalesView) => {
     clearFilters();
     setView(next);
   };
@@ -416,11 +469,127 @@ export default function AdminSales({ timezone }: { timezone: string }) {
     }
   };
 
+  // ── Disputes ──
+  const { fetchDisputes, fetchDispute, setAdminApproval } = useDisputesData();
+  /** Bumped after any dispute write, so the feed refetches with the ledger. */
+  const [disputeRefresh, setDisputeRefresh] = useState(0);
+  /** Bumped only by a ruling — an overturn or un-transfer cannot change what is waiting. */
+  const [rulingsRefresh, setRulingsRefresh] = useState(0);
+  const [rulings, setRulings] = useState<DisputeDocument[]>([]);
+  const [detail, setDetail] = useState<DisputeDocument | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [openingDispute, setOpeningDispute] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchDisputes('admin-ruling')
+      .then(r => !cancelled && setRulings(r.disputes))
+      .catch(() => {
+        /* the band simply lacks the ruling lines; the feed and ledger still load */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchDisputes, rulingsRefresh]);
+
+  const openDetail = useCallback((dispute: DisputeDocument) => {
+    setDetail(dispute);
+    setDetailOpen(true);
+  }, []);
+
+  /** A ledger row carries only its outcome; the claim itself is read on demand. */
+  const openClaim = async (disputeId: string) => {
+    setOpeningDispute(disputeId);
+    try {
+      openDetail(await fetchDispute(disputeId));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not open the dispute');
+    } finally {
+      setOpeningDispute(null);
+    }
+  };
+
+  const afterDisputeWrite = async () => {
+    setDisputeRefresh(k => k + 1);
+    await load(true);
+  };
+
+  /** Reverse a holder's approval: every moved sale goes back. Reason required. */
+  const overturn = async (dispute: DisputeDocument, reason: string) => {
+    try {
+      await setAdminApproval(dispute.id, 'Rejected', reason);
+      const moved = dispute.transferResult?.transferred.length ?? 0;
+      toast.success(
+        moved > 0
+          ? `Overturned · ${pluralise(moved, 'sale')} back with ${dispute.assignedToName || 'the agent the sync credits'}`
+          : 'Overturned',
+      );
+      await afterDisputeWrite();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not overturn the dispute');
+      throw err;
+    }
+  };
+
+  /** An admin's ruling — a claim nobody holds, or in a holder's place. */
+  const rule = async (id: string, verdict: 'Approved' | 'Rejected', reason?: string) => {
+    try {
+      const { transferResult } = await setAdminApproval(id, verdict, reason);
+      toast.success(verdictToast(verdict, transferResult));
+      setRulingsRefresh(k => k + 1);
+      await afterDisputeWrite();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not update the dispute');
+      throw err;
+    }
+  };
+
+  /** Revert one moved sale — the escape hatch for a partly wrong approval. */
+  const untransfer = async (saleId: string, reason: string) => {
+    try {
+      await authed(`/api/ca-sales/${encodeURIComponent(saleId)}/transfer`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason }),
+      });
+      toast.success('Transfer reverted — the sale is back with the agent the sync credits');
+      setDetail(prev =>
+        prev ? { ...prev, untransfers: [...prev.untransfers, { saleId, by: '', at: new Date().toISOString(), reason }] } : prev,
+      );
+      await afterDisputeWrite();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not revert the transfer');
+      throw err;
+    }
+  };
+
+  /** The feed's "show them in the ledger": the Disputed view, moved sales, over the same window. */
+  const showMovedInLedger = (windowDays: number) => {
+    clearFilters();
+    setView('disputed');
+    setOutcome('moved');
+    const today = currentDayKey();
+    setPeriod('custom');
+    setCustomFrom(dayKeyToDate(addDays(today, -(windowDays - 1))));
+    setCustomTo(dayKeyToDate(today));
+    requestAnimationFrame(() => ledgerTop.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+  };
+
   // ── Attention band ──
   const attention = useMemo(() => {
     if (!data) return [];
     const lines: Array<{ key: string; text: string; action?: { label: string; run: () => void } }> = [];
     const live = data.sales.filter(s => !s.removedAt);
+
+    // First: the only disputes an admin must decide. A holder's approval is
+    // final, so these are claims on a sale nobody holds (`admin-ruling`).
+    for (const d of rulings) {
+      const filer = d.createdByName || 'A former agent';
+      lines.push({
+        key: `ruling-${d.id}`,
+        text: `${formatMoney(d.saleAmount)} claimed by ${filer} on a sale nobody holds — needs your ruling`,
+        action: { label: 'Review', run: () => openDetail(d) },
+      });
+    }
 
     const offSchedule = data.flags.offSchedule;
     if (offSchedule.length > 0) {
@@ -534,11 +703,19 @@ export default function AdminSales({ timezone }: { timezone: string }) {
     return lines;
     // `showRows`/`showView` only call setters; listing them would re-derive the band every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, mapping, lastRun]);
+  }, [data, mapping, lastRun, rulings]);
 
   const rangeLabel = range.from && range.to ? (range.from === range.to ? formatDayLabel(range.from) : `${formatDayLabel(range.from)} – ${formatDayLabel(range.to)}`) : '';
   const month = currentDayKey().slice(0, 7);
   const firstRow = (safePage - 1) * PAGE_SIZE + 1;
+  // The Dispute column joins the table on the Disputed view only; elsewhere the
+  // Type cell's "Disputed" tag is enough and the table keeps its width.
+  const showDisputeColumn = view === 'disputed' && !focus;
+  const columns = showDisputeColumn
+    ? [...LEDGER_COLUMNS.slice(0, 3), { label: 'Dispute', hint: 'The latest claim on this sale and what it did here' }, ...LEDGER_COLUMNS.slice(3)]
+    : LEDGER_COLUMNS;
+  const detailStage = detail ? disputeStage(detail) : null;
+  const filtersActiveBesidesView = agent !== 'all' || creatorId !== null || kind !== 'all' || query.trim() !== '';
 
   return (
     <div className="space-y-5">
@@ -546,8 +723,8 @@ export default function AdminSales({ timezone }: { timezone: string }) {
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Sales</h2>
           <p className="mt-0.5 max-w-[70ch] text-sm text-zinc-400">
-            Every sale in the period, newest first — assigned and unassigned, on every creator. Amounts are gross; net is
-            gross less the platform deduction set on Rates. Days are salary days (Harare).
+            Every sale in the period, newest first — assigned and unassigned, on every creator — and what disputes moved.
+            Amounts are gross; net is gross less the platform deduction set on Rates. Days are salary days (Harare).
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -571,6 +748,15 @@ export default function AdminSales({ timezone }: { timezone: string }) {
           <SyncStatus scope="sales" onSynced={() => { void load(true); void loadLastRun(); }} />
         </div>
       </div>
+
+      {/* Independent of the period: "most recent" keeps meaning most recent. */}
+      <DisputeMovesFeed
+        timezone={timezone}
+        refreshKey={disputeRefresh}
+        onOpen={openDetail}
+        onOverturn={overturn}
+        onShowAll={showMovedInLedger}
+      />
 
       {rangeProblem ? (
         <p className="text-sm text-zinc-400">{rangeProblem}</p>
@@ -636,11 +822,12 @@ export default function AdminSales({ timezone }: { timezone: string }) {
                 <ToggleGroupItem value="tip" className={SEGMENT}>Tips</ToggleGroupItem>
                 <ToggleGroupItem value="ppv" className={SEGMENT}>PPV</ToggleGroupItem>
               </ToggleGroup>
-              <InfoTip text={TIPS_ATTRIBUTION} />
-              <InfoTip text={PPV_ATTRIBUTION} />
+              <InfoTip text={LEDGER_TIPS_ATTRIBUTION} />
+              <InfoTip text={LEDGER_PPV_ATTRIBUTION} />
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+              <div className="flex flex-wrap items-center gap-2">
               <ToggleGroup
                 type="single"
                 variant="outline"
@@ -649,7 +836,7 @@ export default function AdminSales({ timezone }: { timezone: string }) {
                 onValueChange={v => {
                   if (!v) return;
                   setFocus(null);
-                  setView(v as View);
+                  setView(v as SalesView);
                 }}
                 aria-label="Show"
                 className="flex-wrap"
@@ -657,12 +844,29 @@ export default function AdminSales({ timezone }: { timezone: string }) {
                 {VIEWS.map(v => (
                   <ToggleGroupItem key={v.value} value={v.value} className={SEGMENT}>
                     {v.label}
-                    <span className={cn('ml-1 tabular-nums', v.value === 'off-schedule' && viewCounts[v.value] > 0 && view !== v.value && 'text-orange-400')}>
-                      {viewCounts[v.value].toLocaleString()}
+                    <span className={cn('ml-1 tabular-nums', v.value === 'off-schedule' && viewCounts.views[v.value] > 0 && view !== v.value && 'text-orange-400')}>
+                      {viewCounts.views[v.value].toLocaleString()}
                     </span>
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
+              {view === 'disputed' && !focus && (
+                <Select value={outcome} onValueChange={v => setOutcome(v as OutcomeFilter)}>
+                  <SelectTrigger size="sm" className="w-48" aria-label="Dispute outcome">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Every outcome</SelectItem>
+                    <SelectSeparator />
+                    {OUTCOMES.map(o => (
+                      <SelectItem key={o} value={o} disabled={outcomeCounts[o] === 0 && outcome !== o}>
+                        {OUTCOME_LABEL[o]} <span className="ml-1 tabular-nums text-zinc-400">{outcomeCounts[o]}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              </div>
               <p className="text-sm text-zinc-400">
                 {pluralise(filtered.length, 'sale')}
                 {view !== 'removed' && (
@@ -718,11 +922,13 @@ export default function AdminSales({ timezone }: { timezone: string }) {
                   `No sales in ${rangeLabel}.`
                 ) : view === 'off-schedule' && !focus ? (
                   'Every sale here is held by the agent on shift for its account, or nobody was scheduled on it.'
+                ) : view === 'disputed' && !focus && viewCounts.views.disputed === 0 && !filtersActiveBesidesView ? (
+                  `No sale in ${rangeLabel} was disputed.`
                 ) : (
                   <>
                     Nothing matches these filters.{' '}
                     <button type="button" onClick={clearFilters} className="rounded-sm text-foreground underline underline-offset-2 hover:text-white focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
-                      Clear them to see all {pluralise(viewCounts.all, 'sale')}
+                      Clear them to see all {pluralise(viewCounts.views.all, 'sale')}
                     </button>
                   </>
                 )}
@@ -746,7 +952,7 @@ export default function AdminSales({ timezone }: { timezone: string }) {
                           className={SELECT_BOX_CLASS}
                         />
                       </th>
-                      {LEDGER_COLUMNS.map(({ label, right, hint }) => (
+                      {columns.map(({ label, right, hint }) => (
                         <th key={label} scope="col" title={hint} className={cn('whitespace-nowrap px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400', right ? 'text-right' : 'text-left')}>
                           {label}
                         </th>
@@ -759,6 +965,7 @@ export default function AdminSales({ timezone }: { timezone: string }) {
                       const canMove = movable(sale, staleLocks);
                       const isPicked = canMove && picked.has(sale.saleId);
                       const match = schedule[sale.saleId];
+                      const mark = disputeMarks[sale.saleId];
                       const target = canMove ? scheduleTarget(sale, schedule) : null;
                       return (
                         <tr
@@ -797,14 +1004,28 @@ export default function AdminSales({ timezone }: { timezone: string }) {
                               <SaleHolderNote sale={sale} names={data.names} />
                             </span>
                           </td>
+                          {showDisputeColumn && (
+                            <td className="max-w-[14rem] px-3 py-2">
+                              {mark ? (
+                                <OutcomeCell
+                                  mark={mark}
+                                  names={data.names}
+                                  opening={openingDispute === mark.disputeId}
+                                  onOpen={() => void openClaim(mark.disputeId)}
+                                />
+                              ) : (
+                                <span className="text-xs text-zinc-400">—</span>
+                              )}
+                            </td>
+                          )}
                           <td className="max-w-[12rem] px-3 py-2 text-xs">
                             <OnShift match={match} names={data.names} />
                           </td>
                           <td className="max-w-[12rem] px-3 py-2 text-xs">
                             {sale.unmappedChatterId ? (
                               <span className="text-orange-400">{sale.employeeName || `Chatter ${sale.unmappedChatterId}`} (not linked)</span>
-                            ) : sale.sourceUserId ? (
-                              <span className="text-zinc-300">{data.names[sale.sourceUserId] ?? sale.employeeName}</span>
+                            ) : sale.buddyxUserId ? (
+                              <span className="text-zinc-300">{data.names[sale.buddyxUserId] ?? sale.employeeName}</span>
                             ) : (
                               <span className="text-zinc-400">Unassigned</span>
                             )}
@@ -814,7 +1035,7 @@ export default function AdminSales({ timezone }: { timezone: string }) {
                               <AttrChip>{saleTypeLabel(sale.type)}</AttrChip>
                               {data.spansCutover && <AttrChip>{sale.source === 'buddyx' ? 'BuddyX' : 'Infloww'}</AttrChip>}
                               {sale.status === 'reverse' && <span className="text-[11px] text-red-400">Reversed</span>}
-                              {sale.disputeId && (
+                              {sale.disputeId && !showDisputeColumn && (
                                 <span className={cn('text-[11px]', staleLocks.has(sale.saleId) ? 'text-orange-400' : 'text-zinc-300')}>
                                   {staleLocks.has(sale.saleId) ? 'Locked by a decided dispute' : 'Disputed'}
                                 </span>
@@ -904,6 +1125,16 @@ export default function AdminSales({ timezone }: { timezone: string }) {
         </>
       ) : null}
 
+      <DisputeDetailDialog
+        dispute={detail}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        timezone={timezone}
+        onAction={detailStage === 'awaiting-ca' || detailStage === 'awaiting-admin' ? rule : undefined}
+        onUntransfer={detail?.version === 2 && detailStage === 'approved' ? untransfer : undefined}
+        onOverturn={detailStage === 'approved' ? overturn : undefined}
+      />
+
       {/* ── Machinery, collapsed ── */}
       <Section title="Mapping" open={mappingOpen} onOpenChange={setMappingOpen}>
         <MappingSection mapping={mapping} isAdmin={isAdmin} authed={authed} onChanged={loadMapping} />
@@ -913,6 +1144,52 @@ export default function AdminSales({ timezone }: { timezone: string }) {
 }
 
 // ─── Pieces ──────────────────────────────────────────────────────────
+
+/**
+ * The Disputed view's cell: what the latest claim on this sale did here, as a
+ * status pill that opens the claim (the argument, who approved it, Overturn).
+ *
+ * The pill is the control rather than the row, because the row already holds
+ * Reassign and the selection box. The Meta line names the people — who
+ * claimed it, from whom — and, for a sale an approval could not move, why.
+ */
+function OutcomeCell({
+  mark,
+  names,
+  opening,
+  onOpen,
+}: {
+  mark: SaleDisputeMark;
+  names: Record<string, string>;
+  opening: boolean;
+  onOpen: () => void;
+}) {
+  const filer = names[mark.filedBy] || 'a former agent';
+  const from = mark.claimedFrom ? names[mark.claimedFrom] || 'a former agent' : 'nobody';
+  return (
+    <span className="flex flex-col items-start gap-1">
+      <button
+        type="button"
+        onClick={onOpen}
+        disabled={opening}
+        aria-label={`${OUTCOME_LABEL[mark.outcome]} — open the claim ${filer} filed`}
+        className={cn(
+          PILL_CLASS,
+          'gap-1 transition-[filter] duration-[120ms] hover:brightness-125 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-70',
+          outcomePillClass(mark.outcome),
+        )}
+      >
+        {opening && <Loader2Icon className="activity-spinner size-3 animate-spin" aria-hidden />}
+        {OUTCOME_LABEL[mark.outcome]}
+      </button>
+      <span className="text-[11px] text-zinc-400">
+        {filer} claimed it from {from}
+        {mark.earlier > 0 && <> · {pluralise(mark.earlier, 'earlier claim')}</>}
+      </span>
+      {mark.skipReason && <span className="text-[11px] text-orange-400">Not moved — {mark.skipReason}</span>}
+    </span>
+  );
+}
 
 const LEDGER_COLUMNS: Array<{ label: string; right?: boolean; hint?: string }> = [
   { label: 'When' },
@@ -1086,8 +1363,9 @@ function BulkBar({
  * Assign or reassign one sale — Bluu Backend is the source of truth, so
  * this is the fix an admin used to make in BuddyX (which cannot move a PPV at
  * all). The agents the shift schedule had on the account come first, then the
- * one BuddyX credits; both are labelled, because "put it where the schedule
- * says" and "put it back" are the two commonest corrections. A reason is
+ * one the sync credits and the one BuddyX credits; all are labelled, because
+ * "put it where the schedule says" and "put it back" are the two commonest
+ * corrections. A reason is
  * required: it is shown on the row and on the agent's report.
  *
  * The server re-checks everything (open dispute, finalised months, archived
@@ -1134,7 +1412,11 @@ function ReassignSaleDialog({
     [users, names],
   );
   const nameOf = (uid: string | null) => holderName(uid, allNames);
-  const pinned = new Set([...onShift, ...(sale?.sourceUserId ? [sale.sourceUserId] : [])]);
+  const pinned = new Set([
+    ...onShift,
+    ...(sale?.sourceUserId ? [sale.sourceUserId] : []),
+    ...(sale?.buddyxUserId ? [sale.buddyxUserId] : []),
+  ]);
   const agents = useMemo(() => activeChatAgents(users), [users]);
 
   if (!sale) return null;
@@ -1152,7 +1434,10 @@ function ReassignSaleDialog({
   const consequence = unchanged
     ? 'It is already held there.'
     : [
-        backToBuddyx && 'Clears the override — the sale matches BuddyX again.',
+        backToBuddyx &&
+          (sale.attributedBy === 'schedule'
+            ? 'Clears the override — the sale goes back to the agent on shift.'
+            : 'Clears the override — the sale matches BuddyX again.'),
         sale.userId ? `${nameOf(sale.userId)} loses ${gross} gross.` : `${gross} gross, unassigned until now.`,
         toUserId ? `${nameOf(toUserId)} gains it.` : 'It will count toward nobody.',
         `Both agents’ ${sale.month} figures recompute.`,
@@ -1160,7 +1445,13 @@ function ReassignSaleDialog({
         .filter(Boolean)
         .join(' ');
   const tags = (uid: string) =>
-    [onShift.includes(uid) && 'on shift', uid === sale.sourceUserId && 'matches BuddyX'].filter(Boolean).join(' · ');
+    [
+      onShift.includes(uid) && 'on shift',
+      uid === sale.buddyxUserId && 'matches BuddyX',
+      uid === sale.sourceUserId && sale.attributedBy === 'schedule' && 'assigned by shift',
+    ]
+      .filter(Boolean)
+      .join(' · ');
 
   async function submit() {
     if (toUserId === undefined || !sale) return;
@@ -1175,7 +1466,7 @@ function ReassignSaleDialog({
         method: 'PUT',
         body: JSON.stringify({ toUserId, reason: reason.trim() }),
       });
-      toast.success(backToBuddyx ? 'Sale back on BuddyX’s attribution' : `Sale ${sale.userId ? 'reassigned' : 'assigned'} to ${nameOf(toUserId)}`);
+      toast.success(backToBuddyx ? (sale.attributedBy === 'schedule' ? 'Sale back with the agent on shift' : 'Sale back on BuddyX’s attribution') : `Sale ${sale.userId ? 'reassigned' : 'assigned'} to ${nameOf(toUserId)}`);
       await onDone();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not reassign the sale';
@@ -1241,7 +1532,7 @@ function ReassignSaleDialog({
             </SelectTrigger>
             <SelectContent>
               {[...pinned].map(uid => (
-                <SelectItem key={uid} value={uid}>{nameOf(uid)} — {tags(uid)}</SelectItem>
+                <SelectItem key={uid} value={uid}>{nameOf(uid)}{tags(uid) && ` — ${tags(uid)}`}</SelectItem>
               ))}
               {pinned.size > 0 && <SelectSeparator />}
               {agents.filter(u => !pinned.has(u.uid)).map(u => <SelectItem key={u.uid} value={u.uid}>{u.displayName}</SelectItem>)}

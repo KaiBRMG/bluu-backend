@@ -20,6 +20,7 @@ import {
   type StoredSale,
 } from '@/lib/buddyx/salesPlan';
 import { SALES_CUTOVER_AT, salesSourceFor } from '@/lib/salary/salaryConstants';
+import { matchSalesToSchedule, SCHEDULE_GRACE_MS, type ScheduleOccurrence } from '@/lib/salary/scheduleMatch';
 import type { BuddyxTipRow } from '@/lib/buddyx/types';
 
 const AFTER = new Date(SALES_CUTOVER_AT + 3_600_000).toISOString(); // 2026-10-04 09:50 SAST
@@ -49,13 +50,33 @@ function tipRow(over: Partial<BuddyxTipRow> = {}): BuddyxTipRow {
 
 const tip = (over: Partial<BuddyxTipRow> = {}) => normaliseTip(tipRow(over)) as NormalisedSale;
 
-function plan(sales: NormalisedSale[], stored: StoredSale[] = [], opts: { finalized?: string[]; complete?: boolean } = {}) {
+/** The schedule map the sync builds: `matchSalesToSchedule` with userId = BuddyX's attribution. */
+function scheduleFor(sales: NormalisedSale[], shifts: ScheduleOccurrence[]) {
+  return matchSalesToSchedule(
+    sales.map(s => ({
+      saleId: s.saleId,
+      userId: (s.chatterId && chatters.get(s.chatterId)?.uid) || null,
+      creatorId: (s.modelId && models.get(s.modelId)?.creatorId) || null,
+      occurredAt: new Date(s.occurredAtMs).toISOString(),
+      removedAt: null,
+    })),
+    shifts,
+  );
+}
+
+function plan(
+  sales: NormalisedSale[],
+  stored: StoredSale[] = [],
+  opts: { finalized?: string[]; complete?: boolean; shifts?: ScheduleOccurrence[] } = {},
+) {
   const storedMap = new Map(stored.map(s => [s.saleId, s]));
+  const identity = resolveSaleIdentities(sales, storedMap);
   return planSalesSync({
-    identity: resolveSaleIdentities(sales, storedMap),
+    identity,
     stored: storedMap,
     chatters,
     models,
+    schedule: opts.shifts ? scheduleFor(identity.sales, opts.shifts) : undefined,
     finalized: new Set(opts.finalized ?? []),
     complete: opts.complete ?? true,
   });
@@ -106,6 +127,72 @@ describe('normalisation', () => {
       revenue: { gross: 20, net: 16 }, unlockDate: AFTER, createdAt: null,
     });
     expect(ppv).toMatchObject({ kind: 'ppv', type: 'ppv', saleId: 'bx-ppv-p1' });
+  });
+});
+
+describe('attribution by the shift schedule', () => {
+  const at = SALES_CUTOVER_AT + 3_600_000;
+  const H = 3_600_000;
+  const shift = (userId: string, start: number, end: number, creatorIds = ['c-adam']) => ({
+    userId, creatorIds, occurrenceStart: start, occurrenceEnd: end,
+  });
+
+  it('credits a PPV to the agent on shift, not its sender', () => {
+    const ppv = normalisePpv({
+      id: 'p1', modelId: 'm1', modelHandle: 'adamh', fanId: 1, chatterId: 101, chatterName: 'Queen',
+      revenue: { gross: 20, net: 16 }, unlockDate: AFTER, createdAt: null,
+    }) as NormalisedSale;
+    const p = plan([ppv], [], { shifts: [shift('u-jen', at - H, at + H)] });
+    expect(p.upserts[0].sale).toMatchObject({
+      userId: 'u-jen', sourceUserId: 'u-jen', buddyxUserId: 'u-queen', attributedBy: 'schedule', attributionConflict: false,
+    });
+    expect(p.counts.scheduleAttributed).toBe(1);
+    expect(p.touched).toEqual(new Set([pairKey('u-jen', MONTH)]));
+  });
+
+  it('keeps BuddyX’s chatter when they were on shift on the account (grace included)', () => {
+    const onShift = plan([tip()], [], { shifts: [shift('u-queen', at - H, at + H), shift('u-jen', at - H, at + H)] });
+    expect(onShift.upserts[0].sale).toMatchObject({ userId: 'u-queen', attributedBy: 'buddyx' });
+    const handover = plan([tip()], [], {
+      shifts: [shift('u-queen', at - H, at - SCHEDULE_GRACE_MS + 60_000), shift('u-jen', at - 60_000, at + H)],
+    });
+    expect(handover.upserts[0].sale).toMatchObject({ userId: 'u-queen', attributedBy: 'buddyx' });
+  });
+
+  it('keeps BuddyX’s attribution when nobody, or more than one other agent, was scheduled', () => {
+    expect(plan([tip()], [], { shifts: [] }).upserts[0].sale).toMatchObject({ userId: 'u-queen', attributedBy: 'buddyx' });
+    expect(plan([tip()], [], { shifts: [shift('u-jen', at - H, at + H, ['other'])] }).upserts[0].sale.userId).toBe('u-queen');
+    const two = plan([tip()], [], { shifts: [shift('u-jen', at - H, at + H), shift('u-x', at - H, at + H)] });
+    expect(two.upserts[0].sale).toMatchObject({ userId: 'u-queen', attributedBy: 'buddyx' });
+  });
+
+  it('assigns an unassigned tip and an unmapped chatter’s sale to the agent on shift, still reporting the chatter', () => {
+    const shifts = [shift('u-jen', at - H, at + H)];
+    expect(plan([tip({ chatterId: null })], [], { shifts }).upserts[0].sale).toMatchObject({ userId: 'u-jen', buddyxUserId: null });
+    const unmapped = plan([tip({ chatterId: 999 })], [], { shifts });
+    expect(unmapped.upserts[0].sale).toMatchObject({ userId: 'u-jen', unmappedChatterId: '999' });
+    expect(unmapped.counts.unassigned).toBe(0);
+    expect(unmapped.unmappedChatters.has('999')).toBe(true);
+  });
+
+  it('never overrides a transfer, and re-credits on the next run when the schedule is corrected', () => {
+    const shifts = [shift('u-jen', at - H, at + H)];
+    const moved = storedFrom(tip(), { userId: 'u-x', transfer: { sourceUserIdAtTransfer: 'u-jen', toUserId: 'u-x' } });
+    expect(plan([tip()], [moved], { shifts }).upserts[0]?.sale ?? null).toMatchObject({ userId: 'u-x', sourceUserId: 'u-jen' });
+
+    const first = plan([tip()], [], { shifts }).upserts[0].sale;
+    const stored = { ...storedFrom(tip()), userId: first.userId, syncHash: first.syncHash };
+    expect(plan([tip()], [stored], { shifts }).counts.unchanged).toBe(1);
+    const corrected = plan([tip()], [stored], { shifts: [shift('u-queen', at - H, at + H)] });
+    expect(corrected.upserts[0].sale).toMatchObject({ userId: 'u-queen', attributedBy: 'buddyx' });
+    expect(corrected.touched).toEqual(new Set([pairKey('u-queen', MONTH), pairKey('u-jen', MONTH)]));
+  });
+
+  it('refuses a schedule re-credit into a finalised month', () => {
+    const stored = storedFrom(tip());
+    const p = plan([tip()], [stored], { shifts: [shift('u-jen', at - H, at + H)], finalized: [pairKey('u-jen', MONTH)] });
+    expect(p.upserts).toHaveLength(0);
+    expect(p.counts.rejectedFinalized).toBe(1);
   });
 });
 

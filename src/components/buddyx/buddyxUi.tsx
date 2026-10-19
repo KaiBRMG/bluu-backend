@@ -21,6 +21,17 @@ export const TIPS_ATTRIBUTION = 'Tips are assigned to the chat agent on shift at
 export const PPV_ATTRIBUTION = 'PPV sales are assigned to the sender';
 
 /**
+ * How Bluu Backend's own ledger (`ca-sales` — pay, the Sales Report, CA Admin →
+ * Sales, disputes) credits a sale. Not BuddyX's rule above: the sync credits
+ * every sale, PPVs included, to the agent the shift schedule had on the
+ * account (`scheduleHolder`), and falls back to BuddyX only without one.
+ */
+export const LEDGER_TIPS_ATTRIBUTION =
+  'Tips are credited to the chat agent on shift on the account at the time of sale — BuddyX’s pick when nobody was scheduled';
+export const LEDGER_PPV_ATTRIBUTION =
+  'PPV sales are credited to the chat agent on shift on the account when the fan unlocks it, not the sender — the sender only when nobody was scheduled';
+
+/**
  * Gross vs net, said the same way everywhere. Every money figure on a BuddyX
  * surface is labelled one or the other; these are the sentences behind the
  * labels. BuddyX's own split is `net = gross × 0.8` (buddyxapi.yaml).

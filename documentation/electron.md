@@ -27,7 +27,7 @@ The same Vercel project serves **two hosts**. **`app.bluurock.com` is the offici
 
 Rules:
 
-- **Never redirect Electron traffic on the legacy host.** `BASE_URL` is compared with `startsWith` in `will-navigate`, `did-fail-load` and `did-finish-load`; a pre-0.16 shell landing on a foreign origin kicks its own navigations out to the system browser and silently skips the offline-retry reset and the 0.9 zoom default. The same holds in reverse for any future domain move.
+- **Never redirect Electron traffic on the legacy host.** Pre-0.16.2 shells compare `BASE_URL` with `startsWith` in `will-navigate`, `did-fail-load` and `did-finish-load` (0.16.2+ compare by origin via `isAppUrl()`); a pre-0.16 shell landing on a foreign origin kicks its own navigations out to the system browser and silently skips the offline-retry reset and the 0.9 zoom default. The same holds in reverse for any future domain move.
 - **Never build a user-facing link from `window.location.origin`.** A pre-0.16 shell resolves it to the legacy host. Use `PUBLIC_APP_ORIGIN`.
 - **The 0.16.0 origin switch logs every desktop user out once.** Auth state, `deviceId`, `sessionToken` and the time-tracking IndexedDB buffer are all per-origin (the app sets no cookies), so the first launch on the new origin starts clean and the user signs in again. The old origin's data stays on disk in the same Electron partition (a rollback build pointed at the legacy host would find it). The one hazard is an **unflushed time-tracking log** (see [time-tracking.md](time-tracking.md)): macOS is covered — `quitAndInstall` runs only after the renderer clocks out and flushes, and the old renderer has already booted and recovered any crashed session before the update dialog can be clicked. A Windows user who crashes mid-shift and reinstalls *before* relaunching would orphan that log; the stale-session cleanup closes the server side.
 - **To finish retiring the legacy host:** add `https://app.bluurock.com/auth/callback` to the Google OAuth client's authorised redirect URIs and set `NEXT_PUBLIC_REDIRECT_URI` to it on Vercel (then drop `/auth` from the passthrough); register `app.bluurock.com` for the bot in BotFather and run `scripts/fix-creator-menu-buttons.js` (then drop `/creator`); re-point the Resend and Telegram webhooks (`scripts/set-telegram-webhook.js` now defaults to the official domain). The legacy host must keep serving until no pre-0.16 shell remains.
@@ -65,6 +65,8 @@ Rules:
 ## IPC surface
 
 All renderer↔main communication goes through `preload.js` → `window.electronAPI`. Types live in `src/types/electron.d.ts` (new/optional APIs are typed `?:` because older builds lack them). Renderer must always feature-detect.
+
+> **Every IPC handler checks its sender (0.16.2+).** `ipcMain.handle/handleOnce/on/once` are wrapped at the top of `main.js`, before any handler is registered, so a handler cannot be added without the check: the sending frame must be the app's origin (official or legacy) or one of our bundled `file:` pages. Anything else — a foreign page that got into a window — gets a rejected promise (`handle`) or a dropped message (`on`). The preload hands a page desktop screenshots, input events, the clipboard and the GoLogin launcher, so this is the second guard behind `will-navigate`, at the point the capability is used. Nothing uses `sendSync`; if something ever does, its dropped message would hang the renderer, so return a value instead.
 
 > **Everything under `window.*` is sender-scoped** — see [Multi-window](#multi-window-the-main-window-and-its-satellites). A handler resolves its window from `BrowserWindow.fromWebContents(event.sender)`, so a satellite that calls `setSize` resizes *itself*.
 
@@ -119,7 +121,6 @@ All renderer↔main communication goes through `preload.js` → `window.electron
 | `app.closingFlushed()` | send | `app:closing-flushed` | renderer acks it finished flushing on close (see Clock-out flush) |
 | `app.retryLoad()` | send | `app:retry-load` | offline screen "Try again" — reloads the **calling window's own** route |
 | `power.onEvent(cb)` | main→renderer | — | native `suspend`/`resume`/`lock`/`unlock` (see Power events). Main window only |
-| `bugs.onReport(cb)` | main→renderer | — | main-process errors forwarded so renderer POSTs `/api/bugs`. Main window only |
 | `updater.getPending()` | invoke | `updater:getPending` | result of the last check (`{version}` or null); **v0.8.0+ — feature-detect** |
 | `updater.download()` | send | `updater:download` | begin download; only ever from an explicit user click. **v0.8.0+** |
 | `updater.onAvailable/onProgress/onStatus/onBeforeInstall`, `readyToInstall()` | both | `updater:*` | live on macOS; inert on Windows (auto-update is darwin-gated) |
@@ -321,7 +322,7 @@ All four new IPCs are **optional** in `electron.d.ts` and feature-detected. On a
 - **Dev** (`ELECTRON_DEV=true`): loads `http://localhost:3000` directly.
 - **Prod**: `loadFile(loading.html)` → on `did-finish-load` → `loadAppUrl()` (Vercel). Satellites skip the splash and load their route directly.
 - `did-fail-load` (main frame, non-abort) on the app URL → `showOfflineScreen(win)` (loads `offline.html`, schedules a capped exponential-backoff retry **to that window's own route**). Successful app load clears the backoff. The offline page's button and the `online` event call `app.retryLoad()`, which is sender-scoped.
-- `will-navigate` / `setWindowOpenHandler`: same-origin app navigation stays in-window; everything else is opened in the external browser via `openExternalSafe()` (**http/https/mailto only** — never `file:` or custom schemes). Renderer-initiated `file://` navigation is allowed **only** to `loading.html` / `offline.html` by exact URL — the previous blanket `file://` allowance was unnecessary and the OF window renders fan-supplied content. (`loadFile`/`loadURL` from main do not emit `will-navigate`, so this restricts pages, not us.)
+- `will-navigate` / `setWindowOpenHandler`: same-origin app navigation stays in-window — **same origin by `isAppUrl()` (`new URL(url).origin === BASE_ORIGIN`), never a string prefix**, which also accepted `https://app.bluurock.com.evil.example` and `https://app.bluurock.com@evil.example` before 0.16.2; everything else is opened in the external browser via `openExternalSafe()` (**http/https/mailto only** — never `file:` or custom schemes). Renderer-initiated `file://` navigation is allowed **only** to `loading.html` / `offline.html` by exact URL — the previous blanket `file://` allowance was unnecessary and the OF window renders fan-supplied content. (`loadFile`/`loadURL` from main do not emit `will-navigate`, so this restricts pages, not us.)
 
 ## Deep-link OAuth (`bluu://`)
 
@@ -346,9 +347,9 @@ Two rules for adding a host:
 ## Robustness (crash recovery, unresponsive)
 
 The renderer *is* the product, so a renderer crash must not leave a blank window. All of this is applied by `attachWindowBehaviour` to **every** window, satellites included — before v0.10.0 the OF window had none of it and a Vercel hiccup left the operator with a blank window and no retry:
-- `render-process-gone` → report to `/api/bugs` (via `forwardErrorToRenderer` → `bug:report`, always delivered to the main window), then auto-reload. A **per-window loop-guard** (max 3 reloads / 60s) parks on the offline screen if it keeps crashing. `clean-exit` is ignored.
-- `unresponsive`/`responsive` and `child-process-gone` are logged/reported.
-- Main-process `uncaughtException`/`unhandledRejection` are forwarded to `/api/bugs` too.
+- `render-process-gone` → logged, then auto-reload. A **per-window loop-guard** (max 3 reloads / 60s) parks on the offline screen if it keeps crashing. `clean-exit` is ignored.
+- `unresponsive`/`responsive` and `child-process-gone` are logged.
+- Main-process `uncaughtException`/`unhandledRejection` are logged. **The handlers must stay** even though nothing is reported any more (the `/api/bugs` pipeline was removed in 0.16.2) — without an `uncaughtException` listener a stray main-process error kills the app with a native dialog.
 
 ## Closing the window vs quitting the app
 
@@ -374,7 +375,7 @@ Main forwards `powerMonitor` `suspend`/`resume`/`lock-screen`/`unlock-screen` as
 ## Version reporting & the update prompt
 
 The shell exposes its version so the fleet can be tracked and nudged:
-- `app.getVersion()` → attached to `active_sessions` (at clock-in, via `/api/time-tracking/start`) and every `/api/bugs` report (via `src/lib/appVersion.ts` + `bugReporter`). Gives a live view of who is on which build.
+- `app.getVersion()` → attached to `active_sessions` (at clock-in, via `/api/time-tracking/start`). Gives a live view of who is on which build.
 - **Persisted per user** → `users/{uid}.appVersion` / `.appPlatform` / `.appVersionUpdatedAt`, so the build survives clock-out and is visible for users who never clock in. Written by [`AppVersionReporter`](../src/components/AppVersionReporter.tsx) (mounted in `(main)/layout.tsx`) via `POST /api/user/app-version`. **Write-on-change only:** the reporter compares `getAppInfo()` against the `useUserData()` snapshot it already has and posts nothing on a normal start-up — no extra read, and one write per update. Machine-reported, so the field is deliberately *not* on the `/api/user/update` whitelist. Surfaced in User Management → user detail, under the email.
 
 ### Two surfaces, and the difference is push vs pull

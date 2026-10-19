@@ -6,7 +6,7 @@
  * An approved dispute now *moves the sale* inside Bluu Backend (BuddyX is
  * read-only), so the agent no longer types a sale's details; they pick the
  * sales themselves. The search is deliberately narrow (D6): one creator, a
- * window of at most 7 days, no totals. PPVs are claimable like tips — they were
+ * window inside the open months (this month or last), no totals. PPVs are claimable like tips — they were
  * refused only while BuddyX, which cannot reassign a PPV, was where the fix
  * had to be made.
  *
@@ -41,7 +41,7 @@ import { useBuddyxCreators } from '@/hooks/useBuddyxSync';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { CreatorCombobox } from '@/components/buddyx/CreatorCombobox';
 import { CreatorChip } from '@/components/creators/CreatorChip';
-import { AttrChip, FanLabel, InfoTip, PPV_ATTRIBUTION, TIPS_ATTRIBUTION } from '@/components/buddyx/buddyxUi';
+import { AttrChip, FanLabel, InfoTip, LEDGER_PPV_ATTRIBUTION, LEDGER_TIPS_ATTRIBUTION } from '@/components/buddyx/buddyxUi';
 import { PersonTag } from './disputeUi';
 import { formatSaleDateTime, formatUsd, pluralise } from '@/lib/salary/salaryFormat';
 import { saleTypeLabel } from '@/lib/salary/saleTypes';
@@ -49,7 +49,6 @@ import { MAX_DISPUTE_SALES } from '@/lib/disputes/disputeRules';
 import { cn } from '@/lib/utils';
 
 const COMMENT_MAX = 2000;
-const MAX_WINDOW_DAYS = 7;
 
 interface SearchRow {
   saleId: string;
@@ -82,7 +81,6 @@ function describeSplit(groups: Array<{ label: string; count: number }>): string 
 }
 
 const dayKey = (d: Date) => format(d, 'yyyy-MM-dd');
-const daysBetween = (a: Date, b: Date) => Math.round((b.getTime() - a.getTime()) / 86_400_000) + 1;
 
 export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted }: CreateDisputeDialogProps) {
   const { user } = useAuth();
@@ -114,9 +112,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
       ? rows.filter(r => (!fanNeedle || r.fanId === fanNeedle) && (kind === 'all' || r.kind === kind))
       : rows;
 
-  const windowDays = from && to ? daysBetween(from, to) : 0;
-  const windowError =
-    from && to && to < from ? 'The end is before the start.' : windowDays > MAX_WINDOW_DAYS ? `At most ${MAX_WINDOW_DAYS} days.` : null;
+  const windowError = from && to && to < from ? 'The end is before the start.' : null;
 
   // ── Search ── (by creator and window only; the fan and kind filters are
   // applied to the rows in hand, so changing them costs no request)
@@ -227,7 +223,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
         <DialogHeader>
           <DialogTitle>New dispute</DialogTitle>
           <DialogDescription>
-            Find the tips and PPVs that should be yours. An admin&apos;s approval moves them to your sales report.
+            Find the tips and PPVs that should be yours. Once the chatter holding them approves, they move to your sales report.
           </DialogDescription>
         </DialogHeader>
 
@@ -257,7 +253,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
           </div>
         </div>
         <p className={cn('-mt-1 text-[11px]', windowError ? 'text-red-400' : 'text-zinc-400')}>
-          {windowError ?? `Search up to ${MAX_WINDOW_DAYS} days at a time, this month or last. Days are in SAST.`}
+          {windowError ?? 'Search any days this month or last. Days are in SAST.'}
         </p>
 
         {/* ── Results ── */}
@@ -267,8 +263,8 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
             <ToggleGroupItem value="tip" className={SEGMENT_ITEM_CLASS}>Tips</ToggleGroupItem>
             <ToggleGroupItem value="ppv" className={SEGMENT_ITEM_CLASS}>PPV</ToggleGroupItem>
           </ToggleGroup>
-          <span className="inline-flex items-center gap-1">Tips <InfoTip text={TIPS_ATTRIBUTION} /></span>
-          <span className="inline-flex items-center gap-1">PPV <InfoTip text={PPV_ATTRIBUTION} /></span>
+          <span className="inline-flex items-center gap-1">Tips <InfoTip text={LEDGER_TIPS_ATTRIBUTION} /></span>
+          <span className="inline-flex items-center gap-1">PPV <InfoTip text={LEDGER_PPV_ATTRIBUTION} /></span>
           <span>· amounts are gross</span>
         </div>
         <div

@@ -9,6 +9,7 @@ import {
   lockIsStale,
   NO_ONE,
   reassignRefusal,
+  saleDisputeOutcome,
   transferDecision,
   type ClaimableSale,
 } from '@/lib/disputes/disputeRules';
@@ -167,5 +168,45 @@ describe('lockIsStale', () => {
     expect(lockIsStale(snap(true, { AdminApproval: 'Rejected' }))).toBe(true);
     expect(lockIsStale(snap(true, { CaApproval: 'Rejected', AdminApproval: 'Pending' }))).toBe(true);
     expect(lockIsStale(snap(false))).toBe(true);
+  });
+});
+
+describe('saleDisputeOutcome — the per-sale Outcome column', () => {
+  const base = {
+    CaApproval: 'Pending',
+    AdminApproval: 'Pending',
+    overturned: false,
+    transferred: [] as string[],
+    skipped: [] as Array<{ saleId: string; reason: string }>,
+    untransferred: [] as string[],
+  };
+
+  it('is open until someone rules', () => {
+    expect(saleDisputeOutcome(base, 's1').outcome).toBe('open');
+  });
+
+  it('a CA approval is final: moved, with no admin step', () => {
+    const d = { ...base, CaApproval: 'Approved', AdminApproval: 'Approved', transferred: ['s1'] };
+    expect(saleDisputeOutcome(d, 's1').outcome).toBe('moved');
+  });
+
+  it('reports a skipped sale with its reason, per sale', () => {
+    const d = { ...base, AdminApproval: 'Approved', transferred: ['s1'], skipped: [{ saleId: 's2', reason: 'month finalised' }] };
+    expect(saleDisputeOutcome(d, 's1').outcome).toBe('moved');
+    expect(saleDisputeOutcome(d, 's2')).toEqual({ outcome: 'skipped', skipReason: 'month finalised' });
+  });
+
+  it('a per-sale un-transfer wins over moved', () => {
+    const d = { ...base, AdminApproval: 'Approved', transferred: ['s1'], untransferred: ['s1'] };
+    expect(saleDisputeOutcome(d, 's1').outcome).toBe('reverted');
+  });
+
+  it('tells an overturn from a plain rejection', () => {
+    expect(saleDisputeOutcome({ ...base, AdminApproval: 'Rejected', overturned: true }, 's1').outcome).toBe('overturned');
+    expect(saleDisputeOutcome({ ...base, AdminApproval: 'Rejected' }, 's1').outcome).toBe('rejected');
+  });
+
+  it('a holder declining is terminal', () => {
+    expect(saleDisputeOutcome({ ...base, CaApproval: 'Rejected' }, 's1').outcome).toBe('declined');
   });
 });

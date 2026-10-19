@@ -1155,7 +1155,6 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         let failed = false;
         let failureMessage = '';
         let failureContext = '';
-        let failureStack: string | undefined;
 
         try {
           const result = await electronAPI.timeTracking.captureScreenshot();
@@ -1249,7 +1248,6 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         } catch (err) {
           failed = true;
           failureMessage = err instanceof Error ? err.message : String(err);
-          failureStack = err instanceof Error ? err.stack : undefined;
           failureContext = 'screenshot:capture-upload-failed';
         }
 
@@ -1300,16 +1298,6 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
               ? 'Screenshot Failed. Please enable this in your OS settings ASAP.'
               : 'Screenshot Failed. Network Issues.',
             playSound: false,
-          }).catch(() => {});
-          fetch('/api/bugs', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              message: failureMessage,
-              ...(failureStack && { stack: failureStack }),
-              context: failureContext,
-              uid: user?.uid ?? null,
-            }),
           }).catch(() => {});
         }
 

@@ -1,6 +1,6 @@
 import 'server-only';
 import crypto from 'crypto';
-import sharp from 'sharp';
+import sharp, { type Metadata, type OutputInfo, type Sharp } from 'sharp';
 import { adminDb, adminStorage } from '@/lib/firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import {
@@ -311,8 +311,8 @@ export async function ingestImage(
     throw new ImageRejected('That image is too large — keep it under 12MB.');
   }
 
-  let pipeline: sharp.Sharp;
-  let metadata: sharp.Metadata;
+  let pipeline: Sharp;
+  let metadata: Metadata;
   try {
     pipeline = sharp(buffer, { limitInputPixels: 80_000_000, animated: false });
     metadata = await pipeline.metadata();
@@ -344,8 +344,8 @@ export async function ingestImage(
   // dimensions above — and still fail here, because parsing the box structure
   // needs no codec but decoding the pixels needs HEVC. So the real decode is
   // guarded separately, and the same actionable message applies.
-  let full: { data: Buffer; info: sharp.OutputInfo };
-  let thumb: { data: Buffer; info: sharp.OutputInfo };
+  let full: { data: Buffer; info: OutputInfo };
+  let thumb: { data: Buffer; info: OutputInfo };
   try {
     [full, thumb] = await Promise.all([
       sharp(buffer, { limitInputPixels: 80_000_000, animated: false })

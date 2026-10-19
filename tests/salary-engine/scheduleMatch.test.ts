@@ -2,7 +2,7 @@
  * The "off schedule" anomaly on CA Admin → Sales: a sale held by someone the
  * shift schedule does not put on that creator account at that moment.
  */
-import { matchSalesToSchedule, SCHEDULE_GRACE_MS } from '@/lib/salary/scheduleMatch';
+import { matchSalesToSchedule, scheduleHolder, SCHEDULE_GRACE_MS } from '@/lib/salary/scheduleMatch';
 
 const H = 3_600_000;
 const T0 = Date.UTC(2026, 9, 10, 8);
@@ -63,5 +63,16 @@ describe('matchSalesToSchedule', () => {
   it('lists every agent scheduled on the account at once', () => {
     const both = [...shifts, { userId: 'c', creatorIds: ['cole'], occurrenceStart: T0, occurrenceEnd: T0 + 2 * H }];
     expect(matchSalesToSchedule([sale('s1', 'c', T0 + H)], both).get('s1')).toEqual({ scheduled: ['a', 'c'], offSchedule: false });
+  });
+});
+
+describe('scheduleHolder — who the sync credits instead of BuddyX', () => {
+  it('names the one agent on shift when BuddyX credits someone else, or nobody', () => {
+    expect(scheduleHolder({ scheduled: ['b'], offSchedule: true })).toBe('b');
+  });
+  it('keeps BuddyX when its agent was on shift, nobody was scheduled, or several others were', () => {
+    expect(scheduleHolder({ scheduled: ['a'], offSchedule: false })).toBeNull();
+    expect(scheduleHolder(undefined)).toBeNull();
+    expect(scheduleHolder({ scheduled: ['b', 'c'], offSchedule: true })).toBeNull();
   });
 });

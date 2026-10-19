@@ -30,7 +30,7 @@ import { lockIsStale } from '../disputes/disputeRules';
 import { addMonths, currentMonthKey, monthKeyRange, toDayKey, type SalaryDayKey, type SalaryMonthKey } from '../salary/salaryDate';
 import { isSalaryMonthVisible, PAID_LEAVE_ACCOUNT_LOOKBACK_DAYS } from '../salary/salaryConstants';
 import { leaveAt, paidAccountsByDay, paidLeaveShifts, type LeaveWindow } from '../salary/leavePay';
-import { matchSalesToSchedule, type ScheduleMatch } from '../salary/scheduleMatch';
+import { matchSalesToSchedule, type ScheduleMatch, type ScheduleSale } from '../salary/scheduleMatch';
 import { normaliseSaleType, saleKindOf, saleSourceOf } from '../salary/saleTypes';
 import type {
   DashboardSalaryMonth,
@@ -171,6 +171,8 @@ export function serialiseSale(doc: CaSaleDocument): SalarySale {
     creatorId: doc.creatorId ?? null,
     modelId: doc.modelId ?? null,
     sourceUserId,
+    buddyxUserId: doc.buddyxUserId !== undefined ? doc.buddyxUserId : sourceUserId,
+    attributedBy: doc.attributedBy ?? 'buddyx',
     transfer: transfer
       ? {
           kind: transferKindOf(transfer),
@@ -272,9 +274,10 @@ export async function getAllSalesInRange(startMs: number, endMs: number): Promis
  * sale's creator account at its instant, and whether its holder was one of
  * them (`matchSalesToSchedule`). One `getShiftsByRange` for every agent (the
  * same read the admin payroll grid makes), expanded in memory; the day of
- * lookback catches an overnight shift that began before the window.
+ * lookback catches an overnight shift that began before the window. The BuddyX
+ * sales sync calls it too, to credit each sale to the agent on shift.
  */
-export async function getScheduleMatches(sales: SalarySale[], startMs: number, endMs: number) {
+export async function getScheduleMatches(sales: ScheduleSale[], startMs: number, endMs: number) {
   if (sales.length === 0) return new Map<string, ScheduleMatch>();
   const shiftDocs = await getShiftsByRange(startMs - DAY_MS, endMs);
   const raw = shiftDocs.map(s => ({ ...serialiseShift(s), timeWorkedSeconds: null, attendanceStatus: null }));

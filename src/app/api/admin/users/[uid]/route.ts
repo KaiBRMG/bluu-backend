@@ -32,6 +32,40 @@ async function releaseSeatForOffboarding(uid: string): Promise<SeatRelease> {
 }
 
 /**
+ * Brings the Firebase Auth account in line with the users doc after an
+ * offboarding or a restore.
+ *
+ * Rotating `sessionToken` only signs out a client that cooperates. Server-side
+ * the person is refused by `withAuth` (which reads the doc), but the Auth
+ * account itself would otherwise keep minting tokens from its refresh token and
+ * keep its `admin` claim — which Firestore rules trust without a read. So an
+ * offboarded account is disabled (no new ID tokens), its refresh tokens are
+ * revoked, and its admin claim cleared; a restored one is re-enabled, and
+ * `exchange-code` re-derives its claim on the next login.
+ *
+ * Driven by the doc's resulting state, not the request, because `isActive` and
+ * `isArchived` are independent: restoring one of them must not re-enable an
+ * account the other still blocks. Best-effort and logged — the doc write has
+ * already happened, and `withAuth` enforces it regardless.
+ */
+async function syncAuthAccountState(uid: string): Promise<void> {
+  try {
+    const user = await getUserById(uid);
+    const blocked = !user || user.isActive === false || user.isArchived === true;
+    if (blocked) {
+      await adminAuth.updateUser(uid, { disabled: true });
+      await adminAuth.revokeRefreshTokens(uid);
+      await adminAuth.setCustomUserClaims(uid, { admin: false });
+    } else {
+      await adminAuth.updateUser(uid, { disabled: false });
+    }
+  } catch (err) {
+    if ((err as { code?: string })?.code === 'auth/user-not-found') return;
+    console.error(`[UserLifecycle] Failed to sync Auth account state for ${uid}:`, err);
+  }
+}
+
+/**
  * PUT /api/admin/users/[uid]
  * Admin-only. Updates any user's profile fields.
  * Does NOT handle group membership — use /api/admin/groups/[groupId]/members for that.
@@ -120,12 +154,17 @@ export const PUT = withAuth(async (
       });
     }
 
+    const offboarding = sanitizedUpdates.isActive === false || sanitizedUpdates.isArchived === true;
+    const restoring = sanitizedUpdates.isActive === true || sanitizedUpdates.isArchived === false;
+    if (offboarding || restoring) {
+      await syncAuthAccountState(targetUid);
+    }
+
     // Revoking access and archiving both end the person's use of Bluu, so both
     // free their GoLogin seat. Restoring them does not buy it back.
-    const gologinSeat: SeatRelease | undefined =
-      sanitizedUpdates.isActive === false || sanitizedUpdates.isArchived === true
-        ? await releaseSeatForOffboarding(targetUid)
-        : undefined;
+    const gologinSeat: SeatRelease | undefined = offboarding
+      ? await releaseSeatForOffboarding(targetUid)
+      : undefined;
 
     return NextResponse.json({ success: true, gologinSeat });
   } catch (error: unknown) {

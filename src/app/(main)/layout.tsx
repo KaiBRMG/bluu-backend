@@ -4,7 +4,6 @@ import { NetworkStatusProvider } from "@/contexts/NetworkStatusContext";
 import { UserDataProvider } from "@/hooks/useUserData";
 import { BootLoaderProvider } from "@/contexts/BootLoaderContext";
 import AuthWrapper from "@/components/AuthWrapper";
-import ErrorLogger from "@/components/ErrorLogger";
 import AppVersionReporter from "@/components/AppVersionReporter";
 import PresenceReporter from "@/components/PresenceReporter";
 import TimezoneReporter from "@/components/TimezoneReporter";
@@ -27,7 +26,6 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     <AuthProvider>
       <NetworkStatusProvider>
         <UserDataProvider>
-          <ErrorLogger />
           <AppVersionReporter />
           {/* Outside LazyProviders on purpose: presence means "the app is open",
               which is true before any of the lazily-imported providers have

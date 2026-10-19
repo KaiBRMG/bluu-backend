@@ -14,7 +14,8 @@
  * held by nobody (unassigned sales, unmapped chatters) and removed rows, and
  * every **anomaly** the ledger can detect (`flags` — see `getLedgerAnomalies`),
  * including sales held **off the shift schedule** (`schedule` — see
- * `scheduleMatch.ts`). A missing `userId` means "mine", never "everyone's".
+ * `scheduleMatch.ts`), and every sale a dispute claimed with what the claim did
+ * to it (`disputes` — see `disputeLedger.ts`). A missing `userId` means "mine", never "everyone's".
  *
  * Every row says whether Bluu holds it where BuddyX credits it
  * (`matchesSource`) and, when not, why (`assignment`: a dispute or an admin).
@@ -45,6 +46,7 @@ import {
   deleteSale,
 } from '@/lib/services/caSalaryService';
 import { displayNamesFor } from '@/lib/services/userService';
+import { getSaleDisputeMarks } from '@/lib/services/disputeLedger';
 import { addDays, addMonths, currentMonthKey, dayKeyRange, enumerateDays, isDayKey, isMonthKey, monthKeyRange } from '@/lib/salary/salaryDate';
 import { SALARY_HISTORY_START_MONTH, SALES_CUTOVER_AT } from '@/lib/salary/salaryConstants';
 import { round2 } from '@/lib/salary/salaryEngine';
@@ -157,7 +159,13 @@ async function adminLedger(searchParams: URLSearchParams): Promise<NextResponse>
   const rows = await getAllSalesInRange(start, end);
   const live = rows.filter(s => !s.removedAt);
   const schedule = await getScheduleMatches(live, start, end);
-  const { names, flags } = await getLedgerAnomalies(rows, [...schedule.values()].flatMap(m => m.scheduled));
+  const [{ names, flags }, disputes] = await Promise.all([
+    getLedgerAnomalies(rows, [...schedule.values()].flatMap(m => m.scheduled)),
+    getSaleDisputeMarks(new Set(rows.map(s => s.saleId)), start),
+  ]);
+  // The Disputed view names filers too; most already hold a sale in the window.
+  const missing = [...new Set(Object.values(disputes).map(d => d.filedBy))].filter(uid => uid && !names.has(uid));
+  if (missing.length) for (const [uid, name] of await displayNamesFor(missing)) names.set(uid, name);
 
   // Unmapped-chatter rows are reported per chatter (the mapping lines), so
   // "unassigned" here means BuddyX assigned the sale to nobody.
@@ -192,6 +200,8 @@ async function adminLedger(searchParams: URLSearchParams): Promise<NextResponse>
       },
       // Only the sales with someone scheduled on their account; absent = nobody was.
       schedule: Object.fromEntries(schedule),
+      // Only the sales a dispute ever claimed — the latest claim and its outcome.
+      disputes,
       flags: {
         attributionConflicts: rows.filter(s => s.attributionConflict && !s.removedAt).map(s => s.saleId),
         vanishedAfterFinalise: rows.filter(s => s.vanishedAfterFinalise).map(s => s.saleId),

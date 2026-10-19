@@ -2,33 +2,29 @@
 
 import { useState, useCallback, useEffect, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
-import { toast } from 'sonner';
-import { RotateCcw } from 'lucide-react';
 import AppLayout from "@/components/AppLayout";
-import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
-} from '@/components/ui/select';
-import { DisputeTable, type ColumnKey } from '@/components/disputes/DisputeTable';
-import { useDisputesData, type AdminFilters } from '@/hooks/useDisputesData';
-import type { DisputeDocument, ApprovalStatus } from '@/types/firestore';
-import { DeletedUser } from '@/components/DeletedUser';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { currentMonthKey, isMonthKey } from '@/lib/salary/salaryDate';
 import { useAuth } from '@/components/AuthProvider';
-import { useAuthFetch } from '@/hooks/useAuthFetch';
-import { DisputeDetailDialog } from '@/components/disputes/DisputeDetailDialog';
 
 // `salaries` is the Payroll tab's id — kept so existing `?tab=salaries` links
 // still land, while the label says Payroll everywhere it is read.
-const ADMIN_TABS = ['overview', 'salaries', 'sales', 'coverage', 'rates', 'disputes'];
+const ADMIN_TABS = ['overview', 'salaries', 'sales', 'coverage', 'rates'];
 const noopSubscribe = () => () => {};
+/**
+ * `?tab=disputes` predates the merge (2026-10-19): disputes are a view of
+ * Sales now, so an old link lands there, on the Disputed view.
+ */
 function readRequestedTab(): string | null {
   const requested = new URLSearchParams(window.location.search).get('tab');
   if (requested === 'payroll') return 'salaries';
+  if (requested === 'disputes') return 'sales';
   return requested && ADMIN_TABS.includes(requested) ? requested : null;
+}
+function readArrivedForDisputes(): boolean {
+  return new URLSearchParams(window.location.search).get('tab') === 'disputes';
 }
 function readRequestedAgent(): string | null {
   return new URLSearchParams(window.location.search).get('agent');
@@ -53,202 +49,6 @@ function writeUrlState(tab: string, agent: string | null) {
   } catch {
     /* a URL that cannot be written is only a lost deep link */
   }
-}
-
-// ─── Column set ───────────────────────────────────────────────────────
-
-const ADMIN_COLUMNS: ColumnKey[] = [
-  'saleAmount', 'saleDate', 'fanName', 'creatorName',
-  'createdByName', 'assignedToName', 'CaApproval', 'AdminApproval', 'Comment',
-];
-
-const ADMIN_CA_APPROVED_COLUMNS: ColumnKey[] = [
-  'saleAmount', 'saleDate', 'fanName', 'creatorName',
-  'assignedToName', 'CaApproval', 'AdminApproval', 'Comment',
-];
-
-// ─── Filter dropdowns ─────────────────────────────────────────────────
-
-function AdminFiltersBar({
-  disputes,
-  filters,
-  onChange,
-}: {
-  disputes: DisputeDocument[];
-  filters: AdminFilters;
-  onChange: (f: AdminFilters) => void;
-}) {
-  const createdByOptions = [
-    ...new Map(disputes.map(d => [d.createdBy, d.createdByName])).entries(),
-  ].sort((a, b) => a[1].localeCompare(b[1]));
-
-  const assignedToOptions = [
-    ...new Map(disputes.map(d => [d.assignedTo, d.assignedToName])).entries(),
-  ].sort((a, b) => a[1].localeCompare(b[1]));
-
-  const creatorOptions = [
-    ...new Map(disputes.map(d => [d.Creator, d.creatorName])).entries(),
-  ].sort((a, b) => a[1].localeCompare(b[1]));
-
-  return (
-    <div className="flex flex-wrap gap-2 mb-3">
-      <Select
-        value={filters.createdBy ?? 'all'}
-        onValueChange={v => onChange({ ...filters, createdBy: v === 'all' ? undefined : v })}
-      >
-        <SelectTrigger size="sm" className="w-44">
-          <SelectValue placeholder="Created by" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All — created by</SelectItem>
-          {createdByOptions.map(([uid, name]) => (
-            <SelectItem key={uid} value={uid}>{name || <DeletedUser />}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      <Select
-        value={filters.assignedTo ?? 'all'}
-        onValueChange={v => onChange({ ...filters, assignedTo: v === 'all' ? undefined : v })}
-      >
-        <SelectTrigger size="sm" className="w-44">
-          <SelectValue placeholder="Assigned to" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All — assigned to</SelectItem>
-          {assignedToOptions.map(([uid, name]) => (
-            <SelectItem key={uid} value={uid}>{name || <DeletedUser />}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      <Select
-        value={filters.creator ?? 'all'}
-        onValueChange={v => onChange({ ...filters, creator: v === 'all' ? undefined : v })}
-      >
-        <SelectTrigger size="sm" className="w-44">
-          <SelectValue placeholder="Creator" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All — creators</SelectItem>
-          {creatorOptions.map(([id, name]) => (
-            <SelectItem key={id} value={id}>{name}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
-
-// ─── Admin panel ──────────────────────────────────────────────────────
-
-function AdminPanel({
-  filter,
-  columns = ADMIN_COLUMNS,
-  userTimezone,
-  showActions,
-  resolvedActions,
-  groupByCreatedBy,
-  selectable,
-  refreshKey,
-  onAction,
-  onBulkAction,
-  onOpenDetail,
-}: {
-  onOpenDetail?: (dispute: DisputeDocument) => void;
-  filter: string;
-  columns?: ColumnKey[];
-  userTimezone: string;
-  showActions?: boolean;
-  resolvedActions?: boolean;
-  groupByCreatedBy?: boolean;
-  selectable?: boolean;
-  refreshKey: number;
-  onAction?: (id: string, action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>, reason?: string) => Promise<void>;
-  onBulkAction?: (ids: string[], action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>, reason?: string) => Promise<void>;
-}) {
-  const { fetchDisputes } = useDisputesData();
-  const [disputes, setDisputes] = useState<DisputeDocument[]>([]);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [adminFilters, setAdminFilters] = useState<AdminFilters>({});
-
-  const load = useCallback(async (p: number, af: AdminFilters) => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const result = await fetchDisputes(filter, p, af);
-      setDisputes(result.disputes);
-      setTotalPages(result.totalPages);
-    } catch (err) {
-      // A failed read is a state, never an empty list (ca-salary.md §6).
-      console.error('[AdminPanel] load failed:', err);
-      setLoadError(err instanceof Error ? err.message : 'Could not load disputes');
-    } finally {
-      setLoading(false);
-    }
-  }, [filter, fetchDisputes]);
-
-  useEffect(() => {
-    load(page, adminFilters);
-  }, [page, load, adminFilters, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleFiltersChange = (f: AdminFilters) => {
-    setAdminFilters(f);
-    setPage(1);
-  };
-
-  const handlePageChange = (p: number) => setPage(p);
-
-  const handleAction = onAction
-    ? async (id: string, action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>, reason?: string) => {
-        await onAction(id, action, reason);
-        load(page, adminFilters);
-      }
-    : undefined;
-
-  const handleBulkAction = onBulkAction
-    ? async (ids: string[], action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>, reason?: string) => {
-        await onBulkAction(ids, action, reason);
-        load(page, adminFilters);
-      }
-    : undefined;
-
-  return (
-    <div className="pt-3">
-      <AdminFiltersBar
-        disputes={disputes}
-        filters={adminFilters}
-        onChange={handleFiltersChange}
-      />
-      {loadError && !loading && (
-        <p className="mb-3 flex flex-wrap items-center gap-2 text-sm text-red-400">
-          Couldn&apos;t load disputes: {loadError}
-          <Button size="xs" variant="ghost" className="text-red-400 hover:text-red-300" onClick={() => void load(page, adminFilters)}>
-            <RotateCcw className="size-3" aria-hidden />
-            Retry
-          </Button>
-        </p>
-      )}
-      <DisputeTable
-        disputes={disputes}
-        columns={columns}
-        loading={loading}
-        page={page}
-        totalPages={totalPages}
-        onPageChange={handlePageChange}
-        userTimezone={userTimezone}
-        onAction={showActions ? handleAction : undefined}
-        resolvedActions={resolvedActions}
-        groupByCreatedBy={groupByCreatedBy}
-        selectable={selectable}
-        onBulkAction={handleBulkAction}
-        onOpenDetail={onOpenDetail}
-      />
-    </div>
-  );
 }
 
 // ─── Lazily-loaded tab panels ─────────────────────────────────────────
@@ -308,8 +108,6 @@ const AdminRates = dynamic(() => import('@/components/ca-admin/AdminRates'), {
  * and refetching — a flash of October's roster is how September gets skipped.
  */
 export default function CaAdminPage() {
-  const { setAdminApproval, setAdminApprovalBulk } = useDisputesData();
-  const [refreshKey, setRefreshKey] = useState(0);
   const { user } = useAuth();
   // `null` until the server says which month payroll is on.
   const [month, setMonth] = useState<string | null>(null);
@@ -345,6 +143,7 @@ export default function CaAdminPage() {
   // would suspend the page; the reader's own pick then wins.
   const requestedTab = useSyncExternalStore(noopSubscribe, readRequestedTab, () => null);
   const requestedAgent = useSyncExternalStore(noopSubscribe, readRequestedAgent, () => null);
+  const arrivedForDisputes = useSyncExternalStore(noopSubscribe, readArrivedForDisputes, () => false);
   const [pickedTab, setPickedTab] = useState<string | null>(null);
   const tab = pickedTab ?? requestedTab ?? 'overview';
   // `undefined` = nothing picked yet this visit, so the URL's `?agent=` applies.
@@ -364,83 +163,12 @@ export default function CaAdminPage() {
     setAgent(uid);
   }, [setAgent]);
 
-  // ── Dispute detail, shared by every Disputes tab ──
-  const [detail, setDetail] = useState<DisputeDocument | null>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const openDetail = useCallback((dispute: DisputeDocument) => {
-    setDetail(dispute);
-    setDetailOpen(true);
-  }, []);
-  const authFetch = useAuthFetch();
-
-  /**
-   * Revert one transfer — the escape hatch for a wrong approval. The detail
-   * dialog shows the reason bar; this records it and refreshes the tables.
-   */
-  const untransfer = async (saleId: string, reason: string) => {
-    try {
-      await authFetch(`/api/ca-sales/${encodeURIComponent(saleId)}/transfer`, {
-        method: 'DELETE',
-        body: JSON.stringify({ reason }),
-      });
-      toast.success('Transfer reverted — the tip is back with the agent BuddyX credits');
-      setDetail(prev =>
-        prev ? { ...prev, untransfers: [...prev.untransfers, { saleId, by: '', at: new Date().toISOString(), reason }] } : prev,
-      );
-      setRefreshKey(k => k + 1);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not revert the transfer');
-      throw err;
-    }
-  };
-
-  const handleAdminAction = async (
-    id: string,
-    action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>,
-    reason?: string,
-  ) => {
-    const { transferResult } = await setAdminApproval(id, action, reason);
-    setRefreshKey(k => k + 1);
-    // A v2 approval moves money; say what moved, in words.
-    if (transferResult) {
-      const moved = transferResult.transferred.length;
-      const skipped = transferResult.skipped.length;
-      toast.success(
-        `${moved} ${moved === 1 ? 'tip' : 'tips'} moved` +
-          (skipped ? ` · ${skipped} skipped — ${[...new Set(transferResult.skipped.map(x => x.reason))].join(', ')}` : ''),
-      );
-    }
-  };
-
-  /**
-   * One request for a whole selection.
-   *
-   * Not a loop over `handleAdminAction`: that would be N round trips and, more
-   * importantly, N notifications — the bulk route writes the decisions in a
-   * batch and queues **one** message per filer naming the count.
-   */
-  const handleAdminBulkAction = async (
-    ids: string[],
-    action: Extract<ApprovalStatus, 'Approved' | 'Rejected'>,
-    reason?: string,
-  ) => {
-    const { updated, skipped, transferred, transferSkipped } = await setAdminApprovalBulk(ids, action, reason);
-    setRefreshKey(k => k + 1);
-    toast.success(
-      `${updated} ${updated === 1 ? 'dispute' : 'disputes'} ${action === 'Approved' ? 'approved' : 'rejected'}` +
-        // A stale row is the reviewer's business: it means the list they acted
-        // on no longer matches the data.
-        (skipped > 0 ? ` · ${skipped} no longer existed` : '') +
-        (transferred + transferSkipped > 0 ? ` · ${transferred} tips moved${transferSkipped ? `, ${transferSkipped} skipped` : ''}` : ''),
-    );
-  };
-
   return (
     <AppLayout>
       <div className="max-w-7xl">
         <h1 className="text-2xl font-bold tracking-tight">CA Admin</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          Payroll, sales, coverage, rates and disputes for every chat agent.
+          Payroll, sales and disputes, coverage and rates for every chat agent.
         </p>
 
         <div className="mt-6 rounded-lg border border-border-subtle bg-content-bg">
@@ -454,7 +182,6 @@ export default function CaAdminPage() {
                 <TabsTrigger value="sales">Sales</TabsTrigger>
                 <TabsTrigger value="coverage">Coverage</TabsTrigger>
                 <TabsTrigger value="rates">Rates</TabsTrigger>
-                <TabsTrigger value="disputes">Disputes</TabsTrigger>
               </TabsList>
             </div>
 
@@ -470,83 +197,14 @@ export default function CaAdminPage() {
                 )}
               </TabsContent>
               <TabsContent value="sales">
-                <AdminSales timezone={userTimezone} />
+                <AdminSales timezone={userTimezone} initialView={arrivedForDisputes ? 'disputed' : 'all'} />
               </TabsContent>
               <TabsContent value="coverage"><AdminCoverage /></TabsContent>
               <TabsContent value="rates"><AdminRates /></TabsContent>
-
-              <TabsContent value="disputes">
-                <h2 className="text-lg font-semibold tracking-tight">Disputes</h2>
-                <Tabs defaultValue="all" className="mt-3">
-                  <TabsList>
-                    <TabsTrigger value="all">All</TabsTrigger>
-                    <TabsTrigger value="unresolved">Unresolved</TabsTrigger>
-                    <TabsTrigger value="ca-approved">CA Approved</TabsTrigger>
-                    <TabsTrigger value="resolved">Resolved</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="all">
-                    <AdminPanel
-                      filter="admin-all"
-                      userTimezone={userTimezone}
-                      refreshKey={refreshKey}
-                      onOpenDetail={openDetail}
-                    />
-                  </TabsContent>
-
-                  <TabsContent value="unresolved">
-                    <AdminPanel
-                      filter="admin-unresolved"
-                      userTimezone={userTimezone}
-                      showActions
-                      selectable
-                      refreshKey={refreshKey}
-                      onOpenDetail={openDetail}
-                      onAction={handleAdminAction}
-                      onBulkAction={handleAdminBulkAction}
-                    />
-                  </TabsContent>
-
-                  <TabsContent value="ca-approved">
-                    <AdminPanel
-                      filter="admin-ca-approved"
-                      columns={ADMIN_CA_APPROVED_COLUMNS}
-                      userTimezone={userTimezone}
-                      showActions
-                      groupByCreatedBy
-                      selectable
-                      refreshKey={refreshKey}
-                      onOpenDetail={openDetail}
-                      onAction={handleAdminAction}
-                      onBulkAction={handleAdminBulkAction}
-                    />
-                  </TabsContent>
-
-                  <TabsContent value="resolved">
-                    <AdminPanel
-                      filter="admin-resolved"
-                      userTimezone={userTimezone}
-                      showActions
-                      resolvedActions
-                      refreshKey={refreshKey}
-                      onOpenDetail={openDetail}
-                      onAction={handleAdminAction}
-                    />
-                  </TabsContent>
-                </Tabs>
-              </TabsContent>
             </div>
           </Tabs>
         </div>
       </div>
-
-      <DisputeDetailDialog
-        dispute={detail}
-        open={detailOpen}
-        onOpenChange={setDetailOpen}
-        timezone={userTimezone}
-        onUntransfer={detail?.version === 2 && detail.AdminApproval === 'Approved' ? untransfer : undefined}
-      />
     </AppLayout>
   );
 }

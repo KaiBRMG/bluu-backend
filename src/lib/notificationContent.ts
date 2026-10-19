@@ -150,10 +150,11 @@ export const notifications = {
   }),
 
   disputeCaApproved: (assignedToName: string, count = 1): NotificationContent => ({
-    title: count > 1 ? 'Disputes Partially Approved' : 'Dispute Partially Approved',
+    // The holder's approval is final (2026-10-19): the sales have already moved.
+    title: count > 1 ? 'Disputes Approved' : 'Dispute Approved',
     message: count > 1
-      ? `${assignedToName} approved ${count} of your disputes! They will now be passed to your team leader for approval.`
-      : `${assignedToName} has approved your dispute! It will now be passed to your team leader for approval.`,
+      ? `Good news 🎉 ${assignedToName} approved ${count} of your disputes! The sales have moved to your Earnings Report.`
+      : `Good news 🎉 ${assignedToName} approved your dispute! The sale has moved to your Earnings Report.`,
     type: 'success',
     actionUrl: '/ca-portal/disputes',
   }),

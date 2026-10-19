@@ -661,7 +661,7 @@ Three calls worth not re-litigating:
 | [`salaryEngine.ts`](../src/lib/salary/salaryEngine.ts) | The whole calculation. Pure. |
 | [`salaryDate.ts`](../src/lib/salary/salaryDate.ts) | Day/month keys in the salary timezone |
 | [`salaryConstants.ts`](../src/lib/salary/salaryConstants.ts) | Defaults, the history floor, the cutover |
-| [`scheduleMatch.ts`](../src/lib/salary/scheduleMatch.ts) | Sales against the shift schedule — the off-schedule flag (display only) |
+| [`scheduleMatch.ts`](../src/lib/salary/scheduleMatch.ts) | Sales against the shift schedule — `scheduleHolder`, which the BuddyX sync credits each sale by (pay path), and the off-schedule flag (display) |
 | [`caSalaryService.ts`](../src/lib/services/caSalaryService.ts) | Firestore + the assembler |
 | [`caCoverageService.ts`](../src/lib/services/caCoverageService.ts) | Offers, claims, assignment |
 | [`leaveCoverage.ts`](../src/lib/services/leaveCoverage.ts) | Leave approval → release, and withdrawal → revert. `resolveLiveOccurrence` re-resolves a pinned request against the live roster first — see §6 |
@@ -715,9 +715,9 @@ Seven decisions inside that table are load-bearing.
 
 - **Outcome is part of the key.** Approved and rejected are different messages with different `type`s, so a sitting that approved two of someone's disputes and rejected one produces **two** notifications, not one blurred summary. An agent must hear both facts.
 - **`count` is a counter, not a name list.** Nothing in the copy names the disputes — "3 of your disputes have been approved" — so the queue carries a `FieldValue.increment` rather than merging labels. `reasons` is the arrayUnion, de-duplicated, which is why ten rejections citing the same reason produce one `REASON:` clause and a mixed batch produces `REASONS: a; b`.
-- **A bulk decision queues once, with the size of the set.** `PATCH /api/disputes/bulk-approval` (below) groups its selection by filer and calls `queueDisputeNotice({ count })` once per person — one write, not one per dispute.
+- **`count` lets a caller queue a set at once.** It is what the retired admin bulk bar used; today every decision is one dispute.
 
-**The admin table decides in bulk, and that is the other half of the fix.** The CA Admin → Disputes **Unresolved** and **CA Approved** tabs carry a leading checkbox column and a bulk bar; `PATCH /api/disputes/bulk-approval` (`ca-admin` page permission, `MAX_BULK` 100) reads the set with one `getAll`, writes one Firestore batch, and reports partial success rather than failing the set — an id that vanished since the page loaded is counted in `skipped` while the rest are written. It is **not** offered on the **Resolved** tab, where Approve and Reject are offered per row depending on the current outcome: one verdict applied to a mixed selection would flip decisions the reviewer never looked at. The agent-facing `/ca-portal/disputes` queue is unchanged — it rules on one sale at a time by design.
+**There is no admin queue any more (2026-10-19).** The holder's approval is final and moves the sales (buddyx.md §5), so the CA Admin → Disputes tab and its bulk bar (`PATCH /api/disputes/bulk-approval`) are gone. Admins audit instead, on CA Admin → Sales: a **Moved by dispute** feed with *Overturn*, attention lines for claims nobody holds, and a **Disputed** ledger view (buddyx.md §5b). The `stage: 'ca'` approved notice now tells the filer the sale **has moved**.
 
 **Both doors to overtime send it, not just the board.** Assigning released accounts on the Coverage board queues the notice, and so does an admin marking accounts **Overtime** on a shift in Shift Management — `queueOvertimeAssignedForShift` in the same file, called by `POST /api/shifts` and `PUT /api/shifts/[shiftId]` after the write and non-fatally. For a long time only the first did, so an agent given overtime by a roster edit was never told and found out by looking at their calendar, if they looked. Three things make the second route safe to add:
 

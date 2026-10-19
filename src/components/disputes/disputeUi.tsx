@@ -115,18 +115,40 @@ export function DisputeCreatorChip({
   );
 }
 
+// ─── DisputeScope ─────────────────────────────────────────────────────
+
+/**
+ * What a claim covers — the creator (or "2 creators") and, past one, how many
+ * sales. Shared by the dashboard column and CA Admin's Moved-by-dispute feed so
+ * the same claim never reads two ways.
+ */
+export function DisputeScope({ dispute, className }: { dispute: DisputeDocument; className?: string }) {
+  const count = dispute.version === 2 ? dispute.sales.length : 1;
+  const creators = dispute.version === 2 ? new Set(dispute.sales.map(s => s.creatorId ?? s.creatorName)).size : 1;
+  if (creators > 1 || dispute.Creator === 'multiple') {
+    return (
+      <span className={cn('min-w-0 truncate text-xs text-zinc-300', className)}>
+        {count} sales · {creators} creators
+      </span>
+    );
+  }
+  return (
+    <>
+      <DisputeCreatorChip dispute={dispute} size="xs" className={cn('min-w-0 text-zinc-300', className)} />
+      {count > 1 && <span className="shrink-0 text-xs text-zinc-400">· {count} sales</span>}
+    </>
+  );
+}
+
 // ─── StagePill ────────────────────────────────────────────────────────
+
+/** The status pill's shape; the hue comes from `STATUS_COLORS` via the caller. */
+export const PILL_CLASS = 'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap';
 
 export function StagePill({ dispute }: { dispute: DisputeStageInput }) {
   const stage: DisputeStage = disputeStage(dispute);
   return (
-    <span
-      title={STAGE_HINT[stage]}
-      className={cn(
-        'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap',
-        stagePillClass(stage),
-      )}
-    >
+    <span title={STAGE_HINT[stage]} className={cn(PILL_CLASS, stagePillClass(stage))}>
       {STAGE_LABEL[stage]}
     </span>
   );
@@ -209,6 +231,19 @@ export interface ReasonBarCopy {
   busy: string;
   required?: boolean;
 }
+
+/**
+ * An admin reversing a holder's approval (CA Admin → Sales). Required: it takes
+ * back money an agent was already told they have, and the reason is recorded
+ * on the dispute and sent to the filer.
+ */
+export const OVERTURN_COPY: ReasonBarCopy = {
+  label: 'Why this move is being overturned',
+  placeholder: 'Reason (required) — the filer sees this',
+  confirm: 'Overturn',
+  busy: 'Overturning…',
+  required: true,
+};
 
 const REJECT_COPY: ReasonBarCopy = {
   label: 'Reason for rejecting this dispute',

@@ -18,7 +18,7 @@ import {
   formatSaleDate,
   STAGE_HINT,
 } from './disputeStatus';
-import { DisputeCreatorChip, PersonTag, StagePill, RejectReasonBar, type ReasonBarCopy } from './disputeUi';
+import { DisputeCreatorChip, OVERTURN_COPY, PersonTag, StagePill, RejectReasonBar, type ReasonBarCopy } from './disputeUi';
 import type { DisputeVerdict } from './DisputeReviewQueue';
 import { CreatorChip } from '@/components/creators/CreatorChip';
 import { AttrChip, FanLabel } from '@/components/buddyx/buddyxUi';
@@ -79,6 +79,7 @@ export function DisputeDetailDialog({
   timezone,
   onAction,
   onUntransfer,
+  onOverturn,
 }: {
   /** Null between closing and the exit animation finishing. */
   dispute: DisputeDocument | null;
@@ -92,8 +93,14 @@ export function DisputeDetailDialog({
    * approval. Offered per moved sale on an approved v2 dispute.
    */
   onUntransfer?: (saleId: string, reason: string) => Promise<void>;
+  /**
+   * CA Admin only: reverse the whole approval — every moved sale goes back.
+   * Offered while the dispute stands approved.
+   */
+  onOverturn?: (dispute: DisputeDocument, reason: string) => Promise<void>;
 }) {
   const [rejecting, setRejecting] = useState(false);
+  const [overturning, setOverturning] = useState(false);
   const [busy, setBusy] = useState(false);
   const [reverting, setReverting] = useState<string | null>(null);
 
@@ -121,7 +128,10 @@ export function DisputeDetailDialog({
         // Reset on close, not on open: reopening the *same* dispute with a
         // half-typed rejection reason still showing is a decision the reviewer
         // did not make this time.
-        if (!next) setRejecting(false);
+        if (!next) {
+          setRejecting(false);
+          setOverturning(false);
+        }
         onOpenChange(next);
       }}
     >
@@ -181,12 +191,31 @@ export function DisputeDetailDialog({
               {dispute.resolvedAt && (
                 <>
                   <dt className="text-zinc-400">Decided</dt>
-                  <dd className="tabular-nums">{formatSaleDate(dispute.resolvedAt, timezone)}</dd>
+                  <dd className="tabular-nums">
+                    {formatSaleDate(dispute.approvedAt ?? dispute.resolvedAt, timezone)}
+                    {dispute.approvedVia && (
+                      <span className="ml-1.5 text-xs text-zinc-400">
+                        approved by {dispute.approvedByName || 'a former agent'}
+                        {dispute.approvedVia === 'admin' ? ' (admin)' : ''}
+                      </span>
+                    )}
+                  </dd>
+                </>
+              )}
+
+              {dispute.overturnedAt && (
+                <>
+                  <dt className="text-zinc-400">Overturned</dt>
+                  <dd className="min-w-0">
+                    <span className="tabular-nums">{formatSaleDate(dispute.overturnedAt, timezone)}</span>
+                    {dispute.overturnedByName && <span className="ml-1.5 text-xs text-zinc-400">by {dispute.overturnedByName}</span>}
+                    {dispute.overturnReason && <p className="mt-0.5 text-sm text-pretty text-red-400">{dispute.overturnReason}</p>}
+                  </dd>
                 </>
               )}
             </dl>
 
-            {/* A v2 claim names its sales; each one's state is what the admin's
+            {/* A v2 claim names its sales; each one's state is what the
                 approval did to it. */}
             {dispute.version === 2 && dispute.sales.length > 0 && (
               <div className={cn('border-t pt-4', HAIRLINE)}>
@@ -269,6 +298,43 @@ export function DisputeDetailDialog({
               <div className={cn('border-t pt-4', HAIRLINE)}>
                 <h3 className="text-xs font-semibold text-zinc-400">Their reason</h3>
                 <p className="mt-1.5 max-w-[70ch] text-sm text-pretty">{dispute.Comment}</p>
+              </div>
+            )}
+
+            {onOverturn && stage === 'approved' && (
+              <div className={cn('border-t pt-4', HAIRLINE)}>
+                {overturning ? (
+                  <RejectReasonBar
+                    id={`detail-overturn-${dispute.id}`}
+                    busy={busy}
+                    copy={OVERTURN_COPY}
+                    onCancel={() => setOverturning(false)}
+                    onConfirm={async reason => {
+                      setBusy(true);
+                      try {
+                        await onOverturn(dispute, reason ?? '');
+                        setOverturning(false);
+                        onOpenChange(false);
+                      } catch {
+                        // The caller toasts; the reason stays typed.
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  />
+                ) : (
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs text-zinc-400">Overturning gives every moved sale back.</p>
+                    <Button
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => setOverturning(true)}
+                      className="text-red-400 hover:bg-red-500/10 hover:text-red-300 dark:hover:bg-red-500/10"
+                    >
+                      Overturn
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
 

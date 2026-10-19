@@ -10,6 +10,8 @@
 
 import { STATUS_COLORS, STATUS_DOT, type CRStatus } from '@/lib/campaignTracking';
 import type { DisputeDocument } from '@/types/firestore';
+import { NO_ONE, type SaleDisputeOutcome } from '@/lib/disputes/disputeRules';
+import { pluralise } from '@/lib/salary/salaryFormat';
 import { safeTimezone } from '@/lib/utils/timezone';
 
 /**
@@ -27,6 +29,7 @@ export type DisputeStage =
   | 'awaiting-admin'
   | 'declined-ca'
   | 'approved'
+  | 'overturned'
   | 'rejected';
 
 /** Each stage maps onto an existing semantic hue; never a fresh hex. */
@@ -35,6 +38,7 @@ const STAGE_HUE: Record<DisputeStage, CRStatus> = {
   'awaiting-admin': 'In Progress',    // blue   — moving, not waiting on the filer
   'declined-ca': 'Rejected',          // red
   approved: 'Completed',              // green
+  overturned: 'Rejected',             // red
   rejected: 'Rejected',               // red
 };
 
@@ -43,34 +47,64 @@ export const STAGE_LABEL: Record<DisputeStage, string> = {
   'awaiting-admin': 'Awaiting admin',
   'declined-ca': 'Declined by CA',
   approved: 'Approved',
+  overturned: 'Overturned by admin',
   rejected: 'Rejected by admin',
 };
 
 /** The one-line "what happens next", used as the pill's accessible title. */
 export const STAGE_HINT: Record<DisputeStage, string> = {
   'awaiting-ca': 'The chatter it was assigned to has not reviewed it yet.',
-  'awaiting-admin': 'Cleared review — an admin has the final call.',
+  'awaiting-admin': 'No agent holds this sale, so an admin rules on it.',
   'declined-ca': 'The chatter it was assigned to declined it. Check your notifications for their reason.',
   approved: 'Approved — the sale has moved onto your earnings report.',
+  overturned: 'An admin overturned the approval. The sales went back to where they were.',
   rejected: 'An admin rejected it. The sale stays where it was.',
 };
 
-export type DisputeStageInput = Pick<
-  DisputeDocument,
-  'CaApproval' | 'AdminApproval' | 'assignedTo'
->;
+export type DisputeStageInput = Pick<DisputeDocument, 'CaApproval' | 'AdminApproval' | 'assignedTo'> &
+  Partial<Pick<DisputeDocument, 'overturnedAt'>>;
 
+/**
+ * Since 2026-10-19 the holder's approval is final, so `AdminApproval` is the
+ * verdict whoever gave it — a CA approval sets both. `awaiting-admin` now means
+ * a claim on a sale nobody holds (or one left half-approved by the old flow).
+ */
 export function disputeStage(d: DisputeStageInput): DisputeStage {
   if (d.AdminApproval === 'Approved') return 'approved';
-  if (d.AdminApproval === 'Rejected') return 'rejected';
+  if (d.AdminApproval === 'Rejected') return d.overturnedAt ? 'overturned' : 'rejected';
   if (d.CaApproval === 'Rejected') return 'declined-ca';
-  // 'No One' skips CA review entirely and lands straight on the admin desk.
-  if (d.CaApproval === 'Approved' || d.assignedTo === 'No One') return 'awaiting-admin';
+  // 'No One' has no holder to approve, so it waits on an admin.
+  if (d.CaApproval === 'Approved' || d.assignedTo === NO_ONE) return 'awaiting-admin';
   return 'awaiting-ca';
 }
 
 export const stagePillClass = (stage: DisputeStage): string => STATUS_COLORS[STAGE_HUE[stage]];
 export const stageDotClass = (stage: DisputeStage): string => STATUS_DOT[STAGE_HUE[stage]];
+
+// ─── Per-sale outcome (CA Admin → Sales, Disputed view) ───────────────
+
+/** Same borrowing rule as the stages: orange waits on a person, green moved, red refused. */
+const OUTCOME_HUE: Record<SaleDisputeOutcome, CRStatus> = {
+  open: 'Awaiting Approval',
+  moved: 'Completed',
+  skipped: 'Awaiting Approval',
+  reverted: 'Archived',
+  declined: 'Rejected',
+  overturned: 'Rejected',
+  rejected: 'Rejected',
+};
+
+export const OUTCOME_LABEL: Record<SaleDisputeOutcome, string> = {
+  open: 'Open',
+  moved: 'Moved',
+  skipped: 'Not moved',
+  reverted: 'Reverted',
+  declined: 'Declined by CA',
+  overturned: 'Overturned',
+  rejected: 'Rejected by admin',
+};
+
+export const outcomePillClass = (outcome: SaleDisputeOutcome): string => STATUS_COLORS[OUTCOME_HUE[outcome]];
 
 // ─── Formatters ───────────────────────────────────────────────────────
 
@@ -116,4 +150,26 @@ export function formatSaleDateCompact(iso: string | null, timezone: string): str
   } catch {
     return iso;
   }
+}
+
+/**
+ * What a verdict did, in words — the holder's Approve moves money now, so the
+ * toast says how much moved rather than just "approved".
+ */
+export function verdictToast(
+  verdict: 'Approved' | 'Rejected',
+  transferResult: DisputeDocument['transferResult'],
+): string {
+  if (verdict === 'Rejected') return 'Dispute rejected';
+  if (!transferResult) return 'Dispute approved';
+  const { transferred, skipped } = transferResult;
+  return (
+    `Approved · ${pluralise(transferred.length, 'sale')} moved` +
+    (skipped.length ? ` · ${skipped.length} not moved — ${skipReasons(skipped)}` : '')
+  );
+}
+
+/** "month finalised, held by another dispute" — each distinct reason once. */
+export function skipReasons(skipped: Array<{ reason: string }>): string {
+  return [...new Set(skipped.map(s => s.reason))].join(', ');
 }

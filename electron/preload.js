@@ -335,16 +335,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('app-closing');
   },
 
-  // Bug reporting — main process forwards errors here so renderer can POST to /api/bugs
-  bugs: {
-    onReport: (callback) => {
-      ipcRenderer.on('bug:report', (_event, payload) => callback(payload));
-    },
-    removeReportListener: () => {
-      ipcRenderer.removeAllListeners('bug:report');
-    },
-  },
-
   // Platform / version info + lifecycle
   app: {
     getPlatform: () => ipcRenderer.invoke('app:getPlatform'),

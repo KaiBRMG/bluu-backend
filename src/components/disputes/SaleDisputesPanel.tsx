@@ -19,8 +19,9 @@ import {
   formatSaleDateCompact,
   STAGE_LABEL,
   stagePillClass,
+  verdictToast,
 } from './disputeStatus';
-import { DisputeCreatorChip, PersonTag, RejectReasonBar } from './disputeUi';
+import { DisputeScope, PersonTag, RejectReasonBar } from './disputeUi';
 import { DisputeDetailDialog } from './DisputeDetailDialog';
 import type { DisputeVerdict } from './DisputeReviewQueue';
 
@@ -154,8 +155,8 @@ export function SaleDisputesPanel({
 
   const rule = useCallback(async (id: string, verdict: DisputeVerdict, reason?: string) => {
     try {
-      await setCaApproval(id, verdict, reason);
-      toast.success(verdict === 'Approved' ? 'Dispute approved' : 'Dispute rejected');
+      const { transferResult } = await setCaApproval(id, verdict, reason);
+      toast.success(verdictToast(verdict, transferResult));
       // Refetched rather than spliced out locally: a ruling changes the count
       // in the heading and can move the dispute into the filer's Decided list,
       // and an optimistic removal would leave that heading lying until the next
@@ -479,24 +480,13 @@ function RowShell({
  * for one of them would misstate what is being decided.
  */
 function RowIdentity({ dispute }: { dispute: DisputeDocument }) {
-  const count = dispute.version === 2 ? dispute.sales.length : 1;
-  const creators = dispute.version === 2 ? new Set(dispute.sales.map(s => s.creatorId ?? s.creatorName)).size : 1;
   return (
     <div className="flex min-w-0 items-center gap-1.5">
       <span className="shrink-0 text-sm font-semibold tabular-nums">
         {formatMoney(dispute.saleAmount)}
       </span>
       <span aria-hidden className="text-zinc-400">·</span>
-      {creators > 1 || dispute.Creator === 'multiple' ? (
-        <span className="min-w-0 truncate text-xs text-zinc-300">
-          {count} sales · {creators} creators
-        </span>
-      ) : (
-        <>
-          <DisputeCreatorChip dispute={dispute} size="xs" className="min-w-0 text-zinc-300" />
-          {count > 1 && <span className="shrink-0 text-xs text-zinc-400">· {count} sales</span>}
-        </>
-      )}
+      <DisputeScope dispute={dispute} />
     </div>
   );
 }
@@ -658,7 +648,9 @@ function DecidedRow({
       : 'Approved — moving to your report'
     : stage === 'declined-ca'
       ? `Declined by ${dispute.assignedToName || 'the reviewer'}`
-      : 'Rejected by an admin';
+      : stage === 'overturned'
+        ? 'Overturned by an admin — the sale went back'
+        : 'Rejected by an admin';
   // The visible string carries an em dash, which a screen reader announces as
   // "em dash". Same fact, punctuated for the ear.
   const spoken = approved

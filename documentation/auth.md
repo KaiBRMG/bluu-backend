@@ -21,7 +21,7 @@
 | `src/components/AuthProvider.tsx` | Internal-employee auth context (`isActive` enforced) |
 | `src/components/CreatorAuthProvider.tsx` | Creator auth context |
 | `src/components/AuthWrapper.tsx` | Gates the app during auth resolution (boot phase `'auth'`) |
-| `src/lib/middleware/withAuth.ts` | API guard: verifies Firebase Bearer token |
+| `src/lib/middleware/withAuth.ts` | API guard: verifies the Firebase Bearer token **and** that it belongs to an active employee |
 | `src/lib/middleware/withCreatorAuth.ts` | API guard: token + creator doc existence + `isActive` |
 | `src/app/api/creator/telegram/session/route.ts` | **The creator portal's sign-in**: Mini App `initData` → Firebase custom token. See [telegram.md](telegram.md) |
 | `src/lib/middleware/apiHelpers.ts` | `checkPageAccess`, notification batching helpers |
@@ -188,6 +188,8 @@ Step 2 must stay. A session established before device identity shipped has no ma
 
 **RULE — revoking rotates, it never deletes.** `revokeSession` replaces the entry's token and drops the index doc. Deleting the *entry* would send that client back to step 2, where the legacy token may still match — i.e. the user would not actually be signed out. Deactivation (`PUT /api/admin/users/[uid]` with `isActive: false`) needs **both** halves for the same reason: it rotates `sessionToken` *and* deletes the whole `sessions` map, so new-bundle clients fall through to a comparison that now fails.
 
+**RULE — that rotation is the client-side half only.** It signs out a renderer that cooperates; it does nothing to someone holding a copied refresh token. The server-side half is `syncAuthAccountState` in the same route: on deactivate **or** archive it disables the Firebase Auth account, revokes its refresh tokens and sets `admin: false`; on restore it re-enables (driven by the doc's resulting state, so restoring one flag never re-enables an account the other still blocks). It is best-effort because `withAuth` already refuses from the doc; `exchange-code` re-enables a still-disabled account for a user whose doc is active, so a failed restore heals on the next login. `firestore.rules`' `hasPagePermission()` applies the same active/unarchived test on the doc it already reads, so permission-gated collections are refused at once too. Residual window, on an already-issued ID token (≤1h): the person's **own** docs (their user doc, time entries, notifications…), and — for an ex-admin — anything behind `isAdmin()`, which is a JWT claim with no read to check against. Closing the latter would cost a `get()` on every admin rule evaluation; deliberately not done.
+
 The delete cascade calls `releaseAllDeviceSessions` — without it the index keeps resolving a deleted employee's browser to their old uid, which is exactly the lookup the public share page performs. See [user-management.md](user-management.md).
 
 **RULE — a displaced logout must clock the timer out first.** `AuthWrapper`'s displaced effect `await`s `clockOutAndFlush()` (from `TimeTrackingContext`) *before* `auth.signOut()`. A displaced user is signed out without ever reaching the Clock Out button, so skipping this leaves the session open server-side until the daily stale-session Cloud Function closes it — and leaves a buffer with no `clock-out` event, which renders as a phantom live session. See [time-tracking.md](time-tracking.md#3-crash--restart-robustness).
@@ -208,8 +210,10 @@ See also [data-layer.md](data-layer.md).
 
 Every API route wraps its handler in one of:
 
-- **`withAuth`** — verifies Firebase Bearer token, injects `DecodedIdToken` (as `token`).
+- **`withAuth`** — verifies the Firebase Bearer token, refuses a `tg` (creator) token, then requires an **active, unarchived `users` doc** behind the uid (cached `getUserById`), and injects `DecodedIdToken` (as `token`). Refusals are a 403 with the same generic `USER_NOT_REGISTERED` body as `exchange-code`.
 - **`withCreatorAuth`** — same, **plus** requires the token's `tg: true` claim (the Telegram session lock — checked first, so a non-Telegram token costs no Firestore read), then verifies the caller exists in the `creators` collection and `isActive !== false`.
+
+**RULE — a valid Firebase token is not an employee.** Three kinds of valid token exist that must never reach an employee route: Telegram creator sessions; **any Google account** (the browser login's `signInWithPopup` makes Firebase Auth create an account and issue a token *before* `/api/auth/session-token` consults the allowlist, and the client-side sign-out does not invalidate it); and offboarded employees (an ID token outlives a refresh-token revocation by up to an hour). `withAuth` refuses all three on the `users` doc. The same reasoning applies to `firestore.rules`: `isSignedIn()` alone must never gate a read — pair it with ownership, `isAdmin()`, `hasPagePermission()` or `isTelegramCreator()`. Never verify a token by hand in a route (`verifyIdToken` directly) and treat it as staff; `/api/app-update` does so only to pick a rollout cohort, which grants nothing.
 
 **RULE — the creator session lock is a token claim, enforced server-side in two places.** Only `POST /api/creator/telegram/session` can mint `tg: true`, and only after verifying Telegram's `initData` signature. It is checked in `withCreatorAuth` **and** in `firestore.rules` (`isTelegramCreator()`), because the portal reads Firestore directly through live `onSnapshot`s — enforcing it in one place only would leave the whole data path open. See [telegram.md](telegram.md#the-session-lock--three-parts-one-of-which-is-the-real-one).
 
@@ -219,7 +223,7 @@ Authorization layers **on top of** the middleware inside handlers.
 
 | Tier | Check | Use for | Examples |
 |---|---|---|---|
-| 1. Authenticated only | `withAuth` alone | General reference data needed across many pages where a single page-permission check would block legitimate callers | `/api/creators`, `/api/users/display-names`, `/api/disputes/users` |
+| 1. Any employee | `withAuth` alone (active `users` doc) | General reference data needed across many pages where a single page-permission check would block legitimate callers | `/api/creators`, `/api/users/display-names`, `/api/disputes/users` |
 | 2. Page permission | `checkPageAccess(token.uid, '<pageId>')` (`apiHelpers.ts`) or inline `caller.permittedPageIds.includes(...)` | Most admin/feature endpoints | Most of `/api/admin/*`, `/api/shifts/*` |
 | 3. Admin claim | `token.admin !== true` guard | Actions gating access to the **system itself** or the **authorization graph** | see below |
 

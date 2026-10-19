@@ -6,7 +6,7 @@ import { DeletedUser } from '@/components/DeletedUser';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 
 /**
- * Avatar + display name pill. Promoted from DisputeTable for reuse across
+ * Avatar + display name pill. Promoted from the retired admin dispute table for reuse across
  * the disputes and SMM tables.
  * - name === 'No One' renders as muted text (unassigned disputes/accounts)
  * - empty name renders <DeletedUser /> (user doc no longer exists)

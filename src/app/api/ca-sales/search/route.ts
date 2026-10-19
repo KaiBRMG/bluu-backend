@@ -7,8 +7,10 @@
  * - **Tips and PPVs.** PPVs were left out while a fix had to be made in BuddyX,
  *   which cannot reassign one; an approval now moves the sale inside Bluu
  *   Backend, so a PPV is claimable exactly like a tip.
- * - **Scoped.** A creator is required, and the window is at most 7 days, inside
- *   the open months, after the cutover. There is no "show me everything".
+ * - **Scoped.** A creator is required, and the window lies inside the open
+ *   months (this month and last), after the cutover. There is no "show me
+ *   everything". (A 7-day cap on the window was dropped 2026-10-19 — the
+ *   open-months floor and `MAX_ROWS` already bound the read.)
  * - **No totals.** Each row names its holder (so the agent knows whom they are
  *   claiming from), but nothing sums a colleague's month.
  * - The caller's own sales and removed rows are left out.
@@ -31,8 +33,7 @@ import { displayNamesFor } from '@/lib/services/userService';
 import type { CaSaleDocument } from '@/types/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
-const MAX_WINDOW_DAYS = 7;
-/** A creator's busiest week is well under this; it bounds a hostile query. */
+/** Bounds a hostile query; past it the dialog asks for a narrower window. */
 const MAX_ROWS = 500;
 
 export interface SaleSearchRow {
@@ -67,9 +68,6 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     }
     const [start] = dayKeyRange(from);
     const [, end] = dayKeyRange(to);
-    if (end - start > MAX_WINDOW_DAYS * 86_400_000) {
-      return NextResponse.json({ error: `Search at most ${MAX_WINDOW_DAYS} days at a time.` }, { status: 400 });
-    }
 
     // Open months only: this month and last. Anything older is payroll history.
     const oldest = addMonths(currentMonthKey(), -1);

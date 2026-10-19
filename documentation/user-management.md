@@ -127,6 +127,8 @@ A user's timezone drives every time the product renders: shift times, salary day
 
 `users/{uid}.isArchived === true` → user is **removed from the system but their data is NOT deleted** from Firestore.
 
+**Archiving (like deactivating) also ends access server-side** — the Firebase Auth account is disabled and its refresh tokens revoked, and `withAuth` refuses any uid whose doc is archived or inactive. See [auth.md](auth.md#device-identity--session-enforcement).
+
 **THE RULE:** Filter archived users out of any list/dropdown where you **select or act on a user**, but keep them wherever their **existing data must still resolve or display**.
 
 ### The four user-list sources
@@ -154,7 +156,7 @@ A user's timezone drives every time the product renders: shift times, salary day
 - **Their GoLogin seat**, first, while the user doc still exists (`releaseGoLoginSeat`): the provider seat, `gologin-accounts/{uid}` (with its encrypted token) and their direct GoLogin page grants. Best-effort — a failure returns `gologinSeat: 'failed'` and is toasted, never stops the cascade. **Revoking access (`isActive: false`) and archiving release it too**, via the PUT handler; restoring does not re-grant it. See [gologin.md](gologin.md#members).
 - `users/{uid}`, group membership (`groups/*.members`), page-permission entries (`page-permissions/*.users.{uid}`), `active_sessions/{uid}`.
 - **The login allowlist entry** `auth-emails/{normalisedEmail}` (`releaseEmailClaim`). The email is read off the doc *before* it is deleted. Leaving the claim behind would keep the address pointing at a dead uid: re-registering that person would fail with "email already taken", and a login attempt would resolve to a doc that no longer exists.
-- Every doc **owned** by the user (`userId`/`uid` field) in: `time_entries`, legacy `time-entries`, `screenshots`, `shifts`, `leave_requests`, `leave-ledger`, `notifications`, `bugs`.
+- Every doc **owned** by the user (`userId`/`uid` field) in: `time_entries`, legacy `time-entries`, `screenshots`, `shifts`, `leave_requests`, `leave-ledger`, `notifications`, `bugs` (legacy — the bug reporter and `/api/bugs` were removed 2026-10-19; the cascade still clears old reports).
 - Storage: `screenshots/{uid}/` prefix (full-size + thumbnails) and `profile-photos/{uid}/`.
 - The **Firebase Auth account** (`adminAuth.deleteUser(uid)`, tolerant of `auth/user-not-found`). **Why it matters:** deleting only the Firestore doc leaves an orphaned login — the user could sign in again, get the *same* uid back, and silently recreate their doc ("resurrection"). Deleting the Auth account closes that. The mirror failure (Auth account deleted but doc left behind) is what produces **duplicate** `users` docs for one email — see [auth.md](auth.md#login-identity--duplicate-account-prevention).
 

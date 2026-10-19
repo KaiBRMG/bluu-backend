@@ -18,6 +18,72 @@ const BASE_ORIGIN = new URL(BASE_URL).origin;
 // (an old notification, a pasted URL) is re-pointed at BASE_URL in place rather
 // than thrown out to the system browser — see will-navigate.
 const LEGACY_BASE_URL = 'https://bluu-backend.vercel.app';
+const LEGACY_ORIGIN = new URL(LEGACY_BASE_URL).origin;
+
+/**
+ * Is this URL the app? Compared by ORIGIN, never by string prefix:
+ * `'https://app.bluurock.com.evil.example/'` and
+ * `'https://app.bluurock.com@evil.example/'` both start with BASE_URL, and both
+ * load someone else's page — with this preload, and so with `electronAPI`.
+ */
+function isAppUrl(url) {
+  try {
+    return new URL(url).origin === BASE_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * IPC sender check, applied to EVERY handler by wrapping `ipcMain` below.
+ *
+ * The preload hands any page it runs in desktop screenshots, input events, the
+ * clipboard and the GoLogin launcher. `will-navigate` keeps foreign pages out of
+ * our windows, but that is one guard; this is the second, at the point where the
+ * capability is actually exercised. Trusted senders are the app (official or
+ * legacy origin — pre-0.16.0 routing re-points the latter, but a stale page can
+ * still be on it) and our own bundled `file:` pages (loading, offline, snip,
+ * widget, recorder), which `will-navigate` never lets a renderer reach on its
+ * own. A destroyed frame (`senderFrame` null) is not trusted.
+ */
+function isTrustedSender(event) {
+  const frame = event && event.senderFrame;
+  if (!frame) return false;
+  let parsed;
+  try {
+    parsed = new URL(frame.url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === 'file:') return true;
+  return parsed.origin === BASE_ORIGIN || parsed.origin === LEGACY_ORIGIN;
+}
+
+// Wrap registration once, before any handler exists, so no handler can be
+// added without the check. `handle` rejects the renderer's promise; `on`
+// drops the message (nothing in the preloads uses sendSync, so nothing waits).
+for (const method of ['handle', 'handleOnce']) {
+  const register = ipcMain[method].bind(ipcMain);
+  ipcMain[method] = (channel, listener) =>
+    register(channel, (event, ...args) => {
+      if (!isTrustedSender(event)) {
+        console.warn(`[ipc] Refused ${channel} from untrusted sender:`, event.senderFrame?.url);
+        throw new Error('Untrusted IPC sender');
+      }
+      return listener(event, ...args);
+    });
+}
+for (const method of ['on', 'once']) {
+  const register = ipcMain[method].bind(ipcMain);
+  ipcMain[method] = (channel, listener) =>
+    register(channel, (event, ...args) => {
+      if (!isTrustedSender(event)) {
+        console.warn(`[ipc] Dropped ${channel} from untrusted sender:`, event.senderFrame?.url);
+        return;
+      }
+      return listener(event, ...args);
+    });
+}
 
 // Custom protocol for OAuth callback
 const PROTOCOL = 'bluu';
@@ -3962,7 +4028,7 @@ function attachWindowBehaviour(win, { isMain, appUrl, minWidth, minHeight, satel
 
   // Prevent navigation to other origins from the electron window
   win.webContents.on('will-navigate', (e, url) => {
-    if (url.startsWith(BASE_URL) || LOCAL_PAGE_URLS.has(url.split('?')[0])) return;
+    if (isAppUrl(url) || LOCAL_PAGE_URLS.has(url.split('?')[0])) return;
     e.preventDefault();
     if (url === LEGACY_BASE_URL || url.startsWith(`${LEGACY_BASE_URL}/`)) {
       win.loadURL(`${BASE_URL}${url.slice(LEGACY_BASE_URL.length)}`);
@@ -3975,7 +4041,7 @@ function attachWindowBehaviour(win, { isMain, appUrl, minWidth, minHeight, satel
   // with backoff. Ignore sub-frame failures and user-aborted loads (-3).
   win.webContents.on('did-fail-load', (_e, errorCode, _desc, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return;
-    if (validatedURL.startsWith(BASE_URL)) {
+    if (isAppUrl(validatedURL)) {
       console.log(`[main] did-fail-load (${errorCode}) for ${validatedURL} — showing offline screen`);
       // The tracker's renderer is gone, so its anchor is stale — the widget would
       // otherwise keep counting up against a session nobody is holding. It comes
@@ -3987,7 +4053,7 @@ function attachWindowBehaviour(win, { isMain, appUrl, minWidth, minHeight, satel
 
   // Successful app load — reset the offline backoff.
   win.webContents.on('did-finish-load', () => {
-    if (!win.isDestroyed() && win.webContents.getURL().startsWith(BASE_URL)) {
+    if (!win.isDestroyed() && isAppUrl(win.webContents.getURL())) {
       clearOfflineRetry(rec);
       // Default the app to 90% zoom — screenshots showed users' screens overly
       // zoomed in. A renderer-chosen factor (window:set-zoom) wins.
@@ -4008,14 +4074,9 @@ function attachWindowBehaviour(win, { isMain, appUrl, minWidth, minHeight, satel
 
   // ─── Renderer crash recovery ───────────────────────────────────────
   // The renderer is the whole product; a crash otherwise leaves a blank
-  // window. Auto-reload with a loop-guard, and report to /api/bugs.
+  // window. Auto-reload with a loop-guard.
   win.webContents.on('render-process-gone', (_e, details) => {
-    console.error('[main] render-process-gone:', details.reason, details.exitCode);
-    forwardErrorToRenderer(
-      'electron:main:render-process-gone',
-      `Renderer gone (${satelliteKey || 'main'}): ${details.reason} (exit ${details.exitCode})`,
-      undefined,
-    );
+    console.error(`[main] render-process-gone (${satelliteKey || 'main'}):`, details.reason, details.exitCode);
     // Same reasoning as did-fail-load: a dead renderer's anchor is stale, so
     // stop the widget rather than let it tick on by itself.
     if (isMain) teardownTimerWidget();
@@ -4043,8 +4104,7 @@ function attachWindowBehaviour(win, { isMain, appUrl, minWidth, minHeight, satel
 
   // ─── Unresponsive detection ────────────────────────────────────────
   win.on('unresponsive', () => {
-    console.warn('[main] window became unresponsive');
-    forwardErrorToRenderer('electron:main:unresponsive', `Renderer became unresponsive (${satelliteKey || 'main'})`, undefined);
+    console.warn(`[main] window became unresponsive (${satelliteKey || 'main'})`);
   });
   win.on('responsive', () => {
     console.log('[main] window became responsive again');
@@ -5548,21 +5608,15 @@ app.whenReady().then(() => {
   });
 });
 
-// Forward main-process errors to the renderer so they reach the /api/bugs route
-function forwardErrorToRenderer(context, message, stack) {
-  sendTo(mainWindow, 'bug:report', { context, message, stack });
-}
-
+// Keep these handlers even though nothing is reported any more: without an
+// `uncaughtException` listener a stray main-process error kills the app with a
+// native dialog.
 process.on('uncaughtException', (err) => {
   console.error('[main] uncaughtException:', err);
-  forwardErrorToRenderer('electron:main:uncaughtException', err.message, err.stack);
 });
 
 process.on('unhandledRejection', (reason) => {
-  const message = reason instanceof Error ? reason.message : String(reason);
-  const stack = reason instanceof Error ? reason.stack : undefined;
   console.error('[main] unhandledRejection:', reason);
-  forwardErrorToRenderer('electron:main:unhandledRejection', message, stack);
 });
 
 // Quit when the last window closes — except on macOS, where the X button only

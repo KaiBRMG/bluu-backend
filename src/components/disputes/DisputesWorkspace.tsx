@@ -9,6 +9,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { DisputeReviewQueue, type DisputeVerdict } from '@/components/disputes/DisputeReviewQueue';
 import { DisputeLedger } from '@/components/disputes/DisputeLedger';
 import { useDisputesData } from '@/hooks/useDisputesData';
+import { verdictToast } from '@/components/disputes/disputeStatus';
 import type { DisputeDocument } from '@/types/firestore';
 
 /**
@@ -109,8 +110,8 @@ function ReviewPanel({
     reason?: string,
   ) => {
     try {
-      await setCaApproval(id, verdict, reason);
-      toast.success(verdict === 'Approved' ? 'Dispute approved' : 'Dispute rejected');
+      const { transferResult } = await setCaApproval(id, verdict, reason);
+      toast.success(verdictToast(verdict, transferResult));
       reload();
       onRuled?.();
     } catch (err) {
@@ -197,9 +198,8 @@ export function DisputesWorkspace({
         <CollapsibleContent className="mt-2 max-w-[75ch] text-sm text-pretty text-zinc-400">
           Every sale inside your shift is added to your Earnings Report on Infloww
           automatically. If a sale shouldn&apos;t be yours — it was sent after your shift, for
-          example — dispute it here: the chatter it currently sits with reviews it, then an
-          admin makes the final call. Approved disputes move the sale off their report and onto
-          yours. You&apos;ll find the sale under Infloww &gt; Analytics &gt; Employee Reports &gt;
+          example — dispute it here. The chatter it currently sits with reviews it, and their
+          approval moves the sale off their report and onto yours straight away. You&apos;ll find the sale under Infloww &gt; Analytics &gt; Employee Reports &gt;
           Sales Record.
         </CollapsibleContent>
       </Collapsible>
@@ -252,8 +252,8 @@ export function DisputesWorkspace({
           <div>
             <h3 className="text-lg font-semibold">Your disputes</h3>
             <p className="mt-1 max-w-[75ch] text-sm text-zinc-400">
-              Sales you&apos;ve claimed. Each one clears the chatter it was assigned to, then an
-              admin, before it reaches your earnings report.
+              Sales you&apos;ve claimed. Once the chatter holding one approves it, it moves to your
+              earnings report.
             </p>
           </div>
 

@@ -175,3 +175,62 @@ export function reassignRefusal(
   }
   return null;
 }
+
+// ─── Per-sale outcome (CA Admin → Sales, Disputed view) ──────────────
+
+/**
+ * What a dispute did to **one** of its sales. A dispute is a claim over many
+ * sales and an approval can move some and skip others, so the ledger's
+ * Outcome column is per sale, not per dispute.
+ *
+ * - `open` — no verdict yet (`withAdmin` when nobody holds the sale, so only
+ *   an admin can rule).
+ * - `moved` — approved, and this sale went to the filer.
+ * - `skipped` — approved, but this sale could not move (`skipReason` says why).
+ * - `reverted` — moved, then an admin gave this one sale back.
+ * - `declined` — the holder said no.
+ * - `overturned` — approved, then an admin reversed the whole claim.
+ * - `rejected` — an admin said no to a claim that was never approved.
+ */
+export type SaleDisputeOutcome = 'open' | 'moved' | 'skipped' | 'reverted' | 'declined' | 'overturned' | 'rejected';
+
+interface DisputeOutcomeInput {
+  CaApproval: string;
+  AdminApproval: string;
+  overturned: boolean;
+  transferred: string[];
+  skipped: Array<{ saleId: string; reason: string }>;
+  untransferred: string[];
+}
+
+export function saleDisputeOutcome(
+  dispute: DisputeOutcomeInput,
+  saleId: string,
+): { outcome: SaleDisputeOutcome; skipReason: string | null } {
+  if (dispute.AdminApproval === 'Approved') {
+    if (dispute.untransferred.includes(saleId)) return { outcome: 'reverted', skipReason: null };
+    const skip = dispute.skipped.find(s => s.saleId === saleId);
+    if (skip) return { outcome: 'skipped', skipReason: skip.reason };
+    // A v1 dispute has no transfer result; an approved one counts as moved by hand.
+    return { outcome: 'moved', skipReason: null };
+  }
+  if (dispute.AdminApproval === 'Rejected') {
+    return { outcome: dispute.overturned ? 'overturned' : 'rejected', skipReason: null };
+  }
+  if (dispute.CaApproval === 'Rejected') return { outcome: 'declined', skipReason: null };
+  return { outcome: 'open', skipReason: null };
+}
+
+/** One sale's dispute history on the ledger — the latest claim and what it did here. */
+export interface SaleDisputeMark {
+  disputeId: string;
+  outcome: SaleDisputeOutcome;
+  skipReason: string | null;
+  /** The filer's uid — the agent the sale moves to on approval. */
+  filedBy: string;
+  /** The holder it was claimed from; `null` for a claim on an unassigned sale. */
+  claimedFrom: string | null;
+  filedAt: string | null;
+  /** Other claims on the same sale before this one (declined, then refiled). */
+  earlier: number;
+}

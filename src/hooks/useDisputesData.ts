@@ -12,11 +12,14 @@ export interface DisputeFetchResult {
   totalPages: number;
 }
 
-export interface AdminFilters {
-  createdBy?: string;
-  assignedTo?: string;
-  creator?: string;
+/** CA Admin → Sales' "Moved by dispute" feed: the newest rows, and the window's total. */
+export interface MovedFeedResult {
+  disputes: DisputeDocument[];
+  total: number;
+  windowDays: number;
 }
+
+type TransferResult = DisputeDocument['transferResult'];
 
 // ─── Hook ─────────────────────────────────────────────────────────────
 
@@ -33,18 +36,22 @@ export function useDisputesData() {
 
   // ── Fetch disputes (not cached — always fresh) ─────────────────────
 
-  const fetchDisputes = useCallback(async (
-    filter: string,
-    page: number,
-    adminFilters?: AdminFilters,
-  ): Promise<DisputeFetchResult> => {
+  const fetchDisputes = useCallback(async (filter: string, page = 1): Promise<DisputeFetchResult> => {
     const params = new URLSearchParams({ filter, page: String(page) });
-    if (adminFilters?.createdBy) params.set('createdBy', adminFilters.createdBy);
-    if (adminFilters?.assignedTo) params.set('assignedTo', adminFilters.assignedTo);
-    if (adminFilters?.creator) params.set('creator', adminFilters.creator);
-
     const data = await authFetch(`/api/disputes?${params}`);
     return { disputes: data.disputes, total: data.total, totalPages: data.totalPages };
+  }, [authFetch]);
+
+  /** The newest disputes approved inside the server's window (`ca-admin`). */
+  const fetchMoved = useCallback(async (): Promise<MovedFeedResult> => {
+    const data = await authFetch('/api/disputes?filter=admin-moved');
+    return { disputes: data.disputes, total: data.total, windowDays: data.windowDays };
+  }, [authFetch]);
+
+  /** One claim, on demand — opened from a ledger row (`ca-admin`). */
+  const fetchDispute = useCallback(async (disputeId: string): Promise<DisputeDocument> => {
+    const data = await authFetch(`/api/disputes/${encodeURIComponent(disputeId)}`);
+    return data.dispute;
   }, [authFetch]);
 
   // ── Set CA approval ─────────────────────────────────────────────────
@@ -53,14 +60,16 @@ export function useDisputesData() {
     disputeId: string,
     value: Extract<ApprovalStatus, 'Approved' | 'Rejected'>,
     reason?: string,
-  ): Promise<void> => {
+  ): Promise<{ transferResult: TransferResult }> => {
     setLoading(true);
     setError(null);
     try {
-      await authFetch(`/api/disputes/${disputeId}/ca-approval`, {
+      // The holder's approval is final: it moves the sales, and says what moved.
+      const data = await authFetch(`/api/disputes/${disputeId}/ca-approval`, {
         method: 'PATCH',
         body: JSON.stringify({ CaApproval: value, reason }),
       });
+      return { transferResult: data.transferResult ?? null };
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to update CA approval';
       setError(msg);
@@ -76,7 +85,7 @@ export function useDisputesData() {
     disputeId: string,
     value: Extract<ApprovalStatus, 'Approved' | 'Rejected'>,
     reason?: string,
-  ): Promise<{ transferResult: DisputeDocument['transferResult'] }> => {
+  ): Promise<{ transferResult: TransferResult }> => {
     setLoading(true);
     setError(null);
     try {
@@ -94,46 +103,13 @@ export function useDisputesData() {
     }
   }, [authFetch]);
 
-  // ── Set admin approval on many disputes at once ─────────────────────
-  //
-  // One request for a whole selection, not one per row: the server writes them
-  // in a batch and queues a single notification per filer. Returns how many
-  // rows the server actually wrote, because a stale selection can legitimately
-  // contain a dispute that no longer exists.
-
-  const setAdminApprovalBulk = useCallback(async (
-    disputeIds: string[],
-    value: Extract<ApprovalStatus, 'Approved' | 'Rejected'>,
-    reason?: string,
-  ): Promise<{ updated: number; skipped: number; transferred: number; transferSkipped: number }> => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await authFetch('/api/disputes/bulk-approval', {
-        method: 'PATCH',
-        body: JSON.stringify({ disputeIds, AdminApproval: value, reason }),
-      });
-      return {
-        updated: data.updated ?? disputeIds.length,
-        skipped: data.skipped ?? 0,
-        transferred: data.transferred ?? 0,
-        transferSkipped: data.transferSkipped ?? 0,
-      };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to update disputes';
-      setError(msg);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  }, [authFetch]);
-
   return useMemo(() => ({
     loading,
     error,
     fetchDisputes,
+    fetchMoved,
+    fetchDispute,
     setCaApproval,
     setAdminApproval,
-    setAdminApprovalBulk,
-  }), [loading, error, fetchDisputes, setCaApproval, setAdminApproval, setAdminApprovalBulk]);
+  }), [loading, error, fetchDisputes, fetchMoved, fetchDispute, setCaApproval, setAdminApproval]);
 }

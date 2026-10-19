@@ -5,18 +5,33 @@
  * decision pure is what lets the attribution invariant, the finalised guard and
  * the vanished-row guard be pinned by tests — they are the money path.
  *
+ * ## Attribution — the shift schedule first, BuddyX second
+ *
+ * BuddyX credits a PPV to whoever **sent** it and cannot be told otherwise, so
+ * the sync does not take its attribution as given. A sale is credited to the
+ * agent the shift schedule puts on its creator account at its instant
+ * (`scheduleHolder` — `shifts.creatorIds`, recurrence and leave resolved), and
+ * to BuddyX's chatter only when the schedule has no single answer: nobody was
+ * scheduled, BuddyX's chatter was (15-minute grace), or several were and
+ * BuddyX's chatter is not one of them. That result is `sourceUserId` — the
+ * sync's attribution, which every revert and un-transfer returns to.
+ * BuddyX's own credit is kept beside it as `buddyxUserId`, and
+ * `attributedBy` says which of the two decided. It is re-derived every run, so
+ * a corrected schedule re-credits the sale on the next sync.
+ *
  * ## The attribution invariant
  *
  * A sale's **effective holder** is `transfer?.toUserId ?? sourceUserId`, and
- * `userId` always equals it. The source attribution (`sourceUserId`) is
- * re-read every run, because BuddyX can re-attribute a tip after the fact, but
+ * `userId` always equals it. The sync's attribution (`sourceUserId`) is
+ * re-read every run, because BuddyX can re-attribute a tip after the fact and
+ * the schedule can be edited, but
  * **a sync never clears a transfer**: once an approved dispute or an admin
  * (CA Admin → Sales) has moved a sale, Bluu Backend is the source of truth.
- * If BuddyX later re-attributes a transferred sale to anyone other than whom
+ * If the attribution later moves a transferred sale to anyone other than whom
  * it credited when the transfer was made — and other than the agent Bluu now
  * holds it on — the transfer stands and the row is flagged
- * `attributionConflict` for an admin, never resolved silently. BuddyX coming
- * round to Bluu's answer is not a conflict.
+ * `attributionConflict` for an admin, never resolved silently. The
+ * attribution coming round to Bluu's answer is not a conflict.
  *
  * ## Identity — which stored sale a BuddyX row is
  *
@@ -58,6 +73,7 @@ import { salesSourceFor } from '../salary/salaryConstants';
 import { toDayKey, toMonthKey } from '../salary/salaryDate';
 import { normaliseSaleType } from '../salary/saleTypes';
 import { round2 } from '../salary/salaryEngine';
+import { scheduleHolder, type ScheduleMatch } from '../salary/scheduleMatch';
 import { normaliseId, type BuddyxPpvRow, type BuddyxTipRow } from './types';
 
 // ─── Normalisation ───────────────────────────────────────────────────
@@ -227,7 +243,11 @@ export interface DerivedSale {
   status: 'complete';
   rule: string;
   assignedBy: string;
+  /** The sync's attribution — the schedule's agent, else BuddyX's (see "Attribution"). */
   sourceUserId: string | null;
+  /** The uid BuddyX itself credits (its chatter, mapped). */
+  buddyxUserId: string | null;
+  attributedBy: 'schedule' | 'buddyx';
   userId: string | null;
   unmappedChatterId: string | null;
   attributionConflict: boolean;
@@ -236,15 +256,25 @@ export interface DerivedSale {
   syncHash: string;
 }
 
+/**
+ * The shift schedule against each resolved sale, keyed by document id — from
+ * `matchSalesToSchedule`, run with `userId` = BuddyX's attribution. Absent or
+ * empty = no schedule known, and every sale keeps BuddyX's attribution.
+ */
+export type SaleSchedule = Map<string, ScheduleMatch>;
+
 export function deriveSale(
   sale: NormalisedSale,
   stored: StoredSale | undefined,
   chatters: Map<string, ChatterRef>,
   models: Map<string, ModelRef>,
+  schedule?: SaleSchedule,
 ): DerivedSale {
   const chatter = sale.chatterId ? chatters.get(sale.chatterId) : undefined;
   const model = sale.modelId ? models.get(sale.modelId) : undefined;
-  const sourceUserId = chatter?.uid ?? null;
+  const buddyxUserId = chatter?.uid ?? null;
+  const onShift = scheduleHolder(schedule?.get(sale.saleId));
+  const sourceUserId = onShift ?? buddyxUserId;
   const transfer = stored?.transfer ?? null;
 
   const base = {
@@ -273,9 +303,13 @@ export function deriveSale(
     rule: '',
     assignedBy: '',
     sourceUserId,
+    buddyxUserId,
+    attributedBy: onShift ? ('schedule' as const) : ('buddyx' as const),
     // The invariant: a transfer is never cleared by a sync.
     userId: transfer ? transfer.toUserId : sourceUserId,
-    unmappedChatterId: sale.chatterId && !sourceUserId ? sale.chatterId : null,
+    // About the BuddyX link, not the holder: an unlinked chatter is still
+    // reported when the schedule credited the sale to someone else.
+    unmappedChatterId: sale.chatterId && !buddyxUserId ? sale.chatterId : null,
     attributionConflict: transfer ? isAttributionConflict(transfer, sourceUserId) : false,
     removedAt: null,
     vanishedAfterFinalise: false,
@@ -286,9 +320,9 @@ export function deriveSale(
 }
 
 /**
- * BuddyX now credits the sale to someone it did not credit when the transfer
- * was made, and who is not the agent Bluu holds it on. A move that BuddyX has
- * since agreed with is not a conflict.
+ * The attribution now credits the sale to someone it did not credit when the
+ * transfer was made, and who is not the agent Bluu holds it on. A move the
+ * attribution has since agreed with is not a conflict.
  */
 export function isAttributionConflict(transfer: StoredTransfer, sourceUserId: string | null): boolean {
   return sourceUserId !== transfer.sourceUserIdAtTransfer && sourceUserId !== transfer.toUserId;
@@ -375,11 +409,12 @@ export function collectHolderPairs(
   stored: Map<string, StoredSale>,
   chatters: Map<string, ChatterRef>,
   models: Map<string, ModelRef>,
+  schedule?: SaleSchedule,
 ): Set<string> {
   const pairs = new Set<string>();
   for (const sale of sales) {
     const prev = stored.get(sale.saleId);
-    const next = deriveSale(sale, prev, chatters, models);
+    const next = deriveSale(sale, prev, chatters, models, schedule);
     if (next.userId) pairs.add(pairKey(next.userId, next.month));
     if (prev?.userId) pairs.add(pairKey(prev.userId, prev.month));
   }
@@ -415,6 +450,8 @@ export interface SalesPlan {
     rejectedFinalized: number;
     attributionConflicts: number;
     unassigned: number;
+    /** Credited to the agent on shift rather than to BuddyX's chatter. */
+    scheduleAttributed: number;
     rekeyed: number;
     /** New ids that matched a vanished row's facts, but not uniquely — not guessed. */
     rekeyAmbiguous: number;
@@ -427,12 +464,14 @@ export function planSalesSync(params: {
   stored: Map<string, StoredSale>;
   chatters: Map<string, ChatterRef>;
   models: Map<string, ModelRef>;
+  /** The shift schedule against each sale — the same map the caller fed `collectHolderPairs`. */
+  schedule?: SaleSchedule;
   /** `uid|month` pairs that are finalised. */
   finalized: Set<string>;
   /** Both endpoints paginated to completion — the only condition under which anything is removed. */
   complete: boolean;
 }): SalesPlan {
-  const { identity, stored, chatters, models, finalized, complete } = params;
+  const { identity, stored, chatters, models, schedule, finalized, complete } = params;
 
   const sales = new Map<string, NormalisedSale>();
   for (const sale of identity.sales) sales.set(sale.saleId, sale);
@@ -456,6 +495,7 @@ export function planSalesSync(params: {
       rejectedFinalized: 0,
       attributionConflicts: 0,
       unassigned: 0,
+      scheduleAttributed: 0,
       rekeyed: identity.rekeyed.length,
       rekeyAmbiguous: identity.ambiguous,
     },
@@ -465,7 +505,7 @@ export function planSalesSync(params: {
 
   for (const sale of sales.values()) {
     const prev = stored.get(sale.saleId);
-    const next = deriveSale(sale, prev, chatters, models);
+    const next = deriveSale(sale, prev, chatters, models, schedule);
 
     if (next.unmappedChatterId) {
       const entry = plan.unmappedChatters.get(next.unmappedChatterId) ?? { name: next.employeeName || null, rows: 0, gross: 0 };
@@ -474,6 +514,7 @@ export function planSalesSync(params: {
       plan.unmappedChatters.set(next.unmappedChatterId, entry);
     }
     if (!next.userId) plan.counts.unassigned += 1;
+    if (next.attributedBy === 'schedule') plan.counts.scheduleAttributed += 1;
     if (next.attributionConflict) plan.counts.attributionConflicts += 1;
 
     const changed = !prev || prev.removed || prev.syncHash !== next.syncHash;

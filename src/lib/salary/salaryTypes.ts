@@ -322,8 +322,15 @@ export interface SalarySale {
   creatorId: string | null;
   /** BuddyX model id; `null` on Infloww rows. Part of the duplicate fingerprint (`saleMatchKey`). */
   modelId: string | null;
-  /** The uid the source attributes the sale to, before any transfer. */
+  /**
+   * The uid the source attributes the sale to, before any transfer. For a
+   * BuddyX row that is the agent on shift on the account, else BuddyX's
+   * chatter — `attributedBy` says which.
+   */
   sourceUserId: string | null;
+  /** The uid BuddyX itself credits. Equals `sourceUserId` unless the schedule decided. */
+  buddyxUserId: string | null;
+  attributedBy: 'schedule' | 'buddyx';
   transfer: SaleTransfer | null;
   /** Set while an open dispute holds the sale. */
   disputeId: string | null;
@@ -337,7 +344,7 @@ export interface SalarySale {
   assignment: SaleAssignment;
   /**
    * `false` when Bluu Backend holds the sale on someone other than the agent
-   * BuddyX credits (`sourceUserId`) — `assignment` says why. Always `true` for
+   * the sync credits (`sourceUserId`) — `assignment` says why. Always `true` for
    * Infloww rows.
    */
   matchesSource: boolean;

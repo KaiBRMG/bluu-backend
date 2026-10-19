@@ -32,8 +32,8 @@ import {
   InfoTip,
   KpiTile,
   LegendSwatch,
-  PPV_ATTRIBUTION,
-  TIPS_ATTRIBUTION,
+  LEDGER_PPV_ATTRIBUTION,
+  LEDGER_TIPS_ATTRIBUTION,
 } from '@/components/buddyx/buddyxUi';
 import { getCache, setCache } from '@/lib/queryCache';
 import { formatUsd, pluralise, signedMoneyClass } from '@/lib/salary/salaryFormat';
@@ -67,10 +67,11 @@ const CUTOVER_LABEL = (() => {
  *
  * Bluu Backend is the source of truth for sales, so this report can disagree
  * with the agent's BuddyX dashboard — never silently. A sale held on them that
- * BuddyX credits elsewhere carries a `SaleHolderNote` saying why (dispute or
- * admin); sales BuddyX credits to them that are held elsewhere are listed at
- * the foot ("In BuddyX, held elsewhere"). Between the two, every difference
- * from BuddyX is on the page.
+ * BuddyX credits elsewhere carries a `SaleHolderNote` saying why (credited to
+ * the agent on shift, a dispute, or an admin); sales the sync credits to them
+ * that are held elsewhere are listed at the foot ("Credited to you, held
+ * elsewhere"). A PPV the agent sent while someone else was on shift on that
+ * account is not theirs and is not listed.
  */
 
 /** Matches `useSalaryMonth`: an agent who has just been told a figure changed
@@ -281,14 +282,14 @@ export function SalesReport({
         <KpiTile
           label="Tips"
           basis="gross"
-          tip={TIPS_ATTRIBUTION}
+          tip={LEDGER_TIPS_ATTRIBUTION}
           value={formatUsd(data.byKind.tip.gross)}
           meta={`${pluralise(data.byKind.tip.count, 'tip')} · ${formatUsd(data.byKind.tip.net)} net`}
         />
         <KpiTile
           label="PPV"
           basis="gross"
-          tip={PPV_ATTRIBUTION}
+          tip={LEDGER_PPV_ATTRIBUTION}
           value={formatUsd(data.byKind.ppv.gross)}
           meta={`${pluralise(data.byKind.ppv.count, 'PPV')} · ${formatUsd(data.byKind.ppv.net)} net`}
         />
@@ -300,9 +301,9 @@ export function SalesReport({
           meta={`${pluralise(data.totals.count, 'sale')} · ${formatUsd(data.totals.net)} net after the platform's share`}
         />
         <KpiTile
-          label="Differs from BuddyX"
+          label="Moved"
           basis="gross"
-          tip="Sales Bluu Backend holds differently from BuddyX — moved by an approved dispute or an admin. Pay follows Bluu Backend."
+          tip="Sales an approved dispute or an admin moved to or from you. A sale credited to the agent on shift instead of BuddyX’s sender is not a move — it carries an “Assigned by shift” note. Pay follows Bluu Backend."
           value={
             data.transfers.inCount + data.transfers.outCount === 0
               ? '—'
@@ -310,7 +311,7 @@ export function SalesReport({
           }
           meta={
             data.transfers.inCount + data.transfers.outCount === 0
-              ? 'Every sale matches BuddyX'
+              ? 'Nothing moved'
               : `${data.transfers.inCount} moved to you · ${data.transfers.outCount} moved away`
           }
           href={data.transfers.outCount > 0 ? '#transferred-away' : undefined}
@@ -324,10 +325,10 @@ export function SalesReport({
             <h2 id="daily-sales-title" className="text-sm font-semibold">Gross sales by day</h2>
             <div className="flex items-center gap-3 text-xs text-zinc-300">
               <span className="inline-flex items-center gap-1.5">
-                <LegendSwatch color={SALE_KIND_COLORS.tip} /> Tips <InfoTip text={TIPS_ATTRIBUTION} />
+                <LegendSwatch color={SALE_KIND_COLORS.tip} /> Tips <InfoTip text={LEDGER_TIPS_ATTRIBUTION} />
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <LegendSwatch color={SALE_KIND_COLORS.ppv} /> PPV <InfoTip text={PPV_ATTRIBUTION} />
+                <LegendSwatch color={SALE_KIND_COLORS.ppv} /> PPV <InfoTip text={LEDGER_PPV_ATTRIBUTION} />
               </span>
             </div>
           </div>
@@ -507,9 +508,9 @@ export function SalesReport({
       {/* ── What left this month ── */}
       {data.transferredAway.length > 0 && (
         <section id="transferred-away" className="space-y-2 pt-2" aria-labelledby="transferred-away-title">
-          <h2 id="transferred-away-title" className="text-sm font-semibold">In BuddyX, held elsewhere</h2>
+          <h2 id="transferred-away-title" className="text-sm font-semibold">Credited to {userId && userId !== user?.uid ? 'this agent' : 'you'}, held elsewhere</h2>
           <p className="text-[11px] text-zinc-400">
-            BuddyX credits these to {userId && userId !== user?.uid ? 'this agent' : 'you'}, but an approved dispute or an admin moved them.
+            Credited to {userId && userId !== user?.uid ? 'this agent' : 'you'} — by the shift schedule, or by BuddyX when nobody was on shift — but an approved dispute or an admin moved them.
             They don&apos;t count toward this month — pay follows Bluu Backend.
           </p>
           <SalesTable rows={data.transferredAway} names={data.names} timezone={timezone} showSource={false} away />
