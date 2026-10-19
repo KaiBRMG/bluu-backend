@@ -330,7 +330,8 @@ export interface SalarySale {
   sourceUserId: string | null;
   /** The uid BuddyX itself credits. Equals `sourceUserId` unless the schedule decided. */
   buddyxUserId: string | null;
-  attributedBy: 'schedule' | 'buddyx';
+  /** `departed`: BuddyX credits someone who had left, and no single agent was on shift — unassigned. */
+  attributedBy: 'schedule' | 'buddyx' | 'departed';
   transfer: SaleTransfer | null;
   /** Set while an open dispute holds the sale. */
   disputeId: string | null;

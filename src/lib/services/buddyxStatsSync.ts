@@ -706,9 +706,9 @@ export async function syncFansScope(ctx: SyncContext): Promise<void> {
  * clears the month from fans who no longer have a sale in it (found through
  * `spendMonths`, which is what that array is for).
  *
- * Called by the `fans` scope for the open months, and by the historical Infloww
- * import for every month it touched — which is what makes lifetime spend span
- * the cutover. Returns the number of fan documents written.
+ * Called by the `fans` scope for the open months. The historical Infloww import
+ * (deleted 2026-10-18) also ran it for every month it touched — which is what
+ * made lifetime spend span the cutover. Returns the number of fan documents written.
  */
 export async function rebuildFanSpend(months: SalaryMonthKey[]): Promise<number> {
   let written = 0;

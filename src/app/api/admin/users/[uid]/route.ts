@@ -138,6 +138,21 @@ export const PUT = withAuth(async (
     }
 
     const userRef = adminDb.collection('users').doc(targetUid);
+
+    // Date the departure: the BuddyX sales sync stops crediting someone from
+    // the moment they were offboarded (`getDepartures`). Stamped on the
+    // transition only — a second offboarding write keeps the first date — and
+    // cleared on a full restore. A direct read, not `getUserById`'s cache, so
+    // the transition is judged against the stored state.
+    if ('isActive' in sanitizedUpdates || 'isArchived' in sanitizedUpdates) {
+      const prev = (await userRef.get()).data() ?? {};
+      const blocked = (active: unknown, archived: unknown) => active === false || archived === true;
+      const wasBlocked = blocked(prev.isActive, prev.isArchived);
+      const willBlock = blocked(sanitizedUpdates.isActive ?? prev.isActive, sanitizedUpdates.isArchived ?? prev.isArchived);
+      if (!wasBlocked && willBlock) sanitizedUpdates.offboardedAt = FieldValue.serverTimestamp();
+      else if (wasBlocked && !willBlock) sanitizedUpdates.offboardedAt = FieldValue.delete();
+    }
+
     await userRef.update({
       ...sanitizedUpdates,
       updatedAt: FieldValue.serverTimestamp(),

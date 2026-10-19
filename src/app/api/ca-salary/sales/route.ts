@@ -1,7 +1,7 @@
 /**
  * GET    /api/ca-salary/sales?month=YYYY-MM[&userId=uid][&day=YYYY-MM-DD]
  * GET    /api/ca-salary/sales?userId=all&from=YYYY-MM-DD&to=YYYY-MM-DD  — the admin ledger
- * DELETE /api/ca-salary/sales?saleId=…  — remove an Infloww row a later export retracted
+ * DELETE /api/ca-salary/sales?saleId=…  — remove an Infloww history row (permanent; nothing re-imports it)
  *
  * The detailed sales report behind the agent's salary page and CA Admin →
  * Sales: every individual sale, so a disputed daily total can be traced to the
@@ -36,6 +36,7 @@ import { handleApiError } from '@/lib/middleware/apiHelpers';
 import { requireCaAdmin, resolveSalarySubject, refuseHiddenMonth } from '@/lib/salary/salaryAuth';
 import {
   getAllSalesInRange,
+  getDepartures,
   getLedgerAnomalies,
   getScheduleMatches,
   getFinalizedMonth,
@@ -90,7 +91,7 @@ function summarise(sales: SalarySale[], deductionRate: number) {
     add(byKind[sale.kind], sale.signedGross);
 
     // Keyed by creator id where the row has one (every BuddyX row, and Infloww
-    // rows the historical import resolved); by name otherwise.
+    // rows the former historical import resolved); by name otherwise.
     const key = sale.creatorId ?? `name:${sale.creatorName}`;
     const creator = byCreator.get(key) ?? { creatorId: sale.creatorId, name: sale.creatorName, gross: 0, count: 0 };
     add(creator, sale.signedGross);
@@ -158,7 +159,9 @@ async function adminLedger(searchParams: URLSearchParams): Promise<NextResponse>
   const { deductionRate } = await getSalaryConfig();
   const rows = await getAllSalesInRange(start, end);
   const live = rows.filter(s => !s.removedAt);
-  const schedule = await getScheduleMatches(live, start, end);
+  // Departed agents' leftover shifts are dropped, as the sync drops them — the
+  // "On shift" column must never name someone who no longer works here.
+  const schedule = await getScheduleMatches(live, start, end, await getDepartures());
   const [{ names, flags }, disputes] = await Promise.all([
     getLedgerAnomalies(rows, [...schedule.values()].flatMap(m => m.scheduled)),
     getSaleDisputeMarks(new Set(rows.map(s => s.saleId)), start),

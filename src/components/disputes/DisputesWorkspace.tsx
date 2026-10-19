@@ -196,11 +196,11 @@ export function DisputesWorkspace({
           How disputes work
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2 max-w-[75ch] text-sm text-pretty text-zinc-400">
-          Every sale inside your shift is added to your Earnings Report on Infloww
-          automatically. If a sale shouldn&apos;t be yours — it was sent after your shift, for
-          example — dispute it here. The chatter it currently sits with reviews it, and their
-          approval moves the sale off their report and onto yours straight away. You&apos;ll find the sale under Infloww &gt; Analytics &gt; Employee Reports &gt;
-          Sales Record.
+          Every sale inside your shift is credited to you automatically. If a sale should be
+          yours but sits with another chatter — it was sent during your shift, for example —
+          dispute it here. The chatter it currently sits with reviews it, and their approval
+          moves the sale off their report and onto yours straight away. Your own sales are under
+          My Salary &gt; Sales report.
         </CollapsibleContent>
       </Collapsible>
 

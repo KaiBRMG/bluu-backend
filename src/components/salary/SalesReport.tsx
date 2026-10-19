@@ -115,7 +115,7 @@ interface SalesReportProps {
   onClearDay?: () => void;
   /** A bar in the daily chart was clicked — reuse the page's inspected-day state. */
   onSelectDay?: (day: string) => void;
-  /** Payroll only — lets an admin remove an Infloww row a later export retracted. */
+  /** Payroll only — lets an admin remove an Infloww history row. */
   allowDelete?: boolean;
   onDeleted?: () => void;
 }
@@ -735,8 +735,8 @@ function DeleteSaleButton({ saleId, onDeleted }: { saleId: string; onDeleted: ()
         <AlertDialogHeader>
           <AlertDialogTitle>Remove this sale?</AlertDialogTitle>
           <AlertDialogDescription>
-            It stops counting toward the agent&apos;s gross and commission straight away. Re-importing an Infloww
-            export that still contains this row will bring it back.
+            It stops counting toward the agent&apos;s gross and commission straight away. This can&apos;t be
+            undone — Infloww history is no longer imported, so nothing will bring it back.
           </AlertDialogDescription>
         </AlertDialogHeader>
         {error && <p className="text-sm text-red-400">{error}</p>}

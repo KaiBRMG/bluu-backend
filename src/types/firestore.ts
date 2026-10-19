@@ -82,6 +82,13 @@ export interface UserDocument {
   previousWorkEmail?: string | null;
   isActive: boolean;
   isArchived?: boolean;
+  /**
+   * When the person was offboarded — the write that made them archived or
+   * deactivated (`PUT /api/admin/users/[uid]`); deleted on restore. The BuddyX
+   * sales sync credits nobody who had left by a sale's instant (buddyx.md §4).
+   * Absent on people offboarded before 2026-10-19 → `updatedAt`. Index-exempt.
+   */
+  offboardedAt?: Timestamp;
   role?: 'admin' | 'member';
 
   /**
@@ -594,7 +601,7 @@ export interface ShiftDocument {
 // stores a computed salary except `ca-salary-months`, which exists precisely to
 // freeze one. See documentation/ca-salary.md.
 
-/** `ca-sales/{saleId}` — one imported sale row. The id is a content hash; see `salesImport.ts`. */
+/** `ca-sales/{saleId}` — one sale row. Infloww history: a content hash of its facts. BuddyX: `bx-tip-{id}` / `bx-ppv-{id}`. */
 export interface CaSaleDocument {
   saleId: string;
   /**
@@ -647,8 +654,12 @@ export interface CaSaleDocument {
   sourceUserId?: string | null;
   /** BuddyX rows: the uid BuddyX itself credits (its chatter, mapped). Index-exempt. Absent on rows synced before 2026-10-19 → `sourceUserId`. */
   buddyxUserId?: string | null;
-  /** BuddyX rows: whether `sourceUserId` came from the shift schedule or from BuddyX. Index-exempt. Absent → `'buddyx'`. */
-  attributedBy?: 'schedule' | 'buddyx';
+  /**
+   * BuddyX rows: whether `sourceUserId` came from the shift schedule or from
+   * BuddyX — or `departed`: BuddyX credits someone who had left and no single
+   * agent was on shift, so nobody. Index-exempt. Absent → `'buddyx'`.
+   */
+  attributedBy?: 'schedule' | 'buddyx' | 'departed';
   /**
    * Index-exempt map. Bluu Backend's override of the source attribution — an
    * approved dispute, or an admin reassigning the sale on CA Admin → Sales.

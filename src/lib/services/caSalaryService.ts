@@ -30,7 +30,7 @@ import { lockIsStale } from '../disputes/disputeRules';
 import { addMonths, currentMonthKey, monthKeyRange, toDayKey, type SalaryDayKey, type SalaryMonthKey } from '../salary/salaryDate';
 import { isSalaryMonthVisible, PAID_LEAVE_ACCOUNT_LOOKBACK_DAYS } from '../salary/salaryConstants';
 import { leaveAt, paidAccountsByDay, paidLeaveShifts, type LeaveWindow } from '../salary/leavePay';
-import { matchSalesToSchedule, type ScheduleMatch, type ScheduleSale } from '../salary/scheduleMatch';
+import { matchSalesToSchedule, withoutDeparted, type Departures, type ScheduleMatch, type ScheduleSale } from '../salary/scheduleMatch';
 import { normaliseSaleType, saleKindOf, saleSourceOf } from '../salary/saleTypes';
 import type {
   DashboardSalaryMonth,
@@ -275,13 +275,35 @@ export async function getAllSalesInRange(startMs: number, endMs: number): Promis
  * them (`matchSalesToSchedule`). One `getShiftsByRange` for every agent (the
  * same read the admin payroll grid makes), expanded in memory; the day of
  * lookback catches an overnight shift that began before the window. The BuddyX
- * sales sync calls it too, to credit each sale to the agent on shift.
+ * sales sync calls it too, to credit each sale to the agent on shift. A shift a
+ * departed agent still has on the roster stops counting from their departure.
  */
-export async function getScheduleMatches(sales: ScheduleSale[], startMs: number, endMs: number) {
+export async function getScheduleMatches(sales: ScheduleSale[], startMs: number, endMs: number, departures?: Departures) {
   if (sales.length === 0) return new Map<string, ScheduleMatch>();
   const shiftDocs = await getShiftsByRange(startMs - DAY_MS, endMs);
   const raw = shiftDocs.map(s => ({ ...serialiseShift(s), timeWorkedSeconds: null, attendanceStatus: null }));
-  return matchSalesToSchedule(sales, expandShiftsForWindow(raw, startMs - DAY_MS, endMs));
+  return matchSalesToSchedule(sales, withoutDeparted(expandShiftsForWindow(raw, startMs - DAY_MS, endMs), departures));
+}
+
+/**
+ * Everyone archived or deactivated, with when they left: `offboardedAt`, else
+ * (offboarded before the stamp existed) `updatedAt` — the offboarding write set
+ * it, so it is never *earlier* than the real departure and never takes a sale
+ * made before someone left. Two equality queries, field-masked; small sets.
+ */
+export async function getDepartures(): Promise<Departures> {
+  const fields = ['uid', 'offboardedAt', 'updatedAt'] as const;
+  const [archived, inactive] = await Promise.all([
+    adminDb.collection('users').where('isArchived', '==', true).select(...fields).get(),
+    adminDb.collection('users').where('isActive', '==', false).select(...fields).get(),
+  ]);
+  const out: Departures = new Map();
+  for (const doc of [...archived.docs, ...inactive.docs]) {
+    const uid = (doc.get('uid') as string | undefined) ?? doc.id;
+    const at = (doc.get('offboardedAt') ?? doc.get('updatedAt')) as Timestamp | undefined;
+    out.set(uid, at?.toMillis?.() ?? 0);
+  }
+  return out;
 }
 
 /**
@@ -390,7 +412,7 @@ export async function getTransferredAwaySales(userId: string, month: SalaryMonth
     .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
 }
 
-/** Remove a single Infloww sale — the agent's Sales Report's delete for a row an export retracted. */
+/** Remove a single Infloww history sale — the admin-only delete on the payroll Sales Report. Permanent. */
 export async function deleteSale(saleId: string): Promise<void> {
   await adminDb.collection(SALES).doc(saleId).delete();
 }

@@ -579,7 +579,7 @@ function PurchasesSection({ report, timezone }: { report: FanReport; timezone: s
           <ul className="mt-2 divide-y divide-white/[0.07]">
             {shown.map((p, index) => (
               <li key={p.saleId} className="py-1.5">
-                {index === cutoverIndex && index > 0 && <p className="pb-1 text-[11px] text-zinc-400">Infloww history — before 08:50 on 4 Oct</p>}
+                {index === cutoverIndex && index > 0 && <p className="pb-1 text-[11px] text-zinc-400">Infloww history — up to 08:50 on 4 Oct (salary time)</p>}
                 <div className="flex items-center gap-2 text-sm">
                   <span className="w-32 shrink-0 tabular-nums text-zinc-400">{formatSaleDateTime(p.occurredAt, timezone)}</span>
                   <AttrChip>{saleTypeLabel(p.type)}</AttrChip>

@@ -27,7 +27,7 @@ Three owners, one document, disjoint fields (`FanRegistryDocument`):
 
 | Owner | Fields |
 |---|---|
-| BuddyX link sync / Infloww import | `name`, `source`, `lastSeenAt` — **both now write with `merge: true`**; a wholesale `set` would wipe staff's name |
+| BuddyX link sync (and, until its deletion on 2026-10-18, the Infloww import) | `name`, `source`, `lastSeenAt` — written with `merge: true`; a wholesale `set` would wipe staff's name |
 | Staff | `manualName`, `manualNameBy`, `manualNameByName`, `manualNameAt` |
 | The fan's customs | `customsName`, `customsNameVotes`, `customsCount`, `customsByType`, `customsOutstanding{Count,Amount}`, `customsAbandonedCount`, `customsRejectedCount`, `customsCreatorIds`, `lastCustomAt` |
 
@@ -71,5 +71,5 @@ All three create wizards (CA custom requests, CA campaigns, Creator Portal custo
 
 - **Run the backfill once after deploy**: `cd src && node scripts/backfill-fan-keys.js` (dry run — prints totals and how many fans' names would change) then `--commit`. Plain JS like the other scripts, because the app's services import `server-only` and cannot run under plain Node; it is therefore a **port** of `fanIdentity.ts` + `fanRegistryService.ts`, so keep them in step and delete it once it has run.
 - The edit dialogs on the customs pages still take free-text name/link — the server re-keys from the link on save.
-- **Synced names are not written through.** The BuddyX link sync and the Infloww seed write `name`/`source` directly; existing sales keep their old synced name until the sales sync next upserts them (via `resolvedFanNames`). Deliberate: propagating would turn the nightly sync into thousands of per-fan queries, and a manual or customs name — the case that matters — always propagates.
+- **Synced names are not written through.** The BuddyX link sync writes `name`/`source` directly (as the deleted Infloww seed did); existing sales keep their old synced name until the sales sync next upserts them (via `resolvedFanNames`). Deliberate: propagating would turn the nightly sync into thousands of per-fan queries, and a manual or customs name — the case that matters — always propagates.
 - `FanLabel` links to the report only when the caller passes `linkToReport` (computed once per table from `usePermissions().canAccess('/ca-portal/fan-analytics')`).

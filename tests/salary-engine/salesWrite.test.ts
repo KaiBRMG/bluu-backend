@@ -7,6 +7,7 @@
  * fetch, or inside a finalised month).
  */
 import {
+  creditableBuddyxUid,
   normalisePpv,
   normaliseTip,
   pairKey,
@@ -20,7 +21,13 @@ import {
   type StoredSale,
 } from '@/lib/buddyx/salesPlan';
 import { SALES_CUTOVER_AT, salesSourceFor } from '@/lib/salary/salaryConstants';
-import { matchSalesToSchedule, SCHEDULE_GRACE_MS, type ScheduleOccurrence } from '@/lib/salary/scheduleMatch';
+import {
+  matchSalesToSchedule,
+  SCHEDULE_GRACE_MS,
+  withoutDeparted,
+  type Departures,
+  type ScheduleOccurrence,
+} from '@/lib/salary/scheduleMatch';
 import type { BuddyxTipRow } from '@/lib/buddyx/types';
 
 const AFTER = new Date(SALES_CUTOVER_AT + 3_600_000).toISOString(); // 2026-10-04 09:50 SAST
@@ -51,23 +58,23 @@ function tipRow(over: Partial<BuddyxTipRow> = {}): BuddyxTipRow {
 const tip = (over: Partial<BuddyxTipRow> = {}) => normaliseTip(tipRow(over)) as NormalisedSale;
 
 /** The schedule map the sync builds: `matchSalesToSchedule` with userId = BuddyX's attribution. */
-function scheduleFor(sales: NormalisedSale[], shifts: ScheduleOccurrence[]) {
+function scheduleFor(sales: NormalisedSale[], shifts: ScheduleOccurrence[], departures?: Departures) {
   return matchSalesToSchedule(
     sales.map(s => ({
       saleId: s.saleId,
-      userId: (s.chatterId && chatters.get(s.chatterId)?.uid) || null,
+      userId: creditableBuddyxUid(s, chatters, departures),
       creatorId: (s.modelId && models.get(s.modelId)?.creatorId) || null,
       occurredAt: new Date(s.occurredAtMs).toISOString(),
       removedAt: null,
     })),
-    shifts,
+    withoutDeparted(shifts, departures),
   );
 }
 
 function plan(
   sales: NormalisedSale[],
   stored: StoredSale[] = [],
-  opts: { finalized?: string[]; complete?: boolean; shifts?: ScheduleOccurrence[] } = {},
+  opts: { finalized?: string[]; complete?: boolean; shifts?: ScheduleOccurrence[]; departures?: Departures } = {},
 ) {
   const storedMap = new Map(stored.map(s => [s.saleId, s]));
   const identity = resolveSaleIdentities(sales, storedMap);
@@ -76,7 +83,8 @@ function plan(
     stored: storedMap,
     chatters,
     models,
-    schedule: opts.shifts ? scheduleFor(identity.sales, opts.shifts) : undefined,
+    schedule: opts.shifts ? scheduleFor(identity.sales, opts.shifts, opts.departures) : undefined,
+    departures: opts.departures,
     finalized: new Set(opts.finalized ?? []),
     complete: opts.complete ?? true,
   });
@@ -186,6 +194,32 @@ describe('attribution by the shift schedule', () => {
     const corrected = plan([tip()], [stored], { shifts: [shift('u-queen', at - H, at + H)] });
     expect(corrected.upserts[0].sale).toMatchObject({ userId: 'u-queen', attributedBy: 'buddyx' });
     expect(corrected.touched).toEqual(new Set([pairKey('u-queen', MONTH), pairKey('u-jen', MONTH)]));
+  });
+
+  it('never credits an agent who had left: BuddyX’s credit to them is dropped, unassigned when no single agent was on shift', () => {
+    const departures: Departures = new Map([['u-queen', at - 7 * 24 * H]]);
+    const two = [shift('u-jen', at - H, at + H), shift('u-x', at - H, at + H)];
+    const p = plan([tip()], [], { shifts: two, departures });
+    expect(p.upserts[0].sale).toMatchObject({ userId: null, sourceUserId: null, buddyxUserId: 'u-queen', attributedBy: 'departed' });
+    expect(p.counts).toMatchObject({ departedUnassigned: 1, unassigned: 1 });
+    // One agent on shift → theirs, as for any other sale.
+    expect(plan([tip()], [], { shifts: [shift('u-jen', at - H, at + H)], departures }).upserts[0].sale).toMatchObject({
+      userId: 'u-jen', attributedBy: 'schedule',
+    });
+    // Nobody scheduled at all → still nobody, never the departed agent.
+    expect(plan([tip()], [], { shifts: [], departures }).upserts[0].sale.userId).toBeNull();
+  });
+
+  it('drops a departed agent’s leftover shifts, but keeps sales they made before leaving', () => {
+    const leftAt = at - H / 2;
+    const departures: Departures = new Map([['u-queen', leftAt]]);
+    // Queen's recurring shift is still on the roster after she left: it no longer captures the sale.
+    const lingering = plan([tip({ chatterId: 102 })], [], { shifts: [shift('u-queen', at - 10 * 60_000, at + H)], departures });
+    expect(lingering.upserts[0].sale).toMatchObject({ userId: 'u-jen', attributedBy: 'buddyx' });
+    // A sale before she left, on her shift, is still hers.
+    const before = normaliseTip(tipRow({ datePurchase: new Date(leftAt - 60_000).toISOString() })) as NormalisedSale;
+    const kept = plan([before], [], { shifts: [shift('u-queen', leftAt - 2 * H, leftAt + 4 * H)], departures });
+    expect(kept.upserts[0].sale).toMatchObject({ userId: 'u-queen', attributedBy: 'buddyx' });
   });
 
   it('refuses a schedule re-credit into a finalised month', () => {

@@ -100,8 +100,27 @@ export function matchSalesToSchedule(
  *   keep BuddyX's. Never guessed; the second case stays flagged off schedule.
  *
  * `match` is `matchSalesToSchedule`'s entry for the sale, computed with
- * `userId` = BuddyX's attribution.
+ * `userId` = BuddyX's attribution (`null` when that agent has left) over a
+ * roster without departed agents (`withoutDeparted`).
  */
 export function scheduleHolder(match: ScheduleMatch | undefined): string | null {
   return match?.offSchedule && match.scheduled.length === 1 ? match.scheduled[0] : null;
+}
+
+/**
+ * People who no longer work here, with the instant they left (`getDepartures`).
+ * The sync credits nobody at or after their departure, and a shift they still
+ * have on the roster stops counting from it — archiving does not delete shifts.
+ */
+export type Departures = Map<string, number>;
+
+export function hasDeparted(uid: string, atMs: number, departures: Departures | undefined): boolean {
+  const left = departures?.get(uid);
+  return left !== undefined && atMs >= left;
+}
+
+/** The roster without the occurrences a departed agent could no longer have worked. */
+export function withoutDeparted<T extends ScheduleOccurrence>(occurrences: T[], departures: Departures | undefined): T[] {
+  if (!departures?.size) return occurrences;
+  return occurrences.filter(o => !hasDeparted(o.userId, o.occurrenceStart, departures));
 }

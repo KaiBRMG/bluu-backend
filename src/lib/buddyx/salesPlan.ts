@@ -19,6 +19,12 @@
  * `attributedBy` says which of the two decided. It is re-derived every run, so
  * a corrected schedule re-credits the sale on the next sync.
  *
+ * Nobody who has **left** (archived or deactivated, `departures`) is credited
+ * for a sale at or after their departure: their leftover shifts stop counting,
+ * and BuddyX's credit to them is dropped. With no single agent on shift either,
+ * the sale is unassigned (`attributedBy: 'departed'`) for an admin to place —
+ * never paid to someone who no longer works here.
+ *
  * ## The attribution invariant
  *
  * A sale's **effective holder** is `transfer?.toUserId ?? sourceUserId`, and
@@ -73,7 +79,7 @@ import { salesSourceFor } from '../salary/salaryConstants';
 import { toDayKey, toMonthKey } from '../salary/salaryDate';
 import { normaliseSaleType } from '../salary/saleTypes';
 import { round2 } from '../salary/salaryEngine';
-import { scheduleHolder, type ScheduleMatch } from '../salary/scheduleMatch';
+import { hasDeparted, scheduleHolder, type Departures, type ScheduleMatch } from '../salary/scheduleMatch';
 import { normaliseId, type BuddyxPpvRow, type BuddyxTipRow } from './types';
 
 // ─── Normalisation ───────────────────────────────────────────────────
@@ -247,7 +253,8 @@ export interface DerivedSale {
   sourceUserId: string | null;
   /** The uid BuddyX itself credits (its chatter, mapped). */
   buddyxUserId: string | null;
-  attributedBy: 'schedule' | 'buddyx';
+  /** `departed`: BuddyX credits someone who had left, and no single agent was on shift — unassigned. */
+  attributedBy: 'schedule' | 'buddyx' | 'departed';
   userId: string | null;
   unmappedChatterId: string | null;
   attributionConflict: boolean;
@@ -258,10 +265,21 @@ export interface DerivedSale {
 
 /**
  * The shift schedule against each resolved sale, keyed by document id — from
- * `matchSalesToSchedule`, run with `userId` = BuddyX's attribution. Absent or
- * empty = no schedule known, and every sale keeps BuddyX's attribution.
+ * `matchSalesToSchedule`, run with `userId` = `creditableBuddyxUid` over a
+ * roster without departed agents. Absent or empty = no schedule known, and
+ * every sale keeps BuddyX's attribution.
  */
 export type SaleSchedule = Map<string, ScheduleMatch>;
+
+/** BuddyX's credit for a sale, unless that agent had left by its instant. What the schedule is compared against. */
+export function creditableBuddyxUid(
+  sale: NormalisedSale,
+  chatters: Map<string, ChatterRef>,
+  departures?: Departures,
+): string | null {
+  const uid = (sale.chatterId && chatters.get(sale.chatterId)?.uid) || null;
+  return uid && !hasDeparted(uid, sale.occurredAtMs, departures) ? uid : null;
+}
 
 export function deriveSale(
   sale: NormalisedSale,
@@ -269,12 +287,14 @@ export function deriveSale(
   chatters: Map<string, ChatterRef>,
   models: Map<string, ModelRef>,
   schedule?: SaleSchedule,
+  departures?: Departures,
 ): DerivedSale {
   const chatter = sale.chatterId ? chatters.get(sale.chatterId) : undefined;
   const model = sale.modelId ? models.get(sale.modelId) : undefined;
   const buddyxUserId = chatter?.uid ?? null;
+  const creditable = creditableBuddyxUid(sale, chatters, departures);
   const onShift = scheduleHolder(schedule?.get(sale.saleId));
-  const sourceUserId = onShift ?? buddyxUserId;
+  const sourceUserId = onShift ?? creditable;
   const transfer = stored?.transfer ?? null;
 
   const base = {
@@ -304,7 +324,7 @@ export function deriveSale(
     assignedBy: '',
     sourceUserId,
     buddyxUserId,
-    attributedBy: onShift ? ('schedule' as const) : ('buddyx' as const),
+    attributedBy: onShift ? ('schedule' as const) : buddyxUserId !== creditable ? ('departed' as const) : ('buddyx' as const),
     // The invariant: a transfer is never cleared by a sync.
     userId: transfer ? transfer.toUserId : sourceUserId,
     // About the BuddyX link, not the holder: an unlinked chatter is still
@@ -410,11 +430,12 @@ export function collectHolderPairs(
   chatters: Map<string, ChatterRef>,
   models: Map<string, ModelRef>,
   schedule?: SaleSchedule,
+  departures?: Departures,
 ): Set<string> {
   const pairs = new Set<string>();
   for (const sale of sales) {
     const prev = stored.get(sale.saleId);
-    const next = deriveSale(sale, prev, chatters, models, schedule);
+    const next = deriveSale(sale, prev, chatters, models, schedule, departures);
     if (next.userId) pairs.add(pairKey(next.userId, next.month));
     if (prev?.userId) pairs.add(pairKey(prev.userId, prev.month));
   }
@@ -452,6 +473,8 @@ export interface SalesPlan {
     unassigned: number;
     /** Credited to the agent on shift rather than to BuddyX's chatter. */
     scheduleAttributed: number;
+    /** BuddyX credits someone who had left, and no single agent was on shift — left unassigned. */
+    departedUnassigned: number;
     rekeyed: number;
     /** New ids that matched a vanished row's facts, but not uniquely — not guessed. */
     rekeyAmbiguous: number;
@@ -466,12 +489,14 @@ export function planSalesSync(params: {
   models: Map<string, ModelRef>;
   /** The shift schedule against each sale — the same map the caller fed `collectHolderPairs`. */
   schedule?: SaleSchedule;
+  /** Who has left, and when — the same map the caller built the schedule with. */
+  departures?: Departures;
   /** `uid|month` pairs that are finalised. */
   finalized: Set<string>;
   /** Both endpoints paginated to completion — the only condition under which anything is removed. */
   complete: boolean;
 }): SalesPlan {
-  const { identity, stored, chatters, models, schedule, finalized, complete } = params;
+  const { identity, stored, chatters, models, schedule, departures, finalized, complete } = params;
 
   const sales = new Map<string, NormalisedSale>();
   for (const sale of identity.sales) sales.set(sale.saleId, sale);
@@ -496,6 +521,7 @@ export function planSalesSync(params: {
       attributionConflicts: 0,
       unassigned: 0,
       scheduleAttributed: 0,
+      departedUnassigned: 0,
       rekeyed: identity.rekeyed.length,
       rekeyAmbiguous: identity.ambiguous,
     },
@@ -505,7 +531,7 @@ export function planSalesSync(params: {
 
   for (const sale of sales.values()) {
     const prev = stored.get(sale.saleId);
-    const next = deriveSale(sale, prev, chatters, models, schedule);
+    const next = deriveSale(sale, prev, chatters, models, schedule, departures);
 
     if (next.unmappedChatterId) {
       const entry = plan.unmappedChatters.get(next.unmappedChatterId) ?? { name: next.employeeName || null, rows: 0, gross: 0 };
@@ -515,6 +541,7 @@ export function planSalesSync(params: {
     }
     if (!next.userId) plan.counts.unassigned += 1;
     if (next.attributedBy === 'schedule') plan.counts.scheduleAttributed += 1;
+    if (next.attributedBy === 'departed') plan.counts.departedUnassigned += 1;
     if (next.attributionConflict) plan.counts.attributionConflicts += 1;
 
     const changed = !prev || prev.removed || prev.syncHash !== next.syncHash;

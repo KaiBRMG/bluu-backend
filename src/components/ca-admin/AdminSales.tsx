@@ -1025,7 +1025,10 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
                             {sale.unmappedChatterId ? (
                               <span className="text-orange-400">{sale.employeeName || `Chatter ${sale.unmappedChatterId}`} (not linked)</span>
                             ) : sale.buddyxUserId ? (
-                              <span className="text-zinc-300">{data.names[sale.buddyxUserId] ?? sale.employeeName}</span>
+                              <span className="text-zinc-300">
+                                {data.names[sale.buddyxUserId] ?? sale.employeeName}
+                                {sale.attributedBy === 'departed' && <span className="text-zinc-400"> · no longer here</span>}
+                              </span>
                             ) : (
                               <span className="text-zinc-400">Unassigned</span>
                             )}
@@ -1412,12 +1415,13 @@ function ReassignSaleDialog({
     [users, names],
   );
   const nameOf = (uid: string | null) => holderName(uid, allNames);
-  const pinned = new Set([
-    ...onShift,
-    ...(sale?.sourceUserId ? [sale.sourceUserId] : []),
-    ...(sale?.buddyxUserId ? [sale.buddyxUserId] : []),
-  ]);
   const agents = useMemo(() => activeChatAgents(users), [users]);
+  // Only people a sale can be moved to: the server refuses an archived target,
+  // so BuddyX's credit to someone who has left is shown above, never offered.
+  const assignable = new Set(agents.map(u => u.uid));
+  const pinned = new Set(
+    [...onShift, sale?.sourceUserId, sale?.buddyxUserId].filter((uid): uid is string => Boolean(uid) && assignable.has(uid!)),
+  );
 
   if (!sale) return null;
   const toUserId = target === NOBODY ? null : target || undefined;
@@ -1437,7 +1441,9 @@ function ReassignSaleDialog({
         backToBuddyx &&
           (sale.attributedBy === 'schedule'
             ? 'Clears the override — the sale goes back to the agent on shift.'
-            : 'Clears the override — the sale matches BuddyX again.'),
+            : sale.attributedBy === 'departed'
+              ? 'Clears the override — the sale goes back to unassigned.'
+              : 'Clears the override — the sale matches BuddyX again.'),
         sale.userId ? `${nameOf(sale.userId)} loses ${gross} gross.` : `${gross} gross, unassigned until now.`,
         toUserId ? `${nameOf(toUserId)} gains it.` : 'It will count toward nobody.',
         `Both agents’ ${sale.month} figures recompute.`,
@@ -1536,7 +1542,9 @@ function ReassignSaleDialog({
               ))}
               {pinned.size > 0 && <SelectSeparator />}
               {agents.filter(u => !pinned.has(u.uid)).map(u => <SelectItem key={u.uid} value={u.uid}>{u.displayName}</SelectItem>)}
-              <SelectItem value={NOBODY}>Nobody (unassigned){sale.sourceUserId === null ? ' — matches BuddyX' : ''}</SelectItem>
+              <SelectItem value={NOBODY}>
+                Nobody (unassigned){sale.sourceUserId === null && sale.attributedBy !== 'departed' ? ' — matches BuddyX' : ''}
+              </SelectItem>
             </SelectContent>
           </Select>
           {toUserId !== undefined && (

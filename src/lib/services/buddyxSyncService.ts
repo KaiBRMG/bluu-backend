@@ -43,6 +43,7 @@ import {
 } from '../buddyx/constants';
 import {
   collectHolderPairs,
+  creditableBuddyxUid,
   deriveSale,
   normalisePpv,
   normaliseTip,
@@ -58,7 +59,7 @@ import type { BuddyxPpvRow, BuddyxTipRow } from '../buddyx/types';
 import { SALARY_TIMEZONE, SALES_CUTOVER_AT } from '../salary/salaryConstants';
 import { addMonths, currentMonthKey, monthKeyRange, toDayKey, type SalaryMonthKey } from '../salary/salaryDate';
 import { notifications } from '../notificationContent';
-import { getFinalizedMonthsFor, getScheduleMatches, resolvePayrollMonth } from './caSalaryService';
+import { getDepartures, getFinalizedMonthsFor, getScheduleMatches, resolvePayrollMonth } from './caSalaryService';
 import { CHATTERS, loadBuddyxMaps, syncDirectory } from './buddyxMappingService';
 import { clearOpsAlert, sendOpsAlertOnce } from './onlyfansOpsAlerts';
 import { announceTierCrossings } from './tierNotices';
@@ -418,24 +419,31 @@ export async function syncSalesScope(ctx: SyncContext, write: boolean): Promise<
   // to its sender and cannot be changed). Compared against BuddyX's own
   // attribution, so the planner knows when the two agree. One shifts read for
   // the window (`getShiftsByRange`, with a day of lookback for overnight shifts).
+  // Nobody who had left by a sale's instant is credited — neither by a shift
+  // still on the roster nor by BuddyX (`departures`).
+  const departures = await getDepartures();
   const schedule = await getScheduleMatches(
     sales.map(sale => ({
       saleId: sale.saleId,
-      userId: (sale.chatterId && ctx.maps.chatters.get(sale.chatterId)?.uid) || null,
+      userId: creditableBuddyxUid(sale, ctx.maps.chatters, departures),
       creatorId: (sale.modelId && ctx.maps.models.get(sale.modelId)?.creatorId) || null,
       occurredAt: new Date(sale.occurredAtMs).toISOString(),
       removedAt: null,
     })),
     start,
     ctx.now,
+    departures,
   );
-  const finalized = await readFinalized(collectHolderPairs(sales, stored, ctx.maps.chatters, ctx.maps.models, schedule));
+  const finalized = await readFinalized(
+    collectHolderPairs(sales, stored, ctx.maps.chatters, ctx.maps.models, schedule, departures),
+  );
   const plan = planSalesSync({
     identity,
     stored,
     chatters: ctx.maps.chatters,
     models: ctx.maps.models,
     schedule,
+    departures,
     finalized,
     complete,
   });
@@ -447,7 +455,7 @@ export async function syncSalesScope(ctx: SyncContext, write: boolean): Promise<
     // the API returned — the figure an admin reconciles against the dashboard.
     const byKey = new Map<string, SalesPreviewRow>();
     for (const sale of sales) {
-      const uid = deriveSale(sale, stored.get(sale.saleId), ctx.maps.chatters, ctx.maps.models, schedule).userId;
+      const uid = deriveSale(sale, stored.get(sale.saleId), ctx.maps.chatters, ctx.maps.models, schedule, departures).userId;
       const day = toDayKey(sale.occurredAtMs);
       const key = `${uid ?? `chatter:${sale.chatterId ?? 'none'}`}|${day}`;
       const row = byKey.get(key) ?? {

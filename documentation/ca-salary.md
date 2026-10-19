@@ -761,7 +761,7 @@ All five are Admin-SDK-only (`allow read, write: if false`) and every field on t
 
 ## 11c. Admin Overview: sales names vs creator ids
 
-`GET /api/ca-salary/overview` is the one place in this subsystem that has to join **sales** to **shifts**, and the two do not share a key. An Infloww sale carries only the creator *name* typed into the old `.xlsx` export (BuddyX rows also carry `creatorId`); a shift carries `creatorIds`, real creator document ids. Anything spanning both needs `buildCreatorIdResolver`.
+`GET /api/ca-salary/overview` is the one place in this subsystem that has to join **sales** to **shifts**, and the two do not share a key. An Infloww sale carries the creator *name* typed into the old `.xlsx` export, plus a `creatorId` only where the historical import could resolve that name (BuddyX rows always carry one); a shift carries `creatorIds`, real creator document ids. Anything spanning both needs `buildCreatorIdResolver`.
 
 The export's names are also routinely shorter than the roster's stage names — "Liam" for Liam Heng, "Adam" for Adam Horváth, "Cole" for Cole Bentley — so an exact folded match resolves only some of them. The resolver takes an exact match first, then a **word-boundary prefix**, and **only when exactly one creator matches**: "noah" is a prefix of both Noah Green and Noah Ryder, and guessing there would attribute one creator's coverage to another. Ambiguous or unmatched resolves to `null`.
 

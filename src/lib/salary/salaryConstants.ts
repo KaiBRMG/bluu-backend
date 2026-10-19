@@ -122,8 +122,8 @@ export function isSalaryMonthVisible(month: string): boolean {
  * timezone (`06:50:31Z`).
  *
  * **Each source owns its own side of this instant, and nothing counts twice.**
- * Infloww owns every sale at or before it — the historical import refuses
- * anything later — and BuddyX owns every sale after it — the sync drops
+ * Infloww owns every sale at or before it — the historical import (deleted
+ * 2026-10-18) refused anything later — and BuddyX owns every sale after it — the sync drops
  * anything earlier. Before it, BuddyX's own attribution is unusable for pay:
  * most tips from 27 Sep to 3 Oct are unassigned, because chatters had not yet
  * moved into the BuddyX app (verified against the live API, 2026-10-06).
@@ -134,9 +134,9 @@ export const SALES_CUTOVER_AT = Date.UTC(2026, 9, 4, 6, 50, 31);
 export type SalesSource = 'infloww' | 'buddyx';
 
 /**
- * The one predicate both writers use, so the two sides of the cutover cannot
- * drift apart: the sync keeps a row only when this says `buddyx`, the
- * historical import only when it says `infloww`.
+ * The one predicate deciding which side of the cutover a sale is on: the sync
+ * keeps a row only when this says `buddyx` (the deleted historical import kept
+ * one only when it said `infloww`), and disputes refuse anything not `buddyx`.
  */
 export function salesSourceFor(occurredAtMs: number): SalesSource {
   return occurredAtMs <= SALES_CUTOVER_AT ? 'infloww' : 'buddyx';

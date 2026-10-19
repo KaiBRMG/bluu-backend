@@ -15,14 +15,16 @@
  * The sync itself credits a BuddyX sale to the agent the shift schedule had on
  * the account (`attributedBy: 'schedule'`), because BuddyX credits a PPV to its
  * sender. Such a row differs from BuddyX with no transfer at all; it gets a
- * quiet *Assigned by shift* note naming who BuddyX credits.
+ * quiet *Assigned by shift* note naming who BuddyX credits. A sale BuddyX
+ * credits to someone who has left, with no single agent on shift, is held by
+ * nobody (`attributedBy: 'departed'`) and says so: *Former agent in BuddyX*.
  *
  * Hues borrow `STATUS_COLORS` (DESIGN.md §2): blue is information — the row
  * differs for a recorded reason — and orange is attention: the attribution has
  * since moved a moved sale to someone else (`attributionConflict`). A move the
  * attribution has since agreed with is a quiet greyscale note.
  */
-import { ArrowLeftRight, CalendarClock, type LucideIcon } from 'lucide-react';
+import { ArrowLeftRight, CalendarClock, UserX, type LucideIcon } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { STATUS_COLORS } from '@/lib/campaignTracking';
 import { cn } from '@/lib/utils';
@@ -42,7 +44,8 @@ export function holderName(uid: string | null, names: Record<string, string>, vi
 /** Who BuddyX credits a sale to — including a chatter not linked to any Bluu user. */
 export function buddyxCreditName(sale: SalarySale, names: Record<string, string>, viewerUid?: string | null): string {
   if (sale.buddyxUserId === null && sale.unmappedChatterId) return `${sale.employeeName || 'a chatter'} (not linked to Bluu)`;
-  return holderName(sale.buddyxUserId, names, viewerUid);
+  const who = holderName(sale.buddyxUserId, names, viewerUid);
+  return sale.attributedBy === 'departed' ? `${who} (no longer here)` : who;
 }
 
 /** Who the sync credits a sale to, said with why: the agent on shift, or BuddyX's chatter. */
@@ -66,6 +69,14 @@ export function SaleHolderNote({
   const held = holderName(sale.userId, names, viewerUid);
 
   if (!sale.transfer && sale.matchesSource) {
+    if (sale.attributedBy === 'departed') {
+      return (
+        <Pill tone={QUIET} pill="Former agent in BuddyX" icon={UserX}>
+          BuddyX credits {buddyx}, so it isn’t credited to them, and no single agent was on shift on this account. It counts toward
+          nobody until an admin assigns it.
+        </Pill>
+      );
+    }
     if (sale.attributedBy !== 'schedule') return null;
     const why = sale.kind === 'ppv' ? 'BuddyX gives a PPV to whoever sent it' : 'BuddyX’s own shift record differs from the schedule';
     return (

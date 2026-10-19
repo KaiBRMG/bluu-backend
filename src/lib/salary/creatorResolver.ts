@@ -14,8 +14,9 @@
  * coverage to another. An ambiguous or unmatched name resolves to `null` and is
  * reported as unmeasurable rather than quietly treated as uncovered.
  *
- * Shared by CA Admin → Overview and the historical Infloww import, which stamps
- * `creatorId` onto every pre-cutover row with it (ca-salary.md §11c). BuddyX
+ * Used by CA Admin → Overview. The historical Infloww import (deleted
+ * 2026-10-18) also used it to stamp `creatorId` onto the pre-cutover rows it
+ * could resolve (ca-salary.md §11c). BuddyX
  * rows do not need it — they carry a model id, mapped by handle.
  */
 
