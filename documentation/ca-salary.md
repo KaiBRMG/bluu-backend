@@ -61,6 +61,7 @@ The commission tier is read from **month-to-date gross including the current day
 - The cap is the **shift's own scheduled length**, not a fixed 8 hours, so a 4-hour overtime shift caps at 4.
 - A shift still in progress is credited only up to `now`. Crediting to its scheduled end would pay for hours not yet worked and make today's figure fall as the day goes on.
 - Hours come from `computeTimeWorked` in [`shiftAttendance.ts`](../src/lib/utils/shiftAttendance.ts) — the same function the Shift Management timesheet uses. Idle and pause are excluded; break is included.
+- **Working time with no evidence the app was running is excluded at clock-out** (a heartbeat-less, screenshot-less span over 20 min becomes a pause) — see [time-tracking.md §3h](time-tracking.md). It reaches pay through the event log, not through anything in the salary engine.
 
 ### Accounts → hourly rate
 

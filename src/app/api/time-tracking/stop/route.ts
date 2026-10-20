@@ -3,6 +3,7 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { getActiveSession, commitSession } from '@/lib/services/activeSessionService';
 import { getUserById } from '@/lib/services/userService';
 import { parseBuffer } from '@/lib/parseBuffer';
+import { excludeUnverifiedSpans } from '@/lib/unverifiedSpans';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { LocalSessionBuffer } from '@/types/firestore';
 
@@ -30,8 +31,11 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'Session ID mismatch' }, { status: 400 });
     }
 
+    // Working time the app cannot prove it was running for is not worked time —
+    // applied here, server-side, so it holds for renderers of any age (rule 9c).
+    const { events } = excludeUnverifiedSpans(buffer.events);
     const endTimeMs = Date.now();
-    const parsedTotals = parseBuffer(buffer.events, endTimeMs);
+    const parsedTotals = parseBuffer(events, endTimeMs);
 
     await commitSession(
       token.uid,
@@ -39,7 +43,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       buffer.startTime,
       endTimeMs,
       parsedTotals,
-      buffer.events,
+      events,
       userData?.timezone || 'UTC',
       userData?.enableIdleTimeout ?? true,
     );

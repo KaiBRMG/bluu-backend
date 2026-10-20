@@ -28,6 +28,16 @@ export async function decodeScreens(screens: string[]): Promise<Blob[]> {
   return Promise.all(screens.map(async b64 => (await fetch(`data:image/png;base64,${b64}`)).blob()));
 }
 
+// Every request is time-boxed. A fetch has no timeout of its own, and one that
+// never settles (a half-open connection, a captive portal) used to stall the
+// capture callback that schedules the NEXT screenshot — ending captures for the
+// rest of the session. A timeout rejects like any other failure: the signed
+// path falls back to the legacy route, and the legacy route throws to the
+// caller's "Network Issues" handling.
+const API_TIMEOUT_MS = 30_000;
+const PUT_TIMEOUT_MS = 60_000;     // full-resolution PNGs, possibly several screens
+const LEGACY_TIMEOUT_MS = 90_000;  // the same bytes again, base64 through a function
+
 class UploadStepError extends Error {
   constructor(readonly step: 'sign' | 'put' | 'finalize', detail: string) {
     super(`${step}: ${detail}`);
@@ -60,6 +70,7 @@ async function signedUpload(idToken: string, blobs: Blob[], meta: CaptureUploadM
     method: 'POST',
     headers: auth,
     body: JSON.stringify({ count: blobs.length }),
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   if (!signRes.ok) throw new UploadStepError('sign', `HTTP ${signRes.status}`);
   const { captureGroup, slots } = (await signRes.json()) as {
@@ -69,7 +80,12 @@ async function signedUpload(idToken: string, blobs: Blob[], meta: CaptureUploadM
   if (!Array.isArray(slots) || slots.length !== blobs.length) throw new UploadStepError('sign', 'slot count mismatch');
 
   const puts = await Promise.all(
-    slots.map((slot, i) => fetch(slot.uploadUrl, { method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: blobs[i] })),
+    slots.map((slot, i) => fetch(slot.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'image/png' },
+      body: blobs[i],
+      signal: AbortSignal.timeout(PUT_TIMEOUT_MS),
+    })),
   );
   const failed = puts.find(r => !r.ok);
   if (failed) throw new UploadStepError('put', `HTTP ${failed.status}`);
@@ -78,6 +94,7 @@ async function signedUpload(idToken: string, blobs: Blob[], meta: CaptureUploadM
     method: 'POST',
     headers: auth,
     body: JSON.stringify({ captureGroup, paths: slots.map(s => s.path), ...metaBody(meta) }),
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   if (!finRes.ok) throw new UploadStepError('finalize', `HTTP ${finRes.status}`);
 }
@@ -96,5 +113,6 @@ export async function uploadCapture(idToken: string, screens: string[], blobs: B
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
     body: JSON.stringify({ screens, ...metaBody(meta) }),
+    signal: AbortSignal.timeout(LEGACY_TIMEOUT_MS),
   });
 }

@@ -152,8 +152,10 @@ function findSyntheticPauses(eventLog) {
     const e = eventLog[i];
     if (e.type !== 'pause') continue;
 
-    // The tag, once patchSleepGap starts writing it, is authoritative.
-    if (e.meta && e.meta.trigger === 'sleep-gap') { synthetic.add(i); continue; }
+    // The tag is authoritative. 'sleep-gap' is the renderer's live patch;
+    // 'no-evidence' is the same exclusion applied at commit by
+    // src/lib/unverifiedSpans.ts — neither is the user interrupting their focus.
+    if (e.meta && (e.meta.trigger === 'sleep-gap' || e.meta.trigger === 'no-evidence')) { synthetic.add(i); continue; }
 
     const prev = eventLog[i - 1];
     const next = eventLog[i + 1];

@@ -22,11 +22,20 @@ import { buildTimerWidgetPayload, pushTimerWidgetState, hideTimerWidget } from '
 import { summariseInputWindow, type InputWindowSummary } from '@/lib/inputQuality';
 import { computeFingerprint } from '@/lib/screenFingerprint';
 import { decodeScreens, uploadCapture } from '@/lib/screenshotUpload';
+import { UNVERIFIED_GAP_MS, AWAKE_VERIFIED_META } from '@/lib/unverifiedSpans';
 import { toast } from 'sonner';
 import * as Sentry from '@sentry/nextjs';
 
 const HEARTBEAT_INTERVAL_MS   = 15 * 60 * 1000; // 15 minutes — working state only
-const SLEEP_GAP_THRESHOLD_MS  = HEARTBEAT_INTERVAL_MS + 5 * 60 * 1000; // 20 min — gap larger than this implies the process was suspended
+// 20 min — a working gap larger than this implies the process was suspended.
+// The SAME constant the server applies at commit (excludeUnverifiedSpans), so the
+// live timer and the ledger agree on what a gap is.
+const SLEEP_GAP_THRESHOLD_MS  = UNVERIFIED_GAP_MS;
+// Bounds on the screenshot chain. Each capture's callback is what schedules the
+// next one, so a single await that never settles used to end screenshots for
+// the rest of the session (until the next state change re-armed the effect).
+const CAPTURE_TIMEOUT_MS      = 30_000;          // native desktopCapturer call
+const CAPTURE_DEADLINE_MS     = 3 * 60 * 1000;   // the whole capture → upload, backstop over per-request timeouts
 const IDLE_CHECK_INTERVAL_MS  = 30_000;          // poll for idle every 30s
 const IDLE_RESUME_CHECK_MS    = 5_000;           // poll for resume every 5s
 const LOCK_CONFIRM_IDLE_SECONDS = 60;            // a `lock` is only "user walked away" if they were active just before it
@@ -64,6 +73,20 @@ async function readIdleSeconds(
     }
   }
   return api.getIdleTime();
+}
+
+class TimeoutError extends Error {}
+
+/**
+ * Settle within `ms` or reject. Does not cancel the underlying work — it only
+ * guarantees the caller moves on, which is what keeps the screenshot chain alive.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new TimeoutError(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 /** Total break seconds allowed based on how many 8-hour periods have elapsed. */
@@ -383,6 +406,63 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /**
+   * Has the session been "working" across a span the app was not running for?
+   * If so, exclude it now — before anything else lands in the log.
+   *
+   * Used to live only inside the 15-min heartbeat. That left the hole this was
+   * written for: the machine sleeps without the renderer hearing `suspend`, the
+   * user wakes it and clocks out within the minute, the heartbeat never runs, and
+   * hours of sleep commit as working. It now also runs at every point the
+   * process can be seen coming back or the session ending — focus/visibility,
+   * resume/unlock, each screenshot, and both clock-out paths.
+   *
+   * The gap alone is a guess (a stalled timer on an awake machine looks the
+   * same), so it is confirmed against the native sampler first. A proven-awake
+   * gap is KEPT and the evidence written into the log as an `awakeVerified`
+   * marker — the server applies the same gap rule at commit
+   * (`excludeUnverifiedSpans`) and honours that marker rather than re-trimming.
+   *
+   * Serialised: focus, a screenshot and the heartbeat can all fire on wake, and
+   * two concurrent checks would read the same gap and patch it twice.
+   */
+  const sleepGapCheckRef = useRef<Promise<void> | null>(null);
+
+  const checkSleepGap = useCallback((sid: string | null): Promise<void> => {
+    if (!sid) return Promise.resolve();
+    if (sleepGapCheckRef.current) return sleepGapCheckRef.current;
+
+    const run = (async () => {
+      try {
+        if (displayStateRef.current !== 'working' || isTransitioningRef.current) return;
+        const buf = await getBuffer(sid);
+        if (!buf || buf.events.length === 0) return;
+        const lastEvent = buf.events.at(-1)!;
+        const now = Date.now();
+        const inWorkingSegment = !['pause', 'idle-start', 'break-start', 'clock-out'].includes(lastEvent.type);
+        if (now - lastEvent.timestamp <= SLEEP_GAP_THRESHOLD_MS || !inWorkingSegment) return;
+
+        if (await wasAwakeDuring(lastEvent.timestamp, now)) {
+          await appendEvent(sid, { type: 'activity', timestamp: now, meta: { [AWAKE_VERIFIED_META]: true } });
+          return;
+        }
+        // Re-check after the awaits: a transition may have moved us out of working.
+        if (displayStateRef.current !== 'working' || isTransitioningRef.current) return;
+        await patchSleepGap(sid, lastEvent.timestamp + 1000, now);
+        Sentry.captureMessage('Time tracking sleep gap excluded', {
+          level: 'info',
+          tags: { area: 'time-tracking', reason: 'sleep-gap-patched' },
+          extra: { gapMs: now - lastEvent.timestamp },
+        });
+      } catch (err) {
+        console.error('[TimeTracking] Sleep-gap check failed:', err);
+      }
+    })();
+
+    sleepGapCheckRef.current = run;
+    return run.finally(() => { sleepGapCheckRef.current = null; });
+  }, [patchSleepGap]);
+
+  /**
    * Watchdog for §3c: the renderer and the event log must agree on the current
    * state. If they ever drift, THE LOG WINS — it is what the timesheet, the
    * activity score and payroll are built from.
@@ -572,6 +652,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       // on the next startup, even if the server-side reconciliation below fails
       // or the buffer is later orphaned by a race.
       if (sid) {
+        // A machine woken just to quit the app must not commit its sleep as work.
+        await checkSleepGap(sid);
         await appendEvent(sid, { type: 'clock-out', timestamp: Date.now() }).catch(() => {});
       }
 
@@ -600,7 +682,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       setBreakRemainingSeconds(null);
       if (user) invalidateTimesheetCache(user.uid);
     }
-  }, [user]);
+  }, [user, checkSleepGap]);
 
   // Reset on logout
   useEffect(() => {
@@ -704,32 +786,12 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         const sid = sessionIdRef.current;
         if (!sid) return;
 
-        const now = Date.now();
-
         // Sleep gap detection — safety net for a suspend that never reached the
         // renderer (the power-event handler stamps `idle-start` at the exact
-        // suspend instant when it does, and `inWorkingSegment` then skips this).
-        //
-        // The gap alone is only a guess: the heartbeat period is 15 min and the
-        // threshold 20, so a throttled timer or a stalled network call can trip
-        // it and erase genuinely worked time. Where the native sampler exists,
-        // confirm against it first — it ticks every 5s in the main process, so
-        // samples spanning the gap prove the machine was awake and the user's
-        // work is real. Absent samples mean it truly slept.
-        try {
-          const buf = await getBuffer(sid);
-          if (buf && buf.events.length > 0) {
-            const lastEvent = buf.events.at(-1)!;
-            const gap = now - lastEvent.timestamp;
-            const inWorkingSegment = !['pause', 'idle-start', 'break-start', 'clock-out'].includes(lastEvent.type);
-
-            if (gap > SLEEP_GAP_THRESHOLD_MS && inWorkingSegment && !(await wasAwakeDuring(lastEvent.timestamp, now))) {
-              await patchSleepGap(sid, lastEvent.timestamp + 1000, now);
-            }
-          }
-        } catch {
-          // Non-critical — proceed with the normal heartbeat regardless
-        }
+        // suspend instant when it does). Confirmed against the native sampler
+        // before anything is excluded; see checkSleepGap.
+        await checkSleepGap(sid);
+        const now = Date.now();
 
         // Appending `activity` is precisely the act that would strand a desynced
         // session, so check agreement immediately before doing it. This is the
@@ -753,7 +815,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         heartbeatRef.current = null;
       }
     };
-  }, [displayState, apiCall, patchSleepGap, reconcileLogState, flushPendingTransition]);
+  }, [displayState, apiCall, checkSleepGap, reconcileLogState, flushPendingTransition]);
 
   // ─── Idle Detection ──────────────────────────────────────────────────
   const enableIdleTimeout = userData?.enableIdleTimeout ?? true;
@@ -958,6 +1020,13 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         }
 
         // 'resume' | 'unlock' ────────────────────────────────────────────
+        // Still 'working' on wake means the matching suspend never reached us —
+        // the sleep is sitting in the log as work. Exclude it now rather than
+        // waiting for a heartbeat the user may clock out before.
+        if (displayStateRef.current === 'working') {
+          await checkSleepGap(sessionIdRef.current);
+          return;
+        }
         // Come back instantly instead of waiting up to IDLE_RESUME_CHECK_MS.
         // Must be a check, not an assumption: after a resume the OS idle counter
         // can still read high, in which case the poll handles it.
@@ -988,7 +1057,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     return () => {
       electronAPI.power?.removeEventListener();
     };
-  }, [enableIdleTimeout, idleThreshold, idleInputMode, syncTransition]);
+  }, [enableIdleTimeout, idleThreshold, idleInputMode, syncTransition, checkSleepGap]);
 
   // ─── Timer Tick (1s) ─────────────────────────────────────────────────
   useEffect(() => {
@@ -1102,9 +1171,12 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
   // can appear stuck. Elapsed time is always derived from entryStartTime +
   // Date.now(), so recomputing on focus/visibility snaps the display back to
   // the true wall-clock value immediately instead of waiting for the next tick.
+  // Coming back into view is also when a sleep that never fired `suspend` first
+  // becomes visible to us, so check for the gap before snapping the display.
   useEffect(() => {
-    const recompute = () => {
+    const recompute = async () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      await checkSleepGap(sessionIdRef.current);
       const state = displayStateRef.current;
       if (state === 'working' && entryStartTimeRef.current) {
         const segment = Math.floor((Date.now() - entryStartTimeRef.current) / 1000);
@@ -1121,7 +1193,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       document.removeEventListener('visibilitychange', recompute);
       window.removeEventListener('focus', recompute);
     };
-  }, []);
+  }, [checkSleepGap]);
 
   // ─── Power Save Blocker (Electron) ──────────────────────────────────
   useEffect(() => {
@@ -1152,15 +1224,35 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
       screenshotTimeoutRef.current = setTimeout(async () => {
         if (displayStateRef.current !== 'working') return;
 
+        // A capture scheduled before a sleep fires the moment the machine wakes —
+        // often the very first thing to run. Exclude the sleep before this
+        // capture's marker lands in the log as fresh evidence of a running app.
+        await checkSleepGap(sessionIdRef.current);
+        if (displayStateRef.current !== 'working') return;
+
         let failed = false;
         let failureMessage = '';
         let failureContext = '';
 
         try {
-          const result = await electronAPI.timeTracking.captureScreenshot();
-          if (result.success && result.screens && result.screens.length > 0) {
+          // Every await below is bounded: this callback is the only thing that
+          // schedules the next capture, so one that never settles would end
+          // screenshots for the rest of the session.
+          const result = await withTimeout(electronAPI.timeTracking.captureScreenshot(), CAPTURE_TIMEOUT_MS, 'captureScreenshot')
+            .catch(err => {
+              if (err instanceof TimeoutError) return null;
+              throw err;
+            });
+          if (result === null) {
+            // A hung capture is not a permission problem — kept apart from
+            // 'capture-failed' so it neither fires the TCC reset nor tells the
+            // user to go change OS settings.
+            failed = true;
+            failureMessage = 'Screen capture did not respond';
+            failureContext = 'screenshot:capture-timeout';
+          } else if (result.success && result.screens && result.screens.length > 0) {
             consecutiveScreenshotFailsRef.current = 0;
-            const idToken = await user?.getIdToken();
+            const idToken = await withTimeout(user?.getIdToken() ?? Promise.resolve(undefined), CAPTURE_TIMEOUT_MS, 'getIdToken');
             if (idToken) {
               const windowEnd = Date.now();
               const windowStart = prevScreenshotMsRef.current ?? sessionStartMsRef.current ?? windowEnd;
@@ -1187,7 +1279,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
               // whenever the sample buffer can't cover the window.
               if (electronAPI.timeTracking.getActivitySince) {
                 try {
-                  const samples = await electronAPI.timeTracking.getActivitySince(windowStart);
+                  const samples = await withTimeout(electronAPI.timeTracking.getActivitySince(windowStart), CAPTURE_TIMEOUT_MS, 'getActivitySince');
                   activityPercent = calcActivityPercentFromSamples(samples, windowStart, windowEnd, events, idleInputModeRef.current);
                   if (activityPercent !== null) activityMethod = 'samples';
                 } catch {
@@ -1205,7 +1297,11 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
               let fingerprints: string[] | null = null;
               if (inputMonitoringRef.current) {
                 try {
-                  const raw = await electronAPI.timeTracking.getInputEvents?.(windowStart);
+                  const raw = await withTimeout(
+                    electronAPI.timeTracking.getInputEvents?.(windowStart) ?? Promise.resolve(undefined),
+                    CAPTURE_TIMEOUT_MS,
+                    'getInputEvents',
+                  );
                   input = summariseInputWindow(raw, windowStart, windowEnd, ms =>
                     events.length === 0 || stateAtMs(events, ms) === 'working',
                   );
@@ -1219,14 +1315,15 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
                 fingerprints = fps.every((f): f is string => f !== null) ? fps : null;
               }
 
-              await uploadCapture(idToken, result.screens, blobs, {
+              // Each request inside carries its own timeout; this is the backstop.
+              await withTimeout(uploadCapture(idToken, result.screens, blobs, {
                 activityPercent,
                 activityMethod,
                 windowStartMs: windowStart,
                 windowEndMs: windowEnd,
                 fingerprints,
                 input,
-              });
+              }), CAPTURE_DEADLINE_MS, 'uploadCapture');
               prevScreenshotMsRef.current = windowEnd;
               if (sid) {
                 appendEvent(sid, { type: 'screenshot', timestamp: Date.now() }).catch(() => {});
@@ -1277,7 +1374,8 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
           ) {
             tccResetAttemptedRef.current = true;
             electronAPI.permissions?.resetScreenCapture?.().catch(() => {});
-            void markScreenshotBugFixed(await user?.getIdToken());
+            // Not awaited — nothing may stand between a failure and the retry below.
+            user?.getIdToken().then(markScreenshotBugFixed).catch(() => {});
           }
 
           if (failCount < 3) {
@@ -1291,12 +1389,13 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
           // an upload failure is a network issue — telling that user to change
           // OS settings would send them chasing the wrong fix.
           consecutiveScreenshotFailsRef.current = 0;
-          const isCaptureFailure = failureContext === 'screenshot:capture-failed';
           electronAPI.notifications?.show({
             title: 'Bluu Backend',
-            body: isCaptureFailure
+            body: failureContext === 'screenshot:capture-failed'
               ? 'Screenshot Failed. Please enable this in your OS settings ASAP.'
-              : 'Screenshot Failed. Network Issues.',
+              : failureContext === 'screenshot:capture-timeout'
+                ? 'Screenshot Failed. Please restart the app if this keeps happening.'
+                : 'Screenshot Failed. Network Issues.',
             playSound: false,
           }).catch(() => {});
         }
@@ -1313,7 +1412,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         screenshotTimeoutRef.current = null;
       }
     };
-  }, [displayState, enableScreenshots, user]);
+  }, [displayState, enableScreenshots, user, checkSleepGap]);
 
   // ─── Actions ──────────────────────────────────────────────────────────
 
@@ -1388,6 +1487,9 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     if (!sid) return;
     setIsLoading(true);
     try {
+      // The reported case: woke the machine, clocked out within the minute, and
+      // the heartbeat that would have caught the sleep never ran.
+      await checkSleepGap(sid);
       await appendEvent(sid, { type: 'clock-out', timestamp: Date.now() });
       const buf = await getBuffer(sid);
       if (buf) {
@@ -1412,7 +1514,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, displayState, sessionId, apiCall, user]);
+  }, [isLoading, displayState, sessionId, apiCall, user, checkSleepGap]);
 
   const pauseTracking = useCallback(async () => {
     if (isLoading || (displayState !== 'working' && displayState !== 'idle')) return;

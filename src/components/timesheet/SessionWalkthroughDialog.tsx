@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button';
 import { STATE_CONFIG } from '@/lib/stateColors';
 import { eventsToSegments, type SegmentState } from '@/lib/utils/sessionSegments';
 import { safeTimezone } from '@/lib/utils/timezone';
+import { UNVERIFIED_TRIGGER } from '@/lib/unverifiedSpans';
 import type { TimesheetSession } from '@/hooks/useTimesheetData';
 import type { SessionEvent, SessionEventType } from '@/types/firestore';
 
@@ -67,8 +68,20 @@ const UNKNOWN_META: EventMeta = {
   Icon: Activity,
 };
 
-function metaFor(type: SessionEventType): EventMeta {
-  return EVENT_META[type] ?? UNKNOWN_META;
+// A pause the system inserted, not one the user pressed. Labelled by its
+// trigger so an admin can see why worked time stops there.
+const SYSTEM_PAUSE_LABEL: Record<string, string> = {
+  'sleep-gap': 'Machine asleep — not counted',
+  [UNVERIFIED_TRIGGER]: 'App not running — not counted',
+};
+
+function metaFor(event: SessionEvent): EventMeta {
+  const meta = EVENT_META[event.type] ?? UNKNOWN_META;
+  const trigger = event.meta?.trigger;
+  if (event.type === 'pause' && typeof trigger === 'string' && SYSTEM_PAUSE_LABEL[trigger]) {
+    return { ...meta, label: SYSTEM_PAUSE_LABEL[trigger] };
+  }
+  return meta;
 }
 
 // ─── Formatters ──────────────────────────────────────────────────────
@@ -164,11 +177,11 @@ export default function SessionWalkthroughDialog({
     // Milestones bound each other: the state an event opens runs until the next
     // milestone, or to the end of the session if nothing closes it.
     const milestoneIdx = events
-      .map((e, i) => (metaFor(e.type).kind === 'milestone' ? i : -1))
+      .map((e, i) => (metaFor(e).kind === 'milestone' ? i : -1))
       .filter(i => i >= 0);
 
     const rows: WalkthroughRow[] = events.map((event, i) => {
-      const meta = metaFor(event.type);
+      const meta = metaFor(event);
       let heldMs: number | null = null;
       if (meta.opens) {
         const next = milestoneIdx.find(j => j > i);

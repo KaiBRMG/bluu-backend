@@ -5,6 +5,7 @@ import { useTimeTracking } from '@/hooks/useTimeTracking';
 import { useTimesheetData } from '@/hooks/useTimesheetData';
 import { getTodaySessions } from '@/lib/localBuffer';
 import { parseBuffer, sessionCloseMs } from '@/lib/parseBuffer';
+import { excludeUnverifiedSpans } from '@/lib/unverifiedSpans';
 import { todayStr } from '@/lib/utils/timezone';
 import type { SessionEvent } from '@/types/firestore';
 
@@ -104,7 +105,9 @@ export function useTodaySessions(timezone: string): UseTodaySessionsReturn {
         sessionId: buf.sessionId,
         startTime: buf.startTime,
         endTime: buf.events.find(e => e.type === 'clock-out')?.timestamp ?? null,
-        events: buf.events,
+        // The rule /stop and /upload-log apply at commit, so a buffer reads the
+        // same before and after it reaches the ledger.
+        events: excludeUnverifiedSpans(buf.events).events,
         source: 'local' as const,
         isLive: false, // resolved against the live session below
         isManual: false,

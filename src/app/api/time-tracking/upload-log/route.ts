@@ -9,6 +9,7 @@ import {
 import { getUserById } from '@/lib/services/userService';
 import { markAnalyticsDirty } from '@/lib/services/analyticsService';
 import { parseBuffer } from '@/lib/parseBuffer';
+import { excludeUnverifiedSpans } from '@/lib/unverifiedSpans';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { LocalSessionBuffer } from '@/types/firestore';
 
@@ -40,7 +41,10 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     const endTimeMs = clockOutEvent
       ? clockOutEvent.timestamp
       : (lastEvent ? lastEvent.timestamp : buffer.startTime);
-    const parsedTotals = parseBuffer(buffer.events, endTimeMs);
+    // Same evidence rule as /stop — a crashed or abandoned session is exactly
+    // where a silent working span is most likely.
+    const { events } = excludeUnverifiedSpans(buffer.events);
+    const parsedTotals = parseBuffer(events, endTimeMs);
 
     // Check both possible states in parallel
     const [ledger, session, userData] = await Promise.all([
@@ -70,7 +74,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       // Correct endTime using the buffer's last known activity timestamp so the
       // timesheet segment accurately reflects when the session actually ended,
       // rather than the CF-assigned lastUpdated which could be late in the day.
-      await updateSessionLog(buffer.sessionId, buffer.events, parsedTotals, endTimeMs);
+      await updateSessionLog(buffer.sessionId, events, parsedTotals, endTimeMs);
       // This day's rollup was written with hasIncompleteLog:true (the CF had no
       // event log to work from). Queue it for recompute — the rollup's 3-day
       // rolling window may have long since passed this session's date.
@@ -89,7 +93,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         buffer.startTime,
         endTimeMs,
         parsedTotals,
-        buffer.events,
+        events,
         userData?.timezone || 'UTC',
         userData?.enableIdleTimeout ?? true,
       );

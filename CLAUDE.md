@@ -254,7 +254,7 @@ Fixing the `AppLayout` hoist is therefore not only the navigation speed-up alrea
 | [onboarding.md](documentation/onboarding.md) | First-run flow: download → login → terms → OS permissions → personal details, the `AuthWrapper` guard, `hasAcceptedTerms`/`hasCompletedOnboarding`, `/terms` |
 | [permissions.md](documentation/permissions.md) | Page definitions, `page-permissions`, `permittedPageIds`, `checkPageAccess`, **`UNIVERSAL_PAGES`** (org-wide pages with no permission) |
 | [data-layer.md](documentation/data-layer.md) | Server services, client hooks, Firestore collections, read-optimization rules, session token |
-| [time-tracking.md](documentation/time-tracking.md) | Event-log sessions, `sessionCloseMs`, crash robustness, activity percent, the **signed-URL screenshot upload**, **integrity signals** (input quality, unchanged screens — §4b), **analytics rollups** |
+| [time-tracking.md](documentation/time-tracking.md) | Event-log sessions, `sessionCloseMs`, crash robustness, **working time needs evidence** (`excludeUnverifiedSpans` — §3h), activity percent, the **signed-URL screenshot upload**, **integrity signals** (input quality, unchanged screens — §4b), **analytics rollups** |
 | [notifications.md](documentation/notifications.md) | `notificationContent.ts`, `addNotificationToBatch`, event → factory table |
 | [telegram.md](documentation/telegram.md) | **Telegram** — account linking + the one-time link tokens, the bot webhook, the creator portal Mini App sign-in, employee alerts, and the in-app **announcement card** module |
 | [smm-portal.md](documentation/smm-portal.md) | **SMM Portal** — Twitter/X accounts, the content schedule, the bonus rounds/submissions engine, Viral Accounts + page suggestions |

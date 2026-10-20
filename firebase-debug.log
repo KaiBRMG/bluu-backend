@@ -1,0 +1,133 @@
+[debug] [2026-10-20T14:51:52.646Z] ----------------------------------------------------------------------
+[debug] [2026-10-20T14:51:52.648Z] Command:       /opt/homebrew/Cellar/node@24/24.21.0_1/bin/node /opt/homebrew/bin/firebase deploy --only functions:rollupDailyAnalytics
+[debug] [2026-10-20T14:51:52.648Z] CLI Version:   15.32.1
+[debug] [2026-10-20T14:51:52.648Z] Platform:      darwin
+[debug] [2026-10-20T14:51:52.648Z] Node Version:  v24.21.0
+[debug] [2026-10-20T14:51:52.648Z] Detected Agent: unknown
+[debug] [2026-10-20T14:51:52.648Z] Time:          Tue Oct 20 2026 16:51:52 GMT+0200 (South Africa Standard Time)
+[debug] [2026-10-20T14:51:52.648Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-10-20T14:51:53.418Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-20T14:51:53.418Z] > authorizing via signed-in user (kai@bluurock.com)
+[debug] [2026-10-20T14:51:53.418Z] [iam] checking project bluu-backend for permissions ["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]
+[debug] [2026-10-20T14:51:53.425Z] Checked if tokens are valid: true, expires at: 1792511466682
+[debug] [2026-10-20T14:51:53.425Z] Checked if tokens are valid: true, expires at: 1792511466682
+[debug] [2026-10-20T14:51:53.425Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/bluu-backend:testIamPermissions [none]
+[debug] [2026-10-20T14:51:53.425Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/bluu-backend:testIamPermissions  x-goog-user-project=bluu-backend
+[debug] [2026-10-20T14:51:53.425Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/bluu-backend:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2026-10-20T14:51:55.123Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/bluu-backend:testIamPermissions 200
+[debug] [2026-10-20T14:51:55.124Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/bluu-backend:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2026-10-20T14:51:55.124Z] Checked if tokens are valid: true, expires at: 1792511466682
+[debug] [2026-10-20T14:51:55.124Z] Checked if tokens are valid: true, expires at: 1792511466682
+[debug] [2026-10-20T14:51:55.124Z] >>> [apiv2][query] POST https://iam.googleapis.com/v1/projects/bluu-backend/serviceAccounts/bluu-backend@appspot.gserviceaccount.com:testIamPermissions [none]
+[debug] [2026-10-20T14:51:55.124Z] >>> [apiv2][body] POST https://iam.googleapis.com/v1/projects/bluu-backend/serviceAccounts/bluu-backend@appspot.gserviceaccount.com:testIamPermissions {"permissions":["iam.serviceAccounts.actAs"]}
+[debug] [2026-10-20T14:51:56.821Z] <<< [apiv2][status] POST https://iam.googleapis.com/v1/projects/bluu-backend/serviceAccounts/bluu-backend@appspot.gserviceaccount.com:testIamPermissions 404
+[debug] [2026-10-20T14:51:56.821Z] <<< [apiv2][body] POST https://iam.googleapis.com/v1/projects/bluu-backend/serviceAccounts/bluu-backend@appspot.gserviceaccount.com:testIamPermissions {"error":{"code":404,"message":"Unknown service account","status":"NOT_FOUND"}}
+[debug] [2026-10-20T14:51:56.822Z] [functions] service account IAM check errored, deploy may fail: Request to https://iam.googleapis.com/v1/projects/bluu-backend/serviceAccounts/bluu-backend@appspot.gserviceaccount.com:testIamPermissions had HTTP Error: 404, Unknown service account {"name":"FirebaseError","children":[],"context":{"body":{"error":{"code":404,"message":"Unknown service account","status":"NOT_FOUND"}},"response":{"statusCode":404}},"exit":1,"message":"Request to https://iam.googleapis.com/v1/projects/bluu-backend/serviceAccounts/bluu-backend@appspot.gserviceaccount.com:testIamPermissions had HTTP Error: 404, Unknown service account","status":404}
+[info] 
+[info] === Deploying to 'bluu-backend'...
+[info] 
+[info] i  deploying functions 
+[debug] [2026-10-20T14:51:56.829Z] Checked if tokens are valid: true, expires at: 1792511466682
+[debug] [2026-10-20T14:51:56.829Z] Checked if tokens are valid: true, expires at: 1792511466682
+[debug] [2026-10-20T14:51:56.829Z] >>> [apiv2][query] GET https://cloudresourcemanager.googleapis.com/v1/projects/bluu-backend [none]
+[debug] [2026-10-20T14:51:57.174Z] <<< [apiv2][status] GET https://cloudresourcemanager.googleapis.com/v1/projects/bluu-backend 200
+[debug] [2026-10-20T14:51:57.174Z] <<< [apiv2][body] GET https://cloudresourcemanager.googleapis.com/v1/projects/bluu-backend {"projectNumber":"211818603920","projectId":"bluu-backend","lifecycleState":"ACTIVE","name":"bluu-backend","labels":{"firebase":"enabled","firebase-core":"disabled"},"createTime":"2025-11-28T18:38:45.566978Z","parent":{"type":"organization","id":"471092785210"}}
+[info] i  functions: preparing codebase default for deployment 
+[info] i  functions: ensuring required API cloudfunctions.googleapis.com is enabled... 
+[info] i  functions: ensuring required API cloudbuild.googleapis.com is enabled... 
+[info] i  artifactregistry: ensuring required API artifactregistry.googleapis.com is enabled... 
+[debug] [2026-10-20T14:51:57.179Z] Checked if tokens are valid: true, expires at: 1792511466682
+[debug] [2026-10-20T14:51:57.179Z] Checked if tokens are valid: true, expires at: 1792511466682
+[debug] [2026-10-20T14:51:57.179Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/bluu-backend/adminSdkConfig [none]
+[debug] [2026-10-20T14:51:58.235Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/bluu-backend/adminSdkConfig 200
+[debug] [2026-10-20T14:51:58.235Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/bluu-backend/adminSdkConfig {"projectId":"bluu-backend","storageBucket":"bluu-backend.firebasestorage.app"}
+[debug] [2026-10-20T14:51:58.236Z] Checked if tokens are valid: true, expires at: 1792511466682
+[debug] [2026-10-20T14:51:58.237Z] Checked if tokens are valid: true, expires at: 1792511466682
+[debug] [2026-10-20T14:51:58.237Z] >>> [apiv2][query] GET https://runtimeconfig.googleapis.com/v1beta1/projects/bluu-backend/configs [none]
+[debug] [2026-10-20T14:51:58.986Z] <<< [apiv2][status] GET https://runtimeconfig.googleapis.com/v1beta1/projects/bluu-backend/configs 200
+[debug] [2026-10-20T14:51:58.986Z] <<< [apiv2][body] GET https://runtimeconfig.googleapis.com/v1beta1/projects/bluu-backend/configs {}
+[debug] [2026-10-20T14:51:58.990Z] Validating nodejs source
+[warn] ⚠  functions: Runtime Node.js 20 was deprecated on 2026-04-30 and will be decommissioned on 2026-10-30, after which you will not be able to deploy without upgrading. Consider upgrading now to avoid disruption. See https://cloud.google.com/functions/docs/runtime-support for full details on the lifecycle policy 
+[warn] ⚠  functions: Couldn't find firebase-functions package in your source code. Have you run 'npm install'? 
+[debug] [2026-10-20T14:51:58.991Z] getFunctionsSDKVersion encountered error: Cannot find module 'firebase-functions'
+Require stack:
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/runtimes/node/versioning.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/runtimes/node/index.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/runtimes/index.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/prepare.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/emulator/functionsEmulatorShared.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/frameworks/index.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/hosting/prepare.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/hosting/index.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/index.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/checkValidTargetFilters.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/commands/deploy.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/commands/index.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/index.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/bin/cli.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/bin/firebase.js {"code":"MODULE_NOT_FOUND","requireStack":["/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/runtimes/node/versioning.js","/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/runtimes/node/index.js","/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/runtimes/index.js","/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/prepare.js","/opt/homebrew/lib/node_modules/firebase-tools/lib/emulator/functionsEmulatorShared.js","/opt/homebrew/lib/node_modules/firebase-tools/lib/frameworks/index.js","/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/hosting/prepare.js","/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/hosting/index.js","/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/index.js","/opt/homebrew/lib/node_modules/firebase-tools/lib/checkValidTargetFilters.js","/opt/homebrew/lib/node_modules/firebase-tools/lib/commands/deploy.js","/opt/homebrew/lib/node_modules/firebase-tools/lib/commands/index.js","/opt/homebrew/lib/node_modules/firebase-tools/lib/index.js","/opt/homebrew/lib/node_modules/firebase-tools/lib/bin/cli.js","/opt/homebrew/lib/node_modules/firebase-tools/lib/bin/firebase.js"]}
+[debug] [2026-10-20T14:51:58.993Z] checkFunctionsSDKVersion encountered error: Invalid Version:  {}
+[debug] [2026-10-20T14:51:58.994Z] > [functions] package.json contents: {
+  "name": "bluu-functions",
+  "description": "Firebase Cloud Functions for bluu-backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^7.0.6",
+    "sharp": "^0.33.0"
+  }
+}
+[debug] [2026-10-20T14:51:58.994Z] Building nodejs source
+[info] i  functions: Loading and analyzing source code for codebase default to determine what to deploy 
+[debug] [2026-10-20T14:51:58.995Z] Could not parse firebase-functions version '' into semver.
+[debug] [2026-10-20T14:51:58.996Z] Could not find functions.yaml. Must use http discovery
+[debug] [2026-10-20T14:51:59.008Z] Error: Cannot find module 'firebase-functions'
+Require stack:
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/runtimes/node/index.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/runtimes/index.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/prepare.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/emulator/functionsEmulatorShared.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/frameworks/index.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/hosting/prepare.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/hosting/index.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/index.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/checkValidTargetFilters.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/commands/deploy.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/commands/index.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/index.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/bin/cli.js
+- /opt/homebrew/lib/node_modules/firebase-tools/lib/bin/firebase.js
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1564:15)
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1118:27)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1169:12)
+    at require.resolve (node:internal/modules/helpers:175:31)
+    at Delegate.findFunctionsBinary (/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/runtimes/node/index.js:98:33)
+    at Delegate.spawnFunctionsProcess (/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/runtimes/node/index.js:128:30)
+    at Delegate.serveAdmin (/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/runtimes/node/index.js:149:35)
+    at Delegate.discoverBuild (/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/runtimes/node/index.js:192:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async loadCodebases (/opt/homebrew/lib/node_modules/firebase-tools/lib/deploy/functions/prepare.js:531:33)
+[error] 
+[error] Error: An unexpected error has occurred.
+[debug] [2026-10-20T14:52:37.334Z] ----------------------------------------------------------------------
+[debug] [2026-10-20T14:52:37.336Z] Command:       /opt/homebrew/Cellar/node@24/24.21.0_1/bin/node /opt/homebrew/bin/firebase deploy --only functions:rollupDailyAnalytic
+[debug] [2026-10-20T14:52:37.336Z] CLI Version:   15.32.1
+[debug] [2026-10-20T14:52:37.336Z] Platform:      darwin
+[debug] [2026-10-20T14:52:37.337Z] Node Version:  v24.21.0
+[debug] [2026-10-20T14:52:37.337Z] Detected Agent: unknown
+[debug] [2026-10-20T14:52:37.337Z] Time:          Tue Oct 20 2026 16:52:37 GMT+0200 (South Africa Standard Time)
+[debug] [2026-10-20T14:52:37.337Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-10-20T14:52:38.237Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-20T14:52:38.238Z] > authorizing via signed-in user (kai@bluurock.com)
+[debug] [2026-10-20T14:52:38.238Z] [iam] checking project bluu-backend for permissions ["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]
+[debug] [2026-10-20T14:52:38.244Z] Checked if tokens are valid: true, expires at: 1792511466682
+[debug] [2026-10-20T14:52:38.244Z] Checked if tokens are valid: true, expires at: 1792511466682
+[debug] [2026-10-20T14:52:38.244Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/bluu-backend:testIamPermissions [none]
+[debug] [2026-10-20T14:52:38.245Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/bluu-backend:testIamPermissions  x-goog-user-project=bluu-backend
+[debug] [2026-10-20T14:52:38.245Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/bluu-backend:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
