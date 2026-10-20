@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { LoadError, SEGMENT, fanReportHref } from '@/components/buddyx/buddyxUi';
+import { BasisTag, LoadError, SEGMENT, fanReportHref } from '@/components/buddyx/buddyxUi';
 import { CreatorChip } from '@/components/creators/CreatorChip';
 import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
 import { formatUsd, pluralise } from '@/lib/salary/salaryFormat';
@@ -126,7 +126,9 @@ export function FanDirectory({ creatorId }: { creatorId: string | null }) {
                 <tr className="border-b border-white/[0.07] text-[11px] uppercase tracking-wide text-zinc-400">
                   <th scope="col" className="px-3 py-2.5 text-left font-semibold">Fan</th>
                   <th scope="col" className="px-3 py-2.5 text-left font-semibold">Creators</th>
-                  <th scope="col" className="px-3 py-2.5 text-right font-semibold">Lifetime gross</th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-semibold">
+                    <span className="inline-flex items-center gap-1.5">Lifetime spend <BasisTag basis="gross" /></span>
+                  </th>
                   <th scope="col" className="px-3 py-2.5 text-right font-semibold">Last purchase</th>
                   <th scope="col" className="px-3 py-2.5 text-right font-semibold">Customs</th>
                   <th scope="col" className="px-3 py-2.5 text-right font-semibold">Owed</th>

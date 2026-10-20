@@ -8,18 +8,19 @@ import { cn } from '@/lib/utils';
 import { SURFACE } from '@/lib/surfaces';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
 import { PeriodPicker, monthName } from '@/components/buddyx/PeriodPicker';
 import { SyncStatus } from '@/components/buddyx/SyncStatus';
 import { SourceMixBar } from '@/components/buddyx/SourceMixBar';
-import { LegendSwatch, KpiTile, Fact, LoadError, LINK_REVENUE_NOTE } from '@/components/buddyx/buddyxUi';
+import { BasisTag, LegendSwatch, KpiTile, Fact, LoadError, LINK_REVENUE_NOTE, SEGMENT } from '@/components/buddyx/buddyxUi';
 import { CreatorAvatar, CreatorChip } from '@/components/creators/CreatorChip';
 import { Sparkline } from '@/components/growth/Sparkline';
 import { useCreatorMap } from '@/hooks/useCreators';
 import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
 import { formatUsd } from '@/lib/salary/salaryFormat';
 import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
-import { formatCount, formatDuration, formatShare } from '@/lib/buddyx/analyticsFormat';
+import { atBasis, formatCount, formatDuration, formatShare, type MoneyBasis } from '@/lib/buddyx/analyticsFormat';
 import { SEQUENTIAL_COLOR, SOURCE_MIX_COLORS } from '@/lib/buddyx/chartColors';
 import type { CreatorAnalytics, CreatorIdentity } from '@/lib/buddyx/analyticsTypes';
 
@@ -32,6 +33,12 @@ import type { CreatorAnalytics, CreatorIdentity } from '@/lib/buddyx/analyticsTy
  * a card scopes everything below it. The history runs back to October 2025 as
  * one series — the Infloww import kept only the fields BuddyX continues — and
  * the cutover is drawn where the source changes.
+ *
+ * **Gross / net toggle — opens on net**, the figure OnlyFans' own statements
+ * show, so the page reconciles with them by default. Every earnings figure follows it (net = summed gross
+ * × 0.8, derived here — the response stays gross) and wears a GROSS/NET tag.
+ * Percentages, shares and the source mix are the same at either basis. Link
+ * revenue does not follow it: BuddyX does not say which basis that is.
  */
 
 type Preset = 'mtd' | 'prev-month' | 'month-2' | '3m' | '6m' | '12m';
@@ -83,6 +90,7 @@ export default function OnlyFansAnalyticsPage() {
   const [preset, setPreset] = useState<Preset | 'custom'>('mtd');
   const [custom, setCustom] = useState<{ from: Date | undefined; to: Date | undefined }>({ from: undefined, to: undefined });
   const [creatorId, setCreatorId] = useState<string | null>(null);
+  const [basis, setBasis] = useState<MoneyBasis>('net');
 
   const today = new Date();
   const shown = preset === 'custom' ? custom : presetRange(preset, today);
@@ -99,9 +107,20 @@ export default function OnlyFansAnalyticsPage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">OnlyFans Analytics</h1>
-            <p className="mt-1 text-sm text-zinc-400">Each creator&apos;s earnings, subscribers and links — Infloww history, then BuddyX. Earnings are gross (what fans paid); net is 80% after OnlyFans&apos; 20%.</p>
+            <p className="mt-1 text-sm text-zinc-400">Each creator&apos;s earnings, subscribers and links — Infloww history, then BuddyX. Gross is what fans paid; net is the creator&apos;s 80% after OnlyFans&apos; 20% — the figure OnlyFans&apos; own statements show.</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <ToggleGroup
+              type="single"
+              value={basis}
+              onValueChange={v => v && setBasis(v as MoneyBasis)}
+              variant="outline"
+              size="sm"
+              aria-label="Show earnings as gross or net"
+            >
+              <ToggleGroupItem value="gross" className={SEGMENT} title="What fans paid">Gross</ToggleGroupItem>
+              <ToggleGroupItem value="net" className={SEGMENT} title="The creator's 80%, after OnlyFans' 20%">Net</ToggleGroupItem>
+            </ToggleGroup>
             <PeriodPicker
               options={presetOptions(today)}
               value={preset}
@@ -129,7 +148,7 @@ export default function OnlyFansAnalyticsPage() {
         ) : error && !data ? (
           <LoadError error={error} onRetry={() => void reload(true)} />
         ) : data ? (
-          <Body data={data} selected={creatorId} onSelect={setCreatorId} />
+          <Body data={data} basis={basis} selected={creatorId} onSelect={setCreatorId} />
         ) : null}
       </div>
     </AppLayout>
@@ -176,7 +195,8 @@ function AccountStatus({ identity }: { identity: CreatorIdentity | undefined }) 
   );
 }
 
-function Body({ data, selected, onSelect }: { data: CreatorAnalytics; selected: string | null; onSelect: (id: string | null) => void }) {
+function Body({ data, basis, selected, onSelect }: { data: CreatorAnalytics; basis: MoneyBasis; selected: string | null; onSelect: (id: string | null) => void }) {
+  const money = (gross: number) => formatUsd(atBasis(gross, basis));
   const creators = useCreatorMap();
   const identity = (id: string | null) => (id ? data.identities[id] : undefined);
   const name = (id: string | null) => (id ? identity(id)?.name ?? creators.get(id)?.stageName ?? 'Unknown creator' : 'All creators');
@@ -193,15 +213,26 @@ function Body({ data, selected, onSelect }: { data: CreatorAnalytics; selected: 
   };
   const showCutover = data.from < data.cutoverDay && data.to >= data.cutoverDay;
   const subscriberDays = data.daily.filter(d => d.day < data.subscribersFrom);
+  // Keys stay `*Gross` so the chart config is shared; the values follow the toggle.
+  const earningsDays =
+    basis === 'gross'
+      ? data.daily
+      : data.daily.map(d => ({
+          ...d,
+          subsGross: d.subsGross === null ? null : atBasis(d.subsGross, basis),
+          tipsGross: d.tipsGross === null ? null : atBasis(d.tipsGross, basis),
+          messagesGross: d.messagesGross === null ? null : atBasis(d.messagesGross, basis),
+        }));
 
   return (
     <>
       {/* ── Period KPIs: every creator, over the selected range (not the selection) ── */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <KpiTile label="Earnings" basis="gross" value={formatUsd(data.kpis.earnings)} meta={vsPrevious(data.kpis.earnings, data.kpis.previousEarnings)} />
+        <KpiTile label="Earnings" basis={basis} value={money(data.kpis.earnings)} meta={vsPrevious(data.kpis.earnings, data.kpis.previousEarnings)} />
         <KpiTile label="New subscribers" value={formatCount(data.kpis.newSubs)} meta={vsPrevious(data.kpis.newSubs, data.kpis.previousNewSubs)} />
         <KpiTile
           label="Top link"
+          basis="reported"
           tip={`Revenue the link brought in during this period. ${LINK_REVENUE_NOTE}`}
           value={data.kpis.topLink ? formatUsd(data.kpis.topLink.revenue) : '—'}
           meta={data.kpis.topLink ? `${data.kpis.topLink.name ?? 'Unnamed link'} · ${name(data.kpis.topLink.creatorId)}` : 'No link revenue synced for this period'}
@@ -249,8 +280,8 @@ function Body({ data, selected, onSelect }: { data: CreatorAnalytics; selected: 
                   <AccountStatus identity={identity(card.creatorId)} />
                 </span>
                 <span className="flex items-baseline justify-between gap-2">
-                  <span className="text-lg font-semibold tabular-nums">
-                    {formatUsd(card.totalGross)} <span className="text-[11px] font-normal text-zinc-400">gross</span>
+                  <span className="inline-flex items-center gap-1.5 text-lg font-semibold tabular-nums">
+                    {money(card.totalGross)} <BasisTag basis={basis} />
                   </span>
                   <span className="text-[11px] tabular-nums text-zinc-400">
                     {delta === null ? '—' : `${delta >= 0 ? '+' : '−'}${Math.abs(Math.round(delta * 100))}% vs previous`}
@@ -276,20 +307,22 @@ function Body({ data, selected, onSelect }: { data: CreatorAnalytics; selected: 
 
       {/* ── 1. Earnings by source ── */}
       <section className={cn('rounded-xl p-5', SURFACE)} aria-labelledby="earnings">
-        <h2 id="earnings" className="text-sm font-semibold">Gross earnings by source</h2>
+        <h2 id="earnings" className="flex items-center gap-1.5 text-sm font-semibold">
+          Earnings by source <BasisTag basis={basis} />
+        </h2>
         <p className="mt-0.5 text-[11px] text-zinc-400">
-          Gross per day — net is 80% of each. Days with no data are gaps, not zeros.
+          {basis === 'net' ? 'Net per day — 80% of gross.' : 'Gross per day — net is 80% of each.'} Days with no data are gaps, not zeros.
           {showCutover && ' The hairline marks where Infloww history ends and BuddyX begins.'}
         </p>
         {data.daily.length === 0 ? (
           <p className="mt-3 text-sm text-zinc-400">No creator statistics in this range.</p>
         ) : (
           <ChartContainer config={earningsConfig} className="mt-3 h-[240px] w-full">
-            <AreaChart data={data.daily} margin={{ left: 4, right: 8, top: 16 }}>
+            <AreaChart data={earningsDays} margin={{ left: 4, right: 8, top: 16 }}>
               <CartesianGrid vertical={false} strokeOpacity={0.15} />
               <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} tickFormatter={d => String(d).slice(5)} />
               <YAxis tickLine={false} axisLine={false} width={56} tickFormatter={v => `$${v}`} />
-              <ChartTooltip content={<ChartTooltipContent labelFormatter={l => formatDayLabelWithWeekday(String(l))} formatter={(v, n) => [` ${formatUsd(Number(v))}`, earningsConfig[n as keyof typeof earningsConfig]?.label ?? String(n)]} />} />
+              <ChartTooltip content={<ChartTooltipContent labelFormatter={l => formatDayLabelWithWeekday(String(l))} formatter={(v, n) => [` ${formatUsd(Number(v))}`, `${earningsConfig[n as keyof typeof earningsConfig]?.label ?? String(n)} (${basis})`]} />} />
               {showCutover && (
                 <ReferenceLine x={data.cutoverDay} stroke="rgba(255,255,255,0.35)" strokeDasharray="3 3" label={{ value: 'Infloww → BuddyX', position: 'insideTopLeft', fill: '#a1a1aa', fontSize: 11 }} />
               )}
@@ -359,7 +392,7 @@ function Body({ data, selected, onSelect }: { data: CreatorAnalytics; selected: 
           </dl>
           {data.revShareGross !== null && (
             <div className="mt-4 border-t border-white/[0.07] pt-3">
-              <Fact label="Rev share owed (BuddyX, gross)" value={formatUsd(data.revShareGross)} />
+              <Fact label="Rev share owed (BuddyX)" basis={basis} value={money(data.revShareGross)} />
             </div>
           )}
         </section>
@@ -378,8 +411,10 @@ function Body({ data, selected, onSelect }: { data: CreatorAnalytics; selected: 
             <table className="w-full min-w-[1000px] text-sm">
               <thead>
                 <tr className="border-b border-white/[0.07] text-[11px] uppercase tracking-wide text-zinc-400">
-                  {['Link', 'Creator', 'Clicks → subs', 'Subs', 'Revenue (as reported)', 'Per fan', 'Cost', 'ROI', 'Stackers', 'Trend'].map((h, i) => (
-                    <th key={h} scope="col" className={cn('px-3 py-2.5 font-semibold', i < 2 ? 'text-left' : 'text-right')}>{h}</th>
+                  {['Link', 'Creator', 'Clicks → subs', 'Subs', 'Revenue', 'Per fan', 'Cost', 'ROI', 'Stackers', 'Trend'].map((h, i) => (
+                    <th key={h} scope="col" className={cn('px-3 py-2.5 font-semibold', i < 2 ? 'text-left' : 'text-right')}>
+                      {h === 'Revenue' ? <span className="inline-flex items-center gap-1.5">{h} <BasisTag basis="reported" /></span> : h}
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -420,7 +455,9 @@ function Body({ data, selected, onSelect }: { data: CreatorAnalytics; selected: 
             <thead>
               <tr className="border-b border-white/[0.07] text-[11px] uppercase tracking-wide text-zinc-400">
                 <th scope="col" className="px-3 py-2 text-left font-semibold">Creator</th>
-                <th scope="col" className="px-3 py-2 text-right font-semibold">Earnings (gross)</th>
+                <th scope="col" className="px-3 py-2 text-right font-semibold">
+                  <span className="inline-flex items-center gap-1.5">Earnings <BasisTag basis={basis} /></span>
+                </th>
                 <th scope="col" className="px-3 py-2 text-right font-semibold">Share</th>
                 <th scope="col" className="px-3 py-2 text-right font-semibold">vs previous period</th>
               </tr>
@@ -429,7 +466,7 @@ function Body({ data, selected, onSelect }: { data: CreatorAnalytics; selected: 
               {data.comparison.map(row => (
                 <tr key={row.creatorId}>
                   <td className="px-3 py-2">{chip(row.creatorId)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{formatUsd(row.gross)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{money(row.gross)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{formatShare(row.share)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-zinc-400">
                     {row.previousGross === null || row.previousGross === 0 ? '—' : `${row.gross >= row.previousGross ? '+' : '−'}${Math.abs(Math.round(((row.gross - row.previousGross) / row.previousGross) * 100))}%`}

@@ -27,6 +27,7 @@ import { CreatorChip } from '@/components/creators/CreatorChip';
 import { SyncStatus } from '@/components/buddyx/SyncStatus';
 import {
   AttrChip,
+  BasisTag,
   FanLabel,
   GROSS_NOTE,
   InfoTip,
@@ -322,7 +323,7 @@ export function SalesReport({
       {data.byDay.length > 0 && (
         <section className={cn('rounded-xl p-4', SURFACE)} aria-labelledby="daily-sales-title">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 id="daily-sales-title" className="text-sm font-semibold">Gross sales by day</h2>
+            <h2 id="daily-sales-title" className="flex items-center gap-1.5 text-sm font-semibold">Sales by day <BasisTag basis="gross" /></h2>
             <div className="flex items-center gap-3 text-xs text-zinc-300">
               <span className="inline-flex items-center gap-1.5">
                 <LegendSwatch color={SALE_KIND_COLORS.tip} /> Tips <InfoTip text={LEDGER_TIPS_ATTRIBUTION} />
@@ -333,7 +334,7 @@ export function SalesReport({
             </div>
           </div>
           <p className="mt-0.5 text-[11px] text-zinc-400">
-            Gross per salary day (SAST) <InfoTip text={SALARY_DAY_HINT} className="inline-flex align-[-2px]" />
+            Per salary day (SAST) <InfoTip text={SALARY_DAY_HINT} className="inline-flex align-[-2px]" />
             {onSelectDay ? ' Select a day to see its sales below.' : ''}
           </p>
           <ChartContainer config={kindChartConfig} className="mt-3 h-[200px] w-full">
@@ -368,11 +369,11 @@ export function SalesReport({
       {data.sales.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2">
           <BreakdownList
-            title="By creator · gross"
+            title="By creator"
             rows={data.byCreator.map(r => ({ key: r.creatorId ?? `name:${r.name}`, label: creatorLabel(r), gross: r.gross }))}
           />
           <BreakdownList
-            title="By type · gross"
+            title="By type"
             rows={data.byType.map(r => ({ key: r.name, label: <span>{saleTypeLabel(r.name)}</span>, gross: r.gross }))}
           />
         </div>
@@ -523,7 +524,7 @@ export function SalesReport({
 // ─── Pieces ──────────────────────────────────────────────────────────
 
 
-const SALES_COLUMNS: Array<{ label: string; hint?: string }> = [
+const SALES_COLUMNS: Array<{ label: string; hint?: string; basis?: 'gross' }> = [
   {
     label: 'When',
     hint: 'In your own timezone. Pay counts each sale on its SAST day, so a late-night sale can show a different date — hover a time for both.',
@@ -531,7 +532,8 @@ const SALES_COLUMNS: Array<{ label: string; hint?: string }> = [
   { label: 'Creator' },
   { label: 'Type' },
   { label: 'Fan' },
-  { label: 'Gross' },
+  // A column named only by its basis is labelled by the tag alone (DESIGN.md §5).
+  { label: 'Gross', basis: 'gross' },
 ];
 
 function SalesTable({
@@ -565,7 +567,7 @@ function SalesTable({
       <table className="w-full min-w-[720px] border-collapse text-sm">
         <thead>
           <tr className="border-b border-white/[0.07]">
-            {SALES_COLUMNS.map(({ label, hint }, index) => (
+            {SALES_COLUMNS.map(({ label, hint, basis }, index) => (
               <th
                 key={label}
                 scope="col"
@@ -574,7 +576,7 @@ function SalesTable({
                   index === 4 ? 'text-right' : 'text-left',
                 )}
               >
-                {hint ? <HintedLabel label={label} hint={hint} /> : label}
+                {basis ? <BasisTag basis={basis} /> : hint ? <HintedLabel label={label} hint={hint} /> : label}
               </th>
             ))}
             {renderAction && <th scope="col" className="w-10 px-3 py-2.5"><span className="sr-only">Actions</span></th>}
@@ -654,7 +656,7 @@ function BreakdownList({ title, rows }: { title: string; rows: Array<{ key: stri
 
   return (
     <div className={cn('rounded-lg p-3', SURFACE)}>
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">{title}</h2>
+      <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400">{title} <BasisTag basis="gross" /></h2>
       <ul className="mt-2.5 space-y-1.5">
         {rows.slice(0, 6).map(row => (
           <li key={row.key} className="relative">

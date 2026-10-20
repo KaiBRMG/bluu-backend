@@ -41,7 +41,7 @@ import { useBuddyxCreators } from '@/hooks/useBuddyxSync';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { CreatorCombobox } from '@/components/buddyx/CreatorCombobox';
 import { CreatorChip } from '@/components/creators/CreatorChip';
-import { AttrChip, FanLabel, InfoTip, LEDGER_PPV_ATTRIBUTION, LEDGER_TIPS_ATTRIBUTION } from '@/components/buddyx/buddyxUi';
+import { AttrChip, BasisTag, FanLabel, InfoTip, LEDGER_PPV_ATTRIBUTION, LEDGER_TIPS_ATTRIBUTION } from '@/components/buddyx/buddyxUi';
 import { PersonTag } from './disputeUi';
 import { formatSaleDateTime, formatUsd, pluralise } from '@/lib/salary/salaryFormat';
 import { saleTypeLabel } from '@/lib/salary/saleTypes';
@@ -265,7 +265,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
           </ToggleGroup>
           <span className="inline-flex items-center gap-1">Tips <InfoTip text={LEDGER_TIPS_ATTRIBUTION} /></span>
           <span className="inline-flex items-center gap-1">PPV <InfoTip text={LEDGER_PPV_ATTRIBUTION} /></span>
-          <span>· amounts are gross</span>
+          <span className="inline-flex items-center gap-1.5">· Amounts <BasisTag basis="gross" /></span>
         </div>
         <div
           tabIndex={0}

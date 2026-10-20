@@ -399,10 +399,6 @@ export async function findCoveringShift(
 
 // ─── An agent's load on a day ────────────────────────────────────────
 
-/** Accounts an agent may work at once — inside their own shift, and outside it. */
-export const MAX_ACCOUNTS_IN_SHIFT = 5;
-export const MAX_ACCOUNTS_OUTSIDE_SHIFT = 4;
-
 /**
  * Every occurrence an agent works that touches a salary day, recurrence
  * expanded. Overlap, not start time: a shift that began the evening before and
@@ -417,7 +413,7 @@ function occurrencesOnDay(occurrences: ExpandedShift[], day: SalaryDayKey): Expa
 
 /**
  * Distinct accounts across a set of occurrences. Every account counts,
- * including a legacy zero-wage cover record's — the cap is about how many chats
+ * including a legacy zero-wage cover record's — the load is about how many chats
  * one person is answering, not what they are paid for.
  */
 function accountsOf(occurrences: ExpandedShift[]): Set<string> {
@@ -426,8 +422,8 @@ function accountsOf(occurrences: ExpandedShift[]): Set<string> {
 
 /**
  * The covering-shift test from `findCoveringShift`, over occurrences the caller
- * already holds — the claim cap and the admin's hover card must agree with the
- * assigner about in-shift versus outside it.
+ * already holds — the admin's hover card must agree with the assigner about
+ * in-shift versus outside it.
  */
 function coveringOccurrence(
   occurrences: ExpandedShift[],
@@ -443,21 +439,6 @@ function coveringOccurrence(
         o.occurrenceEnd >= windowEnd,
     ) ?? null
   );
-}
-
-/**
- * Accounts an agent is already committed to on a day.
- *
- * This used to be a bare `startTime` range query in the claim route, which is
- * the recurrence bug `occurrencesAround` documents: an agent on a weekly roster
- * looked committed to nothing, so the 5/4 cap never counted their own accounts.
- */
-export async function accountsCommittedOn(
-  userId: string,
-  day: SalaryDayKey,
-): Promise<Set<string>> {
-  const [dayStart, dayEnd] = dayKeyRange(day);
-  return accountsOf(occurrencesOnDay(await occurrencesAround(userId, dayStart, dayEnd), day));
 }
 
 export interface ClaimantShift {
@@ -481,9 +462,8 @@ export interface ClaimantLoad {
   alsoClaimedCreatorIds: string[];
   /** Whether this offer would sit inside one of their own shifts. */
   inShift: boolean;
-  /** Distinct accounts if assigned this, counting their other open claims — the claim cap's arithmetic. */
+  /** Distinct accounts if assigned this, counting their other open claims. */
   projected: number;
-  limit: number;
 }
 
 /**
@@ -534,7 +514,6 @@ export async function getClaimantLoads(offers: CoverageOffer[]): Promise<Map<str
         alsoClaimedCreatorIds: [...new Set(alsoClaimed)],
         inShift,
         projected: new Set([...committed, ...alsoClaimed, offer.creatorId]).size,
-        limit: inShift ? MAX_ACCOUNTS_IN_SHIFT : MAX_ACCOUNTS_OUTSIDE_SHIFT,
       });
     }
   }

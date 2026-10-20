@@ -6,31 +6,22 @@
  * Claiming for someone else is impossible by construction — the uid comes from
  * the token and is never read from the body.
  *
- * ## The two limits
+ * ## What a claim checks
  *
- * `shift.md` caps an agent at 5 accounts during their own shift and 4 outside
- * it, and requires a day's notice. Both are enforced here rather than only in
- * the UI: a claim is the moment the rule has to hold, and a client-side guard is
- * not a guard.
+ * The offer is still open, it is not the claimant's own released shift, and its
+ * window has not **ended** — it is claimable while under way, because cover that
+ * starts late is still cover. There is **no cap on accounts** (removed
+ * 2026-10-20): an agent may put their name down for as much overtime as they
+ * like, and the admin who assigns sees each claimant's load on Coverage → To
+ * assign. Enforced here rather than only in the UI: a client-side guard is not a
+ * guard.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
-import {
-  claimOffer,
-  withdrawClaim,
-  getOffer,
-  getOffers,
-  findCoveringShift,
-  accountsCommittedOn,
-  MAX_ACCOUNTS_IN_SHIFT,
-  MAX_ACCOUNTS_OUTSIDE_SHIFT,
-} from '@/lib/services/caCoverageService';
+import { claimOffer, withdrawClaim, getOffer } from '@/lib/services/caCoverageService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-
-/** Overtime must be claimed at least this far ahead. */
-const MIN_NOTICE_MS = 24 * 60 * 60 * 1000;
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
@@ -47,42 +38,12 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     if (offer.originalUserId === token.uid) {
       return NextResponse.json({ error: 'You cannot cover your own released shift.' }, { status: 400 });
     }
-    if (offer.windowStart - Date.now() < MIN_NOTICE_MS) {
-      return NextResponse.json(
-        { error: 'Overtime must be claimed at least a day in advance. Ask an admin to assign it directly.' },
-        { status: 400 },
-      );
-    }
-
-    // The cap counts what the agent is already committed to, plus everything
-    // else they have claimed for that day and not yet been assigned — otherwise
-    // five separate claims each pass the check individually and blow the cap
-    // the moment an admin approves them.
-    const covering = await findCoveringShift(token.uid, offer.windowStart, offer.windowEnd);
-    const limit = covering ? MAX_ACCOUNTS_IN_SHIFT : MAX_ACCOUNTS_OUTSIDE_SHIFT;
-
-    const committed = await accountsCommittedOn(token.uid, offer.day);
-    const sameDayOffers = await getOffers({ fromDay: offer.day, toDay: offer.day, status: 'available' });
-    const alsoClaimed = new Set(
-      sameDayOffers
-        .filter(o => o.offerId !== offerId && o.claims.some(c => c.userId === token.uid))
-        .map(o => o.creatorId),
-    );
-
-    const projected = new Set([...committed, ...alsoClaimed, offer.creatorId]).size;
-    if (projected > limit) {
-      return NextResponse.json(
-        {
-          error: covering
-            ? `That would put you on ${projected} accounts during your shift. The limit is ${limit}.`
-            : `That would put you on ${projected} accounts outside your shift. The limit is ${limit}.`,
-        },
-        { status: 400 },
-      );
+    if (offer.windowEnd <= Date.now()) {
+      return NextResponse.json({ error: 'This shift has already ended.' }, { status: 400 });
     }
 
     await claimOffer(offerId, token.uid, typeof note === 'string' ? note.trim().slice(0, 280) : undefined);
-    return NextResponse.json({ success: true, inShift: covering !== null });
+    return NextResponse.json({ success: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to claim';
     if (/no longer listed|already been assigned/.test(message)) {

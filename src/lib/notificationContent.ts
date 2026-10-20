@@ -290,6 +290,15 @@ export const notifications = {
     actionUrl: '/ca-portal/admin',
   }),
 
+  // The roster's half of the day-before chase: overtime nobody has even put
+  // their name down for. Sent to every chat agent except the one who is away.
+  overtimeUnclaimed: (creatorList: string, dateStr: string): NotificationContent => ({
+    title: '🙋 Overtime Still Available',
+    message: `Overtime on ${creatorList} tomorrow (${dateStr}) has not been claimed yet. Open your calendar to claim it.`,
+    type: 'action',
+    actionUrl: '/ca-portal/dashboard',
+  }),
+
   // ─── Chat-agent salary ────────────────────────────────────────────────────────
   paydayApproaching: (monthLabel: string): NotificationContent => ({
     title: '💸 Payday is Approaching',

@@ -80,7 +80,7 @@ The count comes from the shift's `creatorIds` **minus its `overtimeCreatorIds`**
 
 A creator often runs more than one account — Cole on OnlyFans, "Cole (Fansly)" on Fansly. These are **assignable peers**: one agent can hold Cole while another holds Cole (Fansly), and each counts as one account toward whoever holds it.
 
-The whole mechanism is one design choice: **a sub-account is just another id in `creatorIds`.** Creator ids are Firebase Auth uids; sub-account ids are Firestore auto-ids. The two spaces are disjoint, so the field needs no discriminator — and the salary engine, the per-shift rate, and the 4/5-account claim cap all required **no change whatsoever**, because every one of them counts ids. `subaccounts.test.ts` pins that: the same agent on Cole + Cole (Fansly) earns exactly what they would on Cole + Adam.
+The whole mechanism is one design choice: **a sub-account is just another id in `creatorIds`.** Creator ids are Firebase Auth uids; sub-account ids are Firestore auto-ids. The two spaces are disjoint, so the field needs no discriminator — and the salary engine, the per-shift rate, and the claimant load count all required **no change whatsoever**, because every one of them counts ids. `subaccounts.test.ts` pins that: the same agent on Cole + Cole (Fansly) earns exactly what they would on Cole + Adam.
 
 `isSubAccount` exists only for *display* — grouping a picker, naming the parent on a roster. Nothing in the pay path reads it, and nothing should: weighting a sub-account as a fraction of an account is the bug this model was built to avoid.
 
@@ -186,7 +186,7 @@ An offer is **one creator on one date**, not one shift, so two agents can split 
 
 ### Approving leave releases automatically
 
-`POST /api/shifts/leave/[leaveId]/approve` calls [`releaseOccurrenceForCoverage`](../src/lib/services/leaveCoverage.ts), which tombstones the occurrence and posts one offer per assigned creator. The **release** itself still notifies nobody — the accounts appear on every agent's calendar and the board is the signal; it is the *assignment* that reaches a person, and — if nobody is assigned by the day before — the chaser that reaches the approver (§11). Withdrawing approved leave reverses all of it — see §11.
+`POST /api/shifts/leave/[leaveId]/approve` calls [`releaseOccurrenceForCoverage`](../src/lib/services/leaveCoverage.ts), which tombstones the occurrence and posts one offer per assigned creator. The **release** itself still notifies nobody — the accounts appear on every agent's calendar and the board is the signal; it is the *assignment* that reaches a person, and — if nobody is assigned by the day before — the chaser that reaches the approver, plus a nudge to the roster for anything nobody has claimed (§11). Withdrawing approved leave reverses all of it — see §11.
 
 It runs **after the commit and is non-fatal**: the leave was approved and the agent has been told, so a failure to release must not 500 and make an admin approve twice. The response carries the outcome, and the approvals UI surfaces `noAssignments` — a shift with no creators assigned releases nothing, which is not an error but *is* something an admin needs to know.
 
@@ -342,20 +342,20 @@ Claiming happens in a popover off the day cell: a month cell is ~90px and the de
 
 ### Limits, enforced server-side
 
-- **5 accounts** during the agent's own shift, **4** outside it. The check counts what they are already committed to **plus everything else they have claimed for that day and not yet been assigned** — otherwise five separate claims each pass individually and blow the cap the moment an admin approves them.
-- **1 day's notice** to claim overtime. Enforced.
+- **No cap on accounts (2026-10-20).** There used to be one — 5 during the agent's own shift, 4 outside it — and it was removed so agents can take on more overtime. An agent may claim as many offers as they like; the admin assigning sees each claimant's load (below) and decides. The per-shift warning in Shift Management's `CreatorAssignmentField` (over 5 accounts on one shift) is a separate, soft roster hint and was left as it is.
+- **Claimable until the window ends** — including while it is under way; cover that starts late is still cover. Only an offer whose window has passed is refused (2026-10-20; was a 24-hour notice rule). Enforced in the claim route, mirrored by the calendar's disabled *Ended* button.
 - **4 days' notice to request leave is stated, not enforced.** Leave can be requested right up until the shift starts; the only hard boundary is a shift that has already begun. Blocking a late request would push an agent who is ill tomorrow into telling someone off-system, where no admin can see it — the approvals queue shows how much notice each request actually carries ("in 1 day") and an admin decides. The UI states the expectation in both places it appears.
 - Paid leave requires a stated reason; unpaid does not.
 
-**The cap counts the expanded roster.** `accountsCommittedOn` ([caCoverageService.ts](../src/lib/services/caCoverageService.ts)) used to be a bare `startTime` range query in the claim route — the same recurrence bug as the finders above, so an agent on a weekly roster looked committed to nothing and the cap never counted their own accounts. It now reads `occurrencesAround` and counts every occurrence that **overlaps** the salary day.
+**The load count reads the expanded roster.** `getClaimantLoads` reads `occurrencesAround` and counts every occurrence that **overlaps** the salary day — a bare `startTime` range query would show an agent on a weekly roster as committed to nothing (the recurrence bug the finders above document).
 
 ### Coverage → To assign shows each claimant's load
 
 **Offers whose window has ended unassigned are hidden** from the tab and its badge — nobody can cover them any more, so they are not a decision. This is a client-side filter on `windowEnd`; the offer documents are untouched.
 
-Each claimant chip carries their account count for the offer's day (`Ana · 3 accts`), and hovering or focusing it opens a card with their shifts that day (window in the viewer's zone, accounts per shift with the overtime ring), any other cover they have claimed that day, where this assignment would leave them against the 5/4 cap, and their claim note. The count is on the chip itself because it is the figure claimants are compared by, and a fact only behind a hover is unreachable by keyboard (DESIGN.md §5).
+Each claimant chip carries their account count for the offer's day (`Ana · 3 accts`), and hovering or focusing it opens a card with their shifts that day (window in the viewer's zone, accounts per shift with the overtime ring), any other cover they have claimed that day, how many accounts this assignment would leave them on, and their claim note. The count is on the chip itself because it is the figure claimants are compared by, and a fact only behind a hover is unreachable by keyboard (DESIGN.md §5).
 
-It comes from `GET /api/ca-coverage/offers?detail=claimants` — **admin-only and opt-in**. `getClaimantLoads` does one roster read per claimant across the board's date span and buckets by day in memory; the agent calendar calls the same route without the flag and pays nothing. The in-shift test and the projected count use the **same** functions as the claim cap and the assigner, so a chip flagged over the limit means the roster moved under the claim after it was made.
+It comes from `GET /api/ca-coverage/offers?detail=claimants` — **admin-only and opt-in**. `getClaimantLoads` does one roster read per claimant across the board's date span and buckets by day in memory; the agent calendar calls the same route without the flag and pays nothing. The in-shift test uses the **same** function as the assigner, so the card and the resulting shift agree about inside-versus-outside. There is no limit to flag.
 
 ### Leave balances — derived per period, never stored (2026-10-10)
 
@@ -690,7 +690,7 @@ Three calls worth not re-litigating:
 
 ## 11. Notifications
 
-**They are in.** Eight events notify, restored after the deliberate pre-launch silence — the figures have been trusted long enough to tell people about them. Copy lives in `notificationContent.ts` and the catalogue in `automatedNotifications.ts`, under the `Coverage` and `Salary` categories (cross-cutting rule 15); the full event → factory table is in [notifications.md](notifications.md#notification-events--factory-functions).
+**They are in.** Nine events notify, restored after the deliberate pre-launch silence — the figures have been trusted long enough to tell people about them. Copy lives in `notificationContent.ts` and the catalogue in `automatedNotifications.ts`, under the `Coverage` and `Salary` categories (cross-cutting rule 15); the full event → factory table is in [notifications.md](notifications.md#notification-events--factory-functions).
 
 | Event | Who is told | Gate |
 |---|---|---|
@@ -699,6 +699,7 @@ Three calls worth not re-litigating:
 | Overtime assigned | The assignee | **Coalesced** per agent per day · fires from **both** assignment routes |
 | Overtime cancelled | Each agent who was covering | **Coalesced** per agent per day |
 | Overtime still unassigned | One named approver | The day before the shift, from 09:00 salary-local · remembers the offers it has chased |
+| Overtime still available | Every chat agent but the absentee | The day before, from 09:00 salary-local · only offers with **no claims** · remembers the offers it has chased |
 | Payday in 3 days | Every chat agent | Once per month, latched |
 | Salary finalised | That agent | — (reopening notifies nobody) |
 | Commission tier reached | That agent | Once per band per month, and only upwards |
@@ -710,6 +711,8 @@ Seven decisions inside that table are load-bearing.
 **Coverage notifications are coalesced, and the delay lives in a cron.** One absence releases every creator the agent was covering, and an admin assigns them one at a time — so an assignment **queues** into `ca-coverage-notices` (one doc per `kind`+agent+day, names merged with `arrayUnion`) and `/api/cron/ca-notifications` sends it once the queue has been quiet for 3 minutes, then deletes it. Assigning four accounts to one agent produces one message naming four creators. There is no "sent" flag: a notice either exists (owed) or does not (delivered). The delay cannot sit inside the request — a serverless function is not going to still be there in three minutes, and a message that never arrives is worse than one eight minutes late.
 
 **The unassigned chaser is the one notification that fires because something did *not* happen.** An offer released by approved leave sits `available` until an admin assigns it, and until now nothing said so — the board was a screen someone had to remember to open. `remindUnassignedOffers` runs on the same 5-minute cron, holds until **09:00 in the salary timezone** (the chaser is for a working day, not a phone at 02:00), and names only the accounts *still* on the board for **tomorrow**, so a partly-assigned absence chases the remainder. Its gate is deliberately **not** a once-a-day latch but a set of offer ids, in `ca-notification-latches/overtime-unassigned-{day}`: leave approved at lunchtime releases accounts onto tomorrow's board after the morning tick, and a plain latch would swallow exactly the accounts most likely to go uncovered. The ids are marked inside a transaction **before** the send, so two overlapping ticks cannot both chase the same offer — the same trade the payday latch makes. An offer assigned and then unassigned is not re-chased: the approver moved it by hand and knows it is there.
+
+**The roster gets its own half of that chase (2026-10-20).** `remindUnclaimedOffers`, same tick, same 09:00 hold, same offer-id memory in its own latch (`ca-notification-latches/overtime-unclaimed-{day}`, reusing the already-exempt field names so no index change). It tells every chat agent about tomorrow's offers **nobody has claimed** — an offer with a claimant is waiting on the approver, not the roster, so it is left out. Every offer for tomorrow is still claimable (claims stay open until the window ends), so nothing else is filtered. The absentee is never told about their own released accounts: recipients are grouped by which pending offers they may claim, one message per group.
 
 **Dispute decisions are coalesced too, through a second queue.** Same mechanism, different shape: a reviewer rules on a whole screen of disputes in one sitting, so each decision **queues** into `ca-dispute-notices` (one doc per `stage`+`outcome`+filer, count incremented, reasons merged with `arrayUnion`) and the same cron sends it after the same 3-minute quiet period. Three things differ from the coverage queue and each is deliberate:
 
@@ -753,7 +756,7 @@ All of it runs **after** the withdrawal commits and is non-fatal, the same shape
 | `ca-dispute-notices` | `{stage}__{outcome}__{uid}` | The same, for dispute decisions. Counts rather than names. Deleted on send. |
 | `ca-coverage-withdrawals` | `{leaveId}` | A cancelled absence — the Coverage tab's band |
 | `ca-salary-tier-notices` | `{uid}_{month}` | Which commission band the agent was last told about |
-| `ca-notification-latches` | `payday-{month}` · `overtime-unassigned-{day}` | The once-a-month guard on the payday reminder, and the offer ids the unassigned chaser has already sent for that day |
+| `ca-notification-latches` | `payday-{month}` · `overtime-unassigned-{day}` · `overtime-unclaimed-{day}` | The once-a-month guard on the payday reminder, and the offer ids the approver's chase and the agents' nudge have each already sent for that day |
 
 All five are Admin-SDK-only (`allow read, write: if false`) and every field on them is index-exempt except `ca-coverage-withdrawals.withdrawnAt`, which the band orders by.
 

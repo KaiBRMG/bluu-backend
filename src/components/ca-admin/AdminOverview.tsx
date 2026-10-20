@@ -16,6 +16,7 @@ import { getCache, setCache } from '@/lib/queryCache';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { formatMonthLabel, formatMonthLabelShort } from '@/lib/salary/salaryDate';
 import { formatHours, formatUsd, formatUsdCompact, pluralise, signedMoneyClass } from '@/lib/salary/salaryFormat';
+import { BasisTag } from '@/components/buddyx/buddyxUi';
 
 /**
  * The month above the roster: where the revenue came from, and what it cost.
@@ -336,7 +337,8 @@ function HeadlineStrip({ data }: { data: OverviewResponse }) {
     <section className={cn('rounded-xl p-4', SURFACE)} aria-label="Month totals">
       <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
         <Metric
-          label="Gross revenue"
+          label="Revenue"
+          basis="gross"
           value={formatUsd(totals.gross)}
           emphasis
           meta={<Delta current={totals.gross} previous={totals.previousGross} month={data.previousMonth} />}
@@ -395,16 +397,21 @@ function Metric({
   meta,
   emphasis,
   valueClassName,
+  basis,
 }: {
   label: string;
   value: string;
   meta?: React.ReactNode;
   emphasis?: boolean;
   valueClassName?: string;
+  basis?: 'gross' | 'net';
 }) {
   return (
     <div className="min-w-0">
-      <dt className="text-xs text-zinc-400">{label}</dt>
+      <dt className="flex items-center gap-1.5 text-xs text-zinc-400">
+        {label}
+        {basis && <BasisTag basis={basis} />}
+      </dt>
       <dd className={cn('mt-0.5 font-semibold tabular-nums', emphasis ? 'text-xl' : 'text-lg', valueClassName)}>
         {value}
       </dd>
@@ -680,9 +687,9 @@ function EarningsMatrix({
   return (
     <section className="space-y-2.5">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h3 className="text-sm font-semibold tracking-tight">Earnings by agent and creator</h3>
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold tracking-tight">Earnings by agent and creator <BasisTag basis="gross" /></h3>
         <p className="text-xs text-zinc-400">
-          Gross for {formatMonthLabel(month)}. Shading is the share of the grid’s largest figure.
+          {formatMonthLabel(month)}. Shading is the share of the grid’s largest figure.
         </p>
       </div>
 
@@ -890,8 +897,8 @@ function formatMargin(profit: number, net: number): string {
   return `${pct < 0 ? '−' : ''}${Math.abs(pct).toFixed(1)}%`;
 }
 
-const PROFIT_COLUMNS: Array<{ label: string; title: string }> = [
-  { label: 'Net revenue', title: 'Gross less the platform deduction' },
+const PROFIT_COLUMNS: Array<{ label: string; title: string; basis?: 'net' }> = [
+  { label: 'Revenue', basis: 'net', title: 'Net — gross less the platform deduction' },
   { label: 'Commission', title: 'Commission on the agent’s net sales' },
   { label: 'Wage', title: 'Hourly wage for the hours the agent was paid for' },
   { label: 'Profit', title: 'Net revenue minus commission and wage' },
@@ -960,14 +967,15 @@ function AgentProfitability({
               <th scope="col" className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
                 Agent
               </th>
-              {PROFIT_COLUMNS.map(({ label, title }) => (
+              {PROFIT_COLUMNS.map(({ label, title, basis }) => (
                 <th
                   key={label}
                   scope="col"
                   title={title}
                   className="px-3 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-zinc-400"
                 >
-                  {label}
+                  {/* The tag is the label; the header's own title explains it. */}
+                  {basis ? <span className="inline-flex items-center gap-1.5">{label} <BasisTag basis={basis} note="" /></span> : label}
                 </th>
               ))}
             </tr>
@@ -1116,7 +1124,7 @@ function CreatorLeaderboard({
                         : undefined
                   }
                 >
-                  {label}
+                  {label === 'Gross' ? <BasisTag basis="gross" /> : label}
                 </th>
               ))}
               <th scope="col" className="px-3 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-zinc-400">

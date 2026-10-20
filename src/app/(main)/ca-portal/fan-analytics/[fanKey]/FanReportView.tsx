@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
-import { AttrChip, KpiTile, LegendSwatch, LoadError, fanReportHref } from '@/components/buddyx/buddyxUi';
+import { AttrChip, BasisTag, KpiTile, LegendSwatch, LoadError, fanReportHref } from '@/components/buddyx/buddyxUi';
 import { CreatorChip } from '@/components/creators/CreatorChip';
 import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
@@ -394,7 +394,7 @@ function SpendSection({ report }: { report: FanReport }) {
   return (
     <section className={cn('rounded-xl p-5', SURFACE)} aria-labelledby="spend">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="spend" className="text-sm font-semibold">Spend by month <span className="font-normal text-zinc-400">· gross</span></h2>
+        <h2 id="spend" className="flex items-center gap-1.5 text-sm font-semibold">Spend by month <BasisTag basis="gross" /></h2>
         <span className="flex items-center gap-3 text-xs text-zinc-300">
           <span className="inline-flex items-center gap-1.5"><LegendSwatch color={SALE_KIND_COLORS.tip} /> Tips</span>
           <span className="inline-flex items-center gap-1.5"><LegendSwatch color={SALE_KIND_COLORS.ppv} /> PPV</span>
@@ -569,7 +569,7 @@ function PurchasesSection({ report, timezone }: { report: FanReport; timezone: s
   return (
     <section className={cn('rounded-xl p-5', SURFACE)} aria-labelledby="purchases">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="purchases" className="text-sm font-semibold">Purchases <span className="font-normal text-zinc-400">· gross</span></h2>
+        <h2 id="purchases" className="flex items-center gap-1.5 text-sm font-semibold">Purchases <BasisTag basis="gross" /></h2>
         {report.purchases.length > 0 && <p className="text-[11px] text-zinc-400">{pluralise(report.purchases.length, 'purchase')}</p>}
       </div>
       {report.purchases.length === 0 ? (
@@ -636,7 +636,7 @@ function EarnedBy({ report }: { report: FanReport }) {
   if (report.earnedBy.length === 0) return null;
   return (
     <section className={cn('rounded-xl p-4', SURFACE)} aria-labelledby="earned">
-      <h2 id="earned" className="text-xs font-semibold text-zinc-400">Earned by · gross</h2>
+      <h2 id="earned" className="flex items-center gap-1.5 text-xs font-semibold text-zinc-400">Earned by <BasisTag basis="gross" /></h2>
       <ul className="mt-2 space-y-1">
         {report.earnedBy.map(e => (
           <li key={e.label} className="flex justify-between gap-3 text-sm">

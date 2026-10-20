@@ -24,6 +24,7 @@ import type {
   SalaryOverrideField,
   SalaryShiftBreakdown,
 } from '@/lib/salary/salaryTypes';
+import { BasisTag } from '@/components/buddyx/buddyxUi';
 
 /**
  * The month grid — one row per calendar day, exactly like the sheet it replaces.
@@ -86,10 +87,11 @@ interface SalaryDayTableProps {
 const MISSING_SHIFT_EXPLANATION =
   'Sales landed on this day but no shift is on record, so hours and hourly pay could not be worked out.';
 
-const COLUMNS: Array<{ key: string; label: string; field?: SalaryOverrideField; hint?: string }> = [
+// A column named only by its basis is labelled by the tag alone (DESIGN.md §5).
+const COLUMNS: Array<{ key: string; label: string; field?: SalaryOverrideField; hint?: string; basis?: 'gross' | 'net' }> = [
   { key: 'day', label: 'Date', hint: SALARY_DAY_HINT },
-  { key: 'gross', label: 'Gross', field: 'grossEarnings', hint: 'Total sales for the day, reversals deducted.' },
-  { key: 'net', label: 'Net', hint: 'Gross less the platform deduction.' },
+  { key: 'gross', label: 'Gross', basis: 'gross', field: 'grossEarnings', hint: 'Gross — total sales for the day, reversals deducted.' },
+  { key: 'net', label: 'Net', basis: 'net', hint: 'Net — gross less the platform deduction. Commission is paid on this.' },
   {
     key: 'pct',
     label: 'Comm. %',
@@ -159,7 +161,10 @@ export function SalaryDayTable({
                   column.key === 'day' ? 'px-3 text-left' : 'px-2.5 text-right',
                 )}
               >
-                {column.hint ? (
+                {column.hint && column.basis ? (
+                  // The tag is the label; the tooltip is the hint, so the tag's own title is muted.
+                  <HintedLabel label={<BasisTag basis={column.basis} note="" />} hint={column.hint} className="border-b-0" />
+                ) : column.hint ? (
                   <HintedLabel label={column.label} hint={column.hint} />
                 ) : (
                   column.label

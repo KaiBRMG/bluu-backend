@@ -7,6 +7,7 @@ import { formatDayLabel } from '@/lib/salary/salaryDate';
 import { formatHours, formatPercent, formatUsd, pluralise } from '@/lib/salary/salaryFormat';
 import { round2 } from '@/lib/salary/salaryEngine';
 import type { SalaryDayResult, SalaryMonthResult, SalaryOverrideField } from '@/lib/salary/salaryTypes';
+import { BasisTag, LEDGER_NET_NOTE } from '@/components/buddyx/buddyxUi';
 
 /**
  * "How this was calculated" — the agent's own month, worked through.
@@ -75,7 +76,9 @@ export function SalaryDerivation({ data }: { data: SalaryMonthResult }) {
                 <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
                   <th scope="col" className="py-1.5 pr-3 font-semibold">Rate</th>
                   <th scope="col" className="py-1.5 pr-3 font-semibold">Days</th>
-                  <th scope="col" className="py-1.5 pr-3 text-right font-semibold">Net sales</th>
+                  <th scope="col" className="py-1.5 pr-3 text-right font-semibold">
+                    <span className="inline-flex items-center gap-1.5">Sales <BasisTag basis="net" note={LEDGER_NET_NOTE} /></span>
+                  </th>
                   <th scope="col" className="py-1.5 text-right font-semibold">Commission</th>
                 </tr>
               </thead>

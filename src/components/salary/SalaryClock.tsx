@@ -33,7 +33,7 @@ const HINT_TRIGGER =
   'cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 /** A column label with a dotted underline that explains itself on hover or focus. */
-export function HintedLabel({ label, hint, className }: { label: string; hint: string; className?: string }) {
+export function HintedLabel({ label, hint, className }: { label: React.ReactNode; hint: string; className?: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>

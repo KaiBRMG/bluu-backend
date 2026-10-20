@@ -47,6 +47,7 @@ import { SELECT_BOX_CLASS } from '@/lib/surfaces';
 import { formatHours, formatPercent, formatRelative, formatUsd, pluralise } from '@/lib/salary/salaryFormat';
 import type { SalaryMonthTotals, SalaryTierProgress } from '@/lib/salary/salaryTypes';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
+import { BasisTag } from '@/components/buddyx/buddyxUi';
 
 /**
  * Payroll: every chat agent's month, and one agent's month in detail.
@@ -107,8 +108,9 @@ const COLUMNS: Array<{
   value: (t: SalaryMonthTotals) => number;
   format: (n: number) => string;
   emphasis?: boolean;
+  basis?: 'gross';
 }> = [
-  { key: 'gross', label: 'Gross', value: t => t.grossEarnings, format: n => formatUsd(n) },
+  { key: 'gross', label: 'Sales', basis: 'gross', value: t => t.grossEarnings, format: n => formatUsd(n) },
   { key: 'commission', label: 'Commission', value: t => t.commission, format: n => formatUsd(n) },
   { key: 'hours', label: 'Hours', value: t => t.hours, format: formatHours },
   { key: 'wage', label: 'Hourly pay', value: t => t.wage, format: n => formatUsd(n) },
@@ -276,7 +278,7 @@ export default function AdminSalaries({
                 <tr className="border-b border-white/[0.07]">
                   <SortHeader label="Agent" sortKey="name" sort={sort} onSort={setSort} align="left" />
                   {COLUMNS.map(column => (
-                    <SortHeader key={column.key} label={column.label} sortKey={column.key} sort={sort} onSort={setSort} />
+                    <SortHeader key={column.key} label={column.label} basis={column.basis} sortKey={column.key} sort={sort} onSort={setSort} />
                   ))}
                   <th scope="col" className="w-10 px-3 py-2.5">
                     <span className="sr-only">Open</span>
@@ -371,8 +373,10 @@ function SortHeader({
   sort,
   onSort,
   align = 'right',
+  basis,
 }: {
   label: string;
+  basis?: 'gross';
   sortKey: SortKey;
   sort: { key: SortKey; desc: boolean };
   onSort: (next: { key: SortKey; desc: boolean }) => void;
@@ -397,6 +401,7 @@ function SortHeader({
         )}
       >
         {label}
+        {basis && <BasisTag basis={basis} />}
         {active && (sort.desc ? <ArrowDown className="size-3" aria-hidden /> : <ArrowUp className="size-3" aria-hidden />)}
       </button>
     </th>
@@ -693,7 +698,7 @@ function AgentDetail({
 
           <section className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
             <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-5">
-              <Metric label="Gross" value={formatUsd(data.totals.grossEarnings)} />
+              <Metric label="Sales" basis="gross" value={formatUsd(data.totals.grossEarnings)} />
               <Metric label="Commission" value={formatUsd(data.totals.commission)} />
               <Metric label="Hours" value={formatHours(data.totals.hours)} />
               <Metric label="Hourly pay" value={formatUsd(data.totals.wage)} />
@@ -751,10 +756,13 @@ function AgentDetail({
   );
 }
 
-function Metric({ label, value, emphasis }: { label: string; value: string; emphasis?: boolean }) {
+function Metric({ label, value, emphasis, basis }: { label: string; value: string; emphasis?: boolean; basis?: 'gross' }) {
   return (
     <div className="min-w-0">
-      <dt className="text-xs text-zinc-400">{label}</dt>
+      <dt className="flex items-center gap-1.5 text-xs text-zinc-400">
+        {label}
+        {basis && <BasisTag basis={basis} />}
+      </dt>
       <dd className={cn('mt-0.5 font-semibold tabular-nums', emphasis ? 'text-xl' : 'text-lg')}>{value}</dd>
     </div>
   );

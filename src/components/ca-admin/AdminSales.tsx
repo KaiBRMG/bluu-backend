@@ -26,7 +26,7 @@ import { addDays, addMonths, currentDayKey, enumerateDays, formatDayLabel, forma
 import { SyncStatus } from '@/components/buddyx/SyncStatus';
 import { PeriodPicker, dayKeyToDate } from '@/components/buddyx/PeriodPicker';
 import { CreatorCombobox } from '@/components/buddyx/CreatorCombobox';
-import { AttrChip, FanLabel, InfoTip, LEDGER_PPV_ATTRIBUTION, SEGMENT, LEDGER_TIPS_ATTRIBUTION } from '@/components/buddyx/buddyxUi';
+import { AttrChip, BasisTag, FanLabel, InfoTip, LEDGER_NET_NOTE, LEDGER_PPV_ATTRIBUTION, SEGMENT, LEDGER_TIPS_ATTRIBUTION } from '@/components/buddyx/buddyxUi';
 import { CreatorChip } from '@/components/creators/CreatorChip';
 import { PersonTag } from '@/components/disputes/disputeUi';
 import { buddyxCreditName, holderName, SaleHolderNote } from '@/components/salary/SaleHolderNote';
@@ -952,9 +952,9 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
                           className={SELECT_BOX_CLASS}
                         />
                       </th>
-                      {columns.map(({ label, right, hint }) => (
-                        <th key={label} scope="col" title={hint} className={cn('whitespace-nowrap px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400', right ? 'text-right' : 'text-left')}>
-                          {label}
+                      {columns.map(col => (
+                        <th key={col.label} scope="col" title={col.hint} className={cn('whitespace-nowrap px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400', col.right ? 'text-right' : 'text-left')}>
+                          {'basis' in col && col.basis ? <BasisTag basis={col.basis} note={col.basis === 'net' ? LEDGER_NET_NOTE : undefined} /> : col.label}
                         </th>
                       ))}
                       <th scope="col" className="px-3 py-2.5"><span className="sr-only">Actions</span></th>
@@ -1194,7 +1194,8 @@ function OutcomeCell({
   );
 }
 
-const LEDGER_COLUMNS: Array<{ label: string; right?: boolean; hint?: string }> = [
+// A column named only by its basis is labelled by the tag alone (DESIGN.md §5).
+const LEDGER_COLUMNS: Array<{ label: string; right?: boolean; hint?: string; basis?: 'gross' | 'net' }> = [
   { label: 'When' },
   { label: 'Creator' },
   { label: 'Held by' },
@@ -1202,8 +1203,8 @@ const LEDGER_COLUMNS: Array<{ label: string; right?: boolean; hint?: string }> =
   { label: 'BuddyX credits' },
   { label: 'Type' },
   { label: 'Fan' },
-  { label: 'Gross', right: true },
-  { label: 'Net', right: true },
+  { label: 'Gross', right: true, basis: 'gross' },
+  { label: 'Net', right: true, basis: 'net' },
 ];
 
 /**
@@ -1497,7 +1498,7 @@ function ReassignSaleDialog({
           <dt className="text-zinc-400">Sale</dt>
           <dd className="flex flex-wrap items-center gap-1.5">
             <span className="tabular-nums">{formatUsd(sale.signedGross)}</span>
-            <span className="text-zinc-400">gross ·</span>
+            <BasisTag basis="gross" />
             <AttrChip>{saleTypeLabel(sale.type)}</AttrChip>
             <span className="tabular-nums text-zinc-400">{formatSaleDateTime(sale.occurredAt, timezone)}</span>
           </dd>

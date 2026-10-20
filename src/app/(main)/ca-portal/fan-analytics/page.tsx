@@ -13,7 +13,7 @@ import { SyncStatus } from '@/components/buddyx/SyncStatus';
 import { CreatorCombobox } from '@/components/buddyx/CreatorCombobox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FanDirectory } from '@/components/fans/FanDirectory';
-import { LegendSwatch, KpiTile, LoadError, SEGMENT, fanReportHref } from '@/components/buddyx/buddyxUi';
+import { BasisTag, LegendSwatch, KpiTile, LoadError, SEGMENT, fanReportHref } from '@/components/buddyx/buddyxUi';
 import { CreatorChip } from '@/components/creators/CreatorChip';
 import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
 import { formatUsd, pluralise } from '@/lib/salary/salaryFormat';
@@ -103,7 +103,6 @@ export default function FanAnalyticsPage() {
               <KpiTile label="Revenue per spender" basis="gross" value={data.kpis.revenuePerSpender === null ? '—' : formatUsd(data.kpis.revenuePerSpender)} />
               <KpiTile
                 label="Whale share"
-                basis="gross"
                 value={formatShare(data.kpis.whaleShare)}
                 meta={data.kpis.whaleShare === null ? undefined : `top 10% of spenders = ${formatShare(data.kpis.whaleShare)} of revenue`}
               />
@@ -139,7 +138,7 @@ export default function FanAnalyticsPage() {
             {/* ── Top spenders ── */}
             <section className={cn('rounded-xl p-5', SURFACE)} aria-labelledby="top-spenders">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 id="top-spenders" className="text-sm font-semibold">Top spenders <span className="font-normal text-zinc-400">· gross</span></h2>
+                <h2 id="top-spenders" className="flex items-center gap-1.5 text-sm font-semibold">Top spenders <BasisTag basis="gross" /></h2>
                 <div className="flex items-center gap-3">
                   <span className="flex items-center gap-3 text-xs text-zinc-300">
                     <span className="inline-flex items-center gap-1.5"><LegendSwatch color={SALE_KIND_COLORS.tip} /> Tips</span>
@@ -204,8 +203,10 @@ export default function FanAnalyticsPage() {
                     <table className="w-full min-w-[760px] text-sm">
                       <thead>
                         <tr className="border-b border-white/[0.07] text-[11px] uppercase tracking-wide text-zinc-400">
-                          {['Link', 'Creator', 'Fans', 'Revenue (as reported)', 'Per fan', 'Cost', 'ROI'].map((h, i) => (
-                            <th key={h} scope="col" className={cn('px-3 py-2.5 font-semibold', i < 2 ? 'text-left' : 'text-right')}>{h}</th>
+                          {['Link', 'Creator', 'Fans', 'Revenue', 'Per fan', 'Cost', 'ROI'].map((h, i) => (
+                            <th key={h} scope="col" className={cn('px-3 py-2.5 font-semibold', i < 2 ? 'text-left' : 'text-right')}>
+                              {h === 'Revenue' ? <span className="inline-flex items-center gap-1.5">{h} <BasisTag basis="reported" /></span> : h}
+                            </th>
                           ))}
                         </tr>
                       </thead>
@@ -271,7 +272,7 @@ function FanList({ fans, mode }: { fans: FanSummary[]; mode: 'at-risk' | 'period
               </span>
               <span className="w-24 shrink-0 text-right tabular-nums">
                 {formatUsd(mode === 'period' ? fan.periodSpend : fan.lifetimeSpend)}
-                <span className="block text-[11px] text-zinc-400">{mode === 'period' ? 'gross' : 'lifetime gross'}</span>
+                <span className="block text-[11px] text-zinc-400">{mode === 'period' ? 'this period' : 'lifetime'}</span>
               </span>
             </div>
           </li>

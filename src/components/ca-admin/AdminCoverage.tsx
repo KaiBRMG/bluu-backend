@@ -530,12 +530,11 @@ const SHIFT_KIND_LABEL: Record<ClaimantLoad['shifts'][number]['kind'], string | 
  * figure an admin compares claimants by, and a fact that lives only behind a
  * hover is one a keyboard user never reaches (DESIGN.md §5). The card holds the
  * detail behind it — their shifts that day, which accounts are on each, any
- * other cover they have claimed, and where this assignment would leave them
- * against the 5/4 cap. The trigger is a real button so focus opens it too.
+ * other cover they have claimed, and how many accounts this assignment would
+ * leave them on. The trigger is a real button so focus opens it too.
  *
- * The cap figure is the claim route's own arithmetic (`getClaimantLoads`), so a
- * claim the card shows as over the limit is one the roster has moved under
- * since it was made — exactly the case an admin needs flagged.
+ * There is no account cap to flag (removed 2026-10-20) — the load is shown so
+ * the admin can weigh claimants, not to enforce a limit.
  */
 function ClaimantChip({ claim, day, photoURL }: { claim: Claim; day: string; photoURL: string | null }) {
   const { timezone } = useViewerTimezone();
@@ -544,8 +543,6 @@ function ClaimantChip({ claim, day, photoURL }: { claim: Claim; day: string; pho
   if (!load) {
     return <span className="rounded bg-white/[0.08] px-1.5 py-px text-zinc-300">{claim.displayName}</span>;
   }
-
-  const overCap = load.projected > load.limit;
 
   return (
     <HoverCard openDelay={150} closeDelay={100}>
@@ -558,11 +555,10 @@ function ClaimantChip({ claim, day, photoURL }: { claim: Claim; day: string; pho
           )}
         >
           {claim.displayName}
-          <span className={cn('tabular-nums', overCap ? 'text-orange-400' : 'text-zinc-400')}>
+          <span className="tabular-nums text-zinc-400">
             <span aria-hidden>· </span>
             {pluralise(load.accountCount, 'acct')}
           </span>
-          {overCap && <TriangleAlert className="size-3 text-orange-400" aria-label="Over the account limit" />}
         </button>
       </HoverCardTrigger>
 
@@ -587,10 +583,9 @@ function ClaimantChip({ claim, day, photoURL }: { claim: Claim; day: string; pho
           <p className="text-zinc-300">
             {load.inShift ? 'Inside their own shift \u2014 sales only' : 'Outside their hours \u2014 paid overtime'}
           </p>
-          <p className={cn('mt-0.5 tabular-nums', overCap ? 'text-orange-400' : 'text-zinc-400')}>
-            Would be on {load.projected} of {load.limit} accounts
+          <p className="mt-0.5 tabular-nums text-zinc-400">
+            Would be on {pluralise(load.projected, 'account')}
             {load.alsoClaimedCreatorIds.length > 0 && ', counting their other claims'}
-            {overCap && ' \u2014 over the limit'}
           </p>
         </div>
 

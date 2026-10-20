@@ -3,7 +3,7 @@ import { headers } from 'next/headers';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
 import { notifications } from '@/lib/notificationContent';
 import { claimNotificationLatch, getChatAgentUids, notifyUsers } from '@/lib/services/caNotifications';
-import { flushCoverageNotices, remindUnassignedOffers } from '@/lib/services/coverageNotices';
+import { flushCoverageNotices, remindUnassignedOffers, remindUnclaimedOffers } from '@/lib/services/coverageNotices';
 import { flushDisputeNotices } from '@/lib/services/disputeNotices';
 import {
   addMonths,
@@ -34,6 +34,8 @@ import {
  *    before the shift, the leave approver is — see
  *    `services/coverageNotices.ts` for the offer-id memory that stops it
  *    repeating while still catching accounts released after the first chase.
+ *    The same morning, every chat agent but the absentee is told about the
+ *    offers for tomorrow nobody has *claimed*.
  * 4. **The payday reminder**, 3 days before the 1st.
  *
  * It lives here rather than in `functions/` for the reason every scheduled job
@@ -92,6 +94,13 @@ export async function GET() {
   } catch (err) {
     console.error('[cron/ca-notifications] unassigned coverage chase failed', err);
     report.unassignedCoverage = { error: 'failed' };
+  }
+
+  try {
+    report.unclaimedCoverage = await remindUnclaimedOffers();
+  } catch (err) {
+    console.error('[cron/ca-notifications] unclaimed coverage nudge failed', err);
+    report.unclaimedCoverage = { error: 'failed' };
   }
 
   try {

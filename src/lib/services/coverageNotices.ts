@@ -47,7 +47,7 @@ import {
   type SalaryDayKey,
 } from '../salary/salaryDate';
 import { resolveAccountNames } from './creatorAccountService';
-import { CA_LEAVE_ALERT_RECIPIENT_UID, formatNameList, notifyUsers } from './caNotifications';
+import { CA_LEAVE_ALERT_RECIPIENT_UID, formatNameList, getChatAgentUids, notifyUsers } from './caNotifications';
 import { getOffers } from './caCoverageService';
 
 const NOTICES = 'ca-coverage-notices';
@@ -316,6 +316,103 @@ export async function remindUnassignedOffers(now: number = Date.now()): Promise<
   );
 
   return { sent: true, day, creators: pending.length };
+}
+
+// ─── The day-before nudge to agents (unclaimed offers) ───────────────
+
+/** `ca-notification-latches/{id}` — what agents have already been nudged about for a day. */
+function unclaimedLatchId(day: SalaryDayKey): string {
+  return `overtime-unclaimed-${day}`;
+}
+
+/**
+ * Tell the chat agents about overtime for **tomorrow** that nobody has claimed.
+ *
+ * The roster's counterpart to `remindUnassignedOffers`. That one chases the
+ * approver about offers nobody has been *given*; this one tells the people who
+ * can take them that offers nobody has *asked for* are still there. Same gates —
+ * 09:00 salary-local, and a set of chased offer ids in a latch document marked
+ * before the send — and for the same reasons.
+ *
+ * One filter the approver's chase does not need: **no claims.** An offer with a
+ * claimant is waiting on an admin, not on the roster; advertising it invites a
+ * pile-on that only lengthens the queue. Every offer for tomorrow is still
+ * claimable — claims stay open until the window ends — so nothing else is
+ * filtered.
+ *
+ * The agent who is away is never told about their own released accounts — they
+ * cannot cover them. Recipients are therefore grouped by which of the pending
+ * offers they are eligible for; on the usual day with one absence that is two
+ * groups (everyone else, and the absentee — who may get nothing).
+ *
+ * Read budget: one indexed query (shared shape with the approver's chase), one
+ * latch read, and the CA-group roster query only on a tick that has something
+ * new to send.
+ */
+export async function remindUnclaimedOffers(now: number = Date.now()): Promise<UnassignedReminderReport> {
+  const today = currentDayKey(now);
+  const hourOfSalaryDay = Math.floor((now - dayKeyToStartMs(today)) / 3_600_000);
+  if (hourOfSalaryDay < UNASSIGNED_REMINDER_HOUR) return { sent: false, reason: 'too early in the day' };
+
+  const day = addDays(today, 1);
+  const offers = (await getOffers({ fromDay: day, toDay: day, status: 'available' })).filter(
+    offer => offer.claims.length === 0,
+  );
+  if (offers.length === 0) return { sent: false, day, reason: 'nothing unclaimed' };
+
+  const ref = adminDb.collection(LATCHES).doc(unclaimedLatchId(day));
+
+  let pending: typeof offers = [];
+  try {
+    pending = await adminDb.runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      const chased = new Set<string>((snap.data()?.chasedOfferIds as string[] | undefined) ?? []);
+      const fresh = offers.filter(offer => !chased.has(offer.offerId));
+      if (fresh.length === 0) return [];
+
+      tx.set(
+        ref,
+        {
+          key: unclaimedLatchId(day),
+          day,
+          chasedOfferIds: FieldValue.arrayUnion(...fresh.map(offer => offer.offerId)),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      return fresh;
+    });
+  } catch (err) {
+    console.error('[coverageNotices] failed to claim unclaimed-offer nudge', err);
+    return { sent: false, day, reason: 'latch failed' };
+  }
+
+  if (pending.length === 0) return { sent: false, day, reason: 'already chased' };
+
+  // Group agents by the offers they may claim — everyone but the absentee of
+  // each — so each group gets one message naming exactly its accounts.
+  const groups = new Map<string, { uids: string[]; names: string[] }>();
+  for (const uid of await getChatAgentUids()) {
+    const eligible = pending.filter(offer => offer.originalUserId !== uid);
+    if (eligible.length === 0) continue;
+    const key = eligible.map(offer => offer.offerId).join('|');
+    const group = groups.get(key) ?? { uids: [], names: eligible.map(offer => offer.creatorName) };
+    group.uids.push(uid);
+    groups.set(key, group);
+  }
+
+  const dateLabel = formatDayLabelWithWeekday(day);
+  let recipients = 0;
+  for (const { uids, names } of groups.values()) {
+    const { delivered } = await notifyUsers(
+      uids,
+      notifications.overtimeUnclaimed(formatNameList(names), dateLabel),
+      { label: 'overtimeUnclaimed' },
+    );
+    recipients += delivered;
+  }
+
+  return { sent: recipients > 0, day, creators: pending.length };
 }
 
 // ─── The withdrawal record (the Coverage tab's indicator) ────────────

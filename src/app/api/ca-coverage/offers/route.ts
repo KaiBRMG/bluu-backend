@@ -11,7 +11,7 @@
  *
  * `&detail=claimants` (admin only, Coverage → To assign) adds a `load` to each
  * open claim: the claimant's shifts and accounts on that day, and what assigning
- * this offer would put them on against the 5/4 cap. Opt-in because it costs one
+ * this offer would put them on. Opt-in because it costs one
  * roster read per claimant, and the agent calendar — which admins also open —
  * renders none of it (rule 9i).
  *

@@ -37,6 +37,9 @@ export const LEDGER_PPV_ATTRIBUTION =
  * labels. BuddyX's own split is `net = gross × 0.8` (buddyxapi.yaml).
  */
 export const GROSS_NOTE = 'Gross — what the fan paid. Net is 80% of gross; OnlyFans keeps 20%.';
+/** Net on Bluu's own ledger (pay, the Sales Report, CA Admin): the deduction is configurable, so no fixed 80%. */
+export const LEDGER_NET_NOTE = 'Net — gross less the platform deduction (OnlyFans’ share; 20% unless CA Admin → Rates says otherwise). Pay is worked out on net.';
+export const NET_NOTE = 'Net — what the creator receives: 80% of gross, after OnlyFans keeps 20%. Matches OnlyFans’ own earnings statement to within a few cents.';
 /**
  * The few BuddyX money fields that are a bare number, not a {gross, net} pair:
  * link revenue and a link fan's total spent. The API does not say which they are.
@@ -153,7 +156,7 @@ export function KpiTile({
   tip?: string;
   href?: string;
   /** Money tiles say which figure they are — never leave gross vs net to a guess. */
-  basis?: 'gross' | 'net';
+  basis?: MoneyTag;
 }) {
   return (
     <Card className="gap-1.5 py-4">
@@ -177,23 +180,43 @@ export function KpiTile({
   );
 }
 
-/** "gross" / "net" beside a money label, with the split explained on hover. */
-export function BasisTag({ basis }: { basis: 'gross' | 'net' }) {
+/** Which money figure a label is: either half of BuddyX's pair, or a bare number it never qualified. */
+export type MoneyTag = 'gross' | 'net' | 'reported';
+
+const BASIS_TAG: Record<MoneyTag, { text: string; note: string; className: string }> = {
+  gross: { text: 'Gross', note: GROSS_NOTE, className: 'border-transparent bg-white/[0.12] text-zinc-200' },
+  net: { text: 'Net', note: NET_NOTE, className: 'border-zinc-400/60 text-zinc-200' },
+  reported: { text: 'As reported', note: LINK_REVENUE_NOTE, className: 'border-dashed border-zinc-500 text-zinc-300' },
+};
+
+/**
+ * The basis label on a money figure — `GROSS`, `NET` or `AS REPORTED`. **The
+ * tag is the label**: it sits beside the figure's name and the word is never
+ * repeated in that name ("Earnings GROSS", not "Gross earnings GROSS").
+ * Greyscale (an attribute, not a state), and never the word alone: gross is a
+ * filled chip, net an outlined one, as-reported a dashed one, so two figures
+ * read as different before either tag is read. The split is on hover.
+ */
+export function BasisTag({ basis, note }: { basis: MoneyTag; /** Overrides the hover sentence — `LEDGER_NET_NOTE` on ledger surfaces. */ note?: string }) {
+  const tag = BASIS_TAG[basis];
   return (
     <span
-      title={GROSS_NOTE}
-      className="rounded-md bg-white/[0.08] px-1 py-px text-[10px] font-medium uppercase tracking-wide text-zinc-300"
+      title={note ?? tag.note}
+      className={cn('shrink-0 whitespace-nowrap rounded-md border px-1 py-px text-[10px] font-semibold uppercase leading-[14px] tracking-wide', tag.className)}
     >
-      {basis}
+      {tag.text}
     </span>
   );
 }
 
-/** One fact in a definition list: label, figure, optional Meta line. */
-export function Fact({ label, value, meta }: { label: string; value: string; meta?: string }) {
+/** One fact in a definition list: label (+ basis tag on money), figure, optional Meta line. */
+export function Fact({ label, value, meta, basis }: { label: string; value: string; meta?: string; basis?: MoneyTag }) {
   return (
     <div>
-      <dt className="text-xs text-zinc-400">{label}</dt>
+      <dt className="flex items-center gap-1.5 text-xs text-zinc-400">
+        {label}
+        {basis && <BasisTag basis={basis} />}
+      </dt>
       <dd className="mt-0.5 text-lg font-semibold tabular-nums">{value}</dd>
       {meta && <dd className="text-[11px] text-zinc-400">{meta}</dd>}
     </div>

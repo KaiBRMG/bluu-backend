@@ -20,7 +20,7 @@
 ### 1. Single persistent loader
 Rendered in **exactly one place** — `BootLoaderProvider`, mounted in `src/app/(main)/layout.tsx` **above** `AuthWrapper`. It stays mounted for the whole boot so the `<video>` element **never remounts** (a remount restarts the animation → flicker).
 
-**ANTI-PATTERN:** Do **not** render `LoadingScreen` anywhere else.
+**ANTI-PATTERN:** Do **not** render `LoadingScreen` anywhere else — with one sanctioned exception: [`DeploymentRefresher`](../src/components/DeploymentRefresher.tsx) renders it as a cover in the frames *before* it issues a stale-session reload, so the dying page hands over to the next page's boot loader as one continuous black screen. That is outside the boot (the `booted` latch is already set), so it cannot remount the boot video. See [electron.md](electron.md#deploymentrefreshers-rules).
 
 ### 2. Phase gating (report, don't control)
 Components don't show/hide the loader directly — they **report** their loading state via `useBootPhase(key, loading)`. The loader stays up while **any** phase is pending.
@@ -38,7 +38,7 @@ Components don't show/hide the loader directly — they **report** their loading
 Loader lifts at `max(all phases cleared, MIN_LOADER_MS)`.
 - `MIN_LOADER_MS` = **3s** (in `BootLoaderContext.tsx`) — an aesthetic floor so the animation plays ≥1 full cycle; also bridges brief gaps between phases. It's a **minimum, not a fixed delay** — slower loads stay up longer.
 - After first boot, a `booted` latch prevents the loader from ever reappearing for the session; in-app navigation relies on each view's own skeletons.
-- A full app **reload** resets the latch (a genuine new boot).
+- A full app **reload** resets the latch (a genuine new boot). This includes `DeploymentRefresher`'s automatic stale-session reloads — which is why they happen in the background where possible.
 
 ---
 

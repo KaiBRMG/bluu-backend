@@ -33,3 +33,18 @@ export function daysAgo(ms: number | null, now = Date.now()): string {
   const d = Math.floor((now - ms) / 86_400_000);
   return d <= 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`;
 }
+
+/** Gross or net — which half of BuddyX's `{ gross, net }` pair a figure shows. */
+export type MoneyBasis = 'gross' | 'net';
+
+/** BuddyX's split: `net = gross × 0.8` (OnlyFans keeps 20%; buddyxapi.yaml). */
+export const NET_SHARE = 0.8;
+
+/**
+ * A gross figure at the chosen basis. Applied to a *summed* gross, never summed
+ * from per-row nets (the API's guidance), so it can sit a few cents off
+ * OnlyFans' own statement, which rounds each transaction's 80%.
+ */
+export function atBasis(gross: number, basis: MoneyBasis): number {
+  return basis === 'net' ? gross * NET_SHARE : gross;
+}

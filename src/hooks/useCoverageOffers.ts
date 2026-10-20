@@ -42,8 +42,7 @@ export interface CoverageOfferRow {
 
 /**
  * What a claimant already carries on the offer's day — the admin's decision
- * input on Coverage → To assign. Computed server-side by `getClaimantLoads`,
- * with the same arithmetic the claim cap enforces.
+ * input on Coverage → To assign. Computed server-side by `getClaimantLoads`.
  */
 export interface ClaimantLoad {
   shifts: Array<{
@@ -57,7 +56,6 @@ export interface ClaimantLoad {
   alsoClaimedCreatorIds: string[];
   inShift: boolean;
   projected: number;
-  limit: number;
 }
 
 /**

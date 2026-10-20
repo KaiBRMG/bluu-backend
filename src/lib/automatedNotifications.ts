@@ -258,6 +258,17 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     content: notifications.overtimeUnassigned('{creator1 and creator2}', '{Tue 23 Sep}'),
     telegramEnabled: true,
   },
+  {
+    id: 'overtimeUnclaimed',
+    category: 'Coverage',
+    event: 'Overtime still available',
+    trigger:
+      'The day before a released account is due to be covered, nobody has claimed it. Same 5-minute cron and 09:00 salary-local hold as the approver’s chase, and the same memory of offers already chased. An offer someone has already claimed is left to the approver.',
+    recipients: 'Every chat agent (the CA group, excluding archived users) except the agent whose leave released the accounts',
+    sources: ['src/app/api/cron/ca-notifications/route.ts', 'src/lib/services/coverageNotices.ts'],
+    content: notifications.overtimeUnclaimed('{creator1 and creator2}', '{Tue 23 Sep}'),
+    telegramEnabled: true,
+  },
 
   // ─── Salary ───────────────────────────────────────────────────────────────
   {

@@ -21,7 +21,7 @@ import {
 import { DisputeCreatorChip, OVERTURN_COPY, PersonTag, StagePill, RejectReasonBar, type ReasonBarCopy } from './disputeUi';
 import type { DisputeVerdict } from './DisputeReviewQueue';
 import { CreatorChip } from '@/components/creators/CreatorChip';
-import { AttrChip, FanLabel } from '@/components/buddyx/buddyxUi';
+import { AttrChip, BasisTag, FanLabel } from '@/components/buddyx/buddyxUi';
 import { formatSaleDateTime } from '@/lib/salary/salaryFormat';
 import { saleTypeLabel } from '@/lib/salary/saleTypes';
 
@@ -140,9 +140,9 @@ export function DisputeDetailDialog({
           <>
             <DialogHeader className="pr-10">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <DialogTitle className="text-2xl font-semibold tabular-nums tracking-tight">
+                <DialogTitle className="flex items-center gap-2 text-2xl font-semibold tabular-nums tracking-tight">
                   {formatMoney(dispute.saleAmount)}
-                  <span className="ml-1.5 text-xs font-normal tracking-normal text-zinc-400">gross</span>
+                  <BasisTag basis="gross" />
                 </DialogTitle>
                 <StagePill dispute={dispute} />
               </div>

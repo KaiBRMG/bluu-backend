@@ -21,6 +21,7 @@ import { formatHours, formatUsd, pluralise, signedMoneyClass } from '@/lib/salar
 import type { SalaryMonthResult } from '@/lib/salary/salaryTypes';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { useSalaryEarliestMonth } from '@/hooks/useSalaryEarliestMonth';
+import { BasisTag, LEDGER_NET_NOTE } from '@/components/buddyx/buddyxUi';
 
 // Overview is the tab that opens, and it needs neither of these. Radix unmounts
 // an inactive `TabsContent`, so they were shipped and parsed on every visit
@@ -245,12 +246,14 @@ function Overview({ month, data }: { month: string; data: SalaryMonthResult }) {
           {/* Signed, like the same figure in the day table. A month whose reversals
               exceed its sales is legal, and it rendered white here and red there. */}
           <Metric
-            label="Gross earnings"
+            label="Earnings"
+            basis="gross"
             value={formatUsd(totals.grossEarnings)}
             className={signedMoneyClass(totals.grossEarnings)}
           />
           <Metric
-            label="Net earnings"
+            label="Earnings"
+            basis="net"
             value={formatUsd(totals.netEarnings)}
             hint={`${Math.round(100 - config.deductionRate * 100)}% of gross`}
           />
@@ -282,16 +285,21 @@ function Metric({
   label,
   value,
   hint,
+  basis,
   className,
 }: {
   label: string;
   value: string;
   hint?: string;
+  basis?: 'gross' | 'net';
   className?: string;
 }) {
   return (
     <div className="min-w-0">
-      <dt className="text-xs text-zinc-400">{label}</dt>
+      <dt className="flex items-center gap-1.5 text-xs text-zinc-400">
+        {label}
+        {basis && <BasisTag basis={basis} note={basis === 'net' ? LEDGER_NET_NOTE : undefined} />}
+      </dt>
       <dd className={cn('mt-0.5 text-xl font-semibold tabular-nums', className)}>{value}</dd>
       {/* A second `dd`, not a `p`: a `div` inside a `dl` may contain only `dt`
           and `dd` elements, and the hint describes the same term. */}

@@ -676,6 +676,7 @@ export function ShiftCalendar({
                         day={cell.day}
                         offers={cell.offers}
                         formatTime={formatTime}
+                        now={now}
                         onClaim={setClaim}
                       />
                     </div>
@@ -770,6 +771,7 @@ export function ShiftCalendar({
                           day={cell.day}
                           offers={cell.offers}
                           formatTime={formatTime}
+                          now={now}
                           onClaim={setClaim}
                         />
                       </div>
@@ -1312,11 +1314,14 @@ function OfferCell({
   day,
   offers,
   formatTime,
+  now,
   onClaim,
 }: {
   day: string;
   offers: CoverageOfferRow[];
   formatTime: (ms: number) => string;
+  /** Claims stay open until the window ends — mirrors the claim route. */
+  now: number;
   onClaim: (offerId: string, claimed: boolean) => Promise<void>;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -1335,8 +1340,8 @@ function OfferCell({
         claiming ? `You're in for ${offer.creatorName} on ${formatDayLabelWithWeekday(day)}` : 'Claim withdrawn',
       );
     } catch (err) {
-      // The server's message names the limit that was hit — the account cap, the
-      // notice period — which is the only useful thing to say here.
+      // The server's message says why — already assigned, already ended — which
+      // is the only useful thing to say here.
       toast.error(err instanceof Error ? err.message : 'Could not update your claim');
     } finally {
       setBusy(null);
@@ -1397,7 +1402,7 @@ function OfferCell({
                 <Button
                   size="xs"
                   variant={offer.myClaim ? 'outline' : 'default'}
-                  disabled={busy === offer.offerId}
+                  disabled={busy === offer.offerId || (!offer.myClaim && offer.windowEnd <= now)}
                   onClick={() => void toggle(offer)}
                   className={cn(
                     'shrink-0',
@@ -1410,6 +1415,8 @@ function OfferCell({
                       <Check aria-hidden />
                       In
                     </>
+                  ) : offer.windowEnd <= now ? (
+                    'Ended'
                   ) : (
                     'Claim'
                   )}

@@ -11,6 +11,7 @@ import { useBootPhase } from '@/contexts/BootLoaderContext';
 import { formatHours, formatUsd } from '@/lib/salary/salaryFormat';
 import { currentMonthKey, formatMonthLabel } from '@/lib/salary/salaryDate';
 import { SURFACE, SURFACE_INTERACTIVE } from '@/lib/surfaces';
+import { BasisTag } from '@/components/buddyx/buddyxUi';
 
 /**
  * The salary section on the chat-agent dashboard.
@@ -134,7 +135,7 @@ export function SalarySummaryCard({ salary }: { salary: SalaryMonthState }) {
           three nested cards — nested cards are always wrong (craft floor). */}
       <dl className="mt-4 flex flex-wrap items-baseline gap-x-5 gap-y-1.5 border-t border-white/[0.07] pt-3">
         <div className="flex items-baseline gap-1.5">
-          <dt className="text-xs text-zinc-400">Gross sales</dt>
+          <dt className="flex items-center gap-1.5 self-center text-xs text-zinc-400">Sales <BasisTag basis="gross" /></dt>
           <dd className="text-sm font-medium tabular-nums">{formatUsd(totals.grossEarnings)}</dd>
         </div>
         <div className="flex items-baseline gap-1.5">
