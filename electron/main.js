@@ -5191,12 +5191,15 @@ function createWindow() {
   return mainWindow;
 }
 
-// ─── Auto-update (macOS only) ───────────────────────────────────────────
+// ─── Auto-update (macOS + Windows) ──────────────────────────────────────
 // macOS builds are Developer ID signed + notarized, so Squirrel.Mac can verify
-// and install updates in place. Windows builds are signed only with a
-// self-generated certificate, which the updater cannot validate, so Windows
-// users keep updating manually via the version-gated renderer banner (it
-// compares app:getVersion against APP_UPDATE.latestVersion).
+// and install updates in place. Windows builds are signed through Azure
+// Artifact Signing from 0.17.0, and the NSIS updater verifies every downloaded
+// installer against `win.azureSignOptions.publisherName` (written into
+// app-update.yml at build time) before running it. Windows shells older than
+// 0.17.0 were self-signed and register none of this — they still update by
+// hand, which is why the renderer asks `updater:isSupported` instead of
+// inferring the capability from the platform.
 //
 // The check used to run ONCE, at app start, on the reasoning that a user who
 // leaves the app open for a week picks up the update on their next launch.
@@ -5216,8 +5219,14 @@ function createWindow() {
 // this user and they are behind, and `CheckForUpdateDialog` when the user asks.
 // That also covers the never-relaunched app — the banner re-evaluates on every
 // clock-out and reads the live config over HTTP, so arming a release reaches it.
-const AUTO_UPDATE_SUPPORTED = process.platform === 'darwin';
+const AUTO_UPDATE_SUPPORTED = process.platform === 'darwin' || process.platform === 'win32';
 const INSTALL_FLUSH_TIMEOUT_MS = 10000;
+
+// Registered unconditionally, unlike every other `updater:*` handler: it is how
+// the renderer tells a shell that can install in place from one that must be
+// sent to `downloadUrl`. A shell too old to have this handler rejects the
+// invoke, which the renderer reads as "no".
+ipcMain.handle('updater:isSupported', () => AUTO_UPDATE_SUPPORTED && !isDev);
 
 // `electron-updater` puts the whole HTTP response — URL, headers, `node_modules`
 // stack — in `err.message`. The renderer gets the first line only (and still
@@ -5243,7 +5252,10 @@ function sendToRenderer(channel, payload) {
 function installUpdate() {
   if (updateInstallStarted) return;
   updateInstallStarted = true;
-  autoUpdater.quitAndInstall();
+  // Windows: run the NSIS installer silently and relaunch afterwards — the
+  // renderer has already told the user the app will restart, so a wizard here
+  // would only be a second, redundant prompt. Both flags are ignored on macOS.
+  autoUpdater.quitAndInstall(true, true);
 }
 
 function registerAutoUpdater() {

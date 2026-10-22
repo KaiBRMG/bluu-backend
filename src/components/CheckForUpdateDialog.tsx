@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Download, Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
-import { getAppInfo } from '@/lib/appVersion';
+import { canAutoUpdate, getAppInfo } from '@/lib/appVersion';
 import { compareSemver } from '@/lib/semver';
 import { fetchLatestRelease } from '@/lib/updateCheck';
 import { APP_UPDATE, fetchAppUpdateConfig } from '@/lib/appUpdateConfig';
@@ -60,20 +60,20 @@ import {
  *
  * ## Delivery follows the same hard platform rule as the banner
  *
- * - **macOS never gets the download link.** `electron-updater` is the only
- *   sanctioned path: a hand reinstall over a running signed app is how users end
- *   up on the wrong architecture (the x64 `.dmg` carries no arch suffix) or on a
- *   build that quietly stops auto-updating. Pressing Check for Update asks the
- *   shell to re-run its GitHub check (`updater.check()`) and then polls
- *   `getPending()`; once the shell answers, the dialog grows a real **Download
- *   and install** button with a progress bar. Until it does, the dialog says so
- *   rather than offering an action that does not exist.
- * - **Windows opens `downloadUrl`** for a hand reinstall, which is how that
- *   platform has always updated (no valid signing cert → no auto-update). There
- *   is no updater at all on Windows — `registerAutoUpdater` returns early — so
- *   every `updater.*` call here is both feature-detected and `catch`-guarded: on
- *   Windows the preload exposes the methods while main registers no handler, and
- *   the `invoke` rejects.
+ * - **A shell that updates in place never gets the download link** — macOS
+ *   always, Windows from v0.17.0 (`canAutoUpdate`). `electron-updater` is the
+ *   only sanctioned path there: a hand reinstall over a running signed app is
+ *   how users end up on the wrong architecture (the x64 `.dmg` carries no arch
+ *   suffix) or on a build that quietly stops auto-updating. Pressing Check for
+ *   Update asks the shell to re-run its GitHub check (`updater.check()`) and
+ *   then polls `getPending()`; once the shell answers, the dialog grows a real
+ *   **Download and install** button with a progress bar. Until it does, the
+ *   dialog says so rather than offering an action that does not exist.
+ * - **A Windows shell older than 0.17.0 opens `downloadUrl`** for a hand
+ *   reinstall. Those builds were self-signed and `registerAutoUpdater` returns
+ *   early there, so every `updater.*` call here is both feature-detected and
+ *   `catch`-guarded: the preload exposes the methods while main registers no
+ *   handler, and the `invoke` rejects.
  *
  * ## Interaction with a running shift
  *
@@ -84,7 +84,7 @@ import {
  * than after.
  */
 
-/** How often the macOS path re-reads the shell's check, and for how long. */
+/** How often the in-app path re-reads the shell's check, and for how long. */
 const PENDING_POLL_INTERVAL_MS = 1500;
 const PENDING_POLL_WINDOW_MS = 45_000;
 
@@ -95,7 +95,7 @@ type Outcome =
   | 'unavailable'    // couldn't reach the feed, or the build can't report a version
   | 'not-desktop';
 
-/** Sub-state of the macOS in-app download. */
+/** Sub-state of the in-app download. */
 type Phase = 'idle' | 'waiting' | 'ready' | 'downloading' | 'installing' | 'error';
 
 function formatMB(bytes: number): string {
@@ -115,7 +115,9 @@ export default function CheckForUpdateDialog({
   const [outcome, setOutcome] = useState<Outcome>('checking');
   const [current, setCurrent] = useState<string | null>(null);
   const [latest, setLatest] = useState<string | null>(null);
-  const [platform, setPlatform] = useState<string | null>(null);
+  // Whether this shell installs in place — macOS always, Windows from v0.17.0.
+  // Asked of the shell (`canAutoUpdate`), never inferred from the platform.
+  const [inApp, setInApp] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState(APP_UPDATE.downloadUrl);
 
   const [phase, setPhase] = useState<Phase>('idle');
@@ -134,8 +136,6 @@ export default function CheckForUpdateDialog({
   // interval on every transition it caused.
   const phaseRef = useRef<Phase>('idle');
   useEffect(() => { phaseRef.current = phase; }, [phase]);
-
-  const isMac = platform === 'darwin';
 
   // ── The check itself ────────────────────────────────────────────────
   // Runs on every open and on every "Check again". Two independent questions,
@@ -165,7 +165,7 @@ export default function CheckForUpdateDialog({
           fetchLatestRelease(),
         ]);
         setCurrent(appVersion);
-        setPlatform(os);
+        setInApp(await canAutoUpdate(os));
         setLatest(release.version);
 
         // No answer from the feed, or a build too old to say what it is: either
@@ -180,7 +180,7 @@ export default function CheckForUpdateDialog({
           return;
         }
 
-        // Behind. The live config supplies only the Windows landing page — the
+        // Behind. The live config supplies only the manual landing page — the
         // decision that an update exists was made from the releases feed above,
         // never from the policy.
         const idToken = user ? await user.getIdToken().catch(() => null) : null;
@@ -193,13 +193,13 @@ export default function CheckForUpdateDialog({
     })();
   }, [open, nonce, user]);
 
-  // ── macOS: ask the shell to look, then poll for its answer ──────────
+  // ── In-app: ask the shell to look, then poll for its answer ─────────
   // `electron-updater` is what actually delivers the bytes, and its check is a
   // couple of GitHub round trips. `getPending()` reading null is "not yet", not
   // "nothing found" — the releases feed has already established this user is
   // behind — so poll for a bounded window rather than offering a dead button.
   useEffect(() => {
-    if (!open || outcome !== 'available' || !isMac) return;
+    if (!open || outcome !== 'available' || !inApp) return;
     // A download in flight is not re-checked — the shell is already delivering.
     if (phaseRef.current === 'downloading' || phaseRef.current === 'installing') return;
 
@@ -213,8 +213,8 @@ export default function CheckForUpdateDialog({
 
     setPhase('waiting');
     setPollExhausted(false);
-    // Optional on older shells, and absent entirely on Windows — never called
-    // without a catch, since there the invoke rejects with "no handler".
+    // Optional on older shells — never called without a catch, since there the
+    // invoke can reject with "no handler".
     void updater.check?.()?.catch(() => {});
 
     const tick = async () => {
@@ -236,7 +236,7 @@ export default function CheckForUpdateDialog({
     timer = setInterval(tick, PENDING_POLL_INTERVAL_MS);
     return () => { cancelled = true; if (timer) clearInterval(timer); };
     // `phase` is deliberately absent — see `phaseRef`.
-  }, [open, outcome, isMac, nonce]);
+  }, [open, outcome, inApp, nonce]);
 
   // ── Updater events ──────────────────────────────────────────────────
   // Registered once, for the life of the component, and deliberately never
@@ -323,8 +323,8 @@ export default function CheckForUpdateDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/* macOS, update found, waiting on the shell's own check. */}
-        {outcome === 'available' && isMac && phase === 'waiting' && (
+        {/* In-app, update found, waiting on the shell's own check. */}
+        {outcome === 'available' && inApp && phase === 'waiting' && (
           <p className="text-sm text-muted-foreground">
             {pollExhausted
               ? 'The updater hasn’t been able to reach GitHub yet. Try again in a moment — your work is unaffected in the meantime.'
@@ -332,15 +332,15 @@ export default function CheckForUpdateDialog({
           </p>
         )}
 
-        {/* macOS, ready to install — the only platform offered an in-app update. */}
-        {outcome === 'available' && isMac && phase === 'ready' && willEndShift && (
+        {/* In-app, ready to install. */}
+        {outcome === 'available' && inApp && phase === 'ready' && willEndShift && (
           <p className="text-sm text-amber-400">
             You’re currently clocked in. Installing will clock you out and restart the
             app — your session is saved first.
           </p>
         )}
 
-        {outcome === 'available' && isMac && phase === 'downloading' && (
+        {outcome === 'available' && inApp && phase === 'downloading' && (
           <div className="space-y-2">
             <Progress value={percent} />
             <p className="text-xs text-muted-foreground">
@@ -363,9 +363,9 @@ export default function CheckForUpdateDialog({
           </p>
         )}
 
-        {/* Windows, update found. No updater on this platform — a hand reinstall
-            is the only path, and it is the one that has always been used here. */}
-        {outcome === 'available' && !isMac && (
+        {/* Windows shell older than 0.17.0, update found. It has no updater — a
+            hand reinstall is the only path, and the last one it will need. */}
+        {outcome === 'available' && !inApp && (
           <p className="text-sm text-muted-foreground">
             Download the installer and run it. You can keep working until you do —
             quit the app before installing.
@@ -380,25 +380,25 @@ export default function CheckForUpdateDialog({
             </Button>
           )}
 
-          {outcome === 'available' && isMac && phase === 'ready' && (
+          {outcome === 'available' && inApp && phase === 'ready' && (
             <Button onClick={startDownload}>
               <Download className="size-4" />
               Download and install
             </Button>
           )}
-          {outcome === 'available' && isMac && phase === 'error' && (
+          {outcome === 'available' && inApp && phase === 'error' && (
             <Button onClick={startDownload}>
               <RefreshCw className="size-4" />
               Try again
             </Button>
           )}
-          {outcome === 'available' && isMac && phase === 'waiting' && pollExhausted && (
+          {outcome === 'available' && inApp && phase === 'waiting' && pollExhausted && (
             <Button variant="outline" onClick={recheck}>
               <RefreshCw className="size-4" />
               Check again
             </Button>
           )}
-          {outcome === 'available' && !isMac && (
+          {outcome === 'available' && !inApp && (
             <Button onClick={openDownload}>
               <Download className="size-4" />
               Download installer

@@ -25,6 +25,42 @@ jobs:
         working-directory: electron
         run: npm ci
 
+      # Signing is Azure Artifact Signing (electron-builder's `azureSignOptions`),
+      # and it is what Windows auto-update rests on: the NSIS updater checks every
+      # downloaded installer against `publisherName`, which electron-builder
+      # writes into app-update.yml. An UNSIGNED build is the dangerous failure,
+      # not a cosmetic one — with no publisherName the updater skips verification
+      # entirely and the whole fleet would install whatever it was handed. So
+      # every input is checked up front and the job dies rather than ship one.
+      #
+      # The four account values are repository VARIABLES (not secrets — none is
+      # sensitive, and a secret is masked in the logs you debug signing from).
+      # PUBLISHER_NAME must be the certificate's subject CN exactly, character
+      # for character; a mismatch fails every update with
+      # ERR_UPDATER_INVALID_SIGNATURE. Changing it later strands every installed
+      # client that was built with the old name — they verify against what THEY
+      # shipped with.
+      - name: Verify Azure Artifact Signing configuration
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_CERT_PROFILE: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
+          AZURE_SIGNING_PUBLISHER_NAME: ${{ vars.AZURE_SIGNING_PUBLISHER_NAME }}
+        shell: pwsh
+        run: |
+          $missing = @(
+            'AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET',
+            'AZURE_SIGNING_ENDPOINT', 'AZURE_SIGNING_ACCOUNT',
+            'AZURE_SIGNING_CERT_PROFILE', 'AZURE_SIGNING_PUBLISHER_NAME'
+          ) | Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
+          if ($missing) {
+            Write-Error "Missing Azure Artifact Signing input(s): $($missing -join ', ')"
+            exit 1
+          }
+
       # npmRebuild=false: every native dep here is N-API and already installed
       # for win32-x64 by `npm ci` (uiohook-napi + koffi ship prebuilds, sqlite3
       # pulls a napi prebuild), so the Electron rebuild has nothing to do. Left
@@ -33,10 +69,45 @@ jobs:
       # node-gyp, which dies with "Could not find any Visual Studio installation".
       # Windows-only: the mac job builds x64 on an arm64 runner and NEEDS the
       # rebuild step to swap in the other arch's binaries.
-      - name: Build Windows installer
+      #
+      # A signing failure throws before the installer artifact exists, so with
+      # the inputs verified above an unsigned build cannot reach the release.
+      - name: Build, sign and publish Windows installer
         working-directory: electron
         env:
-          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_CERT_PROFILE: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
+          AZURE_SIGNING_PUBLISHER_NAME: ${{ vars.AZURE_SIGNING_PUBLISHER_NAME }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run dist:win -- --publish always --config.npmRebuild=false
+        shell: pwsh
+        # The account values are written into the runner's copy of package.json
+        # rather than passed as `--config.win.azureSignOptions.*` flags: a
+        # publisher name with spaces does not survive npm's cmd shim intact.
+        run: |
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));const e=process.env;p.build.win.azureSignOptions={endpoint:e.AZURE_SIGNING_ENDPOINT,codeSigningAccountName:e.AZURE_SIGNING_ACCOUNT,certificateProfileName:e.AZURE_SIGNING_CERT_PROFILE,publisherName:e.AZURE_SIGNING_PUBLISHER_NAME};fs.writeFileSync('package.json',JSON.stringify(p,null,2))"
+          npm run dist:win -- --publish always --config.npmRebuild=false
+
+      # Runs after publish, so it cannot un-publish — it is the "do not arm"
+      # signal for rule 14 step 3. A red job here means the release is not fit
+      # for the Windows entry in appUpdateConfig.ts, whatever the assets look
+      # like. electron-builder uploads the files itself (and not `gh release
+      # upload`) because GitHub turns spaces in asset names into dots, while
+      # electron-builder uploads with dashes and writes THOSE names into
+      # latest.yml — a hand upload would leave the manifest pointing at nothing.
+      - name: Verify installer signature and update manifest
+        working-directory: electron/dist
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Filter '*.exe' | Select-Object -First 1
+          if (-not $exe) { Write-Error 'No installer was built'; exit 1 }
+          $sig = Get-AuthenticodeSignature $exe.FullName
+          Write-Host "$($exe.Name): $($sig.Status) - $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') { Write-Error "Installer signature is $($sig.Status)"; exit 1 }
+          $cfg = Get-Content 'win-unpacked/resources/app-update.yml' -Raw
+          Write-Host $cfg
+          if ($cfg -notmatch 'publisherName') { Write-Error 'app-update.yml has no publisherName'; exit 1 }
+          if (-not (Test-Path 'latest.yml')) { Write-Error 'latest.yml was not generated'; exit 1 }

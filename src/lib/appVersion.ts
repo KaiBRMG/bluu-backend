@@ -31,6 +31,24 @@ export async function getAppInfo(): Promise<AppInfo> {
   return inflight;
 }
 
+/**
+ * Can this shell download and install an update in place, or must it be sent to
+ * `downloadUrl` for a hand reinstall?
+ *
+ * **macOS is always yes**, whatever the shell answers — the hard rule that a Mac
+ * is never given the download link (see `UpdateAvailableBanner`). Every other
+ * platform asks the shell: Windows can from v0.17.0, the first build signed
+ * through Azure Artifact Signing, and an older Windows shell has no
+ * `isSupported` handler, so the invoke rejects and the answer is no. Asked
+ * rather than inferred from `platform`, because the same OS splits on the build.
+ */
+export async function canAutoUpdate(platform: string | null): Promise<boolean> {
+  if (platform === 'darwin') return true;
+  const isSupported = typeof window !== 'undefined' ? window.electronAPI?.updater?.isSupported : undefined;
+  if (!isSupported) return false;
+  return isSupported().then(Boolean, () => false);
+}
+
 /** Synchronous best-effort read; returns nulls until getAppInfo() has resolved once. */
 export function getCachedAppInfo(): AppInfo {
   return cached ?? { appVersion: null, platform: null };

@@ -14,14 +14,15 @@ Button: Continue
 
 # src/app/training/home
 
+Shows all modules currently open to user.
 
+- New user (first-time page open): Must get their name.
 
 # src/app/training/media-gen 
 
 Training module/type: Media Generation
 First of many training modules.
 
-- New user (first-time page open): Must get their name.
 - Explain the test and procedures.
 - Display next part to be completed.
 - Display "Start" button or a countdown until when the button goes live.

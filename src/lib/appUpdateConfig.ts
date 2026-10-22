@@ -22,7 +22,8 @@
  *   govern the manual check at all.
  *
  * ▸ **Per-platform.** A release rarely matters to both OSes equally: v0.8.0 is
- *   what gives macOS auto-update, and is irrelevant to Windows. Set that
+ *   what gave macOS auto-update and was irrelevant to Windows; v0.17.0 is the
+ *   Windows equivalent (Azure Artifact Signing). Set that
  *   platform to `null` and those users are left alone rather than nagged about
  *   a build that does nothing for them.
  *
@@ -37,17 +38,19 @@
  *   caller's own answer crosses the wire, so a renderer never holds the list of
  *   who else is targeted.
  *
- * ▸ macOS is still gated by this file even though it can auto-update: a GitHub
- *   release alone never prompts anyone. `mac.latestVersion` decides who gets
- *   asked; the running app finds the actual artifact via `electron-updater`.
+ * ▸ Both platforms are still gated by this file even though both can
+ *   auto-update: a GitHub release alone never prompts anyone. `latestVersion`
+ *   decides who gets asked; the running app finds the actual artifact via
+ *   `electron-updater`.
  *
- * ▸ **Delivery differs, policy doesn't.** `compulsory` and `latestVersion` mean
- *   the same thing on both platforms; only the button differs — macOS downloads
- *   and installs in-app with a progress bar, Windows opens `downloadUrl` for a
- *   manual reinstall. **`downloadUrl` is never shown to a Mac**: auto-update is
- *   the only sanctioned path there (a hand reinstall is how users end up on the
- *   wrong arch or on a build that stops auto-updating). A Mac with nothing
- *   pending is told to quit and reopen instead — see `UpdateAvailableBanner`.
+ * ▸ **Delivery differs by build, policy doesn't.** `compulsory` and
+ *   `latestVersion` mean the same thing on both platforms; only the button
+ *   differs — a shell that can update in place (macOS, Windows ≥0.17.0)
+ *   downloads and installs in-app with a progress bar, and a Windows shell
+ *   older than 0.17.0 opens `downloadUrl` for a manual reinstall.
+ *   **`downloadUrl` is never shown to a Mac** (or to any shell that can update
+ *   in place): a hand reinstall is how users end up on the wrong arch or on a
+ *   build that stops auto-updating. See `canAutoUpdate` in `appVersion.ts`.
  *
  * ▸ **Only bump `latestVersion` AFTER the release artifacts are live** (and, for
  *   Windows, after `downloadUrl` actually serves the new installer). Deploying a
@@ -59,8 +62,8 @@
  *   re-evaluates on every clock-out, and reads this config over HTTP
  *   (`fetchAppUpdateConfig`) so a renderer that has been running for days still
  *   sees it. Arming this file reaches the fleet without waiting for relaunches.
- *   On Windows prefer `false` for routine releases: updating means quitting and
- *   reinstalling by hand.
+ *   While `win` still targets shells older than 0.17.0 prefer `false` there:
+ *   those users reinstall by hand.
  */
 import { PUBLIC_APP_ORIGIN } from './publicOrigin';
 import { compareSemver } from './semver';
@@ -179,8 +182,9 @@ export interface AppUpdateConfig {
   mac: PlatformUpdate | null;
   /** `null` → Windows users are never prompted. */
   win: PlatformUpdate | null;
-  /** Manual-install landing page (.dmg / .exe). **Windows only** — macOS is
-   *  never sent here by the update prompt; it updates in-app or not at all. */
+  /** Manual-install landing page (.dmg / .exe). **Windows shells older than
+   *  0.17.0 only** — a shell that can update in place (every Mac) is never sent
+   *  here by the update prompt; it updates in-app or not at all. */
   downloadUrl: string;
   /** `null` → no release note is sent to anyone. */
   releaseNote: ReleaseNote | null;
@@ -210,11 +214,11 @@ export const APP_UPDATE: AppUpdateConfig = {
   // set `allUsers: false` and list uids or group slugs instead — see
   // `UpdateCohort`. `allUsers: false` with both lists empty prompts nobody.
 
-  mac: { latestVersion: '0.16.0', compulsory: true, allUsers: true, uids: [], groups: [] },
-  // mac: null,
+  // mac: { latestVersion: '0.16.0', compulsory: true, allUsers: true, uids: [], groups: [] },
+  mac: null,
 
   // win: null,
-  win: { latestVersion: '0.16.0', compulsory: true, allUsers: true, uids: [], groups: [] },
+  win: { latestVersion: '1.0.0', compulsory: true, allUsers: false, uids: [], groups: ['admin'] },
 
   // `/update`, not `/download`: this link is only ever opened for someone who
   // ALREADY has the app, so it must not put the one-time certificate sequence in

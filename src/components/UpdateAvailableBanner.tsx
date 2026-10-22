@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, Loader2, RefreshCw, X } from 'lucide-react';
-import { getAppInfo } from '@/lib/appVersion';
+import { canAutoUpdate, getAppInfo } from '@/lib/appVersion';
 import { compareSemver } from '@/lib/semver';
 import { APP_UPDATE, fetchAppUpdateConfig, resolvePlatformUpdate } from '@/lib/appUpdateConfig';
 import { setUpdateInFlight } from '@/lib/updateInFlight';
@@ -32,22 +32,23 @@ import {
  *  picks blocking dialog vs dismissible card. This is the *only* gate: on macOS
  *  a published GitHub release does not prompt anyone by itself.
  *
- *  **Delivery — what the button does — is feature-detected, with one hard
- *  platform rule: macOS is NEVER given the download link.** `electron-updater`
- *  is the only sanctioned way a Mac updates. A hand reinstall over a running
- *  signed app is how users end up on the wrong architecture (the x64 `.dmg`
- *  carries no arch suffix, so Apple Silicon users land on Rosetta and then take
- *  x64 updates forever) or on a build that quietly stops auto-updating.
+ *  **Delivery — what the button does — is asked of the shell
+ *  (`canAutoUpdate`), with one hard platform rule: macOS is NEVER given the
+ *  download link.** `electron-updater` is the only sanctioned way a Mac updates,
+ *  and from v0.17.0 the only way a Windows shell does too. A hand reinstall over
+ *  a running signed app is how users end up on the wrong architecture (the x64
+ *  `.dmg` carries no arch suffix, so Apple Silicon users land on Rosetta and
+ *  then take x64 updates forever) or on a build that quietly stops auto-updating.
  *
  *  - `updater.getPending` present **and** an update pending → **'auto'**:
  *    downloads in-app with a progress bar, then clocks out, flushes and restarts
  *    into the new version.
- *  - macOS with nothing pending → **'restart'**: the shell checks GitHub once at
- *    start-up, so a long-running app hasn't looked since the release shipped.
- *    The dialog says to quit and reopen; there is no button, because no in-app
- *    action helps and a link is not on offer here.
- *  - Windows → **'manual'**: opens the config's `downloadUrl`, which is how that
- *    platform has always updated (no valid signing cert → no auto-update).
+ *  - An auto-updating shell with nothing pending → **'restart'**: the check has
+ *    not answered yet. Polled out of, with a Check again button (below).
+ *  - A Windows shell older than 0.17.0 → **'manual'**: opens the config's
+ *    `downloadUrl`. Those builds were self-signed and carry no updater, so a
+ *    hand reinstall is the only way onto 0.17.0 — after which this path is
+ *    never taken again for that machine.
  *
  * **A work session is never interrupted — but the prompt is no longer a
  * once-per-launch lottery.** The single trigger condition is
@@ -123,9 +124,10 @@ type Mode = 'none' | 'optional' | 'blocking';
  * How the update is delivered.
  *
  * - `auto`    — in-app download + restart (`electron-updater`). **The only path
- *               macOS is ever offered.**
- * - `manual`  — opens `downloadUrl` for a hand reinstall. **Windows only.**
- * - `restart` — macOS, update targeted but the shell has nothing pending yet.
+ *               macOS is ever offered**, and Windows from v0.17.0.
+ * - `manual`  — opens `downloadUrl` for a hand reinstall. **Windows shells older
+ *               than 0.17.0 only.**
+ * - `restart` — an auto-updating shell, update targeted but nothing pending yet.
  *               **Provisional**: it is polled out of, and upgrades itself to
  *               `auto` the moment the check answers. Still no download link
  *               (per the rule above) — the only actions offered are Check again
@@ -286,7 +288,8 @@ export default function UpdateAvailableBanner() {
         const compulsory = appVersion ? cfg.compulsory : true;
 
         const updater = api.updater;
-        const pending = updater?.getPending && updater.download
+        const inApp = await canAutoUpdate(platform);
+        const pending = inApp && updater?.getPending && updater.download
           ? await updater.getPending().catch(() => null)
           : null;
 
@@ -306,19 +309,19 @@ export default function UpdateAvailableBanner() {
           // start-up check hasn't answered, or the release was published after
           // this app launched.
           //
-          // macOS never gets the download link. Auto-update is the only
-          // sanctioned path there: a hand reinstall over a running signed app
-          // is exactly how users end up on the wrong arch (the x64 .dmg has no
-          // suffix) or on a stale build that quietly stops receiving updates.
-          // The honest instruction is "quit and reopen" — that is what makes
-          // the shell check GitHub again, and the update then installs itself.
+          // A shell that can update in place never gets the download link —
+          // and macOS always counts as one (see `canAutoUpdate`). A hand
+          // reinstall over a running signed app is exactly how users end up on
+          // the wrong arch (the x64 .dmg has no suffix) or on a stale build that
+          // quietly stops receiving updates. Only a Windows shell older than
+          // 0.17.0 (self-signed, no updater) is sent to `downloadUrl`.
           setTarget(cfg.latestVersion);
-          setDelivery(platform === 'darwin' ? 'restart' : 'manual');
+          setDelivery(inApp ? 'restart' : 'manual');
           // From 0.16.1 the shell never checks GitHub on its own — this config
           // is the gate, so asking is our job, and only once the user is
           // targeted and behind. The restart path's poll picks up the answer.
           // Older shells lack `check` and still check at launch by themselves.
-          if (platform === 'darwin') void updater?.check?.()?.catch(() => {});
+          if (inApp) void updater?.check?.()?.catch(() => {});
         }
         setMode(compulsory ? 'blocking' : 'optional');
       } finally {
@@ -463,7 +466,7 @@ export default function UpdateAvailableBanner() {
   // is about to restart, so the user must not start working underneath it.
   const inProgress = delivery === 'auto' && phase !== 'prompt';
 
-  // macOS with nothing pending YET. No download link on this platform, but there
+  // An auto-updating shell with nothing pending YET. No download link, but there
   // is an in-app action after all — re-reading the check — so the copy stops
   // promising the one thing the shell cannot do. `autoDownload` and
   // `autoInstallOnAppQuit` are both false in main.js: a relaunch never installs

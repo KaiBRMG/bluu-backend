@@ -1,6 +1,6 @@
 {
   "name": "bluu-backend",
-  "version": "0.16.2",
+  "version": "1.0.0",
   "description": "Bluu Rock MGMT SaaS",
   "author": "BluuRockMGMT",
   "private": true,
@@ -107,10 +107,7 @@
           ]
         }
       ],
-      "icon": "public/logo/icon.ico",
-      "signtoolOptions": {
-        "publisherName": "BluuRockMGMT"
-      }
+      "icon": "public/logo/icon.ico"
     },
     "nsis": {
       "oneClick": true,

@@ -398,8 +398,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     relaunchApp: () => ipcRenderer.invoke('permissions:relaunchApp'),
   },
 
-  // Auto-updater (macOS only; the main process no-ops elsewhere)
+  // Auto-updater (macOS, and Windows from v0.17.0; the main process no-ops elsewhere)
   updater: {
+    // Whether this shell can install an update in place. The only handler main
+    // registers on every platform — ask this, never infer it from the OS.
+    isSupported: () => ipcRenderer.invoke('updater:isSupported'),
     // Result of the start-up check. Returns null when no update is available.
     // The renderer mounts after the check resolves, so it polls this rather
     // than relying on catching 'updater:available'.
