@@ -37,7 +37,7 @@ export async function getAppInfo(): Promise<AppInfo> {
  *
  * **macOS is always yes**, whatever the shell answers — the hard rule that a Mac
  * is never given the download link (see `UpdateAvailableBanner`). Every other
- * platform asks the shell: Windows can from v0.17.0, the first build signed
+ * platform asks the shell: Windows can from v1.0.0, the first build signed
  * through Azure Artifact Signing, and an older Windows shell has no
  * `isSupported` handler, so the invoke rejects and the answer is no. Asked
  * rather than inferred from `platform`, because the same OS splits on the build.

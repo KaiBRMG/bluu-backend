@@ -61,7 +61,7 @@ import {
  * ## Delivery follows the same hard platform rule as the banner
  *
  * - **A shell that updates in place never gets the download link** — macOS
- *   always, Windows from v0.17.0 (`canAutoUpdate`). `electron-updater` is the
+ *   always, Windows from v1.0.0 (`canAutoUpdate`). `electron-updater` is the
  *   only sanctioned path there: a hand reinstall over a running signed app is
  *   how users end up on the wrong architecture (the x64 `.dmg` carries no arch
  *   suffix) or on a build that quietly stops auto-updating. Pressing Check for
@@ -69,7 +69,7 @@ import {
  *   then polls `getPending()`; once the shell answers, the dialog grows a real
  *   **Download and install** button with a progress bar. Until it does, the
  *   dialog says so rather than offering an action that does not exist.
- * - **A Windows shell older than 0.17.0 opens `downloadUrl`** for a hand
+ * - **A Windows shell older than 1.0.0 opens `downloadUrl`** for a hand
  *   reinstall. Those builds were self-signed and `registerAutoUpdater` returns
  *   early there, so every `updater.*` call here is both feature-detected and
  *   `catch`-guarded: the preload exposes the methods while main registers no
@@ -115,7 +115,7 @@ export default function CheckForUpdateDialog({
   const [outcome, setOutcome] = useState<Outcome>('checking');
   const [current, setCurrent] = useState<string | null>(null);
   const [latest, setLatest] = useState<string | null>(null);
-  // Whether this shell installs in place — macOS always, Windows from v0.17.0.
+  // Whether this shell installs in place — macOS always, Windows from v1.0.0.
   // Asked of the shell (`canAutoUpdate`), never inferred from the platform.
   const [inApp, setInApp] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState(APP_UPDATE.downloadUrl);
@@ -363,7 +363,7 @@ export default function CheckForUpdateDialog({
           </p>
         )}
 
-        {/* Windows shell older than 0.17.0, update found. It has no updater — a
+        {/* Windows shell older than 1.0.0, update found. It has no updater — a
             hand reinstall is the only path, and the last one it will need. */}
         {outcome === 'available' && !inApp && (
           <p className="text-sm text-muted-foreground">

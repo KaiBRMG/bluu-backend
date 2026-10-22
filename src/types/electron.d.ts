@@ -622,12 +622,12 @@ interface ElectronAPI {
    * In-app auto-update. `getPending`/`onAvailable`/`download` land in v0.8.0 —
    * feature-detect them: builds older than that have no updater at all and must
    * fall back to the manual APP_UPDATE prompt. Live on macOS, and on Windows
-   * from v0.17.0 (Azure Artifact Signing); on an older Windows shell the methods
+   * from v1.0.0 (Azure Artifact Signing); on an older Windows shell the methods
    * exist but main registers no handler, so the invokes reject.
    */
   updater: {
     /**
-     * Whether this shell can install an update in place (v0.17.0+). Absent or
+     * Whether this shell can install an update in place (v1.0.0+). Absent or
      * rejecting on older shells — use `canAutoUpdate()` in `lib/appVersion.ts`,
      * which handles both and keeps the macOS rule, rather than calling it raw.
      */

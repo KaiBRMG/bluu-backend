@@ -44,8 +44,7 @@
 - `/auth` — OAuth flow pages run in the system browser during login; must be reachable without Electron.
 - `/creator` — external creator interface. It runs inside **Telegram's webview**, whose user agent is not Electron, so the allowlist entry is what makes the Mini App resolve at all. Note that reaching the page is not the same as getting in: without a valid `initData` the shell renders "Open in Telegram" and no session is minted.
 - `/desktop-only` — the public **front door** (DESIGN.md §10). Every rewritten browser request lands here, the bare domain included, and it routes three audiences: creators to `@BluuRockBot`, applicants to `/model-submissions`, staff to `/download`, and anyone else out to bluurock.com.
-- `/download` — public installer/download page; users need it before they have the desktop app. Carries the one-time Windows certificate step.
-- `/update` — the same page with the certificate step and the walkthrough removed, for someone who already has the app. `APP_UPDATE.downloadUrl` points **here**, and the Windows update prompt opens it in the system browser, so it needs the allowlist for the same reason `/download` does.
+- `/download` — public installer/download page; users need it before they have the desktop app. `APP_UPDATE.downloadUrl` points here too, and a pre-1.0 Windows update prompt opens it in the system browser. Its buttons hit `/api/download/[platform]`, which is outside the middleware matcher like all of `/api`. (`/update` was removed on 2026-10-22; `next.config.ts` 307s it to `/download` before middleware runs.)
 - `/p` — **shared prompts.** The whole point of the link is that it resolves for someone without the desktop app; a recipient rewritten to `/desktop-only` would make sharing useless. Read-only, and reachable only with the 160-bit share token in the path. See [prompt-library.md](prompt-library.md#sharing-a-prompt).
 - `/raffle` — browser-accessible raffle page.
 

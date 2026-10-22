@@ -22,7 +22,7 @@
  *   govern the manual check at all.
  *
  * ▸ **Per-platform.** A release rarely matters to both OSes equally: v0.8.0 is
- *   what gave macOS auto-update and was irrelevant to Windows; v0.17.0 is the
+ *   what gave macOS auto-update and was irrelevant to Windows; v1.0.0 is the
  *   Windows equivalent (Azure Artifact Signing). Set that
  *   platform to `null` and those users are left alone rather than nagged about
  *   a build that does nothing for them.
@@ -45,9 +45,9 @@
  *
  * ▸ **Delivery differs by build, policy doesn't.** `compulsory` and
  *   `latestVersion` mean the same thing on both platforms; only the button
- *   differs — a shell that can update in place (macOS, Windows ≥0.17.0)
+ *   differs — a shell that can update in place (macOS, Windows ≥1.0.0)
  *   downloads and installs in-app with a progress bar, and a Windows shell
- *   older than 0.17.0 opens `downloadUrl` for a manual reinstall.
+ *   older than 1.0.0 opens `downloadUrl` for a manual reinstall.
  *   **`downloadUrl` is never shown to a Mac** (or to any shell that can update
  *   in place): a hand reinstall is how users end up on the wrong arch or on a
  *   build that stops auto-updating. See `canAutoUpdate` in `appVersion.ts`.
@@ -62,7 +62,7 @@
  *   re-evaluates on every clock-out, and reads this config over HTTP
  *   (`fetchAppUpdateConfig`) so a renderer that has been running for days still
  *   sees it. Arming this file reaches the fleet without waiting for relaunches.
- *   While `win` still targets shells older than 0.17.0 prefer `false` there:
+ *   While `win` still targets shells older than 1.0.0 prefer `false` there:
  *   those users reinstall by hand.
  */
 import { PUBLIC_APP_ORIGIN } from './publicOrigin';
@@ -183,7 +183,7 @@ export interface AppUpdateConfig {
   /** `null` → Windows users are never prompted. */
   win: PlatformUpdate | null;
   /** Manual-install landing page (.dmg / .exe). **Windows shells older than
-   *  0.17.0 only** — a shell that can update in place (every Mac) is never sent
+   *  1.0.0 only** — a shell that can update in place (every Mac) is never sent
    *  here by the update prompt; it updates in-app or not at all. */
   downloadUrl: string;
   /** `null` → no release note is sent to anyone. */
@@ -206,8 +206,8 @@ export interface ClientAppUpdateConfig {
 export const APP_UPDATE: AppUpdateConfig = {
 
   // `latestVersion` here is a POLICY (who gets prompted). The version the public
-  // /download page prints on its buttons is a FACT about the Drive folders and
-  // lives in `latestRelease.ts` — keep the two in step when a release ships.
+  // /download page prints on its buttons is a FACT read live from GitHub
+  // Releases (`/api/download`) — there is nothing to keep in step by hand.
 
   // Cohort reminder: `allUsers: true` is the whole fleet (the historical
   // behaviour, and the right end state for a real release). To pilot one first,
@@ -218,13 +218,12 @@ export const APP_UPDATE: AppUpdateConfig = {
   mac: null,
 
   // win: null,
-  win: { latestVersion: '1.0.2', compulsory: false, allUsers: false, uids: [], groups: ['admin'] },
+  win: { latestVersion: '1.0.2', compulsory: false, allUsers: true, uids: [], groups: [] },
 
-  // `/update`, not `/download`: this link is only ever opened for someone who
-  // ALREADY has the app, so it must not put the one-time certificate sequence in
-  // front of them. `/download` remains the first-install page, and `/update`
-  // links back to it for the reader who arrived here on a fresh machine.
-  downloadUrl: `${PUBLIC_APP_ORIGIN}/update`,
+  // Only ever opened by a Windows shell too old to update itself (pre-1.0).
+  // `/download` buttons go straight to the newest installer on GitHub, so the
+  // first-install page and the update page are the same page now.
+  downloadUrl: `${PUBLIC_APP_ORIGIN}/download`,
 
   // The session timer widget. Ships armed alongside the v0.10.1 code: see above,
   // it cannot fire before that build exists, so there is nothing to stage.

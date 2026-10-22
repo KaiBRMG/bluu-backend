@@ -5194,10 +5194,10 @@ function createWindow() {
 // ─── Auto-update (macOS + Windows) ──────────────────────────────────────
 // macOS builds are Developer ID signed + notarized, so Squirrel.Mac can verify
 // and install updates in place. Windows builds are signed through Azure
-// Artifact Signing from 0.17.0, and the NSIS updater verifies every downloaded
+// Artifact Signing from 1.0.0, and the NSIS updater verifies every downloaded
 // installer against `win.azureSignOptions.publisherName` (written into
 // app-update.yml at build time) before running it. Windows shells older than
-// 0.17.0 were self-signed and register none of this — they still update by
+// 1.0.0 were self-signed and register none of this — they still update by
 // hand, which is why the renderer asks `updater:isSupported` instead of
 // inferring the capability from the platform.
 //

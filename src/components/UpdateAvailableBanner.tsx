@@ -35,7 +35,7 @@ import {
  *  **Delivery — what the button does — is asked of the shell
  *  (`canAutoUpdate`), with one hard platform rule: macOS is NEVER given the
  *  download link.** `electron-updater` is the only sanctioned way a Mac updates,
- *  and from v0.17.0 the only way a Windows shell does too. A hand reinstall over
+ *  and from v1.0.0 the only way a Windows shell does too. A hand reinstall over
  *  a running signed app is how users end up on the wrong architecture (the x64
  *  `.dmg` carries no arch suffix, so Apple Silicon users land on Rosetta and
  *  then take x64 updates forever) or on a build that quietly stops auto-updating.
@@ -45,9 +45,9 @@ import {
  *    into the new version.
  *  - An auto-updating shell with nothing pending → **'restart'**: the check has
  *    not answered yet. Polled out of, with a Check again button (below).
- *  - A Windows shell older than 0.17.0 → **'manual'**: opens the config's
+ *  - A Windows shell older than 1.0.0 → **'manual'**: opens the config's
  *    `downloadUrl`. Those builds were self-signed and carry no updater, so a
- *    hand reinstall is the only way onto 0.17.0 — after which this path is
+ *    hand reinstall is the only way onto 1.0.0 — after which this path is
  *    never taken again for that machine.
  *
  * **A work session is never interrupted — but the prompt is no longer a
@@ -124,9 +124,9 @@ type Mode = 'none' | 'optional' | 'blocking';
  * How the update is delivered.
  *
  * - `auto`    — in-app download + restart (`electron-updater`). **The only path
- *               macOS is ever offered**, and Windows from v0.17.0.
+ *               macOS is ever offered**, and Windows from v1.0.0.
  * - `manual`  — opens `downloadUrl` for a hand reinstall. **Windows shells older
- *               than 0.17.0 only.**
+ *               than 1.0.0 only.**
  * - `restart` — an auto-updating shell, update targeted but nothing pending yet.
  *               **Provisional**: it is polled out of, and upgrades itself to
  *               `auto` the moment the check answers. Still no download link
@@ -314,7 +314,7 @@ export default function UpdateAvailableBanner() {
           // reinstall over a running signed app is exactly how users end up on
           // the wrong arch (the x64 .dmg has no suffix) or on a stale build that
           // quietly stops receiving updates. Only a Windows shell older than
-          // 0.17.0 (self-signed, no updater) is sent to `downloadUrl`.
+          // 1.0.0 (self-signed, no updater) is sent to `downloadUrl`.
           setTarget(cfg.latestVersion);
           setDelivery(inApp ? 'restart' : 'manual');
           // From 0.16.1 the shell never checks GitHub on its own — this config

@@ -7,7 +7,6 @@
 | File | Role |
 |---|---|
 | `src/app/download/page.tsx` | Public (browser-accessible) installer download page — pre-login, pre-Electron |
-| `src/app/update/page.tsx` | The same page for a machine that already has the app — no certificate step, no walkthrough. Not part of onboarding; listed so the two are not confused |
 | `src/app/api/admin/users/route.ts` (POST) | **Registration** — an admin creates the `users/{uid}` doc *before* the user can log in |
 | `src/lib/services/userService.ts` (`buildNewUserDoc`) | The doc template registration writes: `hasAcceptedTerms: false`, `hasCompletedOnboarding: false`, `lastLoginAt: null` |
 | `src/lib/services/userService.ts` (`recordSuccessfulLogin`) | Records each login; fires the welcome notifications on the first one |
@@ -34,9 +33,9 @@
 
 ## 1. Before login: getting the app
 
-`/download` is a public, browser-accessible page (`BROWSER_ALLOWED_PREFIXES` in `src/middleware.ts` — see [auth.md](auth.md#browser-access-middleware)) that links out to Google Drive-hosted installers per platform, plus a one-time certificate step and a walkthrough video. This step is entirely outside the app and outside Firestore.
+`/download` is a public, browser-accessible page (`BROWSER_ALLOWED_PREFIXES` in `src/middleware.ts` — see [auth.md](auth.md#browser-access-middleware)) with one direct-download button per platform: `/api/download/[platform]` 302s to the newest installer on GitHub Releases (see [electron.md](electron.md#the-download-page-direct-links-to-github-releases)). There is no certificate step — Windows builds are Azure-signed from 1.0. This step is entirely outside the app and outside Firestore.
 
-> **`/download` is the *first install* page. `/update` is its sibling** — the same skin and the same installer links, with the certificate step and the walkthrough removed, because both are work you do once per machine. `APP_UPDATE.downloadUrl` points at `/update`, so nobody reinstalling for a release is walked back through the certificate. `/update` links to `/download` in one line for the reader who followed an update link onto a fresh machine. Hand a new colleague `/download`.
+> **`/download` is the only installer page.** `/update` was deleted on 2026-10-22 (it 307s here): updates install in-app on both platforms from 1.0, and `APP_UPDATE.downloadUrl` — opened only by a pre-1.0 Windows shell — points at `/download`. Hand a new colleague `/download`.
  The user installs and opens the Electron app, which lands on `Login` (`src/components/Login.tsx`) since there is no Firebase user yet.
 
 **Onboarding itself only exists inside Electron.** `/onboarding/*` lives under the `(main)` route group and is *not* in `BROWSER_ALLOWED_PREFIXES`, so a browser hitting it gets rewritten to `/desktop-only`.

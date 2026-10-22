@@ -398,7 +398,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     relaunchApp: () => ipcRenderer.invoke('permissions:relaunchApp'),
   },
 
-  // Auto-updater (macOS, and Windows from v0.17.0; the main process no-ops elsewhere)
+  // Auto-updater (macOS, and Windows from v1.0.0; the main process no-ops elsewhere)
   updater: {
     // Whether this shell can install an update in place. The only handler main
     // registers on every platform — ask this, never infer it from the OS.

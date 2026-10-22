@@ -20,7 +20,7 @@ export { STAGE_GROUND } from '@/app/model-submissions/_lib/theme';
 
 /**
  * Text selection: azure with `AZURE_INK`, the same pairing as any azure fill
- * (white on azure fails AA). Matches `/download` and `/update`.
+ * (white on azure fails AA). Matches `/download`.
  */
 export const SELECTION = 'selection:bg-[#00b8f5] selection:text-[#04141c]';
 

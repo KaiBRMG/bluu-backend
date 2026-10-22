@@ -34,6 +34,11 @@ const nextConfig: NextConfig = {
       { source: '/applications/apps-model-submissions', destination: '/creator-portal/model-submissions', permanent: false },
       // Creator Management moved into the Creator Portal on 2026-09-29.
       { source: '/admin-portal/creator-management', destination: '/creator-portal/creator-management', permanent: false },
+      // `/update` was deleted on 2026-10-22 when Windows started updating in-app;
+      // `APP_UPDATE.downloadUrl` now points at `/download`. Kept for a pre-1.0
+      // Windows prompt or a bookmark still holding the old link. Redirects run
+      // before middleware, so no allowlist entry is needed for the source.
+      { source: '/update', destination: '/download', permanent: false },
     ];
   },
 
