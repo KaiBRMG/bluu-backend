@@ -218,7 +218,7 @@ export const APP_UPDATE: AppUpdateConfig = {
   mac: null,
 
   // win: null,
-  win: { latestVersion: '1.0.1', compulsory: true, allUsers: false, uids: [], groups: ['admin'] },
+  win: { latestVersion: '1.0.2', compulsory: false, allUsers: false, uids: [], groups: ['admin'] },
 
   // `/update`, not `/download`: this link is only ever opened for someone who
   // ALREADY has the app, so it must not put the one-time certificate sequence in
