@@ -74,6 +74,7 @@ export const PAGES: PageDef[] = [
   { pageId: 'sharing', title: 'Sharing', teamspaceId: 'admin-portal', href: '/admin-portal/sharing', icon: 'Share2', order: 1 },
   { pageId: 'shift-management', title: 'Shift Management', teamspaceId: 'admin-portal', href: '/admin-portal/shift-management', icon: 'CalendarCog', order: 2 },
   { pageId: 'admin-notifications', title: 'Notifications', teamspaceId: 'admin-portal', href: '/admin-portal/notifications', icon: 'BellPlus', order: 3 },
+  { pageId: 'training', title: 'Training', teamspaceId: 'admin-portal', href: '/admin-portal/training', icon: 'GraduationCap', order: 4 },
   // Resource Management was merged into the Resources app page (apps-resources)
   // on 2026-08-26 — management is gated by group there, not by a separate page.
 

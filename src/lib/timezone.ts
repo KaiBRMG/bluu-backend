@@ -72,7 +72,7 @@ function offsetMs(utcMs: number, tz: string): number {
  * boundary from the real answer. The second pass re-reads the offset at the
  * corrected instant and settles it.
  */
-function zonedTimeToUtcMs(
+export function zonedTimeToUtcMs(
   y: number, m: number, d: number, h: number, min: number, s: number, tz: string,
 ): number {
   const guess = Date.UTC(y, m - 1, d, h, min, s);

@@ -1,0 +1,1029 @@
+import 'server-only';
+import crypto from 'crypto';
+import { adminDb, adminStorage } from '@/lib/firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
+import {
+  MAX_OUTPUT_BYTES,
+  MAX_PARTICIPANTS_PER_SESSION,
+  MAX_SOURCE_BYTES,
+  MAX_SOURCE_PREVIEW_BYTES,
+  MAX_UPLOAD_ATTEMPTS,
+  IMAGE_LABEL,
+  IMAGE_TYPES,
+  type ImageSniff,
+  UPLOAD_GRACE_MS,
+  getModule,
+  getPart,
+  type SlotId,
+  type TrainingModuleId,
+  type TrainingPartDef,
+} from '@/lib/training/modules';
+import type {
+  AdminParticipant,
+  AdminSessionDetail,
+  AdminSessionRow,
+  AdminSubmissionView,
+  AttemptView,
+  MeResponse,
+  PartResponse,
+  PartState,
+  PartSummary,
+  SessionSummary,
+  SourceView,
+} from '@/lib/training/types';
+import { emailHashFor, getCandidateName, getCandidateNames } from '@/lib/services/trainingAuthService';
+import { TrainingError } from '@/lib/training/errors';
+import { splitEmails } from '@/lib/training/emails';
+
+/**
+ * Training sessions, the per-candidate attempt and everything that touches the
+ * clock. Admin-SDK-only collections, no client rule (rule 10):
+ *
+ *   training-sessions/{id}                 the sitting: module, schedule, source images
+ *   training-participants/{id}_{emailHash} one candidate in one sitting + their attempts
+ *   training-candidates/{emailHash}        the person (name) — see trainingAuthService
+ *
+ * THE CLOCK IS THE SERVER'S. `deadlineMs` is written once, at Start, in a
+ * transaction; the browser only renders `deadline − (now + skew)`. A refresh,
+ * a second tab and a wrong device clock cannot move it. Everything the
+ * candidate can do afterwards is checked against it here.
+ */
+
+const SESSIONS_COLLECTION = 'training-sessions';
+const PARTICIPANTS_COLLECTION = 'training-participants';
+
+/** How long after the grace a candidate's `finalize` call is still honoured (a retry on a flaky line). */
+const FINALIZE_WINDOW_MS = 5 * 60 * 1000;
+/** Signed read URLs: from the start of the current window, this long. */
+const READ_URL_TTL_MS = 2 * 60 * 60 * 1000;
+const SIGNED_WRITE_TTL_MS = 15 * 60 * 1000;
+
+const STORAGE_ROOT = 'training';
+
+// ─── Stored shapes ───────────────────────────────────────────────────────────
+
+interface SourceDoc {
+  id: string;
+  name: string;
+  path: string;
+  thumbPath: string;
+  bytes: number;
+}
+
+interface SessionDoc {
+  label: string;
+  moduleId: TrainingModuleId;
+  createdAtMs: number;
+  createdBy: string;
+  closesAtMs: number;
+  participantCount: number;
+  parts: Record<string, { opensAtMs: number; sources: SourceDoc[] }>;
+}
+
+interface PendingDoc {
+  slotId: SlotId;
+  sourceId: string;
+  path: string;
+  contentType: string;
+  issuedAtMs: number;
+}
+
+interface SlotDoc {
+  sourceId: string;
+  path: string;
+  bytes: number;
+  uploadedAtMs: number;
+}
+
+interface AttemptDoc {
+  startedAtMs: number;
+  deadlineMs: number;
+  finishedAtMs: number | null;
+  uploadAttempts: number;
+  pending: Record<string, PendingDoc>;
+  slots: Partial<Record<SlotId, SlotDoc>>;
+}
+
+interface ParticipantDoc {
+  sessionId: string;
+  emailHash: string;
+  email: string;
+  addedAtMs: number;
+  revokedAtMs: number | null;
+  attempts: Record<string, AttemptDoc>;
+}
+
+
+const participantId = (sessionId: string, emailHash: string) => `${sessionId}_${emailHash}`;
+
+// ─── State derivation ────────────────────────────────────────────────────────
+
+function derivePartState(
+  now: number,
+  session: SessionDoc,
+  part: TrainingPartDef,
+  attempt: AttemptDoc | undefined,
+): PartState {
+  if (attempt) {
+    const filled = Object.keys(attempt.slots).length;
+    if (attempt.finishedAtMs) return 'submitted';
+    if (now > attempt.deadlineMs) return filled >= part.task.slots.length ? 'submitted' : 'timed-out';
+    return 'in-progress';
+  }
+  const cfg = session.parts[part.id];
+  if (now > session.closesAtMs) return 'missed';
+  if (!cfg || now < cfg.opensAtMs) return 'scheduled';
+  if (cfg.sources.length < part.task.sourceCount) return 'not-ready';
+  return 'open';
+}
+
+function summarisePart(
+  now: number,
+  session: SessionDoc,
+  part: TrainingPartDef,
+  attempt: AttemptDoc | undefined,
+): PartSummary {
+  const state = derivePartState(now, session, part, attempt);
+  return {
+    id: part.id,
+    title: part.title,
+    summary: part.summary,
+    durationMs: part.durationMs,
+    opensAtMs: session.parts[part.id]?.opensAtMs ?? 0,
+    state,
+    ...(state === 'in-progress' && attempt ? { deadlineMs: attempt.deadlineMs } : {}),
+  };
+}
+
+// ─── Signing helpers ─────────────────────────────────────────────────────────
+
+/**
+ * A V4 signature covers the signing TIME, so signing on demand yields a
+ * different URL string for the same file on every call — the browser then
+ * re-downloads every image each time the admin page refreshes (the flicker
+ * documented in model-submissions.md). Anchoring both ends to the start of a
+ * 30-minute window makes every request inside it return byte-identical URLs.
+ * The TTL outlives the window, so a URL minted in a window's last second still
+ * has well over an hour left.
+ */
+const URL_WINDOW_MS = 30 * 60 * 1000;
+
+async function signRead(path: string, opts?: { download?: string }): Promise<string> {
+  const stamp = Math.floor(Date.now() / URL_WINDOW_MS) * URL_WINDOW_MS;
+  const [url] = await adminStorage
+    .bucket()
+    .file(path)
+    .getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      accessibleAt: new Date(stamp),
+      expires: new Date(stamp + READ_URL_TTL_MS),
+      ...(opts?.download
+        ? { responseDisposition: `attachment; filename="${opts.download.replace(/["\\\r\n]/g, '_')}"` }
+        : {}),
+    });
+  return url;
+}
+
+async function signWrite(path: string, contentType: string, expiresAtMs: number): Promise<string> {
+  const [url] = await adminStorage
+    .bucket()
+    .file(path)
+    .getSignedUrl({ version: 'v4', action: 'write', expires: expiresAtMs, contentType });
+  return url;
+}
+
+function extFor(contentType: string): string | undefined {
+  return (IMAGE_TYPES as Record<string, { ext: string } | undefined>)[contentType]?.ext;
+}
+
+/** The first bytes of an image, to prove what the declared type claims. */
+async function sniffImage(path: string): Promise<ImageSniff | null> {
+  const chunks: Buffer[] = [];
+  await new Promise<void>((resolve, reject) => {
+    adminStorage
+      .bucket()
+      .file(path)
+      .createReadStream({ start: 0, end: 15 })
+      .on('data', (c: Buffer) => chunks.push(c))
+      .on('end', () => resolve())
+      .on('error', reject);
+  });
+  const b = Buffer.concat(chunks);
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'jpeg';
+  if (b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return 'png';
+  }
+  if (b.length >= 12 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP') return 'webp';
+  return null;
+}
+
+/** Whether the bytes at `path` are the image type its declared content type claims. */
+async function isDeclaredImage(path: string, contentType: string): Promise<boolean> {
+  const expected = (IMAGE_TYPES as Record<string, { sniff: ImageSniff } | undefined>)[contentType]?.sniff;
+  return !!expected && (await sniffImage(path).catch(() => null)) === expected;
+}
+
+// ─── Candidate reads ─────────────────────────────────────────────────────────
+
+/** The participations a candidate may act on right now: not revoked, session not closed. */
+async function activeParticipations(emailHash: string, now: number) {
+  const snap = await adminDb.collection(PARTICIPANTS_COLLECTION).where('emailHash', '==', emailHash).get();
+  const mine = snap.docs
+    .map((d) => d.data() as ParticipantDoc)
+    .filter((p) => p.revokedAtMs == null);
+  if (mine.length === 0) return [];
+
+  const sessionRefs = [...new Set(mine.map((p) => p.sessionId))].map((id) =>
+    adminDb.collection(SESSIONS_COLLECTION).doc(id),
+  );
+  const sessionSnaps = await adminDb.getAll(...sessionRefs);
+  const sessions = new Map<string, SessionDoc>();
+  for (const s of sessionSnaps) if (s.exists) sessions.set(s.id, s.data() as SessionDoc);
+
+  return mine
+    .map((participant) => ({ participant, session: sessions.get(participant.sessionId) }))
+    .filter(
+      (x): x is { participant: ParticipantDoc; session: SessionDoc } =>
+        !!x.session && x.session.closesAtMs > now,
+    );
+}
+
+/** Whether this address is on any live session — decides whether a code is sent. */
+export async function isApproved(emailHash: string): Promise<boolean> {
+  return (await activeParticipations(emailHash, Date.now())).length > 0;
+}
+
+export async function getMe(emailHash: string): Promise<MeResponse> {
+  const now = Date.now();
+  const [active, name] = await Promise.all([activeParticipations(emailHash, now), getCandidateName(emailHash)]);
+
+  const sessions: SessionSummary[] = active
+    .map(({ participant, session }) => {
+      const mod = getModule(session.moduleId);
+      if (!mod) return null;
+      return {
+        id: participant.sessionId,
+        label: session.label,
+        moduleId: session.moduleId,
+        closesAtMs: session.closesAtMs,
+        parts: mod.parts.map((part) => summarisePart(now, session, part, participant.attempts?.[part.id])),
+      };
+    })
+    .filter((s): s is SessionSummary => s !== null)
+    .sort((a, b) => a.closesAtMs - b.closesAtMs);
+
+  return { nowMs: now, email: active[0]?.participant.email ?? '', name, sessions };
+}
+
+/**
+ * Picks the sitting `/training/<module>` should open when no session is named:
+ * one with a part in progress, else one with a part open, else the soonest to
+ * close. Two live sittings for one module is rare; this keeps it unsurprising.
+ */
+export function pickSession(
+  sessions: SessionSummary[],
+  moduleId: string,
+  preferred?: string | null,
+): SessionSummary | null {
+  const forModule = sessions.filter((s) => s.moduleId === moduleId);
+  if (forModule.length === 0) return null;
+  const chosen = preferred ? forModule.find((s) => s.id === preferred) : undefined;
+  if (chosen) return chosen;
+
+  const rank = (s: SessionSummary) =>
+    s.parts.some((p) => p.state === 'in-progress') ? 0 : s.parts.some((p) => p.state === 'open') ? 1 : 2;
+  return [...forModule].sort((a, b) => rank(a) - rank(b) || a.closesAtMs - b.closesAtMs)[0];
+}
+
+async function loadParticipation(emailHash: string, sessionId: string) {
+  const [pSnap, sSnap] = await adminDb.getAll(
+    adminDb.collection(PARTICIPANTS_COLLECTION).doc(participantId(sessionId, emailHash)),
+    adminDb.collection(SESSIONS_COLLECTION).doc(sessionId),
+  );
+  if (!pSnap.exists || !sSnap.exists) return null;
+  const participant = pSnap.data() as ParticipantDoc;
+  const session = sSnap.data() as SessionDoc;
+  if (participant.revokedAtMs != null) return null;
+  return { participant, session };
+}
+
+async function attemptView(attempt: AttemptDoc): Promise<AttemptView> {
+  const slots = await Promise.all(
+    (Object.entries(attempt.slots) as [SlotId, SlotDoc][]).map(async ([slotId, s]) => ({
+      slotId,
+      sourceId: s.sourceId,
+      uploadedAtMs: s.uploadedAtMs,
+      bytes: s.bytes,
+      url: await signRead(s.path),
+    })),
+  );
+  return {
+    startedAtMs: attempt.startedAtMs,
+    deadlineMs: attempt.deadlineMs,
+    finishedAtMs: attempt.finishedAtMs,
+    slots,
+  };
+}
+
+async function sourceViews(sources: SourceDoc[]): Promise<SourceView[]> {
+  return Promise.all(
+    sources.map(async (s) => ({
+      id: s.id,
+      name: s.name,
+      thumbUrl: await signRead(s.thumbPath),
+      downloadUrl: await signRead(s.path, { download: s.name }),
+    })),
+  );
+}
+
+/**
+ * One part for one candidate. The source images are signed ONLY while the
+ * attempt is in progress — the briefing must not be able to leak them, and a
+ * finished attempt has no reason to see them again.
+ */
+export async function getPartForCandidate(
+  emailHash: string,
+  sessionId: string,
+  partId: string,
+): Promise<PartResponse> {
+  const ctx = await loadParticipation(emailHash, sessionId);
+  if (!ctx) throw new TrainingError('Not found', 404);
+  const { participant, session } = ctx;
+  const part = getPart(session.moduleId, partId);
+  if (!part) throw new TrainingError('Not found', 404);
+
+  const now = Date.now();
+  if (now > session.closesAtMs) throw new TrainingError('This session has closed', 410);
+
+  const attempt = participant.attempts?.[partId];
+  const summary = summarisePart(now, session, part, attempt);
+
+  const [sources, attemptOut] = await Promise.all([
+    summary.state === 'in-progress' ? sourceViews(session.parts[partId]?.sources ?? []) : undefined,
+    attempt ? attemptView(attempt) : undefined,
+  ]);
+  return {
+    nowMs: now,
+    session: { id: sessionId, label: session.label, closesAtMs: session.closesAtMs },
+    part: summary,
+    ...(sources ? { sources } : {}),
+    ...(attemptOut ? { attempt: attemptOut } : {}),
+  };
+}
+
+// ─── The attempt ─────────────────────────────────────────────────────────────
+
+/**
+ * Starts the clock. Idempotent: a second Start (a double tap, a second tab)
+ * returns the attempt already running rather than a fresh deadline. Only one
+ * part may run at a time.
+ */
+export async function startAttempt(emailHash: string, sessionId: string, partId: string): Promise<void> {
+  const pRef = adminDb.collection(PARTICIPANTS_COLLECTION).doc(participantId(sessionId, emailHash));
+  const sRef = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId);
+
+  await adminDb.runTransaction(async (tx) => {
+    const [pSnap, sSnap] = await Promise.all([tx.get(pRef), tx.get(sRef)]);
+    if (!pSnap.exists || !sSnap.exists) throw new TrainingError('Not found', 404);
+    const participant = pSnap.data() as ParticipantDoc;
+    const session = sSnap.data() as SessionDoc;
+    if (participant.revokedAtMs != null) throw new TrainingError('Not found', 404);
+
+    const part = getPart(session.moduleId, partId);
+    if (!part) throw new TrainingError('Not found', 404);
+
+    const now = Date.now();
+    if (participant.attempts?.[partId]) return; // already started — idempotent
+    if (now > session.closesAtMs) throw new TrainingError('This session has closed', 410);
+
+    const state = derivePartState(now, session, part, undefined);
+    if (state === 'scheduled') throw new TrainingError('This part has not opened yet', 409);
+    if (state === 'not-ready') throw new TrainingError('This part is not ready yet. We will be in touch.', 409);
+    if (state !== 'open') throw new TrainingError('This part cannot be started', 409);
+
+    for (const [otherId, other] of Object.entries(participant.attempts ?? {})) {
+      if (!other.finishedAtMs && now <= other.deadlineMs + UPLOAD_GRACE_MS) {
+        throw new TrainingError(`Finish ${getPart(session.moduleId, otherId)?.title ?? 'your current part'} first`, 409);
+      }
+    }
+
+    const attempt: AttemptDoc = {
+      startedAtMs: now,
+      deadlineMs: now + part.durationMs,
+      finishedAtMs: null,
+      uploadAttempts: 0,
+      pending: {},
+      slots: {},
+    };
+    tx.update(pRef, { [`attempts.${partId}`]: attempt });
+  });
+}
+
+function inProgress(attempt: AttemptDoc | undefined, now: number): attempt is AttemptDoc {
+  return !!attempt && !attempt.finishedAtMs && now <= attempt.deadlineMs;
+}
+
+/**
+ * Signs one upload slot. The URL's lifetime is capped at `deadline + grace`, so
+ * a URL minted in the last minute cannot be used to upload long after the
+ * clock ran out. The path is server-chosen and the content type is pinned into
+ * the signature.
+ */
+export async function requestUpload(
+  emailHash: string,
+  sessionId: string,
+  partId: string,
+  input: { slotId: string; sourceId: string; contentType: string; size: number },
+): Promise<{ uploadId: string; uploadUrl: string }> {
+  const ext = extFor(input.contentType);
+  if (!ext) throw new TrainingError(`Upload a ${IMAGE_LABEL} image`, 400);
+  if (!Number.isFinite(input.size) || input.size <= 0 || input.size > MAX_OUTPUT_BYTES) {
+    throw new TrainingError('That file is too large', 400);
+  }
+
+  const pRef = adminDb.collection(PARTICIPANTS_COLLECTION).doc(participantId(sessionId, emailHash));
+  const sRef = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId);
+  const uploadId = crypto.randomBytes(12).toString('hex');
+  const path = `${STORAGE_ROOT}/submissions/${sessionId}/${emailHash}/${partId}/${input.slotId}-${uploadId}.${ext}`;
+
+  const deadlineMs = await adminDb.runTransaction(async (tx) => {
+    const [pSnap, sSnap] = await Promise.all([tx.get(pRef), tx.get(sRef)]);
+    if (!pSnap.exists || !sSnap.exists) throw new TrainingError('Not found', 404);
+    const participant = pSnap.data() as ParticipantDoc;
+    const session = sSnap.data() as SessionDoc;
+    if (participant.revokedAtMs != null) throw new TrainingError('Not found', 404);
+
+    const part = getPart(session.moduleId, partId);
+    const slot = part?.task.slots.find((s) => s.id === input.slotId);
+    if (!part || !slot) throw new TrainingError('Not found', 404);
+    if (!session.parts[partId]?.sources.some((s) => s.id === input.sourceId)) {
+      throw new TrainingError('Choose one of the source images', 400);
+    }
+
+    const now = Date.now();
+    const attempt = participant.attempts?.[partId];
+    if (!inProgress(attempt, now)) throw new TrainingError('Time is up', 409);
+    if (attempt.uploadAttempts >= MAX_UPLOAD_ATTEMPTS) {
+      throw new TrainingError('Too many uploads. Keep the ones you have.', 429);
+    }
+
+    tx.update(pRef, {
+      [`attempts.${partId}.uploadAttempts`]: attempt.uploadAttempts + 1,
+      [`attempts.${partId}.pending.${uploadId}`]: {
+        slotId: slot.id,
+        sourceId: input.sourceId,
+        path,
+        contentType: input.contentType,
+        issuedAtMs: now,
+      } satisfies PendingDoc,
+    });
+    return attempt.deadlineMs;
+  });
+
+  const expires = Math.min(Date.now() + SIGNED_WRITE_TTL_MS, deadlineMs + UPLOAD_GRACE_MS);
+  return { uploadId, uploadUrl: await signWrite(path, input.contentType, expires) };
+}
+
+/**
+ * Accepts an upload the browser says it finished. Nothing is taken on trust:
+ * the object must exist at the server-chosen path, be within the size limit,
+ * carry the declared type, START with that type's magic bytes, and have been
+ * CREATED by `deadline + grace`. Bytes are never downloaded through a function
+ * (rule 9i) — only metadata and a 16-byte range.
+ */
+export async function finalizeUpload(
+  emailHash: string,
+  sessionId: string,
+  partId: string,
+  uploadId: string,
+): Promise<void> {
+  if (!/^[a-f0-9]{24}$/.test(uploadId)) throw new TrainingError('Invalid upload', 400);
+
+  const pRef = adminDb.collection(PARTICIPANTS_COLLECTION).doc(participantId(sessionId, emailHash));
+  const current = (await pRef.get()).data() as ParticipantDoc | undefined;
+  if (!current || current.revokedAtMs != null) throw new TrainingError('Not found', 404);
+  const attempt = current.attempts?.[partId];
+  const pending = attempt?.pending?.[uploadId];
+  if (!attempt || !pending) throw new TrainingError('Invalid upload', 400);
+
+  const now = Date.now();
+  if (now > attempt.deadlineMs + UPLOAD_GRACE_MS + FINALIZE_WINDOW_MS) throw new TrainingError('Time is up', 409);
+
+  const file = adminStorage.bucket().file(pending.path);
+
+  const drop = async (message: string, status = 400): Promise<never> => {
+    await file.delete({ ignoreNotFound: true }).catch(() => {});
+    await pRef.update({ [`attempts.${partId}.pending.${uploadId}`]: FieldValue.delete() }).catch(() => {});
+    throw new TrainingError(message, status);
+  };
+
+  // Independent round trips to Storage: the object's metadata and its first bytes.
+  let meta;
+  let isImage: boolean;
+  try {
+    [[meta], isImage] = await Promise.all([file.getMetadata(), isDeclaredImage(pending.path, pending.contentType)]);
+  } catch {
+    throw new TrainingError('That upload did not arrive. Try again.', 400);
+  }
+  const size = Number(meta.size);
+  if (!Number.isFinite(size) || size <= 0 || size > MAX_OUTPUT_BYTES) return drop('That file is too large');
+  if (meta.contentType !== pending.contentType) return drop('That file type is not accepted');
+  const createdMs = Date.parse(String(meta.timeCreated));
+  if (!Number.isFinite(createdMs) || createdMs > attempt.deadlineMs + UPLOAD_GRACE_MS) {
+    return drop('That upload finished after time was up', 409);
+  }
+  if (!isImage) return drop('That file is not a valid image');
+
+  let replaced: string | null = null;
+  try {
+    await adminDb.runTransaction(async (tx) => {
+      const [pSnap, sSnap] = await Promise.all([
+        tx.get(pRef),
+        tx.get(adminDb.collection(SESSIONS_COLLECTION).doc(sessionId)),
+      ]);
+      const participant = pSnap.data() as ParticipantDoc | undefined;
+      const session = sSnap.data() as SessionDoc | undefined;
+      const fresh = participant?.attempts?.[partId];
+      if (!participant || !session || !fresh?.pending?.[uploadId]) throw new TrainingError('Invalid upload', 400);
+
+      const part = getPart(session.moduleId, partId);
+      if (!part) throw new TrainingError('Not found', 404);
+      const { pickCount, editsPerSource } = part.task;
+
+      // The picked sources are DERIVED from the slots, never trusted as a field:
+      // at most `pickCount` distinct sources, each used at most `editsPerSource` times.
+      const next: Partial<Record<SlotId, SlotDoc>> = { ...fresh.slots };
+      replaced = next[pending.slotId]?.path ?? null;
+      next[pending.slotId] = {
+        sourceId: pending.sourceId,
+        path: pending.path,
+        bytes: size,
+        uploadedAtMs: Date.now(),
+      };
+      const perSource = new Map<string, number>();
+      for (const s of Object.values(next)) perSource.set(s.sourceId, (perSource.get(s.sourceId) ?? 0) + 1);
+      if (perSource.size > pickCount) {
+        throw new TrainingError(`Use only ${pickCount} source images`, 409);
+      }
+      if ([...perSource.values()].some((n) => n > editsPerSource)) {
+        throw new TrainingError(`Each image gets ${editsPerSource} edits`, 409);
+      }
+
+      tx.update(pRef, {
+        [`attempts.${partId}.slots.${pending.slotId}`]: next[pending.slotId],
+        [`attempts.${partId}.pending.${uploadId}`]: FieldValue.delete(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof TrainingError && error.status === 409) {
+      await file.delete({ ignoreNotFound: true }).catch(() => {});
+      await pRef.update({ [`attempts.${partId}.pending.${uploadId}`]: FieldValue.delete() }).catch(() => {});
+    }
+    throw error;
+  }
+
+  if (replaced && replaced !== pending.path) {
+    await adminStorage.bucket().file(replaced).delete({ ignoreNotFound: true }).catch(() => {});
+  }
+}
+
+/** Ends the part early. Irreversible; leaves whatever was uploaded. */
+export async function finishAttempt(emailHash: string, sessionId: string, partId: string): Promise<void> {
+  const pRef = adminDb.collection(PARTICIPANTS_COLLECTION).doc(participantId(sessionId, emailHash));
+  await adminDb.runTransaction(async (tx) => {
+    const snap = await tx.get(pRef);
+    const participant = snap.data() as ParticipantDoc | undefined;
+    if (!participant || participant.revokedAtMs != null) throw new TrainingError('Not found', 404);
+    const attempt = participant.attempts?.[partId];
+    if (!attempt) throw new TrainingError('Not started', 409);
+    if (attempt.finishedAtMs) return;
+    if (Date.now() > attempt.deadlineMs) return; // the clock already ended it
+    tx.update(pRef, { [`attempts.${partId}.finishedAtMs`]: Date.now() });
+  });
+}
+
+// ─── Admin ───────────────────────────────────────────────────────────────────
+
+/** Splits a pasted blob into distinct, normalised addresses. Reports the ones it cannot read. */
+function parseEmails(raw: string): {
+  valid: { email: string; emailKey: string; emailHash: string }[];
+  invalid: string[];
+} {
+  const split = splitEmails(raw);
+  const seen = new Set<string>();
+  const valid: { email: string; emailKey: string; emailHash: string }[] = [];
+  const invalid = [...split.invalid];
+  for (const token of split.valid) {
+    const hashed = emailHashFor(token);
+    if (!hashed) invalid.push(token);
+    else if (!seen.has(hashed.emailKey)) {
+      seen.add(hashed.emailKey);
+      valid.push({ email: token, ...hashed });
+    }
+  }
+  return { valid, invalid };
+}
+
+export async function listSessions(): Promise<AdminSessionRow[]> {
+  const snap = await adminDb.collection(SESSIONS_COLLECTION).orderBy('createdAtMs', 'desc').limit(100).get();
+  return snap.docs.map((d) => {
+    const s = d.data() as SessionDoc;
+    const opens = Object.values(s.parts ?? {}).map((p) => p.opensAtMs);
+    return {
+      id: d.id,
+      label: s.label,
+      moduleId: s.moduleId,
+      createdAtMs: s.createdAtMs,
+      closesAtMs: s.closesAtMs,
+      participantCount: s.participantCount ?? 0,
+      firstOpensAtMs: opens.length ? Math.min(...opens) : 0,
+    };
+  });
+}
+
+export async function createSession(input: {
+  label: string;
+  moduleId: string;
+  emails: string;
+  opensAtMs: Record<string, number>;
+  closesAtMs: number;
+  createdBy: string;
+}): Promise<{ id: string }> {
+  const mod = getModule(input.moduleId);
+  if (!mod) throw new TrainingError('Choose a module', 400);
+
+  const label = input.label.trim().slice(0, 80);
+  if (!label) throw new TrainingError('Give the session a name', 400);
+
+  const parts: SessionDoc['parts'] = {};
+  for (const part of mod.parts) {
+    const opensAtMs = input.opensAtMs[part.id];
+    if (!Number.isFinite(opensAtMs)) throw new TrainingError(`Set when ${part.title} opens`, 400);
+    parts[part.id] = { opensAtMs, sources: [] };
+  }
+  const lastOpen = Math.max(...Object.values(parts).map((p) => p.opensAtMs));
+  if (!Number.isFinite(input.closesAtMs) || input.closesAtMs <= lastOpen) {
+    throw new TrainingError('Access must end after the last part opens', 400);
+  }
+
+  const { valid, invalid } = parseEmails(input.emails);
+  if (invalid.length) throw new TrainingError(`These are not valid emails: ${invalid.slice(0, 5).join(', ')}`, 400);
+  if (valid.length === 0) throw new TrainingError('Add at least one email', 400);
+  if (valid.length > MAX_PARTICIPANTS_PER_SESSION) {
+    throw new TrainingError(`At most ${MAX_PARTICIPANTS_PER_SESSION} people per session`, 400);
+  }
+
+  const id = crypto.randomBytes(12).toString('hex');
+  const now = Date.now();
+  const batch = adminDb.batch();
+  batch.set(adminDb.collection(SESSIONS_COLLECTION).doc(id), {
+    label,
+    moduleId: mod.id,
+    createdAtMs: now,
+    createdBy: input.createdBy,
+    closesAtMs: input.closesAtMs,
+    participantCount: valid.length,
+    parts,
+  } satisfies SessionDoc);
+  for (const v of valid) {
+    batch.set(adminDb.collection(PARTICIPANTS_COLLECTION).doc(participantId(id, v.emailHash)), {
+      sessionId: id,
+      emailHash: v.emailHash,
+      email: v.email,
+      addedAtMs: now,
+      revokedAtMs: null,
+      attempts: {},
+    } satisfies ParticipantDoc);
+  }
+  await batch.commit();
+  return { id };
+}
+
+async function loadSession(id: string): Promise<SessionDoc> {
+  const snap = await adminDb.collection(SESSIONS_COLLECTION).doc(id).get();
+  if (!snap.exists) throw new TrainingError('Not found', 404);
+  return snap.data() as SessionDoc;
+}
+
+export async function getSessionDetail(id: string): Promise<AdminSessionDetail> {
+  const [session, pSnap] = await Promise.all([
+    loadSession(id),
+    adminDb.collection(PARTICIPANTS_COLLECTION).where('sessionId', '==', id).get(),
+  ]);
+  const mod = getModule(session.moduleId);
+  const now = Date.now();
+  const participantsRaw = pSnap.docs.map((d) => d.data() as ParticipantDoc);
+  const names = await getCandidateNames(participantsRaw.map((p) => p.emailHash));
+
+  const participants: AdminParticipant[] = participantsRaw
+    .map((p) => ({
+      emailHash: p.emailHash,
+      email: p.email,
+      name: names.get(p.emailHash) ?? null,
+      addedAtMs: p.addedAtMs,
+      revokedAtMs: p.revokedAtMs,
+      parts: Object.fromEntries(
+        (mod?.parts ?? []).map((part) => {
+          const attempt = p.attempts?.[part.id];
+          return [
+            part.id,
+            {
+              state: derivePartState(now, session, part, attempt),
+              startedAtMs: attempt?.startedAtMs ?? null,
+              deadlineMs: attempt?.deadlineMs ?? null,
+              finishedAtMs: attempt?.finishedAtMs ?? null,
+              slotsFilled: attempt ? Object.keys(attempt.slots).length : 0,
+            },
+          ];
+        }),
+      ),
+    }))
+    .sort((a, b) => (a.name ?? a.email).localeCompare(b.name ?? b.email));
+
+  const parts: AdminSessionDetail['session']['parts'] = {};
+  await Promise.all(
+    Object.entries(session.parts).map(async ([partId, cfg]) => {
+      parts[partId] = {
+        opensAtMs: cfg.opensAtMs,
+        sources: await Promise.all(
+          cfg.sources.map(async (s) => ({ id: s.id, name: s.name, thumbUrl: await signRead(s.thumbPath) })),
+        ),
+      };
+    }),
+  );
+
+  return {
+    nowMs: now,
+    session: {
+      id,
+      label: session.label,
+      moduleId: session.moduleId,
+      createdAtMs: session.createdAtMs,
+      closesAtMs: session.closesAtMs,
+      parts,
+    },
+    participants,
+  };
+}
+
+export async function updateSession(
+  id: string,
+  patch: { label?: string; closesAtMs?: number; opensAtMs?: Record<string, number> },
+): Promise<void> {
+  const ref = adminDb.collection(SESSIONS_COLLECTION).doc(id);
+  await adminDb.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new TrainingError('Not found', 404);
+    const session = snap.data() as SessionDoc;
+    const now = Date.now();
+    const update: Record<string, unknown> = {};
+
+    if (patch.label !== undefined) {
+      const label = patch.label.trim().slice(0, 80);
+      if (!label) throw new TrainingError('Give the session a name', 400);
+      update.label = label;
+    }
+    let lastOpen = Math.max(...Object.values(session.parts).map((p) => p.opensAtMs));
+    for (const [partId, opensAtMs] of Object.entries(patch.opensAtMs ?? {})) {
+      const cfg = session.parts[partId];
+      if (!cfg || !Number.isFinite(opensAtMs)) throw new TrainingError('Unknown part', 400);
+      // A part that has already opened keeps its time: candidates may be mid-attempt on it.
+      if (cfg.opensAtMs <= now && opensAtMs !== cfg.opensAtMs) {
+        throw new TrainingError('That part has already opened', 409);
+      }
+      update[`parts.${partId}.opensAtMs`] = opensAtMs;
+    }
+    if (patch.opensAtMs) {
+      lastOpen = Math.max(
+        ...Object.entries(session.parts).map(([pid, p]) => patch.opensAtMs?.[pid] ?? p.opensAtMs),
+      );
+    }
+    const closesAtMs = patch.closesAtMs ?? session.closesAtMs;
+    if (!Number.isFinite(closesAtMs) || closesAtMs <= lastOpen) {
+      throw new TrainingError('Access must end after the last part opens', 400);
+    }
+    if (patch.closesAtMs !== undefined) update.closesAtMs = closesAtMs;
+
+    if (Object.keys(update).length) tx.update(ref, update);
+  });
+}
+
+export async function addParticipants(sessionId: string, raw: string): Promise<{ added: number }> {
+  const { valid, invalid } = parseEmails(raw);
+  if (invalid.length) throw new TrainingError(`These are not valid emails: ${invalid.slice(0, 5).join(', ')}`, 400);
+  if (valid.length === 0) throw new TrainingError('Add at least one email', 400);
+
+  const sRef = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId);
+  return adminDb.runTransaction(async (tx) => {
+    const sSnap = await tx.get(sRef);
+    if (!sSnap.exists) throw new TrainingError('Not found', 404);
+    const refs = valid.map((v) => adminDb.collection(PARTICIPANTS_COLLECTION).doc(participantId(sessionId, v.emailHash)));
+    const snaps = await tx.getAll(...refs);
+
+    let added = 0;
+    const now = Date.now();
+    snaps.forEach((snap, i) => {
+      if (snap.exists) {
+        // Re-adding a revoked person restores them with their attempts intact.
+        if ((snap.data() as ParticipantDoc).revokedAtMs != null) {
+          tx.update(refs[i], { revokedAtMs: null });
+          added++;
+        }
+        return;
+      }
+      tx.set(refs[i], {
+        sessionId,
+        emailHash: valid[i].emailHash,
+        email: valid[i].email,
+        addedAtMs: now,
+        revokedAtMs: null,
+        attempts: {},
+      } satisfies ParticipantDoc);
+      added++;
+    });
+
+    const count = ((sSnap.data() as SessionDoc).participantCount ?? 0) + added;
+    if (count > MAX_PARTICIPANTS_PER_SESSION) {
+      throw new TrainingError(`At most ${MAX_PARTICIPANTS_PER_SESSION} people per session`, 400);
+    }
+    tx.update(sRef, { participantCount: count });
+    return { added };
+  });
+}
+
+/** Revokes access. The record and any submitted work stay, so the admin can still review them. */
+export async function revokeParticipant(sessionId: string, emailHash: string): Promise<void> {
+  const pRef = adminDb.collection(PARTICIPANTS_COLLECTION).doc(participantId(sessionId, emailHash));
+  const sRef = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId);
+  await adminDb.runTransaction(async (tx) => {
+    const [pSnap, sSnap] = await Promise.all([tx.get(pRef), tx.get(sRef)]);
+    if (!pSnap.exists || !sSnap.exists) throw new TrainingError('Not found', 404);
+    if ((pSnap.data() as ParticipantDoc).revokedAtMs != null) return;
+    tx.update(pRef, { revokedAtMs: Date.now() });
+    tx.update(sRef, { participantCount: Math.max(0, ((sSnap.data() as SessionDoc).participantCount ?? 1) - 1) });
+  });
+}
+
+export async function getSubmission(
+  sessionId: string,
+  emailHash: string,
+  partId: string,
+): Promise<AdminSubmissionView> {
+  if (!/^[a-f0-9]{32}$/.test(emailHash)) throw new TrainingError('Not found', 404);
+  const [pSnap, session] = await Promise.all([
+    adminDb.collection(PARTICIPANTS_COLLECTION).doc(participantId(sessionId, emailHash)).get(),
+    loadSession(sessionId),
+  ]);
+  if (!pSnap.exists || !getPart(session.moduleId, partId)) throw new TrainingError('Not found', 404);
+  const participant = pSnap.data() as ParticipantDoc;
+  const attempt = participant.attempts?.[partId];
+
+  const entries = Object.entries(attempt?.slots ?? {}) as [SlotId, SlotDoc][];
+  const usedSources = new Set(entries.map(([, s]) => s.sourceId));
+  const [slots, sources] = await Promise.all([
+    Promise.all(
+      entries.map(async ([slotId, s]) => ({
+        slotId,
+        sourceId: s.sourceId,
+        uploadedAtMs: s.uploadedAtMs,
+        bytes: s.bytes,
+        url: await signRead(s.path),
+      })),
+    ),
+    Promise.all(
+      (session.parts[partId]?.sources ?? [])
+        .filter((s) => usedSources.has(s.id))
+        .map(async (s) => ({ id: s.id, name: s.name, thumbUrl: await signRead(s.thumbPath) })),
+    ),
+  ]);
+
+  return {
+    startedAtMs: attempt?.startedAtMs ?? null,
+    finishedAtMs: attempt?.finishedAtMs ?? null,
+    slots,
+    sources,
+  };
+}
+
+// ─── Source images (admin) ───────────────────────────────────────────────────
+
+
+/** Signs the pair of writes for one source image: the original and its small preview. */
+export async function signSourceUpload(
+  sessionId: string,
+  partId: string,
+  input: { contentType: string; size: number; previewSize: number },
+): Promise<{ imageId: string; fullUrl: string; thumbUrl: string }> {
+  const session = await loadSession(sessionId);
+  const part = getPart(session.moduleId, partId);
+  if (!part) throw new TrainingError('Not found', 404);
+
+  const ext = extFor(input.contentType);
+  if (!ext) throw new TrainingError(`Use ${IMAGE_LABEL} images`, 400);
+  if (!(input.size > 0 && input.size <= MAX_SOURCE_BYTES)) throw new TrainingError('That image is too large', 400);
+  if (!(input.previewSize > 0 && input.previewSize <= MAX_SOURCE_PREVIEW_BYTES)) {
+    throw new TrainingError('The preview is too large', 400);
+  }
+  if ((session.parts[partId]?.sources.length ?? 0) >= part.task.sourceCount) {
+    throw new TrainingError(`This part takes exactly ${part.task.sourceCount} images`, 409);
+  }
+
+  const imageId = crypto.randomBytes(8).toString('hex');
+  const base = `${STORAGE_ROOT}/sources/${sessionId}/${partId}/${imageId}`;
+  const expires = Date.now() + SIGNED_WRITE_TTL_MS;
+  const [fullUrl, thumbUrl] = await Promise.all([
+    signWrite(`${base}.${ext}`, input.contentType, expires),
+    signWrite(`${base}_thumb.webp`, 'image/webp', expires),
+  ]);
+  return { imageId, fullUrl, thumbUrl };
+}
+
+export async function commitSource(
+  sessionId: string,
+  partId: string,
+  input: { imageId: string; name: string; contentType: string },
+): Promise<void> {
+  if (!/^[a-f0-9]{16}$/.test(input.imageId)) throw new TrainingError('Invalid image', 400);
+  const ext = extFor(input.contentType);
+  if (!ext) throw new TrainingError(`Use ${IMAGE_LABEL} images`, 400);
+
+  const base = `${STORAGE_ROOT}/sources/${sessionId}/${partId}/${input.imageId}`;
+  const path = `${base}.${ext}`;
+  const thumbPath = `${base}_thumb.webp`;
+  const bucket = adminStorage.bucket();
+
+  let full;
+  let thumb;
+  try {
+    [[full], [thumb]] = await Promise.all([bucket.file(path).getMetadata(), bucket.file(thumbPath).getMetadata()]);
+  } catch {
+    throw new TrainingError('That upload did not arrive. Try again.', 400);
+  }
+  const bytes = Number(full.size);
+  const dropBoth = async (message: string): Promise<never> => {
+    await Promise.all([
+      bucket.file(path).delete({ ignoreNotFound: true }),
+      bucket.file(thumbPath).delete({ ignoreNotFound: true }),
+    ]).catch(() => {});
+    throw new TrainingError(message, 400);
+  };
+  if (!(bytes > 0 && bytes <= MAX_SOURCE_BYTES) || full.contentType !== input.contentType) {
+    return dropBoth('That image was not accepted');
+  }
+  if (!(Number(thumb.size) > 0 && Number(thumb.size) <= MAX_SOURCE_PREVIEW_BYTES) || thumb.contentType !== 'image/webp') {
+    return dropBoth('The preview was not accepted');
+  }
+  if (!(await isDeclaredImage(path, input.contentType))) return dropBoth('That file is not a valid image');
+
+  const name = input.name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 120) || `image.${ext}`;
+  const ref = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId);
+  try {
+    await adminDb.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new TrainingError('Not found', 404);
+      const session = snap.data() as SessionDoc;
+      const part = getPart(session.moduleId, partId);
+      const cfg = session.parts[partId];
+      if (!part || !cfg) throw new TrainingError('Not found', 404);
+      if (cfg.sources.length >= part.task.sourceCount) {
+        throw new TrainingError(`This part takes exactly ${part.task.sourceCount} images`, 409);
+      }
+      tx.update(ref, {
+        [`parts.${partId}.sources`]: [...cfg.sources, { id: input.imageId, name, path, thumbPath, bytes } satisfies SourceDoc],
+      });
+    });
+  } catch (error) {
+    await Promise.all([
+      bucket.file(path).delete({ ignoreNotFound: true }),
+      bucket.file(thumbPath).delete({ ignoreNotFound: true }),
+    ]).catch(() => {});
+    throw error;
+  }
+}
+
+/**
+ * Removing a source is refused once the part has opened: a candidate may be
+ * choosing from it right now, and a vanished image would break their attempt.
+ */
+export async function removeSource(sessionId: string, partId: string, imageId: string): Promise<void> {
+  const ref = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId);
+  const removed = await adminDb.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new TrainingError('Not found', 404);
+    const session = snap.data() as SessionDoc;
+    const cfg = session.parts[partId];
+    if (!cfg) throw new TrainingError('Not found', 404);
+    if (cfg.opensAtMs <= Date.now()) throw new TrainingError('This part has already opened', 409);
+    const target = cfg.sources.find((s) => s.id === imageId);
+    if (!target) return null;
+    tx.update(ref, { [`parts.${partId}.sources`]: cfg.sources.filter((s) => s.id !== imageId) });
+    return target;
+  });
+  if (removed) {
+    await Promise.all([
+      adminStorage.bucket().file(removed.path).delete({ ignoreNotFound: true }),
+      adminStorage.bucket().file(removed.thumbPath).delete({ ignoreNotFound: true }),
+    ]).catch(() => {});
+  }
+}

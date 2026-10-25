@@ -35,6 +35,7 @@ import {
   MessagesSquare,
   UsersRound,
   ChartColumnBig,
+  GraduationCap,
   type LucideIcon,
 } from "lucide-react";
 
@@ -77,6 +78,7 @@ export const ICON_MAP: Record<string, LucideIcon> = {
   MessagesSquare,
   UsersRound,
   ChartColumnBig,
+  GraduationCap,
 };
 
 // Brand icons that have no lucide equivalent are served from /Icons as SVGs.

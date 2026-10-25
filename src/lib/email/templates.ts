@@ -190,3 +190,43 @@ export function welcomeEmail(firstName: string, onboardingUrl: string, minutes: 
 
   return { subject: WELCOME_SUBJECT, html, text };
 }
+
+// ─── 3. Staff birthday ───────────────────────────────────────────────────────
+
+export const BIRTHDAY_MESSAGE = 'From all of us here at Bluu Rock, Happy Birthday! 💙';
+
+/** Sent once a year to each active employee on their birthday (`birthdayEmails.ts`). */
+export function birthdayEmail(): RenderedEmail {
+  const html = layout(
+    BIRTHDAY_MESSAGE,
+    `<p style="margin:0 0 16px;font-size:20px;line-height:1.5;">${esc(BIRTHDAY_MESSAGE)}</p>`,
+  );
+  return { subject: 'Happy Birthday! 💙', html, text: BIRTHDAY_MESSAGE };
+}
+
+// ─── 4. Training sign-in code ────────────────────────────────────────────────
+
+/** Sent to an approved training candidate to prove they hold the address (`/training`). */
+export function trainingCodeEmail(code: string): RenderedEmail {
+  const text = [
+    'Your Bluu Rock Training code is:',
+    '',
+    code,
+    '',
+    'It works for 10 minutes. If you did not ask for it, you can ignore this email.',
+    '',
+    'The Bluu Rock Team',
+  ].join('\n');
+
+  const html = layout(
+    `Your Bluu Rock Training code is ${code}.`,
+    [
+      p('Your Bluu Rock Training code is:'),
+      `<p style="margin:0 0 20px;font-family:${FONT};font-size:34px;font-weight:700;letter-spacing:0.28em;color:#1b2127;">${esc(code)}</p>`,
+      p('<span style="font-size:14px;color:#3d4650;">It works for 10 minutes. If you did not ask for it, you can ignore this email.</span>'),
+      p('The Bluu Rock Team'),
+    ].join('\n'),
+  );
+
+  return { subject: `${code} is your Bluu Rock Training code`, html, text };
+}

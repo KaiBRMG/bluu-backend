@@ -1,6 +1,6 @@
 # Model Submissions
 
-> The public model application form (`/model-submissions`) and the internal review queue (Creator Portal → Model Submissions, `/creator-portal/model-submissions` — moved from `/applications/apps-model-submissions` on 2026-09-28, which now redirects; the pageId is still `apps-model-submissions`). What happens **after** approval — the welcome email, the personal onboarding form and the hello@ enquiry triage — is in [creator-onboarding.md](creator-onboarding.md). This is the **only unauthenticated write path in the project**, and it collects the most sensitive data we hold — read the [Abuse & security model](#abuse--security-model) before changing any of it.
+> The public model application form (`/model-submissions`) and the internal review queue (Creator Portal → Model Submissions, `/creator-portal/model-submissions` — moved from `/applications/apps-model-submissions` on 2026-09-28, which now redirects; the pageId is still `apps-model-submissions`). What happens **after** approval — the welcome email, the personal onboarding form and the hello@ enquiry triage — is in [creator-onboarding.md](creator-onboarding.md). This is the project's **main unauthenticated write path**, and it collects the most sensitive data we hold — read the [Abuse & security model](#abuse--security-model) before changing any of it.
 
 ## Dependencies / Interacting Files
 
@@ -169,7 +169,7 @@ The two cross-field rules (`requireOneContact`, `requireOneSocial`) are plain fu
 
 ## Abuse & security model
 
-The public endpoints are the only unauthenticated write path in the project. Defence is layered; each layer is cheap and independent.
+The public endpoints are the main unauthenticated write path in the project (`/training`'s sign-in request is the only other; see [training.md](training.md)). Defence is layered; each layer is cheap and independent.
 
 | Layer | Where | What it stops |
 |---|---|---|

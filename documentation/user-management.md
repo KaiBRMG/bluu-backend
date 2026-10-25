@@ -199,3 +199,7 @@ Internal names live on `users/{uid}` as `displayName` (+ `firstName` / `lastName
 - **RULE:** Always use `src/components/ui/avatar.tsx` (`Avatar`, `AvatarImage`, `AvatarFallback`). **Never** a plain `<img>` for avatars.
 - Creator `photoURL` **and `photoThumb`** are included in `useCreators` and `/api/creators` output. `photoThumb` is a 64px WebP `data:` URI and is what avatars actually render — `photoURL` is the 256px fallback. See [ca-salary.md §11b](ca-salary.md#11b-creator-avatars-format-caching-and-render-cost).
 - `DisputeDocument` carries `creatorPhotoURL`, `createdByPhotoURL`, `assignedToPhotoURL` — all resolved server-side in `/api/disputes/route.ts`.
+
+## 5. Birthday email
+
+`GET /api/cron/birthday-emails` (Vercel Cron, 08:00 UTC, `CRON_SECRET`-gated) calls `sendBirthdayEmails` in `lib/services/birthdayEmails.ts`. It reads `users` once (projected to `DOB`, `workEmail`, `isActive`, `isArchived`) and emails the login address of every **active, unarchived** user whose `DOB` month/day equals today's **UTC** month/day — `DOB` is stored as UTC midnight of the picked date, so UTC is the only zone that does not shift it. 29 Feb birthdays are sent on 28 Feb in non-leap years. Resend idempotency key `birthday/<uid>/<year>` guards a cron retry. Copy lives only in `birthdayEmail()` in `lib/email/templates.ts`. This is an email, not an in-app notification, so it is deliberately not in the automated-notifications catalogue (rule 15).

@@ -14,6 +14,10 @@ const BROWSER_ALLOWED_PREFIXES = [
   // "Welcome to BLUU ROCK" email. Opened in a phone browser by someone with no
   // desktop app; the 160-bit secret in the path is the access control.
   '/join',
+  // Training sittings for prospective staff. Candidates are not app users and
+  // arrive by a link an admin hands them; entry is an emailed code, and every
+  // data route behind it checks a signed cookie (documentation/training.md).
+  '/training',
   // Shared prompts. The whole point of the link is that it resolves for someone
   // who does not have the desktop app — a recipient rewritten to /desktop-only
   // would make sharing useless. Read-only, and reachable only with the 160-bit

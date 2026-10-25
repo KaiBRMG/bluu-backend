@@ -788,3 +788,29 @@ Then a fourth door, **"Who is Bluu Rock?"** → `https://bluurock.com`. It is no
 1. **One door per audience, and the order is fixed:** creator, applicant, staff, then the bluurock.com way out. A new audience needs this section rewritten first, not another row squeezed in.
 2. **Every door must lead somewhere a browser can actually enter.** That is why the creator door is the bot, not the portal URL.
 3. **One glow.** The stage wash is borrowed from §8; do not add a second.
+4. **Training has no door here, on purpose.** `/training` (§11) is reached by a link an admin hands a specific person, never by browsing, so it is not a fifth audience and this section did not need rewriting. If candidates ever need to find it unprompted, §10 rule 1 applies first.
+
+## 11. Training (external skin) — "the focus room"
+
+The **sixth** surface: `/training`, public and unauthenticated at the front door (an emailed code, then a signed cookie), read by a **candidate on a trial** — someone who is not yet staff, at a computer for the work and on a phone for the first tap, being judged on a clock. Like §7–§10 this is an **authored divergence**, not drift. It is link-only: it has no door on §10 (rule 4 there).
+
+**There is no new world.** Its skin is §8's stage, imported from [`model-submissions/_lib/theme.ts`](src/app/model-submissions/_lib/theme.ts) through [`src/app/training/_lib/theme.ts`](src/app/training/_lib/theme.ts), which adds only the clock's phase states. Import those tokens; never inline a hex on this surface.
+
+### What carries over
+Near-black ground and the single stage wash, `PANEL` surfaces, hairlines, no drop shadows, Google Sans alone, azure as the one voice with `AZURE_INK` on every azure fill, the 16px `FIELD`, ≥44px targets, `NoTranslate` and `noindex` in the layout, `<img>` for the logo and for user images (as §8's photo tiles do). **Scale is §9's task-surface scale** (`2rem` → `sm:2.5rem` for the heading), not §8's display scale, and nothing animates on arrival.
+
+### What differs (the authored part)
+- **The focus room.** After Start the masthead and navigation go; the page is the brief, the images, the slots and the clock. This is the surface's thesis: a quiz page with a small corner timer is the category default it refuses.
+- **The clock is the largest thing on the page, and it is licensed here.** `text-[5.75rem]` on a `lg` rail card (24rem), `text-[2.5rem]`→`sm:text-5xl` in a pinned band below `lg`, `tabular-nums`, 700. Like §3's `Instrument` this earns the step because the clock *is* the screen's reason to exist; it is a third sanctioned oversized number and **does not** license a fourth. It sits on `bg-[#08090b]` (a pinned band must be opaque — content scrolls under it) and is not blurred.
+- **Phases are carried by words and border weight, never hue alone.** `CLOCK_PHASE` in the theme: calm (>10 min) · "Under 10 minutes left" · warn (≤5, `border-2` amber) · last (≤1, `border-2` red, flashing) · over ("Time's up"). Amber-200 and red-300 on `#08090b` measure 15.4:1 and 9.7:1.
+- **Two authored motions, both on the numerals only** (`globals.css`): `training-pulse`, one dip-and-recover at each milestone (halfway, 10, 5, 2 minutes), and `training-flash`, a one-cycle-a-second loop in the last minute — inside WCAG 2.3.1's three-a-second limit. Reduced motion removes both and loses nothing, because the words and border still say it. Announcements go to one polite live region at milestones only; the numerals are `role="timer"` with `aria-live="off"`, so a screen reader is never read every second.
+- **Selection is three cues.** Azure edge + `/10` tint + a lettered badge ("Image A"). A slot's source choice is a `role="radio"` group, not hue.
+- **State chips pair an icon with a word** (`StateChip`). The console-side twin (`AdminStateBadge`) uses the console's semantic hues, always with the word.
+- **No celebration.** Finishing is quiet — a `role="status"` line saying how many edits are saved. §8's thank-you burst and the pass belong to people being welcomed in; a candidate mid-trial is neither.
+
+### Surface rules (in addition to §1–6)
+1. **The browser's clock is never authoritative.** Every number on the clock comes from a server deadline and a `nowMs` offset (`useServerClock`); nothing in the UI can move it.
+2. **A destructive or irreversible act is confirmed in one sentence** — Start, Finish early. They use `AlertDialog` on the stage's dark panel (`bg-[#0d1014]`, `border-white/10`), with the primary action in `AZURE`/`AZURE_INK`.
+3. **Say only what is true of the rules.** The briefing states the minutes, the single attempt, what happens at zero and the file limits; those come from `modules.ts` and the same constants the server enforces, never typed twice.
+4. **One glow.** The stage wash is borrowed from §8; do not add a second.
+

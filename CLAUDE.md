@@ -43,6 +43,13 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
                                                                         a recording; /image and /video
                                                                         both 302 to a signed Storage URL
                                                                         — the bytes never cross Vercel)
+                    ┌───────────────────────────────────────────────┐
+ System browser  ─►│  Training          /training                  │─► UNAUTHENTICATED front, THIRD identity
+ (candidates on a   └───────────────────────────────────────────────┘   system: email → emailed 6-digit code →
+  trial, by link)                                                       signed httpOnly cookie (no Firebase
+                                                                        Auth). The server owns the clock; link-
+                                                                        only, no door on /desktop-only — see
+                                                                        training.md
 
                     ┌───────────────────────────────────────────────┐
  Second Electron ─►│  OF Manager        /of-manager                │─► own window, own layout
@@ -118,6 +125,8 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
                 Storage objects (media AND a recording's poster), plus upload
                 slots that were never finalised
                 — see snipping-tool.md
+              + daily staff birthday email (08:00 UTC, Resend; users.DOB, UTC
+                month/day; active + unarchived only) — see user-management.md
               (scheduled work that must send a notification lives HERE, not in
                functions/ — copy lives only in notificationContent.ts; work
                needing src/lib services or types belongs here too)
@@ -126,7 +135,7 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
 - **Monorepo:** `src/` (Next.js 16 web app, primary), `electron/` (desktop wrapper), `src/app/creator/` (creator interface), `functions/` (Cloud Functions).
 - **Two domains, one Vercel deployment:** **`app.bluurock.com` is the official domain** — `PUBLIC_APP_ORIGIN` in [`src/lib/publicOrigin.ts`](src/lib/publicOrigin.ts), and the Electron shell's `BASE_URL` from build 0.16.0. `bluu-backend.vercel.app` is **legacy, being phased out, and must keep serving**: shells older than 0.16.0 are pinned to it, and `src/middleware.ts` 308s browser page traffic on it to the official domain (except Electron UAs, `/auth`, `/creator`; `/api` is never touched). Build every user-facing link from `PUBLIC_APP_ORIGIN` — **never `window.location.origin`**, which is the legacy host inside an old shell. See [electron.md](documentation/electron.md#two-domains-one-deployment).
 - **Sessions are per-DEVICE, not per user.** `users/{uid}.sessions[deviceId]` plus the `device-sessions/{deviceId} → uid` index replaced the single `sessionToken`. A desktop login still evicts other **desktop** sessions (nobody is clocked in on two machines); web sessions run concurrently. The legacy `sessionToken` is still written on desktop logins and is still the fallback comparison — **a web login must never rotate it** (rule 9c). This is the groundwork for web access; no surface exercises it yet. See [auth.md](documentation/auth.md#device-identity--session-enforcement).
-- **Two identity systems, deliberately separate.** Employees sign in with Google OAuth against the `users` allowlist (below). **Creators sign in with Telegram** — the portal is a Mini App, `initData` is the credential, and `/creator/login` no longer exists. The two must never share a uid; see [telegram.md](documentation/telegram.md) and [auth.md](documentation/auth.md).
+- **Three identity systems, deliberately separate.** Employees sign in with Google OAuth against the `users` allowlist (below). **Creators sign in with Telegram** — the portal is a Mini App, `initData` is the credential, and `/creator/login` no longer exists. **Training candidates have no Firebase Auth account at all** — an admin-added email proves itself with an emailed code and carries a signed httpOnly cookie ([training.md](documentation/training.md)). None of the three may share a uid; see [telegram.md](documentation/telegram.md) and [auth.md](documentation/auth.md).
 - **Auth:** Google OAuth only, with **personal** Google accounts — there is no company-domain restriction. **Google authenticates; Firestore authorises:** an admin must register someone in the Employee Registry before they can log in, and `/api/auth/exchange-code` refuses any address without a `users` doc. It **never creates one**. Admin status is a JWT custom claim (`token.admin`), not a Firestore read. **A valid Firebase token is not an employee** — creators, any Google account (via the browser login's `signInWithPopup`) and offboarded staff all hold one — so `withAuth` also requires an active, unarchived `users` doc, and no Firestore rule may gate a read on `isSignedIn()` alone. Deactivating/archiving disables the Auth account and revokes its refresh tokens. See [auth.md](documentation/auth.md#api-route-auth-middleware).
 - Full repo layout, commands, and env vars: [architecture-overview.md](documentation/architecture-overview.md).
 
@@ -269,7 +278,8 @@ Fixing the `AppLayout` hoist is therefore not only the navigation speed-up alrea
 | [onlyfans-crm.md](documentation/onlyfans-crm.md) | **OF Manager** — the OnlyFans messaging window, the `IOnlyFansClient` adapter seam, the Firestore chat mirror + provider webhook |
 | [gologin.md](documentation/gologin.md) | **GoLogin** — the browser-profile satellite window, per-operator accounts, profile create/edit/delete (fingerprint read-only — **never `PUT /browser/{id}/custom`**), folders, live folder sharing, the four grantable capabilities, the cross-machine session lock, the Orbita downloader, and the rate limit that shapes it all (a 429 revokes the API token permanently) |
 | [creator-onboarding.md](documentation/creator-onboarding.md) | **Recruiting after the application** — hello@ inbound triage (Resend receiving + the rules-only spam filter), the approval → welcome email, the personal `/join/[token]` onboarding form (question model, autosave, tracks), and Creator Portal → Onboarding |
-| [model-submissions.md](documentation/model-submissions.md) | The **public** application form `/model-submissions` (the project's only unauthenticated write path), its abuse model, and the `apps-model-submissions` review queue |
+| [training.md](documentation/training.md) | **Training** — the public `/training` surface for candidates on a trial (emailed-code sign-in, the signed cookie, the server-owned clock, direct-to-Storage uploads), the `admin-portal/training` page, and the code-defined modules |
+| [model-submissions.md](documentation/model-submissions.md) | The **public** application form `/model-submissions` (an unauthenticated write path — `/training`'s code request is the other), its abuse model, and the `apps-model-submissions` review queue |
 | [boot-loading-screen.md](documentation/boot-loading-screen.md) | `BootLoaderProvider`, `useBootPhase`, home-widget gating |
 | [user-management.md](documentation/user-management.md) | Archiving vs deleting users, name resolution, profile pictures |
 | [electron.md](documentation/electron.md) | `electron/` shell, `window.electronAPI` IPC surface, deep-link OAuth, crash/offline recovery, clock-out flush, power events, version nudge, build/release |

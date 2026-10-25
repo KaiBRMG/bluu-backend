@@ -2,7 +2,7 @@
 
 A new subsystem to be created.
 
-/training is a public facing route (access via app.bluurock.com/training) and serves potential employees. Potential employees usually undergo training for a few days to determine the best candidates before hiring/onboarding. 
+/training is a public facing route (access via app.bluurock.com/training) and serves potential employees (not app users). Potential employees usually undergo training for a few days to determine the best candidates before hiring/onboarding. 
 
 # src/app/training
 
@@ -51,4 +51,4 @@ An admin user primarily views training sessions and their progress here.
 
 # Considerations
 
-Only providing an email is not strong security at all, but since only specified emails are allowed and only for a limited time, it is likely that the person entering an allowable email is the actual person meant to access the page -- but still consider basic measures for bot protection and any other abuse. 
+Only providing an email is not strong security at all, but since only specified emails are allowed and only for a limited time, it is likely that the person entering an allowable email is the actual person meant to access the page and their access will be temporary -- but still consider basic measures for bot protection and any other abuse. 

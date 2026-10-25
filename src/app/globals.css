@@ -827,3 +827,44 @@ mark.hl-purple {
 mark.hl-pink {
   background-color: rgba(244, 63, 94, 0.32);
 }
+/* ─── Training clock (/training task room) ────────────────────────────────
+   Two authored motions, both on the clock's numerals only. `training-pulse`
+   is one dip-and-recover at a milestone (10 and 5 minutes, halfway). The
+   `training-flash` loop runs in the last minute at one cycle a second — well
+   inside WCAG 2.3.1's three-flashes-a-second limit. Base styles are the final
+   state; reduced motion drops both and the phase is still carried by words
+   and the border (the clock never relies on the animation to be understood). */
+
+.training-pulse {
+  animation: training-pulse 1.1s cubic-bezier(0.22, 1, 0.36, 1) 1 both;
+}
+
+@keyframes training-pulse {
+  0% {
+    opacity: 0.3;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.training-flash {
+  animation: training-flash 1s ease-in-out infinite;
+}
+
+@keyframes training-flash {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .training-pulse,
+  .training-flash {
+    animation: none;
+  }
+}

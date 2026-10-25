@@ -357,6 +357,28 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 21a. Training (public /training for prospective staff)
+    // Candidates are neither employees nor creators and hold no Firebase Auth
+    // account, so there is no client path to any of this. Sessions, per-person
+    // attempts (with Storage paths), emailed sign-in codes and rate counters are
+    // all written and read only by the Admin SDK behind /api/training* (cookie)
+    // and /api/admin/training* (the 'training' page permission).
+    match /training-sessions/{sessionId} {
+      allow read, write: if false;
+    }
+    match /training-participants/{participantId} {
+      allow read, write: if false;
+    }
+    match /training-candidates/{emailHash} {
+      allow read, write: if false;
+    }
+    match /training-codes/{emailHash} {
+      allow read, write: if false;
+    }
+    match /training-rate/{key} {
+      allow read, write: if false;
+    }
+
     // 21b. Creator onboarding + hello@ enquiries (the recruiting funnel after
     // approval). `creator-onboarding` holds an approved applicant's onboarding
     // answers — content limits, persona, earnings — and a hash of their link

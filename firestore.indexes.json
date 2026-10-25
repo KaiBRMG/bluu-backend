@@ -2532,6 +2532,21 @@
       "collectionGroup": "leave-ledger",
       "fieldPath": "note",
       "indexes": []
+    },
+    {
+      "collectionGroup": "training-participants",
+      "fieldPath": "attempts",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "training-participants",
+      "fieldPath": "email",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "training-sessions",
+      "fieldPath": "parts",
+      "indexes": []
     }
   ]
 }

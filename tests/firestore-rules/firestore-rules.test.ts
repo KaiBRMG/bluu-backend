@@ -739,3 +739,35 @@ describe('model-submission-rate collection', () => {
     await assertFails(setDoc(doc(db, 'model-submission-rate', DOC_ID), { submissions: 0 }));
   });
 });
+
+// ---------------------------------------------------------------------------
+// 21a. training (public /training for prospective staff)
+// ---------------------------------------------------------------------------
+// Candidates hold no Firebase Auth account. Sessions, attempts (with Storage
+// paths), emailed codes and rate counters are Admin-SDK-only, so no client —
+// anonymous, signed in, or admin — may read or write any of them.
+
+describe.each([
+  ['training-sessions', 'a1b2c3d4e5f60718293a4b5c', { label: 'October intake', moduleId: 'media-gen' }],
+  ['training-participants', 'a1b2c3d4e5f60718293a4b5c_0123456789abcdef0123456789abcdef', { email: 'c@example.com', attempts: {} }],
+  ['training-candidates', '0123456789abcdef0123456789abcdef', { name: 'Candidate' }],
+  ['training-codes', '0123456789abcdef0123456789abcdef', { codeHash: 'x', attempts: 0 }],
+  ['training-rate', 'code-ip_0123456789abcdef0123456789abcdef', { count: 1 }],
+])('%s collection', (collectionName, docId, data) => {
+  beforeEach(async () => {
+    await seedDoc(collectionName, docId, data as Record<string, unknown>);
+  });
+
+  it('denies unauthenticated reads and writes', async () => {
+    const db = unauthenticated().firestore();
+    await assertFails(getDoc(doc(db, collectionName, docId)));
+    await assertFails(setDoc(doc(db, collectionName, docId), { forged: true }));
+  });
+
+  it('denies signed-in reads, lists and writes', async () => {
+    const db = authedUser('user-a').firestore();
+    await assertFails(getDoc(doc(db, collectionName, docId)));
+    await assertFails(getDocs(query(collection(db, collectionName))));
+    await assertFails(setDoc(doc(db, collectionName, docId), { forged: true }));
+  });
+});
