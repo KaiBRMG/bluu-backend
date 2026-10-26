@@ -10,8 +10,8 @@ interface SourceImagesProps {
   images: { id: string; name: string; thumbUrl: string }[];
   /** Fewest images the part needs before a candidate can start it. */
   minimum: number;
-  /** Once a part has opened a candidate may be choosing from these, so they are fixed. */
-  locked: boolean;
+  /** False once anyone has started the part: they may be choosing from these. Adding stays possible. */
+  canRemove: boolean;
   onAdd: (file: File) => Promise<void>;
   onRemove: (imageId: string) => Promise<void>;
   /** Once per batch, not once per file, so ten uploads read the session once. */
@@ -23,7 +23,7 @@ interface SourceImagesProps {
  * browser, then both go straight to Storage (rule 9i). Uploads run three at a
  * time so ten large images do not queue behind each other or flood the line.
  */
-export default function SourceImages({ images, minimum, locked, onAdd, onRemove, onBatchDone }: SourceImagesProps) {
+export default function SourceImages({ images, minimum, canRemove, onAdd, onRemove, onBatchDone }: SourceImagesProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -66,7 +66,7 @@ export default function SourceImages({ images, minimum, locked, onAdd, onRemove,
         <p className="text-xs text-zinc-400 tabular-nums">
           Source images · {images.length}
         </p>
-        {!locked && room > 0 && (
+        {room > 0 && (
           <>
             <input
               ref={inputRef}
@@ -99,7 +99,7 @@ export default function SourceImages({ images, minimum, locked, onAdd, onRemove,
             <li key={img.id} className="group relative overflow-hidden rounded-lg border border-white/[0.07] bg-black/30">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={img.thumbUrl} alt={img.name} width={240} height={240} loading="lazy" decoding="async" className="aspect-square w-full object-cover" />
-              {!locked && (
+              {canRemove && (
                 <Button
                   variant="secondary"
                   size="icon-xs"

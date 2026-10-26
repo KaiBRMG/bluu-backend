@@ -196,6 +196,8 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
               const cfg = session.parts[part.id];
               if (!cfg) return null;
               const opened = cfg.opensAtMs <= now;
+              // Anyone starting a part fixes its open time and its images (a running attempt depends on both).
+              const started = detail.participants.some((p) => p.parts[part.id]?.startedAtMs != null);
               const ready = cfg.sources.length >= part.task.pickCount;
               return (
                 <div key={part.id} className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
@@ -214,11 +216,12 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
                       <Input
                         id={`o-${part.id}`}
                         type="datetime-local"
-                        disabled={opened}
+                        disabled={started}
                         value={opensFor(part.id)}
                         onChange={(e) => setDraft((d) => ({ ...d, opens: { ...d.opens, [part.id]: e.target.value } }))}
                         className="w-52"
                       />
+                      {started && <p className="text-[11px] text-zinc-400">Fixed: someone has started this part.</p>}
                     </div>
                   </div>
                   {!ready && opened && (
@@ -230,7 +233,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
                     <SourceImages
                       images={cfg.sources}
                       minimum={part.task.pickCount}
-                      locked={opened}
+                      canRemove={!started}
                       onAdd={(file) => addSource(part.id, file)}
                       onRemove={(imageId) => removeSource(part.id, imageId)}
                       onBatchDone={refetch}

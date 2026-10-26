@@ -76,7 +76,7 @@ Nothing is public. Reads are v4 signed URLs anchored to a 30-minute window (so r
 
 ### Source images
 
-The source images are the admin's to attach (Session page → Parts), **as many as they like** (at most 500 per part, only because the list lives in the session document). A part needs at least as many as the task picks (`pickCount`, 2 for ID Swap) before a candidate can start it; the candidate then chooses their own from however many there are. They are signed for a candidate **only while the attempt is in progress** — never on the briefing — and cannot be removed once a part has opened.
+The source images are the admin's to attach (Session page → Parts), **as many as they like** (at most 500 per part, only because the list lives in the session document). A part needs at least as many as the task picks (`pickCount`, 2 for ID Swap) before a candidate can start it; the candidate then chooses their own from however many there are. They are signed for a candidate **only while the attempt is in progress** — never on the briefing — Images can be **added at any time**; they are removed, and the part's open time changed, only until someone has **started** the part (a running attempt depends on both) — not merely until it opens, which would strand an admin who opened a part before attaching images.
 
 ## Modules
 
@@ -90,7 +90,7 @@ Adding a module means: an id in `TrainingModuleId`, an entry in `TRAINING_MODULE
 
 - **List:** sessions with people, first open, access end and status (Upcoming / Running / Closed).
 - **New session:** name, module, a pasted list of emails (validated and de-duplicated; invalid ones are named, never silently dropped), when each part opens, when access ends (follows the last open + 48 h until set).
-- **Session page** (refreshes every 60 s, only while the window is visible, access has not ended, and someone is mid-attempt or a part opens within 5 minutes): schedule and access end (a part that has opened keeps its time), the source images (3 uploads at a time), a participant × part table of state badges that opens each candidate's work (their edit beside the image it started from), **Add people**, **Remove** (access stops on the next request; work is kept; **Restore** re-adds), and **Copy link**.
+- **Session page** (refreshes every 60 s, only while the window is visible, access has not ended, and someone is mid-attempt or a part opens within 5 minutes): schedule and access end (a part's open time is fixed once anyone has started it), the source images (3 uploads at a time), a participant × part table of state badges that opens each candidate's work (their edit beside the image it started from), **Add people**, **Remove** (access stops on the next request; work is kept; **Restore** re-adds), and **Copy link**.
 - Times are entered and shown in the **viewer's** timezone (rule 9g) via `zonedTime.ts`, not the browser's.
 - It is **view only**: no scoring, notes or shortlist yet.
 

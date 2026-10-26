@@ -769,16 +769,31 @@ export async function getSessionDetail(id: string): Promise<AdminSessionDetail> 
   };
 }
 
+/**
+ * The parts anyone has started. A part's open time and its source images are
+ * fixed only from that moment — a running attempt has read the images and
+ * counted its clock against the schedule — and not merely once it opens, which
+ * would strand an admin who opened a part before attaching the images.
+ */
+async function startedParts(sessionId: string): Promise<Set<string>> {
+  const snap = await adminDb.collection(PARTICIPANTS_COLLECTION).where('sessionId', '==', sessionId).get();
+  const started = new Set<string>();
+  for (const d of snap.docs) {
+    for (const partId of Object.keys((d.data() as ParticipantDoc).attempts ?? {})) started.add(partId);
+  }
+  return started;
+}
+
 export async function updateSession(
   id: string,
   patch: { label?: string; closesAtMs?: number; opensAtMs?: Record<string, number> },
 ): Promise<void> {
   const ref = adminDb.collection(SESSIONS_COLLECTION).doc(id);
+  const started = patch.opensAtMs ? await startedParts(id) : new Set<string>();
   await adminDb.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) throw new TrainingError('Not found', 404);
     const session = snap.data() as SessionDoc;
-    const now = Date.now();
     const update: Record<string, unknown> = {};
 
     if (patch.label !== undefined) {
@@ -790,9 +805,8 @@ export async function updateSession(
     for (const [partId, opensAtMs] of Object.entries(patch.opensAtMs ?? {})) {
       const cfg = session.parts[partId];
       if (!cfg || !Number.isFinite(opensAtMs)) throw new TrainingError('Unknown part', 400);
-      // A part that has already opened keeps its time: candidates may be mid-attempt on it.
-      if (cfg.opensAtMs <= now && opensAtMs !== cfg.opensAtMs) {
-        throw new TrainingError('That part has already opened', 409);
+      if (opensAtMs !== cfg.opensAtMs && started.has(partId)) {
+        throw new TrainingError('Someone has already started that part, so its open time is fixed', 409);
       }
       update[`parts.${partId}.opensAtMs`] = opensAtMs;
     }
@@ -1005,10 +1019,15 @@ export async function commitSource(
 }
 
 /**
- * Removing a source is refused once the part has opened: a candidate may be
- * choosing from it right now, and a vanished image would break their attempt.
+ * Removing a source is refused once anyone has started the part: a candidate
+ * may be choosing from it right now, and a vanished image would break their
+ * attempt. (Adding is always allowed — a running attempt simply does not see
+ * the new image until it next loads.)
  */
 export async function removeSource(sessionId: string, partId: string, imageId: string): Promise<void> {
+  if ((await startedParts(sessionId)).has(partId)) {
+    throw new TrainingError('Someone has already started this part, so its images are fixed', 409);
+  }
   const ref = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId);
   const removed = await adminDb.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
@@ -1016,7 +1035,6 @@ export async function removeSource(sessionId: string, partId: string, imageId: s
     const session = snap.data() as SessionDoc;
     const cfg = session.parts[partId];
     if (!cfg) throw new TrainingError('Not found', 404);
-    if (cfg.opensAtMs <= Date.now()) throw new TrainingError('This part has already opened', 409);
     const target = cfg.sources.find((s) => s.id === imageId);
     if (!target) return null;
     tx.update(ref, { [`parts.${partId}.sources`]: cfg.sources.filter((s) => s.id !== imageId) });
