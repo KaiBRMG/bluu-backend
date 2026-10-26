@@ -99,6 +99,19 @@ export function useTrainingSession(sessionId: string) {
     [base, refetch],
   );
 
+  const stop = useCallback(async () => {
+    await trainingAdmin(`${base}/stop`, 'POST');
+    refetch();
+  }, [base, refetch]);
+
+  const reopen = useCallback(
+    async (emailHash: string, partId: string) => {
+      await trainingAdmin(`${base}/participants/${emailHash}/reopen`, 'POST', { partId });
+      refetch();
+    },
+    [base, refetch],
+  );
+
   const addPeople = useCallback(
     async (emails: string) => {
       const res = await trainingAdmin<{ added: number }>(`${base}/participants`, 'POST', { emails });
@@ -155,5 +168,5 @@ export function useTrainingSession(sessionId: string) {
     [base],
   );
 
-  return { detail, error, refetch, update, addPeople, revoke, addSource, removeSource, loadSubmission };
+  return { detail, error, refetch, update, stop, reopen, addPeople, revoke, addSource, removeSource, loadSubmission };
 }

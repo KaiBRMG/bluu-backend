@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { ArrowLeft, Check, Copy, Loader2, UserMinus, UserPlus } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Loader2, OctagonX, RotateCcw, UserMinus, UserPlus } from 'lucide-react';
 import AddPeopleDialog from './AddPeopleDialog';
 import { AdminStateBadge } from './AdminStateBadge';
 import SourceImages from './SourceImages';
@@ -19,6 +19,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -34,7 +35,9 @@ const TRAINING_URL = `${PUBLIC_APP_ORIGIN}/training`;
 
 /** What goes under the state badge: the figure the state is about. */
 function partNote(p: AdminParticipant['parts'][string], total: number, timezone: string): string {
-  if (p.state === 'in-progress' && p.deadlineMs) return `ends ${formatWhen(p.deadlineMs, timezone)}`;
+  if (p.state === 'in-progress' && p.deadlineMs) {
+    return `${p.reopenedAtMs ? 'reopened · ' : ''}ends ${formatWhen(p.deadlineMs, timezone)}`;
+  }
   if (p.state === 'submitted' || p.state === 'timed-out') return `${p.slotsFilled} of ${total} uploaded`;
   return '';
 }
@@ -46,7 +49,7 @@ function partNote(p: AdminParticipant['parts'][string], total: number, timezone:
  */
 export default function SessionView({ sessionId }: { sessionId: string }) {
   const { timezone } = useViewerTimezone();
-  const { detail, error, refetch, update, addPeople, revoke, addSource, removeSource, loadSubmission } =
+  const { detail, error, refetch, update, stop, reopen, addPeople, revoke, addSource, removeSource, loadSubmission } =
     useTrainingSession(sessionId);
 
   // Edits only. A field shows the server's value until it is touched, so the
@@ -58,6 +61,10 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   const [viewing, setViewing] = useState<{ emailHash: string; partId: string; label: string } | null>(null);
   const [revoking, setRevoking] = useState<AdminParticipant | null>(null);
   const [busyRevoke, setBusyRevoke] = useState(false);
+  const [reopening, setReopening] = useState<{ person: AdminParticipant; partId: string } | null>(null);
+  const [busyReopen, setBusyReopen] = useState(false);
+  const [confirmStop, setConfirmStop] = useState(false);
+  const [stopping, setStopping] = useState(false);
 
   const session = detail?.session;
   const mod = session ? TRAINING_MODULES[session.moduleId] : null;
@@ -115,6 +122,8 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
 
   const now = detail.nowMs;
   const live = detail.participants.filter((p) => p.revokedAtMs == null);
+  // Judged on the server's clock, like every other state on this page.
+  const ended = now > session.closesAtMs;
 
   async function save() {
     setSaving(true);
@@ -126,7 +135,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
       );
       await update({
         ...(label.trim() !== session!.label ? { label } : {}),
-        closesAtMs: wallToMs(closes, timezone),
+        ...(wallToMs(closes, timezone) !== session!.closesAtMs ? { closesAtMs: wallToMs(closes, timezone) } : {}),
         ...(Object.keys(changedOpens).length ? { opensAtMs: changedOpens } : {}),
       });
       setDraft({ opens: {} });
@@ -142,11 +151,21 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     <>
       <div className="max-w-6xl">
         <div className="mb-6 flex items-start justify-between gap-4">
-          {header(session.label, `${mod.title} · ${live.length} ${live.length === 1 ? 'person' : 'people'} · access ends ${formatWhen(session.closesAtMs, timezone)}`)}
+          {header(session.label, `${mod.title} · ${live.length} ${live.length === 1 ? 'person' : 'people'} · ${ended ? 'access ended' : 'access ends'} ${formatWhen(session.closesAtMs, timezone)}`)}
+          <div className="mt-7 flex shrink-0 items-center gap-2">
+          {ended ? (
+            <Badge variant="outline" className="border-white/10 bg-white/[0.04] font-medium text-zinc-300">
+              Stopped
+            </Badge>
+          ) : (
+            <Button variant="destructive" size="sm" onClick={() => setConfirmStop(true)}>
+              <OctagonX className="size-4" />
+              Stop session
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
-            className="mt-7 shrink-0"
             onClick={async () => {
               try {
                 await navigator.clipboard.writeText(TRAINING_URL);
@@ -161,6 +180,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
             {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
             Copy link
           </Button>
+          </div>
         </div>
 
         <section aria-labelledby="parts-heading" className="mb-8">
@@ -286,16 +306,30 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
                         return (
                           <TableCell key={part.id}>
                             {cell && (
-                              <button
-                                type="button"
-                                disabled={!canView}
-                                onClick={() => setViewing({ emailHash: person.emailHash, partId: part.id, label: display })}
-                                className="flex flex-col items-start gap-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60 enabled:cursor-pointer enabled:hover:opacity-80"
-                                aria-label={`${display}, ${part.title}: ${cell.state}${canView ? '. View work' : ''}`}
-                              >
-                                <AdminStateBadge state={cell.state} />
-                                {note && <span className="text-[11px] text-zinc-400 tabular-nums">{note}</span>}
-                              </button>
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                <button
+                                  type="button"
+                                  disabled={!canView}
+                                  onClick={() => setViewing({ emailHash: person.emailHash, partId: part.id, label: display })}
+                                  className="flex flex-col items-start gap-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60 enabled:cursor-pointer enabled:hover:opacity-80"
+                                  aria-label={`${display}, ${part.title}: ${cell.state}${canView ? '. View work' : ''}`}
+                                >
+                                  <AdminStateBadge state={cell.state} />
+                                  {note && <span className="text-[11px] text-zinc-400 tabular-nums">{note}</span>}
+                                </button>
+                                {!removed && (cell.state === 'timed-out' || cell.state === 'submitted' || cell.state === 'missed') && (
+                                  <Button
+                                    variant="ghost"
+                                    size="xs"
+                                    className="text-zinc-400 hover:text-white"
+                                    aria-label={`Reopen ${part.title} for ${display}`}
+                                    onClick={() => setReopening({ person, partId: part.id })}
+                                  >
+                                    <RotateCcw className="size-3.5" />
+                                    Reopen
+                                  </Button>
+                                )}
+                              </div>
                             )}
                           </TableCell>
                         );
@@ -340,6 +374,77 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
         load={loadSubmission}
         onClose={() => setViewing(null)}
       />
+
+      <AlertDialog open={!!reopening} onOpenChange={(open) => !busyReopen && !open && setReopening(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reopen for {reopening?.person.name ?? reopening?.person.email}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {reopening && mod?.parts.find((p) => p.id === reopening.partId)?.title} reopens on a fresh{' '}
+              {Math.round((mod?.parts.find((p) => p.id === reopening?.partId)?.durationMs ?? 0) / 60_000)} minutes. They keep
+              what they have already uploaded, and can sign in even if the session has ended (for the next 24 hours).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busyReopen}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busyReopen}
+              onClick={async (e) => {
+                e.preventDefault();
+                if (!reopening) return;
+                setBusyReopen(true);
+                try {
+                  await reopen(reopening.person.emailHash, reopening.partId);
+                  toast.success('Reopened');
+                  setReopening(null);
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : 'Could not reopen');
+                } finally {
+                  setBusyReopen(false);
+                }
+              }}
+            >
+              {busyReopen && <Loader2 className="activity-spinner size-4 animate-spin" />}
+              Reopen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmStop} onOpenChange={(open) => !stopping && setConfirmStop(open)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Stop {session.label}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The test ends now for everyone, including anyone in the middle of a part. Work already uploaded is kept. To open it
+              again, set a later &ldquo;Access ends&rdquo;.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={stopping}>Keep running</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={stopping}
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={async (e) => {
+                e.preventDefault();
+                setStopping(true);
+                try {
+                  await stop();
+                  toast.success('Session stopped');
+                  setConfirmStop(false);
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : 'Could not stop the session');
+                } finally {
+                  setStopping(false);
+                }
+              }}
+            >
+              {stopping && <Loader2 className="activity-spinner size-4 animate-spin" />}
+              Stop session
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!revoking} onOpenChange={(open) => !busyRevoke && !open && setRevoking(null)}>
         <AlertDialogContent>

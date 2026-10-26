@@ -77,6 +77,8 @@ interface SessionDoc {
   createdAtMs: number;
   createdBy: string;
   closesAtMs: number;
+  /** Set by Stop. A participant reopened BEFORE it does not outlive it. */
+  stoppedAtMs?: number;
   participantCount: number;
   parts: Record<string, { opensAtMs: number; sources: SourceDoc[] }>;
 }
@@ -100,6 +102,7 @@ interface AttemptDoc {
   startedAtMs: number;
   deadlineMs: number;
   finishedAtMs: number | null;
+  reopenedAtMs?: number;
   uploadAttempts: number;
   pending: Record<string, PendingDoc>;
   slots: Partial<Record<SlotId, SlotDoc>>;
@@ -111,7 +114,22 @@ interface ParticipantDoc {
   email: string;
   addedAtMs: number;
   revokedAtMs: number | null;
+  /** A reopen lets this one candidate in past the session's end, until here. */
+  accessUntilMs?: number;
+  reopenedAtMs?: number;
   attempts: Record<string, AttemptDoc>;
+}
+
+/**
+ * The session as THIS participant sees it: when an admin reopened them after
+ * the session ended, their own access end replaces the session's. A later Stop
+ * ends them again — it is judged by which came last, not by who is bigger.
+ */
+function sessionFor(participant: ParticipantDoc, session: SessionDoc): SessionDoc {
+  const until = participant.accessUntilMs;
+  if (!until || until <= session.closesAtMs) return session;
+  if (session.stoppedAtMs && session.stoppedAtMs > (participant.reopenedAtMs ?? 0)) return session;
+  return { ...session, closesAtMs: until };
 }
 
 
@@ -128,7 +146,8 @@ function derivePartState(
   if (attempt) {
     const filled = Object.keys(attempt.slots).length;
     if (attempt.finishedAtMs) return 'submitted';
-    if (now > attempt.deadlineMs) return filled >= part.task.slots.length ? 'submitted' : 'timed-out';
+    // A stopped session ends a running attempt where it stands, whatever its own clock says.
+    if (now > Math.min(attempt.deadlineMs, session.closesAtMs)) return filled >= part.task.slots.length ? 'submitted' : 'timed-out';
     return 'in-progress';
   }
   const cfg = session.parts[part.id];
@@ -244,7 +263,10 @@ async function activeParticipations(emailHash: string, now: number) {
   for (const s of sessionSnaps) if (s.exists) sessions.set(s.id, s.data() as SessionDoc);
 
   return mine
-    .map((participant) => ({ participant, session: sessions.get(participant.sessionId) }))
+    .map((participant) => {
+      const session = sessions.get(participant.sessionId);
+      return { participant, session: session && sessionFor(participant, session) };
+    })
     .filter(
       (x): x is { participant: ParticipantDoc; session: SessionDoc } =>
         !!x.session && x.session.closesAtMs > now,
@@ -307,7 +329,7 @@ async function loadParticipation(emailHash: string, sessionId: string) {
   const participant = pSnap.data() as ParticipantDoc;
   const session = sSnap.data() as SessionDoc;
   if (participant.revokedAtMs != null) return null;
-  return { participant, session };
+  return { participant, session: sessionFor(participant, session) };
 }
 
 async function attemptView(attempt: AttemptDoc): Promise<AttemptView> {
@@ -389,7 +411,7 @@ export async function startAttempt(emailHash: string, sessionId: string, partId:
     const [pSnap, sSnap] = await Promise.all([tx.get(pRef), tx.get(sRef)]);
     if (!pSnap.exists || !sSnap.exists) throw new TrainingError('Not found', 404);
     const participant = pSnap.data() as ParticipantDoc;
-    const session = sSnap.data() as SessionDoc;
+    const session = sessionFor(participant, sSnap.data() as SessionDoc);
     if (participant.revokedAtMs != null) throw new TrainingError('Not found', 404);
 
     const part = getPart(session.moduleId, partId);
@@ -453,7 +475,7 @@ export async function requestUpload(
     const [pSnap, sSnap] = await Promise.all([tx.get(pRef), tx.get(sRef)]);
     if (!pSnap.exists || !sSnap.exists) throw new TrainingError('Not found', 404);
     const participant = pSnap.data() as ParticipantDoc;
-    const session = sSnap.data() as SessionDoc;
+    const session = sessionFor(participant, sSnap.data() as SessionDoc);
     if (participant.revokedAtMs != null) throw new TrainingError('Not found', 404);
 
     const part = getPart(session.moduleId, partId);
@@ -465,6 +487,7 @@ export async function requestUpload(
 
     const now = Date.now();
     const attempt = participant.attempts?.[partId];
+    if (now > session.closesAtMs) throw new TrainingError('This session has been stopped', 409);
     if (!inProgress(attempt, now)) throw new TrainingError('Time is up', 409);
     if (attempt.uploadAttempts >= MAX_UPLOAD_ATTEMPTS) {
       throw new TrainingError('Too many uploads. Keep the ones you have.', 429);
@@ -545,12 +568,15 @@ export async function finalizeUpload(
         tx.get(adminDb.collection(SESSIONS_COLLECTION).doc(sessionId)),
       ]);
       const participant = pSnap.data() as ParticipantDoc | undefined;
-      const session = sSnap.data() as SessionDoc | undefined;
+      const rawSession = sSnap.data() as SessionDoc | undefined;
       const fresh = participant?.attempts?.[partId];
-      if (!participant || !session || !fresh?.pending?.[uploadId]) throw new TrainingError('Invalid upload', 400);
+      if (!participant || !rawSession || !fresh?.pending?.[uploadId]) throw new TrainingError('Invalid upload', 400);
+      const session = sessionFor(participant, rawSession);
 
       const part = getPart(session.moduleId, partId);
       if (!part) throw new TrainingError('Not found', 404);
+      // An upload already travelling when the session was stopped may land inside the grace; nothing later.
+      if (Date.now() > session.closesAtMs + UPLOAD_GRACE_MS) throw new TrainingError('This session has been stopped', 409);
       const { pickCount, editsPerSource } = part.task;
 
       // The picked sources are DERIVED from the slots, never trusted as a field:
@@ -731,7 +757,8 @@ export async function getSessionDetail(id: string): Promise<AdminSessionDetail> 
           return [
             part.id,
             {
-              state: derivePartState(now, session, part, attempt),
+              state: derivePartState(now, sessionFor(p, session), part, attempt),
+              reopenedAtMs: attempt?.reopenedAtMs ?? null,
               startedAtMs: attempt?.startedAtMs ?? null,
               deadlineMs: attempt?.deadlineMs ?? null,
               finishedAtMs: attempt?.finishedAtMs ?? null,
@@ -816,12 +843,77 @@ export async function updateSession(
       );
     }
     const closesAtMs = patch.closesAtMs ?? session.closesAtMs;
-    if (!Number.isFinite(closesAtMs) || closesAtMs <= lastOpen) {
+    // Only judged when the schedule is being changed: a stopped session ends before its parts
+    // would have opened, and renaming it must still work.
+    if ((patch.opensAtMs || (patch.closesAtMs !== undefined && patch.closesAtMs !== session.closesAtMs)) &&
+        (!Number.isFinite(closesAtMs) || closesAtMs <= lastOpen)) {
       throw new TrainingError('Access must end after the last part opens', 400);
     }
     if (patch.closesAtMs !== undefined) update.closesAtMs = closesAtMs;
 
     if (Object.keys(update).length) tx.update(ref, update);
+  });
+}
+
+/**
+ * Ends the session now: access stops for everyone on their next request, a
+ * running attempt ends where it stands, and what was uploaded is kept. It is
+ * just `closesAtMs = now`, so every existing guard already honours it, and
+ * setting a later "Access ends" reopens the session. Idempotent.
+ */
+export async function stopSession(id: string): Promise<void> {
+  const ref = adminDb.collection(SESSIONS_COLLECTION).doc(id);
+  await adminDb.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new TrainingError('Not found', 404);
+    const now = Date.now();
+    if ((snap.data() as SessionDoc).closesAtMs <= now) return;
+    tx.update(ref, { closesAtMs: now, stoppedAtMs: now });
+  });
+}
+
+/** How long a reopened candidate may get in for — long enough to sign in and start, not an open door. */
+const REOPEN_ACCESS_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Reopens one candidate's part: the SAME attempt, with its uploads, on a fresh
+ * full clock. Works after the session has ended (a candidate-level access
+ * extension, see `sessionFor`), and for a part they never started (they get to
+ * Start it). Refused while the part is genuinely running, or while another part
+ * of theirs is — only one runs at a time.
+ */
+export async function reopenParticipant(sessionId: string, emailHash: string, partId: string): Promise<void> {
+  const pRef = adminDb.collection(PARTICIPANTS_COLLECTION).doc(participantId(sessionId, emailHash));
+  const sRef = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId);
+
+  await adminDb.runTransaction(async (tx) => {
+    const [pSnap, sSnap] = await Promise.all([tx.get(pRef), tx.get(sRef)]);
+    if (!pSnap.exists || !sSnap.exists) throw new TrainingError('Not found', 404);
+    const participant = pSnap.data() as ParticipantDoc;
+    const session = sessionFor(participant, sSnap.data() as SessionDoc);
+    if (participant.revokedAtMs != null) throw new TrainingError('Restore them first', 409);
+    const part = getPart(session.moduleId, partId);
+    if (!part) throw new TrainingError('Not found', 404);
+
+    const now = Date.now();
+    const running = (a: AttemptDoc | undefined) =>
+      !!a && !a.finishedAtMs && now <= Math.min(a.deadlineMs, session.closesAtMs);
+    if (running(participant.attempts?.[partId])) throw new TrainingError('That part is already running for them', 409);
+    for (const [otherId, other] of Object.entries(participant.attempts ?? {})) {
+      if (otherId !== partId && running(other)) {
+        throw new TrainingError(`They are in the middle of ${getPart(session.moduleId, otherId)?.title ?? 'another part'}`, 409);
+      }
+    }
+
+    const update: Record<string, unknown> = { accessUntilMs: now + REOPEN_ACCESS_MS, reopenedAtMs: now };
+    if (participant.attempts?.[partId]) {
+      update[`attempts.${partId}.deadlineMs`] = now + part.durationMs;
+      update[`attempts.${partId}.finishedAtMs`] = null;
+      update[`attempts.${partId}.reopenedAtMs`] = now;
+      update[`attempts.${partId}.uploadAttempts`] = 0;
+      update[`attempts.${partId}.pending`] = {};
+    }
+    tx.update(pRef, update);
   });
 }
 

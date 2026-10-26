@@ -103,6 +103,8 @@ export interface AdminParticipantPart {
   startedAtMs: number | null;
   deadlineMs: number | null;
   finishedAtMs: number | null;
+  /** Set when an admin reopened this attempt. */
+  reopenedAtMs: number | null;
   slotsFilled: number;
 }
 

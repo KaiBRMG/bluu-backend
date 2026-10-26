@@ -90,9 +90,13 @@ Adding a module means: an id in `TrainingModuleId`, an entry in `TRAINING_MODULE
 
 - **List:** sessions with people, first open, access end and status (Upcoming / Running / Closed).
 - **New session:** name, module, a pasted list of emails (validated and de-duplicated; invalid ones are named, never silently dropped), when each part opens, when access ends (follows the last open + 48 h until set).
-- **Session page** (refreshes every 60 s, only while the window is visible, access has not ended, and someone is mid-attempt or a part opens within 5 minutes): schedule and access end (a part's open time is fixed once anyone has started it), the source images (3 uploads at a time), a participant × part table of state badges that opens each candidate's work (their edit beside the image it started from), **Add people**, **Remove** (access stops on the next request; work is kept; **Restore** re-adds), and **Copy link**.
+- **Session page** (refreshes every 60 s, only while the window is visible, access has not ended, and someone is mid-attempt or a part opens within 5 minutes): schedule and access end (a part's open time is fixed once anyone has started it), the source images (3 uploads at a time), a participant × part table of state badges that opens each candidate's work (their edit beside the image it started from), **Stop session** (confirmed; ends the test now for everyone, including anyone mid-attempt — it just sets `closesAtMs = now`, so every guard already honours it, a running attempt ends where it stands, uploaded work is kept, uploads already travelling get the 30 s grace; set a later "Access ends" to reopen), a per-candidate **Reopen** on any ended part (timed out, submitted or missed), **Add people**, **Remove** (access stops on the next request; work is kept; **Restore** re-adds), and **Copy link**.
 - Times are entered and shown in the **viewer's** timezone (rule 9g) via `zonedTime.ts`, not the browser's.
 - It is **view only**: no scoring, notes or shortlist yet.
+
+### Reopening one candidate
+
+`reopenParticipant` gives one candidate a **fresh full clock on the same attempt** — their uploads are kept, `finishedAtMs` is cleared, `deadlineMs = now + durationMs`, the upload-attempt counter and pending uploads reset — or, for a part they never started, simply lets them Start it. It also sets `accessUntilMs = now + 24 h` on the **participant**, because the session may well have ended: `sessionFor(participant, session)` substitutes that for the session's `closesAtMs` everywhere access is judged (sign-in, `/me`, start, upload, finalize, state derivation). A **Stop pressed after the reopen** ends them again (`session.stoppedAtMs > participant.reopenedAtMs`); one pressed before it does not. Refused while the part is genuinely running, or while another of their parts is, and for a removed person (Restore first).
 
 ## Abuse model
 
