@@ -196,7 +196,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
               const cfg = session.parts[part.id];
               if (!cfg) return null;
               const opened = cfg.opensAtMs <= now;
-              const ready = cfg.sources.length >= part.task.sourceCount;
+              const ready = cfg.sources.length >= part.task.pickCount;
               return (
                 <div key={part.id} className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -223,13 +223,13 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
                   </div>
                   {!ready && opened && (
                     <p role="alert" className="mt-3 text-sm text-orange-300">
-                      This part is open but has {cfg.sources.length} of {part.task.sourceCount} images, so candidates cannot start it.
+                      This part is open but has {cfg.sources.length} {cfg.sources.length === 1 ? 'image' : 'images'}, and candidates need at least {part.task.pickCount} to start it.
                     </p>
                   )}
                   <div className="mt-4">
                     <SourceImages
                       images={cfg.sources}
-                      required={part.task.sourceCount}
+                      minimum={part.task.pickCount}
                       locked={opened}
                       onAdd={(file) => addSource(part.id, file)}
                       onRemove={(imageId) => removeSource(part.id, imageId)}

@@ -26,8 +26,6 @@ export interface SlotDef {
 
 export interface IdSwapTask {
   kind: 'id-swap';
-  /** Source images the admin attaches to the session for this part. */
-  sourceCount: number;
   /** Source images the candidate works from. */
   pickCount: number;
   /** Edits made from each picked source — `pickCount × editsPerSource` = slots. */
@@ -70,12 +68,11 @@ export const TRAINING_MODULES: Record<TrainingModuleId, TrainingModuleDef> = {
         durationMs: 20 * MINUTE,
         summary: 'Four edits from two images, each a different level.',
         brief: [
-          'You are given a folder of 10 images. Choose 2 of them to work with.',
+          'You are given a set of images. Choose 2 of them to work with.',
           'Make 4 edits in total. Each image gets 2 edits, and every one of the 4 levels below is used exactly once, so the two images never repeat a level between them.',
         ],
         task: {
           kind: 'id-swap',
-          sourceCount: 10,
           pickCount: 2,
           editsPerSource: 2,
           slots: [
@@ -120,6 +117,13 @@ export type ImageSniff = (typeof IMAGE_TYPES)[keyof typeof IMAGE_TYPES]['sniff']
 export const IMAGE_LABEL = 'JPG, PNG or WebP';
 export const OUTPUT_ACCEPT = Object.keys(IMAGE_TYPES).join(',');
 export const MAX_OUTPUT_BYTES = 25 * 1024 * 1024;
+
+/**
+ * The most source images one part may hold. Not a design limit — the admin may
+ * attach as many as they like — but the list lives in the session document, so
+ * it is bounded well inside Firestore's 1 MiB document size.
+ */
+export const MAX_SOURCES_PER_PART = 500;
 
 /** Source images the admin attaches. A full-size original plus a small preview. */
 export const MAX_SOURCE_BYTES = 25 * 1024 * 1024;

@@ -53,7 +53,7 @@ interface TaskRoomProps {
 
 /**
  * The focus room: after Start there is no masthead, no navigation, only the
- * brief, the ten images, the four slots and the clock.
+ * brief, the images to choose from, the four slots and the clock.
  *
  * The picked images are derived on the server from the slots, so this component
  * keeps the choice locally and the slots are the record. Every rule it enforces

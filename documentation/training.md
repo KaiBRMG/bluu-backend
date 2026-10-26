@@ -60,7 +60,7 @@ Nothing is public. Reads are v4 signed URLs anchored to a 30-minute window (so r
 
 ## The clock is the server's
 
-- **Start** is a transaction: refuses before `opensAtMs`, after `closesAtMs`, while another part is running, or while the part has no full set of source images. It writes `deadlineMs = now + durationMs` **once**. A second Start (a double tap, a second tab) returns the attempt already running. A refresh or closing the page does not move it.
+- **Start** is a transaction: refuses before `opensAtMs`, after `closesAtMs`, while another part is running, or while the part has fewer source images than the task picks (2 for ID Swap). It writes `deadlineMs = now + durationMs` **once**. A second Start (a double tap, a second tab) returns the attempt already running. A refresh or closing the page does not move it.
 - Every response carries `nowMs`; the browser holds `skew = serverNow − deviceNow` (`useServerClock`) and renders `deadline − (now + skew)`. A wrong device clock cannot add or remove time.
 - A part's state is **derived on read** from the attempt and the clock (`derivePartState`): `scheduled` → `not-ready`/`open` → `in-progress` → `submitted` | `timed-out`, or `missed` if the session closed first. There is no cron: nothing flips a flag at the deadline.
 - **"The page is closed" means locked.** A script cannot close a tab it did not open. At zero the task room disables every input and, once no upload is still travelling, hands over to the part's overview ("Time's up. N of 4 edits uploaded and saved."). The server enforces the same boundary regardless of what the page does.
@@ -76,7 +76,7 @@ Nothing is public. Reads are v4 signed URLs anchored to a 30-minute window (so r
 
 ### Source images
 
-The source images are the admin's to attach (Session page → Parts). They are signed for a candidate **only while the attempt is in progress** — never on the briefing — and cannot be removed once a part has opened.
+The source images are the admin's to attach (Session page → Parts), **as many as they like** (at most 500 per part, only because the list lives in the session document). A part needs at least as many as the task picks (`pickCount`, 2 for ID Swap) before a candidate can start it; the candidate then chooses their own from however many there are. They are signed for a candidate **only while the attempt is in progress** — never on the briefing — and cannot be removed once a part has opened.
 
 ## Modules
 

@@ -4,11 +4,12 @@ import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ImagePlus, Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { IMAGE_TYPES, MAX_SOURCE_BYTES, OUTPUT_ACCEPT } from '@/lib/training/modules';
+import { IMAGE_TYPES, MAX_SOURCES_PER_PART, MAX_SOURCE_BYTES, OUTPUT_ACCEPT } from '@/lib/training/modules';
 
 interface SourceImagesProps {
   images: { id: string; name: string; thumbUrl: string }[];
-  required: number;
+  /** Fewest images the part needs before a candidate can start it. */
+  minimum: number;
   /** Once a part has opened a candidate may be choosing from these, so they are fixed. */
   locked: boolean;
   onAdd: (file: File) => Promise<void>;
@@ -22,17 +23,17 @@ interface SourceImagesProps {
  * browser, then both go straight to Storage (rule 9i). Uploads run three at a
  * time so ten large images do not queue behind each other or flood the line.
  */
-export default function SourceImages({ images, required, locked, onAdd, onRemove, onBatchDone }: SourceImagesProps) {
+export default function SourceImages({ images, minimum, locked, onAdd, onRemove, onBatchDone }: SourceImagesProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
-  const room = required - images.length;
+  const room = MAX_SOURCES_PER_PART - images.length;
 
   async function addFiles(files: File[]) {
     const accepted = files.filter((f) => f.type in IMAGE_TYPES);
     if (accepted.length < files.length) toast.error('Only JPG, PNG and WebP images are accepted');
     const batch = accepted.slice(0, Math.max(0, room));
-    if (accepted.length > batch.length) toast.error(`Only ${required} images fit. Added the first ${batch.length}.`);
+    if (accepted.length > batch.length) toast.error(`A part holds at most ${MAX_SOURCES_PER_PART} images. Added the first ${batch.length}.`);
     if (batch.length === 0) return;
 
     setProgress({ done: 0, total: batch.length });
@@ -63,7 +64,7 @@ export default function SourceImages({ images, required, locked, onAdd, onRemove
     <div>
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-zinc-400 tabular-nums">
-          Source images · {images.length} of {required}
+          Source images · {images.length}
         </p>
         {!locked && room > 0 && (
           <>
@@ -90,7 +91,7 @@ export default function SourceImages({ images, required, locked, onAdd, onRemove
 
       {images.length === 0 ? (
         <p className="mt-3 text-sm text-zinc-400">
-          None yet. Candidates cannot start this part until all {required} are here.
+          None yet. Candidates cannot start this part until at least {minimum} are here.
         </p>
       ) : (
         <ul className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">

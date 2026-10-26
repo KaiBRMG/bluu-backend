@@ -5,6 +5,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import {
   MAX_OUTPUT_BYTES,
   MAX_PARTICIPANTS_PER_SESSION,
+  MAX_SOURCES_PER_PART,
   MAX_SOURCE_BYTES,
   MAX_SOURCE_PREVIEW_BYTES,
   MAX_UPLOAD_ATTEMPTS,
@@ -133,7 +134,8 @@ function derivePartState(
   const cfg = session.parts[part.id];
   if (now > session.closesAtMs) return 'missed';
   if (!cfg || now < cfg.opensAtMs) return 'scheduled';
-  if (cfg.sources.length < part.task.sourceCount) return 'not-ready';
+  // A part can start once there is something to choose from: at least the number the task picks.
+  if (cfg.sources.length < part.task.pickCount) return 'not-ready';
   return 'open';
 }
 
@@ -925,8 +927,8 @@ export async function signSourceUpload(
   if (!(input.previewSize > 0 && input.previewSize <= MAX_SOURCE_PREVIEW_BYTES)) {
     throw new TrainingError('The preview is too large', 400);
   }
-  if ((session.parts[partId]?.sources.length ?? 0) >= part.task.sourceCount) {
-    throw new TrainingError(`This part takes exactly ${part.task.sourceCount} images`, 409);
+  if ((session.parts[partId]?.sources.length ?? 0) >= MAX_SOURCES_PER_PART) {
+    throw new TrainingError(`A part holds at most ${MAX_SOURCES_PER_PART} images`, 409);
   }
 
   const imageId = crypto.randomBytes(8).toString('hex');
@@ -986,8 +988,8 @@ export async function commitSource(
       const part = getPart(session.moduleId, partId);
       const cfg = session.parts[partId];
       if (!part || !cfg) throw new TrainingError('Not found', 404);
-      if (cfg.sources.length >= part.task.sourceCount) {
-        throw new TrainingError(`This part takes exactly ${part.task.sourceCount} images`, 409);
+      if (cfg.sources.length >= MAX_SOURCES_PER_PART) {
+        throw new TrainingError(`A part holds at most ${MAX_SOURCES_PER_PART} images`, 409);
       }
       tx.update(ref, {
         [`parts.${partId}.sources`]: [...cfg.sources, { id: input.imageId, name, path, thumbPath, bytes } satisfies SourceDoc],
