@@ -20,11 +20,16 @@ import {
   type TrainingPartDef,
 } from '@/lib/training/modules';
 import type {
+  AdminCandidateDetail,
+  AdminCandidateRow,
+  AdminCandidatePart,
+  AdminCandidateSession,
   AdminParticipant,
   AdminSessionDetail,
   AdminSessionRow,
   AdminSubmissionView,
   AttemptView,
+  CandidateStatus,
   MeResponse,
   PartResponse,
   PartState,
@@ -1011,6 +1016,179 @@ export async function getSubmission(
     finishedAtMs: attempt?.finishedAtMs ?? null,
     slots,
     sources,
+  };
+}
+
+// ─── Candidates across sessions (admin) ──────────────────────────────────────
+
+/** Most pressing first: a live clock, then something to start, then what is coming, then what ended. */
+const STATUS_RANK: Record<CandidateStatus, number> = {
+  'in-progress': 0,
+  open: 1,
+  'not-ready': 2,
+  scheduled: 3,
+  submitted: 4,
+  'timed-out': 5,
+  missed: 6,
+  removed: 7,
+};
+
+/** The most recent sign of life on an attempt. */
+function lastTouch(attempt: AttemptDoc): number {
+  return Math.max(
+    attempt.startedAtMs,
+    attempt.finishedAtMs ?? 0,
+    attempt.reopenedAtMs ?? 0,
+    ...Object.values(attempt.slots).map((s) => s.uploadedAtMs),
+  );
+}
+
+/** Upper bound on participant documents one list reads. A trial pool is tens of people, not thousands. */
+const CANDIDATE_SCAN_LIMIT = 2000;
+
+/**
+ * Every candidate, one row each, with the standing of their most pressing part.
+ * One collection read, one batched read of the sessions and one of the names
+ * (rule 9) — and it runs when the admin opens the tab, never on a poll.
+ */
+export async function listCandidates(): Promise<{ nowMs: number; candidates: AdminCandidateRow[] }> {
+  const snap = await adminDb.collection(PARTICIPANTS_COLLECTION).limit(CANDIDATE_SCAN_LIMIT).get();
+  const participants = snap.docs.map((d) => d.data() as ParticipantDoc);
+
+  const sessionIds = [...new Set(participants.map((p) => p.sessionId))];
+  const [sessionSnaps, names] = await Promise.all([
+    sessionIds.length
+      ? adminDb.getAll(...sessionIds.map((id) => adminDb.collection(SESSIONS_COLLECTION).doc(id)))
+      : Promise.resolve([]),
+    getCandidateNames([...new Set(participants.map((p) => p.emailHash))]),
+  ]);
+  const sessions = new Map<string, SessionDoc>();
+  for (const s of sessionSnaps) if (s.exists) sessions.set(s.id, s.data() as SessionDoc);
+
+  const now = Date.now();
+  const byCandidate = new Map<string, ParticipantDoc[]>();
+  for (const p of participants) byCandidate.set(p.emailHash, [...(byCandidate.get(p.emailHash) ?? []), p]);
+
+  const rows: AdminCandidateRow[] = [];
+  for (const [emailHash, mine] of byCandidate) {
+    let best: { rank: number; state: CandidateStatus; detail: string } | null = null;
+    let partsSubmitted = 0;
+    let partsTotal = 0;
+    let sessionCount = 0;
+    let lastActivityMs = 0;
+
+    for (const p of mine) {
+      lastActivityMs = Math.max(lastActivityMs, p.addedAtMs, ...Object.values(p.attempts ?? {}).map(lastTouch));
+      const raw = sessions.get(p.sessionId);
+      if (!raw || p.revokedAtMs != null) continue;
+      const session = sessionFor(p, raw);
+      const mod = getModule(session.moduleId);
+      if (!mod) continue;
+      sessionCount += 1;
+      for (const part of mod.parts) {
+        const state = derivePartState(now, session, part, p.attempts?.[part.id]);
+        partsTotal += 1;
+        if (state === 'submitted') partsSubmitted += 1;
+        const rank = STATUS_RANK[state];
+        if (!best || rank < best.rank) best = { rank, state, detail: `${part.title} · ${session.label}` };
+      }
+    }
+
+    rows.push({
+      emailHash,
+      email: mine[0].email,
+      name: names.get(emailHash) ?? null,
+      status: best?.state ?? 'removed',
+      statusDetail: best?.detail ?? '',
+      sessionCount,
+      partsSubmitted,
+      partsTotal,
+      lastActivityMs,
+    });
+  }
+
+  rows.sort(
+    (a, b) =>
+      STATUS_RANK[a.status] - STATUS_RANK[b.status] ||
+      b.lastActivityMs - a.lastActivityMs ||
+      (a.name ?? a.email).localeCompare(b.name ?? b.email),
+  );
+  return { nowMs: now, candidates: rows };
+}
+
+/** Everything one candidate has submitted, across every session they have been on. */
+export async function getCandidateDetail(emailHash: string): Promise<AdminCandidateDetail> {
+  if (!/^[a-f0-9]{32}$/.test(emailHash)) throw new TrainingError('Not found', 404);
+  const snap = await adminDb.collection(PARTICIPANTS_COLLECTION).where('emailHash', '==', emailHash).get();
+  const participants = snap.docs.map((d) => d.data() as ParticipantDoc);
+  if (participants.length === 0) throw new TrainingError('Not found', 404);
+
+  const sessionSnaps = await adminDb.getAll(
+    ...[...new Set(participants.map((p) => p.sessionId))].map((id) => adminDb.collection(SESSIONS_COLLECTION).doc(id)),
+  );
+  const sessions = new Map<string, SessionDoc>();
+  for (const s of sessionSnaps) if (s.exists) sessions.set(s.id, s.data() as SessionDoc);
+
+  const now = Date.now();
+  const built = await Promise.all(
+    participants.map(async (p): Promise<AdminCandidateSession | null> => {
+      const raw = sessions.get(p.sessionId);
+      const mod = raw ? getModule(raw.moduleId) : null;
+      if (!raw || !mod) return null;
+      const session = sessionFor(p, raw);
+
+      const parts = await Promise.all(
+        mod.parts.map(async (part): Promise<AdminCandidatePart> => {
+          const attempt = p.attempts?.[part.id];
+          const entries = Object.entries(attempt?.slots ?? {}) as [SlotId, SlotDoc][];
+          const used = new Set(entries.map(([, s]) => s.sourceId));
+          const [slots, sources] = await Promise.all([
+            Promise.all(
+              entries.map(async ([slotId, s]) => ({
+                slotId,
+                sourceId: s.sourceId,
+                uploadedAtMs: s.uploadedAtMs,
+                bytes: s.bytes,
+                url: await signRead(s.path),
+              })),
+            ),
+            Promise.all(
+              (raw.parts[part.id]?.sources ?? [])
+                .filter((src) => used.has(src.id))
+                .map(async (src) => ({ id: src.id, name: src.name, thumbUrl: await signRead(src.thumbPath) })),
+            ),
+          ]);
+          return {
+            partId: part.id,
+            state: derivePartState(now, session, part, attempt),
+            startedAtMs: attempt?.startedAtMs ?? null,
+            deadlineMs: attempt?.deadlineMs ?? null,
+            finishedAtMs: attempt?.finishedAtMs ?? null,
+            reopenedAtMs: attempt?.reopenedAtMs ?? null,
+            slots,
+            sources,
+          };
+        }),
+      );
+      return {
+        sessionId: p.sessionId,
+        label: raw.label,
+        moduleId: raw.moduleId,
+        addedAtMs: p.addedAtMs,
+        revokedAtMs: p.revokedAtMs,
+        closesAtMs: session.closesAtMs,
+        parts,
+        createdAtMs: raw.createdAtMs,
+      };
+    }),
+  );
+
+  return {
+    email: participants[0].email,
+    name: await getCandidateName(emailHash),
+    sessions: built
+      .filter((x): x is AdminCandidateSession => x !== null)
+      .sort((a, b) => b.createdAtMs - a.createdAtMs),
   };
 }
 

@@ -691,7 +691,7 @@ Three calls worth not re-litigating:
 
 ## 11. Notifications
 
-**They are in.** Nine events notify, restored after the deliberate pre-launch silence — the figures have been trusted long enough to tell people about them. Copy lives in `notificationContent.ts` and the catalogue in `automatedNotifications.ts`, under the `Coverage` and `Salary` categories (cross-cutting rule 15); the full event → factory table is in [notifications.md](notifications.md#notification-events--factory-functions).
+**They are in.** Ten events notify, restored after the deliberate pre-launch silence — the figures have been trusted long enough to tell people about them. Copy lives in `notificationContent.ts` and the catalogue in `automatedNotifications.ts`, under the `Coverage` and `Salary` categories (cross-cutting rule 15); the full event → factory table is in [notifications.md](notifications.md#notification-events--factory-functions).
 
 | Event | Who is told | Gate |
 |---|---|---|
@@ -701,6 +701,7 @@ Three calls worth not re-litigating:
 | Overtime cancelled | Each agent who was covering | **Coalesced** per agent per day |
 | Overtime still unassigned | One named approver | The day before the shift, from 09:00 salary-local · remembers the offers it has chased |
 | Overtime still available | Every chat agent but the absentee | The day before, from 09:00 salary-local · only offers with **no claims** · remembers the offers it has chased |
+| Overtime claimed | One named approver | **Coalesced** per claimant per day · a claim withdrawn before the flush is taken back out · the approver's own claims are not announced |
 | Payday in 3 days | Every chat agent | Once per month, latched |
 | Salary finalised | That agent | — (reopening notifies nobody) |
 | Commission tier reached | That agent | Once per band per month, and only upwards |
@@ -714,6 +715,8 @@ Seven decisions inside that table are load-bearing.
 **The unassigned chaser is the one notification that fires because something did *not* happen.** An offer released by approved leave sits `available` until an admin assigns it, and until now nothing said so — the board was a screen someone had to remember to open. `remindUnassignedOffers` runs on the same 5-minute cron, holds until **09:00 in the salary timezone** (the chaser is for a working day, not a phone at 02:00), and names only the accounts *still* on the board for **tomorrow**, so a partly-assigned absence chases the remainder. Its gate is deliberately **not** a once-a-day latch but a set of offer ids, in `ca-notification-latches/overtime-unassigned-{day}`: leave approved at lunchtime releases accounts onto tomorrow's board after the morning tick, and a plain latch would swallow exactly the accounts most likely to go uncovered. The ids are marked inside a transaction **before** the send, so two overlapping ticks cannot both chase the same offer — the same trade the payday latch makes. An offer assigned and then unassigned is not re-chased: the approver moved it by hand and knows it is there.
 
 **The roster gets its own half of that chase (2026-10-20).** `remindUnclaimedOffers`, same tick, same 09:00 hold, same offer-id memory in its own latch (`ca-notification-latches/overtime-unclaimed-{day}`, reusing the already-exempt field names so no index change). It tells every chat agent about tomorrow's offers **nobody has claimed** — an offer with a claimant is waiting on the approver, not the roster, so it is left out. Every offer for tomorrow is still claimable (claims stay open until the window ends), so nothing else is filtered. The absentee is never told about their own released accounts: recipients are grouped by which pending offers they may claim, one message per group.
+
+**A claim tells the approver, through the same queue (kind `claimed`).** A claim is interest, not a booking (§6), so the next move is the approver's — and until now nothing told them one had happened. `POST /api/ca-coverage/claim` queues into `ca-coverage-notices` as `claimed__{claimantUid}__{day}`; the flush names the claimant from their `users` doc and sends to `CA_LEAVE_ALERT_RECIPIENT_UID`. `userId` on this kind is the *claimant*, not the recipient — it is the only kind where they differ. `DELETE` on the claim `arrayRemove`s the creator from the queue, so a claim taken back inside the quiet period is never announced (a queue left empty is skipped and deleted by the flush); one already sent cannot be recalled. No new Firestore field, so no rules or index change.
 
 **Dispute decisions are coalesced too, through a second queue.** Same mechanism, different shape: a reviewer rules on a whole screen of disputes in one sitting, so each decision **queues** into `ca-dispute-notices` (one doc per `stage`+`outcome`+filer, count incremented, reasons merged with `arrayUnion`) and the same cron sends it after the same 3-minute quiet period. Three things differ from the coverage queue and each is deliberate:
 

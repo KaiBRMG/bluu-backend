@@ -62,7 +62,10 @@ import LoadingScreen from '@/components/LoadingScreen';
  *    see `updateInFlight.ts`.
  *  - **Never over unsaved typing**, never during onboarding, never offline
  *    (an offline reload lands on the shell's offline screen instead of the page
- *    the user was on).
+ *    the user was on). "Offline" is tested twice: `navigator.onLine`, then a
+ *    live probe of the origin — right after a wake the first is true while the
+ *    network is not usable yet, and that reload is what used to strand the
+ *    window on the offline screen. A failed probe keeps the staleness latched.
  *  - **Resume reloads are rate-limited across reloads** (`sessionStorage`), so
  *    no combination of timer behaviour can turn this into a poll — a reload is
  *    a burst of origin requests (rule 9i).
@@ -91,6 +94,9 @@ const RELOAD_STAMP_KEY = 'bluu:resume-reload-at';
 // If the reload has not torn this page down by now, something cancelled it —
 // lift the cover rather than leave the user staring at a loader.
 const COVER_FAILSAFE_MS = 15 * 1000;
+// A reload only goes ahead if the origin answers within this. Right after a
+// wake `navigator.onLine` is already true while the network is not yet usable.
+const PROBE_TIMEOUT_MS = 8 * 1000;
 
 type StaleReason = 'deployment' | 'resume';
 
@@ -124,6 +130,23 @@ function writeReloadStamp(at: number) {
     sessionStorage.setItem(RELOAD_STAMP_KEY, String(at));
   } catch {
     // Storage unavailable — the "used since load" guard still prevents a loop.
+  }
+}
+
+/** `navigator.onLine` only says a network interface exists. Straight after a
+ *  wake it is true while Wi-Fi is still associating or DNS is not up, and a
+ *  reload issued then fails and parks the window on the shell's offline screen.
+ *  Ask the origin itself. `/api/deployment` is the cheapest route we have. */
+async function originReachable(): Promise<boolean> {
+  const ctl = new AbortController();
+  const timer = window.setTimeout(() => ctl.abort(), PROBE_TIMEOUT_MS);
+  try {
+    const res = await fetch('/api/deployment', { cache: 'no-store', signal: ctl.signal });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(timer);
   }
 }
 
@@ -176,25 +199,35 @@ export default function DeploymentRefresher() {
     if (!canReload(reason)) return;
 
     reloadingRef.current = true;
-    if (reason === 'resume') writeReloadStamp(Date.now());
+    void originReachable().then((reachable) => {
+      // Not reachable (or the gate closed while we asked): staleness stays
+      // latched and the next trigger — `online`, the 30s tick, focus, blur —
+      // tries again. The reload stamp is written only once we commit, so a
+      // failed probe never burns the 30-minute resume allowance.
+      if (!reachable || !canReload(reason)) {
+        reloadingRef.current = false;
+        return;
+      }
+      if (reason === 'resume') writeReloadStamp(Date.now());
 
-    // Paint the cover first, then reload — two frames so the loader is actually
-    // on screen before the navigation starts. The incoming page boots behind
-    // the same black loader, so the hand-off is seamless. A hidden window may
-    // never get a frame, so a short timer issues the reload regardless.
-    setCovering(true);
-    let issued = false;
-    const issue = () => {
-      if (issued) return;
-      issued = true;
-      window.location.reload();
-    };
-    requestAnimationFrame(() => requestAnimationFrame(issue));
-    window.setTimeout(issue, 150);
-    window.setTimeout(() => {
-      reloadingRef.current = false;
-      setCovering(false);
-    }, COVER_FAILSAFE_MS);
+      // Paint the cover first, then reload — two frames so the loader is actually
+      // on screen before the navigation starts. The incoming page boots behind
+      // the same black loader, so the hand-off is seamless. A hidden window may
+      // never get a frame, so a short timer issues the reload regardless.
+      setCovering(true);
+      let issued = false;
+      const issue = () => {
+        if (issued) return;
+        issued = true;
+        window.location.reload();
+      };
+      requestAnimationFrame(() => requestAnimationFrame(issue));
+      window.setTimeout(issue, 150);
+      window.setTimeout(() => {
+        reloadingRef.current = false;
+        setCovering(false);
+      }, COVER_FAILSAFE_MS);
+    });
   }, [canReload]);
 
   const markResumeStale = useCallback(() => {

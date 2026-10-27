@@ -3835,35 +3835,82 @@ const LOCAL_PAGE_URLS = new Set([pathToFileURL(LOADING_PAGE).href, pathToFileURL
 const OFFLINE_RETRY_BASE = 2000;
 const OFFLINE_RETRY_MAX = 30000;
 
-function clearOfflineRetry(rec) {
-  if (!rec) return;
+// An app load that has neither finished nor failed by now is hung (typically a
+// socket that died with the sleep) — stop it and go round again.
+const LOAD_HANG_TIMEOUT_MS = 20000;
+
+function cancelOfflineTimer(rec) {
   if (rec.offlineTimer) {
     clearTimeout(rec.offlineTimer);
     rec.offlineTimer = null;
   }
+}
+
+// Called on a SUCCESSFUL app load: the window is online again.
+function clearOfflineRetry(rec) {
+  if (!rec) return;
+  cancelOfflineTimer(rec);
   rec.offlineDelay = OFFLINE_RETRY_BASE;
+  rec.offline = false;
+}
+
+function scheduleOfflineRetry(win, rec, delay) {
+  cancelOfflineTimer(rec);
+  rec.offlineTimer = setTimeout(() => {
+    rec.offlineTimer = null;
+    if (!win.isDestroyed()) loadAppUrl(win);
+  }, delay);
 }
 
 function loadAppUrl(win) {
   const rec = recordFor(win);
   if (!rec) return;
-  clearOfflineRetry(rec);
-  win.loadURL(rec.appUrl);
+  // Cancel the pending retry but keep the backoff — only a successful load
+  // resets it.
+  cancelOfflineTimer(rec);
+  rec.lastLoadAttemptAt = Date.now();
+  // A rejection is the same event as did-fail-load, which already handles it.
+  win.loadURL(rec.appUrl).catch(() => {});
+  // While parked on the offline screen the retry chain used to depend on
+  // did-fail-load firing for every attempt. An attempt that hangs, or ends in
+  // ERR_ABORTED (ignored there on purpose), left no timer behind and the
+  // window sat on the offline screen forever. Always have one pending.
+  if (rec.offline) {
+    scheduleOfflineRetry(win, rec, LOAD_HANG_TIMEOUT_MS);
+  }
 }
 
 function showOfflineScreen(win) {
   const rec = recordFor(win);
   if (!rec) return;
+  rec.offline = true;
+  // Replaces any pending timer — including the hang guard from loadAppUrl — so
+  // a real failure retries on the backoff, not at the end of the hang timeout.
   win.loadFile(OFFLINE_PAGE).catch(() => {});
   // Auto-retry with capped exponential backoff; the offline page also has a
   // manual "Try again" button (app:retry-load).
-  if (!rec.offlineTimer) {
-    rec.offlineTimer = setTimeout(() => {
-      rec.offlineTimer = null;
-      loadAppUrl(win);
-    }, rec.offlineDelay);
-    rec.offlineDelay = Math.min(rec.offlineDelay * 2, OFFLINE_RETRY_MAX);
-  }
+  scheduleOfflineRetry(win, rec, rec.offlineDelay);
+  rec.offlineDelay = Math.min(rec.offlineDelay * 2, OFFLINE_RETRY_MAX);
+}
+
+// The user is back (focus / wake / unlock): don't make them wait out the
+// backoff. Throttled so a burst of events is one attempt, and skipped while a
+// load we just started is still within its grace period.
+const RETURN_RETRY_MIN_GAP_MS = 3000;
+function retryIfOffline(win, delayMs = 0) {
+  const rec = recordFor(win);
+  if (!rec || !rec.offline || win.isDestroyed()) return;
+  setTimeout(() => {
+    if (!rec.offline || win.isDestroyed()) return;
+    if (Date.now() - (rec.lastLoadAttemptAt || 0) < RETURN_RETRY_MIN_GAP_MS) return;
+    loadAppUrl(win);
+  }, delayMs);
+}
+
+// After a wake the network needs a moment; an immediate attempt just fails and
+// costs the backoff step. Wi-Fi typically associates within a few seconds.
+function retryAllOfflineWindows(delayMs) {
+  for (const rec of winRecords.values()) retryIfOffline(rec.win, delayMs);
 }
 
 ipcMain.on('app:retry-load', (event) => loadAppUrl(senderWindow(event)));
@@ -3995,6 +4042,8 @@ function attachWindowBehaviour(win, { isMain, appUrl, minWidth, minHeight, satel
     suppressResizedUntil: 0,
     offlineTimer: null,
     offlineDelay: OFFLINE_RETRY_BASE,
+    offline: false,
+    lastLoadAttemptAt: 0,
     reloadCount: 0,
     reloadWindowStart: Date.now(),
   };
@@ -4018,6 +4067,10 @@ function attachWindowBehaviour(win, { isMain, appUrl, minWidth, minHeight, satel
   // Lets a window decide whether an incoming message deserves a notification, or
   // whether the thread on screen should be marked read.
   win.on('focus', () => sendTo(win, 'window:focus-changed', { focused: true }));
+  // Coming back to a window parked on the offline screen retries at once rather
+  // than at the end of whatever backoff step it had reached while nobody looked.
+  win.on('focus', () => retryIfOffline(win));
+  win.on('show', () => retryIfOffline(win));
   win.on('blur', () => sendTo(win, 'window:focus-changed', { focused: false }));
 
   // Open external links (target=_blank) in default browser
@@ -5344,9 +5397,15 @@ function forwardPowerEvent(name) {
 
 function registerPowerListeners() {
   powerMonitor.on('suspend', () => forwardPowerEvent('suspend'));
-  powerMonitor.on('resume', () => forwardPowerEvent('resume'));
+  powerMonitor.on('resume', () => {
+    forwardPowerEvent('resume');
+    retryAllOfflineWindows(2500);
+  });
   powerMonitor.on('lock-screen', () => forwardPowerEvent('lock'));
-  powerMonitor.on('unlock-screen', () => forwardPowerEvent('unlock'));
+  powerMonitor.on('unlock-screen', () => {
+    forwardPowerEvent('unlock');
+    retryAllOfflineWindows(1500);
+  });
 }
 
 app.whenReady().then(() => {

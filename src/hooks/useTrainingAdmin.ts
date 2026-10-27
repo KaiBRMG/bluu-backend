@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useEffectEvent, useState } from 'react';
 import { apiRequest } from '@/lib/clientApi';
 import { makePreview } from '@/components/admin/training/makePreview';
-import type { AdminSessionDetail, AdminSessionRow, AdminSubmissionView } from '@/lib/training/types';
+import type {
+  AdminCandidateDetail,
+  AdminCandidateRow,
+  AdminSessionDetail,
+  AdminSessionRow,
+  AdminSubmissionView,
+} from '@/lib/training/types';
 
 /** One call to the admin training API; throws the server's own message on failure. */
 export async function trainingAdmin<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
@@ -47,6 +53,57 @@ export function useTrainingSessions() {
   }, [refreshKey]);
 
   return { sessions, nowMs, error, refetch };
+}
+
+export function useTrainingCandidates() {
+  const [candidates, setCandidates] = useState<AdminCandidateRow[] | null>(null);
+  const [error, setError] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const refetch = useCallback(() => setRefreshKey((k) => k + 1), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    trainingAdmin<{ candidates: AdminCandidateRow[] }>('candidates')
+      .then((res) => {
+        if (cancelled) return;
+        setCandidates(res.candidates);
+        setError('');
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load candidates');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
+
+  return { candidates, error, refetch };
+}
+
+/** One candidate across every session. Keyed by the caller, so a new candidate is a new instance. */
+export function useTrainingCandidate(emailHash: string) {
+  const [detail, setDetail] = useState<AdminCandidateDetail | null>(null);
+  const [error, setError] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const refetch = useCallback(() => setRefreshKey((k) => k + 1), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    trainingAdmin<AdminCandidateDetail>(`candidates/${emailHash}`)
+      .then((res) => {
+        if (cancelled) return;
+        setDetail(res);
+        setError('');
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load this candidate');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [emailHash, refreshKey]);
+
+  return { detail, error, refetch };
 }
 
 export function useTrainingSession(sessionId: string) {

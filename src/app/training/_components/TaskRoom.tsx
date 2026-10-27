@@ -124,6 +124,12 @@ export function TaskRoom({ initial, part, now, onEnded }: TaskRoomProps) {
     }
   }
 
+  /** Downloading an image is choosing it: add it to the picks when there is room. Never un-picks. */
+  function pickOnDownload(id: string) {
+    if (locked) return;
+    setPicked((p) => (p.includes(id) || p.length >= task.pickCount ? p : [...p, id]));
+  }
+
   async function upload(def: SlotDef, file: File) {
     const current = slots[def.id];
     if (locked || !current.sourceId) return;
@@ -232,7 +238,7 @@ export function TaskRoom({ initial, part, now, onEnded }: TaskRoomProps) {
             Choose {task.pickCount} images
           </h2>
           <p className="mt-1 text-sm text-white/70">
-            Download the originals to work from. {picked.length} of {task.pickCount} chosen.
+            Download the originals to work from — downloading an image chooses it. {picked.length} of {task.pickCount} chosen.
           </p>
           <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
             {sources.map((src) => {
@@ -275,6 +281,7 @@ export function TaskRoom({ initial, part, now, onEnded }: TaskRoomProps) {
                   <a
                     href={src.downloadUrl}
                     aria-label={`Download original of ${src.name}`}
+                    onClick={() => pickOnDownload(src.id)}
                     className="absolute top-2 right-2 grid size-9 place-items-center rounded-lg border border-white/20 bg-[#08090b]/90 text-white outline-none hover:bg-black focus-visible:ring-2 focus-visible:ring-[#00b8f5]/70"
                   >
                     <IconDownload className="size-4" aria-hidden />

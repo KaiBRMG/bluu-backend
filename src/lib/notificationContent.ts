@@ -299,6 +299,16 @@ export const notifications = {
     actionUrl: '/ca-portal/dashboard',
   }),
 
+  // Tells the leave approver an agent has put their name down for overtime — a
+  // claim is only interest, so the next step is theirs: assign it on the
+  // Coverage board. `creatorList` is everything that agent claimed for that day.
+  overtimeClaimed: (agentName: string, creatorList: string, dateStr: string): NotificationContent => ({
+    title: '🙋 Overtime Claimed',
+    message: `${agentName} has claimed overtime on ${creatorList} on ${dateStr}. Review the Coverage board to assign it.`,
+    type: 'action',
+    actionUrl: '/ca-portal/admin',
+  }),
+
   // ─── Chat-agent salary ────────────────────────────────────────────────────────
   paydayApproaching: (monthLabel: string): NotificationContent => ({
     title: '💸 Payday is Approaching',

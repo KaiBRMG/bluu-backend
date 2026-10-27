@@ -143,3 +143,54 @@ export interface AdminSubmissionView {
   /** Only the images this candidate actually used. */
   sources: { id: string; name: string; thumbUrl: string }[];
 }
+
+// ─── Admin: candidates across sessions ───────────────────────────────────────
+
+/** A candidate's standing: the state of their most pressing part, or removal. */
+export type CandidateStatus = PartState | 'removed';
+
+export interface AdminCandidateRow {
+  emailHash: string;
+  email: string;
+  /** Null until they have signed in and given their name. */
+  name: string | null;
+  status: CandidateStatus;
+  /** What the status is about, e.g. "ID Swap (SFW) · October intake". Empty when removed. */
+  statusDetail: string;
+  /** Sessions they are currently on (not removed). */
+  sessionCount: number;
+  partsSubmitted: number;
+  partsTotal: number;
+  /** Latest sign of life: an upload, a start, a finish, or when they were added. */
+  lastActivityMs: number;
+}
+
+export interface AdminCandidatePart {
+  partId: string;
+  state: PartState;
+  startedAtMs: number | null;
+  deadlineMs: number | null;
+  finishedAtMs: number | null;
+  reopenedAtMs: number | null;
+  slots: AdminSubmissionView['slots'];
+  sources: AdminSubmissionView['sources'];
+}
+
+export interface AdminCandidateSession {
+  sessionId: string;
+  label: string;
+  moduleId: TrainingModuleId;
+  /** When the session was created — what "newest first" sorts on. */
+  createdAtMs: number;
+  addedAtMs: number;
+  revokedAtMs: number | null;
+  closesAtMs: number;
+  parts: AdminCandidatePart[];
+}
+
+export interface AdminCandidateDetail {
+  email: string;
+  name: string | null;
+  /** Newest session first. */
+  sessions: AdminCandidateSession[];
+}

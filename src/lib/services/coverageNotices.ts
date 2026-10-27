@@ -49,6 +49,7 @@ import {
 import { resolveAccountNames } from './creatorAccountService';
 import { CA_LEAVE_ALERT_RECIPIENT_UID, formatNameList, getChatAgentUids, notifyUsers } from './caNotifications';
 import { getOffers } from './caCoverageService';
+import { getUserById } from './userService';
 
 const NOTICES = 'ca-coverage-notices';
 const WITHDRAWALS = 'ca-coverage-withdrawals';
@@ -64,7 +65,12 @@ const LATCHES = 'ca-notification-latches';
  */
 export const QUIET_MS = 3 * 60 * 1000;
 
-export type CoverageNoticeKind = 'assigned' | 'cancelled';
+/**
+ * `assigned` / `cancelled` are addressed to `userId`. `claimed` is the odd one
+ * out: `userId` is the **claimant**, and the message goes to the leave approver
+ * (`CA_LEAVE_ALERT_RECIPIENT_UID`) — the notice is about them, not for them.
+ */
+export type CoverageNoticeKind = 'assigned' | 'cancelled' | 'claimed';
 
 interface CoverageNoticeDoc {
   noticeId: string;
@@ -116,6 +122,60 @@ export async function queueCoverageNotice(params: {
       );
   } catch (err) {
     console.error('[coverageNotices] failed to queue', params.kind, err);
+  }
+}
+
+/**
+ * Queue the "Overtime Claimed" notice for the leave approver.
+ *
+ * Coalesced for the same reason assignment is: an agent opening the calendar
+ * and claiming three of tomorrow's accounts one click at a time is one event to
+ * the approver, not three. Keyed `(claimant, day)`, so claims on different days
+ * stay separate messages — the copy names a single date.
+ *
+ * An approver who claims overtime themselves is not told about it: the message
+ * would arrive in their own tray, about their own click.
+ *
+ * Never throws — the claim is already written.
+ */
+export async function queueClaimNotice(params: {
+  claimantUid: string;
+  day: SalaryDayKey;
+  creatorName: string;
+}): Promise<void> {
+  if (params.claimantUid === CA_LEAVE_ALERT_RECIPIENT_UID) return;
+  await queueCoverageNotice({
+    kind: 'claimed',
+    userId: params.claimantUid,
+    day: params.day,
+    creatorNames: [params.creatorName],
+  });
+}
+
+/**
+ * Take a withdrawn claim back out of the queue, so a claim the agent changed
+ * their mind about inside the quiet period is not announced.
+ *
+ * Removes the name rather than deleting the document: other claims for the same
+ * day may share it. A queue left empty is skipped and deleted by the flush, so
+ * there is nothing to clean up here. A queue that has already been sent no
+ * longer exists, and `update` on a missing document is the expected no-op — the
+ * approver was told and the board shows the claim gone.
+ *
+ * Never throws.
+ */
+export async function dequeueClaimNotice(params: {
+  claimantUid: string;
+  day: SalaryDayKey;
+  creatorName: string;
+}): Promise<void> {
+  try {
+    await adminDb
+      .collection(NOTICES)
+      .doc(noticeId('claimed', params.claimantUid, params.day))
+      .update({ creatorNames: FieldValue.arrayRemove(params.creatorName) });
+  } catch {
+    // NOT_FOUND — nothing queued (already sent, or never queued). Not an error.
   }
 }
 
@@ -203,12 +263,20 @@ export async function flushCoverageNotices(now: number = Date.now()): Promise<Fl
     const creatorList = formatNameList(notice.creatorNames ?? []);
     if (creatorList) {
       const dateStr = formatDayLabelWithWeekday(notice.day);
-      const content =
-        notice.kind === 'assigned'
-          ? notifications.overtimeAssigned(creatorList, dateStr)
-          : notifications.overtimeCancelled(creatorList, dateStr);
-
-      await notifyUsers([notice.userId], content, { label: `coverage ${notice.kind}` });
+      if (notice.kind === 'claimed') {
+        const claimant = await getUserById(notice.userId);
+        await notifyUsers(
+          [CA_LEAVE_ALERT_RECIPIENT_UID],
+          notifications.overtimeClaimed(claimant?.displayName || 'An agent', creatorList, dateStr),
+          { label: 'coverage claimed' },
+        );
+      } else {
+        const content =
+          notice.kind === 'assigned'
+            ? notifications.overtimeAssigned(creatorList, dateStr)
+            : notifications.overtimeCancelled(creatorList, dateStr);
+        await notifyUsers([notice.userId], content, { label: `coverage ${notice.kind}` });
+      }
       sent += 1;
     }
 

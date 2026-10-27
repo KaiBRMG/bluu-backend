@@ -22,7 +22,8 @@ import {
  * 1. **Flush coalesced coverage notices.** An admin assigning four released
  *    accounts to one agent must produce one message naming four creators, not
  *    four messages. `ca-coverage-notices` accumulates them and this sends each
- *    queue once it has been quiet for a few minutes — see
+ *    queue once it has been quiet for a few minutes (this includes an agent's
+ *    overtime *claims*, which tell the leave approver) — see
  *    `services/coverageNotices.ts` for why the delay cannot live inside the
  *    assignment request.
  * 2. **Flush coalesced dispute decisions.** A reviewer clearing a backlog

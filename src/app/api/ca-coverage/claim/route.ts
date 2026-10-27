@@ -15,12 +15,21 @@
  * like, and the admin who assigns sees each claimant's load on Coverage → To
  * assign. Enforced here rather than only in the UI: a client-side guard is not a
  * guard.
+ *
+ * ## Who is told
+ *
+ * A claim queues an "Overtime Claimed" notice for the leave approver
+ * (`CA_LEAVE_ALERT_RECIPIENT_UID`) and nobody else. It is coalesced through
+ * `ca-coverage-notices` like assignment is — claiming several accounts for one
+ * day sends one message — and withdrawing a claim inside the quiet period takes
+ * it back out. See `coverageNotices.ts`.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
 import { claimOffer, withdrawClaim, getOffer } from '@/lib/services/caCoverageService';
+import { dequeueClaimNotice, queueClaimNotice } from '@/lib/services/coverageNotices';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
@@ -43,6 +52,9 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     }
 
     await claimOffer(offerId, token.uid, typeof note === 'string' ? note.trim().slice(0, 280) : undefined);
+
+    // Tell the leave approver — coalesced, and non-fatal (the claim is written).
+    await queueClaimNotice({ claimantUid: token.uid, day: offer.day, creatorName: offer.creatorName });
     return NextResponse.json({ success: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to claim';
@@ -67,6 +79,9 @@ export const DELETE = withAuth(async (request: NextRequest, token: DecodedIdToke
     }
 
     await withdrawClaim(offerId, token.uid);
+
+    // A claim taken back before the quiet period ends must not be announced.
+    if (offer) await dequeueClaimNotice({ claimantUid: token.uid, day: offer.day, creatorName: offer.creatorName });
     return NextResponse.json({ success: true });
   } catch (err) {
     return handleApiError(err, 'ca-coverage/claim DELETE');

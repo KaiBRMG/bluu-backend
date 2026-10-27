@@ -269,6 +269,21 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     content: notifications.overtimeUnclaimed('{creator1 and creator2}', '{Tue 23 Sep}'),
     telegramEnabled: true,
   },
+  {
+    id: 'overtimeClaimed',
+    category: 'Coverage',
+    event: 'Overtime claimed',
+    trigger:
+      'A chat agent claims one or more overtime offers on the calendar. A claim is only interest — the approver still assigns — so this tells them there is something to assign. Coalesced like the assignment: claims queue into ca-coverage-notices per agent per day and one notification naming every account is sent once the queue has been quiet for 3 minutes, flushed by the 5-minute cron. A claim withdrawn inside that window is taken back out, so it is never announced. An approver who claims overtime themselves is not told.',
+    recipients: 'The one named leave approver (CA_LEAVE_ALERT_RECIPIENT_UID)',
+    sources: [
+      'src/app/api/ca-coverage/claim/route.ts',
+      'src/app/api/cron/ca-notifications/route.ts',
+      'src/lib/services/coverageNotices.ts',
+    ],
+    content: notifications.overtimeClaimed('{agent}', '{creator1 and creator2}', '{Tue 23 Sep}'),
+    telegramEnabled: true,
+  },
 
   // ─── Salary ───────────────────────────────────────────────────────────────
   {
