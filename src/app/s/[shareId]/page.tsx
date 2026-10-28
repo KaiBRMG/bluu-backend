@@ -196,7 +196,9 @@ async function SharedSnipContent({ params }: { params: Promise<{ shareId: string
       {isVideo ? (
         <SnipVideo
           src={snip.mediaUrl}
+          directSrc={snip.directMediaUrl}
           poster={snip.imageUrl}
+          directPoster={snip.directImageUrl}
           width={snip.width}
           height={snip.height}
           // The recorder's own wall clock. A `MediaRecorder` WebM states no
@@ -207,6 +209,7 @@ async function SharedSnipContent({ params }: { params: Promise<{ shareId: string
       ) : (
         <SnipImage
           src={snip.mediaUrl}
+          directSrc={snip.directMediaUrl}
           width={snip.width}
           height={snip.height}
           // The sender's own title is a far better description of the picture

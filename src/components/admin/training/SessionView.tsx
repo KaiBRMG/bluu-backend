@@ -8,6 +8,7 @@ import AddPeopleDialog from './AddPeopleDialog';
 import { AdminStateBadge } from './AdminStateBadge';
 import SourceImages from './SourceImages';
 import SubmissionDialog from './SubmissionDialog';
+import { TimeLeft } from './TimeLeft';
 import { formatWhen, msToWall, wallToMs } from './zonedTime';
 import {
   AlertDialog,
@@ -25,7 +26,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { useTrainingSession } from '@/hooks/useTrainingAdmin';
+import { isLivePart, useTrainingSession } from '@/hooks/useTrainingAdmin';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { PUBLIC_APP_ORIGIN } from '@/lib/publicOrigin';
 import { TRAINING_MODULES } from '@/lib/training/modules';
@@ -33,13 +34,24 @@ import type { AdminParticipant } from '@/lib/training/types';
 
 const TRAINING_URL = `${PUBLIC_APP_ORIGIN}/training`;
 
-/** What goes under the state badge: the figure the state is about. */
-function partNote(p: AdminParticipant['parts'][string], total: number, timezone: string): string {
+/** What goes under the state badge: the figure the state is about — while it runs, the time left and the work in so far. */
+function PartNote({ p, total, skewMs }: { p: AdminParticipant['parts'][string]; total: number; skewMs: number }) {
   if (p.state === 'in-progress' && p.deadlineMs) {
-    return `${p.reopenedAtMs ? 'reopened · ' : ''}ends ${formatWhen(p.deadlineMs, timezone)}`;
+    return (
+      <span className="text-[11px] text-zinc-400 tabular-nums">
+        {p.reopenedAtMs ? 'reopened · ' : ''}
+        <TimeLeft deadlineMs={p.deadlineMs} skewMs={skewMs} /> left · {p.slotsFilled} of {total} uploaded
+      </span>
+    );
   }
-  if (p.state === 'submitted' || p.state === 'timed-out') return `${p.slotsFilled} of ${total} uploaded`;
-  return '';
+  if (p.state === 'submitted' || p.state === 'timed-out') {
+    return (
+      <span className="text-[11px] text-zinc-400 tabular-nums">
+        {p.slotsFilled} of {total} uploaded
+      </span>
+    );
+  }
+  return null;
 }
 
 /**
@@ -49,11 +61,11 @@ function partNote(p: AdminParticipant['parts'][string], total: number, timezone:
  */
 export default function SessionView({ sessionId }: { sessionId: string }) {
   const { timezone } = useViewerTimezone();
-  const { detail, error, refetch, update, stop, reopen, addPeople, revoke, addSource, removeSource, loadSubmission } =
+  const { detail, skewMs, error, refetch, update, stop, reopen, addPeople, revoke, addSource, removeSource, loadSubmission } =
     useTrainingSession(sessionId);
 
   // Edits only. A field shows the server's value until it is touched, so the
-  // 30s refresh never overwrites what is being typed and nothing needs an
+  // live refresh never overwrites what is being typed and nothing needs an
   // effect to seed it.
   const [draft, setDraft] = useState<{ label?: string; closes?: string; opens: Record<string, string> }>({ opens: {} });
   const [saving, setSaving] = useState(false);
@@ -122,6 +134,10 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
 
   const now = detail.nowMs;
   const live = detail.participants.filter((p) => p.revokedAtMs == null);
+  // The open dialog's part, as of the latest read: while its clock runs, the dialog re-reads the work too.
+  const viewingPart = viewing
+    ? detail.participants.find((p) => p.emailHash === viewing.emailHash)?.parts[viewing.partId]
+    : undefined;
   // Judged on the server's clock, like every other state on this page.
   const ended = now > session.closesAtMs;
 
@@ -253,7 +269,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
                     <SourceImages
                       images={cfg.sources}
                       minimum={part.task.pickCount}
-                      canRemove={!started}
                       onAdd={(file) => addSource(part.id, file)}
                       onRemove={(imageId) => removeSource(part.id, imageId)}
                       onBatchDone={refetch}
@@ -302,7 +317,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
                       {mod.parts.map((part) => {
                         const cell = person.parts[part.id];
                         const canView = !!cell && (cell.state === 'in-progress' || cell.state === 'submitted' || cell.state === 'timed-out');
-                        const note = cell ? partNote(cell, part.task.slots.length, timezone) : '';
                         return (
                           <TableCell key={part.id}>
                             {cell && (
@@ -315,7 +329,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
                                   aria-label={`${display}, ${part.title}: ${cell.state}${canView ? '. View work' : ''}`}
                                 >
                                   <AdminStateBadge state={cell.state} />
-                                  {note && <span className="text-[11px] text-zinc-400 tabular-nums">{note}</span>}
+                                  <PartNote p={cell} total={part.task.slots.length} skewMs={skewMs} />
                                 </button>
                                 {!removed && (cell.state === 'timed-out' || cell.state === 'submitted' || cell.state === 'missed') && (
                                   <Button
@@ -372,6 +386,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
         target={viewing}
         moduleId={session.moduleId}
         timezone={timezone}
+        live={!!viewingPart && isLivePart(viewingPart, now, session.closesAtMs)}
         load={loadSubmission}
         onClose={() => setViewing(null)}
       />

@@ -10,10 +10,9 @@ interface SourceImagesProps {
   images: { id: string; name: string; thumbUrl: string }[];
   /** Fewest images the part needs before a candidate can start it. */
   minimum: number;
-  /** False once anyone has started the part: they may be choosing from these. Adding stays possible. */
-  canRemove: boolean;
   onAdd: (file: File) => Promise<void>;
-  onRemove: (imageId: string) => Promise<void>;
+  /** `retired` when the part had opened: candidates already in it keep the image. */
+  onRemove: (imageId: string) => Promise<{ retired: boolean }>;
   /** Once per batch, not once per file, so ten uploads read the session once. */
   onBatchDone: () => void;
 }
@@ -22,8 +21,10 @@ interface SourceImagesProps {
  * A part's source images. The admin picks files; each is previewed in this
  * browser, then both go straight to Storage (rule 9i). Uploads run three at a
  * time so ten large images do not queue behind each other or flood the line.
+ * An image can be removed at any time, even mid-test — once the part is open
+ * it leaves new starts' choices but stays with anyone already using it.
  */
-export default function SourceImages({ images, minimum, canRemove, onAdd, onRemove, onBatchDone }: SourceImagesProps) {
+export default function SourceImages({ images, minimum, onAdd, onRemove, onBatchDone }: SourceImagesProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -99,27 +100,28 @@ export default function SourceImages({ images, minimum, canRemove, onAdd, onRemo
             <li key={img.id} className="group relative overflow-hidden rounded-lg border border-white/[0.07] bg-black/30">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={img.thumbUrl} alt={img.name} width={240} height={240} loading="lazy" decoding="async" className="aspect-square w-full object-cover" />
-              {canRemove && (
-                <Button
-                  variant="secondary"
-                  size="icon-xs"
-                  aria-label={`Remove ${img.name}`}
-                  disabled={removing === img.id}
-                  onClick={async () => {
-                    setRemoving(img.id);
-                    try {
-                      await onRemove(img.id);
-                    } catch (err) {
-                      toast.error(err instanceof Error ? err.message : 'Could not remove it');
-                    } finally {
-                      setRemoving(null);
-                    }
-                  }}
-                  className="absolute top-1 right-1 size-6 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
-                >
-                  <X className="size-3.5" />
-                </Button>
-              )}
+              <Button
+                variant="secondary"
+                size="icon-xs"
+                aria-label={`Remove ${img.name}`}
+                disabled={removing === img.id}
+                onClick={async () => {
+                  setRemoving(img.id);
+                  try {
+                    const { retired } = await onRemove(img.id);
+                    toast.success(
+                      retired ? `${img.name} removed. Anyone already in this part keeps it until their time is up.` : `${img.name} removed`,
+                    );
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : 'Could not remove it');
+                  } finally {
+                    setRemoving(null);
+                  }
+                }}
+                className="absolute top-1 right-1 size-6 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
+              >
+                <X className="size-3.5" />
+              </Button>
               <p className="truncate px-2 py-1 text-[11px] text-zinc-400">{img.name}</p>
             </li>
           ))}

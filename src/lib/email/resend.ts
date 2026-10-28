@@ -1,5 +1,6 @@
 import 'server-only';
 import { Resend } from 'resend';
+import type { RenderedEmail } from './layout';
 
 /**
  * Resend, the project's one email provider.
@@ -19,10 +20,6 @@ import { Resend } from 'resend';
  *
  * See documentation/creator-onboarding.md → Email.
  */
-
-/** Every outbound message is from the address applicants already wrote to. */
-export const EMAIL_FROM = 'Bluu Rock <hello@bluurock.com>';
-export const EMAIL_REPLY_TO = 'hello@bluurock.com';
 
 let sender: Resend | null = null;
 let reader: Resend | null = null;
@@ -47,9 +44,8 @@ export function resendReader(): Resend {
 
 export interface SendArgs {
   to: string;
-  subject: string;
-  html: string;
-  text: string;
+  /** From `renderEmail` (`layout.ts`) — the only way to build one, so every email wears the template. */
+  email: RenderedEmail;
   /** Resend dedupes on this for 24h — pass one for anything a retry could repeat. */
   idempotencyKey?: string;
   headers?: Record<string, string>;
@@ -61,12 +57,12 @@ export interface SendArgs {
 export async function sendEmail(args: SendArgs): Promise<string> {
   const { data, error } = await resendSender().emails.send(
     {
-      from: EMAIL_FROM,
+      from: args.email.from,
       to: [args.to],
-      replyTo: EMAIL_REPLY_TO,
-      subject: args.subject,
-      html: args.html,
-      text: args.text,
+      replyTo: args.email.replyTo ?? undefined,
+      subject: args.email.subject,
+      html: args.email.html,
+      text: args.email.text,
       headers: args.headers,
       tags: args.tags,
     },

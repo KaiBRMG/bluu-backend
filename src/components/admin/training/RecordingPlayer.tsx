@@ -303,7 +303,8 @@ export default function RecordingPlayer({ sessionId, emailHash, partId, timezone
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
-            {view.live && index < segments.length - 1 && (
+            {/* One segment behind is normal live playback (the next lands while this one plays), not lag. */}
+            {view.live && segments.length - 1 - index >= 2 && (
               <Button variant="outline" size="sm" onClick={() => seek(segments.length - 1)}>
                 <Radio className="size-4" />
                 Jump to live

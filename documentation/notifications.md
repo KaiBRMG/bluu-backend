@@ -72,6 +72,7 @@ Every row below is **automated** — fired by a handler on an event, never sent 
 
 | Event | Factory | Recipients | Sent by |
 |---|---|---|---|
+| Staff birthday (daily cron, 08:00 UTC) | `notifications.staffBirthday(firstName)` | the employee whose birthday it is (+ Telegram) | `cron/birthday-notifications` → `services/birthdayNotifications.ts` |
 | New user — welcome message | `notifications.welcomeToTeam(firstName)` | the new user | `services/userService.ts` |
 | New user — admin alert | `notifications.adminNewUserAlert()` | **every uid in `groups/admin.members`** (do not hardcode an admin uid) | `services/userService.ts` |
 | CR submitted | `notifications.crCreated(creatorName, stageName)` | every uid in `groups/OFAM.members` | `campaign-tracking/create` |

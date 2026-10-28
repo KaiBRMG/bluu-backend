@@ -63,10 +63,9 @@ export async function POST(request: NextRequest) {
         if (!(await isApproved(emailHash))) return;
         const code = await issueCode(emailHash);
         if (!code) return; // inside the resend cooldown
-        const mail = trainingCodeEmail(code);
         await sendEmail({
           to: to.trim(),
-          ...mail,
+          email: trainingCodeEmail(code),
           tags: [{ name: 'kind', value: 'training-code' }],
         });
       } catch (error) {

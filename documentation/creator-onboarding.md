@@ -26,7 +26,9 @@
 | `src/lib/creatorOnboarding.ts` | **The question model** — every question once, as data (tracks, required rules, formats), plus progress, sanitising and the staff stage vocabulary. Client + server. |
 | `src/lib/email/inquiryFilter.ts` | **Pure** rules-only classifier for inbound mail (`reply` / `held` / `spam` / `system`) and the contact-form relay parser |
 | `src/lib/email/resend.ts` | Resend clients (sending key vs inbound key), `EMAIL_FROM`, `sendEmail` |
-| `src/lib/email/templates.ts` | **All email copy** — the enquiry reply and the welcome/onboarding email |
+| `src/lib/email/accountEmails.ts` | Best-effort senders for the account emails (`sendAccountEmail`, `emailOrganizationManager`) — log and swallow, called from `after()` |
+| `src/lib/email/layout.ts` | **The email template** — `renderEmail(spec)` turns copy + blocks into the HTML and plain-text parts; the only way to mint the `RenderedEmail` that `sendEmail` accepts |
+| `src/lib/email/templates.ts` | **All email copy** — the enquiry reply, the welcome/onboarding email, the training code, the sign-in alert and the staff-lifecycle emails (user added / archived / access revoked / deleted) |
 | `src/lib/services/creatorInquiryService.ts` | Webhook handling: fetch body, classify, dedupe, hourly cap, reply; Inbox reads; manual reply |
 | `src/lib/services/creatorOnboardingService.ts` | Link tokens, invites (create/rotate), prefill, autosave, completion, staff reads |
 | `src/app/api/email/inbound/route.ts` | **PUBLIC** — Resend `email.received` webhook (Svix-signed) |
@@ -128,11 +130,27 @@ Model Submissions itself moved into the Creator Portal on 2026-09-28 (`/creator-
 
 ## Email
 
-- **From** `Bluu Rock <hello@bluurock.com>`, **Reply-To** hello@ — replies land in the same Gmail inbox. `bluurock.com` must stay verified for sending in Resend (DKIM `resend._domainkey` is published).
+- **The sender is chosen per email** (`sender` in the spec, `layout.ts`): `team` = `Bluu Rock <hello@bluurock.com>` with Reply-To hello@, for mail that invites a reply (the enquiry reply, the welcome email) — replies land in the same Gmail inbox; `system` = `Bluu Rock <backend@bluurock.com>`, **no-reply**, no Reply-To, for everything automated (training code, sign-in alerts, staff-lifecycle mail) — its footer says it is a no-reply address and points to hello@. `bluurock.com` must stay verified for sending in Resend (DKIM `resend._domainkey` is published).
 - `RESEND_API_KEY` — **sending-only** key, used by every send.
 - `RESEND_INBOUND_API_KEY` — **full-access** key, used **only** to read received email bodies. Falls back to `RESEND_API_KEY` if that one is full-access.
 - `RESEND_WEBHOOK_SECRET` — the `whsec_…` signing secret of the receiving webhook. Unset → the webhook answers 503.
 - Copy lives only in `src/lib/email/templates.ts`. The welcome subject is exactly `Welcome to BLUU ROCK 🎉`.
+- **One template for every email: [`layout.ts`](../src/lib/email/layout.ts).** A template in `templates.ts` is a `renderEmail({ subject, preheader, reason, blocks })` call — never hand-written markup. Blocks: `heading` (at most one), `p`, `note`, `button`, `fallbackLink`, `code`, `list`, `signoff`; inline text takes only `**bold**` and is escaped otherwise, so names interpolate safely. The plain-text part is rendered from the same blocks (a button becomes `Label: url` on its own line). `sendEmail` takes `email: RenderedEmail`, and only `renderEmail` can produce one — an email that bypasses the template does not type-check. `reason` is the footer's "You're receiving this because…" line; every email states one.
+- **The look** is the public skin (DESIGN.md §8) in the inbox: `#08090b` ground pinned with `color-scheme: dark`, the lockup PNG at `public/email/wordmark.png` (rebuild from `bluu_long.svg` with `cd src && node scripts/build-email-wordmark.js` — PNG because Gmail drops SVG and Outlook drops WebP), azure button with `AZURE_INK` text, solid hex only (Outlook ignores rgba). New colour → a token at the top of `layout.ts`, with its contrast on the ground.
+
+### Every automated email
+
+| Email | Sender | To | Sent by |
+|---|---|---|---|
+| Enquiry reply | team | the enquirer | `creatorInquiryService.ts` |
+| Welcome + onboarding link | team | the approved applicant | `POST /api/creator-onboarding/invite` |
+| Training sign-in code | system | the candidate | `POST /api/training/request-code` |
+| New sign-in (with a **Report** button → `SECURITY_REPORT_URL`, `t.me/KaiJN` for now) | system | the user who signed in, at the address they signed in with | `POST /api/auth/exchange-code` (desktop app logins) |
+| User added | system | the **organization manager** | `POST /api/admin/users` |
+| User archived / access revoked | system | the organization manager | `PUT /api/admin/users/[uid]` — on the transition only; an archive (which also sets `isActive: false`) sends one "archived" email |
+| User deleted | system | the organization manager | `DELETE /api/admin/users/[uid]` — only when a user doc existed, so re-running the cascade does not resend |
+
+The **organization manager** is `ORGANIZATION_MANAGER_EMAIL` in [`src/lib/organization.ts`](../src/lib/organization.ts) (`kai@bluurock.com`). The account emails are best-effort and sent in `after()`: a Resend failure never fails the login or the admin action.
 
 ## Setup (one time)
 
@@ -149,5 +167,5 @@ Model Submissions itself moved into the Creator Portal on 2026-09-28 (`/creator-
 2. **A question id is a Firestore field path.** `[A-Za-z0-9_]` only, never renamed once shipped (stored answers are keyed by it).
 3. **Never auto-reply on relevance alone.** Strong spam evidence always wins; unsure means `held`.
 4. **Never put the link secret anywhere but the URL** — not in storage keys (the pending buffer is keyed by the id half), not in logs.
-5. **Copy only in `templates.ts`** (emails) and `notificationContent.ts` (notifications).
+5. **Email copy only in `templates.ts`; look only in `layout.ts`** — a new email is new blocks, never a new layout; a new kind of content is a new block kind there.
 6. **No invented claims on `/join`** — no acceptance rates, roster sizes or earnings. The exclusivity is true facts: hand review, a personal link.

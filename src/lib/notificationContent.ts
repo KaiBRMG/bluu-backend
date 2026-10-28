@@ -23,6 +23,15 @@ function formatReasonClause(reasons: string[]): string {
 }
 
 export const notifications = {
+  // ─── Team ─────────────────────────────────────────────────────────────────────
+  /** Sent once a year on each active employee's birthday (`birthdayNotifications.ts`). */
+  staffBirthday: (firstName: string | null): NotificationContent => ({
+    title: firstName ? `Happy birthday, ${firstName}! 💙` : 'Happy birthday! 💙',
+    message: 'From all of us here at Bluu Rock, Happy Birthday! 💙',
+    type: 'success',
+    actionUrl: null,
+  }),
+
   // ─── User onboarding ──────────────────────────────────────────────────────────
   // Personal information is collected during the onboarding flow itself (the
   // `profile` step), so there is no post-login nudge to go fill in Settings.

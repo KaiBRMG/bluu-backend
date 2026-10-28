@@ -12,7 +12,11 @@ const googleSansHref = googleFonts({
   "Google Sans": ["400", "500", "600", "700", "400italic"],
 })
   .match(/href="([^"]+)"/)![1]
-  .replace(/^\/\//, "https://");
+  .replace(/^\/\//, "https://")
+  // Without `display=swap` the browser hides all text until the font arrives —
+  // on a slow link that is a blank page, on every route including the public
+  // ones. Swap paints in the fallback face immediately.
+  .concat("&display=swap");
 
 export const metadata: Metadata = {
   title: "Bluu Backend",

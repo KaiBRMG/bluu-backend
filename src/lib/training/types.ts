@@ -141,6 +141,17 @@ export interface AdminSessionDetail {
   participants: AdminParticipant[];
 }
 
+/**
+ * The live half of `AdminSessionDetail` — what the session page polls while a
+ * test is under way. No `parts`: those carry a signed URL per source image,
+ * and an admin can attach hundreds (rule 9i).
+ */
+export interface AdminSessionProgress {
+  nowMs: number;
+  session: Omit<AdminSessionDetail['session'], 'parts'>;
+  participants: AdminParticipant[];
+}
+
 export interface AdminSubmissionView {
   startedAtMs: number | null;
   finishedAtMs: number | null;
@@ -226,6 +237,8 @@ export interface AdminCandidateSession {
 }
 
 export interface AdminCandidateDetail {
+  /** The server's clock when this was read — what each `state` was judged against. */
+  nowMs: number;
   email: string;
   name: string | null;
   /** Newest session first. */

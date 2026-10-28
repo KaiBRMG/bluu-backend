@@ -6,10 +6,14 @@ import { getSessionDetail, updateSession } from '@/lib/services/trainingService'
 /**
  * One training session — the roster with each person's state per part, and the
  * schedule edits (page permission `training`, `no-store`: states flip on the
- * server clock and the source previews are signed URLs).
+ * server clock and the source previews are signed URLs). `?view=progress` is
+ * the live poll: the roster without the source images.
  */
-export const GET = withTrainingAdmin<{ sessionId: string }>(async (_request, { params }) => {
-  return NextResponse.json(await getSessionDetail(params.sessionId));
+export const GET = withTrainingAdmin<{ sessionId: string }>(async (request, { params }) => {
+  const progressOnly = new URL(request.url).searchParams.get('view') === 'progress';
+  return NextResponse.json(
+    progressOnly ? await getSessionDetail(params.sessionId, { progressOnly }) : await getSessionDetail(params.sessionId),
+  );
 });
 
 export const PATCH = withTrainingAdmin<{ sessionId: string }>(async (request, { params }) => {

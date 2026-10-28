@@ -85,9 +85,7 @@ async function sendReply(
     messageId && !c.viaContactForm ? { 'In-Reply-To': messageId, References: messageId } : undefined;
   return sendEmail({
     to: c.replyTo!,
-    subject: email.subject,
-    html: email.html,
-    text: email.text,
+    email,
     headers,
     idempotencyKey: `inquiry-reply/${id}`,
     tags: [{ name: 'category', value: 'inquiry_reply' }],

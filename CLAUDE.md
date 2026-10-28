@@ -128,8 +128,9 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
                 Storage objects (media AND a recording's poster), plus upload
                 slots that were never finalised
                 — see snipping-tool.md
-              + daily staff birthday email (08:00 UTC, Resend; users.DOB, UTC
-                month/day; active + unarchived only) — see user-management.md
+              + daily staff birthday notification (08:00 UTC, in-app + Telegram;
+                users.DOB, UTC month/day; active + unarchived only)
+                — see user-management.md
               (scheduled work that must send a notification lives HERE, not in
                functions/ — copy lives only in notificationContent.ts; work
                needing src/lib services or types belongs here too)
@@ -372,6 +373,8 @@ Fixing the `AppLayout` hoist is therefore not only the navigation speed-up alrea
     This applies to admin broadcasts only in reverse: manual sends belong on the **Sent** tab and must **not** be added here.
 
     **One sanctioned exception: `notifications.releaseNote()`.** The "what's new" note gated on `APP_UPDATE.releaseNote` ([appUpdateConfig.ts](src/lib/appUpdateConfig.ts)) is once-off and self-disarming, so cataloguing it would advertise standing behaviour the system does not have. The carve-out is written into `automatedNotifications.ts` at the point someone would add it — don't "fix" it. See [notifications.md](documentation/notifications.md#release-notes-whats-new--gated-on-the-installed-build).
+
+15b. **Automated email and automated notifications are two separate subsystems — never associate, confuse or link them.** Automated **email** goes out via **Resend** (`src/lib/email/` — template in `layout.ts`, copy in `templates.ts`; automated mail is from the no-reply `backend@bluurock.com`, staff-lifecycle mail goes to the organization manager in `src/lib/organization.ts`; the full list is in [creator-onboarding.md](documentation/creator-onboarding.md#every-automated-email)). Automated **notifications** go out via **the app and/or Telegram** (`notificationContent.ts` → `addNotificationToBatch` / `sendTelegramNotification`; see [notifications.md](documentation/notifications.md)). An event is one or the other, chosen deliberately: no event sends both, neither subsystem imports, calls or references the other, an email never goes in the Automated Notifications catalogue, and a notification never goes through Resend. Don't model one on the other in code or docs either.
 
 16. **Impeccable workflows may spawn sub-agents** — standing authorisation. When running any `/impeccable` command (`critique`, `audit`, `polish`, `craft`, …), spawn the isolated sub-agents its reference file requires **without asking first**. This overrides the general "don't spawn sub-agents unless the user requested it" default: invoking an `/impeccable` command **is** the request. `critique` in particular mandates two independent, parallel agents (Assessment A: design review · Assessment B: detector + browser evidence) that must not see each other's output — running them inline in one context is a **degraded** run and must be banner-flagged as such, so don't do it here. Applies to `/impeccable` only; it does not widen sub-agent use for ordinary work.
 

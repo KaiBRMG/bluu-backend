@@ -91,14 +91,21 @@ type WebkitVideoElement = HTMLVideoElement & {
  */
 export function SnipVideo({
   src,
+  directSrc,
   poster,
+  directPoster,
   width,
   height,
   durationMs,
 }: {
+  /** The stable redirect URL — the fallback, and what old links resolve to. */
   src: string;
+  /** A signed Storage URL for the recording: range requests and seeks then go
+   *  straight to Storage instead of re-invoking the redirect for each one. */
+  directSrc?: string | null;
   /** The poster frame, or null when its upload failed. */
   poster: string | null;
+  directPoster?: string | null;
   width: number;
   height: number;
   /**
@@ -114,6 +121,11 @@ export function SnipVideo({
   const shellRef = useRef<HTMLDivElement | null>(null);
 
   const [failed, setFailed] = useState(false);
+  // One switch from the signed URL to the stable one. A signature that expired
+  // under a tab left open, or a transient failure, must cost a retry rather
+  // than "no longer available".
+  const [useFallback, setUseFallback] = useState(false);
+  const currentSrc = directSrc && !useFallback ? directSrc : src;
   const [playing, setPlaying] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -145,6 +157,8 @@ export function SnipVideo({
   const resolvingRef = useRef(false);
   /** The seek is a once-per-element trick, not a retry loop. */
   const resolvedRef = useRef(false);
+  /** Where the viewer was when the signed URL failed, for the swap to resume. */
+  const resumeAtRef = useRef(0);
 
   /**
    * Make the browser work out how long the recording is.
@@ -236,7 +250,15 @@ export function SnipVideo({
     };
     const onRate = () => setRate(video.playbackRate);
     const onEnded = () => setPlaying(false);
-    const onError = () => setFailed(true);
+    const onError = () => {
+      if (directSrc && !useFallback) {
+        // Resume where the viewer was: swapping `src` reloads the element.
+        resumeAtRef.current = video.currentTime;
+        // A new source needs its duration resolved again.
+        resolvedRef.current = false;
+        setUseFallback(true);
+      } else setFailed(true);
+    };
 
     video.addEventListener('loadedmetadata', onLoaded);
     video.addEventListener('durationchange', onDuration);
@@ -265,7 +287,27 @@ export function SnipVideo({
       video.removeEventListener('ended', onEnded);
       video.removeEventListener('error', onError);
     };
-  }, [resolveDuration]);
+  }, [resolveDuration, directSrc, useFallback]);
+
+  // After the fallback swap, put the playhead back. Runs once the new source
+  // has metadata, and only when a swap actually recorded a position.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !useFallback) return;
+    const restore = () => {
+      const at = resumeAtRef.current;
+      resumeAtRef.current = 0;
+      if (at > 0) {
+        try {
+          video.currentTime = at;
+        } catch {
+          // The player still plays from the start — survivable.
+        }
+      }
+    };
+    video.addEventListener('loadedmetadata', restore, { once: true });
+    return () => video.removeEventListener('loadedmetadata', restore);
+  }, [useFallback]);
 
   useEffect(() => {
     const doc = document as WebkitFullscreenDocument;
@@ -411,8 +453,8 @@ export function SnipVideo({
     >
       <video
         ref={videoRef}
-        src={src}
-        poster={poster ?? undefined}
+        src={currentSrc}
+        poster={(directPoster && !useFallback ? directPoster : poster) ?? undefined}
         preload="metadata"
         playsInline
         onClick={togglePlay}

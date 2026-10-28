@@ -1,24 +1,22 @@
 import 'server-only';
 import { PUBLIC_APP_ORIGIN } from '@/lib/publicOrigin';
-import { AZURE, AZURE_INK } from '@/lib/publicSkin';
+import { safeTimezone } from '@/lib/utils/timezone';
+import { renderEmail, type RenderedEmail } from './layout';
 
 /**
- * The two emails the recruiting funnel sends. Copy lives HERE and nowhere else,
- * the way notification copy lives only in `notificationContent.ts`.
+ * Every email the app sends. Email copy lives HERE and nowhere else.
  *
- * Each template returns `{ subject, html, text }`. The text part is written by
- * hand, not derived: Resend would auto-generate one from the HTML, but a
- * generated plain-text version reads the button as a bare URL mid-sentence.
- *
- * HTML is table-based with inline styles because that is what mail clients
- * render. The masthead is the app icon (a PNG — Outlook does not render the
- * WebP lockup) beside a text wordmark, on a dark band, so the brand reads the
- * same in light- and dark-mode clients.
+ * Each template is copy + blocks handed to `renderEmail` (`layout.ts`), which
+ * owns the look and renders both the HTML and the plain-text part from the
+ * same blocks. A new email goes in this file and follows the same shape —
+ * never hand-written markup, never a second layout.
  */
+
+export type { RenderedEmail };
 
 export const MODEL_SUBMISSIONS_URL = `${PUBLIC_APP_ORIGIN}/model-submissions`;
 
-/** Greeting name for the reply: the first word of the given name, tidied. */
+/** Greeting name: the first word of the given name, tidied. */
 export function greetingName(name: string | null): string {
   const first = (name ?? '').trim().split(/\s+/)[0] ?? '';
   const clean = first.replace(/[^\p{L}'-]/gu, '');
@@ -26,106 +24,38 @@ export function greetingName(name: string | null): string {
   return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
-export interface RenderedEmail {
-  subject: string;
-  html: string;
-  text: string;
-}
-
-function esc(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-const FONT = `-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif`;
-
-function layout(preheader: string, inner: string): string {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<title>Bluu Rock</title>
-</head>
-<body style="margin:0;padding:0;background:#eef1f4;">
-<span style="display:none!important;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;mso-hide:all;">${esc(preheader)}</span>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f4;">
-  <tr><td align="center" style="padding:32px 16px;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;border-radius:14px;overflow:hidden;background:#ffffff;">
-      <tr><td style="background:#08090b;padding:22px 28px;">
-        <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-          <td style="vertical-align:middle;"><img src="${PUBLIC_APP_ORIGIN}/logo/bluu-logo.png" width="36" height="36" alt="" style="display:block;border:0;border-radius:8px;"></td>
-          <td style="vertical-align:middle;padding-left:12px;font-family:${FONT};font-size:15px;font-weight:700;letter-spacing:0.14em;color:#ffffff;">BLUU ROCK</td>
-        </tr></table>
-      </td></tr>
-      <tr><td style="padding:32px 28px 12px;font-family:${FONT};font-size:16px;line-height:1.6;color:#1b2127;">
-        ${inner}
-      </td></tr>
-      <tr><td style="padding:8px 28px 28px;font-family:${FONT};font-size:12px;line-height:1.5;color:#5b6570;">
-        Bluu Rock &middot; <a href="mailto:hello@bluurock.com" style="color:#5b6570;">hello@bluurock.com</a>
-      </td></tr>
-    </table>
-  </td></tr>
-</table>
-</body>
-</html>`;
-}
-
-function button(href: string, label: string): string {
-  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:26px 0 28px;"><tr>
-  <td style="border-radius:10px;background:${AZURE};">
-    <a href="${esc(href)}" style="display:inline-block;padding:14px 26px;font-family:${FONT};font-size:16px;font-weight:700;color:${AZURE_INK};text-decoration:none;border-radius:10px;">${esc(label)}</a>
-  </td>
-</tr></table>`;
-}
-
-const p = (html: string) => `<p style="margin:0 0 16px;">${html}</p>`;
-
 // ─── 1. Auto-reply to a creator enquiry ──────────────────────────────────────
 
 /**
  * Sent automatically when mail to hello@ reads as a genuine creator enquiry
  * (see `inquiryFilter.ts`), and by hand from the Onboarding page's Inbox tab.
- * The wording is the client's own.
+ * The wording is the client's own. No heading: it threads as a reply to the
+ * sender's own email, so it should read like one.
  */
 export function inquiryReplyEmail(name: string, originalSubject: string): RenderedEmail {
-  const subject = originalSubject.trim()
-    ? `Re: ${originalSubject.replace(/^(re:\s*)+/i, '').slice(0, 150)}`
-    : 'Thanks for messaging in';
-
-  const text = [
-    `Hey ${name}!`,
-    '',
-    'Thanks for messaging in.',
-    '',
-    'We’re currently looking for more creators to join our team so you’ve messaged at the perfect time!',
-    '',
-    'For the fastest processing, please fill out our quick form and we will be able to provide you with more details.',
-    '',
-    `Form: ${MODEL_SUBMISSIONS_URL}`,
-    '',
-    'The Bluu Rock Team',
-  ].join('\n');
-
-  const html = layout(
-    'We’re looking for more creators — here’s the quick form.',
-    [
-      p(`Hey ${esc(name)}!`),
-      p('Thanks for messaging in.'),
-      p('We’re currently looking for more creators to join our team so you’ve messaged at the perfect time!'),
-      p('For the fastest processing, please fill out our quick form and we will be able to provide you with more details.'),
-      button(MODEL_SUBMISSIONS_URL, 'Open the form'),
-      p(`<span style="font-size:13px;color:#5b6570;">Or paste this link: <a href="${MODEL_SUBMISSIONS_URL}" style="color:#0077a8;">${MODEL_SUBMISSIONS_URL}</a></span>`),
-      p('The Bluu Rock Team'),
-    ].join('\n'),
-  );
-
-  return { subject, html, text };
+  return renderEmail({
+    sender: 'team',
+    subject: originalSubject.trim()
+      ? `Re: ${originalSubject.replace(/^(re:\s*)+/i, '').slice(0, 150)}`
+      : 'Thanks for messaging in',
+    preheader: 'We’re looking for more creators — here’s the quick form.',
+    reason: 'You’re receiving this because you got in touch with Bluu Rock.',
+    blocks: [
+      { kind: 'p', text: `Hey ${name}!` },
+      { kind: 'p', text: 'Thanks for messaging in.' },
+      {
+        kind: 'p',
+        text: 'We’re currently looking for more creators to join our team so you’ve messaged at the perfect time!',
+      },
+      {
+        kind: 'p',
+        text: 'For the fastest processing, please fill out our quick form and we will be able to provide you with more details.',
+      },
+      { kind: 'button', href: MODEL_SUBMISSIONS_URL, label: 'Open the form' },
+      { kind: 'signoff', lines: ['The Bluu Rock Team'] },
+      { kind: 'fallbackLink', href: MODEL_SUBMISSIONS_URL },
+    ],
+  });
 }
 
 // ─── 2. Welcome + personal onboarding link ───────────────────────────────────
@@ -135,98 +65,225 @@ export const WELCOME_SUBJECT = 'Welcome to BLUU ROCK 🎉';
 /**
  * Sent when a reviewer confirms the "email the applicant?" card after approving
  * an application. `firstName` is the first word of the name they applied with.
+ * The heading is the same line the `/join` landing greets them with.
  */
 export function welcomeEmail(firstName: string, onboardingUrl: string, minutes: number): RenderedEmail {
-  const text = [
-    `Hi ${firstName},`,
-    '',
-    'We have reviewed your application and we are delighted to have you join our team.',
-    '',
-    `Let’s get you onboarded onto our system. We’ve set up a personal onboarding form for you — it already has the details from your application, saves as you go, and takes about ${minutes} minutes. You can stop and pick it up again any time from the same link:`,
-    '',
-    onboardingUrl,
-    '',
-    'It covers three things:',
-    '  • You — your setup, your schedule and your goals',
-    '  • Your limits — the content you’re comfortable creating, and what you’re not',
-    '  • Your persona — the character our chat team will bring to life with your fans',
-    '',
-    'Everything you share is confidential and only seen by the Bluu Rock team. The link is personal to you, so please don’t forward it.',
-    '',
-    'Once you’re done, we’ll reach out on Telegram to get you set up.',
-    '',
-    'Welcome aboard,',
-    'The Bluu Rock Team',
-  ].join('\n');
-
-  const li = (label: string, rest: string) =>
-    `<tr><td style="padding:0 0 10px;font-family:${FONT};font-size:15px;line-height:1.5;color:#1b2127;"><strong>${label}</strong> &mdash; ${rest}</td></tr>`;
-
-  const html = layout(
-    'Your application has been approved. Here is your personal onboarding link.',
-    [
-      p(`Hi ${esc(firstName)},`),
-      p('We have reviewed your application and we are <strong>delighted to have you join our team</strong>.'),
-      p(
-        `Let’s get you onboarded onto our system. We’ve set up a personal onboarding form for you — it already has the details from your application, saves as you go, and takes about ${minutes} minutes. You can stop and pick it up again any time from the same link.`,
-      ),
-      button(onboardingUrl, 'Start my onboarding'),
-      p('It covers three things:'),
-      `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px;">
-        ${li('You', 'your setup, your schedule and your goals')}
-        ${li('Your limits', 'the content you’re comfortable creating, and what you’re not')}
-        ${li('Your persona', 'the character our chat team will bring to life with your fans')}
-      </table>`,
-      p(
-        '<span style="font-size:14px;color:#3d4650;">Everything you share is confidential and only seen by the Bluu Rock team. This link is personal to you, so please don’t forward it.</span>',
-      ),
-      p('Once you’re done, we’ll reach out on Telegram to get you set up.'),
-      p('Welcome aboard,<br>The Bluu Rock Team'),
-      p(
-        `<span style="font-size:12px;color:#5b6570;">Button not working? Paste this into your browser:<br><a href="${esc(onboardingUrl)}" style="color:#0077a8;word-break:break-all;">${esc(onboardingUrl)}</a></span>`,
-      ),
-    ].join('\n'),
-  );
-
-  return { subject: WELCOME_SUBJECT, html, text };
+  return renderEmail({
+    sender: 'team',
+    subject: WELCOME_SUBJECT,
+    preheader: 'Your application has been approved. Here is your personal onboarding link.',
+    reason: 'You’re receiving this because your application to Bluu Rock was approved.',
+    blocks: [
+      { kind: 'heading', text: `You’re in, ${firstName}.` },
+      {
+        kind: 'p',
+        text: 'We have reviewed your application and we are **delighted to have you join our team**.',
+      },
+      {
+        kind: 'p',
+        text: `Let’s get you onboarded onto our system. We’ve set up a personal onboarding form for you — it already has the details from your application, saves as you go, and takes about ${minutes} minutes. You can stop and pick it up again any time from the same link.`,
+      },
+      { kind: 'button', href: onboardingUrl, label: 'Start my onboarding' },
+      { kind: 'p', text: 'It covers three things:' },
+      {
+        kind: 'list',
+        items: [
+          { label: 'You', text: 'your setup, your schedule and your goals' },
+          { label: 'Your limits', text: 'the content you’re comfortable creating, and what you’re not' },
+          { label: 'Your persona', text: 'the character our chat team will bring to life with your fans' },
+        ],
+      },
+      {
+        kind: 'note',
+        text: 'Everything you share is confidential and only seen by the Bluu Rock team. This link is personal to you, so please don’t forward it.',
+      },
+      { kind: 'p', text: 'Once you’re done, we’ll reach out on Telegram to get you set up.' },
+      { kind: 'signoff', lines: ['Welcome aboard,', 'The Bluu Rock Team'] },
+      { kind: 'fallbackLink', href: onboardingUrl },
+    ],
+  });
 }
 
-// ─── 3. Staff birthday ───────────────────────────────────────────────────────
-
-export const BIRTHDAY_MESSAGE = 'From all of us here at Bluu Rock, Happy Birthday! 💙';
-
-/** Sent once a year to each active employee on their birthday (`birthdayEmails.ts`). */
-export function birthdayEmail(): RenderedEmail {
-  const html = layout(
-    BIRTHDAY_MESSAGE,
-    `<p style="margin:0 0 16px;font-size:20px;line-height:1.5;">${esc(BIRTHDAY_MESSAGE)}</p>`,
-  );
-  return { subject: 'Happy Birthday! 💙', html, text: BIRTHDAY_MESSAGE };
-}
-
-// ─── 4. Training sign-in code ────────────────────────────────────────────────
+// ─── 3. Training sign-in code ────────────────────────────────────────────────
 
 /** Sent to an approved training candidate to prove they hold the address (`/training`). */
 export function trainingCodeEmail(code: string): RenderedEmail {
-  const text = [
-    'Your Bluu Rock Training code is:',
-    '',
-    code,
-    '',
-    'It works for 10 minutes. If you did not ask for it, you can ignore this email.',
-    '',
-    'The Bluu Rock Team',
-  ].join('\n');
+  return renderEmail({
+    sender: 'system',
+    subject: `${code} is your Bluu Rock Training code`,
+    preheader: `Your Bluu Rock Training code is ${code}.`,
+    reason: 'You’re receiving this because a sign-in code was requested for this address on Bluu Rock Training.',
+    blocks: [
+      { kind: 'heading', text: 'Your sign-in code' },
+      { kind: 'p', text: 'Enter this code on Bluu Rock Training to continue:' },
+      { kind: 'code', value: code },
+      { kind: 'note', text: 'It works for 10 minutes. If you did not ask for it, you can ignore this email.' },
+      { kind: 'signoff', lines: ['The Bluu Rock Team'] },
+    ],
+  });
+}
 
-  const html = layout(
-    `Your Bluu Rock Training code is ${code}.`,
-    [
-      p('Your Bluu Rock Training code is:'),
-      `<p style="margin:0 0 20px;font-family:${FONT};font-size:34px;font-weight:700;letter-spacing:0.28em;color:#1b2127;">${esc(code)}</p>`,
-      p('<span style="font-size:14px;color:#3d4650;">It works for 10 minutes. If you did not ask for it, you can ignore this email.</span>'),
-      p('The Bluu Rock Team'),
-    ].join('\n'),
+// ─── Shared helpers for the account emails below ─────────────────────────────
+
+/** "Wed 28 Oct 2026, 14:05 (Africa/Harare)" — the zone named, so nobody guesses. */
+function formatWhen(at: Date, timezone: string | null = null): string {
+  const tz = safeTimezone(timezone);
+  const when = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(at);
+  return `${when} (${tz})`;
+}
+
+/** Subject lines carry a person's name; keep them single-line and bounded. */
+const subjectSafe = (s: string) => s.replace(/[\r\n]+/g, ' ').slice(0, 120);
+
+// ─── 4. New sign-in (to the user who signed in) ──────────────────────────────
+
+/** Where "Report" points for now: a direct line to the organization manager. */
+export const SECURITY_REPORT_URL = 'https://t.me/KaiJN';
+
+export interface LoginAlert {
+  firstName: string;
+  at: Date;
+  /** The user's own zone (`users.timezone`); unset reads as UTC. */
+  timezone: string | null;
+  device: string | null;
+  location: string | null;
+  ip: string | null;
+}
+
+/** Sent after every successful sign-in to the desktop app (`/api/auth/exchange-code`). */
+export function loginAlertEmail(a: LoginAlert): RenderedEmail {
+  const details = [
+    { label: 'When', text: formatWhen(a.at, a.timezone) },
+    { label: 'Device', text: a.device || 'Bluu Rock desktop app' },
+    ...(a.location ? [{ label: 'Approximate location', text: a.location }] : []),
+    ...(a.ip ? [{ label: 'IP address', text: a.ip }] : []),
+  ];
+  return renderEmail({
+    sender: 'system',
+    subject: 'New sign-in to your Bluu Rock account',
+    preheader: 'Your account was just signed in to on the Bluu Rock app. Not you? Report it.',
+    reason: 'You’re receiving this because your Bluu Rock account was signed in to.',
+    blocks: [
+      { kind: 'heading', text: 'New sign-in' },
+      { kind: 'p', text: `Hi ${a.firstName}, your Bluu Rock account was just signed in to on the desktop app.` },
+      { kind: 'list', items: details },
+      { kind: 'p', text: 'If this was you, there’s nothing to do.' },
+      { kind: 'p', text: '**If it wasn’t you**, report it straight away so we can lock the account.' },
+      { kind: 'button', href: SECURITY_REPORT_URL, label: 'Report' },
+      { kind: 'fallbackLink', href: SECURITY_REPORT_URL },
+    ],
+  });
+}
+
+// ─── 5. Staff lifecycle (to the organization manager) ────────────────────────
+
+const MANAGER_REASON = 'You’re receiving this because you’re the organization manager for Bluu Rock.';
+
+export interface UserAdded {
+  fullName: string;
+  displayName: string;
+  email: string;
+  groupName: string;
+  addedBy: string;
+  at: Date;
+}
+
+/** Sent to `ORGANIZATION_MANAGER_EMAIL` when someone is registered (`POST /api/admin/users`). */
+export function userAddedEmail(u: UserAdded): RenderedEmail {
+  return renderEmail({
+    sender: 'system',
+    subject: subjectSafe(`New user added: ${u.fullName}`),
+    preheader: `${u.addedBy} added ${u.fullName} to Bluu Rock.`,
+    reason: MANAGER_REASON,
+    blocks: [
+      { kind: 'heading', text: `${u.fullName} was added` },
+      {
+        kind: 'p',
+        text: `${u.addedBy} registered a new user in the Employee Registry. They can now sign in with the login email below.`,
+      },
+      {
+        kind: 'list',
+        items: [
+          { label: 'Name', text: u.fullName },
+          { label: 'Nickname', text: u.displayName },
+          { label: 'Login email', text: u.email },
+          { label: 'Group', text: u.groupName },
+          { label: 'Added by', text: u.addedBy },
+          { label: 'When', text: formatWhen(u.at) },
+        ],
+      },
+    ],
+  });
+}
+
+export type OffboardingKind = 'archived' | 'revoked' | 'deleted';
+
+export interface UserOffboarded {
+  kind: OffboardingKind;
+  fullName: string;
+  email: string | null;
+  by: string;
+  at: Date;
+}
+
+const OFFBOARDING_COPY: Record<OffboardingKind, { subject: string; heading: (n: string) => string; body: string }> = {
+  archived: {
+    subject: 'User archived',
+    heading: (n) => `${n} was archived`,
+    body: 'They have been signed out and can no longer sign in. Their data is kept, and they can be restored from the Employee Registry.',
+  },
+  revoked: {
+    subject: 'Access revoked',
+    heading: (n) => `${n}’s access was revoked`,
+    body: 'They have been signed out and can no longer sign in. Their data is kept, and access can be restored from the Employee Registry.',
+  },
+  deleted: {
+    subject: 'User deleted',
+    heading: (n) => `${n} was deleted`,
+    body: 'Their account and personal data were **permanently deleted**. This cannot be undone.',
+  },
+};
+
+/**
+ * Sent to `ORGANIZATION_MANAGER_EMAIL` when someone is archived or has access
+ * revoked (`PUT /api/admin/users/[uid]`), or is deleted (`DELETE` on the same).
+ */
+export function userOffboardedEmail(u: UserOffboarded): RenderedEmail {
+  const copy = OFFBOARDING_COPY[u.kind];
+  return renderEmail({
+    sender: 'system',
+    subject: subjectSafe(`${copy.subject}: ${u.fullName}`),
+    preheader: `${copy.heading(u.fullName)} by ${u.by}.`,
+    reason: MANAGER_REASON,
+    blocks: [
+      { kind: 'heading', text: copy.heading(u.fullName) },
+      { kind: 'p', text: copy.body },
+      {
+        kind: 'list',
+        items: [
+          { label: 'Name', text: u.fullName },
+          ...(u.email ? [{ label: 'Login email', text: u.email }] : []),
+          { label: 'By', text: u.by },
+          { label: 'When', text: formatWhen(u.at) },
+        ],
+      },
+    ],
+  });
+}
+
+/** "First Last", falling back to the nickname, then the email — never blank. */
+export function personName(u: { firstName?: unknown; lastName?: unknown; displayName?: unknown; workEmail?: unknown } | null | undefined): string {
+  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  return (
+    `${str(u?.firstName)} ${str(u?.lastName)}`.trim() || str(u?.displayName) || str(u?.workEmail) || 'Unknown user'
   );
-
-  return { subject: `${code} is your Bluu Rock Training code`, html, text };
 }

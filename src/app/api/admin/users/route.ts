@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb, adminAuth } from '@/lib/firebase-admin';
 import {
@@ -14,6 +14,8 @@ import { recomputeTimeTrackingSettings } from '@/lib/services/timeTrackingSettin
 import { invalidateDisplayNamesCache } from '@/app/api/users/display-names/route';
 import { normalizeEmail, isPlausibleEmail } from '@/lib/authEmail';
 import type { DecodedIdToken } from 'firebase-admin/auth';
+import { personName, userAddedEmail } from '@/lib/email/templates';
+import { emailOrganizationManager } from '@/lib/email/accountEmails';
 
 const CACHE_TTL_MS = 30_000;
 let cache: { data: { users: Record<string, unknown>[]; groups: Record<string, unknown>[] }; expiresAt: number } | null = null;
@@ -224,6 +226,21 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     invalidateUserCache(uid);
     invalidateAdminUsersCache();
     invalidateDisplayNamesCache();
+
+    const addedAt = new Date();
+    after(() =>
+      emailOrganizationManager(
+        userAddedEmail({
+          fullName: `${firstName} ${lastName}`,
+          displayName,
+          email,
+          groupName: String(groupSnap.data()?.name ?? groupId),
+          addedBy: personName(caller),
+          at: addedAt,
+        }),
+        'user_added',
+      ),
+    );
 
     return NextResponse.json({ success: true, uid });
   } catch (error: unknown) {

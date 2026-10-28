@@ -26,7 +26,7 @@
       "schedule": "1 5,13,21 * * *"
     },
     {
-      "path": "/api/cron/birthday-emails",
+      "path": "/api/cron/birthday-notifications",
       "schedule": "0 8 * * *"
     }
   ]

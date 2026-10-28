@@ -11,6 +11,7 @@
 | `electron/snip-preload.js` | The surface's bridge. Commit/cancel, a microphone **status read** and a settings hand-off, and deliberately **no image or media channel** |
 | `electron/snip-record.html` | The **recorder**: the control bar the user sees while recording, and the page holding the `MediaRecorder` |
 | `electron/snip-record-preload.js` | The recorder's bridge. Chunks out, never bytes back |
+| `electron/webm-remux.js` | Gives a finished recording a `Duration` and a `Cues` index before it enters the queue. Required **lazily** by `snip:rec-done` — see "The file is indexed before it is queued" |
 | `electron/preload.js` (`snip`, `clipboard.writeText`) | The main window's bridge |
 | `src/components/snips/SnipController.tsx` | Arms the shell, uploads a capture, copies the link. Mounted on `(main)/layout.tsx` |
 | `src/lib/snips.ts` | Shared constants: retention, accelerators, share-token validation, `SNIPPING_TOOL_PAGE_ID` |
@@ -101,7 +102,9 @@ Three origins are allowed: `app.bluurock.com` (the official domain, loaded by th
             │                    ← the screen is photographed HERE
             ▼
    main: NativeImage.crop         ← only the selected pixels leave main
-            │  snip:captured  {dataBase64, width, height}
+            │  snip:captured  {data: PNG bytes | dataBase64, width, height}
+            │                 (bytes only to a renderer that declared
+            │                  acceptsBinaryCapture; base64 otherwise)
             ▼
    renderer (SnipController)
             │  POST /api/snips/upload-url   → reserve id + sign slot
@@ -284,6 +287,27 @@ The scale from CSS pixels to stream pixels is derived from the stream's **actual
 **Frame rate is deliberately not a lever.** Screen recordings are static with occasional fast scrolls — a modern codec spends almost nothing on a still frame, so dropping to 15fps buys little and makes every scroll look broken.
 
 The container is fixed at `video/webm` by `SNIP_VIDEO_CONTENT_TYPE`, because the signed slot pins it into the signature and Storage rejects a PUT that disagrees. **Adding an MP4 candidate means moving that constant and the slot with it**, not just the recorder's list.
+
+### The file is indexed before it is queued
+
+A `MediaRecorder` WebM is a live-streaming Matroska: the Segment **and every Cluster** carry the unknown-size marker, `Info` has no `Duration`, and there is no `SeekHead` or `Cues` (confirmed against a real recording from the shipped app, not assumed). That is why the public player had to resolve the duration with a seek to `1e101`.
+
+[`webm-remux.js`](../electron/webm-remux.js) repairs the file in main, **between the stream closing and the queue entry existing** (`snip:rec-done`):
+
+- appends a `Duration` to `Info`, from the last block's timestamp (checked against two real recordings: within 12 ms of the recorder's wall clock);
+- writes a `Cues` index, one entry per Cluster, **before** the first Cluster, where a progressive demuxer finds it without scanning to the end;
+- copies every Cluster **byte-for-byte** — nothing is decoded or re-encoded.
+
+Properties worth keeping:
+
+- **Best-effort by contract.** It only touches the exact shape above (no Duration, SeekHead or Cues; known layout); anything else is returned untouched with a reason. A failure of any kind — including a full disk, checked up front with `statfs` — leaves the original, valid recording to upload as before.
+- **Write beside, verify, rename.** Built in `{token}.webm.remux`; the result is length-checked and every Cue is read back from the file and must land on a Cluster header before an atomic rename replaces the original. `loadSnipQueue` deletes a stray `.remux` left by a crash — it can never be mistaken for a recording (`.webm` only).
+- **Not visible to the queue until it settles.** The entry is created by the first `writeSnipQueueMeta`, after the remux, so the background drain and a Retry cannot stat or upload a file mid-replacement. `bytes` in the sidecar and in `snip:recorded` is re-read from the result.
+- **Streaming and async.** A 25 MB / 62-cluster recording takes ~30 ms; main's event loop is never held for a whole-file read. A crash-truncated file still indexes (the cut-off tail is preserved byte-for-byte).
+- **Required lazily, inside the `try`**, and listed in `build.files`. A top-level `require` of a module missing from the package would throw at startup and stop the app launching for everyone; this way the same mistake costs only the remux.
+- **Old recordings and old shells are unaffected.** `SnipVideo` keeps its duration-resolving seek, which is a no-op for a file that now states a finite duration and still rescues every recording made before 1.0.3.
+
+Playback in Chromium was not exercised in a player when this was written — the invariants were checked structurally (Cues land on Cluster headers, cluster region sha256-identical, re-parses to the last byte). Record a take on the first 1.0.3 build and confirm the public page shows a real length and scrubs.
 
 ### The poster frame
 
@@ -834,6 +858,18 @@ The still is served through `/api/public/snip/{id}/image` and a recording throug
 
 **The video route pays a known price for that**, stated here so nobody reaches for the obvious fix without deciding it is acceptable. A `<video>` does not fetch once: the browser issues **range requests** as the viewer plays and seeks, and it re-resolves the original URL rather than reusing the target of an uncacheable redirect — so each one is another invocation. The bodies still never cross Vercel (what repeats is a header-only 302, expensive in invocations and negligible in Fast Origin Transfer, which is the metric rule 9i is actually about), and caching the redirect would break the one guarantee the indirection exists for. If the invocation count ever becomes the problem, the fix is a longer signed read TTL plus an `s-maxage` strictly shorter than it, accepting a bounded window in which a deleted recording still plays.
 
+### Direct signed URLs: the redirect is the fallback, no longer the first hop
+
+The routes above stay exactly as documented — they are the **stable, permanent, revocable** URLs, and every existing link, unfurl and cache keeps resolving through them. What changed is that the page and the library no longer *start* there. Measured from Cape Town, one `/image` hit costs ~0.6 s warm (a function, a Firestore read, a signature) before the browser even opens a connection to Storage; for a recording it was paid again on every range request and seek.
+
+- **`getPublicSnip` returns `directImageUrl` / `directMediaUrl`** — v4 read URLs signed locally during render (no network call), valid 1 h. `SnipImage` and `SnipVideo` use them first and **switch once to the redirect URL on error** (an expired signature in a tab left open; a video resumes at the playhead and re-resolves its duration). Only a failure of the redirect too is "no longer available".
+- **Only for uid-free object paths** (`isUidFreePath`: `snips/{id}.ext`). A legacy `snips/{uid}/…` row would put the owner's uid in the page source, so those keep using the redirect and see no change.
+- **`og:image`, links and anything persisted never use the direct URL.** It is for `src` only.
+- **The deliberate trade:** the redirect's "delete kills it instantly" guarantee does not cover a URL a visitor already holds — a deleted snip's direct URL can work for up to an hour after the page that carried it was rendered. The stable URLs, and every new page load, still stop at once. Expiry and deletion enforcement on read are unchanged.
+- **Owner library:** `toSnipRow` signs `directImageUrl` with the signing time rounded down to the hour (`accessibleAt`), so every call in that hour yields the *same* URL (valid 1–2 h). Storage answers `private, max-age=0` with an ETag, so a re-render or revisit is a 304, not a re-download. `SnipCard` falls back to `imageUrl` once on error.
+- `finalizeSnip` no longer calls `exists()` before `getMetadata()` (which rejects for a missing object), and runs the poster check and the retention read alongside it.
+- `/s` preconnects to `storage.googleapis.com` (the root layout's preconnect is a different host); the snip `<img>` is `fetchPriority="high"`; the Google Fonts URL carries `display=swap` so text is not hidden while the font loads.
+
 ### Link previews (WhatsApp, Telegram, Slack…)
 
 `/s/[shareId]` exports `generateMetadata`: `og:title` is the owner's title (else "Screenshot/Screen recording from {sharedBy}"), `og:description` their description (else sharer · duration), and `og:image` is **`/api/public/snip/{id}/preview`, not `/image`**. The original still is a full-resolution PNG, often several MB, and **WhatsApp silently drops an `og:image` over ~600 KB** — so the preview route re-encodes it with `sharp` to a ≤1200px JPEG (~100–250 KB), and for a recording composites a play badge onto the poster. That is the one public route that returns bytes rather than a 302; it is a small derivative fetched a handful of times per paste, the source bytes come from GCS rather than over Fast Origin Transfer, and a stored derivative would be a third object every delete path and the sweep would have to learn. It follows the same rules as its siblings: liveness re-checked via `resolveLiveSnipObject`, one 404 for everything, `no-store` on both outcomes, and it never logs the id.
@@ -940,6 +976,7 @@ One transparent surface per display, each covering that display's bounds.
 - **The page is gated on app version 0.13.0** in two places — see the version-floor section above. It is a **floor, set once**: `0.14.0` and everything after it passes, so routine releases never touch it. **Video mode has its own second floor at `0.14.0`** and is gated separately, so a 0.13.x user keeps their library.
 - **This needs an Electron build** (rule 14, the two-push dance): `electron/main.js`, `preload.js` and two new files changed. A renderer on an older shell degrades cleanly — `window.electronAPI.snip` is absent, every call site feature-detects, and the page says to update.
 - **Recording needed a second build (0.14.0)**, and it adds three files to `electron/package.json`'s `files[]` — `snip-record.html`, `snip-record-preload.js` and `snip-frame.html`. A file left out of that list is absent from the packaged app and the feature fails only in production, which is the worst place to find out.
+- **Build 1.0.3 — faster stills, seekable recordings.** Two main-process changes, one new file (`electron/webm-remux.js`, in `files[]`): the WebM index above, and a raw-bytes capture. **`snip:captured` carries `data` (PNG bytes) only when the renderer declared `acceptsBinaryCapture` in `snip:configure`**, otherwise `dataBase64` as before — negotiated for the same reason `supportsRecording` is (rule 9c: a page bundle can be weeks older than the shell). `uploadSnip` reads either, so a new renderer in an old shell works too. This removes the base64 encode in main, the ~⅓ larger IPC message and the `atob` character loop. No new version floor: both halves degrade cleanly.
 - **The sounds needed a third build (0.14.2)**, and it is the smallest possible one: two `sendTo(mainWindow, …)` lines in `main.js` and two listeners in `preload.js`. No new files, so `files[]` is untouched. Everything else in this pass — auto-copy, title/description, Import, the public player — is web only and ships on a plain Vercel deploy; a user on an older shell gets all of it, and only loses the shutter's *precision* (it falls back to `snip:captured`) and the recording cue entirely. There is deliberately **no new version floor**: nothing here is unusable on 0.14.0, and a floor would withhold four working features to enforce a sound.
 - **`SnipSettingsPopover`'s fingerprint has to grow with the settings map.** It content-compares five — now six — field values rather than the object, because the object's identity changes every time presence rewrites `users/{uid}`. A field added to `SnipSettings` and left out of that string is a field whose external change never reconciles the draft.
 - **The public page's `<video>` no longer uses native `controls`.** That was a documented decision and it was reversed for a documented reason — a `MediaRecorder` WebM states no duration, so the browser renders it as a live stream. See "The player is ours" above before changing it back.

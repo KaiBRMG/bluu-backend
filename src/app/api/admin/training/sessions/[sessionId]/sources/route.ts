@@ -9,7 +9,7 @@ import { TrainingError } from '@/lib/training/errors';
  *
  *   POST { action: 'sign',   partId, contentType, size, previewSize }  → signed PUTs
  *   POST { action: 'commit', partId, imageId, name, contentType }      → record it
- *   DELETE { partId, imageId }                                         → remove it
+ *   DELETE { partId, imageId }                                         → remove it (any time) → { retired }
  *
  * The bytes never cross a function (rule 9i): the browser PUTs the original
  * and a small preview it made itself straight to Storage. `commit` verifies
@@ -46,6 +46,5 @@ export const DELETE = withTrainingAdmin<{ sessionId: string }>(async (request, {
   if (!read.ok) return read.response;
   const b = (read.body ?? {}) as Record<string, unknown>;
   if (typeof b.partId !== 'string' || typeof b.imageId !== 'string') throw new TrainingError('Invalid request', 400);
-  await removeSource(params.sessionId, b.partId, b.imageId);
-  return NextResponse.json({ ok: true });
+  return NextResponse.json(await removeSource(params.sessionId, b.partId, b.imageId));
 });

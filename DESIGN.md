@@ -728,6 +728,10 @@ The personal onboarding form an approved applicant is emailed (see [creator-onbo
 3. **Mobile is the design target**, not a breakpoint: 16px inputs, ≥44px touch targets, a sticky action bar with `env(safe-area-inset-bottom)`, one question group per scroll.
 4. **Every field goes through `Field`**, which owns the label / hint / error association. Pass `group` when the control is a radio set or composite — a `<label for>` pointing at a group is invalid.
 
+### Email (the skin in the inbox)
+
+Every email Resend sends wears one template, [`src/lib/email/layout.ts`](src/lib/email/layout.ts) — copy + blocks in, HTML + plain text out (details in [creator-onboarding.md](documentation/creator-onboarding.md#email)). It is this skin carried into mail clients, with their constraints: the `#08090b` ground pinned dark (`color-scheme: dark`) so clients don't repaint it; the stage wash as a top radial gradient over a solid `bgcolor` (clients that drop the gradient show the plain ground); the Bluu lockup as a PNG (`public/email/wordmark.png`) at 140px; white-inked type (`#f2f5f8` 18.6:1, secondary `#a3acb6` 8.6:1, footer `#7f8892` 5.5:1); azure as the one voice — the single button (`AZURE_INK` on azure, never white) and links. No white card, no drop shadows, solid hex only. One heading per email at most; an enquiry reply carries none because it threads as a reply. A sign-in code sits in a `PASS_SURFACE`-coloured panel in tabular monospace. Every email ends with a hairline and a "You're receiving this because…" line; mail from the `system` (no-reply) sender adds one more saying so and pointing to hello@.
+
 ## 9. Installer page (external skin) — "the lit bench"
 
 The **fourth** surface: `/download`, public and unauthenticated (allowlisted in [`middleware.ts`](src/middleware.ts)), and the one place in the product whose entire job is a decision someone can get wrong. Like §7 and §8 this is an **authored divergence**, not drift. (`/update` was its sibling until 2026-10-22; it was deleted when Windows started updating in-app and now 307s here.)

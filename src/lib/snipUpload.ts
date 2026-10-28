@@ -19,9 +19,14 @@ import type { SnipRow } from '@/types/snips';
  */
 export async function uploadSnip(
   idToken: string,
-  capture: { dataBase64: string; width: number; height: number },
+  capture: { data?: Uint8Array; dataBase64?: string; width: number; height: number },
 ): Promise<SnipRow> {
-  const blob = base64ToPngBlob(capture.dataBase64);
+  // Raw bytes from a shell that supports them; base64 from every older one.
+  // Both are accepted for as long as an older shell can be running (rule 9c).
+  const blob = capture.data
+    ? new Blob([capture.data as BlobPart], { type: 'image/png' })
+    : base64ToPngBlob(capture.dataBase64 ?? '');
+  if (blob.size === 0) throw new Error('The capture was empty');
 
   const slotRes = await fetch('/api/snips/upload-url', {
     method: 'POST',

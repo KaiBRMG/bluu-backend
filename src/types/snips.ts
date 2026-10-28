@@ -50,6 +50,13 @@ export interface SnipRow {
    */
   imageUrl: string | null;
   /**
+   * `imageUrl`'s target, already signed — the browser fetches it from Storage
+   * with no function in between. Optional and nullable so a payload from before
+   * this field existed still types, and so a signing failure degrades: the card
+   * falls back to `imageUrl`, which is the stable redirect and always works.
+   */
+  directImageUrl?: string | null;
+  /**
    * The thing itself: the PNG for a still, the WebM for a recording. This is
    * what the public page shows at full size.
    */
@@ -89,6 +96,15 @@ export interface PublicSnip {
    *  when a recording has no poster. Used as `<video poster>`. */
   imageUrl: string | null;
   mediaUrl: string;
+  /**
+   * Signed Storage URLs for the same two things, present only for rows whose
+   * object path carries no uid (see `isUidFreePath`). The page tries these
+   * first and falls back to `imageUrl` / `mediaUrl` — the stable, permanent,
+   * revocable URLs — on error, so an expired one costs a retry, not a broken
+   * picture. Never use these for `og:image`, a link or anything persisted.
+   */
+  directImageUrl?: string | null;
+  directMediaUrl?: string | null;
 }
 
 /** The stored document. `snips/{shareId}`. */

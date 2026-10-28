@@ -1436,6 +1436,8 @@ let snipConfig = {
   micDeviceId: '',
   // Off until a renderer says otherwise — see `snip:configure`.
   supportsRecording: false,
+  // Off until a renderer says it can read raw bytes — see `snip:configure`.
+  acceptsBinaryCapture: false,
 };
 let snipTray = null;
 /** The accelerator currently held with the OS, so it can be released exactly. */
@@ -1876,11 +1878,10 @@ ipcMain.on('snip:region', async (event, commit) => {
       failure = 'crop';
       const cropped = shot.crop(crop);
       const size = cropped.getSize();
-      payload = {
-        dataBase64: cropped.toPNG().toString('base64'),
-        width: size.width,
-        height: size.height,
-      };
+      const png = cropped.toPNG();
+      payload = snipConfig.acceptsBinaryCapture
+        ? { data: png, width: size.width, height: size.height }
+        : { dataBase64: png.toString('base64'), width: size.width, height: size.height };
     }
   } catch (err) {
     console.error(`[snip] capture failed (${failure}):`, err.message);
@@ -2089,6 +2090,13 @@ function loadSnipQueue() {
 
   const now = Date.now();
   for (const file of files) {
+    // A remux interrupted by a crash or a quit leaves its working copy behind.
+    // The original beside it is intact (the swap is an atomic rename), so the
+    // leftover is pure waste and must never be mistaken for a recording.
+    if (file.endsWith('.webm.remux')) {
+      fsp.unlink(path.join(ensureSnipQueueDir(), file)).catch(() => {});
+      continue;
+    }
     if (!file.endsWith('.webm')) continue;
     const token = file.slice(0, -'.webm'.length);
     const paths = snipQueuePaths(token);
@@ -2665,7 +2673,7 @@ ipcMain.on('snip:rec-done', (event, summary) => {
   // cut and then stops, which is the kind of corruption nobody notices until
   // the recipient does.
   recording.settled = true;
-  recording.stream.end(() => {
+  recording.stream.end(async () => {
     if (bytes <= 0) {
       console.error('[snip] the recording produced no data');
       sendTo(mainWindow, 'snip:failed', { reason: 'empty-recording' });
@@ -2674,6 +2682,29 @@ ipcMain.on('snip:rec-done', (event, summary) => {
       removeSnipQueueEntry(id);
       return;
     }
+    // **Give the file a duration and a seek index before anything can see it.**
+    // A `MediaRecorder` WebM states no length and has no Cues, so every player
+    // treats it as a live stream. This runs BEFORE the first `writeSnipQueueMeta`
+    // on purpose: the entry is not in `snipQueue` (so not listable, not
+    // uploadable, not drainable) until the file has settled, which is what stops
+    // an `online`-triggered drain from stat-ing and uploading a file that is
+    // being replaced. Strictly best-effort — see `webm-remux.js`; every failure
+    // here leaves the original, valid recording to upload exactly as before.
+    let finalBytes = bytes;
+    try {
+      // Required lazily, inside the try: a packaging slip (the file missing from
+      // `build.files`) must cost the remux, never the launch of the whole app.
+      const { remuxWebm } = require('./webm-remux');
+      const result = await remuxWebm(snipQueuePaths(id).video);
+      if (result.changed) {
+        finalBytes = result.bytes;
+      } else {
+        console.log(`[snip] recording left as recorded (${result.reason})`);
+      }
+    } catch (err) {
+      console.warn('[snip] could not index the recording:', err.message);
+    }
+
     // The poster is written beside the video rather than held in memory: the
     // queue has to survive a restart, and a thumbnail that only exists in this
     // process would be lost on the retry that matters most.
@@ -2690,7 +2721,7 @@ ipcMain.on('snip:rec-done', (event, summary) => {
       durationMs,
       width,
       height,
-      bytes,
+      bytes: finalBytes,
       hasPoster: !!poster && fs.existsSync(snipQueuePaths(id).poster),
       attempts: 0,
       lastError: null,
@@ -2702,7 +2733,7 @@ ipcMain.on('snip:rec-done', (event, summary) => {
       durationMs,
       width,
       height,
-      bytes,
+      bytes: finalBytes,
       hasPoster: !!poster && fs.existsSync(snipQueuePaths(id).poster),
     });
   });
@@ -3192,6 +3223,16 @@ ipcMain.handle('snip:configure', (event, raw = {}) => {
      * and the Video toggle is drawn only when it does.
      */
     supportsRecording: raw.supportsRecording === true,
+    /**
+     * Same negotiation, for the capture's wire format. A still used to cross
+     * to the renderer as base64 text — a third larger on the wire, a
+     * 7 MB string to build here and a character-by-character `atob` loop to
+     * undo there — when IPC carries bytes natively. Main sends raw PNG bytes
+     * ONLY to a renderer that says it can read them; an older page bundle (rule
+     * 9c — it can be weeks older than this shell) keeps getting base64 and
+     * works exactly as before.
+     */
+    acceptsBinaryCapture: raw.acceptsBinaryCapture === true,
   };
 
   if (!snipConfig.enabled) {

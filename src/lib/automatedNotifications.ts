@@ -39,6 +39,7 @@ function stripTelegramFormatting(html: string): string {
 }
 
 export type AutomatedNotificationCategory =
+  | 'Team'
   | 'Onboarding'
   | 'Custom Requests'
   | 'Leave'
@@ -85,6 +86,19 @@ export interface AutomatedCreatorNotification {
 }
 
 export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
+  // ─── Team ─────────────────────────────────────────────────────────────────
+  {
+    id: 'staffBirthday',
+    category: 'Team',
+    event: 'Birthday',
+    trigger:
+      'Daily at 08:00 UTC, for each active, unarchived employee whose date of birth (UTC month/day) is today. 29 February birthdays fire on 28 February in common years.',
+    recipients: 'The employee whose birthday it is',
+    sources: ['src/app/api/cron/birthday-notifications/route.ts', 'src/lib/services/birthdayNotifications.ts'],
+    content: notifications.staffBirthday('{firstName}'),
+    telegramEnabled: true,
+  },
+
   // ─── Onboarding ───────────────────────────────────────────────────────────
   {
     id: 'welcomeToTeam',
@@ -476,6 +490,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
 ];
 
 export const AUTOMATED_NOTIFICATION_CATEGORIES: AutomatedNotificationCategory[] = [
+  'Team',
   'Onboarding',
   'Custom Requests',
   'Leave',

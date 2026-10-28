@@ -97,7 +97,7 @@ bluu://callback?code=...   ── hands code back to Electron ──►  Electro
 
 **API routes:**
 - `/api/auth/google-url` — generates OAuth URL (used by Electron directly; `/auth/google` builds its own URL server-side). Neither sets `hd` any more.
-- `/api/auth/exchange-code` — exchanges code for a Firebase custom token, **enforces the allowlist**, sets custom claims, records the login.
+- `/api/auth/exchange-code` — exchanges code for a Firebase custom token, **enforces the allowlist**, sets custom claims, records the login, and (in `after()`, best-effort) **emails the user a sign-in alert** at the address they signed in with — time in their timezone, device label, approximate location and IP from Vercel's edge headers, and a **Report** button for a sign-in that wasn't them. See [creator-onboarding.md](creator-onboarding.md#every-automated-email).
 
 ### The allowlist (the authorisation gate)
 

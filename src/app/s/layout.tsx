@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { preconnect } from 'react-dom';
 
 export const metadata: Metadata = {
   // "Capture", not "Screenshot": this shell serves recordings too, and the
@@ -20,6 +21,16 @@ export const metadata: Metadata = {
  * route has to render for them with no session and no Electron.
  */
 export default function SharedSnipLayout({ children }: { children: React.ReactNode }) {
+  // Every picture and recording on this route comes from Cloud Storage, which
+  // is a host the page has never talked to — a DNS lookup, a TCP connect and a
+  // TLS handshake the visitor otherwise pays AFTER the HTML says where to look.
+  // Opened now, in parallel with the page. (The root layout warms
+  // `firebasestorage.googleapis.com`, which is a different host: signed URLs
+  // are served from `storage.googleapis.com`.) No `crossOrigin`: <img> and
+  // <video> fetch in no-cors mode, and a connection opened in CORS mode is
+  // not reused by them.
+  preconnect('https://storage.googleapis.com');
+
   // Tokens, not literals. `dark` is applied on the root <html> by the theme
   // provider and never toggled, so these resolve to the same near-black the
   // hexes spelled out by hand — with the difference that changing the app's

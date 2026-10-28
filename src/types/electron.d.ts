@@ -386,11 +386,25 @@ interface ElectronAPI {
        *  hides the Video toggle unless it is true, so an old page bundle
        *  cannot start a recording it has no listener for (rule 9c). */
       supportsRecording?: boolean;
+      /**
+       * This renderer reads a capture's PNG as raw bytes (`data`). Main sends
+       * `dataBase64` instead unless this is true, so an older page bundle in a
+       * newer shell — or a newer one in an older shell, which ignores the flag
+       * — keeps working.
+       */
+      acceptsBinaryCapture?: boolean;
     }) => Promise<{ ok: boolean; shortcutRegistered?: boolean }>;
     start: () => Promise<{ success: boolean; error?: string }>;
     /** The cropped region only — never the full screen. */
     onCaptured: (
-      callback: (payload: { dataBase64: string; width: number; height: number }) => void,
+      callback: (payload: {
+        /** Raw PNG bytes. Present only when `acceptsBinaryCapture` was declared and the shell supports it. */
+        data?: Uint8Array;
+        /** The same PNG as base64 — what every shell older than binary capture sends. */
+        dataBase64?: string;
+        width: number;
+        height: number;
+      }) => void,
     ) => void;
     /**
      * The capture runs after the box is drawn, so a failure is otherwise silent

@@ -12,6 +12,7 @@ import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { AdminStateBadge } from './AdminStateBadge';
 import RecordingPlayer from './RecordingPlayer';
 import SubmissionSlots from './SubmissionSlots';
+import { TimeLeft } from './TimeLeft';
 import { formatDuration, formatWhen } from './zonedTime';
 
 /** The facts about an attempt that are not the work itself, as one Meta line. */
@@ -19,7 +20,6 @@ function attemptFacts(p: AdminCandidatePart, timezone: string): string {
   const facts: string[] = [];
   if (p.startedAtMs) facts.push(`started ${formatWhen(p.startedAtMs, timezone)}`);
   if (p.startedAtMs && p.finishedAtMs) facts.push(`finished early after ${formatDuration(p.finishedAtMs - p.startedAtMs)}`);
-  if (p.state === 'in-progress' && p.deadlineMs) facts.push(`ends ${formatWhen(p.deadlineMs, timezone)}`);
   if (p.reopenedAtMs) facts.push(`reopened ${formatWhen(p.reopenedAtMs, timezone)}`);
   return facts.join(' · ');
 }
@@ -28,7 +28,9 @@ function attemptFacts(p: AdminCandidatePart, timezone: string): string {
  * One candidate across every session: each part they have been given, its state,
  * and what they handed in. A panel, not a page, so the candidate list stays on
  * screen behind it (DESIGN.md: a peek rather than a departure). The body is
- * keyed by the person, so opening another candidate is a clean instance.
+ * keyed by the person, so opening another candidate is a clean instance. While
+ * one of their parts is open or running it re-reads itself, so a running test
+ * shows its clock, uploads and state as they happen.
  */
 export default function CandidateSheet({
   candidate,
@@ -68,9 +70,9 @@ export default function CandidateSheet({
 function CandidateBody({ emailHash, timezone }: { emailHash: string; timezone: string }) {
   // One player at a time: each one polls while live, and a panel of them would all load video at once.
   const [watching, setWatching] = useState<string | null>(null);
-  const { detail, error, refetch } = useTrainingCandidate(emailHash);
+  const { detail, skewMs, error, refetch } = useTrainingCandidate(emailHash);
 
-  if (error) {
+  if (error && !detail) {
     return (
       <div role="alert" className="p-6">
         <p className="text-sm font-medium text-red-400">Couldn&apos;t load this candidate</p>
@@ -115,7 +117,18 @@ function CandidateBody({ emailHash, timezone }: { emailHash: string; timezone: s
                       <h4 className="text-sm font-semibold">{def.title}</h4>
                       <AdminStateBadge state={p.state} />
                     </div>
-                    {facts && <p className="mt-1 text-[11px] text-zinc-400 tabular-nums">{facts}</p>}
+                    {(facts || (p.state === 'in-progress' && p.deadlineMs)) && (
+                      <p className="mt-1 text-[11px] text-zinc-400 tabular-nums">
+                        {facts}
+                        {p.state === 'in-progress' && p.deadlineMs && (
+                          <>
+                            {facts ? ' · ' : ''}
+                            <TimeLeft deadlineMs={p.deadlineMs} skewMs={skewMs} /> left · {p.slots.length} of{' '}
+                            {def.task.slots.length} uploaded
+                          </>
+                        )}
+                      </p>
+                    )}
                     {p.startedAtMs && (
                       <div className="mt-3">
                         {watching === `${session.sessionId}/${p.partId}` ? (

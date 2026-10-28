@@ -27,6 +27,7 @@ import type {
   AdminCandidateSession,
   AdminParticipant,
   AdminSessionDetail,
+  AdminSessionProgress,
   AdminSessionRow,
   AdminSubmissionView,
   AttemptView,
@@ -92,6 +93,25 @@ interface SourceDoc {
   path: string;
   thumbPath: string;
   bytes: number;
+  /** Removed after the part opened: offered to no new start, kept for attempts already using it (`sourcesForAttempt`). */
+  removedAtMs?: number;
+}
+
+/** The images a part offers: everything an admin has not removed. What `pickCount` is judged against. */
+function activeSources(sources: SourceDoc[]): SourceDoc[] {
+  return sources.filter((s) => s.removedAtMs == null);
+}
+
+/**
+ * The images one attempt may use. A removed image stays for an attempt whose
+ * run (start, or latest reopen) began before the removal — the candidate may
+ * have it open in their editor, and taking it away would break timed work —
+ * and for any attempt that has already handed in an edit from it.
+ */
+function sourcesForAttempt(sources: SourceDoc[], attempt: AttemptDoc): SourceDoc[] {
+  const runFrom = attempt.reopenedAtMs ?? attempt.startedAtMs;
+  const used = new Set(Object.values(attempt.slots).map((s) => s?.sourceId));
+  return sources.filter((s) => s.removedAtMs == null || s.removedAtMs > runFrom || used.has(s.id));
 }
 
 interface SessionDoc {
@@ -197,7 +217,7 @@ function derivePartState(
   if (now > session.closesAtMs) return 'missed';
   if (!cfg || now < cfg.opensAtMs) return 'scheduled';
   // A part can start once there is something to choose from: at least the number the task picks.
-  if (cfg.sources.length < part.task.pickCount) return 'not-ready';
+  if (activeSources(cfg.sources).length < part.task.pickCount) return 'not-ready';
   return 'open';
 }
 
@@ -428,7 +448,9 @@ export async function getPartForCandidate(
   const summary = summarisePart(now, session, part, attempt);
 
   const [sources, attemptOut] = await Promise.all([
-    summary.state === 'in-progress' ? sourceViews(session.parts[partId]?.sources ?? []) : undefined,
+    summary.state === 'in-progress' && attempt
+      ? sourceViews(sourcesForAttempt(session.parts[partId]?.sources ?? [], attempt))
+      : undefined,
     attempt ? attemptView(attempt) : undefined,
   ]);
   return {
@@ -531,14 +553,14 @@ export async function requestUpload(
     const { participant, session, part } = candidateContext(pSnap, sSnap, partId);
     const slot = part.task.slots.find((s) => s.id === input.slotId);
     if (!slot) throw new TrainingError('Not found', 404);
-    if (!session.parts[partId]?.sources.some((s) => s.id === input.sourceId)) {
-      throw new TrainingError('Choose one of the source images', 400);
-    }
 
     const now = Date.now();
     const attempt = participant.attempts?.[partId];
     if (now > session.closesAtMs) throw new TrainingError('This session has been stopped', 409);
     if (!inProgress(attempt, now)) throw new TrainingError('Time is up', 409);
+    if (!sourcesForAttempt(session.parts[partId]?.sources ?? [], attempt).some((s) => s.id === input.sourceId)) {
+      throw new TrainingError('Choose one of the source images', 400);
+    }
     // Measured from the start (or reopen) until the first segment lands, which takes a segment's length.
     const recordedUntil = Math.max(latestSegmentMs ?? 0, attempt.startedAtMs, attempt.reopenedAtMs ?? 0);
     if (attempt.recording && latestSegmentMs !== null && now - recordedUntil > RECORDING_STALE_MS) {
@@ -1036,7 +1058,13 @@ async function loadSession(id: string): Promise<SessionDoc> {
   return snap.data() as SessionDoc;
 }
 
-export async function getSessionDetail(id: string): Promise<AdminSessionDetail> {
+export async function getSessionDetail(id: string): Promise<AdminSessionDetail>;
+export async function getSessionDetail(id: string, opts: { progressOnly: true }): Promise<AdminSessionProgress>;
+/** The roster and its states; `progressOnly` skips the source images (the poll — see `AdminSessionProgress`). */
+export async function getSessionDetail(
+  id: string,
+  opts?: { progressOnly: true },
+): Promise<AdminSessionDetail | AdminSessionProgress> {
   const [session, pSnap] = await Promise.all([
     loadSession(id),
     adminDb.collection(PARTICIPANTS_COLLECTION).where('sessionId', '==', id).get(),
@@ -1072,30 +1100,28 @@ export async function getSessionDetail(id: string): Promise<AdminSessionDetail> 
     }))
     .sort((a, b) => (a.name ?? a.email).localeCompare(b.name ?? b.email));
 
+  const head = {
+    id,
+    label: session.label,
+    moduleId: session.moduleId,
+    createdAtMs: session.createdAtMs,
+    closesAtMs: session.closesAtMs,
+  };
+  if (opts?.progressOnly) return { nowMs: now, session: head, participants };
+
   const parts: AdminSessionDetail['session']['parts'] = {};
   await Promise.all(
     Object.entries(session.parts).map(async ([partId, cfg]) => {
       parts[partId] = {
         opensAtMs: cfg.opensAtMs,
         sources: await Promise.all(
-          cfg.sources.map(async (s) => ({ id: s.id, name: s.name, thumbUrl: await signRead(s.thumbPath) })),
+          activeSources(cfg.sources).map(async (s) => ({ id: s.id, name: s.name, thumbUrl: await signRead(s.thumbPath) })),
         ),
       };
     }),
   );
 
-  return {
-    nowMs: now,
-    session: {
-      id,
-      label: session.label,
-      moduleId: session.moduleId,
-      createdAtMs: session.createdAtMs,
-      closesAtMs: session.closesAtMs,
-      parts,
-    },
-    participants,
-  };
+  return { nowMs: now, session: { ...head, parts }, participants };
 }
 
 /**
@@ -1350,7 +1376,8 @@ const CANDIDATE_SCAN_LIMIT = 2000;
 /**
  * Every candidate, one row each, with the standing of their most pressing part.
  * One collection read, one batched read of the sessions and one of the names
- * (rule 9) — and it runs when the admin opens the tab, never on a poll.
+ * (rule 9). The Candidates tab re-reads it on a slow beat, and only while
+ * someone's part is open or running.
  */
 export async function listCandidates(): Promise<{ nowMs: number; candidates: AdminCandidateRow[] }> {
   const snap = await adminDb.collection(PARTICIPANTS_COLLECTION).limit(CANDIDATE_SCAN_LIMIT).get();
@@ -1485,6 +1512,7 @@ export async function getCandidateDetail(emailHash: string): Promise<AdminCandid
   );
 
   return {
+    nowMs: now,
     email: participants[0].email,
     name: await getCandidateName(emailHash),
     sessions: built
@@ -1590,31 +1618,41 @@ export async function commitSource(
 }
 
 /**
- * Removing a source is refused once anyone has started the part: a candidate
- * may be choosing from it right now, and a vanished image would break their
- * attempt. (Adding is always allowed — a running attempt simply does not see
- * the new image until it next loads.)
+ * Removes a source image — allowed at any time, including mid-test.
+ *
+ * Before the part opens nobody can have seen it, so it is deleted outright
+ * (entry and files). From the moment it opens it is RETIRED instead: stamped
+ * `removedAtMs`, offered to no one who starts (or is reopened) from now on,
+ * but kept — in the list and in Storage — for attempts already running, which
+ * may have it open in an editor, and for anyone who handed in an edit from it,
+ * so their work still shows beside its source. Decided inside the transaction
+ * on the open time, so it cannot race a Start.
  */
-export async function removeSource(sessionId: string, partId: string, imageId: string): Promise<void> {
-  if ((await startedParts(sessionId)).has(partId)) {
-    throw new TrainingError('Someone has already started this part, so its images are fixed', 409);
-  }
+export async function removeSource(sessionId: string, partId: string, imageId: string): Promise<{ retired: boolean }> {
   const ref = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId);
-  const removed = await adminDb.runTransaction(async (tx) => {
+  const outcome = await adminDb.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) throw new TrainingError('Not found', 404);
     const session = snap.data() as SessionDoc;
     const cfg = session.parts[partId];
     if (!cfg) throw new TrainingError('Not found', 404);
     const target = cfg.sources.find((s) => s.id === imageId);
-    if (!target) return null;
+    if (!target || target.removedAtMs != null) return null;
+    const now = Date.now();
+    if (now >= cfg.opensAtMs) {
+      tx.update(ref, {
+        [`parts.${partId}.sources`]: cfg.sources.map((s) => (s.id === imageId ? { ...s, removedAtMs: now } : s)),
+      });
+      return { target, retired: true };
+    }
     tx.update(ref, { [`parts.${partId}.sources`]: cfg.sources.filter((s) => s.id !== imageId) });
-    return target;
+    return { target, retired: false };
   });
-  if (removed) {
+  if (outcome && !outcome.retired) {
     await Promise.all([
-      adminStorage.bucket().file(removed.path).delete({ ignoreNotFound: true }),
-      adminStorage.bucket().file(removed.thumbPath).delete({ ignoreNotFound: true }),
+      adminStorage.bucket().file(outcome.target.path).delete({ ignoreNotFound: true }),
+      adminStorage.bucket().file(outcome.target.thumbPath).delete({ ignoreNotFound: true }),
     ]).catch(() => {});
   }
+  return { retired: outcome?.retired ?? false };
 }

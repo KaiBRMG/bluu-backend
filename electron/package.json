@@ -1,6 +1,6 @@
 {
   "name": "bluu-backend",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Bluu Rock MGMT SaaS",
   "author": "BluuRockMGMT",
   "private": true,
@@ -35,6 +35,7 @@
       "widget-preload.js",
       "snip-preload.js",
       "snip-record-preload.js",
+      "webm-remux.js",
       "loading.html",
       "offline.html",
       "widget.html",

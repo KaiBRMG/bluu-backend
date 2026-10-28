@@ -111,6 +111,9 @@ export default function SnipController() {
         // two minutes and then silently drop the result. Main draws the Video
         // toggle only when this is true.
         supportsRecording: typeof api.onRecorded === 'function',
+        // `uploadSnip` reads either shape, so raw bytes are safe to accept. A
+        // shell that predates the flag ignores it and keeps sending base64.
+        acceptsBinaryCapture: true,
       })
       .then(result => {
         // `register` returns false when another application already owns the
@@ -246,7 +249,12 @@ export default function SnipController() {
   );
 
   const handleCapture = useCallback(
-    async (capture: { dataBase64: string; width: number; height: number }) => {
+    async (capture: {
+      data?: Uint8Array;
+      dataBase64?: string;
+      width: number;
+      height: number;
+    }) => {
       if (uploadingRef.current) return;
       uploadingRef.current = true;
 

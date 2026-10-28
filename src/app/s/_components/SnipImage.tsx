@@ -19,16 +19,27 @@ import { useState } from 'react';
  */
 export function SnipImage({
   src,
+  directSrc,
   width,
   height,
   alt,
 }: {
+  /** The stable redirect URL — permanent, revocable, and always correct. */
   src: string;
+  /**
+   * A signed Storage URL for the same picture, when the server could mint one
+   * safely. Tried first because it skips the redirect function entirely; on any
+   * error (an expired signature in a tab left open, a transient failure) the
+   * image switches ONCE to `src`, and only a failure of that is "gone".
+   */
+  directSrc?: string | null;
   width: number;
   height: number;
   alt: string;
 }) {
   const [failed, setFailed] = useState(false);
+  const [useFallback, setUseFallback] = useState(false);
+  const current = directSrc && !useFallback ? directSrc : src;
 
   if (failed) {
     // One quiet line, no box of its own — DESIGN.md §5. The likeliest cause is
@@ -54,14 +65,20 @@ export function SnipImage({
     <div className="overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.025]">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={src}
+        src={current}
         alt={alt}
+        // The capture is the page's largest element and the reason anyone
+        // opened the link; the browser should not rank it behind the logo.
+        fetchPriority="high"
         // A capture with no recorded dimensions still renders; the attributes are
         // simply omitted rather than being given a guess that would reserve the
         // wrong shape.
         width={width > 0 ? width : undefined}
         height={height > 0 ? height : undefined}
-        onError={() => setFailed(true)}
+        onError={() => {
+          if (current !== src) setUseFallback(true);
+          else setFailed(true);
+        }}
         className="h-auto w-full"
       />
     </div>

@@ -125,6 +125,63 @@ function snipMediaUrl(id: string, kind: SnipKind): string {
   return kind === 'video' ? snipVideoUrl(id) : snipImageUrl(id);
 }
 
+// ─── Direct (signed) read URLs ───────────────────────────────────────
+
+/**
+ * A signed read URL for one stored object, or null on any failure.
+ *
+ * Signing is local — the service-account key does the work, there is no network
+ * call — so doing it while a page or a list renders costs microseconds, where
+ * the `/image` and `/video` redirects cost a cold function, a Firestore read and
+ * a whole extra request in the critical path of every picture.
+ *
+ * **Null is always safe.** Every caller keeps the stable redirect URL beside
+ * the direct one and falls back to it, so a signing failure, an expired URL in a
+ * tab left open, or a row the direct path does not cover degrades to exactly
+ * the behaviour that existed before this helper.
+ *
+ * `stable` rounds the signing time down to the hour, so every call within that
+ * hour yields the *same* URL. A fresh signature per call makes every URL unique
+ * and the browser can never reuse a cached picture; this lets a library grid
+ * re-render, and a user re-open the page, without re-downloading. The URL is
+ * valid for between one and two hours, which bounds how long it outlives a
+ * delete — owner-only surfaces use it, the public page does not.
+ */
+async function signReadUrl(path: string, stable = false): Promise<string | null> {
+  try {
+    const now = Date.now();
+    const HOUR = 60 * 60 * 1000;
+    const accessibleAt = stable ? Math.floor(now / HOUR) * HOUR : now;
+    const [url] = await adminStorage.bucket().file(path).getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      accessibleAt,
+      expires: accessibleAt + (stable ? 2 * HOUR : SIGNED_READ_TTL_MS),
+    });
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether an object path is safe to hand to an anonymous visitor as a URL.
+ *
+ * Snips created before 2026-09 live at `snips/{uid}/{id}.png`, and a signed URL
+ * contains its object path — so signing one onto the public page would put the
+ * owner's Firebase uid in the page source, which `getPublicSnip` goes to some
+ * length to keep out. Those rows keep using the redirect route, whose target is
+ * never visible in the markup. New-layout rows (`snips/{id}.ext`) carry nothing
+ * but the share token the visitor already holds.
+ */
+function isUidFreePath(path: unknown): path is string {
+  return (
+    typeof path === 'string' &&
+    path.startsWith(`${SNIP_STORAGE_PREFIX}/`) &&
+    !path.slice(SNIP_STORAGE_PREFIX.length + 1).includes('/')
+  );
+}
+
 // ─── Settings ────────────────────────────────────────────────────────
 
 export async function getSnipSettings(uid: string): Promise<SnipSettings> {
@@ -404,9 +461,22 @@ export async function finalizeSnip(
 
   const bucket = adminStorage.bucket();
   const file = bucket.file(data.storagePath);
-  const [exists] = await file.exists();
-  if (!exists) return null;
-  const [metadata] = await file.getMetadata();
+  // `getMetadata` alone is the existence proof: it rejects for a missing
+  // object, so a separate `exists()` was a second Storage round trip on the
+  // critical path of every upload for no extra information. The poster check
+  // and the retention read are independent of it, so they run alongside.
+  const [metaResult, posterExistsResult, settings] = await Promise.all([
+    file.getMetadata().catch(() => null),
+    data.posterPath
+      ? bucket
+          .file(data.posterPath)
+          .exists()
+          .catch(() => [false] as [boolean])
+      : Promise.resolve(null),
+    getSnipSettings(uid),
+  ]);
+  if (!metaResult) return null;
+  const [metadata] = metaResult;
   const bytes = Number(metadata.size ?? 0);
   const maxBytes = video ? MAX_SNIP_VIDEO_BYTES : MAX_SNIP_BYTES;
   if (!Number.isFinite(bytes) || bytes <= 0 || bytes > maxBytes) {
@@ -435,18 +505,12 @@ export async function finalizeSnip(
   // A recording whose poster PUT failed is still a recording. The row simply
   // drops the field, `imageUrl` comes back null, and the card renders its
   // placeholder — far better than refusing to save the video over its thumbnail.
-  let posterPath: string | null = data.posterPath ?? null;
-  if (posterPath) {
-    const [posterExists] = await bucket
-      .file(posterPath)
-      .exists()
-      .catch(() => [false] as [boolean]);
-    if (!posterExists) posterPath = null;
-  }
+  const posterPath: string | null =
+    data.posterPath && posterExistsResult?.[0] ? data.posterPath : null;
 
   const title = normaliseSnipTitle(options.title);
 
-  const retention = (await getSnipSettings(uid)).retention;
+  const retention = settings.retention;
   const createdAt = new Date();
   const expiresMs = snipExpiryMs(createdAt.getTime(), retention);
 
@@ -517,9 +581,17 @@ function parseSnipCursor(cursor: string): { ms: number; id: string } | null {
   return { ms, id };
 }
 
-function toSnipRow(doc: FirebaseFirestore.QueryDocumentSnapshot): SnipRow {
+async function toSnipRow(doc: FirebaseFirestore.QueryDocumentSnapshot): Promise<SnipRow> {
   const d = doc.data();
   const kind = resolveSnipKind(d.kind);
+  // The grid's picture, signed once here so the browser fetches it from
+  // Storage directly instead of going through `/image` — a function call and a
+  // Firestore read per card, 24 times a page. Owner-only, so the object path
+  // (and therefore any legacy uid in it) is no secret from the reader. The
+  // redirect URL stays on the row as `imageUrl` and is the fallback.
+  const stillPath = kind === 'video' ? d.posterPath : d.storagePath;
+  const directImageUrl =
+    typeof stillPath === 'string' && stillPath ? await signReadUrl(stillPath, true) : null;
   return {
     id: doc.id,
     createdAt: d.createdAt?.toDate?.()?.toISOString() ?? new Date(0).toISOString(),
@@ -537,6 +609,7 @@ function toSnipRow(doc: FirebaseFirestore.QueryDocumentSnapshot): SnipRow {
     // landed — `posterPath` is deleted at finalise when it did not, so its
     // presence here is the answer rather than an assumption about the object.
     imageUrl: kind === 'video' && !d.posterPath ? null : snipImageUrl(doc.id),
+    directImageUrl,
     mediaUrl: snipMediaUrl(doc.id, kind),
   };
 }
@@ -590,7 +663,7 @@ export async function listSnipPage(
           .get(),
   ]);
 
-  const snips = snap.docs.map(toSnipRow);
+  const snips = await Promise.all(snap.docs.map(toSnipRow));
   const last = snap.docs[snap.docs.length - 1];
   // A full page means "there may be more", not "there is more" — an exactly
   // divisible list costs one empty fetch at the end, which is cheaper than the
@@ -629,8 +702,22 @@ export async function getPublicSnip(id: string): Promise<PublicSnip | null> {
   const expiresMs = d.expiresAt?.toDate?.()?.getTime?.();
   if (expiresMs && expiresMs <= Date.now()) return null;
 
-  const owner = await getUserById(d.ownerUid).catch(() => null);
   const kind = resolveSnipKind(d.kind);
+
+  // Direct, signed URLs for the picture / recording, so the visitor's browser
+  // does not have to bounce through `/image` or `/video` (a function, a
+  // Firestore read and a second connection) before the first byte. Only for
+  // rows whose object path carries no uid — see `isUidFreePath` — and each one
+  // is paired with the stable redirect URL, which the page falls back to if the
+  // signed one has expired or fails. Signing runs beside the owner lookup.
+  const stillPath = kind === 'video' ? d.posterPath : d.storagePath;
+  const [owner, directImageUrl, directMediaUrl] = await Promise.all([
+    getUserById(d.ownerUid).catch(() => null),
+    isUidFreePath(stillPath) ? signReadUrl(stillPath) : Promise.resolve(null),
+    kind === 'video' && isUidFreePath(d.storagePath)
+      ? signReadUrl(d.storagePath)
+      : Promise.resolve(null),
+  ]);
 
   return {
     id,
@@ -649,6 +736,9 @@ export async function getPublicSnip(id: string): Promise<PublicSnip | null> {
     height: d.height ?? 0,
     sharedBy: owner?.displayName?.trim() || null,
     imageUrl: kind === 'video' && !d.posterPath ? null : snipImageUrl(id),
+    directImageUrl,
+    // For a still the media IS the still.
+    directMediaUrl: kind === 'video' ? directMediaUrl : directImageUrl,
     mediaUrl: snipMediaUrl(id, kind),
   };
 }
@@ -778,7 +868,7 @@ export async function updateSnipDetails(
   if (Object.keys(update).length > 0) await ref.update(update);
 
   const after = await ref.get();
-  return toSnipRow(after as FirebaseFirestore.QueryDocumentSnapshot);
+  return await toSnipRow(after as FirebaseFirestore.QueryDocumentSnapshot);
 }
 
 // ─── Delete ──────────────────────────────────────────────────────────

@@ -37,9 +37,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     const email = welcomeEmail(greetingName(invite.submission.name), invite.url, TOTAL_MINUTES);
     const emailId = await sendEmail({
       to: invite.submission.email,
-      subject: email.subject,
-      html: email.html,
-      text: email.text,
+      email,
       idempotencyKey: `onboarding-invite/${submissionId}/${invite.inviteCount}`,
       tags: [{ name: 'category', value: 'onboarding_invite' }],
     });

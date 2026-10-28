@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import { LIVE_POLL_MS, useLiveRefresh } from '@/hooks/useTrainingAdmin';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { getPart } from '@/lib/training/modules';
 import type { AdminSubmissionView } from '@/lib/training/types';
@@ -14,6 +15,8 @@ interface SubmissionDialogProps {
   target: { emailHash: string; partId: string; label: string } | null;
   moduleId: string;
   timezone: string;
+  /** The part's clock is running (or its last uploads may still land): re-read the work as it comes in. */
+  live: boolean;
   load: (emailHash: string, partId: string) => Promise<AdminSubmissionView>;
   onClose: () => void;
 }
@@ -26,9 +29,11 @@ interface SubmissionDialogProps {
  * app for now.
  *
  * The body is keyed by the target, so opening someone else's work remounts it
- * with a clean slate instead of resetting state from an effect.
+ * with a clean slate instead of resetting state from an effect. While the part
+ * runs it re-reads on the live beat, and once more when it stops running, so
+ * each edit appears as it is uploaded.
  */
-export default function SubmissionDialog({ sessionId, target, moduleId, timezone, load, onClose }: SubmissionDialogProps) {
+export default function SubmissionDialog({ sessionId, target, moduleId, timezone, live, load, onClose }: SubmissionDialogProps) {
   return (
     <Dialog open={!!target} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
@@ -39,6 +44,7 @@ export default function SubmissionDialog({ sessionId, target, moduleId, timezone
             target={target}
             moduleId={moduleId}
             timezone={timezone}
+            live={live}
             load={load}
           />
         )}
@@ -52,26 +58,37 @@ function SubmissionBody({
   target,
   moduleId,
   timezone,
+  live,
   load,
 }: {
   sessionId: string;
   target: NonNullable<SubmissionDialogProps['target']>;
   moduleId: string;
   timezone: string;
+  live: boolean;
   load: SubmissionDialogProps['load'];
 }) {
   const [view, setView] = useState<AdminSubmissionView | null>(null);
   const [error, setError] = useState('');
+  const [reads, setReads] = useState(0);
+  useLiveRefresh(() => setReads((n) => n + 1), live ? LIVE_POLL_MS : null);
 
+  // `live` is a dependency so the read after the clock stops picks up the last
+  // uploads. A re-read never drops `view` back to null — that would unmount the
+  // recording player mid-stream.
   useEffect(() => {
-    let live = true;
+    let current = true;
     load(target.emailHash, target.partId)
-      .then((v) => live && setView(v))
-      .catch((err) => live && setError(err instanceof Error ? err.message : 'Could not load the work'));
+      .then((v) => {
+        if (!current) return;
+        setView(v);
+        setError('');
+      })
+      .catch((err) => current && setError(err instanceof Error ? err.message : 'Could not load the work'));
     return () => {
-      live = false;
+      current = false;
     };
-  }, [target, load]);
+  }, [target, load, live, reads]);
 
   const part = getPart(moduleId, target.partId);
 
@@ -86,7 +103,7 @@ function SubmissionBody({
         </DialogDescription>
       </DialogHeader>
 
-      {error ? (
+      {error && !view ? (
         <p role="alert" className="text-sm text-red-400">
           {error}
         </p>

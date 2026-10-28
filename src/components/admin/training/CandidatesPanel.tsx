@@ -9,7 +9,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useTrainingCandidates } from '@/hooks/useTrainingAdmin';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
-import type { AdminCandidateRow } from '@/lib/training/types';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { AdminStateBadge } from './AdminStateBadge';
 import CandidateSheet from './CandidateSheet';
@@ -19,13 +18,16 @@ import { formatWhen } from './zonedTime';
  * Every candidate across every session, most pressing first (a live clock, then
  * something to start, then what is coming, then what ended). The status is the
  * state of their most pressing part, with what it is about under it; the row is
- * the whole target and opens everything they have submitted.
+ * the whole target and opens everything they have submitted. While anyone's part
+ * is open or running the list refreshes itself, updating rows where they stand.
  */
 export default function CandidatesPanel() {
   const { timezone } = useViewerTimezone();
   const { candidates, error, refetch } = useTrainingCandidates();
   const [query, setQuery] = useState('');
-  const [open, setOpen] = useState<AdminCandidateRow | null>(null);
+  // By id, so the panel's header follows the row as the list refreshes.
+  const [openHash, setOpenHash] = useState<string | null>(null);
+  const open = candidates?.find((c) => c.emailHash === openHash) ?? null;
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -102,7 +104,7 @@ export default function CandidatesPanel() {
                 return (
                   <TableRow
                     key={c.emailHash}
-                    onClick={() => setOpen(c)}
+                    onClick={() => setOpenHash(c.emailHash)}
                     className="cursor-pointer border-white/[0.07] hover:bg-white/[0.055] active:bg-white/[0.08]"
                   >
                     <TableCell>
@@ -117,7 +119,7 @@ export default function CandidatesPanel() {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setOpen(c);
+                              setOpenHash(c.emailHash);
                             }}
                             className="block max-w-full truncate text-left font-medium text-white outline-none hover:underline focus-visible:underline"
                           >
@@ -147,7 +149,7 @@ export default function CandidatesPanel() {
         </div>
       )}
 
-      <CandidateSheet candidate={open} timezone={timezone} onClose={() => setOpen(null)} />
+      <CandidateSheet candidate={open} timezone={timezone} onClose={() => setOpenHash(null)} />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb, adminStorage, adminAuth } from '@/lib/firebase-admin';
 import { getUserById, invalidateUserCache, releaseEmailClaim } from '@/lib/services/userService';
@@ -12,6 +12,8 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 import { deleteAllSnipsForUser } from '@/lib/services/snipService';
 import { clearManualLinksForUser } from '@/lib/services/buddyxMappingService';
 import { releaseGoLoginSeat } from '@/lib/services/gologinAccountService';
+import { personName, userOffboardedEmail, type OffboardingKind } from '@/lib/email/templates';
+import { emailOrganizationManager } from '@/lib/email/accountEmails';
 
 /**
  * Offboarding frees the person's paid GoLogin seat (and their direct GoLogin
@@ -144,8 +146,15 @@ export const PUT = withAuth(async (
     // transition only — a second offboarding write keeps the first date — and
     // cleared on a full restore. A direct read, not `getUserById`'s cache, so
     // the transition is judged against the stored state.
+    // What this write does to the person, for the organization manager's email.
+    // Archive sends `isActive: false` too, so archiving wins over revoking.
+    let offboardingKind: OffboardingKind | null = null;
+    let target: Record<string, unknown> = {};
     if ('isActive' in sanitizedUpdates || 'isArchived' in sanitizedUpdates) {
       const prev = (await userRef.get()).data() ?? {};
+      target = prev;
+      if (sanitizedUpdates.isArchived === true && prev.isArchived !== true) offboardingKind = 'archived';
+      else if (sanitizedUpdates.isActive === false && prev.isActive !== false) offboardingKind = 'revoked';
       const blocked = (active: unknown, archived: unknown) => active === false || archived === true;
       const wasBlocked = blocked(prev.isActive, prev.isArchived);
       const willBlock = blocked(sanitizedUpdates.isActive ?? prev.isActive, sanitizedUpdates.isArchived ?? prev.isArchived);
@@ -180,6 +189,17 @@ export const PUT = withAuth(async (
     const gologinSeat: SeatRelease | undefined = offboarding
       ? await releaseSeatForOffboarding(targetUid)
       : undefined;
+
+    if (offboardingKind) {
+      const email = userOffboardedEmail({
+        kind: offboardingKind,
+        fullName: personName(target),
+        email: typeof target.workEmail === 'string' ? target.workEmail : null,
+        by: personName(caller),
+        at: new Date(),
+      });
+      after(() => emailOrganizationManager(email, `user_${offboardingKind}`));
+    }
 
     return NextResponse.json({ success: true, gologinSeat });
   } catch (error: unknown) {
@@ -364,6 +384,19 @@ export const DELETE = withAuth(async (
     invalidateUserCache(targetUid);
     invalidateAdminUsersCache();
     invalidateDisplayNamesCache();
+
+    // Only when there was someone to delete — re-running the (idempotent)
+    // cascade on a uid that is already gone must not email a second time.
+    if (targetSnap.exists) {
+      const email = userOffboardedEmail({
+        kind: 'deleted',
+        fullName: personName(targetSnap.data()),
+        email: targetEmail ?? null,
+        by: personName(caller),
+        at: new Date(),
+      });
+      after(() => emailOrganizationManager(email, 'user_deleted'));
+    }
 
     return NextResponse.json({ success: true, gologinSeat });
   } catch (error: unknown) {

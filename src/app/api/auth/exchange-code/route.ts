@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { google } from 'googleapis';
 import { adminAuth } from '@/lib/firebase-admin';
 import {
@@ -8,6 +8,8 @@ import {
 } from '@/lib/services/userService';
 import { normalizeEmail } from '@/lib/authEmail';
 import { isValidDeviceId, registerSession } from '@/lib/services/sessionService';
+import { greetingName, loginAlertEmail } from '@/lib/email/templates';
+import { sendAccountEmail } from '@/lib/email/accountEmails';
 
 const oauth2Client = new google.auth.OAuth2(
   process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
@@ -52,6 +54,27 @@ function isRateLimited(key: string): boolean {
 
   record.count += 1;
   return record.count > MAX_ATTEMPTS_PER_WINDOW;
+}
+
+/**
+ * Where the sign-in came from, per Vercel's edge headers. Approximate by nature
+ * (a VPN lies) and absent off-platform — the email omits what is missing.
+ */
+function requestOrigin(request: NextRequest): { location: string | null; ip: string | null } {
+  const h = request.headers;
+  const decode = (v: string | null) => {
+    if (!v) return '';
+    try {
+      return decodeURIComponent(v);
+    } catch {
+      return v;
+    }
+  };
+  const location = [decode(h.get('x-vercel-ip-city')), h.get('x-vercel-ip-country-region'), h.get('x-vercel-ip-country')]
+    .filter(Boolean)
+    .join(', ');
+  const ip = h.get('x-forwarded-for')?.split(',')[0]?.trim() || h.get('x-real-ip');
+  return { location: location || null, ip: ip || null };
 }
 
 /**
@@ -208,6 +231,26 @@ export async function POST(request: NextRequest) {
     await adminAuth.setCustomUserClaims(uid, { admin: isAdmin });
 
     const customToken = await adminAuth.createCustomToken(uid, { admin: isAdmin });
+
+    // Tell the account owner, at the address they just signed in with, so a
+    // sign-in they did not make is noticed. After the response — it must never
+    // slow or fail the login.
+    const origin = requestOrigin(request);
+    const device = typeof deviceLabel === 'string' && deviceLabel.trim() ? deviceLabel.trim().slice(0, 80) : null;
+    const signedInAt = new Date();
+    after(() =>
+      sendAccountEmail(
+        email,
+        loginAlertEmail({
+          firstName: greetingName(freshDoc?.firstName ?? freshDoc?.displayName ?? userInfo.name ?? null),
+          at: signedInAt,
+          timezone: freshDoc?.timezone ?? null,
+          device,
+          ...origin,
+        }),
+        'login_alert',
+      ),
+    );
 
     return NextResponse.json({
       customToken,

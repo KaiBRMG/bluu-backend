@@ -74,7 +74,15 @@ export function SnipCard({
   // is 24 pipelines and 24 range-request storms, for cells the user is only
   // scanning. The play affordance says what the row is; the public page plays
   // it.
-  const preview = previewFailed ? null : snip.imageUrl;
+  // The signed Storage URL when the server sent one — no function in the way —
+  // else the stable redirect. On the signed one failing (an app left open for
+  // weeks outlives its signature) it switches once to the redirect.
+  const [directFailed, setDirectFailed] = useState(false);
+  const preview = previewFailed
+    ? null
+    : snip.directImageUrl && !directFailed
+      ? snip.directImageUrl
+      : snip.imageUrl;
 
   return (
     <li className={cn('flex flex-col overflow-hidden rounded-xl', SURFACE)}>
@@ -106,7 +114,10 @@ export function SnipCard({
             alt=""
             loading="lazy"
             decoding="async"
-            onError={() => setPreviewFailed(true)}
+            onError={() => {
+              if (snip.directImageUrl && !directFailed) setDirectFailed(true);
+              else setPreviewFailed(true);
+            }}
             className="max-h-full max-w-full object-contain"
           />
         ) : isVideo ? (
