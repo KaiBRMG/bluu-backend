@@ -3,17 +3,8 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { milestonesFor } from '@/lib/training/modules';
+import { fmtRemaining } from '../_lib/format';
 import { CLOCK_PHASE, phaseFor } from '../_lib/theme';
-
-function format(ms: number): string {
-  const total = Math.max(0, Math.ceil(ms / 1000));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const mm = String(m).padStart(2, '0');
-  const ss = String(s).padStart(2, '0');
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
-}
 
 function spoken(ms: number): string {
   const minutes = Math.round(ms / 60_000);
@@ -112,7 +103,7 @@ export function Countdown({ deadlineMs, durationMs, now, onExpire, children, cla
             motion,
           )}
         >
-          {format(remaining)}
+          {fmtRemaining(remaining)}
         </div>
       </div>
       <div className="sr-only" role="status" aria-live="polite">

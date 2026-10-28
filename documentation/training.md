@@ -8,14 +8,15 @@
 |---|---|
 | `src/lib/training/modules.ts` | **Code-defined modules and parts** (titles, durations, briefs, the four edit levels) and the limits client and server share |
 | `src/lib/training/types.ts` | Wire types (what the browser sees — never hashes or storage paths) |
+| `src/lib/training/recording.ts` | **Screen recording** limits (segment length, batch, staleness, capture settings), segment naming, and `recordingGaps` — shared by browser, API and player |
 | `src/lib/services/trainingAuthService.ts` | Signing, email hashing, the cookie, rate limits, one-time codes, candidate names |
 | `src/lib/services/trainingService.ts` | Sessions, participants, the attempt and its clock, signed uploads, admin reads, source images |
 | `src/lib/middleware/withCandidate.ts` | Guard for the candidate API (the analogue of `withAuth`) |
-| `src/app/api/training/**` | Candidate API (cookie): `request-code`, `verify-code`, `logout`, `me`, `name`, `modules/[moduleId]`, `sessions/[sessionId]/parts/[partId]` + `start` `upload-url` `finalize` `finish` |
-| `src/app/api/admin/training/**` | Admin API (`training` page permission): sessions, participants, one candidate's work, source images |
-| `src/app/training/**` | The candidate UI: gate, home, `media-gen`, `_components/` (`Countdown`, `TaskRoom`, `ModuleView`, …), `_lib/theme.ts` |
+| `src/app/api/training/**` | Candidate API (cookie): `request-code`, `verify-code`, `logout`, `me`, `name`, `modules/[moduleId]`, `sessions/[sessionId]/parts/[partId]` + `start` `upload-url` `finalize` `finish` `screen-check` `recording` |
+| `src/app/api/admin/training/**` | Admin API (`training` page permission): sessions, participants, one candidate's work, **their recording** (`participants/[emailHash]/recording`), source images |
+| `src/app/training/**` | The candidate UI: gate, home, `media-gen`, `_components/` (`Countdown`, `TaskRoom`, `ModuleView`, `ScreenCheck`, `ScreenLock`, `ShareButton`, …), `_lib/theme.ts`, `_lib/screenCapture.ts` (share + `ScreenRecorder`), `_lib/useScreenShare.ts` |
 | `src/app/(main)/admin-portal/training/**` | The admin list and session pages |
-| `src/components/admin/training/**`, `src/hooks/useTrainingAdmin.ts` | Admin dialogs, the source-image uploader, the Candidates tab (`CandidatesPanel`, `CandidateSheet`), `SubmissionSlots`, `zonedTime.ts`, the data hooks |
+| `src/components/admin/training/**`, `src/hooks/useTrainingAdmin.ts` | Admin dialogs, the source-image uploader, the Candidates tab (`CandidatesPanel`, `CandidateSheet`), `SubmissionSlots`, `RecordingPlayer`, `zonedTime.ts`, the data hooks |
 | `src/lib/email/templates.ts` → `trainingCodeEmail` | The sign-in code email (copy lives only here) |
 | `src/lib/definitions.ts` | Page `training` in the Admin Portal teamspace (icon `GraduationCap`) |
 | `src/middleware.ts` | `/training` is browser-allowlisted |
@@ -41,12 +42,12 @@ The cookie is an **identity, not an authorisation**. Every request re-derives ac
 | Collection | Contents |
 |---|---|
 | `training-sessions/{id}` | `label`, `moduleId`, `closesAtMs` (access ends), `participantCount`, `parts.{partId} = { opensAtMs, sources[] }` |
-| `training-participants/{sessionId}_{emailHash}` | `email`, `addedAtMs`, `revokedAtMs`, `attempts.{partId} = { startedAtMs, deadlineMs, finishedAtMs, uploadAttempts, pending{}, slots{} }` |
+| `training-participants/{sessionId}_{emailHash}` | `email`, `addedAtMs`, `revokedAtMs`, `screenChecks.{partId} = { atMs, path, pendingId, count }`, `attempts.{partId} = { startedAtMs, deadlineMs, finishedAtMs, recording, segmentSeq, recordingDeletedAtMs?, uploadAttempts, pending{}, slots{} }` |
 | `training-candidates/{emailHash}` | The person: `name` (set once) |
 | `training-codes/{emailHash}` | `codeHash` (HMAC), `expiresAtMs`, `attempts`, `sentAtMs` |
 | `training-rate/{scope}_{hash}` | Fixed-window abuse counters |
 
-`expiresAt` is written on codes and rate docs for a TTL policy (**not configured**; nothing depends on it — expired codes are rejected in code). Indexes: none composite. `attempts`, `email` and `parts` are exempted from indexing (rule 9). Participant reads are two single-field queries (`sessionId ==` for the admin roster, `emailHash ==` for a candidate), plus batched `getAll`s for names and sessions — never N+1.
+`expiresAt` is written on codes and rate docs for a TTL policy (**not configured**; nothing depends on it — expired codes are rejected in code). Indexes: none composite. `attempts`, `email`, `screenChecks` and `parts` are exempted from indexing (rule 9). Participant reads are two single-field queries (`sessionId ==` for the admin roster, `emailHash ==` for a candidate), plus batched `getAll`s for names and sessions — never N+1.
 
 ## Storage
 
@@ -54,6 +55,8 @@ The cookie is an **identity, not an authorisation**. Every request re-derives ac
 training/sources/{sessionId}/{partId}/{imageId}.{jpg|png|webp}   ← original, as uploaded
 training/sources/{sessionId}/{partId}/{imageId}_thumb.webp       ← 480px preview, made in the admin's browser
 training/submissions/{sessionId}/{emailHash}/{partId}/{slotId}-{uploadId}.{ext}
+training/recordings/{sessionId}/{emailHash}/{partId}/seg-{NNNNNN}.{webm|mp4}  ← screen recording, ~10 s each
+training/recordings/{sessionId}/{emailHash}/{partId}/check-{id}.jpg           ← the screen-check still
 ```
 
 Nothing is public. Reads are v4 signed URLs anchored to a 30-minute window (so repeated reads return byte-identical URLs and the browser cache holds; same trick as the application review queue), valid at least 90 minutes; the originals are signed as `attachment` so a click saves rather than opens.
@@ -77,6 +80,26 @@ Nothing is public. Reads are v4 signed URLs anchored to a 30-minute window (so r
 ### Source images
 
 The source images are the admin's to attach (Session page → Parts), **as many as they like** (at most 500 per part, only because the list lives in the session document). A part needs at least as many as the task picks (`pickCount`, 2 for ID Swap) before a candidate can start it; the candidate then chooses their own from however many there are. They are signed for a candidate **only while the attempt is in progress** — never on the briefing — Images can be **added at any time**; they are removed, and the part's open time changed, only until someone has **started** the part (a running attempt depends on both) — not merely until it opens, which would strand an admin who opened a part before attaching images.
+
+## Screen recording
+
+Every attempt started since recording shipped is **screen-recorded**, and an admin can watch it live (about one segment, ~10–20 s, behind) and replay it afterwards. `/training` runs in the candidate's own browser, not the Electron shell, so the capture is the browser's `getDisplayMedia` — which needs a click every time and cannot be started silently.
+
+**The share.** Whole screen only: the track's `displaySurface` must be `monitor` (where the browser does not report it, the capture must have the screen's aspect ratio), and a frame must not be blank — a Mac whose browser lacks Screen Recording permission can hand back a black stream. Capture is capped at 1920×1200, ~5 fps, ~0.8 Mbps (`recording.ts`): segments share the candidate's line with their edit uploads, and bitrate is how fast Storage grows. `surfaceSwitching: 'exclude'` removes Chrome's "share this tab instead", which would switch surface mid-test with no event to catch. **Not detectable:** a second monitor — a candidate can share one screen and work on another. The admin sees the recording; that is the check. Phones and tablets have no `getDisplayMedia`, so the test is desktop-only, and the screen check says so.
+
+**Before Start — the screen check (`ScreenCheck`).** Share → a live preview → the browser grabs a JPEG still → `screen-check` `{action:'sign'}` → direct PUT → `{action:'confirm', checkId}`, which proves the object is a real JPEG created in the last few minutes and records `screenChecks.{partId}.atMs`. The candidate must also tick that the preview shows their whole screen, including other apps' windows — a Mac without permission can share the wallpaper alone, which no automated test can tell apart. **Start refuses** without a check from the last `SCREEN_CHECK_TTL_MS` (10 min); the browser redoes an aged check itself before calling Start. A page loaded before this shipped never runs a check, so Start's refusal tells it to refresh.
+
+**During — segments.** `ScreenRecorder` records standalone ~10 s files: each is a **new** `MediaRecorder` (chunks after a recorder's first have no header), rotated on the recorder's own `timeslice` event rather than a timer — the candidate is in their editing app, and a background tab's timers are throttled to once a minute. `recording` signs `SEGMENT_BATCH` (6) PUT URLs per call, so one call covers a minute (rule 9i). Sequence numbers come from `attempts.{partId}.segmentSeq`, so a segment can never overwrite another; **a reopen continues the counter** instead of resetting it. Every URL dies at `min(deadline, session end) + grace`, like the edit uploads'. Segments upload one at a time, retried with backoff; up to ~10 minutes queue while a line is down, oldest dropped first. **Nothing is written to Firestore per segment** — the folder is the record.
+
+**The lock.** If the share stops ("Stop sharing" in the browser bar) or the page is refreshed mid-attempt (a share never survives a reload, and only a click can start another), `ScreenLock` covers the task room (`inert` beneath it) until they share again. **The clock does not pause** — pausing would make stopping the share a way to buy time. The server enforces it on its own: `upload-url` refuses an edit upload while the newest segment in Storage is older than `RECORDING_STALE_MS` (90 s, generous for a slow line). A failed Storage listing fails **open** — a storage hiccup must not lock an honest candidate out.
+
+**Only attempts that carry `recording: true` are gated.** Start sets it (and `segmentSeq: 0`); a reopen sets it too. Attempts already running when this shipped, or started from an old bundle, never had it and are never refused.
+
+**Admin — `RecordingPlayer`.** In the session page's submission dialog, and behind a **Watch live / Screen recording** button per part in the Candidates panel (one player at a time). `GET …/participants/{emailHash}/recording?part=` lists the folder (`getFiles`) and signs each segment with the window-anchored `signRead`; `&after=<seq>` (Storage `startOffset` — the names are zero-padded, so lexical is chronological) returns only newer ones, and the live view polls with it every 10 s while the window is visible and for a minute after the part ends (the last segment lands in the grace). Two `<video>` elements take turns so the hand-over between files does not flash. **Gaps are derived on read** (`recordingGaps`) from segment times and drawn red on a coverage strip with "No recording for 2m 10s from about 14:03". Segment times are Storage's `timeCreated` (upload end), so positions are labelled "about".
+
+**Retention is manual.** **Delete recording** (confirmed) removes the folder and the check still and stamps `recordingDeletedAtMs`; refused while the part is running or inside the upload grace. Uploaded work is untouched. Nothing deletes recordings automatically.
+
+**Known limits.** The upload gate proves a file arrived recently, **not that it is real video of the screen** — a scripted candidate could keep it open with junk segments; only the admin watching the playback catches that. A reopen hides any gap at the end of the first run (`recordingGaps` cannot tell where that run ended). A segment PUT cannot pin a maximum size (same reason as edits: `x-goog-content-length-range` would need the CORS policy), so a hostile candidate could upload oversized segments until their deadline; `MAX_SEGMENTS_PER_ATTEMPT` bounds the count. The `video/webm`/`video/mp4` content type is pinned in the signature, so the PUT must send exactly that header (not `MediaRecorder`'s `;codecs=` variant).
 
 ## Modules
 
@@ -108,6 +131,7 @@ Adding a module means: an id in `TrainingModuleId`, an entry in `TRAINING_MODULE
 | Code: 10 min, 5 guesses, one live code, resend cooldown | `issueCode`/`verifyCode` | Guessing a 6-digit space; the attempt is recorded before the compare, in the same transaction |
 | Signed cookie, re-authorised per request | `withCandidate` | Stale access after revoke/close |
 | Server clock, capped signed URLs, magic-byte + `timeCreated` checks | `trainingService` | Time-shifting, post-deadline uploads, non-images |
+| Screen check before Start; edit uploads refused without a recent segment | `startAttempt`, `requestUpload` | Sitting the test unrecorded |
 | `no-store` on every route | all | Caching a clock or a signed URL |
 | `noindex`, `NoTranslate` | layout | Discovery; a translator killing a live timed task |
 
@@ -118,5 +142,5 @@ Per-IP limits are sized for a group in one office on one address (60 code reques
 - **Deploy the rules and indexes** after any change here: `firebase deploy --only firestore:rules,firestore:indexes`.
 - **CORS:** the browser `PUT`s to Storage from `app.bluurock.com` (and the legacy host, redirected for pages). The existing `storage-cors.json` already allows `PUT` for those origins; a new domain must be added there (rule 9i).
 - **Email:** needs `RESEND_API_KEY`. A send failure is logged (`[training/request-code]`) and the candidate sees nothing different — check the server log if someone says no code arrived.
-- **Retention:** there is no deletion or archive for sessions, candidates or uploads yet. Candidate work and emails are kept until someone removes them from Firestore/Storage.
+- **Retention:** there is no deletion or archive for sessions, candidates or uploads yet. Candidate work and emails are kept until someone removes them from Firestore/Storage. Screen recordings are deleted only by an admin (**Delete recording**); at the capture settings a 20-minute part is roughly 50–120 MB.
 - **Invitation:** adding someone does not email them. Copy the link from the session page and send it yourself.

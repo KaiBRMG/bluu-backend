@@ -2544,6 +2544,11 @@
       "indexes": []
     },
     {
+      "collectionGroup": "training-participants",
+      "fieldPath": "screenChecks",
+      "indexes": []
+    },
+    {
       "collectionGroup": "training-sessions",
       "fieldPath": "parts",
       "indexes": []

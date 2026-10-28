@@ -1,6 +1,7 @@
 'use client';
 
-import { Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { Loader2, MonitorPlay } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -9,6 +10,7 @@ import { getPart, TRAINING_MODULES } from '@/lib/training/modules';
 import type { AdminCandidatePart, AdminCandidateRow } from '@/lib/training/types';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { AdminStateBadge } from './AdminStateBadge';
+import RecordingPlayer from './RecordingPlayer';
 import SubmissionSlots from './SubmissionSlots';
 import { formatDuration, formatWhen } from './zonedTime';
 
@@ -64,6 +66,8 @@ export default function CandidateSheet({
 }
 
 function CandidateBody({ emailHash, timezone }: { emailHash: string; timezone: string }) {
+  // One player at a time: each one polls while live, and a panel of them would all load video at once.
+  const [watching, setWatching] = useState<string | null>(null);
   const { detail, error, refetch } = useTrainingCandidate(emailHash);
 
   if (error) {
@@ -112,6 +116,24 @@ function CandidateBody({ emailHash, timezone }: { emailHash: string; timezone: s
                       <AdminStateBadge state={p.state} />
                     </div>
                     {facts && <p className="mt-1 text-[11px] text-zinc-400 tabular-nums">{facts}</p>}
+                    {p.startedAtMs && (
+                      <div className="mt-3">
+                        {watching === `${session.sessionId}/${p.partId}` ? (
+                          <RecordingPlayer
+                            sessionId={session.sessionId}
+                            emailHash={emailHash}
+                            partId={p.partId}
+                            timezone={timezone}
+                            partTitle={def.title}
+                          />
+                        ) : (
+                          <Button variant="outline" size="sm" onClick={() => setWatching(`${session.sessionId}/${p.partId}`)}>
+                            <MonitorPlay className="size-4" />
+                            {p.state === 'in-progress' ? 'Watch live' : 'Screen recording'}
+                          </Button>
+                        )}
+                      </div>
+                    )}
                     <div className="mt-3">
                       {p.slots.length > 0 ? (
                         <SubmissionSlots part={def} slots={p.slots} sources={p.sources} timezone={timezone} />

@@ -368,6 +368,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
       </div>
 
       <SubmissionDialog
+        sessionId={sessionId}
         target={viewing}
         moduleId={session.moduleId}
         timezone={timezone}

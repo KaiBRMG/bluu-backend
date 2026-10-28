@@ -21,6 +21,7 @@ import {
 } from '@/lib/training/modules';
 import type {
   AdminCandidateDetail,
+  AdminRecordingView,
   AdminCandidateRow,
   AdminCandidatePart,
   AdminCandidateSession,
@@ -34,12 +35,25 @@ import type {
   PartResponse,
   PartState,
   PartSummary,
+  RecordingSlots,
   SessionSummary,
   SourceView,
 } from '@/lib/training/types';
 import { emailHashFor, getCandidateName, getCandidateNames } from '@/lib/services/trainingAuthService';
 import { TrainingError } from '@/lib/training/errors';
 import { splitEmails } from '@/lib/training/emails';
+import {
+  MAX_CHECK_BYTES,
+  MAX_SCREEN_CHECKS,
+  MAX_SEGMENTS_PER_ATTEMPT,
+  RECORDING_STALE_MS,
+  SCREEN_CHECK_TTL_MS,
+  SEGMENT_BATCH,
+  SEGMENT_URL_TTL_MS,
+  parseSegmentName,
+  segmentName,
+  type RecordingType,
+} from '@/lib/training/recording';
 
 /**
  * Training sessions, the per-candidate attempt and everything that touches the
@@ -48,6 +62,10 @@ import { splitEmails } from '@/lib/training/emails';
  *   training-sessions/{id}                 the sitting: module, schedule, source images
  *   training-participants/{id}_{emailHash} one candidate in one sitting + their attempts
  *   training-candidates/{emailHash}        the person (name) — see trainingAuthService
+ *
+ * Storage: `training/recordings/{sessionId}/{emailHash}/{partId}/` holds the
+ * attempt's screen recording (`seg-NNNNNN.webm|mp4`) and its screen-check
+ * still (`check-{id}.jpg`) — see "Screen recording" below.
  *
  * THE CLOCK IS THE SERVER'S. `deadlineMs` is written once, at Start, in a
  * transaction; the browser only renders `deadline − (now + skew)`. A refresh,
@@ -108,6 +126,14 @@ interface AttemptDoc {
   deadlineMs: number;
   finishedAtMs: number | null;
   reopenedAtMs?: number;
+  /**
+   * Set at Start (and on a reopen): edit uploads need a fresh recording segment.
+   * Absent on attempts started before recording existed, which are never gated.
+   */
+  recording?: boolean;
+  /** The next segment sequence number to sign. Never reset — a reopen continues it. */
+  segmentSeq?: number;
+  recordingDeletedAtMs?: number;
   uploadAttempts: number;
   pending: Record<string, PendingDoc>;
   slots: Partial<Record<SlotId, SlotDoc>>;
@@ -122,7 +148,19 @@ interface ParticipantDoc {
   /** A reopen lets this one candidate in past the session's end, until here. */
   accessUntilMs?: number;
   reopenedAtMs?: number;
+  /** Per part: the screen check that Start requires. Kept off `attempts`, whose keys mean "started". */
+  screenChecks?: Record<string, ScreenCheckDoc>;
   attempts: Record<string, AttemptDoc>;
+}
+
+interface ScreenCheckDoc {
+  /** When the last check still was verified. */
+  atMs: number | null;
+  path: string | null;
+  /** The check signed but not yet confirmed. */
+  pendingId: string | null;
+  /** Checks ever signed for this part — the bound on a looping client. */
+  count: number;
 }
 
 /**
@@ -351,6 +389,7 @@ async function attemptView(attempt: AttemptDoc): Promise<AttemptView> {
     startedAtMs: attempt.startedAtMs,
     deadlineMs: attempt.deadlineMs,
     finishedAtMs: attempt.finishedAtMs,
+    recording: !!attempt.recording,
     slots,
   };
 }
@@ -414,13 +453,7 @@ export async function startAttempt(emailHash: string, sessionId: string, partId:
 
   await adminDb.runTransaction(async (tx) => {
     const [pSnap, sSnap] = await Promise.all([tx.get(pRef), tx.get(sRef)]);
-    if (!pSnap.exists || !sSnap.exists) throw new TrainingError('Not found', 404);
-    const participant = pSnap.data() as ParticipantDoc;
-    const session = sessionFor(participant, sSnap.data() as SessionDoc);
-    if (participant.revokedAtMs != null) throw new TrainingError('Not found', 404);
-
-    const part = getPart(session.moduleId, partId);
-    if (!part) throw new TrainingError('Not found', 404);
+    const { participant, session, part } = candidateContext(pSnap, sSnap, partId);
 
     const now = Date.now();
     if (participant.attempts?.[partId]) return; // already started — idempotent
@@ -437,10 +470,20 @@ export async function startAttempt(emailHash: string, sessionId: string, partId:
       }
     }
 
+    // The screen check is the server's half of "no Start without a working
+    // recording". A page loaded before recording existed never runs one, so it
+    // is told to refresh rather than given a bare refusal.
+    const checkedAtMs = participant.screenChecks?.[partId]?.atMs ?? 0;
+    if (now - checkedAtMs > SCREEN_CHECK_TTL_MS) {
+      throw new TrainingError('Share your screen and run the screen check before you start. If you do not see it, refresh this page.', 409);
+    }
+
     const attempt: AttemptDoc = {
       startedAtMs: now,
       deadlineMs: now + part.durationMs,
       finishedAtMs: null,
+      recording: true,
+      segmentSeq: 0,
       uploadAttempts: 0,
       pending: {},
       slots: {},
@@ -475,17 +518,19 @@ export async function requestUpload(
   const sRef = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId);
   const uploadId = crypto.randomBytes(12).toString('hex');
   const path = `${STORAGE_ROOT}/submissions/${sessionId}/${emailHash}/${partId}/${input.slotId}-${uploadId}.${ext}`;
+  // Storage, not Firestore, so it is started now and runs alongside the
+  // transaction's reads. Null when the listing itself failed: a Storage hiccup
+  // must not lock an honest candidate out.
+  const latestSegment = latestSegmentAtMs(recordingBase(sessionId, emailHash, partId)).catch((error) => {
+    console.error('[training] segment listing failed', error);
+    return null;
+  });
 
   const deadlineMs = await adminDb.runTransaction(async (tx) => {
-    const [pSnap, sSnap] = await Promise.all([tx.get(pRef), tx.get(sRef)]);
-    if (!pSnap.exists || !sSnap.exists) throw new TrainingError('Not found', 404);
-    const participant = pSnap.data() as ParticipantDoc;
-    const session = sessionFor(participant, sSnap.data() as SessionDoc);
-    if (participant.revokedAtMs != null) throw new TrainingError('Not found', 404);
-
-    const part = getPart(session.moduleId, partId);
-    const slot = part?.task.slots.find((s) => s.id === input.slotId);
-    if (!part || !slot) throw new TrainingError('Not found', 404);
+    const [pSnap, sSnap, latestSegmentMs] = await Promise.all([tx.get(pRef), tx.get(sRef), latestSegment]);
+    const { participant, session, part } = candidateContext(pSnap, sSnap, partId);
+    const slot = part.task.slots.find((s) => s.id === input.slotId);
+    if (!slot) throw new TrainingError('Not found', 404);
     if (!session.parts[partId]?.sources.some((s) => s.id === input.sourceId)) {
       throw new TrainingError('Choose one of the source images', 400);
     }
@@ -494,6 +539,11 @@ export async function requestUpload(
     const attempt = participant.attempts?.[partId];
     if (now > session.closesAtMs) throw new TrainingError('This session has been stopped', 409);
     if (!inProgress(attempt, now)) throw new TrainingError('Time is up', 409);
+    // Measured from the start (or reopen) until the first segment lands, which takes a segment's length.
+    const recordedUntil = Math.max(latestSegmentMs ?? 0, attempt.startedAtMs, attempt.reopenedAtMs ?? 0);
+    if (attempt.recording && latestSegmentMs !== null && now - recordedUntil > RECORDING_STALE_MS) {
+      throw new TrainingError('Your screen is not being recorded right now. Share your screen again to keep uploading.', 409);
+    }
     if (attempt.uploadAttempts >= MAX_UPLOAD_ATTEMPTS) {
       throw new TrainingError('Too many uploads. Keep the ones you have.', 429);
     }
@@ -633,6 +683,253 @@ export async function finishAttempt(emailHash: string, sessionId: string, partId
     if (attempt.finishedAtMs) return;
     if (Date.now() > attempt.deadlineMs) return; // the clock already ended it
     tx.update(pRef, { [`attempts.${partId}.finishedAtMs`]: Date.now() });
+  });
+}
+
+// ─── Screen recording ────────────────────────────────────────────────────────
+//
+// The candidate's browser holds a whole-screen share (`getDisplayMedia`) and
+// records it as short, independently playable segments, each PUT straight to
+// Storage over a URL signed here (rule 9i: no video crosses a function). The
+// segments ARE the record: nothing per segment is written to Firestore, and the
+// admin player lists the folder. Two gates make it compulsory:
+//   - Start needs a screen check verified in the last few minutes.
+//   - An edit upload needs a segment that landed in the last RECORDING_STALE_MS.
+
+const recordingBase = (sessionId: string, emailHash: string, partId: string) =>
+  `${STORAGE_ROOT}/recordings/${sessionId}/${emailHash}/${partId}`;
+
+/** When the newest segment finished uploading, by Storage's clock — 0 when there is none. */
+async function latestSegmentAtMs(base: string): Promise<number> {
+  // Only the two fields read here: a long attempt holds hundreds of segments.
+  const [files] = await adminStorage.bucket().getFiles({ prefix: `${base}/seg-`, fields: 'items(name,timeCreated),nextPageToken' });
+  let latest = 0;
+  for (const f of files) latest = Math.max(latest, Date.parse(String(f.metadata.timeCreated)) || 0);
+  return latest;
+}
+
+const CHECK_ID = /^[a-f0-9]{24}$/;
+const CHECK_UPLOAD_TTL_MS = 5 * 60_000;
+
+const checkPath = (sessionId: string, emailHash: string, partId: string, checkId: string) =>
+  `${recordingBase(sessionId, emailHash, partId)}/check-${checkId}.jpg`;
+
+/** When an attempt stops or stopped: finished early, its deadline, or the session's end — whichever came first. */
+const attemptEndMs = (attempt: AttemptDoc, session: SessionDoc) =>
+  attempt.finishedAtMs ?? Math.min(attempt.deadlineMs, session.closesAtMs);
+
+/** One participant's attempt at one part, for the admin recording routes. */
+async function loadAdminAttempt(sessionId: string, emailHash: string, partId: string) {
+  if (!/^[a-f0-9]{32}$/.test(emailHash)) throw new TrainingError('Not found', 404);
+  const pRef = adminDb.collection(PARTICIPANTS_COLLECTION).doc(participantId(sessionId, emailHash));
+  const [pSnap, session] = await Promise.all([pRef.get(), loadSession(sessionId)]);
+  const part = getPart(session.moduleId, partId);
+  if (!pSnap.exists || !part) throw new TrainingError('Not found', 404);
+  const participant = pSnap.data() as ParticipantDoc;
+  return { pRef, participant, part, attempt: participant.attempts?.[partId], session: sessionFor(participant, session) };
+}
+
+/** Loads one participation for a candidate write, refusing a revoked one or an unknown part. */
+function candidateContext(pSnap: FirebaseFirestore.DocumentSnapshot, sSnap: FirebaseFirestore.DocumentSnapshot, partId: string) {
+  if (!pSnap.exists || !sSnap.exists) throw new TrainingError('Not found', 404);
+  const participant = pSnap.data() as ParticipantDoc;
+  if (participant.revokedAtMs != null) throw new TrainingError('Not found', 404);
+  const session = sessionFor(participant, sSnap.data() as SessionDoc);
+  const part = getPart(session.moduleId, partId);
+  if (!part) throw new TrainingError('Not found', 404);
+  return { participant, session, part };
+}
+
+/**
+ * Signs the upload of one screen-check still: a frame the browser grabbed from
+ * the share it will record. Only before the part is started — afterwards the
+ * segments themselves are the evidence.
+ */
+export async function signScreenCheck(
+  emailHash: string,
+  sessionId: string,
+  partId: string,
+): Promise<{ checkId: string; uploadUrl: string }> {
+  const pRef = adminDb.collection(PARTICIPANTS_COLLECTION).doc(participantId(sessionId, emailHash));
+  const sRef = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId);
+  const checkId = crypto.randomBytes(12).toString('hex');
+
+  await adminDb.runTransaction(async (tx) => {
+    const [pSnap, sSnap] = await Promise.all([tx.get(pRef), tx.get(sRef)]);
+    const { participant, session } = candidateContext(pSnap, sSnap, partId);
+    if (Date.now() > session.closesAtMs) throw new TrainingError('This session has closed', 410);
+    if (participant.attempts?.[partId]) throw new TrainingError('This part has already started', 409);
+    const check = participant.screenChecks?.[partId];
+    const count = check?.count ?? 0;
+    if (count >= MAX_SCREEN_CHECKS) throw new TrainingError('Too many screen checks. Contact the team.', 429);
+    tx.update(pRef, {
+      [`screenChecks.${partId}`]: {
+        atMs: check?.atMs ?? null,
+        path: check?.path ?? null,
+        pendingId: checkId,
+        count: count + 1,
+      } satisfies ScreenCheckDoc,
+    });
+  });
+
+  const path = checkPath(sessionId, emailHash, partId, checkId);
+  return { checkId, uploadUrl: await signWrite(path, 'image/jpeg', Date.now() + CHECK_UPLOAD_TTL_MS) };
+}
+
+/** Verifies the still arrived and is a real JPEG, then records the check Start looks for. */
+export async function confirmScreenCheck(
+  emailHash: string,
+  sessionId: string,
+  partId: string,
+  checkId: string,
+): Promise<{ checkedAtMs: number }> {
+  if (!CHECK_ID.test(checkId)) throw new TrainingError('Invalid check', 400);
+  const path = checkPath(sessionId, emailHash, partId, checkId);
+  const file = adminStorage.bucket().file(path);
+
+  let meta;
+  let isJpeg: boolean;
+  try {
+    [[meta], isJpeg] = await Promise.all([file.getMetadata(), isDeclaredImage(path, 'image/jpeg')]);
+  } catch {
+    throw new TrainingError('The screen check did not reach us. Try again.', 400);
+  }
+  const size = Number(meta.size);
+  const createdMs = Date.parse(String(meta.timeCreated));
+  if (!(size > 0 && size <= MAX_CHECK_BYTES) || meta.contentType !== 'image/jpeg' || !isJpeg ||
+      !(Date.now() - createdMs < CHECK_UPLOAD_TTL_MS)) {
+    await file.delete({ ignoreNotFound: true }).catch(() => {});
+    throw new TrainingError('The screen check was not accepted. Try again.', 400);
+  }
+
+  const pRef = adminDb.collection(PARTICIPANTS_COLLECTION).doc(participantId(sessionId, emailHash));
+  const sRef = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId);
+  const now = Date.now();
+  const previous = await adminDb.runTransaction(async (tx) => {
+    const [pSnap, sSnap] = await Promise.all([tx.get(pRef), tx.get(sRef)]);
+    const { participant } = candidateContext(pSnap, sSnap, partId);
+    const check = participant.screenChecks?.[partId];
+    if (!check || check.pendingId !== checkId) throw new TrainingError('Invalid check', 400);
+    tx.update(pRef, {
+      [`screenChecks.${partId}`]: { atMs: now, path, pendingId: null, count: check.count } satisfies ScreenCheckDoc,
+    });
+    return check.path;
+  });
+  if (previous && previous !== path) {
+    await adminStorage.bucket().file(previous).delete({ ignoreNotFound: true }).catch(() => {});
+  }
+  return { checkedAtMs: now };
+}
+
+/**
+ * Signs the next `SEGMENT_BATCH` segment uploads. The sequence numbers are the
+ * server's, so a segment can never overwrite another, and every URL dies at
+ * `deadline + grace` like the edit uploads' do.
+ */
+export async function requestRecordingSlots(
+  emailHash: string,
+  sessionId: string,
+  partId: string,
+  contentType: RecordingType,
+): Promise<RecordingSlots> {
+  const pRef = adminDb.collection(PARTICIPANTS_COLLECTION).doc(participantId(sessionId, emailHash));
+  const sRef = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId);
+
+  const { first, endsAtMs } = await adminDb.runTransaction(async (tx) => {
+    const [pSnap, sSnap] = await Promise.all([tx.get(pRef), tx.get(sRef)]);
+    const { participant, session } = candidateContext(pSnap, sSnap, partId);
+    const attempt = participant.attempts?.[partId];
+    const now = Date.now();
+    if (now > session.closesAtMs || !inProgress(attempt, now)) throw new TrainingError('Time is up', 409);
+    if (!attempt.recording) throw new TrainingError('This attempt is not recorded', 409);
+    const seq = attempt.segmentSeq ?? 0;
+    if (seq + SEGMENT_BATCH > MAX_SEGMENTS_PER_ATTEMPT) throw new TrainingError('The recording is full', 429);
+    tx.update(pRef, { [`attempts.${partId}.segmentSeq`]: seq + SEGMENT_BATCH });
+    return { first: seq, endsAtMs: attemptEndMs(attempt, session) };
+  });
+
+  const base = recordingBase(sessionId, emailHash, partId);
+  const expires = Math.min(Date.now() + SEGMENT_URL_TTL_MS, endsAtMs + UPLOAD_GRACE_MS);
+  const slots = await Promise.all(
+    Array.from({ length: SEGMENT_BATCH }, async (_, i) => ({
+      seq: first + i,
+      url: await signWrite(`${base}/${segmentName(first + i, contentType)}`, contentType, expires),
+    })),
+  );
+  return { slots };
+}
+
+/**
+ * One attempt's recording for the admin player. `after` returns only the
+ * segments past that sequence number — the live view polls with it, so a poll
+ * carries the new ten seconds, not the whole sitting (rule 9i). URLs are
+ * window-anchored (`signRead`), so a repeated read returns identical strings.
+ */
+export async function getRecording(
+  sessionId: string,
+  emailHash: string,
+  partId: string,
+  after: number | null,
+): Promise<AdminRecordingView> {
+  const { participant, part, attempt, session } = await loadAdminAttempt(sessionId, emailHash, partId);
+  const now = Date.now();
+  const live = !!attempt && derivePartState(now, session, part, attempt) === 'in-progress';
+
+  const base = recordingBase(sessionId, emailHash, partId);
+  const [files] = await adminStorage.bucket().getFiles({
+    prefix: `${base}/seg-`,
+    // Lexical, and the names are zero-padded: everything from the next number on.
+    ...(after !== null ? { startOffset: `${base}/seg-${String(after + 1).padStart(6, '0')}` } : {}),
+  });
+  const segments = (
+    await Promise.all(
+      files.map(async (f) => {
+        const seq = parseSegmentName(f.name);
+        const bytes = Number(f.metadata.size);
+        if (seq === null || (after !== null && seq <= after) || !(bytes > 0)) return null;
+        return {
+          seq,
+          endedAtMs: Date.parse(String(f.metadata.timeCreated)) || 0,
+          bytes,
+          url: await signRead(f.name),
+        };
+      }),
+    )
+  )
+    .filter((s): s is NonNullable<typeof s> => s !== null)
+    .sort((a, b) => a.seq - b.seq);
+
+  const check = participant.screenChecks?.[partId];
+  return {
+    nowMs: now,
+    live,
+    recorded: !!attempt?.recording,
+    startedAtMs: attempt?.startedAtMs ?? null,
+    reopenedAtMs: attempt?.reopenedAtMs ?? null,
+    endsAtMs: attempt ? attemptEndMs(attempt, session) : null,
+    deletedAtMs: attempt?.recordingDeletedAtMs ?? null,
+    ...(after === null
+      ? { check: check?.atMs && check.path ? { atMs: check.atMs, url: await signRead(check.path) } : null }
+      : {}),
+    segments,
+  };
+}
+
+/**
+ * Deletes one attempt's recording and its check still. Refused while the part
+ * is running (and through the upload grace): the candidate is still recording,
+ * and an empty folder would lock their uploads. The submitted work is untouched.
+ */
+export async function deleteRecording(sessionId: string, emailHash: string, partId: string): Promise<void> {
+  const { pRef, attempt, session } = await loadAdminAttempt(sessionId, emailHash, partId);
+  if (attempt && Date.now() <= attemptEndMs(attempt, session) + UPLOAD_GRACE_MS) {
+    throw new TrainingError('This part is still running. Delete the recording once it has ended.', 409);
+  }
+
+  await adminStorage.bucket().deleteFiles({ prefix: `${recordingBase(sessionId, emailHash, partId)}/` });
+  await pRef.update({
+    ...(attempt ? { [`attempts.${partId}.recordingDeletedAtMs`]: Date.now() } : {}),
+    [`screenChecks.${partId}`]: FieldValue.delete(),
   });
 }
 
@@ -917,6 +1214,10 @@ export async function reopenParticipant(sessionId: string, emailHash: string, pa
       update[`attempts.${partId}.reopenedAtMs`] = now;
       update[`attempts.${partId}.uploadAttempts`] = 0;
       update[`attempts.${partId}.pending`] = {};
+      // The fresh clock is recorded like any other. `segmentSeq` is left alone,
+      // so the new run's segments continue after the old ones instead of over them.
+      update[`attempts.${partId}.recording`] = true;
+      update[`attempts.${partId}.recordingDeletedAtMs`] = FieldValue.delete();
     }
     tx.update(pRef, update);
   });

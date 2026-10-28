@@ -5,10 +5,12 @@ import { Loader2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { getPart } from '@/lib/training/modules';
 import type { AdminSubmissionView } from '@/lib/training/types';
+import RecordingPlayer from './RecordingPlayer';
 import SubmissionSlots from './SubmissionSlots';
 import { formatDuration, formatWhen } from './zonedTime';
 
 interface SubmissionDialogProps {
+  sessionId: string;
   target: { emailHash: string; partId: string; label: string } | null;
   moduleId: string;
   timezone: string;
@@ -18,19 +20,27 @@ interface SubmissionDialogProps {
 
 
 /**
- * One candidate's work on one part, laid out for comparison: for each level,
- * the image they started from beside what they handed in, with the upload
- * time. Read-only — judgement happens outside the app for now.
+ * One candidate's work on one part: their screen recording (live while the part
+ * runs), then for each level the image they started from beside what they
+ * handed in, with the upload time. Read-only — judgement happens outside the
+ * app for now.
  *
  * The body is keyed by the target, so opening someone else's work remounts it
  * with a clean slate instead of resetting state from an effect.
  */
-export default function SubmissionDialog({ target, moduleId, timezone, load, onClose }: SubmissionDialogProps) {
+export default function SubmissionDialog({ sessionId, target, moduleId, timezone, load, onClose }: SubmissionDialogProps) {
   return (
     <Dialog open={!!target} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
         {target && (
-          <SubmissionBody key={`${target.emailHash}:${target.partId}`} target={target} moduleId={moduleId} timezone={timezone} load={load} />
+          <SubmissionBody
+            key={`${target.emailHash}:${target.partId}`}
+            sessionId={sessionId}
+            target={target}
+            moduleId={moduleId}
+            timezone={timezone}
+            load={load}
+          />
         )}
       </DialogContent>
     </Dialog>
@@ -38,11 +48,13 @@ export default function SubmissionDialog({ target, moduleId, timezone, load, onC
 }
 
 function SubmissionBody({
+  sessionId,
   target,
   moduleId,
   timezone,
   load,
 }: {
+  sessionId: string;
   target: NonNullable<SubmissionDialogProps['target']>;
   moduleId: string;
   timezone: string;
@@ -84,7 +96,16 @@ function SubmissionBody({
           <span className="sr-only">Loading</span>
         </div>
       ) : part ? (
-        <SubmissionSlots part={part} slots={view.slots} sources={view.sources} timezone={timezone} />
+        <div className="flex flex-col gap-6">
+          <RecordingPlayer
+            sessionId={sessionId}
+            emailHash={target.emailHash}
+            partId={target.partId}
+            timezone={timezone}
+            partTitle={part.title}
+          />
+          <SubmissionSlots part={part} slots={view.slots} sources={view.sources} timezone={timezone} />
+        </div>
       ) : null}
     </>
   );

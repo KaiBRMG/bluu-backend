@@ -48,8 +48,11 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
  (candidates on a   └───────────────────────────────────────────────┘   system: email → emailed 6-digit code →
   trial, by link)                                                       signed httpOnly cookie (no Firebase
                                                                         Auth). The server owns the clock; link-
-                                                                        only, no door on /desktop-only — see
-                                                                        training.md
+                                                                        only, no door on /desktop-only. Every
+                                                                        attempt is SCREEN-RECORDED (browser
+                                                                        getDisplayMedia, ~10s segments PUT
+                                                                        direct to Storage); admins watch live
+                                                                        — see training.md
 
                     ┌───────────────────────────────────────────────┐
  Second Electron ─►│  OF Manager        /of-manager                │─► own window, own layout
@@ -278,7 +281,7 @@ Fixing the `AppLayout` hoist is therefore not only the navigation speed-up alrea
 | [onlyfans-crm.md](documentation/onlyfans-crm.md) | **OF Manager** — the OnlyFans messaging window, the `IOnlyFansClient` adapter seam, the Firestore chat mirror + provider webhook |
 | [gologin.md](documentation/gologin.md) | **GoLogin** — the browser-profile satellite window, per-operator accounts, profile create/edit/delete (fingerprint read-only — **never `PUT /browser/{id}/custom`**), folders, live folder sharing, the four grantable capabilities, the cross-machine session lock, the Orbita downloader, and the rate limit that shapes it all (a 429 revokes the API token permanently) |
 | [creator-onboarding.md](documentation/creator-onboarding.md) | **Recruiting after the application** — hello@ inbound triage (Resend receiving + the rules-only spam filter), the approval → welcome email, the personal `/join/[token]` onboarding form (question model, autosave, tracks), and Creator Portal → Onboarding |
-| [training.md](documentation/training.md) | **Training** — the public `/training` surface for candidates on a trial (emailed-code sign-in, the signed cookie, the server-owned clock, direct-to-Storage uploads), the `admin-portal/training` page, and the code-defined modules |
+| [training.md](documentation/training.md) | **Training** — the public `/training` surface for candidates on a trial (emailed-code sign-in, the signed cookie, the server-owned clock, direct-to-Storage uploads, **the compulsory screen recording** and its live admin player), the `admin-portal/training` page, and the code-defined modules |
 | [model-submissions.md](documentation/model-submissions.md) | The **public** application form `/model-submissions` (an unauthenticated write path — `/training`'s code request is the other), its abuse model, and the `apps-model-submissions` review queue |
 | [boot-loading-screen.md](documentation/boot-loading-screen.md) | `BootLoaderProvider`, `useBootPhase`, home-widget gating |
 | [user-management.md](documentation/user-management.md) | Archiving vs deleting users, name resolution, profile pictures |

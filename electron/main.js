@@ -3880,13 +3880,21 @@ function loadAppUrl(win) {
   }
 }
 
-function showOfflineScreen(win) {
+// ERR_CERT_AUTHORITY_INVALID: the server presented a certificate signed by a CA
+// this machine does not trust. For our own host that is almost never our
+// deployment — it is a network re-signing HTTPS with its own CA (a captive
+// portal or a firewall doing TLS inspection). Nothing is bypassed: the page is
+// still refused, the offline screen just says why.
+const ERR_CERT_AUTHORITY_INVALID = -202;
+
+function showOfflineScreen(win, reason) {
   const rec = recordFor(win);
   if (!rec) return;
   rec.offline = true;
   // Replaces any pending timer — including the hang guard from loadAppUrl — so
   // a real failure retries on the backoff, not at the end of the hang timeout.
-  win.loadFile(OFFLINE_PAGE).catch(() => {});
+  // `reason` only picks the copy on offline.html; no value is trusted from it.
+  win.loadFile(OFFLINE_PAGE, reason ? { query: { reason } } : undefined).catch(() => {});
   // Auto-retry with capped exponential backoff; the offline page also has a
   // manual "Try again" button (app:retry-load).
   scheduleOfflineRetry(win, rec, rec.offlineDelay);
@@ -4100,7 +4108,7 @@ function attachWindowBehaviour(win, { isMain, appUrl, minWidth, minHeight, satel
       // otherwise keep counting up against a session nobody is holding. It comes
       // back on its own: the provider pushes fresh state when the app reloads.
       if (isMain) teardownTimerWidget();
-      showOfflineScreen(win);
+      showOfflineScreen(win, errorCode === ERR_CERT_AUTHORITY_INVALID ? 'network-intercepted' : undefined);
     }
   });
 

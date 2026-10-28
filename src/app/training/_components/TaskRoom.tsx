@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
-import { IconCheck, IconDownload, IconLoader2, IconUpload } from '@tabler/icons-react';
+import { useCallback, useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
+import { IconArrowDown, IconCheck, IconDownload, IconLoader2, IconLock, IconUpload } from '@tabler/icons-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,7 +27,9 @@ import type { PartResponse } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
 import { api, ApiError } from '../_lib/api';
 import { AZURE, AZURE_INK, PANEL } from '../_lib/theme';
+import type { ScreenShare } from '../_lib/useScreenShare';
 import { Countdown } from './Countdown';
+import { ScreenLock } from './ScreenLock';
 
 interface SlotState {
   sourceId: string | null;
@@ -49,6 +51,10 @@ interface TaskRoomProps {
   part: TrainingPartDef;
   now: () => number;
   onEnded: (kind: 'time' | 'finished', filled: number) => void;
+  /** The screen share the attempt is recorded from — owned by `ModuleView`, which runs the recorder. */
+  share: ScreenShare;
+  /** Segment uploads keep failing: the server will refuse edit uploads until they catch up. */
+  recordingFailing: boolean;
 }
 
 /**
@@ -60,11 +66,17 @@ interface TaskRoomProps {
  * (two images, two edits each, four distinct levels) is enforced again by
  * `finalizeUpload` — this just says so before the candidate loses an upload.
  *
+ * The room reads as two steps: choose the images, then upload the edits. The
+ * second stays closed until the first is complete, and never closes again.
+ *
  * At zero the inputs lock, but an upload already on its way is left to finish
  * (the server accepts it inside the grace) and only then does the room hand
  * over to the "Time's up" screen.
+ *
+ * A recorded attempt is locked whenever the screen is not shared (`ScreenLock`);
+ * the clock keeps running underneath.
  */
-export function TaskRoom({ initial, part, now, onEnded }: TaskRoomProps) {
+export function TaskRoom({ initial, part, now, onEnded, share, recordingFailing }: TaskRoomProps) {
   const { task } = part;
   const sources = initial.sources ?? [];
   const attempt = initial.attempt!;
@@ -83,6 +95,10 @@ export function TaskRoom({ initial, part, now, onEnded }: TaskRoomProps) {
   const [picked, setPicked] = useState<string[]>(() => [
     ...new Set(attempt.slots.map((s) => s.sourceId)),
   ]);
+  // Latched: un-picking an image later never folds the uploads away again. A
+  // resumed attempt that already holds an upload opens straight away.
+  const [editsOpen, setEditsOpen] = useState(() => picked.length >= task.pickCount || attempt.slots.length > 0);
+  if (!editsOpen && picked.length >= task.pickCount) setEditsOpen(true);
   const [expired, setExpired] = useState(false);
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [finishing, setFinishing] = useState(false);
@@ -90,7 +106,9 @@ export function TaskRoom({ initial, part, now, onEnded }: TaskRoomProps) {
 
   const filled = task.slots.filter((s) => slots[s.id].uploaded).length;
   const busyCount = task.slots.filter((s) => slots[s.id].busy).length;
-  const locked = expired || finishing;
+  const screenLocked = attempt.recording && !share.stream && !expired;
+  const locked = expired || finishing || screenLocked;
+  const pickDone = picked.length >= task.pickCount;
 
   const patch = useCallback((id: SlotId, next: Partial<SlotState>) => {
     setSlots((prev) => ({ ...prev, [id]: { ...prev[id], ...next } }));
@@ -184,7 +202,11 @@ export function TaskRoom({ initial, part, now, onEnded }: TaskRoomProps) {
   const letter = (id: string) => String.fromCharCode(65 + picked.indexOf(id));
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-5 sm:px-8 lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:gap-x-14">
+    <>
+    <div
+      inert={screenLocked}
+      className="mx-auto w-full max-w-6xl px-5 sm:px-8 lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:gap-x-14"
+    >
       <Countdown
         deadlineMs={attempt.deadlineMs}
         durationMs={part.durationMs}
@@ -202,6 +224,12 @@ export function TaskRoom({ initial, part, now, onEnded }: TaskRoomProps) {
               aria-label="Uploads"
               className="mt-2 hidden h-1.5 bg-white/10 lg:block [&>div]:bg-[#00b8f5]"
             />
+            {attempt.recording && share.stream && (
+              <p className="mt-2 hidden items-center gap-2 text-xs text-white/70 lg:flex">
+                <span className="size-2 rounded-full bg-red-400" aria-hidden />
+                Your screen is being recorded
+              </p>
+            )}
           </div>
           <Button
             variant="outline"
@@ -232,15 +260,34 @@ export function TaskRoom({ initial, part, now, onEnded }: TaskRoomProps) {
             {finishError}
           </p>
         )}
+        {recordingFailing && share.stream && !expired && (
+          <p role="alert" className={`${PANEL} mt-6 rounded-xl px-4 py-3 text-sm text-amber-200`}>
+            Your screen recording is not reaching us. Check your connection. Uploads are refused until it catches up.
+          </p>
+        )}
 
         <section aria-labelledby="pick-heading" className="mt-10">
-          <h2 id="pick-heading" className="text-xl font-semibold">
+          <StepHeading id="pick-heading" step={1} done={pickDone}>
             Choose {task.pickCount} images
-          </h2>
+          </StepHeading>
           <p className="mt-1 text-sm text-white/70">
-            Download the originals to work from — downloading an image chooses it. {picked.length} of {task.pickCount} chosen.
+            Click an image to choose it, then download its original to edit. Downloading an image also chooses it.
           </p>
-          <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+          <div className="mt-2 flex min-h-11 flex-wrap items-center gap-x-4">
+            <p className="text-sm font-medium tabular-nums" aria-live="polite">
+              {picked.length} of {task.pickCount} chosen
+            </p>
+            {pickDone && (
+              <a
+                href="#edits-heading"
+                className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-[#7dd8fa] underline-offset-4 outline-none hover:underline focus-visible:underline"
+              >
+                Next: upload your edits
+                <IconArrowDown className="size-4" aria-hidden />
+              </a>
+            )}
+          </div>
+          <ul className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
             {sources.map((src) => {
               const on = picked.includes(src.id);
               const full = !on && picked.length >= task.pickCount;
@@ -292,31 +339,43 @@ export function TaskRoom({ initial, part, now, onEnded }: TaskRoomProps) {
           </ul>
         </section>
 
-        <section aria-labelledby="edits-heading" className="mt-12">
-          <h2 id="edits-heading" className="text-xl font-semibold">
+        <section aria-labelledby="edits-heading" className="mt-12 scroll-mt-40 lg:scroll-mt-10">
+          <StepHeading id="edits-heading" step={2} done={filled === task.slots.length} muted={!editsOpen}>
             Upload your {task.slots.length} edits
-          </h2>
-          <p className="mt-1 text-sm text-white/70">
-            Each image gets {task.editsPerSource} edits. Every upload is saved the moment it finishes.
-          </p>
-          <ol className="mt-4 flex flex-col gap-3">
-            {task.slots.map((def, index) => (
-              <SlotCard
-                key={def.id}
-                def={def}
-                index={index + 1}
-                state={slots[def.id]}
-                picked={picked}
-                sources={sources}
-                letter={letter}
-                full={(sourceId) => usedBy(sourceId, def.id) >= task.editsPerSource}
-                locked={locked}
-                // Switching the source of an uploaded edit means a new upload is owed for it.
-                onSource={(sourceId) => patch(def.id, { sourceId, error: '', uploaded: false })}
-                onFile={(file) => void upload(def, file)}
-              />
-            ))}
-          </ol>
+          </StepHeading>
+          {editsOpen ? (
+            // The one reveal on this surface: a short fade-down as step 2 opens. Its base style is the
+            // open state, so reduced motion simply shows it.
+            <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2 motion-safe:duration-300 motion-safe:ease-out">
+              <p className="mt-1 text-sm text-white/70">
+                Each image gets {task.editsPerSource} edits. For each level, pick the image it was made from, then upload
+                your edit. Every upload is saved the moment it finishes.
+              </p>
+              <ol className="mt-4 flex flex-col gap-3">
+                {task.slots.map((def, index) => (
+                  <SlotCard
+                    key={def.id}
+                    def={def}
+                    index={index + 1}
+                    state={slots[def.id]}
+                    picked={picked}
+                    sources={sources}
+                    letter={letter}
+                    full={(sourceId) => usedBy(sourceId, def.id) >= task.editsPerSource}
+                    locked={locked}
+                    // Switching the source of an uploaded edit means a new upload is owed for it.
+                    onSource={(sourceId) => patch(def.id, { sourceId, error: '', uploaded: false })}
+                    onFile={(file) => void upload(def, file)}
+                  />
+                ))}
+              </ol>
+            </div>
+          ) : (
+            <p className="mt-3 flex items-center gap-2.5 rounded-xl border border-dashed border-white/[0.16] px-4 py-4 text-sm text-white/70">
+              <IconLock className="size-4 shrink-0 text-white/60" aria-hidden />
+              Opens once you have chosen {task.pickCount} images above.
+            </p>
+          )}
         </section>
       </div>
 
@@ -347,6 +406,42 @@ export function TaskRoom({ initial, part, now, onEnded }: TaskRoomProps) {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+    {screenLocked && <ScreenLock share={share} deadlineMs={attempt.deadlineMs} now={now} />}
+    </>
+  );
+}
+
+/**
+ * A step's heading and its marker: the number, or a check once the step is
+ * done. Done is an azure fill AND a different glyph, never hue alone.
+ */
+function StepHeading({
+  id,
+  step,
+  done,
+  muted = false,
+  children,
+}: {
+  id: string;
+  step: number;
+  done: boolean;
+  muted?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <h2 id={id} className={cn('flex items-center gap-3 text-xl font-semibold', muted && 'text-white/60')}>
+      <span
+        className={cn(
+          'grid size-7 shrink-0 place-items-center rounded-full border text-sm font-bold tabular-nums',
+          !done && 'border-white/25 text-white/80',
+        )}
+        style={done ? { backgroundColor: AZURE, borderColor: AZURE, color: AZURE_INK } : undefined}
+      >
+        {done ? <IconCheck className="size-4" stroke={3} aria-hidden /> : <span aria-hidden>{step}</span>}
+        <span className="sr-only">{done ? `Step ${step}, done:` : `Step ${step}:`}</span>
+      </span>
+      {children}
+    </h2>
   );
 }
 

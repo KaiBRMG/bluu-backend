@@ -69,7 +69,18 @@ export interface AttemptView {
   startedAtMs: number;
   deadlineMs: number;
   finishedAtMs: number | null;
+  /**
+   * The attempt is screen-recorded: edit uploads are refused while no recent
+   * segment has arrived, so the page must hold a live screen share. False only
+   * for attempts started before recording existed.
+   */
+  recording: boolean;
   slots: SlotView[];
+}
+
+/** Signed PUT URLs for the next segments of the recording, in order. */
+export interface RecordingSlots {
+  slots: { seq: number; url: string }[];
 }
 
 export interface PartResponse {
@@ -142,6 +153,32 @@ export interface AdminSubmissionView {
   }[];
   /** Only the images this candidate actually used. */
   sources: { id: string; name: string; thumbUrl: string }[];
+}
+
+export interface AdminRecordingSegment {
+  seq: number;
+  /** When it finished uploading (server clock). It covers roughly the `SEGMENT_MS` before. */
+  endedAtMs: number;
+  bytes: number;
+  url: string;
+}
+
+export interface AdminRecordingView {
+  nowMs: number;
+  /** The part is running: new segments are still arriving. */
+  live: boolean;
+  /** False for an attempt started before recording existed. */
+  recorded: boolean;
+  startedAtMs: number | null;
+  /** Set when an admin reopened the attempt: the time before it is between runs, not a gap. */
+  reopenedAtMs: number | null;
+  /** When the attempt ends or ended: finished early, the deadline, or the session's stop — whichever came first. */
+  endsAtMs: number | null;
+  deletedAtMs: number | null;
+  /** The still the candidate's browser grabbed at the screen check. Omitted on an `after` read. */
+  check?: { atMs: number; url: string } | null;
+  /** Only those after the `after` cursor when one was sent. */
+  segments: AdminRecordingSegment[];
 }
 
 // ─── Admin: candidates across sessions ───────────────────────────────────────
