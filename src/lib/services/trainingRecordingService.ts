@@ -28,7 +28,7 @@ import {
   type ParticipantDoc,
   type ScreenCheckDoc,
 } from '@/lib/training/model';
-import { isDeclaredImage, recordingBase, signRead, signWrite } from '@/lib/training/storage';
+import { isDeclaredImage, recordingBase, signRead, signWrite, type ListedObject } from '@/lib/training/storage';
 
 /**
  * Screen recording and the screen check — what makes every attempt recorded.
@@ -207,13 +207,13 @@ export async function getRecording(
   const live = !!attempt && deriveTestState(now, mod, test, attempt) === 'in-progress';
   const segments = (
     await Promise.all(
-      files.map(async (f) => {
+      (files as unknown as ListedObject[]).map(async (f) => {
         const seq = parseSegmentName(f.name);
-        const bytes = Number(f.metadata.size);
+        const bytes = Number(f.size);
         if (seq === null || (after !== null && seq <= after) || !(bytes > 0)) return null;
         return {
           seq,
-          endedAtMs: Date.parse(String(f.metadata.timeCreated)) || 0,
+          endedAtMs: Date.parse(String(f.timeCreated)) || 0,
           bytes,
           url: await signRead(f.name),
         };

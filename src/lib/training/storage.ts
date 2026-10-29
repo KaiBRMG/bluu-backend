@@ -106,11 +106,18 @@ export const recordingBase = (moduleId: string, emailHash: string, testId: strin
 export const submissionBase = (moduleId: string, emailHash: string, testId: string) =>
   `${STORAGE_ROOT}/submissions/${moduleId}/${emailHash}/${testId}`;
 
+/**
+ * What `getFiles` returns when `fields` is set: the raw JSON items, NOT `File`
+ * instances, despite the SDK's typing. There is no `.metadata` — the requested
+ * fields sit on the object itself (`size` as a string).
+ */
+export type ListedObject = { name: string; size?: string; timeCreated?: string };
+
 /** When the newest recording segment finished uploading, by Storage's clock — 0 when there is none. */
 export async function latestSegmentAtMs(base: string): Promise<number> {
   // Only the two fields read here: a long attempt holds hundreds of segments.
   const [files] = await adminStorage.bucket().getFiles({ prefix: `${base}/seg-`, fields: 'items(name,timeCreated),nextPageToken' });
   let latest = 0;
-  for (const f of files) latest = Math.max(latest, Date.parse(String(f.metadata.timeCreated)) || 0);
+  for (const f of files as unknown as ListedObject[]) latest = Math.max(latest, Date.parse(String(f.timeCreated)) || 0);
   return latest;
 }
