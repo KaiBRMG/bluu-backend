@@ -178,7 +178,7 @@ function inView(
     case 'unassigned':
       return !s.removedAt && !s.userId;
     case 'off-schedule':
-      return schedule[s.saleId]?.offSchedule === true;
+      return schedule[s.saleId]?.differs === true;
     case 'differs':
       // Moved by a dispute or an admin, or credited to the agent on shift rather than BuddyX's chatter.
       return !s.removedAt && (!s.matchesSource || Boolean(s.transfer) || s.buddyxUserId !== s.userId);
@@ -209,7 +209,7 @@ function presetRange(period: Period): { from: string; to: string } {
 /** The one agent the schedule had on this sale's account, when moving it there is a single, unambiguous fix. */
 function scheduleTarget(sale: SalarySale, schedule: Record<string, ScheduleMatch>): string | null {
   const match = schedule[sale.saleId];
-  if (!match?.offSchedule || match.scheduled.length !== 1) return null;
+  if (!match?.differs || match.scheduled.length !== 1) return null;
   return match.scheduled[0] === sale.userId ? null : match.scheduled[0];
 }
 
@@ -971,7 +971,7 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
                         <tr
                           key={sale.saleId}
                           title={`Sale ${sale.saleId}`}
-                          className={cn(isPicked && 'bg-action-blue/10', match?.offSchedule && !isPicked && 'bg-orange-500/[0.035]')}
+                          className={cn(isPicked && 'bg-action-blue/10', match?.differs && !isPicked && 'bg-orange-500/[0.035]')}
                         >
                           <td className="px-3 py-2">
                             {canMove && (
@@ -1220,7 +1220,7 @@ function OnShift({ match, names }: { match: ScheduleMatch | undefined; names: Re
     );
   }
   const who = match.scheduled.map(uid => holderName(uid, names)).join(', ');
-  if (!match.offSchedule) return <span className="text-zinc-300">{who}</span>;
+  if (!match.differs) return <span className="text-zinc-300">{who}</span>;
   return (
     <span className="flex flex-col items-start gap-0.5">
       <span className="text-zinc-200">{who}</span>
@@ -1514,9 +1514,9 @@ function ReassignSaleDialog({
             <SaleHolderNote sale={sale} names={names} />
           </dd>
           <dt className="text-zinc-400">On shift</dt>
-          <dd className={cn(schedule[sale.saleId]?.offSchedule && 'text-orange-400')}>
+          <dd className={cn(schedule[sale.saleId]?.differs && 'text-orange-400')}>
             {onShift.length ? onShift.map(uid => nameOf(uid)).join(', ') : <span className="text-zinc-400">Nobody scheduled on this account</span>}
-            {schedule[sale.saleId]?.offSchedule && <span className="text-[11px]"> · off schedule</span>}
+            {schedule[sale.saleId]?.differs && <span className="text-[11px]"> · off schedule</span>}
           </dd>
           <dt className="text-zinc-400">BuddyX credits</dt>
           <dd>{buddyxCreditName(sale, allNames)}</dd>

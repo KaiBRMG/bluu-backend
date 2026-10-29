@@ -209,7 +209,7 @@ async function adminLedger(searchParams: URLSearchParams): Promise<NextResponse>
         attributionConflicts: rows.filter(s => s.attributionConflict && !s.removedAt).map(s => s.saleId),
         vanishedAfterFinalise: rows.filter(s => s.vanishedAfterFinalise).map(s => s.saleId),
         removed: rows.filter(s => s.removedAt).length,
-        offSchedule: [...schedule].filter(([, m]) => m.offSchedule).map(([id]) => id),
+        offSchedule: [...schedule].filter(([, m]) => m.differs).map(([id]) => id),
         ...flags,
       },
       spansCutover: start <= SALES_CUTOVER_AT && SALES_CUTOVER_AT < end,

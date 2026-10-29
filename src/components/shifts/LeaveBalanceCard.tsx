@@ -9,9 +9,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useBootPhase } from '@/contexts/BootLoaderContext';
 import { useUserData } from '@/hooks/useUserData';
 import { useLeaveRequests, type LeaveRequest } from '@/hooks/useLeaveRequests';
-import { computeLeaveBalance, describeLeaveBalance, leavePeriodOf, requestableMonths } from '@/lib/leave/leaveBalance';
+import { computeLeaveBalance, describeLeaveBalance, leavePeriodOf } from '@/lib/leave/leaveBalance';
 import { useNow } from '@/hooks/useNow';
-import { formatDayLabelWithWeekday, formatMonthName, toDayKey } from '@/lib/salary/salaryDate';
+import { currentMonthKey, formatDayLabelWithWeekday, formatMonthName, toDayKey } from '@/lib/salary/salaryDate';
 import { pluralise } from '@/lib/salary/salaryFormat';
 
 /**
@@ -45,9 +45,9 @@ import { pluralise } from '@/lib/salary/salaryFormat';
  * Derived by `computeLeaveBalance` from the allowance on the user document and
  * the agent's own requests — the same function the request route checks
  * against, so the card and the refusal cannot disagree. Unpaid shows **this
- * month and next**, because those are the two months leave can be requested in
- * and each has its own allowance; a request for a shift next month spends next
- * month's. Paid shows the year, and only for someone with `hasPaidLeave`.
+ * month only**: unpaid leave always comes out of the current month's pool, even
+ * when the shift is next month, so next month's pool has nothing to show until
+ * it becomes the current one. Paid shows the year, and only for someone with `hasPaidLeave`.
  *
  * The numbers wait for the request list: a balance computed from an empty list
  * that has not loaded yet would show the full allowance as fact.
@@ -107,10 +107,11 @@ export function LeaveBalanceCard({ className }: { className?: string }) {
 
   const hasPaidLeave = userData?.hasPaidLeave === true;
   const known = !leaveLoading && !leaveError;
-  const [thisMonth, nextMonth] = requestableMonths(now);
+  // Unpaid leave always comes out of the current month's pool, even for a shift
+  // next month, so there is no separate "next month" figure to show.
+  const thisMonth = currentMonthKey(now);
   const unpaidNow = computeLeaveBalance(userData, leaveRequests, 'unpaid', thisMonth);
-  const unpaidNext = computeLeaveBalance(userData, leaveRequests, 'unpaid', nextMonth);
-  const year = leavePeriodOf('paid', now);
+  const year = leavePeriodOf('paid', { occurrenceStart: now });
   const paid = computeLeaveBalance(userData, leaveRequests, 'paid', year);
   const pending = leaveRequests.filter(r => r.status === 'pending').length;
 
@@ -129,11 +130,6 @@ export function LeaveBalanceCard({ className }: { className?: string }) {
               value={known ? unpaidNow.remaining : null}
               label={`unpaid left in ${formatMonthName(thisMonth)}`}
               title={describeLeaveBalance(unpaidNow, { omitZeroUsed: true })}
-            />
-            <BalanceFigure
-              value={known ? unpaidNext.remaining : null}
-              label={`in ${formatMonthName(nextMonth)}`}
-              title={describeLeaveBalance(unpaidNext, { omitZeroUsed: true })}
             />
             {hasPaidLeave && (
               <BalanceFigure value={known ? paid.remaining : null} label={`paid left in ${year}`} title={describeLeaveBalance(paid, { omitZeroUsed: true })} />

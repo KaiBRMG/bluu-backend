@@ -162,7 +162,7 @@ export function LeaveHistory() {
       )}
 
       <p className="max-w-[70ch] text-xs leading-relaxed text-zinc-400">
-        Each balance is the days left in the month (unpaid) or year (paid) the leave falls in. Every request, adjustment
+        Each balance is the days left in the month the leave was requested in (unpaid) or the year of the shift (paid). Every request, adjustment
         and allowance change since 10 Oct 2026 is listed; before that, month-end resets and hand edits were not
         recorded.
       </p>

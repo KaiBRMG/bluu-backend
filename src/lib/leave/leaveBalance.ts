@@ -9,12 +9,13 @@
  *     remaining = allotment + adjustment − days held by requests in that period
  *
  * - **Unpaid leave is a monthly allowance; paid leave is a yearly one.** The
- *   period is the salary month (`YYYY-MM`) or salary year (`YYYY`) of the
- *   **shift the leave is for**, in `Africa/Harare` — the same clock the salary
- *   day uses, so a day off cannot land in one month's roster and spend another
- *   month's allowance.
- * - **A request is charged to the period its shift falls in**, not the period
- *   it was asked in. Leave for a shift next month spends next month's allowance.
+ *   period is a salary month (`YYYY-MM`) or salary year (`YYYY`) in
+ *   `Africa/Harare` — the same clock the salary day uses.
+ * - **Unpaid leave is always charged to the pool it was ASKED in** (2026-10-29):
+ *   the salary month of `requestedAt`, whatever month the shift is in. Leave
+ *   asked for in October for a November shift spends October's allowance; next
+ *   month's pool is untouched until next month arrives. **Paid leave is
+ *   charged to the year of the shift.**
  * - **A request holds a day while it is pending or approved.** A denial or a
  *   withdrawal (which deletes the request) gives it back simply by no longer
  *   counting — there is no refund write, so there is nothing to get wrong.
@@ -32,7 +33,9 @@
  * This replaced the stored `remainingUnpaidLeave` / `remainingPaidLeave` fields,
  * the reset stamps and the charge/refund markers. Those fields may still sit on
  * old documents; nothing reads them any more. Old requests need no migration —
- * every request carries `occurrenceStart`, which is all the period needs.
+ * every request carries `occurrenceStart` and `requestedAt`, which is all the
+ * period needs. (The 2026-10-29 change re-derives existing unpaid requests into
+ * the month they were asked in; nothing is rewritten.)
  */
 
 import { addMonths, currentMonthKey, formatMonthLabel, toMonthKey } from '@/lib/salary/salaryDate';
@@ -63,14 +66,45 @@ export type LeavePeriod = string;
 
 type LeaveUser = Pick<UserDocument, 'hasPaidLeave' | 'leaveAllotment' | 'leaveAdjustments'>;
 
-type HeldLeave = { leaveType: LeaveType; occurrenceStart: number; status: string };
+type HeldLeave = { leaveType: LeaveType; occurrenceStart: number; status: string; requestedAt?: unknown };
+
+/** What a request's period is read from. `requestedAt` is a Firestore `Timestamp` on the server, an ISO string on the client. */
+export type LeavePeriodSource = { occurrenceStart: number; requestedAt?: unknown };
 
 // ─── Periods ──────────────────────────────────────────────────────────────────
 
-/** The period a shift's leave is charged to. */
-export function leavePeriodOf(type: LeaveType, occurrenceStart: number): LeavePeriod {
-  const month = toMonthKey(occurrenceStart);
-  return type === 'paid' ? month.slice(0, 4) : month;
+/**
+ * Milliseconds from a `requestedAt` in any form a request travels in — a
+ * Firestore `Timestamp` (server), an ISO string (the client hook), or a number.
+ * `null` when it is none of them.
+ */
+function requestedAtMs(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const ms = Date.parse(value);
+    return Number.isNaN(ms) ? null : ms;
+  }
+  if (value && typeof value === 'object' && typeof (value as { toMillis?: unknown }).toMillis === 'function') {
+    const ms = (value as { toMillis(): number }).toMillis();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  return null;
+}
+
+/**
+ * The period a request is charged to.
+ *
+ * - **Unpaid:** the salary month it was **requested** in, not the month of its
+ *   shift — unpaid leave always comes out of the pool that is current when it
+ *   is asked for. A request whose `requestedAt` cannot be read (none should be)
+ *   falls back to its shift's month.
+ * - **Paid:** the salary year of the shift.
+ *
+ * For a request being made right now, pass `requestedAt: Date.now()`.
+ */
+export function leavePeriodOf(type: LeaveType, request: LeavePeriodSource): LeavePeriod {
+  if (type === 'paid') return toMonthKey(request.occurrenceStart).slice(0, 4);
+  return toMonthKey(requestedAtMs(request.requestedAt) ?? request.occurrenceStart);
 }
 
 /** `'2026-11'` → `'November 2026'`; `'2026'` → `'2026'`. */
@@ -143,7 +177,7 @@ export interface LeaveBalance {
   period: LeavePeriod;
   allotment: number;
   adjustment: number;
-  /** Days held by pending and approved requests whose shift falls in the period. */
+  /** Days held by pending and approved requests charged to the period (see `leavePeriodOf`). */
   used: number;
   /** May be negative when an adjustment was cut below what is already approved. */
   remaining: number;
@@ -172,7 +206,7 @@ export function computeLeaveBalance(
   let used = 0;
   for (const request of requests) {
     if (request.leaveType !== type || !holdsLeaveDay(request)) continue;
-    if (leavePeriodOf(type, request.occurrenceStart) === period) used++;
+    if (leavePeriodOf(type, request) === period) used++;
   }
   return { type, period, allotment, adjustment, used, remaining: allotment + adjustment - used };
 }

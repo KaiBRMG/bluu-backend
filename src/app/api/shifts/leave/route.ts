@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { adminDb } from '@/lib/firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
+import { Timestamp } from 'firebase-admin/firestore';
 import { getUserById } from '@/lib/services/userService';
 import {
   computeLeaveBalance,
@@ -146,8 +146,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'That shift has already started.' }, { status: 400 });
     }
 
-    // Leave spends the allowance of the month the shift is in, and only this
-    // month's and next month's allowances can be spent (`leaveBalance.ts`).
+    // Only shifts in this salary month or the next can be asked for
+    // (`leaveBalance.ts`). Unpaid leave is charged to the current month either way.
     if (!isWithinRequestWindow(occurrenceStart)) {
       const [current, next] = requestableMonths();
       return NextResponse.json(
@@ -192,7 +192,12 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     const leaveId = leaveRef.id;
     const userRef = adminDb.collection('users').doc(token.uid);
     const label = leaveType === 'paid' ? 'paid' : 'unpaid';
-    const period = leavePeriodOf(leaveType, occurrenceStart);
+    // Unpaid leave comes out of the pool that is current NOW, whatever month the
+    // shift is in; paid leave out of the shift's year (`leavePeriodOf`). The
+    // same instant is stored as `requestedAt`, so the period checked here is
+    // the one the request is later derived into, even across a month boundary.
+    const requestedAtMs = Date.now();
+    const period = leavePeriodOf(leaveType, { occurrenceStart, requestedAt: requestedAtMs });
 
     try {
       await adminDb.runTransaction(async tx => {
@@ -223,7 +228,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
           userId: token.uid,
           leaveType,
           status: 'pending',
-          requestedAt: FieldValue.serverTimestamp(),
+          requestedAt: Timestamp.fromMillis(requestedAtMs),
           resolvedAt: null,
           resolvedBy: null,
           reason: trimmedReason || null,

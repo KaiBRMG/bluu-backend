@@ -16,7 +16,7 @@
  * 9h), and a sale's `creatorId` is whichever of the two its handle mapped to,
  * so they compare directly.
  *
- * `matchSalesToSchedule` is display; `scheduleHolder` is on the pay path — the
+ * `matchSalesToSchedule` is display (its `differs` is, `offSchedule` feeds the pay path); `scheduleHolder` is on the pay path — the
  * sync's attribution rests on it, so it is pinned in `scheduleMatch.test.ts`.
  */
 
@@ -41,8 +41,18 @@ export interface ScheduleSale {
 export interface ScheduleMatch {
   /** Agents the schedule puts on this sale's account at its instant, by uid, sorted. Empty = nobody scheduled. */
   scheduled: string[];
-  /** Held by someone other than a scheduled agent (or by nobody) while someone was scheduled. */
+  /**
+   * Held by someone other than a scheduled agent (or by nobody) while someone was scheduled,
+   * and not within `graceMs` of their own shift on that account. Pay path: `scheduleHolder`
+   * rests on it, so a handover keeps the sender's sale.
+   */
   offSchedule: boolean;
+  /**
+   * Strictly: the holder is not among `scheduled` — no grace. What CA Admin → Sales'
+   * *Off schedule* view and flag read, so a sale held 5 minutes past someone's shift
+   * while another agent was on shift still shows. Display only; never on the pay path.
+   */
+  differs: boolean;
 }
 
 /**
@@ -81,7 +91,11 @@ export function matchSalesToSchedule(
       }
     }
     if (scheduled.size === 0) continue;
-    out.set(sale.saleId, { scheduled: [...scheduled].sort(), offSchedule: !holderNear });
+    out.set(sale.saleId, {
+      scheduled: [...scheduled].sort(),
+      offSchedule: !holderNear,
+      differs: !sale.userId || !scheduled.has(sale.userId),
+    });
   }
   return out;
 }

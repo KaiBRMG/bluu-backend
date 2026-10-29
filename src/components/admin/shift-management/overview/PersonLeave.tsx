@@ -156,7 +156,7 @@ export function PersonLeave({ uid }: { uid: string }) {
       <section className={cn('rounded-xl p-4', SURFACE)}>
         <h3 className="text-sm font-medium">Balances</h3>
         <p className="mt-0.5 text-xs text-zinc-400">
-          The periods leave can be requested in now. Adjust one to give or take days for that period only.
+          Unpaid leave comes out of the month it is requested in, so next month&apos;s stays untouched until then. Adjust a period to give or take days for that period only.
         </p>
         <ul className="mt-3 divide-y divide-white/[0.06]">
           {balances.map(balance => (

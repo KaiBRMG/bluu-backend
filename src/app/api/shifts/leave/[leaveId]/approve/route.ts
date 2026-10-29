@@ -111,7 +111,7 @@ export const POST = withAuth(async (
 
         const nextStatus = action === 'approve' ? 'approved' : 'denied';
         const requests = ownRequests.docs.map(d => d.data() as LeaveRequestDocument);
-        const period = leavePeriodOf(leave.leaveType, leave.occurrenceStart);
+        const period = leavePeriodOf(leave.leaveType, freshLeave);
         const before = computeLeaveBalance(freshUser, requests, leave.leaveType, period).remaining;
         const after = remainingAfterChange(before, freshLeave, { status: nextStatus });
 

@@ -26,11 +26,12 @@ import { pluralise } from '@/lib/salary/salaryFormat';
  * Shift Management → Settings → Leave: how much leave each person gets, and
  * what is left of it.
  *
- * Unpaid leave is a **monthly** allowance and paid leave a **yearly** one; a
- * request is charged to the month (or year) its shift falls in, and nothing
- * carries over or resets (`lib/leave/leaveBalance.ts`). So this table edits the
- * standing allowance, and shows the balances for the two months leave can be
- * requested in. One-off adjustments for a single month are made from the
+ * Unpaid leave is a **monthly** allowance and paid leave a **yearly** one; unpaid
+ * leave is charged to the month it was requested in (never the shift's month),
+ * paid leave to the year of the shift, and nothing carries over or resets
+ * (`lib/leave/leaveBalance.ts`). So this table edits the standing allowance,
+ * and shows the balances for this month and next — next month's stays full
+ * until that month arrives and requests are made in it. One-off adjustments for a single month are made from the
  * person's own Leave tab, where the note they need can be written.
  */
 

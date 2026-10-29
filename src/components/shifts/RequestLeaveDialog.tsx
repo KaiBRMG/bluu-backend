@@ -62,16 +62,17 @@ export function RequestLeaveDialog({ target, onClose, onSubmit }: RequestLeaveDi
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // The balance of the period this shift falls in — this month's or next
-  // month's unpaid allowance, this year's paid one — through the same function
+  // The balance this request would draw from — this month's unpaid allowance
+  // whatever month the shift is in, the shift's year's paid one — through the same function
   // the server checks against (`lib/leave/leaveBalance.ts`). The calendar only
   // opens this for a shift in the request window, and only once the request
   // list has loaded, so `leaveRequests` is the real list here.
   // `computeLeaveBalance` already gives no paid days without the entitlement.
   const hasPaidLeave = userData?.hasPaidLeave === true;
   const start = target?.occurrenceStart ?? 0;
-  const unpaidKey = leavePeriodOf('unpaid', start);
-  const paidKey = leavePeriodOf('paid', start);
+  // Unpaid leave is charged to the month it is asked in, not the shift's month.
+  const unpaidKey = leavePeriodOf('unpaid', { occurrenceStart: start, requestedAt: Date.now() });
+  const paidKey = leavePeriodOf('paid', { occurrenceStart: start });
   const unpaidRemaining = Math.max(0, computeLeaveBalance(userData, leaveRequests, 'unpaid', unpaidKey).remaining);
   const paidRemaining = Math.max(0, computeLeaveBalance(userData, leaveRequests, 'paid', paidKey).remaining);
   const unpaidPeriod = formatLeavePeriod(unpaidKey);

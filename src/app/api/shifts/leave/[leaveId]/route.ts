@@ -73,7 +73,7 @@ export const DELETE = withAuth(async (
 
       const freshUser = userSnap.data() as UserDocument | undefined;
       const requests = ownRequests.docs.map(d => d.data() as LeaveRequestDocument);
-      const period = leavePeriodOf(freshLeave.leaveType, freshLeave.occurrenceStart);
+      const period = leavePeriodOf(freshLeave.leaveType, freshLeave);
       const before = computeLeaveBalance(freshUser, requests, freshLeave.leaveType, period).remaining;
       const after = remainingAfterChange(before, freshLeave, null);
 

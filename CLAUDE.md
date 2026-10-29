@@ -108,7 +108,8 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
               Leave pays on read too: no sales count inside a leave shift, and
               paid leave pays 8h on the previous day's accounts (src/lib/salary/leavePay.ts).
               Leave balances are DERIVED too: allowance + adjustment − requests
-              whose SHIFT falls in the period (unpaid per month, paid per year;
+              charged to the period (unpaid: the month it was REQUESTED in, never
+              the shift's month; paid: the shift's year;
               src/lib/leave/leaveBalance.ts). Nothing resets — finalising a
               month no longer touches leave. Requests: this month or next only.
  Firestore + Storage (Firebase Admin SDK) ← services (src/lib/services) ← API routes (src/app/api)
