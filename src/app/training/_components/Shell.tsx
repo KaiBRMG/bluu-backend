@@ -1,7 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { STAGE_GROUND } from '../_lib/theme';
+import { BROWSER_SURFACE, STAGE_GROUND } from '../_lib/theme';
 
 interface ShellProps {
   children: React.ReactNode;
@@ -24,7 +24,7 @@ export function Shell({ children, aside, width = 'default', bare, className }: S
   return (
     <main
       style={STAGE_GROUND}
-      className="notranslate min-h-dvh text-white selection:bg-[#00b8f5]/35 [caret-color:#00b8f5]"
+      className={cn('notranslate min-h-dvh text-white', BROWSER_SURFACE)}
       translate="no"
     >
       <div className={cn('mx-auto flex min-h-dvh w-full flex-col px-5 sm:px-8', WIDTH[width], className)}>

@@ -1,6 +1,5 @@
 import 'server-only';
 import { PUBLIC_APP_ORIGIN } from '@/lib/publicOrigin';
-import { AZURE, AZURE_INK } from '@/lib/publicSkin';
 
 /**
  * THE email template. Every message Resend sends is built here — `sendEmail`
@@ -13,30 +12,39 @@ import { AZURE, AZURE_INK } from '@/lib/publicSkin';
  * URL mid-sentence, which is what Resend's auto-generated text would do). So a
  * new email is copy + blocks; it never writes markup.
  *
- * The look is the public skin (DESIGN.md §8) carried into the inbox: the
- * #08090b ground, the Bluu lockup, white-inked type, Bluu azure as the ONE
- * voice (the button and links) with `AZURE_INK` on any
- * azure fill. The ground is pinned dark (`color-scheme: dark`) so clients that
- * repaint light emails leave it alone. Mail-client constraints shape the rest:
- * tables and inline styles, solid hex instead of rgba (Outlook), a PNG lockup
- * (Gmail drops SVG, Outlook drops WebP), and the stage wash as a progressive
- * gradient over a solid `bgcolor` that every client honours.
+ * The look is deliberately LIGHT, with plain colours and no tricks. Every mail
+ * app's dark mode (Gmail, Outlook, Apple Mail…) is built to turn a light
+ * email dark — and does it cleanly. A dark-designed email is the case those
+ * modes get wrong (Gmail iOS inverts it back into grey-on-grey), so this
+ * template does not fight them: it gives them the input they expect.
  *
- * Contrast on the ground: INK 18.6:1 · SOFT 8.6:1 · MUTED 5.5:1 · azure 8.6:1.
+ * Three rules keep that true — keep them when adding a block:
+ *   - Solid colours only, set inline. No `background-image` fills, no blend
+ *     modes, no per-client dark-mode CSS.
+ *   - Colour-on-colour only where it survives inversion either way: the
+ *     button is white on `BUTTON` (#007db0), which reads 4.6:1 as authored and
+ *     becomes dark-on-light-blue when inverted. Brand azure (#00b8f5) with dark
+ *     ink would invert to light-on-azure at ~2:1, so it is not used here.
+ *   - Brand that must not change lives in an IMAGE, which no client recolours:
+ *     the lockup PNG carries its own dark plate (`public/email/wordmark.png`,
+ *     built by `scripts/build-email-wordmark.js`).
+ *
+ * Contrast on white: INK 18:1 · SOFT 9.6:1 · MUTED 5.9:1 · LINK 6:1 · button 4.6:1.
  */
 
 // ─── Tokens ──────────────────────────────────────────────────────────────────
 
-// GROUND is `STAGE_GROUND`'s colour and PANEL is `PASS_SURFACE`, both in
-// `app/model-submissions/_lib/theme.ts`; repeated here as plain hex because the
-// email must not depend on an app route's module. Change them together.
-const GROUND = '#08090b';
-const PANEL = '#12171d';
-const PANEL_EDGE = '#262d35';
-const HAIRLINE = '#1f252c';
-const INK = '#f2f5f8';
-const SOFT = '#a3acb6';
-const MUTED = '#7f8892';
+const PAGE = '#ffffff';
+const PANEL = '#f3f5f8';
+const PANEL_EDGE = '#dde2e8';
+const HAIRLINE = '#e3e7ec';
+const INK = '#12171d';
+const SOFT = '#3d4650';
+const MUTED = '#5b6570';
+const LINK = '#0068a0';
+/** Button fill — white on it reads 4.6:1. */
+const BUTTON = '#007db0';
+const WHITE = '#ffffff';
 
 const FONT = `-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif`;
 const MONO = `ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace`;
@@ -139,12 +147,12 @@ function blockHtml(b: EmailBlock): string {
       return `<p style="margin:0 0 16px;${text(14, SOFT)}">${inline(b.text)}</p>`;
     case 'button':
       return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 28px;"><tr>
-  <td bgcolor="${AZURE}" style="border-radius:10px;background:${AZURE};mso-padding-alt:15px 28px;">
-    <a href="${esc(b.href)}" target="_blank" style="display:inline-block;padding:15px 28px;${text(16, AZURE_INK, 'font-weight:700;text-decoration:none;border-radius:10px;', 1.2)}">${esc(b.label)}</a>
+  <td bgcolor="${BUTTON}" style="border-radius:10px;background:${BUTTON};mso-padding-alt:15px 28px;">
+    <a href="${esc(b.href)}" target="_blank" style="display:inline-block;padding:15px 28px;${text(16, WHITE, 'font-weight:700;text-decoration:none;border-radius:10px;', 1.2)}">${esc(b.label)}</a>
   </td>
 </tr></table>`;
     case 'fallbackLink':
-      return `<p style="margin:0 0 16px;${text(13, MUTED, '', 1.5)}">Button not working? Paste this into your browser:<br><a href="${esc(b.href)}" target="_blank" style="color:${AZURE};text-decoration:underline;word-break:break-all;">${esc(b.href)}</a></p>`;
+      return `<p style="margin:0 0 16px;${text(13, MUTED, '', 1.5)}">Button not working? Paste this into your browser:<br><a href="${esc(b.href)}" target="_blank" style="color:${LINK};text-decoration:underline;word-break:break-all;">${esc(b.href)}</a></p>`;
     case 'code':
       return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 24px;"><tr>
   <td bgcolor="${PANEL}" style="background:${PANEL};border:1px solid ${PANEL_EDGE};border-radius:12px;padding:18px 24px 18px 30px;">
@@ -199,29 +207,23 @@ function page(spec: EmailSpec): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="x-apple-disable-message-reformatting">
-<meta name="color-scheme" content="dark">
-<meta name="supported-color-schemes" content="dark">
 <title>${esc(spec.subject)}</title>
 <style>
-  :root { color-scheme: dark; supported-color-schemes: dark; }
-</style>
-<style>
-  body { margin:0; padding:0; background:${GROUND}; -webkit-text-size-adjust:100%; }
-  a { color:${AZURE}; }
+  body { margin:0; padding:0; background:${PAGE}; -webkit-text-size-adjust:100%; }
   @media (max-width:600px) {
     .bluu-pad { padding-left:20px !important; padding-right:20px !important; }
     .bluu-body h1 { font-size:24px !important; }
   }
 </style>
 </head>
-<body bgcolor="${GROUND}" style="margin:0;padding:0;background:${GROUND};">
+<body bgcolor="${PAGE}" style="margin:0;padding:0;background:${PAGE};">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">${esc(spec.preheader)}${'&#847;&zwnj;&nbsp;'.repeat(40)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${GROUND}" style="background-color:${GROUND};background-image:radial-gradient(ellipse 90% 340px at 50% 0,#0b2a3a,${GROUND} 75%);background-repeat:no-repeat;">
-  <tr><td align="center" style="padding:40px 0 32px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${PAGE}" style="background:${PAGE};">
+  <tr><td align="center" style="padding:32px 0;">
     <!--[if mso]><table role="presentation" width="${WIDTH}" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:${WIDTH}px;">
-      <tr><td class="bluu-pad" style="padding:0 32px 36px;">
-        <a href="${PUBLIC_APP_ORIGIN}" target="_blank" style="text-decoration:none;"><img src="${PUBLIC_APP_ORIGIN}/email/wordmark.png" width="140" height="24" alt="Bluu Rock" style="display:block;border:0;outline:none;width:140px;height:24px;color:${INK};font-family:${FONT};font-size:16px;font-weight:700;letter-spacing:0.14em;"></a>
+      <tr><td class="bluu-pad" style="padding:0 32px 32px;">
+        <a href="${PUBLIC_APP_ORIGIN}" target="_blank" style="text-decoration:none;"><img src="${PUBLIC_APP_ORIGIN}/email/wordmark.png" width="172" height="56" alt="Bluu Rock" style="display:block;border:0;outline:none;width:172px;height:56px;color:${INK};font-family:${FONT};font-size:16px;font-weight:700;letter-spacing:0.14em;"></a>
       </td></tr>
       <tr><td class="bluu-pad bluu-body" style="padding:0 32px 12px;">
 ${spec.blocks.map(blockHtml).join('\n')}

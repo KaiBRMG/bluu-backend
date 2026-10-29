@@ -6,6 +6,7 @@ import { ChevronDown, Copy, ExternalLink, Loader2, MonitorPlay, RefreshCw } from
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { SURFACE } from '@/lib/surfaces';
 import { TRAINING_MODULES, type TestDef, type TrainingModuleId } from '@/lib/training/modules';
 import type { AdminAttemptCell, AdminParticipant, AdminSubmissionView } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
@@ -90,7 +91,7 @@ function Body({ moduleId, person, skewMs, timezone, load, onRetry }: Omit<Candid
           load={load}
           onRetry={onRetry}
           watching={watching === t.id}
-          onWatch={() => setWatching(t.id)}
+          onWatch={() => setWatching((w) => (w === t.id ? null : t.id))}
         />
       ))}
     </div>
@@ -147,7 +148,7 @@ function TestWork({
   }, [open, stamp, load, person.emailHash, test.id]);
 
   return (
-    <section className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-4" aria-labelledby={`tw-${test.id}`}>
+    <section className={cn('rounded-xl p-4', SURFACE)} aria-labelledby={`tw-${test.id}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 id={`tw-${test.id}`} className="text-sm font-semibold">
           {test.id} · {test.title}
@@ -168,12 +169,10 @@ function TestWork({
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        {watching ? null : (
-          <Button variant="outline" size="sm" onClick={onWatch}>
-            <MonitorPlay className="size-4" />
-            {cell.state === 'in-progress' ? 'Watch live' : 'Screen recording'}
-          </Button>
-        )}
+        <Button variant="outline" size="sm" aria-pressed={watching} onClick={onWatch}>
+          <MonitorPlay className="size-4" />
+          {watching ? 'Hide recording' : cell.state === 'in-progress' ? 'Watch live' : 'Screen recording'}
+        </Button>
         <Button variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
           <ChevronDown className={cn('size-4 transition-transform', open && 'rotate-180')} />
           {open ? 'Hide work' : 'View work'}
@@ -210,7 +209,7 @@ function TestWork({
             <Button
               variant="ghost"
               size="sm"
-              aria-label="Copy the Drive folder link"
+              aria-label="Copy link to the Drive folder"
               onClick={() => {
                 navigator.clipboard.writeText(sub.driveUrl!).then(
                   () => toast.success('Drive link copied'),

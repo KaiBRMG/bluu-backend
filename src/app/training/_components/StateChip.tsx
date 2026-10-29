@@ -2,6 +2,7 @@ import { IconCheck, IconCircleOff, IconHourglassOff, IconLock, IconPlayerPlay } 
 import type { TestState } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
 import { STATE_LABEL } from '../_lib/format';
+import { AZURE_CHIP } from '../_lib/theme';
 
 const ICON: Record<TestState, typeof IconCheck> = {
   locked: IconLock,
@@ -20,7 +21,7 @@ export function StateChip({ state, className }: { state: TestState; className?: 
     <span
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium whitespace-nowrap',
-        live ? 'border-[#00b8f5]/50 bg-[#00b8f5]/10 text-[#7dd8fa]' : 'border-white/[0.12] bg-white/[0.04] text-white/80',
+        live ? AZURE_CHIP : 'border-white/[0.12] bg-white/[0.04] text-white/80',
         className,
       )}
     >

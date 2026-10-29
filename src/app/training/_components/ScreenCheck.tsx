@@ -4,7 +4,8 @@ import { useEffect, useRef } from 'react';
 import { IconCircleCheck, IconLoader2 } from '@tabler/icons-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { PANEL } from '../_lib/theme';
+import { AZURE_TEXT, CHECKBOX_AZURE, FOCUS, PANEL } from '../_lib/theme';
+import { cn } from '@/lib/utils';
 import { SHARE_PROBLEM_TEXT, type ScreenShare } from '../_lib/useScreenShare';
 import { ShareButton } from './ShareButton';
 
@@ -74,7 +75,7 @@ export function ScreenCheck({ share, onShare, check, onRetryCheck, confirmed, on
               </p>
             ) : check.state === 'passed' ? (
               <p className="flex items-center gap-2 text-white">
-                <IconCircleCheck className="size-4 text-[#00b8f5]" aria-hidden />
+                <IconCircleCheck className={cn('size-4', AZURE_TEXT)} aria-hidden />
                 Your screen is being received.
               </p>
             ) : (
@@ -96,7 +97,7 @@ export function ScreenCheck({ share, onShare, check, onRetryCheck, confirmed, on
             <Checkbox
               checked={confirmed}
               onCheckedChange={(v) => onConfirmed(v === true)}
-              className="mt-0.5 size-5 border-white/30 data-[state=checked]:border-[#00b8f5] data-[state=checked]:bg-[#00b8f5] data-[state=checked]:text-[#04141c]"
+              className={cn('mt-0.5 size-5 border-white/30', CHECKBOX_AZURE)}
             />
             <span>
               The preview shows my whole screen, including windows from other apps, not just this browser window.
@@ -105,7 +106,7 @@ export function ScreenCheck({ share, onShare, check, onRetryCheck, confirmed, on
           <button
             type="button"
             onClick={() => share.release()}
-            className="mt-2 min-h-11 text-sm text-white/70 underline-offset-4 outline-none hover:text-white hover:underline focus-visible:ring-2 focus-visible:ring-[#00b8f5]/60"
+            className={cn('mt-2 min-h-11 rounded text-sm text-white/70 underline-offset-4 hover:text-white hover:underline', FOCUS)}
           >
             Share a different screen
           </button>

@@ -6,7 +6,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useTrainingModules } from '@/hooks/useTrainingAdmin';
+import { SURFACE, SURFACE_INTERACTIVE } from '@/lib/surfaces';
 import { getTest } from '@/lib/training/modules';
+import { cn } from '@/lib/utils';
 
 /**
  * Training: the modules a candidate can be sat on. A module is a switch — on lets
@@ -27,7 +29,7 @@ export default function AdminTrainingPage() {
         </div>
 
         {error ? (
-          <div role="alert" className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-6">
+          <div role="alert" className={cn('rounded-xl p-6', SURFACE)}>
             <p className="text-sm font-medium text-red-400">Couldn&apos;t load the modules</p>
             <p className="mt-1 text-sm text-zinc-400">{error}</p>
             <Button variant="outline" size="sm" className="mt-4" onClick={refetch}>
@@ -38,15 +40,16 @@ export default function AdminTrainingPage() {
           <div className="grid gap-3 sm:grid-cols-2" aria-hidden>
             <Skeleton className="h-28 rounded-xl" />
           </div>
+        ) : modules.length === 0 ? (
+          <div className={cn('rounded-xl p-8 text-center', SURFACE)}>
+            <p className="text-sm font-medium">No training modules yet</p>
+            <p className="mt-1 text-sm text-zinc-400">Modules are defined in code, so there is nothing to switch on here until one ships.</p>
+          </div>
         ) : (
           <ul className="grid gap-3 sm:grid-cols-2">
             {modules.map((m) => (
               <li key={m.id}>
-                <Link
-                  href={`/admin-portal/training/${m.id}`}
-                  prefetch={false}
-                  className="block rounded-xl border border-white/[0.07] bg-white/[0.025] p-5 outline-none transition-colors hover:bg-white/[0.055] focus-visible:ring-2 focus-visible:ring-blue-400/60"
-                >
+                <Link href={`/admin-portal/training/${m.id}`} prefetch={false} className={cn('block rounded-xl p-5', SURFACE, SURFACE_INTERACTIVE)}>
                   <div className="flex items-start justify-between gap-3">
                     <h2 className="text-base font-semibold">{m.title}</h2>
                     <Badge

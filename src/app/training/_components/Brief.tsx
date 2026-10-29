@@ -68,8 +68,21 @@ function Blocks({ blocks, test, compact }: { blocks: BriefBlock[]; test: Pick<Te
   );
 }
 
-function Section({ section, test, compact }: { section: BriefSection; test: Pick<TestDef, 'slots'>; compact?: boolean }) {
-  const H = section.sub ? 'h4' : 'h3';
+/** The heading level a brief's top sections take; a sub-section is one below. */
+type Level = 2 | 3;
+
+function Section({
+  section,
+  test,
+  compact,
+  level,
+}: {
+  section: BriefSection;
+  test: Pick<TestDef, 'slots'>;
+  compact?: boolean;
+  level: Level;
+}) {
+  const H = section.sub ? (`h${level + 1}` as 'h3' | 'h4') : (`h${level}` as 'h2' | 'h3');
   return (
     <section className={section.sub ? 'mt-5' : 'mt-8'}>
       <H className={cn('font-semibold text-white', section.sub ? 'text-base' : 'text-lg')}>{section.heading}</H>
@@ -82,25 +95,35 @@ function Section({ section, test, compact }: { section: BriefSection; test: Pick
   );
 }
 
-/** A test's full brief. */
-export function BriefView({ test, brief = test.brief, compact }: { test: TestDef; brief?: BriefDef; compact?: boolean }) {
+/** A test's full brief. `level` is the heading level of its sections: one below whatever heads the place it sits in. */
+export function BriefView({
+  test,
+  brief = test.brief,
+  compact,
+  level = 3,
+}: {
+  test: TestDef;
+  brief?: BriefDef;
+  compact?: boolean;
+  level?: Level;
+}) {
   return (
     <div className="max-w-prose text-base leading-relaxed text-white/80">
       <Blocks blocks={brief.lead} test={test} compact={compact} />
       {brief.sections.map((s, i) => (
-        <Section key={`${s.heading}-${i}`} section={s} test={test} compact={compact} />
+        <Section key={`${s.heading}-${i}`} section={s} test={test} compact={compact} level={level} />
       ))}
     </div>
   );
 }
 
 /** The module explainer: the same typography, no test to derive from. */
-export function ExplainerView({ sections }: { sections: BriefSection[] }) {
+export function ExplainerView({ sections, level = 3 }: { sections: BriefSection[]; level?: Level }) {
   const none = { slots: [] };
   return (
     <div className="max-w-prose text-base leading-relaxed text-white/80">
       {sections.map((s, i) => (
-        <Section key={`${s.heading}-${i}`} section={s} test={none} />
+        <Section key={`${s.heading}-${i}`} section={s} test={none} level={level} />
       ))}
     </div>
   );

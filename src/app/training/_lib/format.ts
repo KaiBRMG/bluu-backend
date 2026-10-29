@@ -18,7 +18,7 @@ export const STATE_LABEL: Record<TestState, string> = {
   open: 'Open',
   'in-progress': 'In progress',
   submitted: 'Submitted',
-  'timed-out': 'Time ran out',
+  'timed-out': "Time's up",
   missed: 'Missed',
 };
 

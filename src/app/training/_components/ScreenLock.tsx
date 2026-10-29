@@ -33,7 +33,10 @@ export function ScreenLock({ share, deadlineMs, now }: { share: ScreenShare; dea
           Share your screen to continue
         </h2>
         <div id="screen-lock-body" className="mt-2 flex flex-col gap-2 text-base text-white/80">
-          <p>Your screen is not being shared, so the test is locked. The clock is still running.</p>
+          <p>
+            Your screen is not being shared, so the test is locked. The clock is still running, and everything you have
+            already uploaded is kept.
+          </p>
           <p className="text-sm text-white/70">
             If you refreshed the page, share again. Uploads work again a few seconds after the recording resumes.
           </p>

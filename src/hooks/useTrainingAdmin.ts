@@ -127,6 +127,13 @@ export interface Preparing {
   total: number;
 }
 
+/** `invited` were emailed; `held` are new but were not, because the module is off. */
+export interface AddPeopleResult {
+  added: number;
+  invited: number;
+  held: number;
+}
+
 export function useTrainingModule(moduleId: string) {
   const [detail, setDetail] = useState<AdminModuleDetail | null>(null);
   const [skewMs, setSkewMs] = useState(0);
@@ -230,9 +237,9 @@ export function useTrainingModule(moduleId: string) {
 
   const addPeople = useCallback(
     async (emails: string) => {
-      const res = await trainingAdmin<{ added: number }>(`${base}/participants`, 'POST', { emails });
+      const res = await trainingAdmin<AddPeopleResult>(`${base}/participants`, 'POST', { emails });
       refetch();
-      return res.added;
+      return res;
     },
     [base, refetch],
   );

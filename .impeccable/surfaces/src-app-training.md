@@ -25,7 +25,7 @@ A nervous candidate, probably at a computer for the work and on a phone for the 
 
 THESIS: After Start the page becomes a focus room: all chrome goes and the clock is the largest thing on screen. Refuses the category default: a quiz page with a small timer badge in the corner.
 
-OWN-WORLD: §8's stage — #08090b ground, one azure wash, azure the only voice with AZURE_INK on fills, Google Sans alone, translucent-white panels, hairlines, no shadows. The clock is tabular numerals at `clamp(4rem,14vw,9rem)` in a rail; urgency is carried by words ("5 minutes left"), a border state and weight, never hue alone.
+OWN-WORLD: §8's stage — #08090b ground, one azure wash, azure the only voice with AZURE_INK on fills, Google Sans alone, translucent-white panels, hairlines, no shadows. The clock is tabular numerals at `5.75rem` on the `lg` rail (DESIGN.md §11 is the record) and `2.5rem`→`3rem` in the pinned band below it; urgency is carried by words ("5 minutes left"), a border state and weight, never hue alone.
 
 STORY: They enter an email, then a code, and understand they are on the list. They read what the open test asks and what the rules are, tap Start, and the task and the clock arrive together. They upload final images, see each one land, add working files and a task record, and finish with "N of M uploaded" visible the whole time. At zero the room locks, says what is still arriving, and says so calmly.
 

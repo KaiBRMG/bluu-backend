@@ -887,7 +887,16 @@ function parseEmails(raw: string) {
   return { valid, invalid };
 }
 
-export async function addParticipants(moduleId: string, raw: string): Promise<{ added: number }> {
+/**
+ * `invitees` are the addresses that are NEW to the module and should be emailed their
+ * invitation now (the caller sends it). A restored person already had one, and while
+ * the module is off nobody can sign in, so an invitation then would lead nowhere —
+ * those new people are counted in `held` instead.
+ */
+export async function addParticipants(
+  moduleId: string,
+  raw: string,
+): Promise<{ added: number; invitees: string[]; held: number }> {
   requireModule(moduleId);
   const { valid, invalid } = parseEmails(raw);
   if (invalid.length) throw new TrainingError(`These are not valid emails: ${invalid.slice(0, 5).join(', ')}`, 400);
@@ -900,6 +909,7 @@ export async function addParticipants(moduleId: string, raw: string): Promise<{ 
     const snaps = await tx.getAll(...refs);
 
     let added = 0;
+    const fresh: string[] = [];
     const now = Date.now();
     snaps.forEach((snap, i) => {
       if (snap.exists) {
@@ -918,6 +928,7 @@ export async function addParticipants(moduleId: string, raw: string): Promise<{ 
         revokedAtMs: null,
         attempts: {},
       } satisfies ParticipantDoc);
+      fresh.push(valid[i].email);
       added++;
     });
 
@@ -926,7 +937,7 @@ export async function addParticipants(moduleId: string, raw: string): Promise<{ 
       throw new TrainingError(`At most ${MAX_PARTICIPANTS_PER_MODULE} people per module`, 400);
     }
     tx.set(mRef, { participantCount: count }, { merge: true });
-    return { added };
+    return { added, invitees: mod.isOn ? fresh : [], held: mod.isOn ? 0 : fresh.length };
   });
 }
 

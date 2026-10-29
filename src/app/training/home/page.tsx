@@ -10,7 +10,8 @@ import { getModule } from '@/lib/training/modules';
 import type { MeResponse, ModuleSummary, TestSummary } from '@/lib/training/types';
 import { api, ApiError, useServerClock } from '../_lib/api';
 import { TERMINAL } from '../_lib/format';
-import { AZURE, AZURE_INK, FIELD, PANEL } from '../_lib/theme';
+import { AZURE, AZURE_INK, AZURE_TEXT, FIELD, FOCUS, PANEL } from '../_lib/theme';
+import { cn } from '@/lib/utils';
 import { Shell } from '../_components/Shell';
 import { SignedInAside } from '../_components/SignedInAside';
 import { StateChip } from '../_components/StateChip';
@@ -109,6 +110,13 @@ export default function TrainingHomePage() {
       .then((data) => {
         if (cancelled) return;
         sync(data.nowMs);
+        // One module is the whole product for this person: go straight in. The module's own
+        // "Your training" link comes back with `?list=1`, which is the only way to see this list.
+        const only = data.modules.length === 1 ? getModule(data.modules[0].id) : null;
+        if (data.name && only && !new URLSearchParams(window.location.search).has('list')) {
+          router.replace(`/training/${only.path}`);
+          return;
+        }
         setMe(data);
         setError('');
       })
@@ -168,7 +176,7 @@ export default function TrainingHomePage() {
                     <Link
                       href={`/training/${def.path}`}
                       prefetch={false}
-                      className={`${PANEL} group flex items-center gap-4 rounded-2xl p-5 transition-colors outline-none hover:bg-white/[0.055] focus-visible:ring-2 focus-visible:ring-[#00b8f5]/60`}
+                      className={cn(PANEL, 'group flex items-center gap-4 rounded-2xl p-5 transition-colors hover:bg-white/[0.055]', FOCUS)}
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -180,7 +188,7 @@ export default function TrainingHomePage() {
                         </p>
                       </div>
                       <IconArrowRight
-                        className="size-5 shrink-0 text-[#00b8f5] transition-transform group-hover:translate-x-0.5"
+                        className={cn('size-5 shrink-0 transition-transform group-hover:translate-x-0.5', AZURE_TEXT)}
                         aria-hidden
                       />
                     </Link>

@@ -7,9 +7,10 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import type { AddPeopleResult } from '@/hooks/useTrainingAdmin';
 import { splitEmails } from '@/lib/training/emails';
 
-export default function AddPeopleDialog({ onAdd }: { onAdd: (emails: string) => Promise<number> }) {
+export default function AddPeopleDialog({ onAdd }: { onAdd: (emails: string) => Promise<AddPeopleResult> }) {
   const [open, setOpen] = useState(false);
   const [emails, setEmails] = useState('');
   const [saving, setSaving] = useState(false);
@@ -23,8 +24,15 @@ export default function AddPeopleDialog({ onAdd }: { onAdd: (emails: string) => 
     setSaving(true);
     setError('');
     try {
-      const added = await onAdd(emails);
-      toast.success(added === 0 ? 'Everyone was already on the module' : `Added ${added} ${added === 1 ? 'person' : 'people'}`);
+      const { added, invited, held } = await onAdd(emails);
+      if (added === 0) {
+        toast.success('Everyone was already on the module');
+      } else {
+        const people = `${added} ${added === 1 ? 'person' : 'people'}`;
+        if (held > 0) toast.success(`Added ${people}. No invitation emailed — switch the module on, then tell them`);
+        else if (invited > 0) toast.success(`Added ${people}. ${invited === 1 ? 'Invitation' : 'Invitations'} emailed`);
+        else toast.success(`Restored ${people}`);
+      }
       setEmails('');
       setOpen(false);
     } catch (err) {
@@ -35,7 +43,14 @@ export default function AddPeopleDialog({ onAdd }: { onAdd: (emails: string) => 
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => !saving && setOpen(next)}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (saving) return;
+        if (!next) setError('');
+        setOpen(next);
+      }}
+    >
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           <UserPlus className="size-4" />
@@ -46,7 +61,7 @@ export default function AddPeopleDialog({ onAdd }: { onAdd: (emails: string) => 
         <form onSubmit={submit} className="flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Add people</DialogTitle>
-            <DialogDescription>They can sign in to the training link whenever the module is on.</DialogDescription>
+            <DialogDescription>New people are emailed an invitation with the training link when the module is on.</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-1">
             <Label htmlFor="ap-emails" className="text-xs text-zinc-400">
@@ -55,7 +70,9 @@ export default function AddPeopleDialog({ onAdd }: { onAdd: (emails: string) => 
             <Textarea id="ap-emails" value={emails} onChange={(e) => setEmails(e.target.value)} rows={5} placeholder="One per line, or paste a list" required />
             <p className="text-[11px] text-zinc-400 tabular-nums">
               {count} {count === 1 ? 'person' : 'people'}
-              {invalid.length > 0 && <span className="text-red-400"> · not an email: {invalid.slice(0, 3).join(', ')}</span>}
+              {invalid.length > 0 && <span className="text-red-400"> · not an email: {invalid.slice(0, 3).join(', ')}
+                  {invalid.length > 3 ? ` +${invalid.length - 3} more` : ''}
+                </span>}
             </p>
           </div>
           {error && (
@@ -69,7 +86,7 @@ export default function AddPeopleDialog({ onAdd }: { onAdd: (emails: string) => 
             </Button>
             <Button type="submit" size="sm" disabled={saving || count === 0 || invalid.length > 0}>
               {saving && <Loader2 className="activity-spinner size-4 animate-spin" />}
-              Add
+              {count > 0 ? `Add ${count} ${count === 1 ? 'person' : 'people'}` : 'Add'}
             </Button>
           </DialogFooter>
         </form>

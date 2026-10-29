@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useEffectEvent, useState } from 'react';
+import { memo, useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
 import { IconArrowDown, IconArrowRight, IconBook2, IconChevronRight, IconDownload, IconPhotoSearch } from '@tabler/icons-react';
 import {
   AlertDialog,
@@ -20,6 +20,7 @@ import {
   IMAGE_LABEL,
   IMAGE_TYPES,
   MAX_OUTPUT_BYTES,
+  UPLOAD_GRACE_MS,
   WORKING_GRACE_MS,
   type BriefSection,
   type DatasetId,
@@ -29,9 +30,10 @@ import {
 import type { SourceView, TestResponse } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
 import { api, ApiError } from '../_lib/api';
-import { AZURE, AZURE_INK, PANEL } from '../_lib/theme';
+import { AZURE, AZURE_CHIP_BUTTON, AZURE_EDGE, AZURE_INK, AZURE_TEXT, DIALOG_PANEL, FOCUS, OVERLAY_BUTTON, PANEL, PROGRESS_AZURE } from '../_lib/theme';
 import { fmtBytes, uploadFile } from '../_lib/upload';
 import type { ScreenShare } from '../_lib/useScreenShare';
+import { useRoomGuards } from '../_lib/useRoomGuards';
 import { BriefView, ExplainerView } from './Brief';
 import { Countdown } from './Countdown';
 import { DatasetModal } from './DatasetModal';
@@ -46,7 +48,8 @@ interface EditRoomProps {
   test: TestDef;
   explainer: BriefSection[];
   now: () => number;
-  onEnded: (kind: 'time' | 'finished', filled: number) => void;
+  /** `unsaved`: the task record never finished saving. */
+  onEnded: (kind: 'time' | 'finished', filled: number, unsaved?: boolean) => void;
   /** The screen share the attempt is recorded from — owned by `ModuleView`, which runs the recorder. */
   share: ScreenShare;
   /** Segment uploads keep failing: the server will refuse uploads until they catch up. */
@@ -93,11 +96,26 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [finishError, setFinishError] = useState('');
+  // The task record is autosaved, so "nothing is travelling" has to include it: a note typed in the
+  // last seconds is still on its way (or failing) when the clock reaches zero.
+  const [recordPending, setRecordPending] = useState(false);
+  const [recordGaveUp, setRecordGaveUp] = useState(false);
+  const recordPendingRef = useRef(false);
+  const onRecordPending = useCallback((pending: boolean) => {
+    recordPendingRef.current = pending;
+    setRecordPending(pending);
+  }, []);
+
+  useRoomGuards();
 
   const filled = test.slots.filter((s) => slots[s.id].uploaded).length;
-  const busyCount = test.slots.filter((s) => slots[s.id].busy).length + workBusy;
+  const recordBusy = recordPending && !recordGaveUp;
+  const busyCount = test.slots.filter((s) => slots[s.id].busy).length + workBusy + (recordBusy ? 1 : 0);
   const screenLocked = attempt.recording && !share.stream && !expired;
   const locked = expired || finishing || screenLocked;
+
+  // A dialog does not wait out the lock: when the screen goes, the Finish prompt is dropped rather than held for the re-share.
+  if (screenLocked && confirmFinish) setConfirmFinish(false);
 
   const patch = useCallback((id: string, next: Partial<SlotState>) => {
     setSlots((prev) => ({ ...prev, [id]: { ...prev[id], ...next } }));
@@ -106,7 +124,7 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
   // Hand over once the clock is out AND nothing is still travelling. The cap covers the
   // server's grace — ten minutes when a working file is on its way — so a stuck upload
   // can never hold the room open.
-  const handOver = useEffectEvent(() => onEnded('time', filled));
+  const handOver = useEffectEvent(() => onEnded('time', filled, recordPendingRef.current));
   useEffect(() => {
     if (!expired || busyCount > 0) return;
     const id = window.setTimeout(handOver, 500);
@@ -115,6 +133,12 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
   useEffect(() => {
     if (!expired) return;
     const id = window.setTimeout(handOver, WORKING_GRACE_MS + 5_000);
+    return () => window.clearTimeout(id);
+  }, [expired]);
+  // The server takes the task record only for the upload grace after the clock; past that, waiting on it is pointless.
+  useEffect(() => {
+    if (!expired) return;
+    const id = window.setTimeout(() => setRecordGaveUp(true), UPLOAD_GRACE_MS);
     return () => window.clearTimeout(id);
   }, [expired]);
 
@@ -147,25 +171,38 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
     }
   }
 
-  async function chooseIdentity(slotId: string, identity: DatasetId) {
-    setIdentityError('');
-    try {
-      const res = await api<{ choices: Record<string, DatasetId> }>(`${base}/identity`, {
-        method: 'POST',
-        body: { slotId, identity },
-      });
-      setChoices(res.choices);
-    } catch (err) {
-      setIdentityError(err instanceof ApiError ? err.message : 'Could not change that. Try again.');
-    }
-  }
+  // The rows are memoised, and a progress tick is a state change in this component: the handlers they
+  // receive must keep their identity, so a percentage moving on one slot does not redraw the others.
+  const uploadRef = useRef(upload);
+  useEffect(() => {
+    uploadRef.current = upload;
+  });
+  const handleFile = useCallback((def: SlotDef, file: File) => void uploadRef.current(def, file), []);
+
+  const chooseIdentity = useCallback(
+    async (slotId: string, identity: DatasetId) => {
+      setIdentityError('');
+      try {
+        const res = await api<{ choices: Record<string, DatasetId> }>(`${base}/identity`, {
+          method: 'POST',
+          body: { slotId, identity },
+        });
+        setChoices(res.choices);
+      } catch (err) {
+        setIdentityError(err instanceof ApiError ? err.message : 'Could not change that. Try again.');
+      }
+    },
+    [base],
+  );
 
   async function finishEarly() {
     setFinishing(true);
     setFinishError('');
     try {
+      // Finishing locks the task record, which pushes its last edit; give that a moment to land before the room goes.
+      for (let waited = 0; recordPendingRef.current && waited < 8_000; waited += 200) await new Promise((r) => window.setTimeout(r, 200));
       await api(`${base}/finish`, { method: 'POST' });
-      onEnded('finished', filled);
+      onEnded('finished', filled, recordPendingRef.current);
     } catch (err) {
       setFinishing(false);
       setConfirmFinish(false);
@@ -173,7 +210,7 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
     }
   }
 
-  const openDatasets = (at: DatasetId | null) => setDatasets((d) => ({ open: true, at, n: d.n + 1 }));
+  const openDatasets = useCallback((at: DatasetId | null) => setDatasets((d) => ({ open: true, at, n: d.n + 1 })), []);
   const sourceFor = (slotId: string) => sources.find((s) => s.slotId === slotId);
 
   return (
@@ -187,6 +224,22 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
           durationMs={test.durationMs}
           now={now}
           onExpire={() => setExpired(true)}
+          title={`${test.id} ${test.title}`}
+          screenLocked={screenLocked}
+          alerts={
+            <>
+              {recordingFailing && share.stream && !expired && (
+                <p role="alert" className="text-amber-200">
+                  Your screen recording is not reaching us, so uploads wait until it catches up. Check your connection.
+                </p>
+              )}
+              {finishError && (
+                <p role="alert" className="text-red-300">
+                  {finishError}
+                </p>
+              )}
+            </>
+          }
           className="lg:col-start-2 lg:row-start-1 lg:self-start"
         >
           <div className="flex items-center gap-3 lg:flex-col lg:items-stretch lg:gap-4">
@@ -197,12 +250,13 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
               <Progress
                 value={(filled / test.slots.length) * 100}
                 aria-label="Final images uploaded"
-                className="mt-2 hidden h-1.5 bg-white/10 lg:block [&>div]:bg-[#00b8f5]"
+                className={cn('mt-2 h-1.5 bg-white/10', PROGRESS_AZURE)}
               />
               {attempt.recording && share.stream && (
-                <p className="mt-2 hidden items-center gap-2 text-xs text-white/70 lg:flex">
+                <p className="mt-2 flex items-center justify-end gap-2 text-xs text-white/70 lg:justify-start">
                   <span className="size-2 rounded-full bg-red-400" aria-hidden />
-                  Your screen is being recorded
+                  <span className="lg:hidden">Recording</span>
+                  <span className="hidden lg:inline">Your screen is being recorded</span>
                 </p>
               )}
             </div>
@@ -267,11 +321,12 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
           {/* The brief reads first and folds once read — a state change, not one of the clock's two motions. */}
           {briefOpen ? (
             <section aria-label="Brief" className="mt-6">
-              <BriefView test={test} compact />
+              <BriefView test={test} compact level={2} />
               <button
                 type="button"
                 onClick={() => setBriefOpen(false)}
-                className="mt-4 min-h-11 text-sm text-[#7dd8fa] underline-offset-4 outline-none hover:underline focus-visible:underline"
+                aria-expanded={true}
+                className={cn('mt-4 min-h-11 rounded text-sm underline-offset-4 hover:underline', AZURE_TEXT, FOCUS)}
               >
                 Fold the brief
               </button>
@@ -281,7 +336,7 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
               type="button"
               onClick={() => setBriefOpen(true)}
               aria-expanded={false}
-              className={`${PANEL} mt-6 flex min-h-11 w-full items-center gap-2 rounded-xl px-4 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-[#00b8f5]/70`}
+              className={cn(PANEL, 'mt-6 flex min-h-11 w-full items-center gap-2 rounded-xl px-4 text-left text-sm', FOCUS)}
             >
               <IconChevronRight className="size-4 text-white/70" aria-hidden />
               <span className="text-white">Brief · {test.id} {test.title}</span>
@@ -291,17 +346,7 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
 
           {expired && (
             <p role="status" className={`${PANEL} mt-6 rounded-xl px-4 py-3 text-sm text-white`}>
-              {busyCount > 0 ? "Time's up. Files still arriving are being saved…" : "Time's up."}
-            </p>
-          )}
-          {finishError && (
-            <p role="alert" className="mt-6 text-sm text-red-300">
-              {finishError}
-            </p>
-          )}
-          {recordingFailing && share.stream && !expired && (
-            <p role="alert" className={`${PANEL} mt-6 rounded-xl px-4 py-3 text-sm text-amber-200`}>
-              Your screen recording is not reaching us. Check your connection. Uploads are refused until it catches up.
+              {busyCount > 0 ? "Time's up. Saving what is still arriving…" : "Time's up."}
             </p>
           )}
 
@@ -332,25 +377,25 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
                     choices={choices}
                     identities={test.datasets}
                     locked={locked}
-                    onFile={(file) => void upload(def, file)}
+                    onFile={handleFile}
                     onDataset={openDatasets}
-                    onChoose={(identity) => void chooseIdentity(def.id, identity)}
+                    onChoose={chooseIdentity}
                   />
                 ))}
               </ol>
             ) : (
-              <GenerateGrid test={test} slots={slots} locked={locked} onFile={(def, file) => void upload(def, file)} />
+              <GenerateGrid test={test} slots={slots} locked={locked} onFile={handleFile} />
             )}
           </section>
 
           {test.kind === 'generate' && <Inspiration sources={sources} />}
 
-          <WorkingFiles base={base} initial={attempt.workingFiles} locked={expired || screenLocked} onBusy={setWorkBusy} />
-          <TaskRecord base={base} initial={attempt.text} locked={expired || finishing} />
+          <WorkingFiles base={base} initial={attempt.workingFiles} locked={expired || finishing || screenLocked} expired={expired} onBusy={setWorkBusy} />
+          <TaskRecord base={base} initial={attempt.text} locked={expired || finishing} onPending={onRecordPending} />
         </div>
 
-        <AlertDialog open={confirmFinish} onOpenChange={(open) => !finishing && setConfirmFinish(open)}>
-          <AlertDialogContent className="rounded-2xl border-white/10 bg-[#0d1014] text-white">
+        <AlertDialog open={confirmFinish && !screenLocked} onOpenChange={(open) => !finishing && setConfirmFinish(open)}>
+          <AlertDialogContent className={cn('rounded-2xl', DIALOG_PANEL)}>
             <AlertDialogHeader>
               <AlertDialogTitle>Finish now?</AlertDialogTitle>
               <AlertDialogDescription className="text-white/75">
@@ -380,15 +425,15 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
       {test.datasets.length > 0 && (
         <DatasetModal
           key={datasets.n}
-          open={datasets.open}
+          open={datasets.open && !screenLocked}
           onOpenChange={(open) => setDatasets((d) => ({ ...d, open }))}
           base={base}
           identities={test.datasets}
           initial={datasets.at}
         />
       )}
-      <Sheet open={explainerOpen} onOpenChange={setExplainerOpen}>
-        <SheetContent side="right" className="w-full overflow-y-auto border-white/10 bg-[#0d1014] p-5 text-white sm:max-w-xl">
+      <Sheet open={explainerOpen && !screenLocked} onOpenChange={setExplainerOpen}>
+        <SheetContent side="right" className={cn('w-full overflow-y-auto p-5 sm:max-w-xl', DIALOG_PANEL)}>
           <SheetHeader className="p-0 pb-4">
             <SheetTitle className="text-xl text-white">Explainer</SheetTitle>
             <SheetDescription className="text-white/70">The rules that apply to every test.</SheetDescription>
@@ -411,13 +456,13 @@ interface EditRowProps {
   choices: Record<string, DatasetId>;
   identities: DatasetId[];
   locked: boolean;
-  onFile: (file: File) => void;
+  onFile: (def: SlotDef, file: File) => void;
   onDataset: (at: DatasetId | null) => void;
-  onChoose: (identity: DatasetId) => void;
+  onChoose: (slotId: string, identity: DatasetId) => void;
 }
 
-/** One source → one final: the code, the source image, an arrow, the slot. */
-function EditRow({ def, source, state, choice, choices, identities, locked, onFile, onDataset, onChoose }: EditRowProps) {
+/** One source → one final: the code, the source image, an arrow, the slot. Memoised: only the row whose slot moved redraws. */
+const EditRow = memo(function EditRow({ def, source, state, choice, choices, identities, locked, onFile, onDataset, onChoose }: EditRowProps) {
   const needsChoice = def.pickIdentity && !choice;
   return (
     <li className={`${PANEL} rounded-2xl p-4 sm:p-5`}>
@@ -428,7 +473,7 @@ function EditRow({ def, source, state, choice, choices, identities, locked, onFi
             type="button"
             onClick={() => onDataset(def.identity!)}
             aria-label={`Open the ${DATASETS[def.identity].label} dataset`}
-            className="inline-flex h-11 items-center gap-2 rounded-full border border-[#00b8f5]/50 bg-[#00b8f5]/10 px-4 text-sm font-medium text-[#7dd8fa] outline-none hover:bg-[#00b8f5]/20 focus-visible:ring-2 focus-visible:ring-[#00b8f5]/70"
+            className={cn('inline-flex h-11 items-center gap-2 rounded-full border px-4 text-sm font-medium', AZURE_CHIP_BUTTON, FOCUS)}
           >
             <IconPhotoSearch className="size-4" aria-hidden />
             {DATASETS[def.identity].label} dataset
@@ -454,7 +499,7 @@ function EditRow({ def, source, state, choice, choices, identities, locked, onFi
           choice={choice}
           choices={choices}
           disabled={locked || state.uploaded || state.busy}
-          onChoose={onChoose}
+          onChoose={(identity) => onChoose(def.id, identity)}
         />
       )}
 
@@ -473,8 +518,9 @@ function EditRow({ def, source, state, choice, choices, identities, locked, onFi
               />
               <a
                 href={source.downloadUrl}
+                data-download
                 aria-label={`Download the original of source ${def.code}`}
-                className="absolute top-2 right-2 grid size-10 place-items-center rounded-lg border border-white/20 bg-[#08090b]/90 text-white outline-none hover:bg-black focus-visible:ring-2 focus-visible:ring-[#00b8f5]/70"
+                className={cn(OVERLAY_BUTTON, FOCUS)}
               >
                 <IconDownload className="size-4" aria-hidden />
               </a>
@@ -491,12 +537,12 @@ function EditRow({ def, source, state, choice, choices, identities, locked, onFi
           state={state}
           disabled={locked}
           waitingFor={needsChoice ? 'Choose which identity this image uses first.' : undefined}
-          onFile={onFile}
+          onFile={(file) => onFile(def, file)}
         />
       </div>
     </li>
   );
-}
+});
 
 /**
  * T4: which identity this image uses. Each is used exactly once, so choosing one
@@ -537,9 +583,10 @@ function IdentityPicker({
               disabled={disabled}
               onClick={() => onChoose(id)}
               className={cn(
-                'flex min-h-11 items-center gap-2 rounded-xl border px-4 text-sm outline-none transition-colors',
-                'focus-visible:ring-2 focus-visible:ring-[#00b8f5]/70 disabled:cursor-not-allowed disabled:opacity-60',
-                selected ? 'border-[#00b8f5] bg-[#00b8f5]/10 text-white' : 'border-white/[0.12] text-white/85 enabled:hover:bg-white/[0.07]',
+                'flex min-h-11 items-center gap-2 rounded-xl border px-4 text-sm transition-colors',
+                FOCUS,
+                'disabled:cursor-not-allowed disabled:opacity-60',
+                selected ? `${AZURE_EDGE} text-white` : 'border-white/[0.12] text-white/85 enabled:hover:bg-white/[0.07]',
               )}
             >
               {DATASETS[id].label}
@@ -602,10 +649,16 @@ function Inspiration({ sources }: { sources: SourceView[] }) {
           <ul className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
             {sources
               .filter((s) => (s.group ?? '') === g)
-              .map((s) => (
+              .map((s, n) => (
                 <li key={s.id} className="overflow-hidden rounded-lg border border-white/[0.10] bg-black/40">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={s.thumbUrl} alt="" loading="lazy" decoding="async" className="aspect-[3/4] w-full object-cover" />
+                  <img
+                    src={s.thumbUrl}
+                    alt={`${g ? `${g}, ` : ''}inspiration image ${n + 1}, viewing only`}
+                    loading="lazy"
+                    decoding="async"
+                    className="aspect-[3/4] w-full object-cover"
+                  />
                 </li>
               ))}
           </ul>

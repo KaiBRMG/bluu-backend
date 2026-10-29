@@ -9,7 +9,7 @@ import { DATASETS, type DatasetId } from '@/lib/training/modules';
 import type { DatasetView, DatasetsResponse } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
 import { api } from '../_lib/api';
-import { AZURE, AZURE_INK } from '../_lib/theme';
+import { AZURE, AZURE_EDGE, AZURE_INK, DIALOG_PANEL, FOCUS, OVERLAY_BUTTON } from '../_lib/theme';
 
 interface DatasetModalProps {
   open: boolean;
@@ -97,7 +97,7 @@ export function DatasetModal({ open, onOpenChange, base, identities, initial }: 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90dvh] w-[calc(100vw-1.5rem)] max-w-5xl flex-col gap-0 rounded-2xl border-white/10 bg-[#0d1014] p-0 text-white sm:max-w-5xl">
+      <DialogContent className={cn('flex max-h-[90dvh] w-[calc(100vw-1.5rem)] max-w-5xl flex-col gap-0 rounded-2xl p-0 sm:max-w-5xl', DIALOG_PANEL)}>
         <DialogHeader className="px-5 pt-5 pb-3 sm:px-6">
           <DialogTitle className="text-xl">Datasets</DialogTitle>
           <DialogDescription className="text-white/70">
@@ -117,8 +117,9 @@ export function DatasetModal({ open, onOpenChange, base, identities, initial }: 
                 setZip({ state: 'idle' });
               }}
               className={cn(
-                'h-11 shrink-0 rounded-full border px-5 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-[#00b8f5]/70',
-                active === id ? 'border-[#00b8f5] bg-[#00b8f5]/10 text-white' : 'border-white/[0.12] text-white/80 hover:bg-white/[0.06]',
+                'h-11 shrink-0 rounded-full border px-5 text-sm font-medium',
+                FOCUS,
+                active === id ? `${AZURE_EDGE} text-white` : 'border-white/[0.12] text-white/80 hover:bg-white/[0.06]',
               )}
             >
               {DATASETS[id].label}
@@ -198,8 +199,9 @@ export function DatasetModal({ open, onOpenChange, base, identities, initial }: 
                   <span className="block truncate px-3 py-2 text-xs text-white/80">{img.name}</span>
                   <a
                     href={img.downloadUrl}
+                    data-download
                     aria-label={`Download ${img.name}`}
-                    className="absolute top-2 right-2 grid size-10 place-items-center rounded-lg border border-white/20 bg-[#08090b]/90 text-white outline-none hover:bg-black focus-visible:ring-2 focus-visible:ring-[#00b8f5]/70"
+                    className={cn(OVERLAY_BUTTON, FOCUS)}
                   >
                     <IconDownload className="size-4" aria-hidden />
                   </a>

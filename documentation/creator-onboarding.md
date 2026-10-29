@@ -136,7 +136,7 @@ Model Submissions itself moved into the Creator Portal on 2026-09-28 (`/creator-
 - `RESEND_WEBHOOK_SECRET` — the `whsec_…` signing secret of the receiving webhook. Unset → the webhook answers 503.
 - Copy lives only in `src/lib/email/templates.ts`. The welcome subject is exactly `Welcome to BLUU ROCK 🎉`.
 - **One template for every email: [`layout.ts`](../src/lib/email/layout.ts).** A template in `templates.ts` is a `renderEmail({ subject, preheader, reason, blocks })` call — never hand-written markup. Blocks: `heading` (at most one), `p`, `note`, `button`, `fallbackLink`, `code`, `list`, `signoff`; inline text takes only `**bold**` and is escaped otherwise, so names interpolate safely. The plain-text part is rendered from the same blocks (a button becomes `Label: url` on its own line). `sendEmail` takes `email: RenderedEmail`, and only `renderEmail` can produce one — an email that bypasses the template does not type-check. `reason` is the footer's "You're receiving this because…" line; every email states one.
-- **The look** is the public skin (DESIGN.md §8) in the inbox: `#08090b` ground pinned with `color-scheme: dark`, the lockup PNG at `public/email/wordmark.png` (rebuild from `bluu_long.svg` with `cd src && node scripts/build-email-wordmark.js` — PNG because Gmail drops SVG and Outlook drops WebP), azure button with `AZURE_INK` text, solid hex only (Outlook ignores rgba). New colour → a token at the top of `layout.ts`, with its contrast on the ground.
+- **The look** is a plain **light** email on purpose — mail apps' dark modes invert light email cleanly and mangle dark email (Gmail iOS), so the template uses solid inline colours only, a white-on-`#007db0` button, and puts the brand in an image: the lockup PNG at `public/email/wordmark.png` carries its own dark plate (rebuild from `bluu_long.svg` with `cd src && node scripts/build-email-wordmark.js` — PNG because Gmail drops SVG and Outlook drops WebP). New colour → a token at the top of `layout.ts`, with its contrast on white. See DESIGN.md §8 → Email.
 
 ### Every automated email
 
@@ -144,6 +144,7 @@ Model Submissions itself moved into the Creator Portal on 2026-09-28 (`/creator-
 |---|---|---|---|
 | Enquiry reply | team | the enquirer | `creatorInquiryService.ts` |
 | Welcome + onboarding link | team | the approved applicant | `POST /api/creator-onboarding/invite` |
+| Training invitation (names the module; button → `/training`) | system | a **new** address added to a module that is **on** — not restores, not while the module is off | `POST /api/admin/training/modules/[moduleId]/participants` |
 | Training sign-in code | system | the candidate | `POST /api/training/request-code` |
 | New sign-in (with a **Report** button → `SECURITY_REPORT_URL`, `t.me/KaiJN` for now) | system | the user who signed in, at the address they signed in with | `POST /api/auth/exchange-code` (desktop app logins) |
 | User added | system | the **organization manager** | `POST /api/admin/users` |

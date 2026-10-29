@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { IconArrowLeft, IconChevronDown } from '@tabler/icons-react';
+import { IconArrowLeft, IconChevronDown, IconLoader2 } from '@tabler/icons-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,9 +32,10 @@ import { cn } from '@/lib/utils';
 import { api, ApiError, TRAINING_STOPPED, useServerClock } from '../_lib/api';
 import { fmtRemaining, minutesOf } from '../_lib/format';
 import { ScreenRecorder, grabCheckFrame, pickRecordingType } from '../_lib/screenCapture';
-import { AZURE, AZURE_INK, PANEL } from '../_lib/theme';
+import { AZURE, AZURE_EDGE_SOFT, AZURE_INK, DIALOG_PANEL, FOCUS, PANEL } from '../_lib/theme';
 import { fmtBytes } from '../_lib/upload';
 import { useScreenShare } from '../_lib/useScreenShare';
+import { useTabTitle } from '../_lib/useTabTitle';
 import { ExplainerView } from './Brief';
 import { EditRoom } from './EditRoom';
 import { ScreenCheck, type CheckState } from './ScreenCheck';
@@ -54,6 +55,16 @@ interface Ended {
   kind: 'time' | 'finished';
   filled: number;
   total: number;
+  /** The last thing typed (the task record, or T7's final answer) never reached the server. */
+  unsaved: boolean;
+}
+
+/** What the end of a test says it saved — said out loud and written on the page, from one place. */
+function endedSummary(e: Ended): string {
+  if (e.total > 0) {
+    return `${e.filled} of ${e.total} final images uploaded and saved.${e.unsaved ? ' Your last task-record changes did not reach us.' : ''}`;
+  }
+  return e.unsaved ? 'Your answers are saved, except the last one, which may not have reached us.' : 'Your answers are saved.';
 }
 
 /** How often the page asks whether a test has opened, while nothing is running. */
@@ -98,6 +109,9 @@ export function ModuleView({ moduleId }: { moduleId: TrainingModuleId }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [explainerOpen, setExplainerOpen] = useState<boolean | null>(null);
   const [announce, setAnnounce] = useState('');
+  // The last recording segment is still uploading after the room has gone; the share is held until it lands.
+  const [flushing, setFlushing] = useState(false);
+  const endRef = useRef<HTMLElement>(null);
   const [confirmStart, setConfirmStart] = useState(false);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState('');
@@ -120,6 +134,9 @@ export function ModuleView({ moduleId }: { moduleId: TrainingModuleId }) {
       const open = res.module.openTestId;
       if (open && open !== lastOpen.current && lastOpen.current !== null) {
         setAnnounce(`${getTest(moduleId, open)?.title ?? open} is now open.`);
+        // A test just opened: the explainer steps aside for the briefing, even if it was opened by hand.
+        // (It can still be reopened; this only fires on the moment of opening.)
+        setExplainerOpen(false);
       }
       lastOpen.current = open ?? '';
     },
@@ -175,6 +192,16 @@ export function ModuleView({ moduleId }: { moduleId: TrainingModuleId }) {
   const briefDef = briefId ? getTest(moduleId, briefId) : null;
   const briefing = briefTest?.state === 'open' && briefDef ? briefDef : null;
   const explainerShown = explainerOpen ?? !openTest;
+  // What happens next, once nothing is running — said once, under the result when there is one.
+  const nextLine = briefing
+    ? `${briefing.id} is open. Its briefing is below.`
+    : !openTest && !tests.some((t) => t.state === 'in-progress')
+      ? tests.some((t) => t.state === 'open' || t.state === 'locked')
+        ? 'No test is open yet. Keep this page open and the next one will appear here when the team opens it.'
+        : 'That is everything for now. The team will be in touch.'
+      : null;
+  // The one place this page can still reach a candidate who is working in another window.
+  useTabTitle(openTest && !task ? `${openTest.id} is open · Bluu Rock Training` : null);
 
   /** Grabs a still from the share and proves it reaches Storage — the check Start requires. */
   const runCheck = useCallback(
@@ -239,7 +266,11 @@ export function ModuleView({ moduleId }: { moduleId: TrainingModuleId }) {
     const rec = recorder.current;
     const recorded = share.stream;
     recorder.current = null;
-    void (rec ? rec.stop(UPLOAD_GRACE_MS - 5_000) : Promise.resolve()).then(() => share.release(recorded));
+    if (rec) setFlushing(true);
+    void (rec ? rec.stop(UPLOAD_GRACE_MS - 5_000) : Promise.resolve()).then(() => {
+      share.release(recorded);
+      setFlushing(false);
+    });
     setRecordingFailing(false);
     setTask(null);
   }, [share]);
@@ -255,8 +286,31 @@ export function ModuleView({ moduleId }: { moduleId: TrainingModuleId }) {
     return () => window.removeEventListener(TRAINING_STOPPED, onStopped);
   }, []);
 
+  // The room replaces the briefing in the same document, so the briefing's scroll position would carry
+  // over and the room would open halfway down. Entering or leaving a room always starts at the top.
+  const roomId = task?.test.id ?? null;
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [roomId]);
+
   const own = share.stream && check.stream === share.stream ? check : NO_CHECK;
   const screenReady = own.state === 'passed' && own.confirmed;
+
+  // What is stopping Start, in order — a disabled button that does not say why is a dead end.
+  const startHint = !share.stream
+    ? 'Start unlocks after you share your whole screen.'
+    : own.state === 'failed'
+      ? 'Start unlocks once the screen check passes. Try the check again above.'
+      : own.state !== 'passed'
+        ? 'Start unlocks once the screen check finishes.'
+        : !own.confirmed
+          ? 'One more step: tick the box above to confirm the preview shows your whole screen.'
+          : '';
+
+  // The room unmounts with the focused element in it: put focus on the result, so a keyboard or screen-reader user lands on it.
+  useEffect(() => {
+    if (ended) endRef.current?.focus({ preventScroll: true });
+  }, [ended]);
 
   async function start() {
     if (!briefing || starting) return;
@@ -288,11 +342,18 @@ export function ModuleView({ moduleId }: { moduleId: TrainingModuleId }) {
   }
 
   const handleEnded = useCallback(
-    (kind: 'time' | 'finished', filled: number) => {
+    (kind: 'time' | 'finished', filled: number, unsaved = false) => {
       const t = task && getTest(moduleId, task.test.id);
       // Out of time: tell the server so the task record is written to Drive now, not at the daily sweep.
       if (t && kind === 'time') void api(`${testBase(moduleId, t.id)}/finish`, { method: 'POST' }).catch(() => {});
-      if (t) setEnded({ title: t.title, kind, filled, total: t.slots.length });
+      if (t) {
+        const next: Ended = { title: t.title, kind, filled, total: t.slots.length, unsaved };
+        setEnded(next);
+        // The room unmounts with its own live regions; this one outlives it, so the result is actually announced.
+        setAnnounce(`${kind === 'time' ? "Time's up. " : ''}${t.title}: ${endedSummary(next)}`);
+      }
+      // The explainer has done its job; the result and what comes next must not sit under a wall of rules.
+      setExplainerOpen(false);
       endRoom();
       setSelected(null);
       reload();
@@ -300,36 +361,46 @@ export function ModuleView({ moduleId }: { moduleId: TrainingModuleId }) {
     [task, moduleId, reload, endRoom],
   );
 
+  // One polite live region for the whole page, kept above every branch so it survives the room coming and going.
+  const live = (
+    <div className="sr-only" role="status" aria-live="polite">
+      {announce}
+    </div>
+  );
+
   // ─── The focus room ────────────────────────────────────────────────────────
   if (task?.attempt) {
     const t = getTest(moduleId, task.test.id);
     if (t) {
       return (
-        <Shell width="wide" bare className="max-w-none px-0 sm:px-0">
-          {t.kind === 'sequence' ? (
-            <SequenceRoom initial={task} moduleId={moduleId} test={t} now={now} onEnded={handleEnded} share={share} recordingFailing={recordingFailing} />
-          ) : (
-            <EditRoom
-              initial={task}
-              moduleId={moduleId}
-              test={t}
-              explainer={def.explainer}
-              now={now}
-              onEnded={handleEnded}
-              share={share}
-              recordingFailing={recordingFailing}
-            />
-          )}
-        </Shell>
+        <>
+          {live}
+          <Shell width="wide" bare className="max-w-none px-0 sm:px-0">
+            {t.kind === 'sequence' ? (
+              <SequenceRoom initial={task} moduleId={moduleId} test={t} now={now} onEnded={handleEnded} share={share} recordingFailing={recordingFailing} />
+            ) : (
+              <EditRoom
+                initial={task}
+                moduleId={moduleId}
+                test={t}
+                explainer={def.explainer}
+                now={now}
+                onEnded={handleEnded}
+                share={share}
+                recordingFailing={recordingFailing}
+              />
+            )}
+          </Shell>
+        </>
       );
     }
   }
 
   const back = (
     <Link
-      href="/training/home"
+      href="/training/home?list=1"
       prefetch={false}
-      className="-ml-2 inline-flex h-11 items-center gap-1.5 rounded-lg px-2 text-sm text-white/75 outline-none hover:text-white focus-visible:ring-2 focus-visible:ring-[#00b8f5]/60"
+      className={cn('-ml-2 inline-flex h-11 items-center gap-1.5 rounded-lg px-2 text-sm text-white/75 hover:text-white', FOCUS)}
     >
       <IconArrowLeft className="size-4" aria-hidden />
       Your training
@@ -338,157 +409,179 @@ export function ModuleView({ moduleId }: { moduleId: TrainingModuleId }) {
 
   if (missing) {
     return (
-      <Shell>
-        <div className="pt-12">
-          {back}
-          <h1 className="mt-4 text-[2rem] leading-tight font-semibold sm:text-[2.5rem]">
-            {stopped ? 'Training has been ended by the team' : 'Training isn’t running right now'}
-          </h1>
-          <p role={stopped ? 'status' : undefined} className="mt-3 text-base text-white/75">
-            {stopped
-              ? 'Your uploaded work is kept. The team will be in touch.'
-              : `${def.title} is switched off, or you are not on it. If you expected it to be open, check you signed in with the email address you were approved with — the team will let you know when it starts.`}
-          </p>
-        </div>
-      </Shell>
+      <>
+        {live}
+        <Shell>
+          <div className="pt-12">
+            {back}
+            <h1 className="mt-4 text-[2rem] leading-tight font-semibold sm:text-[2.5rem]">
+              {stopped ? 'Training has been ended by the team' : 'Training isn’t running right now'}
+            </h1>
+            <p role={stopped ? 'status' : undefined} className="mt-3 text-base text-white/75">
+              {stopped
+                ? 'Your uploaded work is kept. The team will be in touch.'
+                : `${def.title} is switched off, or you are not on it. If you expected it to be open, check you signed in with the email address you were approved with — the team will let you know when it starts.`}
+            </p>
+          </div>
+        </Shell>
+      </>
     );
   }
 
   return (
-    <Shell aside={data ? <SignedInAside email={data.name ?? undefined} /> : null}>
-      {error ? (
-        <div role="alert" className="pt-16">
-          <p className="text-base text-red-300">{error}</p>
-          <Button variant="outline" className="mt-4 h-11" onClick={reload}>
-            Try again
-          </Button>
-        </div>
-      ) : !data ? (
-        <div className="pt-16" aria-busy="true">
-          <span className="sr-only" role="status">
-            Loading…
-          </span>
-        </div>
-      ) : (
-        <div className="pt-8 pb-24 sm:pt-10">
-          {back}
-          <h1 className="mt-3 text-[2rem] leading-tight font-semibold text-balance sm:text-[2.5rem]">{def.title}</h1>
-          <div className="sr-only" role="status" aria-live="polite">
-            {announce}
+    <>
+      {live}
+      <Shell aside={data ? <SignedInAside email={data.name ?? undefined} /> : null}>
+        {error ? (
+          <div role="alert" className="pt-16">
+            <p className="text-base text-red-300">{error}</p>
+            <Button variant="outline" className="mt-4 h-11" onClick={reload}>
+              Try again
+            </Button>
           </div>
+        ) : !data ? (
+          <div className="pt-16" aria-busy="true">
+            <span className="sr-only" role="status">
+              Loading…
+            </span>
+          </div>
+        ) : (
+          <div className="pt-8 pb-24 sm:pt-10">
+            {back}
+            <h1 className="mt-3 text-[2rem] leading-tight font-semibold text-balance sm:text-[2.5rem]">{def.title}</h1>
 
-          {ended && (
-            <p role="status" className={`${PANEL} mt-6 rounded-xl px-4 py-3 text-base text-white`}>
-              {ended.kind === 'time' ? "Time's up. " : ''}
-              {ended.title}:{' '}
-              {ended.total > 0 ? `${ended.filled} of ${ended.total} final images uploaded and saved.` : 'your answers are saved.'}
-            </p>
-          )}
-
-          <section aria-labelledby="explainer-heading" className={`${PANEL} mt-6 rounded-2xl`}>
-            <h2 id="explainer-heading" className="text-base font-semibold">
-              <button
-                type="button"
-                aria-expanded={explainerShown}
-                onClick={() => setExplainerOpen(!explainerShown)}
-                className="flex min-h-14 w-full items-center justify-between gap-3 rounded-2xl px-5 text-left outline-none focus-visible:ring-2 focus-visible:ring-[#00b8f5]/70"
+            {ended && (
+              <section
+                ref={endRef}
+                tabIndex={-1}
+                aria-labelledby="ended-heading"
+                className={`${PANEL} mt-6 rounded-2xl p-5 outline-none sm:p-6`}
               >
-                About these tests
-                <IconChevronDown className={cn('size-5 text-white/70 transition-transform', explainerShown && 'rotate-180')} aria-hidden />
-              </button>
-            </h2>
-            {explainerShown && (
-              <div className="px-5 pb-6">
-                <ExplainerView sections={def.explainer} />
-              </div>
+                <h2 id="ended-heading" className="text-xl font-semibold">
+                  {ended.kind === 'time' ? `Time's up on ${ended.title}` : `You finished ${ended.title}`}
+                </h2>
+                <p className="mt-2 text-base text-white/85">{endedSummary(ended)}</p>
+                {flushing && (
+                  <p className="mt-2 flex items-center gap-2 text-sm text-white/75">
+                    <IconLoader2 className="activity-spinner size-4 shrink-0 animate-spin" aria-hidden />
+                    Your screen recording is still uploading. Keep this tab open for a few seconds.
+                  </p>
+                )}
+                {nextLine && <p className="mt-2 text-base text-white/85">{nextLine}</p>}
+              </section>
             )}
-          </section>
 
-          <ol className="mt-8 flex flex-col gap-2" aria-label="Tests">
-            {tests.map((t) => (
-              <TestRow
-                key={t.id}
-                test={t}
-                selected={briefId === t.id}
-                now={now}
-                onBrief={() => {
-                  setSelected(t.id);
-                  setStartError('');
-                }}
-                onReturn={() =>
-                  api<TestResponse>(testBase(moduleId, t.id))
-                    .then((r) => {
-                      sync(r.nowMs);
-                      setTask(r);
-                    })
-                    .catch(() => reload())
+            <section aria-labelledby="explainer-heading" className={`${PANEL} mt-6 rounded-2xl`}>
+              <h2 id="explainer-heading" className="text-base font-semibold">
+                <button
+                  type="button"
+                  aria-expanded={explainerShown}
+                  onClick={() => setExplainerOpen(!explainerShown)}
+                  className={cn('flex min-h-14 w-full items-center justify-between gap-3 rounded-2xl px-5 text-left', FOCUS)}
+                >
+                  <span>
+                    Explainer <span className="ml-1 font-normal text-white/70">· the rules for every test</span>
+                  </span>
+                  <IconChevronDown className={cn('size-5 text-white/70 transition-transform', explainerShown && 'rotate-180')} aria-hidden />
+                </button>
+              </h2>
+              {explainerShown && (
+                <div className="px-5 pb-6">
+                  <ExplainerView sections={def.explainer} />
+                </div>
+              )}
+            </section>
+
+            <ol className="mt-8 flex flex-col gap-2" aria-label="Tests">
+              {tests.map((t) => (
+                <TestRow
+                  key={t.id}
+                  test={t}
+                  selected={briefId === t.id}
+                  now={now}
+                  onBrief={() => {
+                    setSelected(t.id);
+                    setStartError('');
+                    // The briefing is on the same page, further down: take them to it.
+                    window.requestAnimationFrame(() => {
+                      const heading = document.getElementById('briefing-heading');
+                      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                      heading?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+                      heading?.focus({ preventScroll: true });
+                    });
+                  }}
+                  onReturn={() =>
+                    api<TestResponse>(testBase(moduleId, t.id))
+                      .then((r) => {
+                        sync(r.nowMs);
+                        setTask(r);
+                      })
+                      .catch(() => reload())
+                  }
+                />
+              ))}
+            </ol>
+
+            {briefing ? (
+              <Briefing
+                test={briefing}
+                error={startError}
+                onStart={() => setConfirmStart(true)}
+                screen={
+                  <>
+                    <ScreenCheck
+                      share={share}
+                      // A new share is checked straight away.
+                      onShare={async () => {
+                        const stream = await share.request();
+                        if (stream) void runCheck(stream, briefing.id);
+                      }}
+                      check={own}
+                      onRetryCheck={() => share.stream && void runCheck(share.stream, briefing.id)}
+                      confirmed={own.confirmed}
+                      onConfirmed={(confirmed) => setCheck((c) => (c === own ? { ...c, confirmed } : c))}
+                    />
+                  </>
                 }
+                canStart={screenReady}
+                startHint={startHint}
+                supported={share.supported}
               />
-            ))}
-          </ol>
+            ) : nextLine && !ended ? (
+              <p className={`${PANEL} mt-10 rounded-xl px-5 py-4 text-base text-white/85`}>{nextLine}</p>
+            ) : null}
+          </div>
+        )}
 
-          {briefing ? (
-            <Briefing
-              test={briefing}
-              error={startError}
-              onStart={() => setConfirmStart(true)}
-              screen={
-                <>
-                  <ScreenCheck
-                    share={share}
-                    // A new share is checked straight away.
-                    onShare={async () => {
-                      const stream = await share.request();
-                      if (stream) void runCheck(stream, briefing.id);
-                    }}
-                    check={own}
-                    onRetryCheck={() => share.stream && void runCheck(share.stream, briefing.id)}
-                    confirmed={own.confirmed}
-                    onConfirmed={(confirmed) => setCheck((c) => (c === own ? { ...c, confirmed } : c))}
-                  />
-                </>
-              }
-              canStart={screenReady}
-              supported={share.supported}
-            />
-          ) : !openTest && !tests.some((t) => t.state === 'in-progress') ? (
-            <p className={`${PANEL} mt-10 rounded-xl px-5 py-4 text-base text-white/85`}>
-              {tests.some((t) => t.state === 'open' || t.state === 'locked')
-                ? 'No test is open yet. Keep this page open and the next one will appear here when the team opens it.'
-                : 'That is everything for now. The team will be in touch.'}
-            </p>
-          ) : null}
-        </div>
-      )}
-
-      <AlertDialog open={confirmStart} onOpenChange={(open) => !starting && setConfirmStart(open)}>
-        <AlertDialogContent className="rounded-2xl border-white/10 bg-[#0d1014] text-white">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Start {briefing ? `${briefing.id} · ${briefing.title}` : ''}?</AlertDialogTitle>
-            <AlertDialogDescription className="text-white/75">
-              Your {briefing ? minutesOf(briefing.durationMs) : ''} minutes begin the moment you confirm. You cannot pause or
-              restart. Your entire screen is recorded until the test ends.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="h-11 border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white">
-              Not yet
-            </AlertDialogCancel>
-            <AlertDialogAction
-              disabled={starting}
-              onClick={(e) => {
-                e.preventDefault();
-                void start();
-              }}
-              className="h-11 font-semibold"
-              style={{ backgroundColor: AZURE, color: AZURE_INK }}
-            >
-              {starting ? 'Starting…' : 'Start now'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </Shell>
+        <AlertDialog open={confirmStart} onOpenChange={(open) => !starting && setConfirmStart(open)}>
+          <AlertDialogContent className={cn('rounded-2xl', DIALOG_PANEL)}>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Start {briefing ? `${briefing.id} · ${briefing.title}` : ''}?</AlertDialogTitle>
+              <AlertDialogDescription className="text-white/75">
+                Your {briefing ? minutesOf(briefing.durationMs) : ''} minutes begin the moment you confirm. You cannot pause or
+                restart. Your entire screen is recorded until the test ends.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="h-11 border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white">
+                Not yet
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={starting}
+                onClick={(e) => {
+                  e.preventDefault();
+                  void start();
+                }}
+                className="h-11 font-semibold"
+                style={{ backgroundColor: AZURE, color: AZURE_INK }}
+              >
+                {starting ? 'Starting…' : 'Start now'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </Shell>
+    </>
   );
 }
 
@@ -507,7 +600,7 @@ function TestRow({
   onReturn: () => void;
 }) {
   return (
-    <li className={cn(`${PANEL} flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl px-4 py-3`, selected && 'border-[#00b8f5]/50')}>
+    <li className={cn(`${PANEL} flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl px-4 py-3`, selected && AZURE_EDGE_SOFT)}>
       <span className="w-8 shrink-0 text-sm font-medium tabular-nums text-white/70">{test.id}</span>
       <div className="min-w-0 flex-1 basis-48">
         <p className="text-base font-medium">{test.title}</p>
@@ -546,6 +639,7 @@ function Briefing({
   error,
   screen,
   canStart,
+  startHint,
   supported,
   onStart,
 }: {
@@ -553,6 +647,8 @@ function Briefing({
   error: string;
   screen: React.ReactNode;
   canStart: boolean;
+  /** Why Start is not yet available, or empty. */
+  startHint: string;
   supported: boolean;
   onStart: () => void;
 }) {
@@ -560,7 +656,7 @@ function Briefing({
   const finals = test.slots.length;
   return (
     <section aria-labelledby="briefing-heading" className="mt-12">
-      <h2 id="briefing-heading" className="text-xl font-semibold">
+      <h2 id="briefing-heading" tabIndex={-1} className="scroll-mt-6 text-xl font-semibold outline-none">
         {test.id} · {test.title}
       </h2>
       <dl className="mt-4 grid max-w-prose grid-cols-2 gap-x-6 gap-y-3 text-base">
@@ -580,7 +676,9 @@ function Briefing({
         </p>
       )}
       {lead && <p className="mt-4 max-w-prose text-base leading-relaxed text-white/80">{lead}</p>}
-      <p className="mt-2 text-sm text-white/70">The full brief and the images appear when you start.</p>
+      <p className="mt-2 text-sm text-white/70">
+        The full brief and the images appear when you start, so reading the brief is part of your time.
+      </p>
 
       <h3 className="mt-8 text-base font-semibold">Before you start</h3>
       <ul className="mt-2 flex max-w-prose list-disc flex-col gap-1.5 pl-5 text-base leading-relaxed text-white/80">
@@ -620,17 +718,25 @@ function Briefing({
           {screen}
           {/* A phone or tablet cannot share its screen, so it can read the briefing but never start. */}
           {supported && (
+            // `aria-disabled`, not `disabled`: it stays focusable, so a keyboard or screen-reader user reaches it and hears why.
             <Button
               size="lg"
-              disabled={!canStart}
-              onClick={onStart}
-              className="h-12 px-8 text-base font-semibold"
+              aria-disabled={!canStart}
+              aria-describedby={canStart ? undefined : 'start-hint'}
+              onClick={() => canStart && onStart()}
+              className="h-12 px-8 text-base font-semibold aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
               style={{ backgroundColor: AZURE, color: AZURE_INK }}
             >
               Start
             </Button>
           )}
-          {!canStart && supported && <p className="-mt-3 text-sm text-white/70">Start unlocks once the screen check has passed.</p>}
+          {supported && (
+            // Always mounted, so a change is announced; out of the layout (and the flex gap) when there is nothing to say.
+            <p id="start-hint" role="status" className={cn('-mt-3 text-sm text-white/70', canStart && 'sr-only')}>
+              {canStart ? '' : startHint}
+            </p>
+          )}
+          <p className="text-sm text-white/70">Stuck before you start? Contact whoever invited you.</p>
         </div>
       </div>
     </section>

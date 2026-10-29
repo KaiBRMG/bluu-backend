@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
 import type { Preparing } from '@/hooks/useTrainingAdmin';
+import { SURFACE } from '@/lib/surfaces';
 import type { AdminModuleDetail, AdminTestRow, MaterialCheck } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
 import { formatWhen } from './zonedTime';
@@ -67,7 +68,7 @@ export default function TestsStrip({ detail, preparing, timezone, onOpen, onClos
       <h2 id="tests-heading" className="mb-3 text-lg font-semibold">
         Tests
       </h2>
-      <ol className="overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.025]">
+      <ol className={cn('overflow-hidden rounded-xl', SURFACE)}>
         {detail.tests.map((t) => {
           const st = statusOf(t, timezone);
           const prep = preparing?.testId === t.id ? preparing : null;

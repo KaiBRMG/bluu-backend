@@ -123,6 +123,34 @@ export function trainingCodeEmail(code: string): RenderedEmail {
   });
 }
 
+/** Where a candidate signs in — the public training front door. */
+export const TRAINING_URL = `${PUBLIC_APP_ORIGIN}/training`;
+
+/**
+ * Sent when an admin adds a NEW address to a training module that is on
+ * (`POST /api/admin/training/modules/[moduleId]/participants`). Names the module;
+ * the button goes to the sign-in page, which emails its own code.
+ */
+export function trainingInviteEmail(moduleTitle: string): RenderedEmail {
+  return renderEmail({
+    sender: 'system',
+    subject: `You’ve been invited to ${moduleTitle} training`,
+    preheader: `You’ve been invited to the ${moduleTitle} module on Bluu Rock Training.`,
+    reason: 'You’re receiving this because this address was added to a Bluu Rock training module.',
+    blocks: [
+      { kind: 'heading', text: 'You’re invited to training' },
+      { kind: 'p', text: `You’ve been invited to the **${moduleTitle}** training module.` },
+      {
+        kind: 'p',
+        text: 'Open the training page and sign in with this email address. We’ll send a code to it to confirm it’s you.',
+      },
+      { kind: 'button', href: TRAINING_URL, label: 'Open Bluu Rock Training' },
+      { kind: 'signoff', lines: ['The Bluu Rock Team'] },
+      { kind: 'fallbackLink', href: TRAINING_URL },
+    ],
+  });
+}
+
 // ─── Shared helpers for the account emails below ─────────────────────────────
 
 /** "Wed 28 Oct 2026, 14:05 (Africa/Harare)" — the zone named, so nobody guesses. */

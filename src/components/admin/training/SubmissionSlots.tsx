@@ -120,7 +120,7 @@ export default function SubmissionSlots({ test, submission, timezone }: Submissi
                   {a.text === null ? (
                     <p className="mt-1 text-sm text-zinc-400">No answer</p>
                   ) : (
-                    <p className="mt-1 text-sm whitespace-pre-wrap">{a.text}</p>
+                    <p className="mt-1 text-sm break-words whitespace-pre-wrap">{a.text}</p>
                   )}
                 </div>
               </li>
@@ -152,7 +152,7 @@ export default function SubmissionSlots({ test, submission, timezone }: Submissi
           <section aria-label="Task record">
             <h3 className="mb-2 text-sm font-medium">Task record</h3>
             {submission.text ? (
-              <p className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-3 text-sm whitespace-pre-wrap">{submission.text}</p>
+              <p className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-3 text-sm break-words whitespace-pre-wrap">{submission.text}</p>
             ) : (
               <p className="text-sm text-zinc-400">Nothing written.</p>
             )}

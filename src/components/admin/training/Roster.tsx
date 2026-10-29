@@ -3,6 +3,7 @@
 import { RotateCcw, UserMinus, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { SURFACE } from '@/lib/surfaces';
 import type { AdminAttemptCell, AdminModuleDetail, AdminParticipant } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
 import { AdminStateBadge } from './AdminStateBadge';
@@ -45,7 +46,7 @@ interface RosterProps {
 export default function Roster({ detail, skewMs, onView, onReopen, onRemove, onRestore }: RosterProps) {
   const openId = detail.module.openTestId;
   return (
-    <div className="overflow-x-auto rounded-xl border border-white/[0.07] bg-white/[0.025]">
+    <div className={cn('overflow-x-auto rounded-xl', SURFACE)}>
       <Table>
         <TableHeader>
           <TableRow className="border-white/[0.07] hover:bg-transparent">
@@ -53,7 +54,7 @@ export default function Roster({ detail, skewMs, onView, onReopen, onRemove, onR
             {detail.tests.map((t) => (
               <TableHead key={t.id} className={cn('min-w-32', t.id === openId && 'bg-blue-400/[0.06] text-blue-200')}>
                 {t.id}
-                {t.id === openId && <span className="ml-1 text-[10px] font-normal">open</span>}
+                {t.id === openId && <span className="ml-1 text-[11px] font-normal">open</span>}
               </TableHead>
             ))}
             <TableHead className="w-24 text-right">
@@ -66,14 +67,14 @@ export default function Roster({ detail, skewMs, onView, onReopen, onRemove, onR
             const removed = person.revokedAtMs != null;
             const display = person.name ?? person.email;
             return (
-              <TableRow key={person.emailHash} className={cn('border-white/[0.07] hover:bg-white/[0.04]', removed && 'opacity-60')}>
+              <TableRow key={person.emailHash} className="border-white/[0.07] hover:bg-white/[0.04]">
                 <TableCell>
                   <button
                     type="button"
                     onClick={() => onView(person)}
                     className="rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60"
                   >
-                    <span className="block font-medium text-white hover:underline">{display}</span>
+                    <span className={cn('block font-medium hover:underline', removed ? 'text-zinc-400' : 'text-white')}>{display}</span>
                     <span className="block text-[11px] text-zinc-400">
                       {person.name ? `${person.email} · ` : ''}
                       {removed ? 'Access removed' : person.name ? 'Signed in' : 'Not signed in yet'}

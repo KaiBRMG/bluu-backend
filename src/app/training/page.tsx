@@ -30,6 +30,7 @@ export default function TrainingGatePage() {
   const [cooldown, setCooldown] = useState(0);
   // Set on mount, never during render: a time read at render is frozen into the prerender.
   const mountedAt = useRef(0);
+  const emailRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     mountedAt.current = Date.now();
@@ -82,7 +83,24 @@ export default function TrainingGatePage() {
     }
   }
 
-  if (checking) return <Shell width="narrow">{null}</Shell>;
+  // Focus the field only where there is a hardware keyboard: on a phone, autofocus raises the on-screen
+  // keyboard at once and it covers the paragraph above, which is the part that says what this is.
+  const showingEmail = !checking && step === 'email';
+  useEffect(() => {
+    if (showingEmail && window.matchMedia('(pointer: fine)').matches) emailRef.current?.focus();
+  }, [showingEmail]);
+
+  if (checking) {
+    return (
+      <Shell width="narrow">
+        <div aria-busy="true">
+          <span className="sr-only" role="status">
+            Loading…
+          </span>
+        </div>
+      </Shell>
+    );
+  }
 
   return (
     <Shell width="narrow">
@@ -94,8 +112,9 @@ export default function TrainingGatePage() {
                 Bluu Rock Training
               </h1>
               <p className="mt-3 text-base leading-relaxed text-white/75">
-                Training is by invitation. Only people an admin has approved can continue, and approval is what grants
-                access. Enter the email address you were approved with and we will send you a code.
+                Training is by invitation. Enter the email address you were approved with and we will send you a 6-digit
+                code. The tests are timed, and your screen is recorded while you sit one, so you will need a laptop or
+                desktop computer.
               </p>
             </div>
 
@@ -111,7 +130,7 @@ export default function TrainingGatePage() {
                 autoCapitalize="none"
                 spellCheck={false}
                 required
-                autoFocus
+                ref={emailRef}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 aria-invalid={!!error}
@@ -153,6 +172,9 @@ export default function TrainingGatePage() {
               <p className="mt-3 text-base leading-relaxed text-white/75">
                 If <span className="break-all text-white">{email.trim()}</span> has been approved, we have sent it a
                 6-digit code. It can take a minute to arrive.
+              </p>
+              <p className="mt-2 text-sm leading-relaxed text-white/70">
+                Nothing after a few minutes? Check your spam folder, or ask whoever invited you.
               </p>
             </div>
 

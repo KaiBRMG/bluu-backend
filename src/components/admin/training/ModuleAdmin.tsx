@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { ArrowLeft, Check, Copy, Loader2 } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Loader2, TriangleAlert } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,14 +14,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { useTrainingModule } from '@/hooks/useTrainingAdmin';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { PUBLIC_APP_ORIGIN } from '@/lib/publicOrigin';
+import { SURFACE } from '@/lib/surfaces';
 import { getTest, TRAINING_MODULES, type TrainingModuleId } from '@/lib/training/modules';
 import type { AdminParticipant } from '@/lib/training/types';
+import { cn } from '@/lib/utils';
 import AddPeopleDialog from './AddPeopleDialog';
 import CandidateSheet from './CandidateSheet';
 import Roster from './Roster';
@@ -64,7 +67,7 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
       <div className="max-w-6xl">
         {header}
         <h1 className="mb-6 text-2xl font-bold tracking-tight">{mod.title}</h1>
-        <div role="alert" className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-6">
+        <div role="alert" className={cn('rounded-xl p-6', SURFACE)}>
           <p className="text-sm font-medium text-red-400">Couldn&apos;t load this module</p>
           <p className="mt-1 text-sm text-zinc-400">{error}</p>
           <Button variant="outline" size="sm" className="mt-4" onClick={refetch}>
@@ -139,13 +142,24 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
               <Switch
                 checked={isOn}
                 disabled={switching}
-                aria-label={`${mod.title} is ${isOn ? 'on' : 'off'}`}
-                className="scale-125"
+                aria-label={`${mod.title} module`}
                 onCheckedChange={(next) => (next ? void toggle(true) : setConfirmOff(true))}
               />
             </label>
           </div>
         </div>
+
+        {error && (
+          <div role="alert" className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-orange-400/30 bg-orange-400/10 px-4 py-3 text-sm text-orange-200">
+            <span className="flex items-center gap-2">
+              <TriangleAlert className="size-4 shrink-0" aria-hidden />
+              Couldn’t refresh, so this is the last read. {error}
+            </span>
+            <Button variant="outline" size="sm" onClick={refetch}>
+              Try again
+            </Button>
+          </div>
+        )}
 
         <TestsStrip detail={detail} preparing={preparing} timezone={timezone} onOpen={openTest} onClose={closeTest} onCheck={check} />
 
@@ -156,8 +170,18 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
             </h2>
             <AddPeopleDialog onAdd={addPeople} />
           </div>
+          {!isOn && (
+            <Alert className="mb-3 border-orange-400/30 bg-orange-400/10 text-orange-200">
+              <TriangleAlert className="size-4" aria-hidden />
+              <AlertTitle>Candidates can’t sign in yet</AlertTitle>
+              <AlertDescription className="text-orange-200">
+                People added here get no invitation email and can’t sign in until this module is live. Switch {mod.title} on when you are ready for them
+                to start.
+              </AlertDescription>
+            </Alert>
+          )}
           {detail.participants.length === 0 ? (
-            <div className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-8 text-center">
+            <div className={cn('rounded-xl p-8 text-center', SURFACE)}>
               <p className="text-sm font-medium">No one is on this module yet</p>
               <p className="mt-1 text-sm text-zinc-400">Add the email addresses of the people you have approved.</p>
             </div>
@@ -269,6 +293,7 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
             <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               disabled={busy}
+              className="bg-destructive text-white hover:bg-destructive/90"
               onClick={async (e) => {
                 e.preventDefault();
                 if (!removing) return;
@@ -284,6 +309,7 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
                 }
               }}
             >
+              {busy && <Loader2 className="activity-spinner size-4 animate-spin" />}
               Remove access
             </AlertDialogAction>
           </AlertDialogFooter>

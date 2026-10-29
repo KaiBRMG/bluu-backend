@@ -5,6 +5,8 @@ import { IconCheck, IconLoader2, IconUpload } from '@tabler/icons-react';
 import { Button } from '@/components/ui/button';
 import { OUTPUT_ACCEPT } from '@/lib/training/modules';
 import { cn } from '@/lib/utils';
+import { DROPZONE_ATTR } from '../_lib/useRoomGuards';
+import { AZURE_CHIP, AZURE_EDGE } from '../_lib/theme';
 import { fmtBytes } from '../_lib/upload';
 
 export interface SlotState {
@@ -46,7 +48,7 @@ export function SlotUploader({ stem, state, disabled, waitingFor, onFile, compac
         <span
           className={cn(
             'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium',
-            state.uploaded ? 'border-[#00b8f5]/50 bg-[#00b8f5]/10 text-[#7dd8fa]' : 'border-white/[0.12] text-white/70',
+            state.uploaded ? AZURE_CHIP : 'border-white/[0.12] text-white/70',
           )}
         >
           {state.uploaded && <IconCheck className="size-3" aria-hidden />}
@@ -66,6 +68,7 @@ export function SlotUploader({ stem, state, disabled, waitingFor, onFile, compac
         }}
       />
       <div
+        {...{ [DROPZONE_ATTR]: off ? 'off' : 'on' }}
         onDragOver={(e) => {
           if (off) return;
           e.preventDefault();
@@ -81,7 +84,7 @@ export function SlotUploader({ stem, state, disabled, waitingFor, onFile, compac
         className={cn(
           'flex items-center gap-3 rounded-xl border border-dashed p-3 transition-colors',
           compact ? 'min-h-16' : 'min-h-24',
-          over ? 'border-[#00b8f5] bg-[#00b8f5]/10' : 'border-white/20',
+          over ? AZURE_EDGE : 'border-white/20',
         )}
       >
         {state.previewUrl && (

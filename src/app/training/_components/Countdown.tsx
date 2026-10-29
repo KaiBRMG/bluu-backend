@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { milestonesFor } from '@/lib/training/modules';
 import { fmtRemaining } from '../_lib/format';
 import { CLOCK_PHASE, phaseFor } from '../_lib/theme';
+import { useTabTitle } from '../_lib/useTabTitle';
 
 function spoken(ms: number): string {
   const minutes = Math.round(ms / 60_000);
@@ -20,6 +21,15 @@ interface CountdownProps {
   onExpire: () => void;
   /** Progress and the early-finish control, laid out beside / under the numerals. */
   children?: React.ReactNode;
+  /**
+   * Things that must not be missed while the candidate is anywhere on the page (the recording
+   * is failing, Finish did not go through). They pin with the clock, on their own line.
+   */
+  alerts?: React.ReactNode;
+  /** The test's name, for the tab title: "12:04 · T2 ID + Body". */
+  title: string;
+  /** The screen is not shared: the tab says so, because that is what they must do next. */
+  screenLocked?: boolean;
   className?: string;
 }
 
@@ -37,7 +47,7 @@ interface CountdownProps {
  * Announcements go to ONE polite live region and only at milestones — a timer
  * that speaks every second makes the page unusable with a screen reader.
  */
-export function Countdown({ deadlineMs, durationMs, now, onExpire, children, className }: CountdownProps) {
+export function Countdown({ deadlineMs, durationMs, now, onExpire, children, alerts, title, screenLocked, className }: CountdownProps) {
   const [remaining, setRemaining] = useState(() => Math.max(0, deadlineMs - now()));
   const [pulseKey, setPulseKey] = useState(0);
   const [announcement, setAnnouncement] = useState('');
@@ -78,13 +88,23 @@ export function Countdown({ deadlineMs, durationMs, now, onExpire, children, cla
 
   const phase = phaseFor(remaining);
   const look = CLOCK_PHASE[phase];
+  useTabTitle(
+    screenLocked
+      ? `Share your screen · ${fmtRemaining(remaining)} left`
+      : phase === 'over'
+        ? `Time's up · ${title}`
+        : `${fmtRemaining(remaining)} · ${title}`,
+  );
+  const text = fmtRemaining(remaining);
+  // "1:29:59" is seven glyphs; at the full rail size it would meet the card's edge.
+  const long = text.length > 5;
   const motion = phase === 'last' ? 'training-flash' : phase === 'over' ? '' : pulseKey > 0 ? 'training-pulse' : '';
 
   return (
     <section
       aria-label="Time remaining"
       className={cn(
-        'sticky top-0 z-20 -mx-5 flex items-center justify-between gap-4 border-b bg-[#08090b] px-5 py-3 sm:-mx-8 sm:px-8',
+        'sticky top-0 z-20 -mx-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b bg-[#08090b] px-5 py-3 sm:-mx-8 sm:px-8',
         'lg:top-8 lg:mx-0 lg:flex-col lg:items-stretch lg:gap-5 lg:rounded-2xl lg:border lg:bg-white/[0.025] lg:p-6',
         look.box,
         className,
@@ -98,18 +118,20 @@ export function Countdown({ deadlineMs, durationMs, now, onExpire, children, cla
           key={phase === 'last' ? 'last' : pulseKey}
           className={cn(
             'font-bold tabular-nums leading-none',
-            'text-[2.5rem] sm:text-5xl lg:text-[5.75rem]',
+            'text-[2.5rem] sm:text-5xl',
+            long ? 'lg:text-[4.5rem]' : 'lg:text-[5.75rem]',
             look.digits,
             motion,
           )}
         >
-          {fmtRemaining(remaining)}
+          {text}
         </div>
       </div>
       <div className="sr-only" role="status" aria-live="polite">
         {announcement}
       </div>
       {children}
+      {alerts && <div className="flex w-full flex-col gap-2 text-sm">{alerts}</div>}
     </section>
   );
 }
