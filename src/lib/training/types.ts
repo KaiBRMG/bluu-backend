@@ -1,42 +1,46 @@
-import type { SlotId, TrainingModuleId } from './modules';
+import type { DatasetId, TestId, TrainingModuleId } from './modules';
 
 /**
  * Wire types for the training API — what the browser sees. The Firestore
- * documents are richer (hashes, storage paths); none of that crosses the wire.
+ * documents are richer (hashes, storage paths, Drive ids); none of that crosses
+ * the wire.
  */
 
-export type PartState =
-  /** Not open yet — the candidate sees a countdown to `opensAtMs`. */
-  | 'scheduled'
-  /** Open and not started. */
+/** The admin's switch on one test. `preparing` = files are being copied from Drive. */
+export type TestStatus = 'closed' | 'preparing' | 'open';
+
+/** Where one test stands for one candidate. Derived on read — no cron flips it. */
+export type TestState =
+  /** Not open (never opened, or being prepared). */
+  | 'locked'
+  /** Open, and this candidate has not started it. */
   | 'open'
   | 'in-progress'
   /** Finished early or with every slot in. */
   | 'submitted'
-  /** The clock ran out. Whatever was uploaded in time is kept. */
+  /** The clock ran out (or the module was switched off). Whatever was uploaded in time is kept. */
   | 'timed-out'
-  /** The session closed before it was started. */
-  | 'missed'
-  /** Open, but the admin has not attached the source images yet. */
-  | 'not-ready';
+  /** The test was closed before this candidate started it. */
+  | 'missed';
 
-export interface PartSummary {
-  id: string;
+/** Whether a stored file has reached the Drive mirror. */
+export type MirrorState = 'synced' | 'pending' | 'failed';
+
+export interface TestSummary {
+  id: TestId;
   title: string;
-  summary: string;
   durationMs: number;
-  opensAtMs: number;
-  state: PartState;
+  state: TestState;
   /** Set while `in-progress`. */
   deadlineMs?: number;
 }
 
-export interface SessionSummary {
-  id: string;
-  label: string;
-  moduleId: TrainingModuleId;
-  closesAtMs: number;
-  parts: PartSummary[];
+export interface ModuleSummary {
+  id: TrainingModuleId;
+  title: string;
+  blurb: string;
+  openTestId: TestId | null;
+  tests: TestSummary[];
 }
 
 export interface MeResponse {
@@ -44,38 +48,101 @@ export interface MeResponse {
   nowMs: number;
   email: string;
   name: string | null;
-  sessions: SessionSummary[];
+  /** Modules that are switched on and that this person is on. Empty = nothing is running. */
+  modules: ModuleSummary[];
+}
+
+/** One module for one candidate — what `/training/<module>` shows and polls. */
+export interface ModuleResponse {
+  nowMs: number;
+  name: string | null;
+  module: ModuleSummary;
 }
 
 export interface SourceView {
+  /** The Drive file id — opaque and stable. */
   id: string;
   name: string;
+  /** The edit slot this source belongs to (`edit` tests), matched by its code. */
+  slotId?: string;
+  /** The source group (`generate`: Candid SFW / Teasy / Explicit). */
+  group?: string;
   /** Small preview for the grid. */
   thumbUrl: string;
   /** Full-size original, signed as an attachment so it saves rather than opens. */
   downloadUrl: string;
+  width: number;
+  height: number;
 }
 
 export interface SlotView {
-  slotId: SlotId;
-  sourceId: string;
+  slotId: string;
   uploadedAtMs: number;
   bytes: number;
   /** Signed read URL for the candidate's own upload. */
   url: string;
 }
 
+export interface WorkingFileView {
+  id: string;
+  name: string;
+  bytes: number;
+  uploadedAtMs: number;
+}
+
 export interface AttemptView {
+  attemptId: string;
   startedAtMs: number;
   deadlineMs: number;
   finishedAtMs: number | null;
   /**
-   * The attempt is screen-recorded: edit uploads are refused while no recent
-   * segment has arrived, so the page must hold a live screen share. False only
-   * for attempts started before recording existed.
+   * The attempt is screen-recorded: final-image uploads are refused while no
+   * recent segment has arrived, so the page must hold a live screen share.
    */
   recording: boolean;
   slots: SlotView[];
+  workingFiles: WorkingFileView[];
+  /** The task record, as last autosaved. */
+  text: string;
+  textUpdatedAtMs: number | null;
+  /** T4: the identity chosen for each slot. */
+  datasetChoices: Record<string, DatasetId>;
+}
+
+export interface TestResponse {
+  nowMs: number;
+  module: { id: TrainingModuleId; title: string };
+  test: TestSummary;
+  /** Present only once the attempt is in progress. Never on the briefing. */
+  sources?: SourceView[];
+  attempt?: AttemptView;
+}
+
+/** One identity's images, for the dataset modal. Only while the attempt is in progress. */
+export interface DatasetView {
+  id: DatasetId;
+  label: string;
+  images: { id: string; name: string; thumbUrl: string; downloadUrl: string }[];
+}
+
+export interface DatasetsResponse {
+  nowMs: number;
+  datasets: DatasetView[];
+}
+
+/** T7: the one image that is current right now — and nothing before or after it. */
+export interface SequenceResponse {
+  nowMs: number;
+  count: number;
+  windowMs: number;
+  /** Null once every window has passed. */
+  index: number | null;
+  windowStartsAtMs: number | null;
+  windowEndsAtMs: number | null;
+  /** Signed until this window ends (plus a few seconds). */
+  imageUrl: string | null;
+  /** The draft already saved for the current image. */
+  answer: string;
 }
 
 /** Signed PUT URLs for the next segments of the recording, in order. */
@@ -83,40 +150,39 @@ export interface RecordingSlots {
   slots: { seq: number; url: string }[];
 }
 
-export interface PartResponse {
-  nowMs: number;
-  session: { id: string; label: string; closesAtMs: number };
-  part: PartSummary;
-  /** Present only once the attempt is in progress. Never on the briefing. */
-  sources?: SourceView[];
-  attempt?: AttemptView;
-}
-
 // ─── Admin ───────────────────────────────────────────────────────────────────
 
-export interface AdminSessionRow {
-  id: string;
-  label: string;
-  moduleId: TrainingModuleId;
-  createdAtMs: number;
-  closesAtMs: number;
+export interface AdminModuleRow {
+  id: TrainingModuleId;
+  title: string;
+  isOn: boolean;
+  openTestId: TestId | null;
   participantCount: number;
-  firstOpensAtMs: number;
 }
 
-export interface AdminPartState {
-  opensAtMs: number;
-  sources: { id: string; name: string; thumbUrl: string }[];
+export interface AdminTestRow {
+  id: TestId;
+  title: string;
+  durationMs: number;
+  slotCount: number;
+  status: TestStatus;
+  openedAtMs: number | null;
+  closedAtMs: number | null;
+  /** Copy problems that stop this test being opened — see `TestDef.pending`. */
+  pending: string[];
 }
 
-export interface AdminParticipantPart {
-  state: PartState;
+export interface AdminAttemptCell {
+  state: TestState;
   startedAtMs: number | null;
   deadlineMs: number | null;
   finishedAtMs: number | null;
   /** Set when an admin reopened this attempt. */
   reopenedAtMs: number | null;
   slotsFilled: number;
+  slotsTotal: number;
+  /** The worst Drive mirror state across this attempt's files; null when it has none. */
+  mirror: MirrorState | null;
 }
 
 export interface AdminParticipant {
@@ -125,30 +191,13 @@ export interface AdminParticipant {
   name: string | null;
   addedAtMs: number;
   revokedAtMs: number | null;
-  parts: Record<string, AdminParticipantPart>;
+  tests: Partial<Record<TestId, AdminAttemptCell>>;
 }
 
-export interface AdminSessionDetail {
+export interface AdminModuleDetail {
   nowMs: number;
-  session: {
-    id: string;
-    label: string;
-    moduleId: TrainingModuleId;
-    createdAtMs: number;
-    closesAtMs: number;
-    parts: Record<string, AdminPartState>;
-  };
-  participants: AdminParticipant[];
-}
-
-/**
- * The live half of `AdminSessionDetail` — what the session page polls while a
- * test is under way. No `parts`: those carry a signed URL per source image,
- * and an admin can attach hundreds (rule 9i).
- */
-export interface AdminSessionProgress {
-  nowMs: number;
-  session: Omit<AdminSessionDetail['session'], 'parts'>;
+  module: { id: TrainingModuleId; title: string; isOn: boolean; openTestId: TestId | null };
+  tests: AdminTestRow[];
   participants: AdminParticipant[];
 }
 
@@ -156,14 +205,30 @@ export interface AdminSubmissionView {
   startedAtMs: number | null;
   finishedAtMs: number | null;
   slots: {
-    slotId: SlotId;
-    sourceId: string;
+    slotId: string;
+    label: string;
+    stem: string;
+    identity: DatasetId | null;
     uploadedAtMs: number;
     bytes: number;
     url: string;
+    mirror: MirrorState | null;
+    /** The source it started from, when the test has one per slot. */
+    source: { name: string; thumbUrl: string } | null;
   }[];
-  /** Only the images this candidate actually used. */
-  sources: { id: string; name: string; thumbUrl: string }[];
+  workingFiles: {
+    id: string;
+    name: string;
+    bytes: number;
+    uploadedAtMs: number;
+    downloadUrl: string;
+    mirror: MirrorState | null;
+  }[];
+  text: string;
+  /** T7: every image in order, with the answer given (null = "No answer"). */
+  answers: { index: number; imageUrl: string; text: string | null; atMs: number | null }[] | null;
+  /** The candidate's folder for this attempt in the shared drive. Null until something is mirrored. */
+  driveUrl: string | null;
 }
 
 export interface AdminRecordingSegment {
@@ -176,14 +241,14 @@ export interface AdminRecordingSegment {
 
 export interface AdminRecordingView {
   nowMs: number;
-  /** The part is running: new segments are still arriving. */
+  /** The test is running: new segments are still arriving. */
   live: boolean;
   /** False for an attempt started before recording existed. */
   recorded: boolean;
   startedAtMs: number | null;
   /** Set when an admin reopened the attempt: the time before it is between runs, not a gap. */
   reopenedAtMs: number | null;
-  /** When the attempt ends or ended: finished early, the deadline, or the session's stop — whichever came first. */
+  /** When the attempt ends or ended: finished early, the deadline, or the module's switch-off — whichever came first. */
   endsAtMs: number | null;
   deletedAtMs: number | null;
   /** The still the candidate's browser grabbed at the screen check. Omitted on an `after` read. */
@@ -192,55 +257,41 @@ export interface AdminRecordingView {
   segments: AdminRecordingSegment[];
 }
 
-// ─── Admin: candidates across sessions ───────────────────────────────────────
+// ─── Admin: Drive materials ──────────────────────────────────────────────────
 
-/** A candidate's standing: the state of their most pressing part, or removal. */
-export type CandidateStatus = PartState | 'removed';
-
-export interface AdminCandidateRow {
-  emailHash: string;
-  email: string;
-  /** Null until they have signed in and given their name. */
-  name: string | null;
-  status: CandidateStatus;
-  /** What the status is about, e.g. "ID Swap (SFW) · October intake". Empty when removed. */
-  statusDetail: string;
-  /** Sessions they are currently on (not removed). */
-  sessionCount: number;
-  partsSubmitted: number;
-  partsTotal: number;
-  /** Latest sign of life: an upload, a start, a finish, or when they were added. */
-  lastActivityMs: number;
-}
-
-export interface AdminCandidatePart {
-  partId: string;
-  state: PartState;
-  startedAtMs: number | null;
-  deadlineMs: number | null;
-  finishedAtMs: number | null;
-  reopenedAtMs: number | null;
-  slots: AdminSubmissionView['slots'];
-  sources: AdminSubmissionView['sources'];
-}
-
-export interface AdminCandidateSession {
-  sessionId: string;
+export interface MaterialFolderCheck {
+  key: string;
   label: string;
-  moduleId: TrainingModuleId;
-  /** When the session was created — what "newest first" sorts on. */
-  createdAtMs: number;
-  addedAtMs: number;
-  revokedAtMs: number | null;
-  closesAtMs: number;
-  parts: AdminCandidatePart[];
+  /** The folder as an admin would find it in Drive. */
+  folder: string;
+  unchanged: number;
+  /** Not copied, and why — wrong type, no checksum, too big. */
+  skipped: { name: string; reason: string }[];
+  added: string[];
+  changed: string[];
+  removed: string[];
 }
 
-export interface AdminCandidateDetail {
-  /** The server's clock when this was read — what each `state` was judged against. */
-  nowMs: number;
-  email: string;
-  name: string | null;
-  /** Newest session first. */
-  sessions: AdminCandidateSession[];
+/** Check Drive: a dry run of what Open would copy, and whether the test has what it needs. Writes nothing. */
+export interface MaterialCheck {
+  testId: string;
+  /** Nothing to copy and nothing missing. */
+  upToDate: boolean;
+  /** The test can open once its files are copied (no blocking problems). */
+  ok: boolean;
+  problems: string[];
+  folders: MaterialFolderCheck[];
+}
+
+export interface SyncTodo {
+  key: string;
+  driveId: string;
+  name: string;
+}
+
+export interface SyncPlan {
+  todo: SyncTodo[];
+  /** Files deleted from Storage because Drive no longer has them. */
+  removed: number;
+  unchanged: number;
 }

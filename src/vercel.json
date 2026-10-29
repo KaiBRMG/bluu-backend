@@ -28,6 +28,10 @@
     {
       "path": "/api/cron/birthday-notifications",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/training-mirror",
+      "schedule": "30 3 * * *"
     }
   ]
 }

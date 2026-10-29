@@ -431,6 +431,16 @@
        */
       window.__snipBeginCapture = () => { beginCapture(); };
 
+      /*
+        Main asking the recorder to finish — used when the disk filled mid-take.
+        The same `finish` the Stop button and the time limit run, so what has
+        been written still goes through the normal path and uploads; discarding
+        an hour because the last minute had nowhere to go would be the wrong
+        trade. Only main can reach this (it is called through
+        `executeJavaScript`; the preload exposes nothing that does).
+      */
+      window.__snipStop = (reason) => { finish(reason === 'storage' ? 'storage' : 'user'); };
+
       window.recorderAPI.onStart((payload) => {
         config = payload;
         // Main decides this, not the page: only main knows the display's work
@@ -765,7 +775,9 @@
           ? 'Time limit reached — uploading what was recorded.'
           : reason === 'source-ended'
             ? 'The screen stopped being available — uploading what was recorded.'
-            : 'Uploading…');
+            : reason === 'storage'
+              ? 'The disk is full — uploading what was recorded.'
+              : 'Uploading…');
 
         if (recorder && recorder.state !== 'inactive') {
           // `onstop` stops the tracks and sends `done` once the queued chunks

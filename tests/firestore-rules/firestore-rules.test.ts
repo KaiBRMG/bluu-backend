@@ -748,8 +748,9 @@ describe('model-submission-rate collection', () => {
 // anonymous, signed in, or admin — may read or write any of them.
 
 describe.each([
-  ['training-sessions', 'a1b2c3d4e5f60718293a4b5c', { label: 'October intake', moduleId: 'media-gen' }],
-  ['training-participants', 'a1b2c3d4e5f60718293a4b5c_0123456789abcdef0123456789abcdef', { email: 'c@example.com', attempts: {} }],
+  ['training-modules', 'media-gen', { isOn: true, openTestId: 'T1', tests: {} }],
+  ['training-materials', 'media-gen_dataset_JOE', { files: {}, pending: [] }],
+  ['training-participants', 'media-gen_0123456789abcdef0123456789abcdef', { email: 'c@example.com', attempts: {} }],
   ['training-candidates', '0123456789abcdef0123456789abcdef', { name: 'Candidate' }],
   ['training-codes', '0123456789abcdef0123456789abcdef', { codeHash: 'x', attempts: 0 }],
   ['training-rate', 'code-ip_0123456789abcdef0123456789abcdef', { count: 1 }],

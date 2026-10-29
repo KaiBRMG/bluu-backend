@@ -1,13 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { Loader2, MonitorPlay } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { ChevronDown, Copy, ExternalLink, Loader2, MonitorPlay, RefreshCw } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { useTrainingCandidate } from '@/hooks/useTrainingAdmin';
-import { getPart, TRAINING_MODULES } from '@/lib/training/modules';
-import type { AdminCandidatePart, AdminCandidateRow } from '@/lib/training/types';
+import { TRAINING_MODULES, type TestDef, type TrainingModuleId } from '@/lib/training/modules';
+import type { AdminAttemptCell, AdminParticipant, AdminSubmissionView } from '@/lib/training/types';
+import { cn } from '@/lib/utils';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { AdminStateBadge } from './AdminStateBadge';
 import RecordingPlayer from './RecordingPlayer';
@@ -15,152 +16,236 @@ import SubmissionSlots from './SubmissionSlots';
 import { TimeLeft } from './TimeLeft';
 import { formatDuration, formatWhen } from './zonedTime';
 
-/** The facts about an attempt that are not the work itself, as one Meta line. */
-function attemptFacts(p: AdminCandidatePart, timezone: string): string {
+interface CandidateSheetProps {
+  moduleId: TrainingModuleId;
+  person: AdminParticipant | null;
+  skewMs: number;
+  timezone: string;
+  load: (emailHash: string, testId: string) => Promise<AdminSubmissionView>;
+  onRetry: (emailHash: string, testId: string) => Promise<number>;
+  onClose: () => void;
+}
+
+/** The facts about an attempt that are not the work itself, as one line. */
+function attemptFacts(c: AdminAttemptCell, timezone: string): string {
   const facts: string[] = [];
-  if (p.startedAtMs) facts.push(`started ${formatWhen(p.startedAtMs, timezone)}`);
-  if (p.startedAtMs && p.finishedAtMs) facts.push(`finished early after ${formatDuration(p.finishedAtMs - p.startedAtMs)}`);
-  if (p.reopenedAtMs) facts.push(`reopened ${formatWhen(p.reopenedAtMs, timezone)}`);
+  if (c.startedAtMs) facts.push(`started ${formatWhen(c.startedAtMs, timezone)}`);
+  if (c.startedAtMs && c.finishedAtMs) facts.push(`finished early after ${formatDuration(c.finishedAtMs - c.startedAtMs)}`);
+  if (c.reopenedAtMs) facts.push(`reopened ${formatWhen(c.reopenedAtMs, timezone)}`);
   return facts.join(' · ');
 }
 
 /**
- * One candidate across every session: each part they have been given, its state,
- * and what they handed in. A panel, not a page, so the candidate list stays on
- * screen behind it (DESIGN.md: a peek rather than a departure). The body is
- * keyed by the person, so opening another candidate is a clean instance. While
- * one of their parts is open or running it re-reads itself, so a running test
- * shows its clock, uploads and state as they happen.
+ * One candidate's work, test by test. A panel rather than a page, so the roster
+ * stays on screen behind it (DESIGN.md: a peek, not a departure). A test's work
+ * is read only when it is opened, and re-read while it is live, so a running
+ * test shows its uploads and state as they land.
  */
-export default function CandidateSheet({
-  candidate,
-  timezone,
-  onClose,
-}: {
-  candidate: AdminCandidateRow | null;
-  timezone: string;
-  onClose: () => void;
-}) {
-  const display = candidate ? (candidate.name ?? candidate.email) : '';
-  const seed = candidate ? (candidate.name ?? candidate.email) : '';
-
+export default function CandidateSheet({ moduleId, person, skewMs, timezone, load, onRetry, onClose }: CandidateSheetProps) {
+  const display = person ? (person.name ?? person.email) : '';
   return (
-    <Sheet open={!!candidate} onOpenChange={(open) => !open && onClose()}>
+    <Sheet open={!!person} onOpenChange={(open) => !open && onClose()}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-3xl">
         <SheetHeader className="flex-row items-center gap-3 border-b border-white/[0.07] py-4 pr-12 pl-6">
-          {candidate && (
-            <Avatar className="size-11 shrink-0" style={{ background: getAvatarColor(seed) }}>
-              <AvatarFallback style={{ background: getAvatarColor(seed), color: '#fff' }}>{getInitials(seed)}</AvatarFallback>
+          {person && (
+            <Avatar className="size-11 shrink-0" style={{ background: getAvatarColor(display) }}>
+              <AvatarFallback style={{ background: getAvatarColor(display), color: '#fff' }}>{getInitials(display)}</AvatarFallback>
             </Avatar>
           )}
           <div className="min-w-0">
             <SheetTitle className="truncate">{display}</SheetTitle>
             <SheetDescription className="truncate">
-              {candidate?.name ? `${candidate.email} · ` : ''}
-              {candidate && !candidate.name ? 'Has not signed in yet' : 'All sessions'}
+              {person?.name ? `${person.email} · ` : ''}
+              {person && !person.name ? 'Has not signed in yet' : TRAINING_MODULES[moduleId].title}
             </SheetDescription>
           </div>
         </SheetHeader>
-        {candidate && <CandidateBody key={candidate.emailHash} emailHash={candidate.emailHash} timezone={timezone} />}
+        {person && (
+          <Body key={person.emailHash} moduleId={moduleId} person={person} skewMs={skewMs} timezone={timezone} load={load} onRetry={onRetry} />
+        )}
       </SheetContent>
     </Sheet>
   );
 }
 
-function CandidateBody({ emailHash, timezone }: { emailHash: string; timezone: string }) {
+function Body({ moduleId, person, skewMs, timezone, load, onRetry }: Omit<CandidateSheetProps, 'onClose' | 'person'> & { person: AdminParticipant }) {
   // One player at a time: each one polls while live, and a panel of them would all load video at once.
   const [watching, setWatching] = useState<string | null>(null);
-  const { detail, skewMs, error, refetch } = useTrainingCandidate(emailHash);
+  const tests = TRAINING_MODULES[moduleId].tests.filter((t) => person.tests[t.id]?.startedAtMs != null);
 
-  if (error && !detail) {
-    return (
-      <div role="alert" className="p-6">
-        <p className="text-sm font-medium text-red-400">Couldn&apos;t load this candidate</p>
-        <p className="mt-1 text-sm text-zinc-400">{error}</p>
-        <Button variant="outline" size="sm" className="mt-4" onClick={refetch}>
-          Try again
-        </Button>
-      </div>
-    );
+  if (tests.length === 0) {
+    return <p className="p-6 text-sm text-zinc-400">They have not started any test.</p>;
   }
-  if (!detail) {
-    return (
-      <div className="flex justify-center py-16" role="status">
-        <Loader2 className="activity-spinner size-5 animate-spin text-zinc-400" />
-        <span className="sr-only">Loading</span>
-      </div>
-    );
-  }
+  return (
+    <div className="flex flex-col gap-4 p-6">
+      {tests.map((t) => (
+        <TestWork
+          key={t.id}
+          moduleId={moduleId}
+          test={t}
+          person={person}
+          cell={person.tests[t.id]!}
+          skewMs={skewMs}
+          timezone={timezone}
+          load={load}
+          onRetry={onRetry}
+          watching={watching === t.id}
+          onWatch={() => setWatching(t.id)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function TestWork({
+  moduleId,
+  test,
+  person,
+  cell,
+  skewMs,
+  timezone,
+  load,
+  onRetry,
+  watching,
+  onWatch,
+}: {
+  moduleId: TrainingModuleId;
+  test: TestDef;
+  person: AdminParticipant;
+  cell: AdminAttemptCell;
+  skewMs: number;
+  timezone: string;
+  load: CandidateSheetProps['load'];
+  onRetry: CandidateSheetProps['onRetry'];
+  watching: boolean;
+  onWatch: () => void;
+}) {
+  const [open, setOpen] = useState(cell.state === 'in-progress');
+  const [sub, setSub] = useState<AdminSubmissionView | null>(null);
+  const [error, setError] = useState('');
+  const [retrying, setRetrying] = useState(false);
+  const facts = attemptFacts(cell, timezone);
+
+  // Read when opened and again whenever the roster says something moved (an upload, the mirror, the state).
+  const stamp = `${cell.state}|${cell.slotsFilled}|${cell.mirror}`;
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    load(person.emailHash, test.id)
+      .then((res) => {
+        if (!cancelled) {
+          setSub(res);
+          setError('');
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load their work');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, stamp, load, person.emailHash, test.id]);
 
   return (
-    <div className="flex flex-col gap-8 p-6">
-      {detail.sessions.map((session) => {
-        const mod = TRAINING_MODULES[session.moduleId];
-        return (
-          <section key={session.sessionId} aria-labelledby={`cs-${session.sessionId}`}>
-            <h3 id={`cs-${session.sessionId}`} className="text-base font-semibold">
-              {session.label}
-            </h3>
-            <p className="mt-0.5 text-[11px] text-zinc-400 tabular-nums">
-              {mod?.title ?? session.moduleId} · added {formatWhen(session.addedAtMs, timezone)}
-              {session.revokedAtMs ? ` · access removed ${formatWhen(session.revokedAtMs, timezone)}` : ''}
-            </p>
+    <section className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-4" aria-labelledby={`tw-${test.id}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 id={`tw-${test.id}`} className="text-sm font-semibold">
+          {test.id} · {test.title}
+        </h3>
+        <AdminStateBadge state={cell.state} />
+      </div>
+      {(facts || (cell.state === 'in-progress' && cell.deadlineMs)) && (
+        <p className="mt-1 text-[11px] text-zinc-400 tabular-nums">
+          {facts}
+          {cell.state === 'in-progress' && cell.deadlineMs && (
+            <>
+              {facts ? ' · ' : ''}
+              <TimeLeft deadlineMs={cell.deadlineMs} skewMs={skewMs} /> left
+              {cell.slotsTotal > 0 ? ` · ${cell.slotsFilled} of ${cell.slotsTotal} uploaded` : ''}
+            </>
+          )}
+        </p>
+      )}
 
-            <div className="mt-3 flex flex-col gap-4">
-              {session.parts.map((p) => {
-                const def = getPart(session.moduleId, p.partId);
-                if (!def) return null;
-                const facts = attemptFacts(p, timezone);
-                return (
-                  <div key={p.partId} className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h4 className="text-sm font-semibold">{def.title}</h4>
-                      <AdminStateBadge state={p.state} />
-                    </div>
-                    {(facts || (p.state === 'in-progress' && p.deadlineMs)) && (
-                      <p className="mt-1 text-[11px] text-zinc-400 tabular-nums">
-                        {facts}
-                        {p.state === 'in-progress' && p.deadlineMs && (
-                          <>
-                            {facts ? ' · ' : ''}
-                            <TimeLeft deadlineMs={p.deadlineMs} skewMs={skewMs} /> left · {p.slots.length} of{' '}
-                            {def.task.slots.length} uploaded
-                          </>
-                        )}
-                      </p>
-                    )}
-                    {p.startedAtMs && (
-                      <div className="mt-3">
-                        {watching === `${session.sessionId}/${p.partId}` ? (
-                          <RecordingPlayer
-                            sessionId={session.sessionId}
-                            emailHash={emailHash}
-                            partId={p.partId}
-                            timezone={timezone}
-                            partTitle={def.title}
-                          />
-                        ) : (
-                          <Button variant="outline" size="sm" onClick={() => setWatching(`${session.sessionId}/${p.partId}`)}>
-                            <MonitorPlay className="size-4" />
-                            {p.state === 'in-progress' ? 'Watch live' : 'Screen recording'}
-                          </Button>
-                        )}
-                      </div>
-                    )}
-                    <div className="mt-3">
-                      {p.slots.length > 0 ? (
-                        <SubmissionSlots part={def} slots={p.slots} sources={p.sources} timezone={timezone} />
-                      ) : (
-                        <p className="text-sm text-zinc-400">Nothing submitted for this part.</p>
-                      )}
-                    </div>
-                  </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {watching ? null : (
+          <Button variant="outline" size="sm" onClick={onWatch}>
+            <MonitorPlay className="size-4" />
+            {cell.state === 'in-progress' ? 'Watch live' : 'Screen recording'}
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          <ChevronDown className={cn('size-4 transition-transform', open && 'rotate-180')} />
+          {open ? 'Hide work' : 'View work'}
+        </Button>
+        {cell.mirror && cell.mirror !== 'synced' && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={retrying}
+            onClick={async () => {
+              setRetrying(true);
+              try {
+                await onRetry(person.emailHash, test.id);
+                toast.success('Copied to Drive');
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : 'Could not copy to Drive');
+              } finally {
+                setRetrying(false);
+              }
+            }}
+          >
+            {retrying ? <Loader2 className="activity-spinner size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+            Retry Drive copy
+          </Button>
+        )}
+        {sub?.driveUrl && (
+          <>
+            <Button variant="ghost" size="sm" asChild>
+              <a href={sub.driveUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="size-4" />
+                Drive folder
+              </a>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Copy the Drive folder link"
+              onClick={() => {
+                navigator.clipboard.writeText(sub.driveUrl!).then(
+                  () => toast.success('Drive link copied'),
+                  () => toast.error('Could not copy'),
                 );
-              })}
-            </div>
-          </section>
-        );
-      })}
-    </div>
+              }}
+            >
+              <Copy className="size-4" />
+              Copy link
+            </Button>
+          </>
+        )}
+      </div>
+
+      {watching && (
+        <div className="mt-3">
+          <RecordingPlayer moduleId={moduleId} emailHash={person.emailHash} testId={test.id} timezone={timezone} testTitle={test.title} />
+        </div>
+      )}
+
+      {open && (
+        <div className="mt-4">
+          {error && !sub ? (
+            <p role="alert" className="text-sm text-red-400">
+              {error}
+            </p>
+          ) : !sub ? (
+            <p className="flex items-center gap-2 text-sm text-zinc-400" role="status">
+              <Loader2 className="activity-spinner size-4 animate-spin" /> Loading
+            </p>
+          ) : (
+            <SubmissionSlots test={test} submission={sub} timezone={timezone} />
+          )}
+        </div>
+      )}
+    </section>
   );
 }

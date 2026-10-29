@@ -517,9 +517,43 @@ Two details that are easy to get wrong:
 
 ### Limits and how they end
 
-`MAX_SNIP_RECORDING_MS` is **10 minutes**, counted down in the bar with a warning at one minute. At the cap the recorder **stops and keeps** what it has — discarding at the limit would throw away ten minutes of someone's work to enforce a number they never saw. The display's track ending (a monitor unplugged, the OS revoking the share) does the same thing for the same reason.
+`MAX_SNIP_RECORDING_MS` is **60 minutes** (it was 10; no recording had ever come near it — the longest of 367 was 9 min), counted down in the bar with a warning at one minute. At the cap the recorder **stops and keeps** what it has — discarding at the limit would throw away an hour of someone's work to enforce a number they never saw. The display's track ending (a monitor unplugged, the OS revoking the share) and **a disk that fills mid-take** do the same thing for the same reason.
 
-`MAX_SNIP_VIDEO_BYTES` is 400 MB, derived from that duration at the bitrate ceiling plus headroom — the two move together. The still ceiling (`MAX_SNIP_BYTES`, 25 MB) is unchanged and the two are checked separately: a screenshot claiming 40 MB is not a screenshot, while a ten-minute recording legitimately is.
+`MAX_SNIP_VIDEO_BYTES` is **2 GB**, derived from that duration, not guessed. The recorder's video target is `pixels × 30 × 0.05` with the output area capped at ~2.5 MP, so it can never exceed ~3.9 Mbps — the recorder's 5 Mbps clamp is a ceiling nothing reaches — and an hour at that rate plus 128 kbps audio is ~1.8 GB. Measured recordings average ~1.1 Mbps. The cap must stay under **4 GiB**: the seek index stores cluster offsets as 32-bit integers (`webm-remux.js` refuses rather than wrap). The still ceiling (`MAX_SNIP_BYTES`, 25 MB) is unchanged and the two are checked separately: a screenshot claiming 40 MB is not a screenshot, while an hour-long recording legitimately is.
+
+**The shell's copy is `SNIP_MAX_RECORDING_MS` in `main.js`** — a shell older than 1.0.3 still stops at 10 minutes, which is fine: the server accepts anything up to the new caps, and the web deploy always lands first. **There is no per-user byte quota** (only the 500-snip count), so the theoretical worst case per user is now 500 × 2 GB; add one if storage cost ever matters.
+
+### Long recordings: what scales with length, and what was done
+
+Every one of these was a defect that only appears when a take runs long:
+
+| Risk | What happens | Defence |
+|---|---|---|
+| **The sign-in token ages out during the upload** | A Firebase ID token lives an hour. The upload used the token fetched *before* it began, so a long one 401'd at finalise — after every byte had moved — and main had already deleted the only local copy | `uploadSnipRecording` takes `getFreshToken` and `finalizeWithRetry` re-reads it, retrying network errors, 5xx and a 401 (with a forced refresh). The renderer sends `keepUntilFinalized`, so main **keeps the file until the finalise succeeds** and the renderer then calls `discardRecording`. A shell or page bundle without the flag behaves exactly as before |
+| **A finalise whose *response* is lost** | The retry was refused ("not pending") although the row had been saved, so the client re-uploaded the whole file | `finalizeSnip` is **idempotent for the owner**: an already-`ready` row is returned as it stands |
+| **The sweep reaps a reservation mid-upload** | `PENDING_UPLOAD_TTL_MS` was 1 h; the daily cron deleted the row and its half-written object under a multi-GB upload on a slow link | 24 h. The sweep runs once a day, so the only cost is how long a genuinely abandoned reservation lingers |
+| **The poster slot expires first** | Both slots lived 15 min and an old shell PUTs the poster *after* the video, so every long recording lost its thumbnail and `og:image` | Main uploads the **poster first**; the poster slot is also signed for 6 h so shells that predate this are covered by the web deploy alone |
+| **Round trips** | 8 MiB chunks over a ~230 ms RTT is ~250 sequential round trips for 2 GB | Above 256 MiB the chunk is 32 MiB (still a multiple of 256 KiB) |
+| **The display sleeps** | The only `powerSaveBlocker` belonged to time tracking, held while clocked in — a recording made clocked-out could record a black screen after the OS slept the display | The session holds its own `prevent-display-sleep` blocker, released in `clearSnipRecording` so every exit path lets go |
+| **The disk fills** | The write stream's error handler discarded the whole recording | **Stop and keep**: main stops accepting chunks, asks the recorder to finish (`window.__snipStop('storage')`, the same `finish` the Stop button runs) and the file as written goes through the normal path. A free-space floor (`SNIP_MIN_FREE_BYTES`, 512 MB) also refuses a take on a disk that cannot hold even a short one |
+| **A big file in the queue** | The 4 GB queue cap could evict older, still-unsent recordings to make room for one 2 GB take | Raised to 8 GB |
+
+Sizes over 1 GB format as `1.80 GB` (`formatSnipBytes`).
+
+**Unverified, and worth knowing:** the draw loop is `requestAnimationFrame`. The recorder window has `backgroundThrottling: false`, but whether a window that is fully occluded (for example by another app's full-screen Space) keeps receiving frames was not tested, and a recorder that stops drawing would produce a frozen video for the rest of a long take. If that is ever reported, drive `requestFrame()` from a ~33 ms timer instead.
+
+### Compression: what was measured, and what was deliberately not changed
+
+Measured across all 367 stored recordings and, structurally, three of them:
+
+- **Size is modest already:** median 25 MB / 1.1 Mbps, p90 2.5 Mbps, max 3.4 Mbps. An hour at the median is ~0.5 GB.
+- **Size follows the rate target** (correlation 0.82 between each recording's actual bitrate and the recorder's target), so the one real lever is `BITS_PER_PIXEL`.
+- **Static screens are already almost free.** 19–29% of inter-frames are under 1 KB and carry under 3% of the bytes. Skipping unchanged frames would save CPU but essentially **no** bytes — so it was not built.
+- **The bytes are in motion bursts:** frames over 30 KB are 3–16% of frames but 38–56% of the bytes. Quality in those bursts is what a lower target would trade away.
+- **Keyframes are 7–8% of the bytes** (one every ~3.4 s), so a longer keyframe interval caps out at a few percent and was not worth the seek-latency cost.
+- **AV1 was rejected:** it would be 30–40% smaller on screen content, but a share link is opened by anyone, and Safari/iOS on older hardware cannot decode it. A link that does not play is worse than a larger file.
+
+**The default quality was left alone**: whether a lower target is acceptable is a judgement about how the output looks, not something a number settles. If smaller files are wanted, the knob is `BITS_PER_PIXEL` (0.05) in `electron/snip-record.html`; a user-facing "smaller files" option would be a setting that selects the value rather than a global change.
 
 The session ends in exactly one of three ways — uploaded, discarded, or failed — and **every one of them runs `clearSnipRecording`**, which is the only thing that removes the temp file. A recorder window that dies without any of them (`'closed'`) is treated as a failure, for the same reason.
 
@@ -535,7 +569,7 @@ The session ends in exactly one of three ways — uploaded, discarded, or failed
 - **Written straight into the queue**, not moved there on completion — a crash mid-recording leaves a playable partial rather than nothing.
 - **The in-memory Map is an index**, rebuilt from disk by `loadSnipQueue()` at startup. Disk is the source of truth. A `.webm` whose sidecar is missing or corrupt is still listed, with zeroed duration and dimensions: the metadata is a convenience, the recording is the thing, and deleting someone's work over an unreadable JSON file would be absurd.
 
-`SNIP_QUEUE_TTL_MS` is **14 days** and there is a 4 GB size cap. Both are floors on "we will not fill your disk forever", not deadlines the user is expected to race — this replaced a 30-minute reaper that deleted exactly the work the queue now protects.
+`SNIP_QUEUE_TTL_MS` is **14 days** and there is an 8 GB size cap. Both are floors on "we will not fill your disk forever", not deadlines the user is expected to race — this replaced a 30-minute reaper that deleted exactly the work the queue now protects.
 
 **The queue is not cleared when the window closes.** It used to be, which was precisely backwards: quitting the app is the single most likely moment for an upload to be cut short.
 
@@ -544,7 +578,7 @@ The session ends in exactly one of three ways — uploaded, discarded, or failed
 A plain `PUT` of 300 MB is one indivisible request — interrupt it at 95% and every byte goes again. On a connection bad enough to drop it once, that is a loop that may never terminate. So `createSnipUploadSlot` signs video with `action: 'resumable'` and main drives the three-step protocol:
 
 1. **POST the initiation URL** with `x-goog-resumable: start`. That header is part of the v4 signature (`extensionHeaders`), so a POST without it is a signature mismatch, not a missing option. The bucket replies `201` with a session URI in `Location`.
-2. **PUT 8 MiB chunks** with `Content-Range: bytes a-b/total`. Chunk size must be a multiple of 256 KiB — GCS rejects anything else. A `308` means "stored, continue" and carries a `Range` header saying what the bucket *actually* holds, which is the offset we continue from rather than trusting our own arithmetic.
+2. **PUT 8 MiB chunks** (32 MiB above 256 MiB) with `Content-Range: bytes a-b/total`. Chunk size must be a multiple of 256 KiB — GCS rejects anything else. A `308` means "stored, continue" and carries a `Range` header saying what the bucket *actually* holds, which is the offset we continue from rather than trusting our own arithmetic.
 3. **On a transient failure, probe and continue.** `PUT` with `Content-Range: bytes */total` and an empty body asks the bucket where it got to. This is what turns a dropped connection into a few seconds lost rather than the whole file — and it also catches the case where the body arrived but the response did not, so the chunk is already stored.
 
 `onProgress` reports bytes **confirmed by the bucket**, never bytes written to the socket: a chunk in flight when the connection died was not stored, and a progress bar counting it would run backwards.
@@ -977,6 +1011,7 @@ One transparent surface per display, each covering that display's bounds.
 - **This needs an Electron build** (rule 14, the two-push dance): `electron/main.js`, `preload.js` and two new files changed. A renderer on an older shell degrades cleanly — `window.electronAPI.snip` is absent, every call site feature-detects, and the page says to update.
 - **Recording needed a second build (0.14.0)**, and it adds three files to `electron/package.json`'s `files[]` — `snip-record.html`, `snip-record-preload.js` and `snip-frame.html`. A file left out of that list is absent from the packaged app and the feature fails only in production, which is the worst place to find out.
 - **Build 1.0.3 — faster stills, seekable recordings.** Two main-process changes, one new file (`electron/webm-remux.js`, in `files[]`): the WebM index above, and a raw-bytes capture. **`snip:captured` carries `data` (PNG bytes) only when the renderer declared `acceptsBinaryCapture` in `snip:configure`**, otherwise `dataBase64` as before — negotiated for the same reason `supportsRecording` is (rule 9c: a page bundle can be weeks older than the shell). `uploadSnip` reads either, so a new renderer in an old shell works too. This removes the base64 encode in main, the ~⅓ larger IPC message and the `atob` character loop. No new version floor: both halves degrade cleanly.
+  **The same build carries the long-recording changes** (see "Long recordings" above): the 60-minute cap (`SNIP_MAX_RECORDING_MS`), the power-save blocker, stop-and-keep on a full disk, the free-space floor, poster-first upload, 32 MiB chunks above 256 MiB, and `keepUntilFinalized`. The web half (fresh token + finalise retry, idempotent finalise, 24 h sweep window, 6 h poster slot, 2 GB cap) deploys first and is harmless on its own; a shell older than 1.0.3 simply keeps its 10-minute stop.
 - **The sounds needed a third build (0.14.2)**, and it is the smallest possible one: two `sendTo(mainWindow, …)` lines in `main.js` and two listeners in `preload.js`. No new files, so `files[]` is untouched. Everything else in this pass — auto-copy, title/description, Import, the public player — is web only and ships on a plain Vercel deploy; a user on an older shell gets all of it, and only loses the shutter's *precision* (it falls back to `snip:captured`) and the recording cue entirely. There is deliberately **no new version floor**: nothing here is unusable on 0.14.0, and a floor would withhold four working features to enforce a sound.
 - **`SnipSettingsPopover`'s fingerprint has to grow with the settings map.** It content-compares five — now six — field values rather than the object, because the object's identity changes every time presence rewrites `users/{uid}`. A field added to `SnipSettings` and left out of that string is a field whose external change never reconciles the draft.
 - **The public page's `<video>` no longer uses native `controls`.** That was a documented decision and it was reversed for a documented reason — a `MediaRecorder` WebM states no duration, so the browser renders it as a live stream. See "The player is ours" above before changing it back.

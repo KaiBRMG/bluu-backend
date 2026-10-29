@@ -26,16 +26,16 @@ import { formatClockTime, formatDuration, formatWhen } from './zonedTime';
 
 /** How often the live view asks for new segments — one segment's length. */
 const POLL_MS = SEGMENT_MS;
-/** Keep polling this long after the part ends: the last segment lands inside the upload grace. */
+/** Keep polling this long after the test ends: the last segment lands inside the upload grace. */
 const TAIL_MS = 60_000;
 
 interface RecordingPlayerProps {
-  sessionId: string;
+  moduleId: string;
   emailHash: string;
-  partId: string;
+  testId: string;
   timezone: string;
-  /** The part's title, for the delete confirmation. */
-  partTitle: string;
+  /** The test's title, for the delete confirmation. */
+  testTitle: string;
 }
 
 /**
@@ -48,8 +48,8 @@ interface RecordingPlayerProps {
  * segments after the last one it holds, every ten seconds, and only while the
  * window is visible (rule 9i). Mounted only while its dialog or panel is open.
  */
-export default function RecordingPlayer({ sessionId, emailHash, partId, timezone, partTitle }: RecordingPlayerProps) {
-  const path = `sessions/${sessionId}/participants/${emailHash}/recording?part=${encodeURIComponent(partId)}`;
+export default function RecordingPlayer({ moduleId, emailHash, testId, timezone, testTitle }: RecordingPlayerProps) {
+  const path = `modules/${moduleId}/participants/${emailHash}/recording?test=${encodeURIComponent(testId)}`;
   const [view, setView] = useState<AdminRecordingView | null>(null);
   const [segments, setSegments] = useState<AdminRecordingSegment[]>([]);
   const [error, setError] = useState('');
@@ -196,7 +196,7 @@ export default function RecordingPlayer({ sessionId, emailHash, partId, timezone
   let empty: string | null = null;
   if (segments.length === 0) {
     if (view.deletedAtMs) empty = `This recording was deleted ${formatWhen(view.deletedAtMs, timezone)}.`;
-    else if (!view.startedAtMs) empty = 'This part has not been started.';
+    else if (!view.startedAtMs) empty = 'This test has not been started.';
     else if (!view.recorded) empty = 'This attempt started before screen recording was switched on, so it has no recording.';
     else if (view.live) empty = 'Waiting for the first part of the recording to arrive…';
     else empty = 'No recording arrived for this attempt.';
@@ -349,7 +349,7 @@ export default function RecordingPlayer({ sessionId, emailHash, partId, timezone
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this recording?</AlertDialogTitle>
             <AlertDialogDescription>
-              The screen recording of {partTitle} is deleted for good. The work they uploaded is kept.
+              The screen recording of {testTitle} is deleted for good. The work they uploaded is kept.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

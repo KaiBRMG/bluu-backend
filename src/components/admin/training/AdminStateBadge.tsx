@@ -1,10 +1,12 @@
 import { Badge } from '@/components/ui/badge';
-import type { CandidateStatus } from '@/lib/training/types';
+import type { TestState } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
 
-const LABEL: Record<CandidateStatus, string> = {
-  scheduled: 'Scheduled',
-  'not-ready': 'Needs images',
+/** A candidate's standing on one test, or `removed` for someone whose access was taken away. */
+export type AdminState = TestState | 'removed';
+
+const LABEL: Record<AdminState, string> = {
+  locked: 'Locked',
   open: 'Not started',
   'in-progress': 'In progress',
   submitted: 'Submitted',
@@ -15,9 +17,8 @@ const LABEL: Record<CandidateStatus, string> = {
 
 // Status hues are semantic (DESIGN.md): green = done, blue = live, orange =
 // needs a look, red = lost. The word is always there, so none rely on colour.
-const TONE: Record<CandidateStatus, string> = {
-  scheduled: 'border-white/10 bg-white/[0.04] text-zinc-300',
-  'not-ready': 'border-orange-400/30 bg-orange-400/10 text-orange-300',
+const TONE: Record<AdminState, string> = {
+  locked: 'border-white/10 bg-white/[0.04] text-zinc-400',
   open: 'border-white/10 bg-white/[0.04] text-zinc-200',
   'in-progress': 'border-blue-400/30 bg-blue-400/10 text-blue-300',
   submitted: 'border-green-400/30 bg-green-400/10 text-green-300',
@@ -26,7 +27,7 @@ const TONE: Record<CandidateStatus, string> = {
   removed: 'border-white/10 bg-white/[0.04] text-zinc-400',
 };
 
-export function AdminStateBadge({ state, className }: { state: CandidateStatus; className?: string }) {
+export function AdminStateBadge({ state, className }: { state: AdminState; className?: string }) {
   return (
     <Badge variant="outline" className={cn('font-medium', TONE[state], className)}>
       {LABEL[state]}

@@ -2,6 +2,14 @@
 
 import { useCallback, useRef } from 'react';
 
+/**
+ * Fired when any call is answered `410 Gone`. The server uses 410 for exactly one thing — the
+ * module was switched off — so every part of a room (uploads, the task record, the recorder)
+ * reports it the same way and the page can lock with one message instead of each showing a
+ * refused request.
+ */
+export const TRAINING_STOPPED = 'training:stopped';
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -15,7 +23,7 @@ export class ApiError extends Error {
  * Same-origin JSON call to the candidate API. The signed httpOnly cookie rides
  * along automatically, so there is no token to hold or leak in the page.
  */
-export async function api<T>(path: string, init?: { method?: 'GET' | 'POST'; body?: unknown }): Promise<T> {
+export async function api<T>(path: string, init?: { method?: 'GET' | 'POST' | 'PUT'; body?: unknown }): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, {
@@ -28,6 +36,7 @@ export async function api<T>(path: string, init?: { method?: 'GET' | 'POST'; bod
   } catch {
     throw new ApiError('You look to be offline. Check your connection and try again.', 0);
   }
+  if (res.status === 410) window.dispatchEvent(new Event(TRAINING_STOPPED));
   let data: unknown = null;
   try {
     data = await res.json();

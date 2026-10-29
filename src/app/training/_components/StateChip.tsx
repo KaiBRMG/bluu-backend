@@ -1,20 +1,19 @@
-import { IconCheck, IconClock, IconHourglassOff, IconLock, IconPlayerPlay, IconTool } from '@tabler/icons-react';
-import type { PartState } from '@/lib/training/types';
+import { IconCheck, IconCircleOff, IconHourglassOff, IconLock, IconPlayerPlay } from '@tabler/icons-react';
+import type { TestState } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
 import { STATE_LABEL } from '../_lib/format';
 
-const ICON: Record<PartState, typeof IconCheck> = {
-  scheduled: IconClock,
-  'not-ready': IconTool,
+const ICON: Record<TestState, typeof IconCheck> = {
+  locked: IconLock,
   open: IconPlayerPlay,
   'in-progress': IconPlayerPlay,
   submitted: IconCheck,
   'timed-out': IconHourglassOff,
-  missed: IconLock,
+  missed: IconCircleOff,
 };
 
 /** Icon + word, always both — the state is never carried by colour alone. */
-export function StateChip({ state, className }: { state: PartState; className?: string }) {
+export function StateChip({ state, className }: { state: TestState; className?: string }) {
   const Icon = ICON[state];
   const live = state === 'open' || state === 'in-progress';
   return (

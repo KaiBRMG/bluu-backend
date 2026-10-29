@@ -7,20 +7,21 @@ import { IconArrowRight } from '@tabler/icons-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { getModule } from '@/lib/training/modules';
-import type { MeResponse, PartSummary, SessionSummary } from '@/lib/training/types';
+import type { MeResponse, ModuleSummary, TestSummary } from '@/lib/training/types';
 import { api, ApiError, useServerClock } from '../_lib/api';
-import { TERMINAL, fmtWhen } from '../_lib/format';
+import { TERMINAL } from '../_lib/format';
 import { AZURE, AZURE_INK, FIELD, PANEL } from '../_lib/theme';
 import { Shell } from '../_components/Shell';
 import { SignedInAside } from '../_components/SignedInAside';
 import { StateChip } from '../_components/StateChip';
 
-/** The part to talk about on a card: the live one, else the next to come, else the last. */
-function focusPart(session: SessionSummary): PartSummary {
+/** The test to talk about on a card: the live one, else the open one, else the next to come, else the last. */
+function focusTest(module: ModuleSummary): TestSummary {
   return (
-    session.parts.find((p) => p.state === 'in-progress') ??
-    session.parts.find((p) => !TERMINAL.has(p.state)) ??
-    session.parts[session.parts.length - 1]
+    module.tests.find((t) => t.state === 'in-progress') ??
+    module.tests.find((t) => t.state === 'open') ??
+    module.tests.find((t) => !TERMINAL.has(t.state)) ??
+    module.tests[module.tests.length - 1]
   );
 }
 
@@ -87,9 +88,9 @@ function NameStep({ onSaved }: { onSaved: () => void }) {
 }
 
 /**
- * `/training/home` — what is open to this candidate.
+ * `/training/home` — what is on for this candidate.
  *
- * First visit asks for a name (once, ever). After that: one row per sitting,
+ * First visit asks for a name (once, ever). After that: one row per module,
  * the whole row a link, saying in a line what is next. The list is built for
  * more modules than the one that exists today.
  */
@@ -148,37 +149,34 @@ export default function TrainingHomePage() {
           </h1>
           <p className="mt-3 text-base text-white/75">Here is what is open to you.</p>
 
-          {me.sessions.length === 0 ? (
+          {me.modules.length === 0 ? (
             <div className={`${PANEL} mt-8 rounded-2xl p-6`}>
-              <p className="text-base text-white">Nothing is open for you right now.</p>
+              <p className="text-base text-white">Training isn’t running right now.</p>
               <p className="mt-1 text-sm text-white/70">
-                If you expected something, check that you signed in with the email address you were approved with.
+                The team will switch it on when it is time. If you expected it to be open, check that you signed in with the
+                email address you were approved with.
               </p>
             </div>
           ) : (
             <ul className="mt-8 flex flex-col gap-3">
-              {me.sessions.map((session) => {
-                const mod = getModule(session.moduleId);
-                const part = focusPart(session);
-                if (!mod || !part) return null;
+              {me.modules.map((module) => {
+                const def = getModule(module.id);
+                const test = focusTest(module);
+                if (!def || !test) return null;
                 return (
-                  <li key={session.id}>
+                  <li key={module.id}>
                     <Link
-                      href={`/training/${mod.path}?session=${session.id}`}
+                      href={`/training/${def.path}`}
                       prefetch={false}
                       className={`${PANEL} group flex items-center gap-4 rounded-2xl p-5 transition-colors outline-none hover:bg-white/[0.055] focus-visible:ring-2 focus-visible:ring-[#00b8f5]/60`}
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                          <h2 className="text-xl font-semibold">{mod.title}</h2>
-                          <StateChip state={part.state} />
+                          <h2 className="text-xl font-semibold">{def.title}</h2>
+                          <StateChip state={test.state} />
                         </div>
                         <p className="mt-1.5 text-sm text-white/70">
-                          {part.title}
-                          {part.state === 'scheduled' ? ` · opens ${fmtWhen(part.opensAtMs)}` : ''}
-                        </p>
-                        <p className="mt-1 text-xs text-white/60">
-                          {session.label} · access ends {fmtWhen(session.closesAtMs)}
+                          {test.id} · {test.title}
                         </p>
                       </div>
                       <IconArrowRight

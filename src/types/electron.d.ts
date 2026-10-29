@@ -482,6 +482,14 @@ interface ElectronAPI {
       uploadUrl: string;
       resumable?: boolean;
       posterUploadUrl?: string;
+      /**
+       * Keep the local file after the bytes land, until the caller removes it
+       * with `discardRecording`. A shell that predates this ignores it and
+       * deletes on success, as it always did. Sent by a renderer that finalises
+       * afterwards, because finalising can fail on a long upload (the sign-in
+       * token ages out while the bytes move) and the file is then the only copy.
+       */
+      keepUntilFinalized?: boolean;
     }) => Promise<{
       success: boolean;
       error?: string;

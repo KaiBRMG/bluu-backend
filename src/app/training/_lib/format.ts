@@ -1,15 +1,4 @@
-import type { PartState } from '@/lib/training/types';
-
-/** The candidate's own local time — a browser formatter, never a stored zone. */
-export function fmtWhen(ms: number): string {
-  return new Date(ms).toLocaleString(undefined, {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+import type { TestState } from '@/lib/training/types';
 
 /** Time left on a clock: `mm:ss`, or `h:mm:ss` from an hour. */
 export function fmtRemaining(ms: number): string {
@@ -22,19 +11,16 @@ export function fmtRemaining(ms: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-export function minutesOf(ms: number): number {
-  return Math.round(ms / 60_000);
-}
+export { minutesOf } from '@/lib/training/modules';
 
-export const STATE_LABEL: Record<PartState, string> = {
-  scheduled: 'Not open yet',
-  'not-ready': 'Being prepared',
-  open: 'Ready to start',
+export const STATE_LABEL: Record<TestState, string> = {
+  locked: 'Locked',
+  open: 'Open',
   'in-progress': 'In progress',
   submitted: 'Submitted',
   'timed-out': 'Time ran out',
   missed: 'Missed',
 };
 
-/** A state after which nothing more can be done on the part. */
-export const TERMINAL: ReadonlySet<PartState> = new Set(['submitted', 'timed-out', 'missed']);
+/** A state after which nothing more can be done on the test. */
+export const TERMINAL: ReadonlySet<TestState> = new Set(['submitted', 'timed-out', 'missed']);

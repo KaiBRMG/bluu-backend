@@ -359,11 +359,16 @@ service cloud.firestore {
 
     // 21a. Training (public /training for prospective staff)
     // Candidates are neither employees nor creators and hold no Firebase Auth
-    // account, so there is no client path to any of this. Sessions, per-person
-    // attempts (with Storage paths), emailed sign-in codes and rate counters are
-    // all written and read only by the Admin SDK behind /api/training* (cookie)
-    // and /api/admin/training* (the 'training' page permission).
-    match /training-sessions/{sessionId} {
+    // account, so there is no client path to any of this. Modules (the on/off
+    // switch and which test is open), the Google Drive materials manifest,
+    // per-person attempts (with Storage paths and Drive ids), emailed sign-in
+    // codes and rate counters are all written and read only by the Admin SDK
+    // behind /api/training* (cookie) and /api/admin/training* (the 'training'
+    // page permission).
+    match /training-modules/{moduleId} {
+      allow read, write: if false;
+    }
+    match /training-materials/{key} {
       allow read, write: if false;
     }
     match /training-participants/{participantId} {

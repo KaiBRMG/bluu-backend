@@ -43,7 +43,25 @@ const SIGNED_WRITE_TTL_MS = 15 * 60 * 1000;
 const SIGNED_READ_TTL_MS = 60 * 60 * 1000;
 
 /** A pending upload whose finalise call never arrived is garbage after this. */
-const PENDING_UPLOAD_TTL_MS = 60 * 60 * 1000;
+/**
+ * Long, because an upload is not instantaneous: a recording of up to two
+ * gigabytes on a slow connection is hours, and the daily sweep reaping the
+ * reservation (and its half-written object) while the bytes are still moving
+ * would fail the finalise and cost the take. The sweep only runs once a day, so
+ * a generous window costs nothing but the lifetime of a genuinely abandoned
+ * reservation.
+ */
+const PENDING_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How long a recording's POSTER slot stays writable. The video's own slot only
+ * has to be valid at the moment the resumable session is opened (the session
+ * has its own lifetime after that), but a shell older than this change uploads
+ * the poster AFTER the video — so on a long upload a 15-minute signature
+ * expired first and the recording lost its thumbnail and link preview. The slot
+ * is pinned to one unguessable path and one content type.
+ */
+const POSTER_WRITE_TTL_MS = 6 * 60 * 60 * 1000;
 
 /**
  * The hard ceiling on one user's library, enforced when a slot is reserved. The
@@ -351,11 +369,11 @@ export async function createSnipUploadSlot(
   });
 
   const bucket = adminStorage.bucket();
-  const sign = (path: string, type: string) =>
+  const sign = (path: string, type: string, ttlMs = SIGNED_WRITE_TTL_MS) =>
     bucket.file(path).getSignedUrl({
       version: 'v4',
       action: 'write',
-      expires: Date.now() + SIGNED_WRITE_TTL_MS,
+      expires: Date.now() + ttlMs,
       contentType: type,
     });
 
@@ -394,7 +412,7 @@ export async function createSnipUploadSlot(
   // breath as the first.
   const [[uploadUrl], poster] = await Promise.all([
     video ? signResumable(storagePath, contentType) : sign(storagePath, contentType),
-    posterPath ? sign(posterPath, SNIP_CONTENT_TYPE) : Promise.resolve(null),
+    posterPath ? sign(posterPath, SNIP_CONTENT_TYPE, POSTER_WRITE_TTL_MS) : Promise.resolve(null),
   ]);
 
   return {
@@ -450,7 +468,16 @@ export async function finalizeSnip(
   // Ownership, not just existence: the id is unguessable, but a route that
   // finalises whatever id it is handed is still a route that writes another
   // user's row.
-  if (!data || data.ownerUid !== uid || data.status !== 'pending') return null;
+  if (!data || data.ownerUid !== uid) return null;
+  // **Idempotent for the owner.** A long recording is finalised minutes after
+  // its bytes landed, over a connection that may drop the RESPONSE of a request
+  // the server fully handled; the retry would otherwise be refused as "not
+  // pending" and the client — believing the save failed — would upload the
+  // whole file again. Returning the existing row makes the retry a no-op.
+  if (data.status === 'ready') {
+    return await toSnipRow(snap as FirebaseFirestore.QueryDocumentSnapshot);
+  }
+  if (data.status !== 'pending') return null;
 
   // The kind is read off the RESERVATION, never off the request body. The slot
   // was signed for one content type and one path from that decision; letting the

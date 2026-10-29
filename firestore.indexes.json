@@ -2549,8 +2549,23 @@
       "indexes": []
     },
     {
-      "collectionGroup": "training-sessions",
-      "fieldPath": "parts",
+      "collectionGroup": "training-modules",
+      "fieldPath": "tests",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "training-materials",
+      "fieldPath": "files",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "training-materials",
+      "fieldPath": "pending",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "training-candidates",
+      "fieldPath": "driveFolders",
       "indexes": []
     }
   ]

@@ -1306,8 +1306,17 @@ const SNIP_FRAME_PX = 3;
  * enforcement — which is what makes a drift between the copies a cosmetic bug
  * rather than a hole. Keep them in step anyway.
  */
-const SNIP_MAX_RECORDING_MS = 10 * 60 * 1000;
+const SNIP_MAX_RECORDING_MS = 60 * 60 * 1000;
 const SNIP_RECORDING_WARN_MS = 60 * 1000;
+
+/**
+ * Free space required to START a recording. Deliberately modest: it is a floor
+ * against beginning a take on a disk that cannot hold even a short one, not an
+ * estimate of the worst case (an hour is ~1.8 GB). A disk that fills later
+ * costs the rest of the take, never the part already written — see the write
+ * stream's `error` handler.
+ */
+const SNIP_MIN_FREE_BYTES = 512 * 1024 * 1024;
 
 /**
  * Whether the platform can hand us the desktop's own audio output.
@@ -2012,7 +2021,7 @@ const snipQueue = new Map();
 const SNIP_QUEUE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 /** Total queue size before the oldest entries are dropped regardless of age. */
-const SNIP_QUEUE_MAX_BYTES = 4 * 1024 * 1024 * 1024;
+const SNIP_QUEUE_MAX_BYTES = 8 * 1024 * 1024 * 1024;
 
 function writeSnipQueueMeta(token, patch) {
   const current = snipQueue.get(token) || {};
@@ -2394,6 +2403,18 @@ async function startSnipRecording({ display, rect, audio }) {
   // several hundred milliseconds of head start.
   sendTo(mainWindow, 'snip:rec-started', {});
 
+  // Refuse up front on a disk with no room, while nothing has been captured
+  // and the user loses nothing. `statfs` is advisory: if it is unavailable the
+  // recording starts and the write stream's own error handling applies.
+  try {
+    const fsStats = await fsp.statfs(ensureSnipQueueDir());
+    if (fsStats.bavail * fsStats.bsize < SNIP_MIN_FREE_BYTES) {
+      console.error('[snip] not enough free disk space to start a recording');
+      sendTo(mainWindow, 'snip:failed', { reason: 'storage' });
+      return;
+    }
+  } catch { /* advisory */ }
+
   const id = crypto.randomBytes(12).toString('hex');
   // Straight into the durable queue, not a temp file that is moved on success.
   // A crash mid-recording then leaves a playable partial rather than nothing.
@@ -2407,10 +2428,27 @@ async function startSnipRecording({ display, rect, audio }) {
     // The recording is lost either way; the app must not be.
     stream.on('error', (err) => {
       console.error('[snip] writing the recording failed:', err.message);
-      if (snipRecording && snipRecording.stream === stream) {
-        clearSnipRecording();
-        sendTo(mainWindow, 'snip:failed', { reason: 'storage' });
+      const rec = snipRecording;
+      if (!rec || rec.stream !== stream) return;
+      // Already handled once; a repeat must never fall through to the discard
+      // below, which would throw away the take this branch exists to keep.
+      if (rec.writeFailed) return;
+      if (rec.bytes > 0) {
+        // **Stop and keep, as the time limit does.** A disk that fills at
+        // minute fifty of an hour-long take must not throw away the fifty
+        // minutes already on it. Further chunks are dropped, the recorder is
+        // told to finish, and the file as it stands goes through the normal
+        // path (a cut-off tail is something the remux already handles).
+        rec.writeFailed = true;
+        if (rec.window && !rec.window.isDestroyed()) {
+          rec.window.webContents
+            .executeJavaScript('window.__snipStop && window.__snipStop("storage")')
+            .catch(() => { /* the window is going away; `rec-done` is not coming */ });
+        }
+        return;
       }
+      clearSnipRecording();
+      sendTo(mainWindow, 'snip:failed', { reason: 'storage' });
     });
   } catch (err) {
     console.error('[snip] could not open a temp file for the recording:', err.message);
@@ -2495,6 +2533,13 @@ async function startSnipRecording({ display, rect, audio }) {
     audio,
     barCompact,
     settled: false,
+    writeFailed: false,
+    // Held for the life of the take. Time tracking owns its own blocker and
+    // only holds it while clocked in; a recording made clocked-out would
+    // otherwise let the display sleep (or the screensaver start) mid-take and
+    // record a black screen for the rest of an hour. Released in
+    // `clearSnipRecording`, which every exit path runs.
+    powerBlockerId: powerSaveBlocker.start('prevent-display-sleep'),
   };
 
   win.once('ready-to-show', () => {
@@ -2572,6 +2617,9 @@ function clearSnipRecording(keepFile = false) {
   if (!recording) return;
 
   recording.settled = true;
+  if (recording.powerBlockerId != null && powerSaveBlocker.isStarted(recording.powerBlockerId)) {
+    powerSaveBlocker.stop(recording.powerBlockerId);
+  }
   // Guarded, not try/caught. A second `end()` on an already-ended stream emits
   // an asynchronous `error` — which a try/catch here would NOT see, and an
   // unhandled stream error takes the main process down. `snip:rec-done` ends
@@ -2599,7 +2647,7 @@ function recordingFrom(event) {
 
 ipcMain.on('snip:rec-chunk', (event, buffer) => {
   const recording = recordingFrom(event);
-  if (!recording || recording.settled) return;
+  if (!recording || recording.settled || recording.writeFailed) return;
   const chunk = Buffer.from(buffer);
   recording.bytes += chunk.length;
   recording.stream.write(chunk);
@@ -2662,7 +2710,7 @@ ipcMain.on('snip:rec-done', (event, summary) => {
   const recording = recordingFrom(event);
   if (!recording || recording.settled) return;
 
-  const { poster, bytes, id } = recording;
+  const { poster, id } = recording;
   const durationMs = Math.max(0, Math.round(Number(summary && summary.durationMs) || 0));
   const width = Math.max(1, Math.round(Number(summary && summary.width) || 0));
   const height = Math.max(1, Math.round(Number(summary && summary.height) || 0));
@@ -2673,7 +2721,11 @@ ipcMain.on('snip:rec-done', (event, summary) => {
   // cut and then stops, which is the kind of corruption nobody notices until
   // the recipient does.
   recording.settled = true;
-  recording.stream.end(async () => {
+  const finalize = async () => {
+    // The file's real size, not the count of chunks we tried to write: after a
+    // write failure the two differ, and the file is the thing that uploads.
+    let bytes = 0;
+    try { bytes = fs.statSync(snipQueuePaths(id).video).size; } catch { /* never created */ }
     if (bytes <= 0) {
       console.error('[snip] the recording produced no data');
       sendTo(mainWindow, 'snip:failed', { reason: 'empty-recording' });
@@ -2736,7 +2788,18 @@ ipcMain.on('snip:rec-done', (event, summary) => {
       bytes: finalBytes,
       hasPoster: !!poster && fs.existsSync(snipQueuePaths(id).poster),
     });
-  });
+  };
+  // A stream that already failed will not call `end`'s callback reliably, and
+  // waiting on it would strand the recording; its file is already as flushed
+  // as it will ever be.
+  const settle = () => {
+    finalize().catch((err) => {
+      console.error('[snip] finishing the recording failed:', err.message);
+      sendTo(mainWindow, 'snip:failed', { reason: 'unknown' });
+    });
+  };
+  if (recording.writeFailed || recording.stream.destroyed) settle();
+  else recording.stream.end(settle);
 
   clearSnipRecording(true);
 });
@@ -2861,6 +2924,15 @@ function isRetryableUploadFailure(status) {
 const SNIP_UPLOAD_MAX_ATTEMPTS = 5;
 /** 8 MiB. Must be a multiple of 256 KiB — GCS rejects a chunk that is not. */
 const SNIP_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
+/**
+ * Above this the chunk grows to 32 MiB (still a multiple of 256 KiB). With 8 MiB
+ * chunks a 2 GB file is ~250 sequential round trips, each paying a full RTT on
+ * top of its transfer time. A failed chunk loses at most one chunk's worth, so
+ * the larger size only changes the retry granularity for files where the
+ * round trips were the bigger cost.
+ */
+const SNIP_UPLOAD_LARGE_FILE_BYTES = 256 * 1024 * 1024;
+const SNIP_UPLOAD_LARGE_CHUNK_BYTES = 32 * 1024 * 1024;
 
 const snipBackoffMs = (attempt) =>
   Math.min(30_000, 1000 * 2 ** attempt) + Math.floor(Math.random() * 500);
@@ -2939,9 +3011,11 @@ async function uploadRecordingResumable(uploadUrl, filePath, totalBytes, onProgr
 
   let offset = 0;
   let attempt = 0;
+  const chunkBytes =
+    totalBytes > SNIP_UPLOAD_LARGE_FILE_BYTES ? SNIP_UPLOAD_LARGE_CHUNK_BYTES : SNIP_UPLOAD_CHUNK_BYTES;
 
   while (offset < totalBytes) {
-    const end = Math.min(offset + SNIP_UPLOAD_CHUNK_BYTES, totalBytes) - 1;
+    const end = Math.min(offset + chunkBytes, totalBytes) - 1;
     const result = await snipRequest({
       url: sessionUri,
       method: 'PUT',
@@ -3039,6 +3113,26 @@ ipcMain.handle('snip:uploadRecording', async (event, options = {}) => {
     lastError: null,
   });
 
+  // **The poster goes first.** It is a few tens of kilobytes and its signed slot
+  // is short-lived; sent after the video, a long upload outlives the signature
+  // and every long recording quietly loses its thumbnail and its link preview.
+  // Best-effort: its failure must not fail the upload, since a recording with no
+  // thumbnail renders a placeholder where a failed recording is work to redo.
+  let posterUploaded = false;
+  if (options.posterUploadUrl && entry.hasPoster) {
+    try {
+      const poster = await putSmallFile(
+        options.posterUploadUrl,
+        'image/png',
+        fs.readFileSync(paths.poster),
+      );
+      posterUploaded = poster.success;
+      if (!poster.success) console.warn('[snip] poster upload failed:', poster.error);
+    } catch (err) {
+      console.warn('[snip] poster could not be read:', err.message);
+    }
+  }
+
   const result = options.resumable === false
     ? await putSmallFile(options.uploadUrl, 'video/webm', fs.readFileSync(paths.video))
     : await uploadRecordingResumable(options.uploadUrl, paths.video, totalBytes, (sent, total) => {
@@ -3056,22 +3150,18 @@ ipcMain.handle('snip:uploadRecording', async (event, options = {}) => {
     return { success: false, error: result.error, retryable: result.retryable !== false };
   }
 
-  // The poster is best-effort and its failure must not fail the upload: a
-  // recording with no thumbnail is a row the grid renders a placeholder for,
-  // where a failed recording is work the user has to redo.
-  let posterUploaded = false;
-  if (options.posterUploadUrl && entry.hasPoster) {
-    try {
-      const poster = await putSmallFile(
-        options.posterUploadUrl,
-        'image/png',
-        fs.readFileSync(paths.poster),
-      );
-      posterUploaded = poster.success;
-      if (!poster.success) console.warn('[snip] poster upload failed:', poster.error);
-    } catch (err) {
-      console.warn('[snip] poster could not be read:', err.message);
-    }
+  if (options.keepUntilFinalized === true) {
+    // **The renderer finalises next, and finalising can fail** — most likely on
+    // a long upload, where the sign-in token it holds has aged out while the
+    // bytes were moving. Deleting the only local copy now would make that
+    // failure unrecoverable, so a renderer that asks keeps the file until its
+    // finalise has succeeded and then calls `discardRecording` itself. State
+    // returns to `pending`: if finalising never succeeds, the next drain
+    // uploads it again (a fresh slot, as every retry gets) rather than
+    // stranding it. A renderer that does not send the flag — any older page
+    // bundle — gets exactly the previous behaviour.
+    writeSnipQueueMeta(token, { state: 'pending', lastError: null });
+    return { success: true, posterUploaded };
   }
 
   // Only now are the local bytes redundant \u2014 they are in the bucket.

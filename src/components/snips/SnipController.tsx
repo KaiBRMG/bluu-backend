@@ -52,6 +52,14 @@ function isMac(): boolean {
   return typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent);
 }
 
+/**
+ * A current sign-in token for the finalise step of a recording upload. The
+ * Firebase SDK returns the cached token while it is valid and refreshes it on
+ * its own near expiry; `forceRefresh` is for answering a 401.
+ */
+const freshToken = (forceRefresh?: boolean) =>
+  auth.currentUser?.getIdToken(forceRefresh === true) ?? Promise.resolve(undefined);
+
 export default function SnipController() {
   const { userData } = useUserData();
   const router = useRouter();
@@ -327,7 +335,7 @@ export default function SnipController() {
         const idToken = await auth.currentUser?.getIdToken();
         if (!idToken) throw new Error('Session expired — sign in again.');
 
-        await announce(await uploadSnipRecording(idToken, recording), toastId);
+        await announce(await uploadSnipRecording(idToken, recording, freshToken), toastId);
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'The recording could not be saved';
@@ -390,7 +398,7 @@ export default function SnipController() {
         try {
           const idToken = await auth.currentUser?.getIdToken();
           if (!idToken) return;
-          const snip = await uploadSnipRecording(idToken, item);
+          const snip = await uploadSnipRecording(idToken, item, freshToken);
           // The automatic pass is genuinely quiet: no clipboard write, no
           // toast, just the OS notification. It used to open a loading toast
           // here and fall through to a full announce, which took the user's

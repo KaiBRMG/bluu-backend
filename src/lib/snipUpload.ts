@@ -226,6 +226,14 @@ export async function uploadSnipRecording(
     bytes: number;
     hasPoster: boolean;
   },
+  /**
+   * A way to get a current sign-in token. The `idToken` above was fetched
+   * before the upload began; a long recording can take longer than the hour a
+   * token lives, so finalising with it would be refused AFTER every byte had
+   * been moved. Optional so the signature stays compatible; without it the
+   * original token is all there is.
+   */
+  getFreshToken?: (forceRefresh?: boolean) => Promise<string | undefined>,
 ): Promise<SnipRow> {
   const api = window.electronAPI?.snip;
   if (!api?.uploadRecording) {
@@ -264,6 +272,10 @@ export async function uploadSnipRecording(
     // Only offered when there is a poster to send. A slot signed and never
     // used is swept with the reservation, so an absent poster costs nothing.
     ...(recording.hasPoster && posterUploadUrl ? { posterUploadUrl } : {}),
+    // Finalising is the step that can still fail after the bytes are in the
+    // bucket; until it succeeds the local file is the only copy. A shell that
+    // predates the flag ignores it and deletes on success, as before.
+    keepUntilFinalized: true,
   });
   if (!put.success) {
     // **Deliberately does not discard.** The recording is still in main's
@@ -274,22 +286,70 @@ export async function uploadSnipRecording(
     throw new Error(put.error || 'The recording could not be uploaded');
   }
 
-  const finalRes = await fetch('/api/snips', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const finalRes = await finalizeWithRetry(
+    idToken,
+    getFreshToken,
+    JSON.stringify({
       id,
       width: recording.width,
       height: recording.height,
       durationMs: recording.durationMs,
     }),
-  });
+  );
   if (!finalRes.ok) {
+    // The file is deliberately still queued (`keepUntilFinalized`): the next
+    // retry uploads it again rather than the user losing the take.
     throw new Error(await errorMessage(finalRes, 'The recording could not be saved'));
   }
 
   const { snip } = (await finalRes.json()) as { snip: SnipRow };
+  // Saved — only now is the local copy redundant. Best-effort: if this call is
+  // lost the recording uploads once more on the next drain, which costs a
+  // duplicate link, never the recording.
+  await Promise.resolve(api.discardRecording?.(recording.token)).catch(() => {});
   return snip;
+}
+
+/**
+ * `POST /api/snips` for a recording, which can be seconds-to-minutes after the
+ * token it would have used was minted.
+ *
+ * Retries only what a retry can change: a network failure, a 5xx, and a 401
+ * (answered with a forced token refresh). Every other 4xx is the server's final
+ * word — and finalising is idempotent for the owner, so a retry after a
+ * response that was lost in transit returns the snip instead of an error.
+ */
+async function finalizeWithRetry(
+  initialToken: string,
+  getFreshToken: ((forceRefresh?: boolean) => Promise<string | undefined>) | undefined,
+  body: string,
+): Promise<Response> {
+  const delays = [0, 1000, 3000, 8000];
+  let token = (await getFreshToken?.()) ?? initialToken;
+  let last: Response | null = null;
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    if (delays[attempt]) await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+    try {
+      const res = await fetch('/api/snips', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body,
+      });
+      if (res.ok) return res;
+      last = res;
+      if (res.status === 401 && getFreshToken) {
+        token = (await getFreshToken(true)) ?? token;
+        continue;
+      }
+      if (res.status < 500 && res.status !== 408 && res.status !== 429) return res;
+    } catch (error) {
+      // Offline or a dropped connection: retry, and surface the failure only
+      // if every attempt is spent.
+      if (attempt === delays.length - 1) throw error;
+    }
+  }
+  if (last) return last;
+  throw new Error('The recording could not be saved');
 }
 
 /**

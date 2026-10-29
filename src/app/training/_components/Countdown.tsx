@@ -113,34 +113,3 @@ export function Countdown({ deadlineMs, durationMs, now, onExpire, children, cla
     </section>
   );
 }
-
-/** "Opens in 2h 14m" — ticks once a second, calls `onOpen` at zero. */
-export function OpensIn({ opensAtMs, now, onOpen }: { opensAtMs: number; now: () => number; onOpen: () => void }) {
-  const [left, setLeft] = useState(() => opensAtMs - now());
-  const opened = useEffectEvent(onOpen);
-  const fired = useRef(false);
-
-  useEffect(() => {
-    const tick = () => {
-      const remaining = opensAtMs - now();
-      setLeft(remaining);
-      if (remaining <= 0 && !fired.current) {
-        fired.current = true;
-        opened();
-      }
-    };
-    tick();
-    const id = window.setInterval(tick, 1000);
-    return () => window.clearInterval(id);
-  }, [opensAtMs, now]);
-
-  const total = Math.max(0, Math.ceil(left / 1000));
-  const d = Math.floor(total / 86400);
-  const h = Math.floor((total % 86400) / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const text =
-    d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${m}m ${String(s).padStart(2, '0')}s` : `${m}m ${String(s).padStart(2, '0')}s`;
-
-  return <span className="tabular-nums">{text}</span>;
-}

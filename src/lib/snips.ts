@@ -388,22 +388,26 @@ export const MAX_SNIP_BYTES = 25 * 1024 * 1024;
 /**
  * The ceiling on one recording.
  *
- * Ten minutes at the recorder's own bitrate ceiling (5 Mbps video + 128 kbps
- * audio) is ~385 MB, so this is the number the duration cap is derived from
- * rather than an independent guess — raise one and the other has to move.
+ * Derived from the duration cap, not guessed — raise one and the other has to
+ * move. The recorder's video target is `pixels × 30 × 0.05` with the output
+ * area capped at ~2.5 MP, so it can never exceed ~3.9 Mbps (the 5 Mbps clamp in
+ * the recorder is a ceiling nothing reaches); with 128 kbps audio an hour is
+ * ~1.8 GB. Measured recordings average ~1.1 Mbps and peak at ~3.4, so this has
+ * headroom without being open-ended. It must also stay under 4 GiB: the seek
+ * index stores cluster offsets as 32-bit integers.
  */
-export const MAX_SNIP_VIDEO_BYTES = 400 * 1024 * 1024;
+export const MAX_SNIP_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
 
 /**
  * The hard stop on a recording, enforced in the recorder window itself.
  *
  * A cap is not optional here: the surfaces come down the moment recording
  * starts, so a user who forgets the control bar is on screen would otherwise
- * fill their disk and their quota with a recording nobody asked to keep. At ten
- * minutes the recorder stops itself and uploads what it has — stopping and
+ * fill their disk and their quota with a recording nobody asked to keep. At the
+ * limit the recorder stops itself and uploads what it has — stopping and
  * keeping is always better than stopping and discarding.
  */
-export const MAX_SNIP_RECORDING_MS = 10 * 60 * 1000;
+export const MAX_SNIP_RECORDING_MS = 60 * 60 * 1000;
 
 /** How long before the cap the control bar starts warning. */
 export const SNIP_RECORDING_WARN_MS = 60 * 1000;
@@ -429,7 +433,8 @@ export function formatSnipDuration(ms: number): string {
 export function formatSnipBytes(bytes: number): string {
   if (bytes <= 0) return '—';
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 // ─── Retention ───────────────────────────────────────────────────────

@@ -24,7 +24,7 @@ export default function AddPeopleDialog({ onAdd }: { onAdd: (emails: string) => 
     setError('');
     try {
       const added = await onAdd(emails);
-      toast.success(added === 0 ? 'Everyone was already on the session' : `Added ${added} ${added === 1 ? 'person' : 'people'}`);
+      toast.success(added === 0 ? 'Everyone was already on the module' : `Added ${added} ${added === 1 ? 'person' : 'people'}`);
       setEmails('');
       setOpen(false);
     } catch (err) {
@@ -46,7 +46,7 @@ export default function AddPeopleDialog({ onAdd }: { onAdd: (emails: string) => 
         <form onSubmit={submit} className="flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Add people</DialogTitle>
-            <DialogDescription>They can sign in to the training link straight away.</DialogDescription>
+            <DialogDescription>They can sign in to the training link whenever the module is on.</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-1">
             <Label htmlFor="ap-emails" className="text-xs text-zinc-400">
