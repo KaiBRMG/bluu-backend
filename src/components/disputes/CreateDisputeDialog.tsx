@@ -43,7 +43,7 @@ import { CreatorCombobox } from '@/components/buddyx/CreatorCombobox';
 import { CreatorChip } from '@/components/creators/CreatorChip';
 import { AttrChip, BasisTag, FanLabel, InfoTip, LEDGER_PPV_ATTRIBUTION, LEDGER_TIPS_ATTRIBUTION } from '@/components/buddyx/buddyxUi';
 import { PersonTag } from './disputeUi';
-import { formatSaleDateTime, formatUsd, pluralise } from '@/lib/salary/salaryFormat';
+import { formatSaleDateTime, formatUsd, formatZoneOffset, pluralise } from '@/lib/salary/salaryFormat';
 import { saleTypeLabel } from '@/lib/salary/saleTypes';
 import { MAX_DISPUTE_SALES } from '@/lib/disputes/disputeRules';
 import { cn } from '@/lib/utils';
@@ -112,6 +112,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
       ? rows.filter(r => (!fanNeedle || r.fanId === fanNeedle) && (kind === 'all' || r.kind === kind))
       : rows;
 
+  const zoneLabel = formatZoneOffset(Date.now(), timezone);
   const windowError = from && to && to < from ? 'The end is before the start.' : null;
 
   // ── Search ── (by creator and window only; the fan and kind filters are
@@ -126,7 +127,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
       setSearching(true);
       setSearchError(null);
       try {
-        const params = new URLSearchParams({ creatorId, from: dayKey(from), to: dayKey(to) });
+        const params = new URLSearchParams({ creatorId, from: dayKey(from), to: dayKey(to), timezone });
         const body = await authFetch(`/api/ca-sales/search?${params}`);
         if (!cancelled) {
           setRows(body.rows ?? []);
@@ -141,7 +142,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
     return () => {
       cancelled = true;
     };
-  }, [open, user, authFetch, creatorId, from, to, windowError, retryKey]);
+  }, [open, user, authFetch, creatorId, from, to, timezone, windowError, retryKey]);
 
   const toggle = (row: SearchRow, on: boolean) => {
     setPicked(prev => {
@@ -253,7 +254,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
           </div>
         </div>
         <p className={cn('-mt-1 text-[11px]', windowError ? 'text-red-400' : 'text-zinc-400')}>
-          {windowError ?? 'Search any days this month or last. Days are in SAST.'}
+          {windowError ?? `Search any days this month or last. Days and times are in your timezone (${zoneLabel}).`}
         </p>
 
         {/* ── Results ── */}

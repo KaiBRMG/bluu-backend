@@ -1,5 +1,5 @@
 /**
- * GET /api/ca-sales/search?creatorId&from=YYYY-MM-DD&to=YYYY-MM-DD[&fanId]
+ * GET /api/ca-sales/search?creatorId&from=YYYY-MM-DD&to=YYYY-MM-DD[&timezone][&fanId]
  *
  * The sale search behind the New dispute dialog — the one place an agent sees
  * sales that are not their own, so it is deliberately narrow (D6):
@@ -14,6 +14,11 @@
  * - **No totals.** Each row names its holder (so the agent knows whom they are
  *   claiming from), but nothing sums a colleague's month.
  * - The caller's own sales and removed rows are left out.
+ * - **The days are the caller's own** (`timezone`, an IANA zone; SAST when
+ *   absent or invalid), so the window matches the local times the dialog shows.
+ *   This is a *search* window only — pay still buckets on the SAST day. The
+ *   window is clamped to the start of the oldest open SAST month, so a zone ahead
+ *   of UTC+2 can never reach into a month that is already payroll history.
  *
  * `ca-dashboard` page access — the same tier that may file. Served by the
  * `creatorId ASC, kind ASC, occurredAt ASC` composite index — `kind in
@@ -26,8 +31,9 @@ import { Timestamp } from 'firebase-admin/firestore';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { checkPageAccess, handleApiError } from '@/lib/middleware/apiHelpers';
 import { adminDb } from '@/lib/firebase-admin';
-import { addMonths, currentMonthKey, dayKeyRange, isDayKey } from '@/lib/salary/salaryDate';
-import { SALES_CUTOVER_AT } from '@/lib/salary/salaryConstants';
+import { addDays, addMonths, currentMonthKey, isDayKey, monthKeyRange } from '@/lib/salary/salaryDate';
+import { SALARY_TIMEZONE, SALES_CUTOVER_AT } from '@/lib/salary/salaryConstants';
+import { getDayBoundsUTC, safeTimezone } from '@/lib/utils/timezone';
 import { getFinalizedMonthsFor } from '@/lib/services/caSalaryService';
 import { displayNamesFor } from '@/lib/services/userService';
 import type { CaSaleDocument } from '@/types/firestore';
@@ -66,15 +72,19 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     if (!isDayKey(from) || !isDayKey(to) || from > to) {
       return NextResponse.json({ error: 'from and to must be days, from ≤ to.' }, { status: 400 });
     }
-    const [start] = dayKeyRange(from);
-    const [, end] = dayKeyRange(to);
+    // The caller's days; an unset or unknown zone reads as the salary clock, which
+    // is what this endpoint spoke before it took a zone.
+    const requestedZone = searchParams.get('timezone');
+    const timezone = requestedZone ? safeTimezone(requestedZone) : SALARY_TIMEZONE;
+    const start = getDayBoundsUTC(from, timezone).start;
+    const end = getDayBoundsUTC(addDays(to, 1), timezone).start;
 
     // Open months only: this month and last. Anything older is payroll history.
     const oldest = addMonths(currentMonthKey(), -1);
     if (from.slice(0, 7) < oldest) {
       return NextResponse.json({ error: 'Only the current and previous month can be disputed.' }, { status: 400 });
     }
-    const queryStart = Math.max(start, SALES_CUTOVER_AT + 1);
+    const queryStart = Math.max(start, monthKeyRange(oldest)[0], SALES_CUTOVER_AT + 1);
     if (queryStart >= end) {
       return NextResponse.json({ rows: [], truncated: false }, { headers: { 'Cache-Control': 'private, max-age=30', Vary: 'Authorization' } });
     }
