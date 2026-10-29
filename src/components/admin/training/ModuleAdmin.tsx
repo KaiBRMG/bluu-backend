@@ -27,6 +27,7 @@ import type { AdminParticipant } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
 import AddPeopleDialog from './AddPeopleDialog';
 import CandidateSheet from './CandidateSheet';
+import RefreshButton from './RefreshButton';
 import Roster from './Roster';
 import TestsStrip from './TestsStrip';
 
@@ -40,7 +41,7 @@ const TRAINING_URL = `${PUBLIC_APP_ORIGIN}/training`;
 export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }) {
   const { timezone } = useViewerTimezone();
   const mod = TRAINING_MODULES[moduleId];
-  const { detail, skewMs, error, preparing, refetch, setOn, check, openTest, closeTest, reopen, addPeople, revoke, retryMirror, loadSubmission } =
+  const { detail, skewMs, error, preparing, refreshing, refetch, refresh, setOn, check, openTest, closeTest, reopen, addPeople, revoke, retryMirror, loadSubmission } =
     useTrainingModule(moduleId);
 
   const [copied, setCopied] = useState(false);
@@ -119,7 +120,8 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
               {detail.module.openTestId ? ` · ${detail.module.openTestId} is open` : ''}
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-4">
+          <div className="flex shrink-0 flex-wrap items-center gap-4">
+            <RefreshButton onClick={refresh} refreshing={refreshing} />
             <Button
               variant="outline"
               size="sm"
@@ -212,6 +214,8 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
         timezone={timezone}
         load={loadSubmission}
         onRetry={retryMirror}
+        refreshing={refreshing}
+        onRefresh={refresh}
         onClose={() => setViewing(null)}
       />
 

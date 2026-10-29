@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { AdminStateBadge } from './AdminStateBadge';
 import RecordingPlayer from './RecordingPlayer';
+import RefreshButton from './RefreshButton';
 import SubmissionSlots from './SubmissionSlots';
 import { TimeLeft } from './TimeLeft';
 import { formatDuration, formatWhen } from './zonedTime';
@@ -24,6 +25,9 @@ interface CandidateSheetProps {
   timezone: string;
   load: (emailHash: string, testId: string) => Promise<AdminSubmissionView>;
   onRetry: (emailHash: string, testId: string) => Promise<number>;
+  /** Re-reads the roster; the sheet re-reads the open work and recording with it. */
+  onRefresh: () => void;
+  refreshing: boolean;
   onClose: () => void;
 }
 
@@ -42,7 +46,9 @@ function attemptFacts(c: AdminAttemptCell, timezone: string): string {
  * is read only when it is opened, and re-read while it is live, so a running
  * test shows its uploads and state as they land.
  */
-export default function CandidateSheet({ moduleId, person, skewMs, timezone, load, onRetry, onClose }: CandidateSheetProps) {
+export default function CandidateSheet({ moduleId, person, skewMs, timezone, load, onRetry, onRefresh, refreshing, onClose }: CandidateSheetProps) {
+  // Bumped by Refresh: the open work and any recording player read again, even when nothing on the roster moved.
+  const [nonce, setNonce] = useState(0);
   const display = person ? (person.name ?? person.email) : '';
   return (
     <Sheet open={!!person} onOpenChange={(open) => !open && onClose()}>
@@ -53,23 +59,41 @@ export default function CandidateSheet({ moduleId, person, skewMs, timezone, loa
               <AvatarFallback style={{ background: getAvatarColor(display), color: '#fff' }}>{getInitials(display)}</AvatarFallback>
             </Avatar>
           )}
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <SheetTitle className="truncate">{display}</SheetTitle>
             <SheetDescription className="truncate">
               {person?.name ? `${person.email} · ` : ''}
               {person && !person.name ? 'Has not signed in yet' : TRAINING_MODULES[moduleId].title}
             </SheetDescription>
           </div>
+          {person && (
+            <RefreshButton
+              className="shrink-0"
+              refreshing={refreshing}
+              onClick={() => {
+                setNonce((n) => n + 1);
+                onRefresh();
+              }}
+            />
+          )}
         </SheetHeader>
         {person && (
-          <Body key={person.emailHash} moduleId={moduleId} person={person} skewMs={skewMs} timezone={timezone} load={load} onRetry={onRetry} />
+          <Body key={person.emailHash} moduleId={moduleId} person={person} skewMs={skewMs} timezone={timezone} load={load} onRetry={onRetry} nonce={nonce} />
         )}
       </SheetContent>
     </Sheet>
   );
 }
 
-function Body({ moduleId, person, skewMs, timezone, load, onRetry }: Omit<CandidateSheetProps, 'onClose' | 'person'> & { person: AdminParticipant }) {
+function Body({
+  moduleId,
+  person,
+  skewMs,
+  timezone,
+  load,
+  onRetry,
+  nonce,
+}: Pick<CandidateSheetProps, 'moduleId' | 'skewMs' | 'timezone' | 'load' | 'onRetry'> & { person: AdminParticipant; nonce: number }) {
   // One player at a time: each one polls while live, and a panel of them would all load video at once.
   const [watching, setWatching] = useState<string | null>(null);
   const tests = TRAINING_MODULES[moduleId].tests.filter((t) => person.tests[t.id]?.startedAtMs != null);
@@ -90,6 +114,7 @@ function Body({ moduleId, person, skewMs, timezone, load, onRetry }: Omit<Candid
           timezone={timezone}
           load={load}
           onRetry={onRetry}
+          nonce={nonce}
           watching={watching === t.id}
           onWatch={() => setWatching((w) => (w === t.id ? null : t.id))}
         />
@@ -107,6 +132,7 @@ function TestWork({
   timezone,
   load,
   onRetry,
+  nonce,
   watching,
   onWatch,
 }: {
@@ -118,6 +144,7 @@ function TestWork({
   timezone: string;
   load: CandidateSheetProps['load'];
   onRetry: CandidateSheetProps['onRetry'];
+  nonce: number;
   watching: boolean;
   onWatch: () => void;
 }) {
@@ -145,7 +172,7 @@ function TestWork({
     return () => {
       cancelled = true;
     };
-  }, [open, stamp, load, person.emailHash, test.id]);
+  }, [open, stamp, nonce, load, person.emailHash, test.id]);
 
   return (
     <section className={cn('rounded-xl p-4', SURFACE)} aria-labelledby={`tw-${test.id}`}>
@@ -226,7 +253,7 @@ function TestWork({
 
       {watching && (
         <div className="mt-3">
-          <RecordingPlayer moduleId={moduleId} emailHash={person.emailHash} testId={test.id} timezone={timezone} testTitle={test.title} />
+          <RecordingPlayer key={nonce} moduleId={moduleId} emailHash={person.emailHash} testId={test.id} timezone={timezone} testTitle={test.title} />
         </div>
       )}
 

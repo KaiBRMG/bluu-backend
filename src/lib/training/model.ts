@@ -87,6 +87,12 @@ export interface AnswerDoc {
   atMs: number;
 }
 
+/** T7: one image's window. It starts at the browser's render ack, or the cap after it was issued. */
+export interface WindowDoc {
+  issuedAtMs: number;
+  startedAtMs?: number;
+}
+
 export interface AttemptDoc {
   /** Short, names the Drive folder: `T1_k3f9x2`. */
   attemptId: string;
@@ -107,6 +113,8 @@ export interface AttemptDoc {
   textUpdatedAtMs: number | null;
   /** T7 — keyed by the image's index in the sequence, as a string. */
   answers?: Record<string, AnswerDoc>;
+  /** T7 — keyed like `answers`. Cleared on a reopen: the new run starts from the first image. */
+  windows?: Record<string, WindowDoc>;
   /** T4 — the identity chosen per slot. */
   datasetChoices?: Record<string, DatasetId>;
   /** The Drive folder holding this attempt's mirror, and its two subfolders. Created under a lease — see the mirror. */

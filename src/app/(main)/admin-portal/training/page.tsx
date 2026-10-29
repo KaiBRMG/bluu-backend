@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import AppLayout from '@/components/AppLayout';
+import RefreshButton from '@/components/admin/training/RefreshButton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -18,14 +19,17 @@ import { cn } from '@/lib/utils';
  * candidate side lives at /training (documentation/training.md).
  */
 export default function AdminTrainingPage() {
-  const { modules, error, refetch } = useTrainingModules();
+  const { modules, error, refreshing, refetch, refresh } = useTrainingModules();
 
   return (
     <AppLayout>
       <div className="max-w-6xl">
-        <div className="mb-6">
-          <h1 className="mb-2 text-2xl font-bold tracking-tight">Training</h1>
-          <p className="text-sm text-zinc-400">Switch a module on, open its tests one at a time, and watch how each person is getting on.</p>
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="mb-2 text-2xl font-bold tracking-tight">Training</h1>
+            <p className="text-sm text-zinc-400">Switch a module on, open its tests one at a time, and watch how each person is getting on.</p>
+          </div>
+          <RefreshButton onClick={refresh} refreshing={refreshing} className="shrink-0" />
         </div>
 
         {error ? (

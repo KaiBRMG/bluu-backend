@@ -849,6 +849,12 @@ export const MIN_NAME_LENGTH = 2;
 
 /** T7: an answer is accepted this long after its window closes (a request in flight at zero). */
 export const SEQUENCE_ANSWER_GRACE_MS = 5_000;
+/**
+ * T7: how long a window waits for the browser to say its image has rendered. The window
+ * starts at that ack — or here, if it never comes — so a slow line costs the candidate
+ * nothing, and a candidate cannot hold an image open to study it for longer than this.
+ */
+export const SEQUENCE_READY_CAP_MS = 8_000;
 export const MAX_ANSWER_LENGTH = 1_000;
 
 /** Whole minutes, for "40 minutes". */

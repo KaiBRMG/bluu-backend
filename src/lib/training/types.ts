@@ -137,8 +137,13 @@ export interface SequenceResponse {
   windowMs: number;
   /** Null once every window has passed. */
   index: number | null;
+  /** Null until the window has started: the browser has confirmed the image rendered, or `startsByMs` passed. */
   windowStartsAtMs: number | null;
   windowEndsAtMs: number | null;
+  /** The latest the window starts, ready or not. Null once every window has passed. */
+  startsByMs: number | null;
+  /** The attempt's clock end as it now stands: it moves out by however long the images took to arrive. */
+  deadlineMs: number | null;
   /** Signed until this window ends (plus a few seconds). */
   imageUrl: string | null;
   /** The draft already saved for the current image. */

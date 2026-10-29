@@ -98,8 +98,14 @@ export async function trainingAdmin<T>(path: string, method = 'GET', body?: unkn
 export function useTrainingModules() {
   const [modules, setModules] = useState<AdminModuleRow[] | null>(null);
   const [error, setError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const refetch = useCallback(() => setRefreshKey((k) => k + 1), []);
+  /** The button: like `refetch`, but `refreshing` is true until the read lands. */
+  const refresh = useCallback(() => {
+    setRefreshing(true);
+    setRefreshKey((k) => k + 1);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,13 +117,16 @@ export function useTrainingModules() {
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load the modules');
+      })
+      .finally(() => {
+        if (!cancelled) setRefreshing(false);
       });
     return () => {
       cancelled = true;
     };
   }, [refreshKey]);
 
-  return { modules, error, refetch };
+  return { modules, error, refreshing, refetch, refresh };
 }
 
 /** The files Open is copying from Drive, shown as `23 / 41`. */
@@ -139,8 +148,14 @@ export function useTrainingModule(moduleId: string) {
   const [skewMs, setSkewMs] = useState(0);
   const [error, setError] = useState('');
   const [preparing, setPreparing] = useState<Preparing | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const refetch = useCallback(() => setRefreshKey((k) => k + 1), []);
+  /** The button: like `refetch`, but `refreshing` is true until the read lands. */
+  const refresh = useCallback(() => {
+    setRefreshing(true);
+    setRefreshKey((k) => k + 1);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -153,6 +168,9 @@ export function useTrainingModule(moduleId: string) {
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load the module');
+      })
+      .finally(() => {
+        if (!cancelled) setRefreshing(false);
       });
     return () => {
       cancelled = true;
@@ -273,7 +291,9 @@ export function useTrainingModule(moduleId: string) {
     skewMs,
     error,
     preparing,
+    refreshing,
     refetch,
+    refresh,
     setOn,
     check,
     openTest,
