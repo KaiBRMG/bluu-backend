@@ -13,7 +13,6 @@ import {
   MAX_WORKING_FILES,
   MAX_WORKING_FILE_BYTES,
   SEQUENCE_ANSWER_GRACE_MS,
-  SEQUENCE_READY_CAP_MS,
   TRAINING_MODULES,
   UPLOAD_GRACE_MS,
   WORKING_GRACE_MS,
@@ -52,6 +51,7 @@ import {
   clockEndMs,
   deriveTestState,
   isRunning,
+  notRunning,
   mirrorStateOf,
   moduleRef,
   isEmailHash,
@@ -65,7 +65,6 @@ import {
   type ParticipantDoc,
   type PendingDoc,
   type SlotDoc,
-  type WindowDoc,
   type WorkingFileDoc,
 } from '@/lib/training/model';
 import {
@@ -74,7 +73,6 @@ import {
   latestSegmentAtMs,
   recordingBase,
   signRead,
-  signReadUntil,
   signWrite,
   submissionBase,
 } from '@/lib/training/storage';
@@ -276,7 +274,7 @@ async function runningAttempt(emailHash: string, moduleId: string, testId: strin
   if (!ctx || !ctx.mod.isOn) throw new TrainingError('Not found', 404);
   const attempt = ctx.participant.attempts?.[testId];
   const now = Date.now();
-  if (!isRunning(attempt, ctx.mod, now)) throw new TrainingError(TIME_UP, 409);
+  if (!isRunning(attempt, ctx.mod, now)) throw notRunning(attempt, TIME_UP);
   return { test, attempt, mod: ctx.mod, now };
 }
 
@@ -352,6 +350,8 @@ export async function startAttempt(emailHash: string, moduleId: string, testId: 
       workingFiles: {},
       text: '',
       textUpdatedAtMs: null,
+      // T7 opens on its first image; Next shows the rest one at a time.
+      ...(test.kind === 'sequence' ? { revealed: 1 } : {}),
     };
     tx.update(pRef, { [`attempts.${testId}`]: attempt });
   });
@@ -409,7 +409,7 @@ export async function requestUpload(
 
     const now = Date.now();
     const attempt = participant.attempts?.[testId];
-    if (!isRunning(attempt, mod, now)) throw new TrainingError(TIME_UP, 409);
+    if (!isRunning(attempt, mod, now)) throw notRunning(attempt, TIME_UP);
     if (slot?.pickIdentity && !attempt.datasetChoices?.[slot.id]) {
       throw new TrainingError('Choose which identity this image uses, then upload it.', 400);
     }
@@ -573,7 +573,7 @@ export async function saveText(emailHash: string, moduleId: string, testId: stri
   const attempt = ctx.participant.attempts?.[testId];
   const now = Date.now();
   if (!attempt || attempt.finishedAtMs || now > clockEndMs(attempt, ctx.mod) + UPLOAD_GRACE_MS) {
-    throw new TrainingError(TIME_UP, 409);
+    throw notRunning(attempt, TIME_UP);
   }
   if (attempt.text === text) return;
   if (attempt.textUpdatedAtMs && now - attempt.textUpdatedAtMs < TEXT_MIN_INTERVAL_MS) {
@@ -607,7 +607,7 @@ export async function setIdentity(
     const slot = test.slots.find((s) => s.id === slotId);
     if (!slot?.pickIdentity || !test.datasets.includes(identity)) throw new TrainingError('Not found', 404);
     const attempt = participant.attempts?.[testId];
-    if (!isRunning(attempt, mod, Date.now())) throw new TrainingError(TIME_UP, 409);
+    if (!isRunning(attempt, mod, Date.now())) throw notRunning(attempt, TIME_UP);
 
     const choices = { ...(attempt.datasetChoices ?? {}) };
     if (choices[slotId] === identity) return choices;
@@ -628,13 +628,12 @@ export async function setIdentity(
 }
 
 /**
- * Ends the test early. Irreversible; leaves whatever was uploaded. A T7 sitting
- * runs its full clock, so for it this only succeeds once the clock has ended. It
- * is also what the room calls when time runs out, which is the cue to write the
- * task record to Drive — there is no cron at the deadline.
+ * Ends the test early. Irreversible; leaves whatever was uploaded (or, on T7,
+ * answered). It is also what the room calls when time runs out, which is the cue
+ * to write the task record to Drive — there is no cron at the deadline.
  */
 export async function finishAttempt(emailHash: string, moduleId: string, testId: string): Promise<void> {
-  const test = requireTest(moduleId, testId);
+  requireTest(moduleId, testId);
   const pRef = participantRef(moduleId, emailHash);
   await adminDb.runTransaction(async (tx) => {
     const [pSnap, mSnap] = await Promise.all([tx.get(pRef), tx.get(moduleRef(moduleId))]);
@@ -644,150 +643,62 @@ export async function finishAttempt(emailHash: string, moduleId: string, testId:
     if (!attempt) throw new TrainingError('This test has not been started.', 409);
     if (attempt.finishedAtMs) return;
     if (Date.now() > clockEndMs(attempt, readModuleDoc(mSnap))) return; // the clock already ended it
-    if (test.kind === 'sequence') throw new TrainingError('This test runs for its full time; it cannot be finished early.', 409);
     tx.update(pRef, { [`attempts.${testId}.finishedAtMs`]: Date.now() });
   });
 }
 
 // ─── T7: the sequence ────────────────────────────────────────────────────────
 
-/** When a window starts: the browser's ack, or the cap after the image was issued if none came. */
-const windowStartMs = (w: WindowDoc) => w.startedAtMs ?? w.issuedAtMs + SEQUENCE_READY_CAP_MS;
-
 /**
- * The window that is current at `now`, and whether it has been issued yet. A window is issued
- * the first time its image is asked for, after the one before it has ended; nothing here is
- * derived from the clock alone, so the time an image takes to arrive is never taken from the candidate.
+ * Every image shown so far, each signed with its saved answer. Nothing past `revealed` is signed or
+ * sent — the candidate cannot look ahead — and everything up to it stays, so they can go back and
+ * change an answer. The order is the Drive file order, the same for every candidate. The test runs on
+ * the attempt's one clock (`count × perImageMs`, set at Start), like every other test.
  */
-function currentWindow(attempt: AttemptDoc, seq: { count: number; windowMs: number }, now: number) {
-  for (let index = 0; index < seq.count; index++) {
-    const w = attempt.windows?.[String(index)];
-    if (!w) return { index, window: null };
-    if (now < windowStartMs(w) + seq.windowMs) return { index, window: w };
-  }
-  return null;
-}
-
-/** The deadline that holds every window from `index` on, if each one starts at `startMs`. */
-const deadlineFrom = (seq: { count: number; windowMs: number }, index: number, startMs: number) =>
-  startMs + (seq.count - index) * seq.windowMs;
-
-/**
- * The ONE image that is current right now. Earlier images are no longer signed
- * and later ones never are — nothing is prefetched, so there is no going back or
- * ahead. The order is the Drive file order, the same for every candidate.
- *
- * The window does not start here. The image is issued, the browser draws it and
- * says so (`markWindowReady`), and the 30 s run from that ack — or from the cap
- * if it never comes. Issuing also moves the attempt's deadline out to hold every
- * window still to come, so the test never ends on a window that is still running.
- */
-export async function getSequence(emailHash: string, moduleId: string, testId: string): Promise<SequenceResponse> {
-  const { test, attempt, now } = await runningAttempt(emailHash, moduleId, testId);
-  const seq = test.sequence;
-  if (!seq) throw new TrainingError('Not found', 404);
-
-  let cursor = currentWindow(attempt, seq, now);
-  let deadlineMs = attempt.deadlineMs;
-  if (cursor && !cursor.window) {
-    const pRef = participantRef(moduleId, emailHash);
-    // Two tabs, or a retry, can ask at once: whichever writes first issues the window, the other reads it.
-    cursor = await adminDb.runTransaction(async (tx) => {
-      const pSnap = await tx.get(pRef);
-      const fresh = (pSnap.data() as ParticipantDoc | undefined)?.attempts?.[testId];
-      if (!fresh) throw new TrainingError('Not found', 404);
-      const at = currentWindow(fresh, seq, now);
-      if (!at || at.window) {
-        deadlineMs = fresh.deadlineMs;
-        return at;
-      }
-      const window: WindowDoc = { issuedAtMs: now };
-      deadlineMs = deadlineFrom(seq, at.index, windowStartMs(window));
-      tx.update(pRef, {
-        [`attempts.${testId}.windows.${at.index}`]: window,
-        [`attempts.${testId}.deadlineMs`]: deadlineMs,
-      });
-      return { index: at.index, window };
-    });
-  }
-
-  if (!cursor?.window) {
-    return {
-      nowMs: now,
-      count: seq.count,
-      windowMs: seq.windowMs,
-      index: null,
-      windowStartsAtMs: null,
-      windowEndsAtMs: null,
-      startsByMs: null,
-      deadlineMs: null,
-      imageUrl: null,
-      answer: '',
-    };
-  }
-
-  const { index, window } = cursor;
-  const file = (await readMaterials(moduleId, test.sources[0].id))[index];
-  if (!file) throw new TrainingError('The images for this test are not ready. Let the team know.', 409);
-  const startsByMs = window.issuedAtMs + SEQUENCE_READY_CAP_MS;
-  // Started once acked, or once the cap has passed with no ack.
-  const startsAtMs = window.startedAtMs ?? (now >= startsByMs ? startsByMs : null);
+async function sequenceView(moduleId: string, test: TestDef, attempt: AttemptDoc, now: number): Promise<SequenceResponse> {
+  const seq = test.sequence!;
+  const files = await readMaterials(moduleId, test.sources[0].id);
+  const revealed = Math.min(attempt.revealed ?? 1, seq.count, files.length);
+  if (files.length < seq.count) throw new TrainingError('The images for this test are not ready. Let the team know.', 409);
   return {
     nowMs: now,
     count: seq.count,
-    windowMs: seq.windowMs,
-    index,
-    windowStartsAtMs: startsAtMs,
-    windowEndsAtMs: startsAtMs === null ? null : startsAtMs + seq.windowMs,
-    startsByMs,
-    deadlineMs,
-    imageUrl: await signReadUntil(file.path, startsByMs + seq.windowMs + SEQUENCE_ANSWER_GRACE_MS),
-    answer: attempt.answers?.[String(index)]?.text ?? '',
+    perImageMs: seq.perImageMs,
+    deadlineMs: attempt.deadlineMs,
+    images: await Promise.all(
+      Array.from({ length: revealed }, async (_, index) => ({
+        index,
+        imageUrl: await signRead(files[index].path),
+        answer: attempt.answers?.[String(index)]?.text ?? '',
+      })),
+    ),
   };
 }
 
-/**
- * The browser says image `index` has rendered: its window starts now (never before it was
- * issued, never later than the cap). The first ack wins, so a retry cannot restart a window.
- * The deadline tightens from "the cap was hit" to the real start, but only while this is the
- * latest window — a late ack for an older one must not pull the deadline back in.
- */
-export async function markWindowReady(
-  emailHash: string,
-  moduleId: string,
-  testId: string,
-  index: number,
-): Promise<{ nowMs: number; windowStartsAtMs: number; windowEndsAtMs: number; deadlineMs: number }> {
-  const test = requireTest(moduleId, testId);
-  const seq = test.sequence;
-  if (!seq || !Number.isInteger(index) || index < 0 || index >= seq.count) throw new TrainingError('Not found', 404);
-  const pRef = participantRef(moduleId, emailHash);
-
-  return adminDb.runTransaction(async (tx) => {
-    const [pSnap, mSnap] = await Promise.all([tx.get(pRef), tx.get(moduleRef(moduleId))]);
-    const { participant, mod } = candidateContext(pSnap, mSnap, moduleId, testId);
-    const attempt = participant.attempts?.[testId];
-    const now = Date.now();
-    if (!isRunning(attempt, mod, now)) throw new TrainingError(TIME_UP, 409);
-    const w = attempt.windows?.[String(index)];
-    if (!w) throw new TrainingError('That image has not been shown', 409);
-
-    let deadlineMs = attempt.deadlineMs;
-    if (w.startedAtMs === undefined) {
-      const startedAtMs = Math.min(now, w.issuedAtMs + SEQUENCE_READY_CAP_MS);
-      const updates: Record<string, unknown> = { [`attempts.${testId}.windows.${index}.startedAtMs`]: startedAtMs };
-      if (!attempt.windows?.[String(index + 1)]) {
-        deadlineMs = deadlineFrom(seq, index, startedAtMs);
-        updates[`attempts.${testId}.deadlineMs`] = deadlineMs;
-      }
-      tx.update(pRef, updates);
-      w.startedAtMs = startedAtMs;
-    }
-    return { nowMs: now, windowStartsAtMs: w.startedAtMs, windowEndsAtMs: w.startedAtMs + seq.windowMs, deadlineMs };
-  });
+export async function getSequence(emailHash: string, moduleId: string, testId: string): Promise<SequenceResponse> {
+  const { test, attempt, now } = await runningAttempt(emailHash, moduleId, testId);
+  if (!test.sequence) throw new TrainingError('Not found', 404);
+  return sequenceView(moduleId, test, attempt, now);
 }
 
-/** An answer for image `index`: accepted only inside that image's window, plus a few seconds for a request in flight. */
+/** Next: show one more image. Idempotent at the end — past the last image it changes nothing. */
+export async function revealNext(emailHash: string, moduleId: string, testId: string): Promise<SequenceResponse> {
+  const pRef = participantRef(moduleId, emailHash);
+  const { test, attempt, now } = await adminDb.runTransaction(async (tx) => {
+    const [pSnap, mSnap] = await Promise.all([tx.get(pRef), tx.get(moduleRef(moduleId))]);
+    const { participant, mod, test: t } = candidateContext(pSnap, mSnap, moduleId, testId);
+    if (!t.sequence) throw new TrainingError('Not found', 404);
+    const a = participant.attempts?.[testId];
+    const at = Date.now();
+    if (!isRunning(a, mod, at)) throw notRunning(a, TIME_UP);
+    const revealed = Math.min((a.revealed ?? 1) + 1, t.sequence.count);
+    if (revealed !== (a.revealed ?? 1)) tx.update(pRef, { [`attempts.${testId}.revealed`]: revealed });
+    return { test: t, attempt: { ...a, revealed }, now: at };
+  });
+  return sequenceView(moduleId, test, attempt, now);
+}
+
+/** An answer for image `index`: any image already shown, until the clock ends (plus a few seconds for a save in flight). */
 export async function saveAnswer(
   emailHash: string,
   moduleId: string,
@@ -804,17 +715,10 @@ export async function saveAnswer(
   if (!ctx || !ctx.mod.isOn) throw new TrainingError('Not found', 404);
   const attempt = ctx.participant.attempts?.[testId];
   if (!attempt) throw new TrainingError('This test has not been started.', 409);
+  if (index >= (attempt.revealed ?? 1)) throw new TrainingError('That image has not been shown yet.', 409);
   const now = Date.now();
-  const w = attempt.windows?.[String(index)];
-  const start = w ? windowStartMs(w) : null;
-  if (
-    start === null ||
-    attempt.finishedAtMs ||
-    now < start ||
-    now > start + seq.windowMs + SEQUENCE_ANSWER_GRACE_MS ||
-    now > clockEndMs(attempt, ctx.mod) + SEQUENCE_ANSWER_GRACE_MS
-  ) {
-    throw new TrainingError('Time is up for this image', 409);
+  if (attempt.finishedAtMs || now > clockEndMs(attempt, ctx.mod) + SEQUENCE_ANSWER_GRACE_MS) {
+    throw notRunning(attempt, TIME_UP);
   }
   await participantRef(moduleId, emailHash).update({
     [`attempts.${testId}.answers.${index}`]: { text, atMs: now },
@@ -846,6 +750,7 @@ function adminCell(now: number, mod: ModuleDoc, test: TestDef, attempt: AttemptD
     deadlineMs: attempt ? clockEndMs(attempt, mod) : null,
     finishedAtMs: attempt?.finishedAtMs ?? null,
     reopenedAtMs: attempt?.reopenedAtMs ?? null,
+    endedByAdminAtMs: attempt?.endedByAdminAtMs ?? null,
     slotsFilled: attempt ? Object.keys(attempt.slots).length : 0,
     slotsTotal: test.slots.length,
     mirror: mirrorStateOf(attempt),
@@ -1079,6 +984,28 @@ export async function revokeParticipant(moduleId: string, emailHash: string): Pr
 }
 
 /**
+ * Ends one candidate's running attempt now — the counterpart of Reopen, for a test that has been
+ * reopened (or simply needs stopping) without switching the whole module off. The clock stops, and
+ * everything already uploaded is kept; an upload already travelling still lands inside its grace.
+ * Their room learns on its next request (410 `attempt-ended`) and closes itself. Reopen undoes it.
+ */
+export async function endAttempt(moduleId: string, emailHash: string, testId: string): Promise<void> {
+  requireTest(moduleId, testId);
+  const pRef = participantRef(moduleId, emailHash);
+  await adminDb.runTransaction(async (tx) => {
+    const [pSnap, mSnap] = await Promise.all([tx.get(pRef), tx.get(moduleRef(moduleId))]);
+    if (!pSnap.exists) throw new TrainingError('Not found', 404);
+    const attempt = (pSnap.data() as ParticipantDoc).attempts?.[testId];
+    const now = Date.now();
+    if (!isRunning(attempt, readModuleDoc(mSnap), now)) throw new TrainingError('That test is not running for them.', 409);
+    tx.update(pRef, {
+      [`attempts.${testId}.finishedAtMs`]: now,
+      [`attempts.${testId}.endedByAdminAtMs`]: now,
+    });
+  });
+}
+
+/**
  * Reopens one candidate's test: the SAME attempt, with its uploads, on a fresh
  * full clock — the escape hatch for a crashed machine. Needs the module on.
  * Refused while a test of theirs is genuinely running (only one runs at a time).
@@ -1112,9 +1039,8 @@ export async function reopenParticipant(moduleId: string, emailHash: string, tes
       reopenedAtMs: now,
       [`attempts.${testId}.deadlineMs`]: now + test.durationMs,
       [`attempts.${testId}.finishedAtMs`]: null,
+      [`attempts.${testId}.endedByAdminAtMs`]: FieldValue.delete(),
       [`attempts.${testId}.reopenedAtMs`]: now,
-      // T7 starts again from the first image; the windows the last run issued do not carry over.
-      [`attempts.${testId}.windows`]: FieldValue.delete(),
       [`attempts.${testId}.uploadAttempts`]: 0,
       [`attempts.${testId}.pending`]: {},
       // The fresh clock is recorded like any other. `segmentSeq` is left alone,

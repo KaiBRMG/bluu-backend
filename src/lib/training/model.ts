@@ -87,18 +87,14 @@ export interface AnswerDoc {
   atMs: number;
 }
 
-/** T7: one image's window. It starts at the browser's render ack, or the cap after it was issued. */
-export interface WindowDoc {
-  issuedAtMs: number;
-  startedAtMs?: number;
-}
-
 export interface AttemptDoc {
   /** Short, names the Drive folder: `T1_k3f9x2`. */
   attemptId: string;
   startedAtMs: number;
   deadlineMs: number;
   finishedAtMs: number | null;
+  /** Set when an admin ended this attempt (it also sets `finishedAtMs`). Cleared by a reopen. */
+  endedByAdminAtMs?: number;
   reopenedAtMs?: number;
   /** Final-image uploads need a fresh recording segment. */
   recording?: boolean;
@@ -113,8 +109,11 @@ export interface AttemptDoc {
   textUpdatedAtMs: number | null;
   /** T7 — keyed by the image's index in the sequence, as a string. */
   answers?: Record<string, AnswerDoc>;
-  /** T7 — keyed like `answers`. Cleared on a reopen: the new run starts from the first image. */
-  windows?: Record<string, WindowDoc>;
+  /**
+   * T7 — how many images have been shown (1 at Start; Next adds one). Images below it can be seen and
+   * answered again; the rest are never signed, so there is no looking ahead. Kept on a reopen.
+   */
+  revealed?: number;
   /** T4 — the identity chosen per slot. */
   datasetChoices?: Record<string, DatasetId>;
   /** The Drive folder holding this attempt's mirror, and its two subfolders. Created under a lease — see the mirror. */
@@ -192,6 +191,21 @@ export function clockEndMs(attempt: AttemptDoc, mod: ModuleDoc): number {
 /** When the attempt stopped or stops: finished early, or the clock — whichever came first. */
 export function attemptEndMs(attempt: AttemptDoc, mod: ModuleDoc): number {
   return attempt.finishedAtMs ?? clockEndMs(attempt, mod);
+}
+
+/** What a candidate reads when the team ended their test — said, not dressed up as "time is up". */
+export const ENDED_BY_TEAM = 'The team has ended this test for you. Everything you uploaded is kept.';
+
+/**
+ * The refusal for work on an attempt that is not running. An attempt an admin ended is 410 with
+ * code `attempt-ended`, so the candidate's room closes itself with the right words — the recorder
+ * asks for upload slots every minute, so an idle room hears it within a minute too. Everything
+ * else is the caller's own time-is-up message, 409.
+ */
+export function notRunning(attempt: AttemptDoc | undefined, timeUp: string): TrainingError {
+  return attempt?.endedByAdminAtMs
+    ? new TrainingError(ENDED_BY_TEAM, 410, 'attempt-ended')
+    : new TrainingError(timeUp, 409);
 }
 
 export function isRunning(attempt: AttemptDoc | undefined, mod: ModuleDoc, now: number): attempt is AttemptDoc {

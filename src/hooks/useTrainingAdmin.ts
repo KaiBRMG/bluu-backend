@@ -245,6 +245,15 @@ export function useTrainingModule(moduleId: string) {
     [base, refetch],
   );
 
+  /** End one candidate's running test now. Reopen undoes it. */
+  const endAttempt = useCallback(
+    async (emailHash: string, testId: string) => {
+      await trainingAdmin(`${base}/participants/${emailHash}/end`, 'POST', { testId });
+      refetch();
+    },
+    [base, refetch],
+  );
+
   const reopen = useCallback(
     async (emailHash: string, testId: string) => {
       await trainingAdmin(`${base}/participants/${emailHash}/reopen`, 'POST', { testId });
@@ -299,6 +308,7 @@ export function useTrainingModule(moduleId: string) {
     openTest,
     closeTest,
     reopen,
+    endAttempt,
     addPeople,
     revoke,
     retryMirror,

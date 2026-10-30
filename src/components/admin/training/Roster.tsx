@@ -1,6 +1,6 @@
 'use client';
 
-import { RotateCcw, UserMinus, UserPlus } from 'lucide-react';
+import { CircleStop, RotateCcw, UserMinus, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { SURFACE } from '@/lib/surfaces';
@@ -21,7 +21,10 @@ function CellNote({ cell, skewMs }: { cell: AdminAttemptCell; skewMs: number }) 
           <TimeLeft deadlineMs={cell.deadlineMs} skewMs={skewMs} /> left{uploaded ? ` · ${uploaded}` : ''}
         </span>
       ) : cell.state === 'submitted' || cell.state === 'timed-out' ? (
-        uploaded && <span>{uploaded}</span>
+        <>
+          {cell.endedByAdminAtMs && <span>Ended by the team</span>}
+          {uploaded && <span>{uploaded}</span>}
+        </>
       ) : null}
       <MirrorMark state={cell.mirror} />
     </span>
@@ -33,6 +36,7 @@ interface RosterProps {
   skewMs: number;
   onView: (person: AdminParticipant) => void;
   onReopen: (person: AdminParticipant, testId: string) => void;
+  onEnd: (person: AdminParticipant, testId: string) => void;
   onRemove: (person: AdminParticipant) => void;
   onRestore: (person: AdminParticipant) => void;
 }
@@ -43,7 +47,7 @@ interface RosterProps {
  * emphasised. Rows keep the order people were added in, so a live re-read never
  * moves a row under the reader.
  */
-export default function Roster({ detail, skewMs, onView, onReopen, onRemove, onRestore }: RosterProps) {
+export default function Roster({ detail, skewMs, onView, onReopen, onEnd, onRemove, onRestore }: RosterProps) {
   const openId = detail.module.openTestId;
   return (
     <div className={cn('overflow-x-auto rounded-xl', SURFACE)}>
@@ -99,6 +103,18 @@ export default function Roster({ detail, skewMs, onView, onReopen, onRemove, onR
                             >
                               <RotateCcw className="size-3.5" />
                               Reopen
+                            </Button>
+                          )}
+                          {!removed && cell.state === 'in-progress' && (
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              className="-ml-2 text-zinc-400 hover:text-red-400"
+                              aria-label={`End ${t.id} for ${display} now`}
+                              onClick={() => onEnd(person, t.id)}
+                            >
+                              <CircleStop className="size-3.5" />
+                              End
                             </Button>
                           )}
                         </div>

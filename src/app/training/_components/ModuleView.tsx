@@ -30,7 +30,7 @@ import {
 import { SCREEN_CHECK_REFRESH_MS } from '@/lib/training/recording';
 import type { ModuleResponse, RecordingSlots, TestResponse, TestSummary } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
-import { api, ApiError, TRAINING_STOPPED, useServerClock } from '../_lib/api';
+import { api, ApiError, TRAINING_STOPPED, useServerClock, type StoppedDetail } from '../_lib/api';
 import { fmtRemaining, minutesOf } from '../_lib/format';
 import { ScreenRecorder, grabCheckFrame, pickRecordingType } from '../_lib/screenCapture';
 import { AZURE, AZURE_EDGE_SOFT, AZURE_INK, DIALOG_PANEL, FOCUS, PANEL } from '../_lib/theme';
@@ -53,7 +53,7 @@ type ModuleData = ModuleResponse;
 
 interface Ended {
   title: string;
-  kind: 'time' | 'finished';
+  kind: 'time' | 'finished' | 'ended';
   filled: number;
   total: number;
   /** The last thing typed (the task record, or T7's final answer) never reached the server. */
@@ -62,6 +62,7 @@ interface Ended {
 
 /** What the end of a test says it saved — said out loud and written on the page, from one place. */
 function endedSummary(e: Ended): string {
+  if (e.kind === 'ended') return 'Everything you uploaded is kept.';
   if (e.total > 0) {
     return `${e.filled} of ${e.total} final images uploaded and saved.${e.unsaved ? ' Your last task-record changes did not reach us.' : ''}`;
   }
@@ -277,7 +278,21 @@ export function ModuleView({ moduleId }: { moduleId: TrainingModuleId }) {
   }, [share]);
 
   // Switched off mid-test: end the room calmly and say so — the work already uploaded is kept.
-  const onStopped = useEffectEvent(() => {
+  // The team ended just this test: close the room, and the module page stays usable.
+  const onStopped = useEffectEvent((e: Event) => {
+    if ((e as CustomEvent<StoppedDetail>).detail?.code === 'attempt-ended') {
+      const t = task && getTest(moduleId, task.test.id);
+      if (t) {
+        const next: Ended = { title: t.title, kind: 'ended', filled: 0, total: 0, unsaved: false };
+        setEnded(next);
+        setAnnounce(`The team has ended ${t.title} for you. Everything you uploaded is kept.`);
+      }
+      setExplainerOpen(false);
+      endRoom();
+      setSelected(null);
+      reload();
+      return;
+    }
     endRoom();
     setStopped(true);
     setMissing(true);
@@ -459,7 +474,11 @@ export function ModuleView({ moduleId }: { moduleId: TrainingModuleId }) {
                 className={`${PANEL} mt-6 rounded-2xl p-5 outline-none sm:p-6`}
               >
                 <h2 id="ended-heading" className="text-xl font-semibold">
-                  {ended.kind === 'time' ? `Time's up on ${ended.title}` : `You finished ${ended.title}`}
+                  {ended.kind === 'time'
+                    ? `Time's up on ${ended.title}`
+                    : ended.kind === 'ended'
+                      ? `The team has ended ${ended.title}`
+                      : `You finished ${ended.title}`}
                 </h2>
                 <p className="mt-2 text-base text-white/85">{endedSummary(ended)}</p>
                 {flushing && (
@@ -684,8 +703,8 @@ function Briefing({
         <li>You have one attempt. The clock starts when you confirm and cannot be paused; refreshing or closing the page does not stop it.</li>
         {test.kind === 'sequence' ? (
           <li>
-            Each image is shown for {(test.sequence!.windowMs / 1000).toFixed(0)} seconds and you cannot go back. Your answer is
-            saved when its time runs out.
+            Allow about {Math.round(test.sequence!.perImageMs / 1000)} seconds per image, then press Next. Answers save as you
+            type, and you can go back to change one — but see every image first. When time runs out the page locks.
           </li>
         ) : (
           <>

@@ -41,7 +41,7 @@ const TRAINING_URL = `${PUBLIC_APP_ORIGIN}/training`;
 export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }) {
   const { timezone } = useViewerTimezone();
   const mod = TRAINING_MODULES[moduleId];
-  const { detail, skewMs, error, preparing, refreshing, refetch, refresh, setOn, check, openTest, closeTest, reopen, addPeople, revoke, retryMirror, loadSubmission } =
+  const { detail, skewMs, error, preparing, refreshing, refetch, refresh, setOn, check, openTest, closeTest, reopen, endAttempt, addPeople, revoke, retryMirror, loadSubmission } =
     useTrainingModule(moduleId);
 
   const [copied, setCopied] = useState(false);
@@ -50,6 +50,7 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
   const [switching, setSwitching] = useState(false);
   const [removing, setRemoving] = useState<AdminParticipant | null>(null);
   const [reopening, setReopening] = useState<{ person: AdminParticipant; testId: string } | null>(null);
+  const [ending, setEnding] = useState<{ person: AdminParticipant; testId: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const header = (
@@ -193,6 +194,7 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
               skewMs={skewMs}
               onView={(p) => setViewing(p.emailHash)}
               onReopen={(person, testId) => setReopening({ person, testId })}
+              onEnd={(person, testId) => setEnding({ person, testId })}
               onRemove={setRemoving}
               onRestore={async (person) => {
                 try {
@@ -279,6 +281,44 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
             >
               {busy && <Loader2 className="activity-spinner size-4 animate-spin" />}
               Reopen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!ending} onOpenChange={(open) => !busy && !open && setEnding(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              End {ending && getTest(moduleId, ending.testId)?.id} for {ending?.person.name ?? ending?.person.email}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Their clock stops now and they can’t upload or answer any more. Everything they have already uploaded is kept, and
+              their screen tells them the team ended it. You can reopen it for them later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Keep it running</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy}
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={async (e) => {
+                e.preventDefault();
+                if (!ending) return;
+                setBusy(true);
+                try {
+                  await endAttempt(ending.person.emailHash, ending.testId);
+                  toast.success('Ended');
+                  setEnding(null);
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : 'Could not end it');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {busy && <Loader2 className="activity-spinner size-4 animate-spin" />}
+              End now
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

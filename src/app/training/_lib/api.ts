@@ -3,12 +3,17 @@
 import { useCallback, useRef } from 'react';
 
 /**
- * Fired when any call is answered `410 Gone`. The server uses 410 for exactly one thing — the
- * module was switched off — so every part of a room (uploads, the task record, the recorder)
+ * Fired when any call is answered `410 Gone`. The server uses 410 for two things — the module was
+ * switched off, or the team ended this candidate's test (`code: 'attempt-ended'`) — so every part of a room (uploads, the task record, the recorder)
  * reports it the same way and the page can lock with one message instead of each showing a
  * refused request.
  */
 export const TRAINING_STOPPED = 'training:stopped';
+
+/** Why it stopped: `attempt-ended` when the team ended this one test for the candidate, else null (module off). */
+export interface StoppedDetail {
+  code: string | null;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -48,12 +53,16 @@ export async function api<T>(path: string, init?: { method?: 'GET' | 'POST' | 'P
   } catch {
     throw new ApiError('You look to be offline. Check your connection and try again.', 0);
   }
-  if (res.status === 410) window.dispatchEvent(new Event(TRAINING_STOPPED));
   let data: unknown = null;
   try {
     data = await res.json();
   } catch {
     /* an empty or non-JSON body keeps the generic message below */
+  }
+  if (res.status === 410) {
+    // `attempt-ended`: the team ended this one test; anything else: the module was switched off.
+    const code = (data as { code?: string } | null)?.code ?? null;
+    window.dispatchEvent(new CustomEvent<StoppedDetail>(TRAINING_STOPPED, { detail: { code } }));
   }
   if (!res.ok) {
     const message = (data as { error?: string } | null)?.error;

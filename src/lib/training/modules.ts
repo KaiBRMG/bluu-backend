@@ -113,8 +113,11 @@ export interface TestDef {
   /** Identities the test's dataset modal offers. */
   datasets: DatasetId[];
   sources: SourceFolderDef[];
-  /** `sequence` only. */
-  sequence?: { count: number; windowMs: number };
+  /**
+   * `sequence` only. `perImageMs` is the pace the brief recommends, not a limit: the test's whole
+   * time is `count × perImageMs`, on one clock, and the candidate moves on with Next.
+   */
+  sequence?: { count: number; perImageMs: number };
   brief: BriefDef;
   /**
    * Known problems with this test's copy or slots that must be settled before a
@@ -725,20 +728,26 @@ const T6: TestDef = {
   },
 };
 
+const T7_IMAGES = 10;
+const T7_PER_IMAGE_MS = 30_000;
+
 const T7: TestDef = {
   id: 'T7',
   title: 'Spot The Mistake',
   kind: 'sequence',
-  durationMs: 5 * MINUTE,
+  // The whole test is the images times the time per image — one clock, like every other test.
+  durationMs: T7_IMAGES * T7_PER_IMAGE_MS,
   deliverables: 'Completed timed assessment',
   slots: [],
   datasets: [],
   sources: [{ id: 'source_T7', folder: 'T7' }],
-  sequence: { count: 10, windowMs: 30_000 },
+  sequence: { count: T7_IMAGES, perImageMs: T7_PER_IMAGE_MS },
   brief: {
     lead: [
-      'You’ll be shown 10 images, one at a time. You have 30 seconds per image to identify what’s wrong and write down your answer before the next image appears.',
-      'You will not be able to review the other images prior. Only when each one shows up with the 30s timer.',
+      `You’ll be shown ${T7_IMAGES} images, one at a time. Allow about ${T7_PER_IMAGE_MS / 1000} seconds per image: identify what’s wrong, write it down, then press Next for the next image.`,
+      `You have ${(T7_IMAGES * T7_PER_IMAGE_MS) / 60_000} minutes in total — ${T7_PER_IMAGE_MS / 1000} seconds for each of the ${T7_IMAGES} images.`,
+      'You can go back and change an earlier answer. We recommend working through all the images as quickly as you can first, and only going back once you have seen them all and have time left.',
+      'Each image appears only when you press Next, so you cannot look ahead.',
     ],
     sections: [],
   },
@@ -840,14 +849,8 @@ export const MAX_PARTICIPANTS_PER_MODULE = 100;
 export const MAX_NAME_LENGTH = 80;
 export const MIN_NAME_LENGTH = 2;
 
-/** T7: an answer is accepted this long after its window closes (a request in flight at zero). */
+/** T7: an answer is still accepted this long after the clock ends — a save in flight at zero. */
 export const SEQUENCE_ANSWER_GRACE_MS = 5_000;
-/**
- * T7: how long a window waits for the browser to say its image has rendered. The window
- * starts at that ack — or here, if it never comes — so a slow line costs the candidate
- * nothing, and a candidate cannot hold an image open to study it for longer than this.
- */
-export const SEQUENCE_READY_CAP_MS = 8_000;
 export const MAX_ANSWER_LENGTH = 1_000;
 
 /** Whole minutes, for "40 minutes". */

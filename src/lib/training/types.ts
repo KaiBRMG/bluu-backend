@@ -130,24 +130,17 @@ export interface DatasetsResponse {
   datasets: DatasetView[];
 }
 
-/** T7: the one image that is current right now — and nothing before or after it. */
+/**
+ * T7: every image shown so far, each with the answer saved for it. Nothing beyond `revealed` is
+ * signed or sent, so the candidate cannot look ahead; everything up to it stays, so they can go back.
+ */
 export interface SequenceResponse {
   nowMs: number;
   count: number;
-  windowMs: number;
-  /** Null once every window has passed. */
-  index: number | null;
-  /** Null until the window has started: the browser has confirmed the image rendered, or `startsByMs` passed. */
-  windowStartsAtMs: number | null;
-  windowEndsAtMs: number | null;
-  /** The latest the window starts, ready or not. Null once every window has passed. */
-  startsByMs: number | null;
-  /** The attempt's clock end as it now stands: it moves out by however long the images took to arrive. */
-  deadlineMs: number | null;
-  /** Signed until this window ends (plus a few seconds). */
-  imageUrl: string | null;
-  /** The draft already saved for the current image. */
-  answer: string;
+  /** The recommended pace — the test's time is `count × perImageMs`, on the attempt's one clock. */
+  perImageMs: number;
+  deadlineMs: number;
+  images: { index: number; imageUrl: string; answer: string }[];
 }
 
 /** Signed PUT URLs for the next segments of the recording, in order. */
@@ -184,6 +177,8 @@ export interface AdminAttemptCell {
   finishedAtMs: number | null;
   /** Set when an admin reopened this attempt. */
   reopenedAtMs: number | null;
+  /** Set when an admin ended this attempt early (cleared by a reopen). */
+  endedByAdminAtMs: number | null;
   slotsFilled: number;
   slotsTotal: number;
   /** The worst Drive mirror state across this attempt's files; null when it has none. */

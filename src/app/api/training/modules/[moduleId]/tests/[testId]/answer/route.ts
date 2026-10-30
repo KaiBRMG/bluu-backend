@@ -4,7 +4,7 @@ import { readJsonBody } from '@/lib/middleware/apiHelpers';
 import { saveAnswer } from '@/lib/services/trainingService';
 import { TrainingError } from '@/lib/training/errors';
 
-/** Candidate — T7: the answer for image `index`. Accepted only inside that image's window. */
+/** Candidate — T7: the answer for image `index`. Accepted for any image already shown, until the clock ends. */
 export const POST = withCandidate<{ moduleId: string; testId: string }>(async (request, { emailHash, params }) => {
   const read = await readJsonBody(request, 8 * 1024);
   if (!read.ok) return read.response;

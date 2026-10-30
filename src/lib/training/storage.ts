@@ -46,15 +46,6 @@ export async function signRead(path: string, opts?: { download?: string }): Prom
   return url;
 }
 
-/**
- * A short-lived read URL for ONE moment — a sequence image that must stop
- * working when its window closes. Not anchored: the whole point is the expiry.
- */
-export async function signReadUntil(path: string, expiresAtMs: number): Promise<string> {
-  const [url] = await adminStorage.bucket().file(path).getSignedUrl({ version: 'v4', action: 'read', expires: expiresAtMs });
-  return url;
-}
-
 export async function signWrite(path: string, contentType: string, expiresAtMs: number): Promise<string> {
   const [url] = await adminStorage
     .bucket()

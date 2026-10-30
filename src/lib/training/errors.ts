@@ -7,6 +7,8 @@ export class TrainingError extends Error {
   constructor(
     message: string,
     public status: number,
+    /** A stable code for the page to act on (`attempt-ended`), where the status alone is ambiguous. */
+    public code?: string,
   ) {
     super(message);
   }

@@ -28,7 +28,10 @@ export function withCandidate<P = Record<string, never>>(
         response = await handler(request, { emailHash, params: await context.params });
       } catch (error) {
         if (error instanceof TrainingError) {
-          response = NextResponse.json({ error: error.message }, { status: error.status });
+          response = NextResponse.json(
+            { error: error.message, ...(error.code ? { code: error.code } : {}) },
+            { status: error.status },
+          );
         } else {
           console.error('[training]', error);
           response = NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
