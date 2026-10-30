@@ -204,6 +204,33 @@ export class ScreenRecorder {
 
   start() {
     this.next();
+    // Ask for the first upload slots now, not when the first segment closes ten seconds in: an
+    // attempt finished before then would otherwise have nowhere to put any of its recording.
+    void this.loadSlots().then((result) => {
+      if (result === 'closed') {
+        this.closed = true;
+        this.queue = [];
+      }
+    });
+  }
+
+  private loading: Promise<'ok' | 'retry' | 'closed'> | null = null;
+
+  /** Fetches the next batch of slots; concurrent callers share one request. */
+  private loadSlots(): Promise<'ok' | 'retry' | 'closed'> {
+    this.loading ??= this.fetchSlots()
+      .then((slots) => {
+        this.slots = slots;
+        return 'ok' as const;
+      })
+      // A refusal (time is up, session stopped, signed out) is final; anything else is the line.
+      .catch((error: unknown) =>
+        error instanceof ApiError && error.status >= 400 && error.status < 500 ? ('closed' as const) : ('retry' as const),
+      )
+      .finally(() => {
+        this.loading = null;
+      });
+    return this.loading;
   }
 
   private next() {
@@ -269,12 +296,9 @@ export class ScreenRecorder {
 
   private async uploadOne(blob: Blob): Promise<'ok' | 'retry' | 'closed'> {
     if (this.slots.length === 0) {
-      try {
-        this.slots = await this.fetchSlots();
-      } catch (error) {
-        // A refusal (time is up, session stopped, signed out) is final; anything else is the line.
-        return error instanceof ApiError && error.status >= 400 && error.status < 500 ? 'closed' : 'retry';
-      }
+      const result = await this.loadSlots();
+      if (result !== 'ok') return result;
+      if (this.slots.length === 0) return 'retry';
     }
     const slot = this.slots[0];
     try {

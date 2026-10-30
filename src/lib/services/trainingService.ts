@@ -187,7 +187,12 @@ export async function getModuleForCandidate(emailHash: string, moduleId: string)
   const ctx = await loadParticipation(emailHash, moduleId);
   if (!ctx || !ctx.mod.isOn) throw new TrainingError('Not found', 404);
   const now = Date.now();
-  return { nowMs: now, name: await getCandidateName(emailHash), module: summariseModule(now, def, ctx.mod, ctx.participant) };
+  return {
+    nowMs: now,
+    email: ctx.participant.email,
+    name: await getCandidateName(emailHash),
+    module: summariseModule(now, def, ctx.mod, ctx.participant),
+  };
 }
 
 async function loadParticipation(emailHash: string, moduleId: string) {
@@ -948,9 +953,11 @@ export async function addParticipants(
     const now = Date.now();
     snaps.forEach((snap, i) => {
       if (snap.exists) {
-        // Re-adding a removed person restores them with their attempts intact.
+        // Re-adding a removed person restores them with their attempts intact. `addedAtMs` is
+        // reset: it is when they last JOINED, and what `deriveTestState` weighs a closed test
+        // against — a test that closed while they were out was never theirs to miss.
         if ((snap.data() as ParticipantDoc).revokedAtMs != null) {
-          tx.update(refs[i], { revokedAtMs: null });
+          tx.update(refs[i], { revokedAtMs: null, addedAtMs: now });
           added++;
         }
         return;

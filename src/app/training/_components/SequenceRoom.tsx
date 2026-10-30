@@ -321,7 +321,7 @@ export function SequenceRoom({ initial, moduleId, test, now, onEnded, share, rec
                 const latestCard = img.index === images.length - 1;
                 const hasAnswer = !!(answers[img.index] ?? '').trim();
                 return (
-                <li key={img.index} id={`t7-image-${img.index}`} className={`${PANEL} scroll-mt-28 rounded-2xl p-4 sm:p-5 lg:scroll-mt-8`}>
+                <li key={img.index} id={`t7-image-${img.index}`} className={`${PANEL} scroll-mt-44 rounded-2xl p-4 sm:p-5 lg:scroll-mt-24`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-lg font-semibold tabular-nums">
                       Image {img.index + 1} of {seqDef.count}

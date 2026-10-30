@@ -142,6 +142,7 @@ export interface ParticipantDoc {
   moduleId: string;
   emailHash: string;
   email: string;
+  /** When they last joined: set on add, and reset when a removed person is restored. */
   addedAtMs: number;
   revokedAtMs: number | null;
   /** The last reopen of any test, so a module switch-off before it does not outlive it. */
@@ -218,7 +219,7 @@ export function isComplete(test: TestDef, attempt: AttemptDoc): boolean {
 }
 
 /**
- * `addedAtMs` is when the person joined the module. A module is used continuously, so a test that
+ * `addedAtMs` is when the person last joined the module (a restore counts as joining again). A module is used continuously, so a test that
  * closed BEFORE they were added was never theirs to miss — it reads as `locked` (not open yet) until
  * the admin opens it again. `missed` means the test was open at some point after they joined.
  */

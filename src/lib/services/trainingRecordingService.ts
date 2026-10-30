@@ -20,7 +20,6 @@ import {
   candidateContext,
   deriveTestState,
   isEmailHash,
-  isRunning,
   notRunning,
   moduleRef,
   participantRef,
@@ -150,7 +149,14 @@ export async function requestRecordingSlots(
     const { participant, mod } = candidateContext(pSnap, mSnap, moduleId, testId);
     const attempt = participant.attempts?.[testId];
     const now = Date.now();
-    if (!isRunning(attempt, mod, now)) throw notRunning(attempt, 'Time is up for this test.');
+    // Signed through the upload grace after the attempt ends, not only while it runs: the last
+    // segment closes AT the end (Finish, or the clock), and an attempt finished inside its first
+    // segment has never asked for slots at all — refusing here lost the whole recording. The URLs
+    // are capped at end + grace below, so this opens no new window. An attempt the team ended is
+    // still refused at once: that 410 is how an idle room learns it was ended.
+    if (!attempt || attempt.endedByAdminAtMs || now > attemptEndMs(attempt, mod) + UPLOAD_GRACE_MS) {
+      throw notRunning(attempt, 'Time is up for this test.');
+    }
     if (!attempt.recording) throw new TrainingError('This attempt is not recorded', 409);
     const seq = attempt.segmentSeq ?? 0;
     if (seq + SEGMENT_BATCH > MAX_SEGMENTS_PER_ATTEMPT) throw new TrainingError('The recording is full', 429);

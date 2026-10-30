@@ -55,6 +55,8 @@ export interface MeResponse {
 /** One module for one candidate — what `/training/<module>` shows and polls. */
 export interface ModuleResponse {
   nowMs: number;
+  /** The candidate's own address, as typed by the admin — shown beside their name in the header. */
+  email: string;
   name: string | null;
   module: ModuleSummary;
 }

@@ -104,8 +104,8 @@ export function Countdown({ deadlineMs, durationMs, now, onExpire, children, ale
     <section
       aria-label="Time remaining"
       className={cn(
-        'sticky top-0 z-20 -mx-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b bg-[#08090b] px-5 py-3 sm:-mx-8 sm:px-8',
-        'lg:top-8 lg:mx-0 lg:flex-col lg:items-stretch lg:gap-5 lg:rounded-2xl lg:border lg:bg-white/[0.025] lg:p-6',
+        'sticky top-16 z-20 -mx-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b bg-[#08090b] px-5 py-3 sm:-mx-8 sm:px-8',
+        'lg:top-24 lg:mx-0 lg:flex-col lg:items-stretch lg:gap-5 lg:rounded-2xl lg:border lg:bg-white/[0.025] lg:p-6',
         look.box,
         className,
       )}

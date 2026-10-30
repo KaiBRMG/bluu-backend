@@ -391,7 +391,11 @@ export function ModuleView({ moduleId }: { moduleId: TrainingModuleId }) {
       return (
         <>
           {live}
-          <Shell width="wide" bare className="max-w-none px-0 sm:px-0">
+          <Shell
+            width="wide"
+            className="max-w-none px-0 sm:px-0"
+            aside={data ? <SignedInAside name={data.name} email={data.email} signOut={false} /> : null}
+          >
             {t.kind === 'sequence' ? (
               <SequenceRoom initial={task} moduleId={moduleId} test={t} now={now} onEnded={handleEnded} share={share} recordingFailing={recordingFailing} />
             ) : (
@@ -447,7 +451,7 @@ export function ModuleView({ moduleId }: { moduleId: TrainingModuleId }) {
   return (
     <>
       {live}
-      <Shell aside={data ? <SignedInAside email={data.name ?? undefined} /> : null}>
+      <Shell aside={data ? <SignedInAside name={data.name} email={data.email} /> : null}>
         {error ? (
           <div role="alert" className="pt-16">
             <p className="text-base text-red-300">{error}</p>
@@ -676,7 +680,7 @@ function Briefing({
   const finals = test.slots.length;
   return (
     <section aria-labelledby="briefing-heading" className="mt-12">
-      <h2 id="briefing-heading" tabIndex={-1} className="scroll-mt-6 text-xl font-semibold outline-none">
+      <h2 id="briefing-heading" tabIndex={-1} className="scroll-mt-22 text-xl font-semibold outline-none">
         {test.id} · {test.title}
       </h2>
       <dl className="mt-4 grid max-w-prose grid-cols-2 gap-x-6 gap-y-3 text-base">

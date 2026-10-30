@@ -37,6 +37,50 @@ const LIVE_BUFFER = 1;
 /** Keep polling this long after the test ends: the last segment lands inside the upload grace. */
 const TAIL_MS = 60_000;
 
+/**
+ * One gap, worded by where it falls — the position says more than a cause list. A gap after the
+ * last segment means the recording stopped and never came back: the candidate stopped sharing or
+ * left (a dropped line only delays segments; the queue uploads them once it is back). A gap with
+ * recording on both sides was a stop and a re-share — or a long enough stall to look like one.
+ */
+function gapText(
+  g: { fromMs: number; toMs: number },
+  segments: AdminRecordingSegment[],
+  live: boolean,
+  timezone: string,
+) {
+  const from = formatClockTime(g.fromMs, timezone);
+  const length = formatDuration(g.toMs - g.fromMs);
+  const lastEnd = segments.at(-1)?.endedAtMs ?? 0;
+  const firstBegan = (segments[0]?.endedAtMs ?? 0) - SEGMENT_MS;
+  if (g.fromMs >= lastEnd) {
+    return live ? (
+      <>
+        <span className="text-red-300">Nothing has arrived since about {from}</span> ({length}) — the candidate stopped sharing
+        their screen or left the test.
+      </>
+    ) : (
+      <>
+        <span className="text-red-300">Recording stopped at about {from}</span>, {length} before the test ended — the candidate
+        stopped sharing their screen or left the test.
+      </>
+    );
+  }
+  if (g.toMs <= firstBegan) {
+    return (
+      <>
+        <span className="text-red-300">No recording for the first {length}</span>, from about {from} — the recording started late.
+      </>
+    );
+  }
+  return (
+    <>
+      <span className="text-red-300">No recording</span> for {length} from about {from} — the screen share stopped and was shared
+      again, or the connection stalled.
+    </>
+  );
+}
+
 interface RecordingPlayerProps {
   moduleId: string;
   emailHash: string;
@@ -559,8 +603,7 @@ export default function RecordingPlayer({ moduleId, emailHash, testId, timezone,
             <ul className="flex flex-col gap-1 text-xs text-zinc-400">
               {gaps.map((g) => (
                 <li key={g.fromMs} className="tabular-nums">
-                  <span className="text-red-300">No recording</span> for {formatDuration(g.toMs - g.fromMs)} from about{' '}
-                  {formatClockTime(g.fromMs, timezone)} — the screen was not shared, or the upload was not getting through.
+                  {gapText(g, segments, view.live, timezone)}
                 </li>
               ))}
             </ul>

@@ -134,7 +134,7 @@ export default function TrainingHomePage() {
   }, [router, sync, refreshKey]);
 
   return (
-    <Shell aside={me ? <SignedInAside email={me.email} /> : null}>
+    <Shell aside={me ? <SignedInAside name={me.name} email={me.email} /> : null}>
       {error ? (
         <div role="alert" className="pt-16">
           <p className="text-base text-red-300">{error}</p>
