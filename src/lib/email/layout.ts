@@ -97,6 +97,12 @@ export interface EmailSpec {
   blocks: EmailBlock[];
   /** One honest sentence in the footer saying why this person got this email. */
   reason: string;
+  /**
+   * Lets one `system` email take replies at hello@ while still sent from backend@. For mail to people
+   * outside the team (training candidates): a no-reply sender is a spam signal, and a candidate
+   * with a problem should be able to just reply. The footer then says where a reply goes.
+   */
+  replyToTeam?: boolean;
 }
 
 declare const rendered: unique symbol;
@@ -195,7 +201,11 @@ function blockText(b: EmailBlock): string | null {
 function footerLines(spec: EmailSpec): string[] {
   const lines = [spec.reason];
   if (spec.sender === 'system') {
-    lines.push(`This is an automated message from a no-reply address. To reach us, email ${SUPPORT_EMAIL}.`);
+    lines.push(
+      spec.replyToTeam
+        ? `This is an automated message. Replies go to the Bluu Rock team at ${SUPPORT_EMAIL}.`
+        : `This is an automated message from a no-reply address. To reach us, email ${SUPPORT_EMAIL}.`,
+    );
   }
   return lines;
 }
@@ -249,6 +259,7 @@ export function renderEmail(spec: EmailSpec): RenderedEmail {
     .filter((t): t is string => t !== null)
     .join('\n\n');
   const textPart = `${body}\n\n--\n${footerLines(spec).join('\n')}\nBluu Rock · ${SUPPORT_EMAIL}\n`;
-  const { from, replyTo } = SENDERS[spec.sender];
+  const { from, replyTo: senderReplyTo } = SENDERS[spec.sender];
+  const replyTo = spec.replyToTeam ? SUPPORT_EMAIL : senderReplyTo;
   return { from, replyTo, subject: spec.subject, html: page(spec), text: textPart } as RenderedEmail;
 }

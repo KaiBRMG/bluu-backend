@@ -50,7 +50,6 @@ export type TestKind = 'edit' | 'generate' | 'sequence';
 export type BriefBlock =
   | string
   | string[]
-  | { slotNames: true }
   | { assignments: true }
   | { corrections: true };
 
@@ -289,9 +288,8 @@ const T1: TestDef = {
         heading: 'Submission',
         body: [
           'Submit 4 final images: one completed image for each source selfie.',
-          'Keep the original source image code and add “T1 - ” at the beginning:',
-          { slotNames: true },
-          'Upload these as your final images. If you’d like to include rejected attempts, upload these under your working files.',
+          'Upload each image into its slot — it is named for you, so you do not need to rename anything.',
+          'If you’d like to include rejected attempts, upload these under your working files.',
           'Include a short task record listing the tools and models used, prompts and relevant settings, number of attempts, total spend, and any remaining defects.',
           'Before submitting, check all four images for identity accuracy, hairline and jawline transitions, natural skin texture, and unintended changes to the source.',
         ],
@@ -362,9 +360,8 @@ const T2: TestDef = {
         heading: 'Submission',
         body: [
           'Submit 4 final images: one completed image for each source selfie.',
-          'Keep the original source image code and add “T2 - ” at the beginning:',
-          { slotNames: true },
-          'Upload these as your final images. Keep working files and rejected attempts and upload as your working files.',
+          'Upload each image into its slot — it is named for you, so you do not need to rename anything.',
+          'Keep working files and rejected attempts and upload as your working files.',
           'Include a short task record listing:',
           [
             'The tools and models used.',
@@ -458,9 +455,8 @@ const T3: TestDef = {
         heading: 'Submission',
         body: [
           'Submit 4 final images: one completed image for each source image.',
-          'Keep the original source image code and add “T3 - ” at the beginning:',
-          { slotNames: true },
-          'Upload these as your final images. Keep working files and rejected attempts and upload as your working files.',
+          'Upload each image into its slot — it is named for you, so you do not need to rename anything.',
+          'Keep working files and rejected attempts and upload as your working files.',
           'Include a short task record listing:',
           [
             'The replacement setting chosen for each image.',
@@ -526,9 +522,8 @@ const T4: TestDef = {
         heading: 'Submission',
         body: [
           'Submit 4 final images: one final version for each source image.',
-          'Keep the original source image code and add “T4 - ” at the beginning:',
-          { slotNames: true },
-          'Upload these as your final images. Keep working files and rejected attempts and upload as your working files.',
+          'Upload each image into its slot — it is named for you, so you do not need to rename anything.',
+          'Keep working files and rejected attempts and upload as your working files.',
           'Include a short task record listing:',
           [
             'The dataset chosen for each image.',
@@ -613,9 +608,9 @@ const T5: TestDef = {
       {
         heading: 'Submission',
         body: [
-          'Submit one final corrected version of each source image:',
-          { slotNames: true },
-          'Upload these as your final images. Keep working files and rejected attempts and upload as your working files.',
+          'Submit one final corrected version of each source image.',
+          'Upload each image into its slot — it is named for you, so you do not need to rename anything.',
+          'Keep working files and rejected attempts and upload as your working files.',
           'Include a short task record listing:',
           [
             'The corrections made to each image.',
@@ -712,9 +707,7 @@ const T6: TestDef = {
       {
         heading: 'Submission',
         body: [
-          'Name each dataset\'s images using this format:',
-          ['T6 - Adam - 01 - SFW.png', 'T6 - Adam - 02 - Teasing.png', 'T6 - Adam - 03 - Explicit.png'],
-          'Use the same naming structure for Cole, Jackson, and Joe.',
+          'Upload each image into its slot — it is named for you, so you do not need to rename anything.',
           'Upload working files.',
           'Include a short task record listing your creative concepts, tools and models, prompts and settings, number of attempts, total spend, and any remaining defects.',
           'Before submitting, review the images individually and as a set. Confirm that every dataset has three distinct images and that their identity remains consistent throughout.',

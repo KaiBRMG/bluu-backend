@@ -130,7 +130,7 @@ Model Submissions itself moved into the Creator Portal on 2026-09-28 (`/creator-
 
 ## Email
 
-- **The sender is chosen per email** (`sender` in the spec, `layout.ts`): `team` = `Bluu Rock <hello@bluurock.com>` with Reply-To hello@, for mail that invites a reply (the enquiry reply, the welcome email) — replies land in the same Gmail inbox; `system` = `Bluu Rock <backend@bluurock.com>`, **no-reply**, no Reply-To, for everything automated (training code, sign-in alerts, staff-lifecycle mail) — its footer says it is a no-reply address and points to hello@. `bluurock.com` must stay verified for sending in Resend (DKIM `resend._domainkey` is published).
+- **The sender is chosen per email** (`sender` in the spec, `layout.ts`): `team` = `Bluu Rock <hello@bluurock.com>` with Reply-To hello@, for mail that invites a reply (the enquiry reply, the welcome email) — replies land in the same Gmail inbox; `system` = `Bluu Rock <backend@bluurock.com>`, **no-reply**, no Reply-To, for everything automated (training code, sign-in alerts, staff-lifecycle mail) — its footer says it is a no-reply address and points to hello@. **Exception — mail to training candidates** (the sign-in code and the module invite) sets `replyToTeam`: still sent from backend@, but with Reply-To hello@ and a footer saying replies go to the team. A no-reply sender is a spam signal, and these go to people outside the company who may need to answer; every other automated email stays no-reply. `bluurock.com` must stay verified for sending in Resend (DKIM `resend._domainkey` is published).
 - `RESEND_API_KEY` — **sending-only** key, used by every send.
 - `RESEND_INBOUND_API_KEY` — **full-access** key, used **only** to read received email bodies. Falls back to `RESEND_API_KEY` if that one is full-access.
 - `RESEND_WEBHOOK_SECRET` — the `whsec_…` signing secret of the receiving webhook. Unset → the webhook answers 503.
@@ -145,7 +145,7 @@ Model Submissions itself moved into the Creator Portal on 2026-09-28 (`/creator-
 | Enquiry reply | team | the enquirer | `creatorInquiryService.ts` |
 | Welcome + onboarding link | team | the approved applicant | `POST /api/creator-onboarding/invite` |
 | Training invitation (names the module; button → `/training`) | system | a **new** address added to a module that is **on** — not restores, not while the module is off | `POST /api/admin/training/modules/[moduleId]/participants` |
-| Training sign-in code | system | the candidate | `POST /api/training/request-code` |
+| Training sign-in code | system, **replies to hello@** | the candidate | `POST /api/training/request-code` |
 | New sign-in (with a **Report** button → `SECURITY_REPORT_URL`, `t.me/KaiJN` for now) | system | the user who signed in, at the address they signed in with | `POST /api/auth/exchange-code` (desktop app logins) |
 | User added | system | the **organization manager** | `POST /api/admin/users` |
 | User archived / access revoked | system | the organization manager | `PUT /api/admin/users/[uid]` — on the transition only; an archive (which also sets `isActive: false`) sends one "archived" email |

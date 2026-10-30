@@ -164,7 +164,14 @@ export async function getMe(emailHash: string): Promise<MeResponse> {
       return def ? summariseModule(now, def, mod, participant) : null;
     })
     .filter((m): m is ModuleSummary => m !== null);
-  return { nowMs: now, email: active[0]?.participant.email ?? '', name, modules };
+  // Someone with nothing open (removed, or the module is off) still sees which address they are signed in
+  // as — the likeliest fix is that it is the wrong one. Only this case pays the extra read.
+  let email = active[0]?.participant.email ?? '';
+  if (!email) {
+    const any = await adminDb.collection(PARTICIPANTS_COLLECTION).where('emailHash', '==', emailHash).limit(1).get();
+    email = (any.docs[0]?.data() as ParticipantDoc | undefined)?.email ?? '';
+  }
+  return { nowMs: now, email, name, modules };
 }
 
 /**

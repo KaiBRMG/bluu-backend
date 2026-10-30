@@ -159,10 +159,18 @@ export default function TrainingHomePage() {
 
           {me.modules.length === 0 ? (
             <div className={`${PANEL} mt-8 rounded-2xl p-6`}>
-              <p className="text-base text-white">Training isn’t running right now.</p>
+              {/* True whether the module is off, this address was removed, or it was never added: say what is true for all three. */}
+              <p className="text-base text-white">There is no training open to you right now.</p>
               <p className="mt-1 text-sm text-white/70">
-                The team will switch it on when it is time. If you expected it to be open, check that you signed in with the
-                email address you were approved with.
+                If you were told a test is running, check that you are signed in with the email address the team added
+                {me.email ? (
+                  <>
+                    {' '}— you are signed in as <span className="break-all text-white">{me.email}</span>. To use a different
+                    address, sign out and sign in again.
+                  </>
+                ) : (
+                  '. To use a different address, sign out and sign in again.'
+                )}
               </p>
             </div>
           ) : (

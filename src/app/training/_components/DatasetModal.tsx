@@ -98,14 +98,14 @@ export function DatasetModal({ open, onOpenChange, base, identities, initial }: 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={cn('flex max-h-[90dvh] w-[calc(100vw-1.5rem)] max-w-5xl flex-col gap-0 rounded-2xl p-0 sm:max-w-5xl', DIALOG_PANEL)}>
-        <DialogHeader className="px-5 pt-5 pb-3 sm:px-6">
+        <DialogHeader className="shrink-0 px-5 pt-5 pb-3 sm:px-6">
           <DialogTitle className="text-xl">Datasets</DialogTitle>
           <DialogDescription className="text-white/70">
             Use only the dataset assigned to each image. Do not mix references between identities.
           </DialogDescription>
         </DialogHeader>
 
-        <div role="tablist" aria-label="Identity" className="flex gap-2 overflow-x-auto px-5 pb-3 sm:px-6">
+        <div role="tablist" aria-label="Identity" className="flex shrink-0 gap-2 overflow-x-auto px-5 pt-1 pb-3 sm:px-6">
           {identities.map((id) => (
             <button
               key={id}
@@ -127,7 +127,7 @@ export function DatasetModal({ open, onOpenChange, base, identities, initial }: 
           ))}
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 border-y border-white/10 px-5 py-3 sm:px-6">
+        <div className="flex shrink-0 flex-wrap items-center gap-3 border-y border-white/10 px-5 py-3 sm:px-6">
           <Button
             disabled={!view || zip.state === 'working'}
             onClick={() => void downloadAll()}

@@ -110,6 +110,7 @@ export function welcomeEmail(firstName: string, onboardingUrl: string, minutes: 
 export function trainingCodeEmail(code: string): RenderedEmail {
   return renderEmail({
     sender: 'system',
+    replyToTeam: true,
     subject: `${code} is your Bluu Rock Training code`,
     preheader: `Your Bluu Rock Training code is ${code}.`,
     reason: 'You’re receiving this because a sign-in code was requested for this address on Bluu Rock Training.',
@@ -134,6 +135,7 @@ export const TRAINING_URL = `${PUBLIC_APP_ORIGIN}/training`;
 export function trainingInviteEmail(moduleTitle: string): RenderedEmail {
   return renderEmail({
     sender: 'system',
+    replyToTeam: true,
     subject: `You’ve been invited to ${moduleTitle} training`,
     preheader: `You’ve been invited to the ${moduleTitle} module on Bluu Rock Training.`,
     reason: 'You’re receiving this because this address was added to a Bluu Rock training module.',

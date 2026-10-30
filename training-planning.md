@@ -2,6 +2,8 @@
 
 **Status:** built 2026-10-29 (all of §11 steps 1–7 except `/simplify`'s follow-up and the manual checks below). The permanent description is [`documentation/training.md`](documentation/training.md); this file is now the record of the decisions and what changed from them.
 
+**Naming dropped (2026-10-30):** the briefs no longer tell candidates how to name final images ("Keep the original source image code and add “T1 - ”…", T6's format list). A final is named by its slot, in the app and in Drive, so the instruction had no effect; naming discipline is now judged on working files only.
+
 **Built differently from the plan** (each is also in `documentation/training.md`):
 - **Drive layout has a module folder:** `Training/Media-Gen/{Datasets, Source Media, Submissions}`, not `Training/{…}`. It is `TrainingModuleDef.driveFolder`, so a second module gets its own.
 - **Materials are keyed by module as well as identity/test** (`training-materials/media-gen_dataset_JOE`, Storage `training/materials/{moduleId}/…`), and a file's checksum is in its Storage name so a changed file is a new path.

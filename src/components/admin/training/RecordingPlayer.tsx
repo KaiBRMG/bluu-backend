@@ -237,16 +237,34 @@ export default function RecordingPlayer({ moduleId, emailHash, testId, timezone,
     seek(Math.floor(at / SEGMENT_MS), at % SEGMENT_MS);
   }
 
-  // Fullscreen covers the video AND its controls, so the controls are still there in fullscreen.
+  // Full screen covers the video AND its controls, so the controls are still there.
+  //
+  // Two ways to get there. `native` is the browser's own full screen. The desktop app refuses it:
+  // Chromium asks for a `fullscreen` permission first, and the Electron shell grants web pages only
+  // clipboard writes (ALLOWED_PERMISSIONS in electron/main.js), so `requestFullscreen` rejects. When
+  // it does — or where the browser has no element full screen at all — `page` mode fills the app
+  // window instead: the same layout, fixed over everything, closed by Esc or the button.
   const stage = useRef<HTMLDivElement>(null);
-  const [fullscreen, setFullscreen] = useState(false);
-  // Not every browser can put an element in full screen (iOS Safari cannot): offer it only where it works.
-  const [canFullscreen] = useState(() => typeof document !== 'undefined' && !!document.fullscreenEnabled);
+  const [fullscreen, setFullscreen] = useState<'off' | 'native' | 'page'>('off');
   useEffect(() => {
-    const sync = () => setFullscreen(document.fullscreenElement === stage.current && !!stage.current);
+    const sync = () =>
+      setFullscreen((cur) => (stage.current && document.fullscreenElement === stage.current ? 'native' : cur === 'native' ? 'off' : cur));
     document.addEventListener('fullscreenchange', sync);
     return () => document.removeEventListener('fullscreenchange', sync);
   }, []);
+  // Esc leaves page mode — and only that. The player sits in a sheet that also closes on Esc, so the key
+  // is caught at the window in the capture phase, before the sheet's own listener on the document sees it.
+  useEffect(() => {
+    if (fullscreen !== 'page') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setFullscreen('off');
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [fullscreen]);
   /** Keyboard, on the picture: Space/K play-pause, ←/→ ten seconds, F full screen. Controls keep their own keys. */
   function onStageKey(e: React.KeyboardEvent<HTMLDivElement>) {
     if (e.target !== e.currentTarget) return;
@@ -254,14 +272,23 @@ export default function RecordingPlayer({ moduleId, emailHash, testId, timezone,
     if (key === ' ' || key === 'k') setPlaying((p) => !p);
     else if (key === 'arrowright') seekTo(index * SEGMENT_MS + offsetMs + SEGMENT_MS);
     else if (key === 'arrowleft') seekTo(index * SEGMENT_MS + offsetMs - SEGMENT_MS);
-    else if (key === 'f' && canFullscreen) toggleFullscreen();
+    else if (key === 'f') toggleFullscreen();
     else return;
     e.preventDefault();
   }
 
   function toggleFullscreen() {
-    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
-    else void stage.current?.requestFullscreen().catch(() => {});
+    if (fullscreen === 'native') {
+      void document.exitFullscreen().catch(() => setFullscreen('off'));
+      return;
+    }
+    if (fullscreen === 'page') {
+      setFullscreen('off');
+      return;
+    }
+    const el = stage.current;
+    if (el && document.fullscreenEnabled) el.requestFullscreen().catch(() => setFullscreen('page'));
+    else setFullscreen('page');
   }
 
   async function remove() {
@@ -383,7 +410,14 @@ export default function RecordingPlayer({ moduleId, emailHash, testId, timezone,
       ) : (
         <div
           ref={stage}
-          className={cn('flex flex-col gap-2', fullscreen && 'h-full justify-center bg-black p-4')}
+          className={cn(
+            'flex flex-col gap-2',
+            fullscreen === 'native' && 'h-full justify-center bg-black p-4',
+            fullscreen === 'page' && 'fixed inset-0 z-[100] h-dvh justify-center bg-black p-4',
+          )}
+          role={fullscreen === 'page' ? 'dialog' : undefined}
+          aria-modal={fullscreen === 'page' ? true : undefined}
+          aria-label={fullscreen === 'page' ? 'Screen recording, full screen' : undefined}
         >
           <div
             tabIndex={0}
@@ -392,7 +426,7 @@ export default function RecordingPlayer({ moduleId, emailHash, testId, timezone,
             onKeyDown={onStageKey}
             className={cn(
               'relative w-full overflow-hidden rounded-xl border border-white/[0.07] bg-black outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60',
-              fullscreen ? 'min-h-0 flex-1' : 'aspect-video',
+              fullscreen !== 'off' ? 'min-h-0 flex-1' : 'aspect-video',
             )}
           >
             {[0, 1].map((slot) => {
@@ -504,17 +538,15 @@ export default function RecordingPlayer({ moduleId, emailHash, testId, timezone,
               </Button>
             )}
             {atMs && <span className="text-xs text-zinc-400 tabular-nums">about {formatClockTime(atMs, timezone)}</span>}
-            {canFullscreen && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="ml-auto"
-                onClick={toggleFullscreen}
-                aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}
-              >
-                {fullscreen ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              onClick={toggleFullscreen}
+              aria-label={fullscreen !== 'off' ? 'Exit full screen' : 'Full screen'}
+            >
+              {fullscreen !== 'off' ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
+            </Button>
           </div>
 
           {skipped > 0 && (
@@ -523,7 +555,7 @@ export default function RecordingPlayer({ moduleId, emailHash, testId, timezone,
             </p>
           )}
 
-          {gaps.length > 0 && !fullscreen && (
+          {gaps.length > 0 && fullscreen === 'off' && (
             <ul className="flex flex-col gap-1 text-xs text-zinc-400">
               {gaps.map((g) => (
                 <li key={g.fromMs} className="tabular-nums">

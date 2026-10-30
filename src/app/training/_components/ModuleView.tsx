@@ -416,12 +416,12 @@ export function ModuleView({ moduleId }: { moduleId: TrainingModuleId }) {
           <div className="pt-12">
             {back}
             <h1 className="mt-4 text-[2rem] leading-tight font-semibold sm:text-[2.5rem]">
-              {stopped ? 'Training has been ended by the team' : 'Training isn’t running right now'}
+              {stopped ? 'Training has been ended by the team' : `${def.title} isn’t open to you right now`}
             </h1>
             <p role={stopped ? 'status' : undefined} className="mt-3 text-base text-white/75">
               {stopped
                 ? 'Your uploaded work is kept. The team will be in touch.'
-                : `${def.title} is switched off, or you are not on it. If you expected it to be open, check you signed in with the email address you were approved with — the team will let you know when it starts.`}
+                : 'Either it is not running, or the address you are signed in with is not on it. If you were told a test is running, sign out and sign in again with the email address the team added.'}
             </p>
           </div>
         </Shell>

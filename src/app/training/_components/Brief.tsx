@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 
 /**
  * Renders the copy in `modules.ts`. A block that the code also knows — the
- * submission names, which identity goes with which source, a correction — is
+ * which identity goes with which source, a correction — is
  * rendered from the test's slots, so the words cannot disagree with the mechanics.
  */
 function Block({ block, test, compact }: { block: BriefBlock; test: Pick<TestDef, 'slots'>; compact?: boolean }) {
@@ -13,15 +13,6 @@ function Block({ block, test, compact }: { block: BriefBlock; test: Pick<TestDef
       <ul className="list-disc space-y-1.5 pl-5">
         {block.map((item) => (
           <li key={item}>{item}</li>
-        ))}
-      </ul>
-    );
-  }
-  if ('slotNames' in block) {
-    return (
-      <ul className="list-disc space-y-1 pl-5 tabular-nums">
-        {test.slots.map((s) => (
-          <li key={s.id}>{s.stem}.png</li>
         ))}
       </ul>
     );
