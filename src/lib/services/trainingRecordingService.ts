@@ -149,7 +149,7 @@ export async function requestRecordingSlots(
     const { participant, mod } = candidateContext(pSnap, mSnap, moduleId, testId);
     const attempt = participant.attempts?.[testId];
     const now = Date.now();
-    if (!isRunning(attempt, mod, now)) throw new TrainingError('Time is up', 409);
+    if (!isRunning(attempt, mod, now)) throw new TrainingError('Time is up for this test.', 409);
     if (!attempt.recording) throw new TrainingError('This attempt is not recorded', 409);
     const seq = attempt.segmentSeq ?? 0;
     if (seq + SEGMENT_BATCH > MAX_SEGMENTS_PER_ATTEMPT) throw new TrainingError('The recording is full', 429);

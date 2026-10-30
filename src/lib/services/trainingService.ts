@@ -95,6 +95,10 @@ import {
 /** How long after the grace a candidate's `finalize` call is still honoured (a retry on a flaky line). */
 const FINALIZE_WINDOW_MS = 5 * 60 * 1000;
 const SIGNED_WRITE_TTL_MS = 15 * 60 * 1000;
+
+/** What a candidate reads whenever the clock has already run out. Says what is safe, not only what failed. */
+const TIME_UP = 'Time is up for this test. Everything you uploaded before it ran out is kept.';
+const MB = (bytes: number) => `${Math.round(bytes / 1024 / 1024)} MB`;
 /** The task record is autosaved; this throttles a client that saves faster than a person types. */
 const TEXT_MIN_INTERVAL_MS = 1000;
 
@@ -265,7 +269,7 @@ async function runningAttempt(emailHash: string, moduleId: string, testId: strin
   if (!ctx || !ctx.mod.isOn) throw new TrainingError('Not found', 404);
   const attempt = ctx.participant.attempts?.[testId];
   const now = Date.now();
-  if (!isRunning(attempt, ctx.mod, now)) throw new TrainingError('Time is up', 409);
+  if (!isRunning(attempt, ctx.mod, now)) throw new TrainingError(TIME_UP, 409);
   return { test, attempt, mod: ctx.mod, now };
 }
 
@@ -318,7 +322,7 @@ export async function startAttempt(emailHash: string, moduleId: string, testId: 
     for (const [otherId, other] of Object.entries(participant.attempts ?? {})) {
       // Still running, or inside the grace where its last uploads may yet land.
       if (!other.finishedAtMs && now <= clockEndMs(other, mod) + UPLOAD_GRACE_MS) {
-        throw new TrainingError(`Finish ${requireTest(moduleId, otherId).title} first`, 409);
+        throw new TrainingError(`Finish ${requireTest(moduleId, otherId).title} first — only one test can run at a time.`, 409);
       }
     }
 
@@ -364,14 +368,14 @@ export async function requestUpload(
   testId: string,
   input: UploadRequest,
 ): Promise<{ uploadId: string; uploadUrl: string }> {
-  if (!Number.isFinite(input.size) || input.size <= 0) throw new TrainingError('That file is empty', 400);
+  if (!Number.isFinite(input.size) || input.size <= 0) throw new TrainingError('That file is empty. Choose the file again.', 400);
   let contentType = WORK_CONTENT_TYPE;
   if (input.kind === 'final') {
     contentType = input.contentType;
     if (!extFor(contentType)) throw new TrainingError(`Upload a ${IMAGE_LABEL} image`, 400);
-    if (input.size > MAX_OUTPUT_BYTES) throw new TrainingError('That file is too large', 400);
+    if (input.size > MAX_OUTPUT_BYTES) throw new TrainingError(`That image is over the ${MB(MAX_OUTPUT_BYTES)} limit.`, 400);
   } else if (input.size > MAX_WORKING_FILE_BYTES) {
-    throw new TrainingError('That file is too large (250 MB at most)', 400);
+    throw new TrainingError(`That file is over the ${MB(MAX_WORKING_FILE_BYTES)} limit for working files.`, 400);
   }
 
   const pRef = participantRef(moduleId, emailHash);
@@ -398,12 +402,12 @@ export async function requestUpload(
 
     const now = Date.now();
     const attempt = participant.attempts?.[testId];
-    if (!isRunning(attempt, mod, now)) throw new TrainingError('Time is up', 409);
+    if (!isRunning(attempt, mod, now)) throw new TrainingError(TIME_UP, 409);
     if (slot?.pickIdentity && !attempt.datasetChoices?.[slot.id]) {
-      throw new TrainingError('Choose which identity this image uses first', 400);
+      throw new TrainingError('Choose which identity this image uses, then upload it.', 400);
     }
     if (input.kind === 'work' && Object.keys(attempt.workingFiles ?? {}).length >= MAX_WORKING_FILES) {
-      throw new TrainingError(`At most ${MAX_WORKING_FILES} working files`, 429);
+      throw new TrainingError(`You have added the most working files allowed (${MAX_WORKING_FILES}). The ones already saved are kept.`, 429);
     }
     // Measured from the start (or reopen) until the first segment lands, which takes a segment's length.
     const recordedUntil = Math.max(latestSegmentMs ?? 0, attempt.startedAtMs, attempt.reopenedAtMs ?? 0);
@@ -411,7 +415,7 @@ export async function requestUpload(
       throw new TrainingError('Your screen is not being recorded right now. Share your screen again to keep uploading.', 409);
     }
     if (attempt.uploadAttempts >= MAX_UPLOAD_ATTEMPTS) {
-      throw new TrainingError('Too many uploads. Keep the ones you have.', 429);
+      throw new TrainingError('You have reached the upload limit for this test. Everything already uploaded is kept.', 429);
     }
 
     const pending: PendingDoc =
@@ -444,7 +448,7 @@ export async function finalizeUpload(
   testId: string,
   uploadId: string,
 ): Promise<{ target: MirrorTarget; replacedDriveFileId: string | undefined }> {
-  if (!/^[a-f0-9]{24}$/.test(uploadId)) throw new TrainingError('Invalid upload', 400);
+  if (!/^[a-f0-9]{24}$/.test(uploadId)) throw new TrainingError('That upload could not be matched to this test. Upload the file again.', 400);
 
   const pRef = participantRef(moduleId, emailHash);
   const [pSnap, mSnap] = await adminDb.getAll(pRef, moduleRef(moduleId));
@@ -453,13 +457,13 @@ export async function finalizeUpload(
   const mod = readModuleDoc(mSnap);
   const attempt = current.attempts?.[testId];
   const pending = attempt?.pending?.[uploadId];
-  if (!attempt || !pending) throw new TrainingError('Invalid upload', 400);
+  if (!attempt || !pending) throw new TrainingError('That upload could not be matched to this test. Upload the file again.', 400);
 
   const isWork = pending.kind === 'work';
   const grace = isWork ? WORKING_GRACE_MS : UPLOAD_GRACE_MS;
   const clockEnd = clockEndMs(attempt, mod);
   const now = Date.now();
-  if (now > clockEnd + grace + FINALIZE_WINDOW_MS) throw new TrainingError('Time is up', 409);
+  if (now > clockEnd + grace + FINALIZE_WINDOW_MS) throw new TrainingError(TIME_UP, 409);
 
   const file = adminStorage.bucket().file(pending.path);
   const drop = async (message: string, status = 400): Promise<never> => {
@@ -481,13 +485,13 @@ export async function finalizeUpload(
   }
   const size = Number(meta.size);
   const maxBytes = isWork ? MAX_WORKING_FILE_BYTES : MAX_OUTPUT_BYTES;
-  if (!Number.isFinite(size) || size <= 0 || size > maxBytes) return drop('That file is too large');
-  if (meta.contentType !== pending.contentType) return drop('That file type is not accepted');
+  if (!Number.isFinite(size) || size <= 0 || size > maxBytes) return drop(isWork ? `That file is over the ${MB(MAX_WORKING_FILE_BYTES)} limit for working files.` : `That image is over the ${MB(MAX_OUTPUT_BYTES)} limit.`);
+  if (meta.contentType !== pending.contentType) return drop('That file is not the type it was sent as. Upload it again.');
   const createdMs = Date.parse(String(meta.timeCreated));
   if (!Number.isFinite(createdMs) || createdMs > clockEnd + grace) {
-    return drop('That upload finished after time was up', 409);
+    return drop('That upload finished after time was up, so it was not kept.', 409);
   }
-  if (!isImage) return drop('That file is not a valid image');
+  if (!isImage) return drop('That file is not a readable JPG, PNG or WebP image. Export it again and upload the new file.');
 
   let landed: { target: MirrorTarget; replaced: SlotDoc | null };
   try {
@@ -495,14 +499,14 @@ export async function finalizeUpload(
       const [fp, fm] = await Promise.all([tx.get(pRef), tx.get(moduleRef(moduleId))]);
       const participant = fp.data() as ParticipantDoc | undefined;
       const fresh = participant?.attempts?.[testId];
-      if (!participant || !fresh?.pending?.[uploadId]) throw new TrainingError('Invalid upload', 400);
+      if (!participant || !fresh?.pending?.[uploadId]) throw new TrainingError('That upload could not be matched to this test. Upload the file again.', 400);
       // An upload already travelling when the module was switched off may land inside the grace; nothing later.
-      if (Date.now() > clockEndMs(fresh, readModuleDoc(fm)) + grace) throw new TrainingError('Training has been ended', 409);
+      if (Date.now() > clockEndMs(fresh, readModuleDoc(fm)) + grace) throw new TrainingError('Training has been ended by the team. Your uploaded work is kept.', 409);
 
       const now2 = Date.now();
       if (isWork) {
         if (Object.keys(fresh.workingFiles ?? {}).length >= MAX_WORKING_FILES) {
-          throw new TrainingError(`At most ${MAX_WORKING_FILES} working files`, 409);
+          throw new TrainingError(`You have added the most working files allowed (${MAX_WORKING_FILES}). The ones already saved are kept.`, 409);
         }
         const doc: WorkingFileDoc = {
           name: pending.fileName ?? 'file',
@@ -554,7 +558,7 @@ export async function finalizeUpload(
 
 /** The task record. Autosaved while the candidate types; accepted until the grace after the clock. */
 export async function saveText(emailHash: string, moduleId: string, testId: string, text: string): Promise<void> {
-  if (text.length > MAX_TEXT_LENGTH) throw new TrainingError('That is too long', 400);
+  if (text.length > MAX_TEXT_LENGTH) throw new TrainingError(`Your task record is over the ${MAX_TEXT_LENGTH.toLocaleString('en')}-character limit.`, 400);
   const test = requireTest(moduleId, testId);
   if (test.kind === 'sequence') throw new TrainingError('This test has no task record', 400);
   const ctx = await loadParticipation(emailHash, moduleId);
@@ -562,11 +566,11 @@ export async function saveText(emailHash: string, moduleId: string, testId: stri
   const attempt = ctx.participant.attempts?.[testId];
   const now = Date.now();
   if (!attempt || attempt.finishedAtMs || now > clockEndMs(attempt, ctx.mod) + UPLOAD_GRACE_MS) {
-    throw new TrainingError('Time is up', 409);
+    throw new TrainingError(TIME_UP, 409);
   }
   if (attempt.text === text) return;
   if (attempt.textUpdatedAtMs && now - attempt.textUpdatedAtMs < TEXT_MIN_INTERVAL_MS) {
-    throw new TrainingError('Slow down', 429);
+    throw new TrainingError('Saving too often. Trying again in a moment.', 429);
   }
   await participantRef(moduleId, emailHash).update({
     [`attempts.${testId}.text`]: text,
@@ -596,16 +600,16 @@ export async function setIdentity(
     const slot = test.slots.find((s) => s.id === slotId);
     if (!slot?.pickIdentity || !test.datasets.includes(identity)) throw new TrainingError('Not found', 404);
     const attempt = participant.attempts?.[testId];
-    if (!isRunning(attempt, mod, Date.now())) throw new TrainingError('Time is up', 409);
+    if (!isRunning(attempt, mod, Date.now())) throw new TrainingError(TIME_UP, 409);
 
     const choices = { ...(attempt.datasetChoices ?? {}) };
     if (choices[slotId] === identity) return choices;
-    if (attempt.slots[slotId]) throw new TrainingError('This image is already uploaded', 409);
+    if (attempt.slots[slotId]) throw new TrainingError('This image is already uploaded, so its identity cannot change now.', 409);
 
     const holder = Object.entries(choices).find(([, v]) => v === identity)?.[0];
     if (holder) {
       if (attempt.slots[holder]) {
-        throw new TrainingError(`${DATASETS[identity].label} is already used on ${holder}`, 409);
+        throw new TrainingError(`${DATASETS[identity].label} is used on ${holder}, which is already uploaded. Choose another identity.`, 409);
       }
       if (choices[slotId]) choices[holder] = choices[slotId];
       else delete choices[holder];
@@ -630,10 +634,10 @@ export async function finishAttempt(emailHash: string, moduleId: string, testId:
     const participant = pSnap.data() as ParticipantDoc | undefined;
     if (!participant || participant.revokedAtMs != null) throw new TrainingError('Not found', 404);
     const attempt = participant.attempts?.[testId];
-    if (!attempt) throw new TrainingError('Not started', 409);
+    if (!attempt) throw new TrainingError('This test has not been started.', 409);
     if (attempt.finishedAtMs) return;
     if (Date.now() > clockEndMs(attempt, readModuleDoc(mSnap))) return; // the clock already ended it
-    if (test.kind === 'sequence') throw new TrainingError('This test runs its full time', 409);
+    if (test.kind === 'sequence') throw new TrainingError('This test runs for its full time; it cannot be finished early.', 409);
     tx.update(pRef, { [`attempts.${testId}.finishedAtMs`]: Date.now() });
   });
 }
@@ -717,7 +721,7 @@ export async function getSequence(emailHash: string, moduleId: string, testId: s
 
   const { index, window } = cursor;
   const file = (await readMaterials(moduleId, test.sources[0].id))[index];
-  if (!file) throw new TrainingError('This test is not ready', 409);
+  if (!file) throw new TrainingError('The images for this test are not ready. Let the team know.', 409);
   const startsByMs = window.issuedAtMs + SEQUENCE_READY_CAP_MS;
   // Started once acked, or once the cap has passed with no ack.
   const startsAtMs = window.startedAtMs ?? (now >= startsByMs ? startsByMs : null);
@@ -757,7 +761,7 @@ export async function markWindowReady(
     const { participant, mod } = candidateContext(pSnap, mSnap, moduleId, testId);
     const attempt = participant.attempts?.[testId];
     const now = Date.now();
-    if (!isRunning(attempt, mod, now)) throw new TrainingError('Time is up', 409);
+    if (!isRunning(attempt, mod, now)) throw new TrainingError(TIME_UP, 409);
     const w = attempt.windows?.[String(index)];
     if (!w) throw new TrainingError('That image has not been shown', 409);
 
@@ -784,7 +788,7 @@ export async function saveAnswer(
   index: number,
   text: string,
 ): Promise<void> {
-  if (text.length > MAX_ANSWER_LENGTH) throw new TrainingError('That is too long', 400);
+  if (text.length > MAX_ANSWER_LENGTH) throw new TrainingError(`Your answer is over the ${MAX_ANSWER_LENGTH.toLocaleString('en')}-character limit.`, 400);
   const test = requireTest(moduleId, testId);
   const seq = test.sequence;
   if (!seq || !Number.isInteger(index) || index < 0 || index >= seq.count) throw new TrainingError('Not found', 404);
@@ -792,7 +796,7 @@ export async function saveAnswer(
   const ctx = await loadParticipation(emailHash, moduleId);
   if (!ctx || !ctx.mod.isOn) throw new TrainingError('Not found', 404);
   const attempt = ctx.participant.attempts?.[testId];
-  if (!attempt) throw new TrainingError('Not started', 409);
+  if (!attempt) throw new TrainingError('This test has not been started.', 409);
   const now = Date.now();
   const w = attempt.windows?.[String(index)];
   const start = w ? windowStartMs(w) : null;

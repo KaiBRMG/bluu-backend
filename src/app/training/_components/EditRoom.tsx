@@ -29,11 +29,11 @@ import {
 } from '@/lib/training/modules';
 import type { SourceView, TestResponse } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
-import { api, ApiError } from '../_lib/api';
+import { api, ApiError, isRetryable } from '../_lib/api';
 import { AZURE, AZURE_CHIP_BUTTON, AZURE_EDGE, AZURE_INK, AZURE_TEXT, DIALOG_PANEL, FOCUS, OVERLAY_BUTTON, PANEL, PROGRESS_AZURE } from '../_lib/theme';
 import { fmtBytes, uploadFile } from '../_lib/upload';
 import type { ScreenShare } from '../_lib/useScreenShare';
-import { useRoomGuards } from '../_lib/useRoomGuards';
+import { OFFLINE_TEXT, useOnline, useRoomGuards } from '../_lib/useRoomGuards';
 import { BriefView, ExplainerView } from './Brief';
 import { Countdown } from './Countdown';
 import { DatasetModal } from './DatasetModal';
@@ -107,6 +107,9 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
   }, []);
 
   useRoomGuards();
+  const online = useOnline();
+  // The file each slot last tried, so a failed upload can be sent again without finding it twice.
+  const lastFile = useRef(new Map<string, File>());
 
   const filled = test.slots.filter((s) => slots[s.id].uploaded).length;
   const recordBusy = recordPending && !recordGaveUp;
@@ -145,14 +148,20 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
   async function upload(def: SlotDef, file: File) {
     if (locked) return;
     if (!(file.type in IMAGE_TYPES)) {
-      patch(def.id, { error: `Upload a ${IMAGE_LABEL} image.` });
+      // Name what was wrong with THIS file: an iPhone's HEIC, a PDF, a file with no type at all.
+      const ext = file.name.includes('.') ? file.name.split('.').pop()!.toUpperCase().slice(0, 8) : '';
+      patch(def.id, {
+        error: `${ext ? `That is a ${ext} file. ` : 'That file type is not accepted. '}Upload a ${IMAGE_LABEL} image.`,
+        retryable: false,
+      });
       return;
     }
     if (file.size > MAX_OUTPUT_BYTES) {
-      patch(def.id, { error: `That file is ${fmtBytes(file.size)}. The limit is ${fmtBytes(MAX_OUTPUT_BYTES)}.` });
+      patch(def.id, { error: `That file is ${fmtBytes(file.size)}. The limit is ${fmtBytes(MAX_OUTPUT_BYTES)}.`, retryable: false });
       return;
     }
-    patch(def.id, { busy: true, progress: 0, error: '' });
+    lastFile.current.set(def.id, file);
+    patch(def.id, { busy: true, progress: 0, error: '', retryable: false });
     let shown = 0;
     try {
       await uploadFile(base, { kind: 'final', slotId: def.id, contentType: file.type, size: file.size }, file, file.type, (p) => {
@@ -165,9 +174,14 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
       });
       const previous = slots[def.id].previewUrl;
       if (previous?.startsWith('blob:')) URL.revokeObjectURL(previous);
+      lastFile.current.delete(def.id);
       patch(def.id, { busy: false, uploaded: true, previewUrl: URL.createObjectURL(file), bytes: file.size, error: '' });
     } catch (err) {
-      patch(def.id, { busy: false, error: err instanceof ApiError ? err.message : 'Something went wrong. Try again.' });
+      patch(def.id, {
+        busy: false,
+        error: err instanceof ApiError ? err.message : 'Something went wrong. Try again.',
+        retryable: isRetryable(err),
+      });
     }
   }
 
@@ -178,6 +192,10 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
     uploadRef.current = upload;
   });
   const handleFile = useCallback((def: SlotDef, file: File) => void uploadRef.current(def, file), []);
+  const handleRetry = useCallback((def: SlotDef) => {
+    const file = lastFile.current.get(def.id);
+    if (file) void uploadRef.current(def, file);
+  }, []);
 
   const chooseIdentity = useCallback(
     async (slotId: string, identity: DatasetId) => {
@@ -228,7 +246,12 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
           screenLocked={screenLocked}
           alerts={
             <>
-              {recordingFailing && share.stream && !expired && (
+              {!online && !expired && (
+                <p role="alert" className="text-amber-200">
+                  {OFFLINE_TEXT}
+                </p>
+              )}
+              {recordingFailing && share.stream && !expired && online && (
                 <p role="alert" className="text-amber-200">
                   Your screen recording is not reaching us, so uploads wait until it catches up. Check your connection.
                 </p>
@@ -328,7 +351,7 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
                 aria-expanded={true}
                 className={cn('mt-4 min-h-11 rounded text-sm underline-offset-4 hover:underline', AZURE_TEXT, FOCUS)}
               >
-                Fold the brief
+                Hide the brief
               </button>
             </section>
           ) : (
@@ -355,9 +378,7 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
               Final images
             </h2>
             <p className="mt-1 text-sm text-white/70">
-              {test.kind === 'edit'
-                ? 'Each source on the left becomes the image on the right. Every upload is saved the moment it finishes.'
-                : 'One image for each cell. Every upload is saved the moment it finishes.'}
+              Every upload is saved the moment it finishes.
             </p>
             {identityError && (
               <p role="alert" className="mt-2 text-sm text-red-300">
@@ -378,13 +399,14 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
                     identities={test.datasets}
                     locked={locked}
                     onFile={handleFile}
+                    onRetry={handleRetry}
                     onDataset={openDatasets}
                     onChoose={chooseIdentity}
                   />
                 ))}
               </ol>
             ) : (
-              <GenerateGrid test={test} slots={slots} locked={locked} onFile={handleFile} />
+              <GenerateGrid test={test} slots={slots} locked={locked} onFile={handleFile} onRetry={handleRetry} />
             )}
           </section>
 
@@ -457,12 +479,13 @@ interface EditRowProps {
   identities: DatasetId[];
   locked: boolean;
   onFile: (def: SlotDef, file: File) => void;
+  onRetry: (def: SlotDef) => void;
   onDataset: (at: DatasetId | null) => void;
   onChoose: (slotId: string, identity: DatasetId) => void;
 }
 
 /** One source → one final: the code, the source image, an arrow, the slot. Memoised: only the row whose slot moved redraws. */
-const EditRow = memo(function EditRow({ def, source, state, choice, choices, identities, locked, onFile, onDataset, onChoose }: EditRowProps) {
+const EditRow = memo(function EditRow({ def, source, state, choice, choices, identities, locked, onFile, onRetry, onDataset, onChoose }: EditRowProps) {
   const needsChoice = def.pickIdentity && !choice;
   return (
     <li className={`${PANEL} rounded-2xl p-4 sm:p-5`}>
@@ -538,6 +561,7 @@ const EditRow = memo(function EditRow({ def, source, state, choice, choices, ide
           disabled={locked}
           waitingFor={needsChoice ? 'Choose which identity this image uses first.' : undefined}
           onFile={(file) => onFile(def, file)}
+          onRetry={() => onRetry(def)}
         />
       </div>
     </li>
@@ -605,11 +629,13 @@ function GenerateGrid({
   slots,
   locked,
   onFile,
+  onRetry,
 }: {
   test: TestDef;
   slots: Record<string, SlotState>;
   locked: boolean;
   onFile: (def: SlotDef, file: File) => void;
+  onRetry: (def: SlotDef) => void;
 }) {
   const identities = [...new Set(test.slots.map((s) => s.identity!))];
   return (
@@ -623,7 +649,7 @@ function GenerateGrid({
             {test.slots
               .filter((s) => s.identity === id)
               .map((def) => (
-                <SlotUploader key={def.id} compact stem={def.stem} state={slots[def.id]} disabled={locked} onFile={(f) => onFile(def, f)} />
+                <SlotUploader key={def.id} compact stem={def.stem} state={slots[def.id]} disabled={locked} onFile={(f) => onFile(def, f)} onRetry={() => onRetry(def)} />
               ))}
           </div>
         </section>

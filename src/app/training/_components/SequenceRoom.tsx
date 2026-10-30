@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { api, ApiError } from '../_lib/api';
 import { PANEL, FIELD } from '../_lib/theme';
 import type { ScreenShare } from '../_lib/useScreenShare';
-import { useRoomGuards } from '../_lib/useRoomGuards';
+import { OFFLINE_TEXT, useOnline, useRoomGuards } from '../_lib/useRoomGuards';
 import { useTabTitle } from '../_lib/useTabTitle';
 import { ScreenLock } from './ScreenLock';
 
@@ -95,6 +95,7 @@ export function SequenceRoom({ initial, moduleId, test, now, onEnded, share, rec
   const answerRef = useRef<HTMLTextAreaElement>(null);
 
   useRoomGuards();
+  const online = useOnline();
 
   const screenLocked = attempt.recording && !share.stream;
   const end = useEffectEvent(() => onEnded('time', 0, draftRef.current !== sentRef.current));
@@ -334,7 +335,12 @@ export function SequenceRoom({ initial, moduleId, test, now, onEnded, share, rec
               : ''}
         </div>
 
-        {recordingFailing && share.stream && (
+        {!online && (
+          <p role="alert" className={`${PANEL} mt-4 rounded-xl px-4 py-3 text-sm text-amber-200`}>
+            {OFFLINE_TEXT}
+          </p>
+        )}
+        {recordingFailing && share.stream && online && (
           <p role="alert" className={`${PANEL} mt-4 rounded-xl px-4 py-3 text-sm text-amber-200`}>
             Your screen recording is not reaching us. Check your connection.
           </p>

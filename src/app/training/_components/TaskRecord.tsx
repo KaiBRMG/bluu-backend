@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { MAX_TEXT_LENGTH } from '@/lib/training/modules';
-import { ApiError, api } from '../_lib/api';
+import { ApiError, api, isRetryable } from '../_lib/api';
 import { FIELD } from '../_lib/theme';
 
 interface TaskRecordProps {
@@ -25,15 +25,20 @@ const RETRY_MS = 5000;
  */
 export function TaskRecord({ base, initial, locked, onPending }: TaskRecordProps) {
   const [text, setText] = useState(initial);
-  const [status, setStatus] = useState<'saved' | 'saving' | 'unsaved' | 'error'>('saved');
+  // `stopped`: the server refused this edit for good (time is up, training ended) — nothing will be sent again.
+  const [status, setStatus] = useState<'saved' | 'saving' | 'unsaved' | 'error' | 'stopped'>('saved');
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState('');
+  // Refused because the clock had run out — said in the record's own words, not the upload-shaped server message.
+  const [lateEdit, setLateEdit] = useState(false);
   // From the first failed save until one lands — `status` passes through 'saving' on every retry.
   const [failed, setFailed] = useState(false);
   const sent = useRef(initial);
   const latest = useRef(initial);
   const inflight = useRef(false);
   const timer = useRef<number | null>(null);
+  // Read inside `save`, which runs from timers holding an old render's `status`: the ref is always current.
+  const stopped = useRef(false);
 
   async function save() {
     if (inflight.current) return;
@@ -47,21 +52,41 @@ export function TaskRecord({ base, initial, locked, onPending }: TaskRecordProps
     setStatus('saving');
     try {
       await api(`${base}/text`, { method: 'PUT', body: { text: value } });
+      stopped.current = false;
       sent.current = value;
       setSavedAt(Date.now());
       setError('');
       setFailed(false);
       setStatus(latest.current === value ? 'saved' : 'unsaved');
     } catch (err) {
-      setStatus('error');
-      setFailed(true);
-      setError(err instanceof ApiError ? err.message : 'Could not save.');
-      // Try again shortly: a flaky line should not cost the candidate their notes.
-      timer.current = window.setTimeout(() => void save(), RETRY_MS);
+      if (err instanceof ApiError && err.status === 429) {
+        // Saved too quickly after the last one: not a failure, just send it a moment later.
+        setStatus('unsaved');
+        timer.current = window.setTimeout(() => {
+          timer.current = null;
+          void save();
+        }, DEBOUNCE_MS);
+      } else if (isRetryable(err) && !(err instanceof ApiError && err.status === 409 && locked)) {
+        setStatus('error');
+        setFailed(true);
+        setError(err instanceof ApiError ? err.message : 'Could not save.');
+        // Try again shortly: a flaky line should not cost the candidate their notes.
+        timer.current = window.setTimeout(() => {
+          timer.current = null;
+          void save();
+        }, RETRY_MS);
+      } else {
+        // Refused for good — time is up, or training has ended. Retrying would only repeat the refusal.
+        stopped.current = true;
+        setLateEdit(err instanceof ApiError && err.status === 409);
+        setStatus('stopped');
+        setFailed(false);
+        setError(err instanceof ApiError ? err.message : 'Could not save.');
+      }
     } finally {
       inflight.current = false;
     }
-    if (latest.current !== sent.current && !timer.current) void save();
+    if (latest.current !== sent.current && !timer.current && !stopped.current) void save();
   }
 
   function schedule(delay: number) {
@@ -72,7 +97,8 @@ export function TaskRecord({ base, initial, locked, onPending }: TaskRecordProps
     }, delay);
   }
 
-  useEffect(() => onPending(status !== 'saved'), [status, onPending]);
+  // A refused edit is not "on its way": the room must not wait for it.
+  useEffect(() => onPending(status !== 'saved' && status !== 'stopped'), [status, onPending]);
 
   // When the room locks, push whatever has not gone out yet.
   useEffect(() => {
@@ -109,6 +135,8 @@ export function TaskRecord({ base, initial, locked, onPending }: TaskRecordProps
         onChange={(e) => {
           setText(e.target.value);
           latest.current = e.target.value;
+          // A new edit gets its own chance; only a refusal of IT stops the sending again.
+          stopped.current = false;
           setStatus('unsaved');
           schedule(DEBOUNCE_MS);
         }}
@@ -123,6 +151,11 @@ export function TaskRecord({ base, initial, locked, onPending }: TaskRecordProps
         <p>
           {status === 'error' ? (
             <span className="text-red-300">Not saved — {error} Trying again…</span>
+          ) : status === 'stopped' ? (
+            <span className="text-red-300">
+              {lateEdit ? 'Your last change arrived after time was up, so it was not saved.' : `Your last change was not saved: ${error}`}
+              {savedAt ? ` Everything up to ${new Date(savedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} is kept.` : ''}
+            </span>
           ) : status === 'saving' ? (
             'Saving…'
           ) : status === 'unsaved' ? (

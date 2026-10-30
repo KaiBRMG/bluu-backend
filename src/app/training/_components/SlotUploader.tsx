@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { IconCheck, IconLoader2, IconUpload } from '@tabler/icons-react';
+import { IconCheck, IconLoader2, IconRefresh, IconUpload } from '@tabler/icons-react';
 import { Button } from '@/components/ui/button';
 import { OUTPUT_ACCEPT } from '@/lib/training/modules';
 import { cn } from '@/lib/utils';
@@ -17,9 +17,11 @@ export interface SlotState {
   previewUrl: string | null;
   bytes: number;
   error: string;
+  /** The upload failed in a way that can succeed if sent again, and the file is still held. */
+  retryable: boolean;
 }
 
-export const EMPTY_SLOT: SlotState = { uploaded: false, busy: false, progress: 0, previewUrl: null, bytes: 0, error: '' };
+export const EMPTY_SLOT: SlotState = { uploaded: false, busy: false, progress: 0, previewUrl: null, bytes: 0, error: '', retryable: false };
 
 interface SlotUploaderProps {
   /** The server's name for it: `T2 - 005`. Shown on the slot. */
@@ -29,6 +31,8 @@ interface SlotUploaderProps {
   /** Why it cannot take an upload yet ("Choose an identity first"). */
   waitingFor?: string;
   onFile: (file: File) => void;
+  /** Send the file that just failed again, without finding it a second time. */
+  onRetry?: () => void;
   compact?: boolean;
 }
 
@@ -36,7 +40,7 @@ interface SlotUploaderProps {
  * One final-image slot: a drop zone that becomes the uploaded thumbnail. The
  * state — empty / uploading % / uploaded — is shown in words as well as shape.
  */
-export function SlotUploader({ stem, state, disabled, waitingFor, onFile, compact }: SlotUploaderProps) {
+export function SlotUploader({ stem, state, disabled, waitingFor, onFile, onRetry, compact }: SlotUploaderProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const off = disabled || state.busy || !!waitingFor;
@@ -45,15 +49,12 @@ export function SlotUploader({ stem, state, disabled, waitingFor, onFile, compac
     <div className="min-w-0">
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <p className="truncate text-sm font-medium text-white tabular-nums">{stem}</p>
-        <span
-          className={cn(
-            'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium',
-            state.uploaded ? AZURE_CHIP : 'border-white/[0.12] text-white/70',
-          )}
-        >
-          {state.uploaded && <IconCheck className="size-3" aria-hidden />}
-          {state.busy ? 'Uploading' : state.uploaded ? 'Uploaded' : 'Empty'}
-        </span>
+        {state.uploaded && !state.busy && (
+          <span className={cn('inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium', AZURE_CHIP)}>
+            <IconCheck className="size-3" aria-hidden />
+            Uploaded
+          </span>
+        )}
       </div>
       <input
         ref={inputRef}
@@ -119,9 +120,24 @@ export function SlotUploader({ stem, state, disabled, waitingFor, onFile, compac
         </Button>
       </div>
       {state.error && (
-        <p role="alert" className="mt-2 text-sm text-red-300">
-          {state.error}
-        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+          <p role="alert" className="min-w-0 flex-1 text-sm text-red-300">
+            {state.error}
+          </p>
+          {state.retryable && onRetry && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={off}
+              onClick={onRetry}
+              aria-label={`Retry the upload for ${stem}`}
+              className="h-11 shrink-0 border-white/20 bg-transparent px-4 text-sm text-white hover:bg-white/[0.08] hover:text-white"
+            >
+              <IconRefresh className="size-4" aria-hidden />
+              Retry
+            </Button>
+          )}
+        </div>
       )}
     </div>
   );

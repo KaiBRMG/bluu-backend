@@ -20,6 +20,18 @@ export class ApiError extends Error {
 }
 
 /**
+ * Whether sending the same request again could succeed: the line dropped (0), the server was busy
+ * or failed (408, 425, 429, 5xx), or a conflict that clears by itself (409 — e.g. the recording
+ * catching up). A refusal about the request itself — invalid (400), not signed in (401), not
+ * allowed (403), gone (404, 410), too large (413) — will be refused again, so it is not retried.
+ */
+export function isRetryable(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return true;
+  const s = err.status;
+  return s === 0 || s === 408 || s === 409 || s === 425 || s === 429 || s >= 500;
+}
+
+/**
  * Same-origin JSON call to the candidate API. The signed httpOnly cookie rides
  * along automatically, so there is no token to hold or leak in the page.
  */

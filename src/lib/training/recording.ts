@@ -37,11 +37,15 @@ export const SCREEN_CHECK_REFRESH_MS = 8 * 60_000;
 export const MAX_SCREEN_CHECKS = 50;
 export const MAX_CHECK_BYTES = 3 * 1024 * 1024;
 
-/** Capture settings: a readable screen, not a cinema one. Bitrate sets how fast Storage grows. */
+/**
+ * Capture settings: a readable screen, not a cinema one. Bitrate sets how fast Storage grows.
+ * 10 fps (was 5) so a reviewer sees the cursor and windows move rather than jump; the bitrate
+ * rose with it, so roughly 50% more Storage per minute than before.
+ */
 export const CAPTURE_MAX_WIDTH = 1920;
 export const CAPTURE_MAX_HEIGHT = 1200;
-export const CAPTURE_FRAME_RATE = 5;
-export const CAPTURE_BITS_PER_SECOND = 800_000;
+export const CAPTURE_FRAME_RATE = 10;
+export const CAPTURE_BITS_PER_SECOND = 1_200_000;
 
 /** The container types a segment may be, and the extension it is stored under. */
 export const RECORDING_TYPES = {

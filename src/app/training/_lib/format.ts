@@ -14,7 +14,7 @@ export function fmtRemaining(ms: number): string {
 export { minutesOf } from '@/lib/training/modules';
 
 export const STATE_LABEL: Record<TestState, string> = {
-  locked: 'Locked',
+  locked: 'Not open yet',
   open: 'Open',
   'in-progress': 'In progress',
   submitted: 'Submitted',

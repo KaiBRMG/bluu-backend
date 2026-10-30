@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import {
+  DATASETS,
   IMAGE_LABEL,
   MAX_OUTPUT_BYTES,
   MAX_WORKING_FILES,
@@ -609,7 +610,7 @@ function TestRow({
           {test.state === 'in-progress' && test.deadlineMs ? ` · ${fmtRemaining(test.deadlineMs - now())} left` : ''}
         </p>
       </div>
-      <StateChip state={test.state} />
+      {test.state !== 'open' && test.state !== 'in-progress' && <StateChip state={test.state} />}
       {test.state === 'open' && (
         <Button
           variant="outline"
@@ -663,18 +664,16 @@ function Briefing({
         <Fact label="Time" value={`${minutesOf(test.durationMs)} minutes`} />
         {test.budgetUsd !== undefined && <Fact label="Generation budget" value={`$${test.budgetUsd.toFixed(2)}`} />}
         <Fact label="Deliverables" value={test.deliverables} />
-        {test.datasetLine && <Fact label="Dataset" value={test.datasetLine} />}
+        {test.datasets.length > 0 && (
+          <Fact
+            label={test.datasets.length === 1 ? 'Dataset' : 'Datasets'}
+            value={test.datasets.map((id) => DATASETS[id].label).join(', ')}
+            // The brief's own dataset rule, only where the names alone do not say how they are used:
+            // a choice per image (T4), or a dataset only where one applies (T5).
+            note={datasetRuleMatters(test) ? test.datasetLine : undefined}
+          />
+        )}
       </dl>
-      {test.datasets.length > 0 && (
-        <p className="mt-4 text-sm text-white/75">
-          Datasets:{' '}
-          {test.datasets.map((id) => (
-            <span key={id} className="mr-2 inline-flex rounded-full border border-white/[0.12] px-3 py-1 text-xs text-white/85">
-              {id.charAt(0) + id.slice(1).toLowerCase()}
-            </span>
-          ))}
-        </p>
-      )}
       {lead && <p className="mt-4 max-w-prose text-base leading-relaxed text-white/80">{lead}</p>}
       <p className="mt-2 text-sm text-white/70">
         The full brief and the images appear when you start, so reading the brief is part of your time.
@@ -682,8 +681,7 @@ function Briefing({
 
       <h3 className="mt-8 text-base font-semibold">Before you start</h3>
       <ul className="mt-2 flex max-w-prose list-disc flex-col gap-1.5 pl-5 text-base leading-relaxed text-white/80">
-        <li>You have {minutesOf(test.durationMs)} minutes. The clock starts the moment you confirm and cannot be paused.</li>
-        <li>You have one attempt. Refreshing or closing the page does not reset the clock.</li>
+        <li>You have one attempt. The clock starts when you confirm and cannot be paused; refreshing or closing the page does not stop it.</li>
         {test.kind === 'sequence' ? (
           <li>
             Each image is shown for {(test.sequence!.windowMs / 1000).toFixed(0)} seconds and you cannot go back. Your answer is
@@ -699,12 +697,8 @@ function Briefing({
           </>
         )}
         <li>
-          Your entire screen is recorded from Start until the test ends, and the team can watch it live and keep it for review.
-          Close anything private first, and silence notifications.
-        </li>
-        <li>
-          If you stop sharing your screen, the test locks until you share it again. The clock keeps running, and uploads are
-          refused while nothing is being recorded.
+          Your entire screen is recorded until the test ends, and the team can watch it live. Close anything private and silence
+          notifications first. If you stop sharing, the test locks until you share again — the clock keeps running.
         </li>
       </ul>
 
@@ -743,11 +737,18 @@ function Briefing({
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+/** Whether the test's dataset line says something its dataset names do not: identities are picked, or only some images have one. */
+function datasetRuleMatters(test: TestDef): boolean {
+  const assigned = test.slots.filter((s) => s.identity).length;
+  return test.slots.some((s) => s.pickIdentity) || (assigned > 0 && assigned < test.slots.length);
+}
+
+function Fact({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
     <div>
       <dt className="text-xs font-medium text-white/70">{label}</dt>
       <dd className="mt-0.5 font-medium text-white">{value}</dd>
+      {note && <dd className="mt-0.5 text-sm text-white/70">{note}</dd>}
     </div>
   );
 }

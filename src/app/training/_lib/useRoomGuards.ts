@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 /** Marks a drop zone that takes a file. Everything else on the page refuses one. */
 export const DROPZONE_ATTR = 'data-dropzone';
@@ -61,3 +61,27 @@ export function useRoomGuards() {
     };
   }, []);
 }
+
+/**
+ * The browser's own idea of whether it is online. It can say "online" on a dead line (it only
+ * knows a network is attached), so it is a hint for one clear banner — the real verdict is still
+ * each request's own failure. It is never "offline" while it is actually working.
+ */
+export function useOnline(): boolean {
+  const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine);
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => {
+      window.removeEventListener('online', up);
+      window.removeEventListener('offline', down);
+    };
+  }, []);
+  return online;
+}
+
+/** One sentence for both rooms, so the two never describe the same outage differently. */
+export const OFFLINE_TEXT =
+  'You are offline. The clock keeps running; uploads and saves pick up again as soon as you are back online.';
