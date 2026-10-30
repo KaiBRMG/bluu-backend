@@ -18,6 +18,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useTrainingModule } from '@/hooks/useTrainingAdmin';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { PUBLIC_APP_ORIGIN } from '@/lib/publicOrigin';
@@ -28,10 +29,14 @@ import { cn } from '@/lib/utils';
 import AddPeopleDialog from './AddPeopleDialog';
 import CandidateSheet from './CandidateSheet';
 import RefreshButton from './RefreshButton';
+import RemovedList from './RemovedList';
 import Roster from './Roster';
 import TestsStrip from './TestsStrip';
 
 const TRAINING_URL = `${PUBLIC_APP_ORIGIN}/training`;
+
+/** Radix gives a tab panel `tabIndex={0}` and shadcn sets `outline-none`; the ring puts the focus landing back (WCAG 2.4.7). */
+const TAB_PANEL = 'rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/45';
 
 /**
  * One training module: the switch, the tests that open one at a time, and the
@@ -52,6 +57,7 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
   const [reopening, setReopening] = useState<{ person: AdminParticipant; testId: string } | null>(null);
   const [ending, setEnding] = useState<{ person: AdminParticipant; testId: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [peopleView, setPeopleView] = useState<'active' | 'removed'>('active');
 
   const header = (
     <Link
@@ -91,6 +97,7 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
   }
 
   const live = detail.participants.filter((p) => p.revokedAtMs == null);
+  const removedPeople = detail.participants.filter((p) => p.revokedAtMs != null);
   const running = live.filter((p) => Object.values(p.tests).some((c) => c.state === 'in-progress')).length;
   const viewingPerson = detail.participants.find((p) => p.emailHash === viewing) ?? null;
   const { isOn } = detail.module;
@@ -183,29 +190,52 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
               </AlertDescription>
             </Alert>
           )}
-          {detail.participants.length === 0 ? (
-            <div className={cn('rounded-xl p-8 text-center', SURFACE)}>
-              <p className="text-sm font-medium">No one is on this module yet</p>
-              <p className="mt-1 text-sm text-zinc-400">Add the email addresses of the people you have approved.</p>
+          <Tabs value={peopleView} onValueChange={(v) => setPeopleView(v as 'active' | 'removed')}>
+            <div className="overflow-x-auto border-b border-white/[0.07] pb-1.5">
+              <TabsList variant="line">
+                <TabsTrigger value="active">
+                  Candidates <span className="tabular-nums text-zinc-400">{live.length}</span>
+                </TabsTrigger>
+                <TabsTrigger value="removed">
+                  Removed <span className="tabular-nums text-zinc-400">{removedPeople.length}</span>
+                </TabsTrigger>
+              </TabsList>
             </div>
-          ) : (
-            <Roster
-              detail={detail}
-              skewMs={skewMs}
-              onView={(p) => setViewing(p.emailHash)}
-              onReopen={(person, testId) => setReopening({ person, testId })}
-              onEnd={(person, testId) => setEnding({ person, testId })}
-              onRemove={setRemoving}
-              onRestore={async (person) => {
-                try {
-                  await addPeople(person.email);
-                  toast.success(`${person.name ?? person.email} restored`);
-                } catch (err) {
-                  toast.error(err instanceof Error ? err.message : 'Could not restore');
-                }
-              }}
-            />
-          )}
+            <TabsContent value="active" className={cn('pt-3', TAB_PANEL)}>
+              {live.length === 0 ? (
+                <p className="text-sm text-zinc-400">
+                  {removedPeople.length > 0
+                    ? 'No one has access. Restore someone from Removed, or add people.'
+                    : 'No one is on this module yet. Add the email addresses of the people you have approved.'}
+                </p>
+              ) : (
+                <Roster
+                  detail={detail}
+                  people={live}
+                  skewMs={skewMs}
+                  onView={(p) => setViewing(p.emailHash)}
+                  onReopen={(person, testId) => setReopening({ person, testId })}
+                  onEnd={(person, testId) => setEnding({ person, testId })}
+                  onRemove={setRemoving}
+                />
+              )}
+            </TabsContent>
+            <TabsContent value="removed" className={cn('pt-3', TAB_PANEL)}>
+              <RemovedList
+                people={removedPeople}
+                timezone={timezone}
+                onView={(p) => setViewing(p.emailHash)}
+                onRestore={async (person) => {
+                  try {
+                    await addPeople(person.email);
+                    toast.success(`${person.name ?? person.email} restored`);
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : 'Could not restore');
+                  }
+                }}
+              />
+            </TabsContent>
+          </Tabs>
         </section>
       </div>
 

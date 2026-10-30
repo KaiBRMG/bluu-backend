@@ -102,8 +102,14 @@ const TEXT_MIN_INTERVAL_MS = 1000;
 
 // ─── Summaries ───────────────────────────────────────────────────────────────
 
-function summariseTest(now: number, mod: ModuleDoc, test: TestDef, attempt: AttemptDoc | undefined): TestSummary {
-  const state = deriveTestState(now, mod, test, attempt);
+function summariseTest(
+  now: number,
+  mod: ModuleDoc,
+  test: TestDef,
+  participant: ParticipantDoc,
+): TestSummary {
+  const attempt = participant.attempts?.[test.id];
+  const state = deriveTestState(now, mod, test, attempt, participant.addedAtMs);
   return {
     id: test.id,
     title: test.title,
@@ -124,7 +130,7 @@ function summariseModule(
     title: def.title,
     blurb: def.blurb,
     openTestId: mod.isOn ? mod.openTestId : null,
-    tests: def.tests.map((t) => summariseTest(now, mod, t, participant.attempts?.[t.id])),
+    tests: def.tests.map((t) => summariseTest(now, mod, t, participant)),
   };
 }
 
@@ -252,7 +258,7 @@ export async function getTestForCandidate(
 
   const now = Date.now();
   const attempt = participant.attempts?.[testId];
-  const summary = summariseTest(now, mod, test, attempt);
+  const summary = summariseTest(now, mod, test, participant);
 
   const [sources, attemptOut] = await Promise.all([
     summary.state === 'in-progress' && test.kind !== 'sequence' ? sourceViews(moduleId, test) : undefined,
@@ -321,7 +327,7 @@ export async function startAttempt(emailHash: string, moduleId: string, testId: 
     const now = Date.now();
     if (participant.attempts?.[testId]) return; // already started — idempotent
 
-    const state = deriveTestState(now, mod, test, undefined);
+    const state = deriveTestState(now, mod, test, undefined, participant.addedAtMs);
     if (state !== 'open') throw new TrainingError(state === 'missed' ? 'This test has closed' : 'This test is not open yet', 409);
 
     for (const [otherId, other] of Object.entries(participant.attempts ?? {})) {
@@ -743,9 +749,10 @@ export async function listModules(): Promise<AdminModuleRow[]> {
   });
 }
 
-function adminCell(now: number, mod: ModuleDoc, test: TestDef, attempt: AttemptDoc | undefined): AdminAttemptCell {
+function adminCell(now: number, mod: ModuleDoc, test: TestDef, p: ParticipantDoc): AdminAttemptCell {
+  const attempt = p.attempts?.[test.id];
   return {
-    state: deriveTestState(now, mod, test, attempt),
+    state: deriveTestState(now, mod, test, attempt, p.addedAtMs),
     startedAtMs: attempt?.startedAtMs ?? null,
     deadlineMs: attempt ? clockEndMs(attempt, mod) : null,
     finishedAtMs: attempt?.finishedAtMs ?? null,
@@ -776,7 +783,7 @@ export async function getModuleDetail(moduleId: string): Promise<AdminModuleDeta
       addedAtMs: p.addedAtMs,
       revokedAtMs: p.revokedAtMs,
       tests: Object.fromEntries(
-        def.tests.map((t) => [t.id, adminCell(now, mod, t, p.attempts?.[t.id])]),
+        def.tests.map((t) => [t.id, adminCell(now, mod, t, p)]),
       ) as AdminParticipant['tests'],
     }))
     .sort((a, b) => a.addedAtMs - b.addedAtMs);

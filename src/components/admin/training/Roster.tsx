@@ -1,6 +1,6 @@
 'use client';
 
-import { CircleStop, RotateCcw, UserMinus, UserPlus } from 'lucide-react';
+import { CircleStop, RotateCcw, UserMinus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { SURFACE } from '@/lib/surfaces';
@@ -33,21 +33,22 @@ function CellNote({ cell, skewMs }: { cell: AdminAttemptCell; skewMs: number }) 
 
 interface RosterProps {
   detail: AdminModuleDetail;
+  /** Who to list — the people with access. Removed people live in `RemovedList`. */
+  people: AdminParticipant[];
   skewMs: number;
   onView: (person: AdminParticipant) => void;
   onReopen: (person: AdminParticipant, testId: string) => void;
   onEnd: (person: AdminParticipant, testId: string) => void;
   onRemove: (person: AdminParticipant) => void;
-  onRestore: (person: AdminParticipant) => void;
 }
 
 /**
- * Everyone on the module against T1–T7, in one matrix — a module holds fewer
- * than ~15 candidates, so there is no pagination. The open test's column is
+ * Everyone with access against T1–T7, in one matrix. The open test's column is
  * emphasised. Rows keep the order people were added in, so a live re-read never
- * moves a row under the reader.
+ * moves a row under the reader. Removed people are not here — see `RemovedList`
+ * — so a module that runs for months does not drag its history through this table.
  */
-export default function Roster({ detail, skewMs, onView, onReopen, onEnd, onRemove, onRestore }: RosterProps) {
+export default function Roster({ detail, people, skewMs, onView, onReopen, onEnd, onRemove }: RosterProps) {
   const openId = detail.module.openTestId;
   return (
     <div className={cn('overflow-x-auto rounded-xl', SURFACE)}>
@@ -67,8 +68,7 @@ export default function Roster({ detail, skewMs, onView, onReopen, onEnd, onRemo
           </TableRow>
         </TableHeader>
         <TableBody>
-          {detail.participants.map((person) => {
-            const removed = person.revokedAtMs != null;
+          {people.map((person) => {
             const display = person.name ?? person.email;
             return (
               <TableRow key={person.emailHash} className="border-white/[0.07] hover:bg-white/[0.04]">
@@ -78,10 +78,10 @@ export default function Roster({ detail, skewMs, onView, onReopen, onEnd, onRemo
                     onClick={() => onView(person)}
                     className="rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60"
                   >
-                    <span className={cn('block font-medium hover:underline', removed ? 'text-zinc-400' : 'text-white')}>{display}</span>
+                    <span className="block font-medium text-white hover:underline">{display}</span>
                     <span className="block text-[11px] text-zinc-400">
                       {person.name ? `${person.email} · ` : ''}
-                      {removed ? 'Access removed' : person.name ? 'Signed in' : 'Not signed in yet'}
+                      {person.name ? 'Signed in' : 'Not signed in yet'}
                     </span>
                   </button>
                 </TableCell>
@@ -93,7 +93,7 @@ export default function Roster({ detail, skewMs, onView, onReopen, onEnd, onRemo
                         <div className="flex flex-col items-start gap-1">
                           <AdminStateBadge state={cell.state} />
                           <CellNote cell={cell} skewMs={skewMs} />
-                          {!removed && cell.startedAtMs !== null && cell.state !== 'in-progress' && (
+                          {cell.startedAtMs !== null && cell.state !== 'in-progress' && (
                             <Button
                               variant="ghost"
                               size="xs"
@@ -105,7 +105,7 @@ export default function Roster({ detail, skewMs, onView, onReopen, onEnd, onRemo
                               Reopen
                             </Button>
                           )}
-                          {!removed && cell.state === 'in-progress' && (
+                          {cell.state === 'in-progress' && (
                             <Button
                               variant="ghost"
                               size="xs"
@@ -123,17 +123,10 @@ export default function Roster({ detail, skewMs, onView, onReopen, onEnd, onRemo
                   );
                 })}
                 <TableCell className="text-right align-top">
-                  {removed ? (
-                    <Button variant="ghost" size="xs" onClick={() => onRestore(person)}>
-                      <UserPlus className="size-3.5" />
-                      Restore
-                    </Button>
-                  ) : (
-                    <Button variant="ghost" size="xs" className="text-zinc-400 hover:text-red-400" onClick={() => onRemove(person)}>
-                      <UserMinus className="size-3.5" />
-                      Remove
-                    </Button>
-                  )}
+                  <Button variant="ghost" size="xs" className="text-zinc-400 hover:text-red-400" onClick={() => onRemove(person)}>
+                    <UserMinus className="size-3.5" />
+                    Remove
+                  </Button>
                 </TableCell>
               </TableRow>
             );

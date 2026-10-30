@@ -205,7 +205,7 @@ export async function getRecording(
     listing,
   ]);
   const now = Date.now();
-  const live = !!attempt && deriveTestState(now, mod, test, attempt) === 'in-progress';
+  const live = !!attempt && deriveTestState(now, mod, test, attempt, participant.addedAtMs) === 'in-progress';
   const segments = (
     await Promise.all(
       (files as unknown as ListedObject[]).map(async (f) => {

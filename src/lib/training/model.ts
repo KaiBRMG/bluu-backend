@@ -217,11 +217,17 @@ export function isComplete(test: TestDef, attempt: AttemptDoc): boolean {
   return test.slots.every((s) => attempt.slots[s.id]);
 }
 
+/**
+ * `addedAtMs` is when the person joined the module. A module is used continuously, so a test that
+ * closed BEFORE they were added was never theirs to miss — it reads as `locked` (not open yet) until
+ * the admin opens it again. `missed` means the test was open at some point after they joined.
+ */
 export function deriveTestState(
   now: number,
   mod: ModuleDoc,
   test: TestDef,
   attempt: AttemptDoc | undefined,
+  addedAtMs: number,
 ): TestState {
   if (attempt) {
     if (attempt.finishedAtMs) return 'submitted';
@@ -230,7 +236,7 @@ export function deriveTestState(
   }
   const t = mod.tests[test.id];
   if (mod.isOn && mod.openTestId === test.id && t?.status === 'open') return 'open';
-  return t?.closedAtMs != null && t.openedAtMs != null ? 'missed' : 'locked';
+  return t?.closedAtMs != null && t.openedAtMs != null && t.closedAtMs > addedAtMs ? 'missed' : 'locked';
 }
 
 /** The worst mirror state among an attempt's files — failed beats pending beats synced. */

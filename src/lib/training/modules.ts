@@ -293,6 +293,7 @@ const T1: TestDef = {
           'Submit 4 final images: one completed image for each source selfie.',
           'Upload each image into its slot — it is named for you, so you do not need to rename anything.',
           'If you’d like to include rejected attempts, upload these under your working files.',
+          'Once you have finished, take a screenshot of your credit balance and upload it as a working file.',
           'Include a short task record listing the tools and models used, prompts and relevant settings, number of attempts, total spend, and any remaining defects.',
           'Before submitting, check all four images for identity accuracy, hairline and jawline transitions, natural skin texture, and unintended changes to the source.',
         ],
@@ -365,6 +366,7 @@ const T2: TestDef = {
           'Submit 4 final images: one completed image for each source selfie.',
           'Upload each image into its slot — it is named for you, so you do not need to rename anything.',
           'Keep working files and rejected attempts and upload as your working files.',
+          'Once you have finished, take a screenshot of your credit balance and upload it as a working file.',
           'Include a short task record listing:',
           [
             'The tools and models used.',
@@ -460,6 +462,7 @@ const T3: TestDef = {
           'Submit 4 final images: one completed image for each source image.',
           'Upload each image into its slot — it is named for you, so you do not need to rename anything.',
           'Keep working files and rejected attempts and upload as your working files.',
+          'Once you have finished, take a screenshot of your credit balance and upload it as a working file.',
           'Include a short task record listing:',
           [
             'The replacement setting chosen for each image.',
@@ -527,6 +530,7 @@ const T4: TestDef = {
           'Submit 4 final images: one final version for each source image.',
           'Upload each image into its slot — it is named for you, so you do not need to rename anything.',
           'Keep working files and rejected attempts and upload as your working files.',
+          'Once you have finished, take a screenshot of your credit balance and upload it as a working file.',
           'Include a short task record listing:',
           [
             'The dataset chosen for each image.',
@@ -614,6 +618,7 @@ const T5: TestDef = {
           'Submit one final corrected version of each source image.',
           'Upload each image into its slot — it is named for you, so you do not need to rename anything.',
           'Keep working files and rejected attempts and upload as your working files.',
+          'Once you have finished, take a screenshot of your credit balance and upload it as a working file.',
           'Include a short task record listing:',
           [
             'The corrections made to each image.',
@@ -712,6 +717,7 @@ const T6: TestDef = {
         body: [
           'Upload each image into its slot — it is named for you, so you do not need to rename anything.',
           'Upload working files.',
+          'Once you have finished, take a screenshot of your credit balance and upload it as a working file.',
           'Include a short task record listing your creative concepts, tools and models, prompts and settings, number of attempts, total spend, and any remaining defects.',
           'Before submitting, review the images individually and as a set. Confirm that every dataset has three distinct images and that their identity remains consistent throughout.',
         ],
