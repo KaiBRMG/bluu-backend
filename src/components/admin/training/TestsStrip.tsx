@@ -70,7 +70,7 @@ export default function TestsStrip({ detail, preparing, timezone, onOpen, onClos
       </h2>
       <ol className={cn('overflow-hidden rounded-xl', SURFACE)}>
         {detail.tests.map((t) => {
-          // "Open all tests" (the Training page) opens every test that has no copy problems.
+          // "Open all tests" (above, on this page) opens every test that has no copy problems.
           const st =
             allTestsOpen && !t.pending.length && t.status !== 'open'
               ? { label: 'Open — all tests are open', tone: 'text-blue-300' }
@@ -130,7 +130,7 @@ export default function TestsStrip({ detail, preparing, timezone, onOpen, onClos
                         !isOn
                           ? 'Switch the module on first'
                           : allTestsOpen
-                            ? 'All tests are open. Turn “Open all tests” off on the Training page first.'
+                            ? 'All tests are open. Turn “Open all tests” off above first.'
                             : blockedBy
                               ? `Close ${blockedBy} first`
                               : pending
@@ -152,7 +152,7 @@ export default function TestsStrip({ detail, preparing, timezone, onOpen, onClos
       {!isOn && <p className="mt-2 text-[11px] text-zinc-400">Switch the module on to open a test.</p>}
       {allTestsOpen && (
         <p className="mt-2 text-[11px] text-zinc-400">
-          “Open all tests” is on (Training page), so every test is open to anyone who hasn’t started it. Turn it off there to open them one at a time again.
+          “Open all tests” is on, so every test is open to anyone who hasn’t started it. Turn it off above to open them one at a time again.
         </p>
       )}
 

@@ -126,49 +126,7 @@ export function useTrainingModules() {
     };
   }, [refreshKey]);
 
-  /** "Open all tests" progress while files are being copied from Drive (`total` 0 = reading Drive). */
-  const [openingAll, setOpeningAll] = useState<{ done: number; total: number } | null>(null);
-
-  /**
-   * "Open all tests" on every module that is on (off: every module where it is on). Turning it on
-   * copies whatever changed in Drive for every test first — one file per call, as Open does — and
-   * the server refuses the final step until every test's files are in, so an interrupted run is
-   * resumed by toggling again.
-   */
-  const setAllTestsOpen = useCallback(
-    async (on: boolean) => {
-      const targets = (modules ?? []).filter((m) => (on ? m.isOn && !m.allTestsOpen : m.allTestsOpen));
-      try {
-        if (on) {
-          setOpeningAll({ done: 0, total: 0 });
-          const plans = [];
-          for (const m of targets) plans.push({ id: m.id, plan: await trainingAdmin<SyncPlan>(`modules/${m.id}/prepare-all`, 'POST') });
-          const total = plans.reduce((n, p) => n + p.plan.todo.length, 0);
-          let done = 0;
-          setOpeningAll({ done, total });
-          for (const { id, plan } of plans) {
-            for (const file of plan.todo) {
-              const body = { key: file.key, driveId: file.driveId };
-              try {
-                await trainingAdmin(`modules/${id}/prepare-all/file`, 'POST', body);
-              } catch {
-                // One retry: a download that did not arrive intact is the usual cause.
-                await trainingAdmin(`modules/${id}/prepare-all/file`, 'POST', body);
-              }
-              setOpeningAll({ done: ++done, total });
-            }
-          }
-        }
-        for (const m of targets) await trainingAdmin(`modules/${m.id}`, 'PATCH', { allTestsOpen: on });
-      } finally {
-        setOpeningAll(null);
-        refetch();
-      }
-    },
-    [modules, refetch],
-  );
-
-  return { modules, error, refreshing, refetch, refresh, openingAll, setAllTestsOpen };
+  return { modules, error, refreshing, refetch, refresh };
 }
 
 /** The files Open is copying from Drive, shown as `23 / 41`. */
@@ -279,6 +237,41 @@ export function useTrainingModule(moduleId: string) {
     [base, refetch],
   );
 
+  /** "Open all tests" progress while files are being copied from Drive (`total` 0 = reading Drive). */
+  const [openingAll, setOpeningAll] = useState<{ done: number; total: number } | null>(null);
+
+  /**
+   * "Open all tests" for this module. Turning it on copies whatever changed in Drive for every
+   * test first — one file per call, as Open does — and the server refuses the final step until
+   * every test's files are in, so an interrupted run is resumed by switching it on again.
+   */
+  const setAllTestsOpen = useCallback(
+    async (on: boolean) => {
+      try {
+        if (on) {
+          setOpeningAll({ done: 0, total: 0 });
+          const plan = await trainingAdmin<SyncPlan>(`${base}/prepare-all`, 'POST');
+          setOpeningAll({ done: 0, total: plan.todo.length });
+          for (const [i, file] of plan.todo.entries()) {
+            const body = { key: file.key, driveId: file.driveId };
+            try {
+              await trainingAdmin(`${base}/prepare-all/file`, 'POST', body);
+            } catch {
+              // One retry: a download that did not arrive intact is the usual cause.
+              await trainingAdmin(`${base}/prepare-all/file`, 'POST', body);
+            }
+            setOpeningAll({ done: i + 1, total: plan.todo.length });
+          }
+        }
+        await trainingAdmin(base, 'PATCH', { allTestsOpen: on });
+      } finally {
+        setOpeningAll(null);
+        refetch();
+      }
+    },
+    [base, refetch],
+  );
+
   const closeTest = useCallback(
     async (testId: string) => {
       await trainingAdmin(`${base}/tests/${testId}/close`, 'POST');
@@ -342,10 +335,12 @@ export function useTrainingModule(moduleId: string) {
     skewMs,
     error,
     preparing,
+    openingAll,
     refreshing,
     refetch,
     refresh,
     setOn,
+    setAllTestsOpen,
     check,
     openTest,
     closeTest,

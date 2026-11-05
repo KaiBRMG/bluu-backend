@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -46,13 +47,15 @@ const TAB_PANEL = 'rounded-xl focus-visible:outline-none focus-visible:ring-2 fo
 export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }) {
   const { timezone } = useViewerTimezone();
   const mod = TRAINING_MODULES[moduleId];
-  const { detail, skewMs, error, preparing, refreshing, refetch, refresh, setOn, check, openTest, closeTest, reopen, endAttempt, addPeople, revoke, retryMirror, loadSubmission } =
+  const { detail, skewMs, error, preparing, openingAll, refreshing, refetch, refresh, setOn, setAllTestsOpen, check, openTest, closeTest, reopen, endAttempt, addPeople, revoke, retryMirror, loadSubmission } =
     useTrainingModule(moduleId);
 
   const [copied, setCopied] = useState(false);
   const [viewing, setViewing] = useState<string | null>(null);
   const [confirmOff, setConfirmOff] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [confirmAllOpen, setConfirmAllOpen] = useState(false);
+  const [switchingAll, setSwitchingAll] = useState(false);
   const [removing, setRemoving] = useState<AdminParticipant | null>(null);
   const [reopening, setReopening] = useState<{ person: AdminParticipant; testId: string } | null>(null);
   const [ending, setEnding] = useState<{ person: AdminParticipant; testId: string } | null>(null);
@@ -115,6 +118,21 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
     }
   }
 
+  const { allTestsOpen } = detail.module;
+
+  async function toggleAll(next: boolean) {
+    setSwitchingAll(true);
+    try {
+      await setAllTestsOpen(next);
+      toast.success(next ? 'All tests are open' : 'Back to one test at a time');
+      setConfirmAllOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not change the switch');
+    } finally {
+      setSwitchingAll(false);
+    }
+  }
+
   return (
     <>
       <div className="max-w-6xl">
@@ -162,6 +180,30 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
             </label>
           </div>
         </div>
+
+        <section aria-labelledby="open-all-heading" className={cn('mb-6 rounded-xl p-5', SURFACE)}>
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h2 id="open-all-heading" className="text-base font-semibold">
+                Open all tests
+              </h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                {!isOn
+                  ? `Switch ${mod.title} on first.`
+                  : 'Every test is open to candidates who haven’t started it. Tests someone has already submitted stay submitted. Turning it off leaves running clocks to finish.'}
+              </p>
+            </div>
+            <label className="mt-0.5 flex shrink-0 items-center gap-3 text-sm font-medium">
+              <span aria-hidden>{allTestsOpen ? 'On' : 'Off'}</span>
+              <Switch
+                checked={allTestsOpen}
+                disabled={switchingAll || !isOn}
+                aria-labelledby="open-all-heading"
+                onCheckedChange={(next) => (next ? setConfirmAllOpen(true) : void toggleAll(false))}
+              />
+            </label>
+          </div>
+        </section>
 
         {error && (
           <div role="alert" className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-orange-400/30 bg-orange-400/10 px-4 py-3 text-sm text-orange-200">
@@ -254,6 +296,41 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
         onRefresh={refresh}
         onClose={() => setViewing(null)}
       />
+
+      <AlertDialog open={confirmAllOpen} onOpenChange={(open) => !switchingAll && setConfirmAllOpen(open)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Open all tests?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Everyone on {mod.title} can start any test they haven’t started yet, as soon as this finishes. Each test can be
+              sat once. Every test’s files are copied from Drive first, which can take a minute.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {openingAll && (
+            <div className="flex flex-col gap-1.5 text-xs" role="status" aria-live="polite">
+              <span className="text-zinc-200 tabular-nums">
+                {openingAll.total === 0 ? 'Reading Drive…' : `Copying ${openingAll.done} / ${openingAll.total} files`}
+              </span>
+              {openingAll.total > 0 && (
+                <Progress value={(openingAll.done / openingAll.total) * 100} className="h-1.5" aria-label="Files copied" />
+              )}
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={switchingAll}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={switchingAll}
+              onClick={(e) => {
+                e.preventDefault();
+                void toggleAll(true);
+              }}
+            >
+              {switchingAll && <Loader2 className="activity-spinner size-4 animate-spin" />}
+              {switchingAll ? 'Opening…' : 'Open all tests'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={confirmOff} onOpenChange={(open) => !switching && setConfirmOff(open)}>
         <AlertDialogContent>

@@ -906,7 +906,7 @@ export async function openTest(moduleId: string, rawTestId: string): Promise<voi
  * Opening one test syncs its materials from Drive; while every test is open, that would change
  * files under candidates who are mid-test — so the one-at-a-time controls wait.
  */
-const ALL_OPEN_BLOCKS = 'All tests are open. Turn “Open all tests” off on the Training page first.';
+const ALL_OPEN_BLOCKS = 'All tests are open. Turn “Open all tests” off first.';
 
 /**
  * Refuses a materials sync for "Open all tests" once it is already on — the files are frozen while

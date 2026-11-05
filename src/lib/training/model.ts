@@ -44,7 +44,7 @@ export interface ModuleDoc {
   openTestId: TestId | null;
   /**
    * "Open all tests" — every test (but one with `pending` copy problems) is open to anyone who has
-   * not started it, on top of `openTestId`. Set from the Training list page after every test's
+   * not started it, on top of `openTestId`. Set from the module's admin page after every test's
    * materials are copied; cleared by switching the module off. Absent on older docs = false.
    */
   allTestsOpen?: boolean;
