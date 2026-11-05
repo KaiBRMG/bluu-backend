@@ -39,6 +39,10 @@ export interface ModuleSummary {
   id: TrainingModuleId;
   title: string;
   blurb: string;
+  /**
+   * The test whose briefing the page leads with. While "Open all tests" is on, the first test this
+   * candidate can still start — so it moves on as they submit each one.
+   */
   openTestId: TestId | null;
   tests: TestSummary[];
 }
@@ -157,6 +161,8 @@ export interface AdminModuleRow {
   title: string;
   isOn: boolean;
   openTestId: TestId | null;
+  /** "Open all tests" is on (only ever while the module is on). */
+  allTestsOpen: boolean;
   participantCount: number;
 }
 
@@ -198,7 +204,8 @@ export interface AdminParticipant {
 
 export interface AdminModuleDetail {
   nowMs: number;
-  module: { id: TrainingModuleId; title: string; isOn: boolean; openTestId: TestId | null };
+  /** `allTestsOpen`: "Open all tests" is on (only ever while the module is on). */
+  module: { id: TrainingModuleId; title: string; isOn: boolean; openTestId: TestId | null; allTestsOpen: boolean };
   tests: AdminTestRow[];
   participants: AdminParticipant[];
 }

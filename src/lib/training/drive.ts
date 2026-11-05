@@ -302,13 +302,35 @@ async function deleteQuietly(paths: string[]) {
 export async function planSync(moduleId: string, testId: string): Promise<SyncPlan> {
   const { mod, test } = requireTest(moduleId, testId);
   if (test.pending?.length) throw new TrainingError(`${test.id} cannot be opened yet: ${test.pending[0]}`, 409);
+  return planKeys(mod, materialKeysFor(test));
+}
 
+/**
+ * The plan for "Open all tests": every folder any openable test reads, each once — the datasets
+ * are shared, so T1…T5 list JOE once, not five times. `frozenTestId` is a test open on its own:
+ * its source folders are left alone (materials freeze while a test is open), so they are not
+ * re-diffed under someone mid-test. They were complete when it opened.
+ */
+export async function planSyncAll(moduleId: string, frozenTestId: string | null): Promise<SyncPlan> {
+  const mod = requireModule(moduleId);
+  const frozen = new Set(mod.tests.find((t) => t.id === frozenTestId)?.sources.map((s) => s.id) ?? []);
+  const keys = [...new Set(mod.tests.filter((t) => !t.pending?.length).flatMap(materialKeysFor))].filter((k) => !frozen.has(k));
+  return planKeys(mod, keys);
+}
+
+/** Every material key an openable test of this module reads — what `prepare-all/file` may copy. */
+export function moduleMaterialKeys(moduleId: string): string[] {
+  const mod = requireModule(moduleId);
+  return [...new Set(mod.tests.filter((t) => !t.pending?.length).flatMap(materialKeysFor))];
+}
+
+async function planKeys(mod: TrainingModuleDef, keys: string[]): Promise<SyncPlan> {
   const todo: SyncTodo[] = [];
   let removedCount = 0;
   let unchanged = 0;
   const now = Date.now();
 
-  for (const key of materialKeysFor(test)) {
+  for (const key of keys) {
     const { diff, manifest } = await diffOne(mod, key);
 
     const dropped = diff.removed.flatMap((r) => {

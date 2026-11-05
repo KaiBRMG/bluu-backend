@@ -30,7 +30,7 @@ import {
 import type { SourceView, TestResponse } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
 import { api, ApiError, isRetryable } from '../_lib/api';
-import { AZURE, AZURE_CHIP_BUTTON, AZURE_EDGE, AZURE_INK, AZURE_TEXT, DIALOG_PANEL, FOCUS, OVERLAY_BUTTON, PANEL, PROGRESS_AZURE } from '../_lib/theme';
+import { AZURE, AZURE_CHIP_BUTTON, AZURE_EDGE, AZURE_INK, AZURE_TEXT, DIALOG_PANEL, FOCUS, OVERLAY_BUTTON, PANEL, PROGRESS_AZURE, OUTLINE_BUTTON } from '../_lib/theme';
 import { fmtBytes, uploadFile } from '../_lib/upload';
 import type { ScreenShare } from '../_lib/useScreenShare';
 import { OFFLINE_TEXT, useOnline, useRoomGuards } from '../_lib/useRoomGuards';
@@ -288,7 +288,7 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
                 <Button
                   variant="outline"
                   onClick={() => openDatasets(null)}
-                  className="h-11 justify-start border-white/20 bg-transparent px-4 text-sm text-white hover:bg-white/[0.08] hover:text-white"
+                  className={`h-11 justify-start ${OUTLINE_BUTTON}`}
                 >
                   <IconPhotoSearch className="size-4" aria-hidden />
                   Datasets
@@ -297,7 +297,7 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
               <Button
                 variant="outline"
                 onClick={() => setExplainerOpen(true)}
-                className="h-11 justify-start border-white/20 bg-transparent px-4 text-sm text-white hover:bg-white/[0.08] hover:text-white"
+                className={`h-11 justify-start ${OUTLINE_BUTTON}`}
               >
                 <IconBook2 className="size-4" aria-hidden />
                 Explainer
@@ -307,7 +307,7 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
               variant="outline"
               disabled={locked}
               onClick={() => setConfirmFinish(true)}
-              className="h-11 border-white/20 bg-transparent px-4 text-sm text-white hover:bg-white/[0.08] hover:text-white"
+              className={`h-11 ${OUTLINE_BUTTON}`}
             >
               Finish early
             </Button>
@@ -325,7 +325,7 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
               <Button
                 variant="outline"
                 onClick={() => openDatasets(null)}
-                className="h-11 border-white/20 bg-transparent px-4 text-sm text-white hover:bg-white/[0.08] hover:text-white"
+                className={`h-11 ${OUTLINE_BUTTON}`}
               >
                 <IconPhotoSearch className="size-4" aria-hidden />
                 Datasets
@@ -334,7 +334,7 @@ export function EditRoom({ initial, moduleId, test, explainer, now, onEnded, sha
             <Button
               variant="outline"
               onClick={() => setExplainerOpen(true)}
-              className="h-11 border-white/20 bg-transparent px-4 text-sm text-white hover:bg-white/[0.08] hover:text-white"
+              className={`h-11 ${OUTLINE_BUTTON}`}
             >
               <IconBook2 className="size-4" aria-hidden />
               Explainer

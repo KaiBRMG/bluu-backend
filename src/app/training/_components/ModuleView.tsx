@@ -33,7 +33,7 @@ import { cn } from '@/lib/utils';
 import { api, ApiError, TRAINING_STOPPED, useServerClock, type StoppedDetail } from '../_lib/api';
 import { fmtRemaining, minutesOf } from '../_lib/format';
 import { ScreenRecorder, grabCheckFrame, pickRecordingType } from '../_lib/screenCapture';
-import { AZURE, AZURE_EDGE_SOFT, AZURE_INK, DIALOG_PANEL, FOCUS, PANEL } from '../_lib/theme';
+import { AZURE, AZURE_EDGE_SOFT, AZURE_INK, DIALOG_PANEL, FOCUS, PANEL, OUTLINE_BUTTON } from '../_lib/theme';
 import { fmtBytes } from '../_lib/upload';
 import { useScreenShare } from '../_lib/useScreenShare';
 import { useTabTitle } from '../_lib/useTabTitle';
@@ -455,7 +455,7 @@ export function ModuleView({ moduleId }: { moduleId: TrainingModuleId }) {
         {error ? (
           <div role="alert" className="pt-16">
             <p className="text-base text-red-300">{error}</p>
-            <Button variant="outline" className="mt-4 h-11" onClick={reload}>
+            <Button variant="outline" className={`mt-4 h-11 ${OUTLINE_BUTTON}`} onClick={reload}>
               Try again
             </Button>
           </div>
@@ -638,7 +638,7 @@ function TestRow({
         <Button
           variant="outline"
           onClick={onBrief}
-          className="h-11 border-white/20 bg-transparent px-4 text-sm text-white hover:bg-white/[0.08] hover:text-white"
+          className={`h-11 ${OUTLINE_BUTTON}`}
         >
           Read briefing
         </Button>

@@ -125,7 +125,11 @@ export default function ModuleAdmin({ moduleId }: { moduleId: TrainingModuleId }
             <p className="text-sm text-zinc-400 tabular-nums">
               {isOn ? 'On — approved candidates can sign in.' : 'Off — nobody can sign in.'} · {live.length}{' '}
               {live.length === 1 ? 'person' : 'people'}
-              {detail.module.openTestId ? ` · ${detail.module.openTestId} is open` : ''}
+              {detail.module.allTestsOpen
+                ? ' · all tests are open'
+                : detail.module.openTestId
+                  ? ` · ${detail.module.openTestId} is open`
+                  : ''}
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-4">

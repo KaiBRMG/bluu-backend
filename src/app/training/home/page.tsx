@@ -10,7 +10,7 @@ import { getModule } from '@/lib/training/modules';
 import type { MeResponse, ModuleSummary, TestSummary } from '@/lib/training/types';
 import { api, ApiError, useServerClock } from '../_lib/api';
 import { TERMINAL } from '../_lib/format';
-import { AZURE, AZURE_INK, AZURE_TEXT, FIELD, FOCUS, PANEL } from '../_lib/theme';
+import { AZURE, AZURE_INK, AZURE_TEXT, FIELD, FOCUS, PANEL, OUTLINE_BUTTON } from '../_lib/theme';
 import { cn } from '@/lib/utils';
 import { Shell } from '../_components/Shell';
 import { SignedInAside } from '../_components/SignedInAside';
@@ -138,7 +138,7 @@ export default function TrainingHomePage() {
       {error ? (
         <div role="alert" className="pt-16">
           <p className="text-base text-red-300">{error}</p>
-          <Button variant="outline" className="mt-4 h-11" onClick={reload}>
+          <Button variant="outline" className={`mt-4 h-11 ${OUTLINE_BUTTON}`} onClick={reload}>
             Try again
           </Button>
         </div>

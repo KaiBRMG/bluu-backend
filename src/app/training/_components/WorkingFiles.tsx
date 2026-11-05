@@ -8,7 +8,7 @@ import { MAX_WORKING_FILES, MAX_WORKING_FILE_BYTES } from '@/lib/training/module
 import type { WorkingFileView } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
 import { ApiError } from '../_lib/api';
-import { AZURE_EDGE, AZURE_TEXT, PANEL, PROGRESS_AZURE } from '../_lib/theme';
+import { AZURE_EDGE, AZURE_TEXT, PANEL, PROGRESS_AZURE, OUTLINE_BUTTON } from '../_lib/theme';
 import { WORK_CONTENT_TYPE, fmtBytes, uploadFile } from '../_lib/upload';
 import { DROPZONE_ATTR } from '../_lib/useRoomGuards';
 
@@ -162,7 +162,7 @@ export function WorkingFiles({ base, initial, locked, expired, onBusy }: Working
           variant="outline"
           disabled={locked || count >= MAX_WORKING_FILES}
           onClick={() => input.current?.click()}
-          className="h-11 shrink-0 border-white/20 bg-transparent px-4 text-sm text-white hover:bg-white/[0.08] hover:text-white"
+          className={`h-11 shrink-0 ${OUTLINE_BUTTON}`}
         >
           <IconPaperclip className="size-4" aria-hidden />
           Add files
@@ -197,7 +197,7 @@ export function WorkingFiles({ base, initial, locked, expired, onBusy }: Working
                       disabled={locked}
                       onClick={() => retry(i.key)}
                       aria-label={`Retry ${i.name}`}
-                      className="h-11 border-white/20 bg-transparent px-4 text-sm text-white hover:bg-white/[0.08] hover:text-white"
+                      className={`h-11 ${OUTLINE_BUTTON}`}
                     >
                       <IconRefresh className="size-4" aria-hidden />
                       Retry

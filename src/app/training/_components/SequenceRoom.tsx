@@ -18,7 +18,7 @@ import { MAX_ANSWER_LENGTH, type TestDef } from '@/lib/training/modules';
 import type { SequenceResponse, TestResponse } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
 import { api, ApiError, isRetryable } from '../_lib/api';
-import { AZURE, AZURE_CHIP, AZURE_INK, DIALOG_PANEL, FIELD, PANEL, PROGRESS_AZURE } from '../_lib/theme';
+import { AZURE, AZURE_CHIP, AZURE_INK, DIALOG_PANEL, FIELD, PANEL, PROGRESS_AZURE, OUTLINE_BUTTON } from '../_lib/theme';
 import type { ScreenShare } from '../_lib/useScreenShare';
 import { OFFLINE_TEXT, useOnline, useRoomGuards } from '../_lib/useRoomGuards';
 import { Countdown } from './Countdown';
@@ -281,7 +281,7 @@ export function SequenceRoom({ initial, moduleId, test, now, onEnded, share, rec
               variant="outline"
               disabled={locked}
               onClick={() => setConfirmFinish(true)}
-              className="h-11 border-white/20 bg-transparent px-4 text-sm text-white hover:bg-white/[0.08] hover:text-white"
+              className={`h-11 ${OUTLINE_BUTTON}`}
             >
               Finish
             </Button>
@@ -306,7 +306,7 @@ export function SequenceRoom({ initial, moduleId, test, now, onEnded, share, rec
           {loadError && images.length === 0 ? (
             <div role="alert" className="mt-8">
               <p className="text-base text-red-300">{loadError}</p>
-              <Button variant="outline" className="mt-3 h-11" onClick={() => setReloadKey((k) => k + 1)}>
+              <Button variant="outline" className={`mt-3 h-11 ${OUTLINE_BUTTON}`} onClick={() => setReloadKey((k) => k + 1)}>
                 Try again
               </Button>
             </div>

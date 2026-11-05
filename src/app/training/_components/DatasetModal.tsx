@@ -9,7 +9,7 @@ import { DATASETS, type DatasetId } from '@/lib/training/modules';
 import type { DatasetView, DatasetsResponse } from '@/lib/training/types';
 import { cn } from '@/lib/utils';
 import { api } from '../_lib/api';
-import { AZURE, AZURE_EDGE, AZURE_INK, DIALOG_PANEL, FOCUS, OVERLAY_BUTTON } from '../_lib/theme';
+import { AZURE, AZURE_EDGE, AZURE_INK, DIALOG_PANEL, FOCUS, OVERLAY_BUTTON, OUTLINE_BUTTON } from '../_lib/theme';
 
 interface DatasetModalProps {
   open: boolean;
@@ -159,7 +159,7 @@ export function DatasetModal({ open, onOpenChange, base, identities, initial }: 
               <Button
                 variant="outline"
                 onClick={() => void downloadAll(zip.failed)}
-                className="h-11 border-white/20 bg-transparent px-4 text-white hover:bg-white/[0.08] hover:text-white"
+                className={`h-11 ${OUTLINE_BUTTON}`}
               >
                 Retry
               </Button>

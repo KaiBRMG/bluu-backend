@@ -20,6 +20,7 @@ import {
   getModule,
   type DatasetId,
   type TestDef,
+  type TestId,
   type TrainingModuleDef,
 } from '@/lib/training/modules';
 import type {
@@ -125,12 +126,13 @@ function summariseModule(
   mod: ModuleDoc,
   participant: ParticipantDoc,
 ): ModuleSummary {
+  const tests = def.tests.map((t) => summariseTest(now, mod, t, participant));
   return {
     id: def.id,
     title: def.title,
     blurb: def.blurb,
-    openTestId: mod.isOn ? mod.openTestId : null,
-    tests: def.tests.map((t) => summariseTest(now, mod, t, participant)),
+    openTestId: !mod.isOn ? null : mod.allTestsOpen ? (tests.find((t) => t.state === 'open')?.id ?? null) : mod.openTestId,
+    tests,
   };
 }
 
@@ -749,6 +751,7 @@ export async function listModules(): Promise<AdminModuleRow[]> {
       title: d.title,
       isOn: mod.isOn,
       openTestId: mod.isOn ? mod.openTestId : null,
+      allTestsOpen: mod.isOn && !!mod.allTestsOpen,
       participantCount: mod.participantCount ?? 0,
     };
   });
@@ -795,7 +798,13 @@ export async function getModuleDetail(moduleId: string): Promise<AdminModuleDeta
 
   return {
     nowMs: now,
-    module: { id: def.id, title: def.title, isOn: mod.isOn, openTestId: mod.isOn ? mod.openTestId : null },
+    module: {
+      id: def.id,
+      title: def.title,
+      isOn: mod.isOn,
+      openTestId: mod.isOn ? mod.openTestId : null,
+      allTestsOpen: mod.isOn && !!mod.allTestsOpen,
+    },
     tests: def.tests.map((t) => {
       const s = mod.tests[t.id];
       return {
@@ -815,7 +824,7 @@ export async function getModuleDetail(moduleId: string): Promise<AdminModuleDeta
 
 /**
  * The switch. ON lets approved candidates in. OFF is a hard stop: it closes the
- * open test, and every running attempt ends where it stands (`clockEndMs`) —
+ * open test (and "Open all tests"), and every running attempt ends where it stands (`clockEndMs`) —
  * uploaded work is kept, and uploads already travelling get the grace.
  */
 export async function setModuleOn(moduleId: string, on: boolean): Promise<void> {
@@ -836,7 +845,7 @@ export async function setModuleOn(moduleId: string, on: boolean): Promise<void> 
         tests[id] = { status: 'closed', closedAtMs: t.status === 'open' ? now : t.closedAtMs };
       }
     }
-    tx.set(ref, { isOn: false, switchedOffAtMs: now, openTestId: null, tests }, { merge: true });
+    tx.set(ref, { isOn: false, switchedOffAtMs: now, openTestId: null, allTestsOpen: false, tests }, { merge: true });
   });
 }
 
@@ -851,6 +860,7 @@ export async function beginPrepare(moduleId: string, rawTestId: string): Promise
   const ref = moduleRef(moduleId);
   await adminDb.runTransaction(async (tx) => {
     const mod = readModuleDoc(await tx.get(ref));
+    if (mod.allTestsOpen) throw new TrainingError(ALL_OPEN_BLOCKS, 409);
     if (mod.openTestId && mod.openTestId !== testId) throw new TrainingError(`Close ${mod.openTestId} first`, 409);
     if (mod.tests[testId]?.status === 'open') throw new TrainingError(`${testId} is already open`, 409);
     tx.set(ref, { tests: { [testId]: { status: 'preparing' } } }, { merge: true });
@@ -871,6 +881,7 @@ export async function openTest(moduleId: string, rawTestId: string): Promise<voi
   await adminDb.runTransaction(async (tx) => {
     const mod = readModuleDoc(await tx.get(ref));
     if (!mod.isOn) throw new TrainingError('Switch the module on first', 409);
+    if (mod.allTestsOpen) throw new TrainingError(ALL_OPEN_BLOCKS, 409);
     if (mod.openTestId && mod.openTestId !== testId) throw new TrainingError(`Close ${mod.openTestId} first`, 409);
     const now = Date.now();
     tx.set(
@@ -888,6 +899,48 @@ export async function openTest(moduleId: string, rawTestId: string): Promise<voi
       },
       { merge: true },
     );
+  });
+}
+
+/**
+ * Opening one test syncs its materials from Drive; while every test is open, that would change
+ * files under candidates who are mid-test — so the one-at-a-time controls wait.
+ */
+const ALL_OPEN_BLOCKS = 'All tests are open. Turn “Open all tests” off on the Training page first.';
+
+/**
+ * Refuses a materials sync for "Open all tests" once it is already on — the files are frozen while
+ * candidates may be using them. Returns the test that is open on its own (its sources stay frozen).
+ */
+export async function beginPrepareAll(moduleId: string): Promise<TestId | null> {
+  requireModule(moduleId);
+  const mod = readModuleDoc(await moduleRef(moduleId).get());
+  if (!mod.isOn) throw new TrainingError('Switch the module on first', 409);
+  if (mod.allTestsOpen) throw new TrainingError('All tests are already open', 409);
+  return mod.openTestId;
+}
+
+/**
+ * "Open all tests": every test is open to anyone who has not started it (`deriveTestState`).
+ * ENFORCED HERE: the module must be on, and every test's materials must be copied and cover what
+ * it asks for — the same gate as Open, for each test. A test with `pending` copy problems is left
+ * out (it stays shut). OFF returns to the one-at-a-time state; clocks already running finish.
+ */
+export async function setAllTestsOpen(moduleId: string, on: boolean): Promise<void> {
+  const def = requireModule(moduleId);
+  if (on) {
+    const problems = await Promise.all(
+      def.tests.filter((t) => !t.pending?.length).map(async (t) => ((await materialsProblems(moduleId, t.id))[0] ?? null)),
+    );
+    const first = problems.find((p) => p !== null);
+    if (first) throw new TrainingError(first, 409);
+  }
+  const ref = moduleRef(moduleId);
+  await adminDb.runTransaction(async (tx) => {
+    const mod = readModuleDoc(await tx.get(ref));
+    if (on && !mod.isOn) throw new TrainingError(`Switch ${def.title} on first`, 409);
+    if (!!mod.allTestsOpen === on) return;
+    tx.set(ref, { allTestsOpen: on }, { merge: true });
   });
 }
 

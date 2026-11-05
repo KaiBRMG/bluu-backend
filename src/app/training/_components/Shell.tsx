@@ -1,7 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { BROWSER_SURFACE, STAGE_GROUND } from '../_lib/theme';
+import { BROWSER_SURFACE, TRAINING_GROUND } from '../_lib/theme';
 
 interface ShellProps {
   children: React.ReactNode;
@@ -26,7 +26,7 @@ const WIDTH = { narrow: 'max-w-md', default: 'max-w-3xl', wide: 'max-w-6xl' } as
 export function Shell({ children, aside, width = 'default', className }: ShellProps) {
   return (
     <main
-      style={STAGE_GROUND}
+      style={TRAINING_GROUND}
       className={cn('notranslate min-h-dvh text-white', BROWSER_SURFACE)}
       translate="no"
     >

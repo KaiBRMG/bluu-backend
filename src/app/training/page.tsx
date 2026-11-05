@@ -2,10 +2,20 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { api, ApiError } from './_lib/api';
-import { AZURE, AZURE_INK, FIELD } from './_lib/theme';
+import { AZURE, AZURE_INK, DIALOG_PANEL, FIELD } from './_lib/theme';
 import { Shell } from './_components/Shell';
 
 const RESEND_COOLDOWN_S = 45;
@@ -28,6 +38,7 @@ export default function TrainingGatePage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [cooldown, setCooldown] = useState(0);
+  const [confirmResend, setConfirmResend] = useState(false);
   // Set on mount, never during render: a time read at render is frozen into the prerender.
   const mountedAt = useRef(0);
   const emailRef = useRef<HTMLInputElement>(null);
@@ -218,7 +229,7 @@ export default function TrainingGatePage() {
                 variant="ghost"
                 size="lg"
                 disabled={busy || cooldown > 0}
-                onClick={() => sendCode()}
+                onClick={() => setConfirmResend(true)}
                 className="h-12 px-3 text-base text-white/80 hover:text-white"
               >
                 {cooldown > 0 ? `Send a new code in ${cooldown}s` : 'Send a new code'}
@@ -240,6 +251,32 @@ export default function TrainingGatePage() {
           </form>
         )}
       </div>
+
+      {/* Most "it never came" is a spam filter. A new code invalidates nothing the user is waiting on,
+          but it does burn a request against the rate limit — so ask them to look first. */}
+      <AlertDialog open={confirmResend} onOpenChange={setConfirmResend}>
+        <AlertDialogContent className={`rounded-2xl ${DIALOG_PANEL}`}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Have you checked your spam?</AlertDialogTitle>
+            <AlertDialogDescription className="text-white/75">
+              Codes often land in the spam or junk folder. Please check there for an email from Bluu Rock before asking
+              for a new code.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="h-11 border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void sendCode()}
+              className="h-11 font-semibold"
+              style={{ backgroundColor: AZURE, color: AZURE_INK }}
+            >
+              I&apos;ve checked it
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Shell>
   );
 }

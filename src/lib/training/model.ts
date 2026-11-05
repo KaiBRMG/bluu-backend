@@ -42,6 +42,12 @@ export interface ModuleDoc {
    */
   switchedOffAtMs: number | null;
   openTestId: TestId | null;
+  /**
+   * "Open all tests" — every test (but one with `pending` copy problems) is open to anyone who has
+   * not started it, on top of `openTestId`. Set from the Training list page after every test's
+   * materials are copied; cleared by switching the module off. Absent on older docs = false.
+   */
+  allTestsOpen?: boolean;
   tests: Partial<Record<TestId, TestStateDoc>>;
   /** People on the module, not removed. Kept here so the list needs no count query. */
   participantCount?: number;
@@ -218,10 +224,18 @@ export function isComplete(test: TestDef, attempt: AttemptDoc): boolean {
   return test.slots.every((s) => attempt.slots[s.id]);
 }
 
+/** Whether "Open all tests" opens this test. A test with `pending` copy problems never opens. */
+export function opensWithAll(mod: ModuleDoc, test: TestDef): boolean {
+  return !!mod.allTestsOpen && !test.pending?.length;
+}
+
 /**
  * `addedAtMs` is when the person last joined the module (a restore counts as joining again). A module is used continuously, so a test that
  * closed BEFORE they were added was never theirs to miss — it reads as `locked` (not open yet) until
  * the admin opens it again. `missed` means the test was open at some point after they joined.
+ *
+ * An attempt always wins: "Open all tests" opens a test only to someone who has not started it, so
+ * a submitted (or timed-out) test is never offered again — Reopen is still the only second go.
  */
 export function deriveTestState(
   now: number,
@@ -236,7 +250,7 @@ export function deriveTestState(
     return 'in-progress';
   }
   const t = mod.tests[test.id];
-  if (mod.isOn && mod.openTestId === test.id && t?.status === 'open') return 'open';
+  if (mod.isOn && (opensWithAll(mod, test) || (mod.openTestId === test.id && t?.status === 'open'))) return 'open';
   return t?.closedAtMs != null && t.openedAtMs != null && t.closedAtMs > addedAtMs ? 'missed' : 'locked';
 }
 

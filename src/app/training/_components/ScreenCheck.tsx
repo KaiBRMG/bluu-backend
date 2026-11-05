@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import { IconCircleCheck, IconLoader2 } from '@tabler/icons-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { AZURE_TEXT, CHECKBOX_AZURE, FOCUS, PANEL } from '../_lib/theme';
+import { AZURE_TEXT, CHECKBOX_AZURE, FOCUS, PANEL, OUTLINE_BUTTON } from '../_lib/theme';
 import { cn } from '@/lib/utils';
 import { SHARE_PROBLEM_TEXT, type ScreenShare } from '../_lib/useScreenShare';
 import { ShareButton } from './ShareButton';
@@ -86,7 +86,7 @@ export function ScreenCheck({ share, onShare, check, onRetryCheck, confirmed, on
                 <Button
                   variant="outline"
                   onClick={onRetryCheck}
-                  className="h-11 border-white/20 bg-transparent px-4 text-sm text-white hover:bg-white/[0.08] hover:text-white"
+                  className={`h-11 ${OUTLINE_BUTTON}`}
                 >
                   Try again
                 </Button>

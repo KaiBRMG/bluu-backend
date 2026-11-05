@@ -8,7 +8,19 @@
  *
  * Import these; never inline a hex here.
  */
-export { AZURE, AZURE_DEEP, AZURE_INK, PANEL, STAGE_GROUND, FIELD } from '@/app/model-submissions/_lib/theme';
+export { AZURE, AZURE_DEEP, AZURE_INK, PANEL, FIELD } from '@/app/model-submissions/_lib/theme';
+
+/**
+ * The page ground: §8's near-black, flat — without its stage wash. The wash is
+ * a light falling from above the page, and on this surface the top of the page
+ * is a pinned, opaque masthead (and in the room, a pinned clock band under it).
+ * They covered the brightest part of the light, so the glow began mid-strength
+ * under the hairline and read as a black slab cut out of it. The bars must stay
+ * opaque (content scrolls under them; the masthead is in every recorded frame),
+ * so the light goes. Ground and bars are now one colour and the seam is the
+ * hairline alone.
+ */
+export const TRAINING_GROUND = { backgroundColor: '#08090b' } as const;
 
 /**
  * Azure as class recipes. Tailwind reads class strings statically, so a variable
@@ -38,6 +50,9 @@ export const CHECKBOX_AZURE =
 /** The 44px download button laid over a corner of an image: the stage ground at 90%, a hairline, no shadow. */
 export const OVERLAY_BUTTON =
   'absolute top-2 right-2 grid size-11 place-items-center rounded-lg border border-white/20 bg-[#08090b]/90 text-white hover:bg-black';
+/** The quiet button: a white/20 hairline on the stage, no fill, a faint wash on hover. Pair with `variant="outline"` and a height. */
+export const OUTLINE_BUTTON =
+  'border-white/20 bg-transparent px-4 text-sm text-white hover:bg-white/[0.08] hover:text-white';
 /** A dialog or sheet panel (§11): the dark panel, hairline edge, and no shadow — §8 allows none. */
 export const DIALOG_PANEL = 'border-white/10 bg-[#0d1014] text-white shadow-none';
 

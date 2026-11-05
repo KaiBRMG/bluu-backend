@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { OUTPUT_ACCEPT } from '@/lib/training/modules';
 import { cn } from '@/lib/utils';
 import { DROPZONE_ATTR } from '../_lib/useRoomGuards';
-import { AZURE_CHIP, AZURE_EDGE } from '../_lib/theme';
+import { AZURE_CHIP, AZURE_EDGE, OUTLINE_BUTTON } from '../_lib/theme';
 import { fmtBytes } from '../_lib/upload';
 
 export interface SlotState {
@@ -113,7 +113,7 @@ export function SlotUploader({ stem, state, disabled, waitingFor, onFile, onRetr
           variant="outline"
           disabled={off}
           onClick={() => inputRef.current?.click()}
-          className="h-11 shrink-0 border-white/20 bg-transparent px-4 text-sm text-white hover:bg-white/[0.08] hover:text-white"
+          className={`h-11 shrink-0 ${OUTLINE_BUTTON}`}
         >
           <IconUpload className="size-4" aria-hidden />
           {state.uploaded ? 'Replace' : 'Upload'}
@@ -131,7 +131,7 @@ export function SlotUploader({ stem, state, disabled, waitingFor, onFile, onRetr
               disabled={off}
               onClick={onRetry}
               aria-label={`Retry the upload for ${stem}`}
-              className="h-11 shrink-0 border-white/20 bg-transparent px-4 text-sm text-white hover:bg-white/[0.08] hover:text-white"
+              className={`h-11 shrink-0 ${OUTLINE_BUTTON}`}
             >
               <IconRefresh className="size-4" aria-hidden />
               Retry

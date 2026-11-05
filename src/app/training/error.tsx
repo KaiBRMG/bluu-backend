@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import * as Sentry from '@sentry/nextjs';
 import { Button } from '@/components/ui/button';
-import { AZURE, AZURE_INK, STAGE_GROUND } from './_lib/theme';
+import { AZURE, AZURE_INK, TRAINING_GROUND } from './_lib/theme';
 
 /**
  * Route error boundary. Without it a render crash escapes to the app's global
@@ -16,7 +16,7 @@ export default function TrainingError({ error }: { error: Error & { digest?: str
   }, [error]);
 
   return (
-    <main style={STAGE_GROUND} className="notranslate flex min-h-dvh items-center justify-center px-5 text-white" translate="no">
+    <main style={TRAINING_GROUND} className="notranslate flex min-h-dvh items-center justify-center px-5 text-white" translate="no">
       <div className="w-full max-w-md text-center">
         <h1 className="text-[2rem] leading-tight font-semibold text-balance sm:text-[2.5rem]">Something went wrong</h1>
         <p className="mt-3 text-base text-white/75">
