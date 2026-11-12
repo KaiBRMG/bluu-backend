@@ -13,6 +13,7 @@
 | `src/app/api/auth/exchange-code/route.ts` | Allowlist gate + calls `recordSuccessfulLogin` |
 | `src/components/AuthWrapper.tsx` | Owns the **onboarding guard** — redirects a logged-in user into the flow based on Firestore flags |
 | `src/app/(main)/onboarding/steps.ts` | `ONBOARDING_STEPS` — the ordered step list; the source of truth for the progress rail |
+| `src/app/(main)/onboarding/resume.ts` | Per-step **resume** (localStorage, per uid) + the screen step's per-machine state: the remembered prompt and the once-per-machine TCC reset claim |
 | `src/app/(main)/onboarding/_components/OnboardingCard.tsx` | Shared step chrome: progress dots, identity strip, card surface, optional footer. Also exports `UserAvatar` |
 | `src/app/(main)/onboarding/layout.tsx` | Centering shell on the near-black canvas |
 | `src/app/(main)/onboarding/welcome/page.tsx` | Step 1 — terms of use acceptance |
@@ -21,7 +22,7 @@
 | `src/app/(main)/onboarding/permission/notifications/page.tsx` | Step 4 — OS notification permission |
 | `src/app/(main)/onboarding/profile/page.tsx` | Step 5 — personal details form; **this is the step that completes onboarding** |
 | `src/app/(main)/onboarding/done/page.tsx` | Step 6 — terminal confirmation; explains the unassigned-group wait |
-| `src/app/terms/page.tsx` | The Terms of Use **& Privacy Policy** (single source, all surfaces — staff, creators, applicants) — opened in the **system browser**, not in-app |
+| `src/app/terms/page.tsx` | The Terms of Use **& Privacy Policy** (single source, all surfaces — staff, creators, and external individuals: applicants, recruits, training candidates, enquirers, shared-link recipients) — opened in the **system browser**, not in-app |
 | `src/middleware.ts` | `/terms` is in `BROWSER_ALLOWED_PREFIXES` so the external browser can reach it |
 | `src/app/api/user/onboarding/route.ts` | The only write path for `hasAcceptedTerms` / `hasCompletedOnboarding` — one-way (true only) |
 | `src/app/api/user/update/route.ts` | Writes the profile-step payload (same allowlisted route Settings uses) |
@@ -56,20 +57,22 @@ Only then can that person sign in at all: login is an allowlist check against ex
 
 **RULE — `/api/auth/exchange-code` must never create a user document.** It used to; with the company-domain check gone, that would provision an account for any Google user. See [auth.md](auth.md#the-allowlist-the-authorisation-gate).
 
-On **every** login `recordSuccessfulLogin` sets `lastLoginAt`, rotates `sessionToken`, records `googleSub` — **and, if the last onboarding run never completed, discards it**: `hasAcceptedTerms` goes back to `false` and `photoURL` back to `null`. See *Onboarding is all-or-nothing* below. Once `hasCompletedOnboarding` is `true` it stays true forever; there is no re-onboarding for a completed user.
+On **every** login `recordSuccessfulLogin` sets `lastLoginAt`, rotates `sessionToken` and records `googleSub`. It **no longer touches an unfinished onboarding run** — see *Onboarding resumes where it was left* below. Once `hasCompletedOnboarding` is `true` it stays true forever; there is no re-onboarding for a completed user.
 
 On the **first** login only, the welcome notifications fire (see §Notifications below).
 
-### Onboarding is all-or-nothing
+### Onboarding resumes where it was left
 
-**A run that never reached "Submit details" is thrown away.** The user is met with the login screen on next launch and walks the whole flow again from the terms step, exactly as a first-time signup would. Two halves, both required:
+**An unfinished run is kept, not discarded.** Closing the window, macOS's *Quit & Reopen* after granting Screen Recording, a crash, or signing out and back in all land the user on the step they left — not on the login screen, and not back at the terms step. (Until 2026-11-12 the flow was all-or-nothing: `recordSuccessfulLogin` reset `hasAcceptedTerms`/`photoURL` and `AuthWrapper` signed out any restored session with incomplete onboarding. On macOS that turned the Screen Recording grant — which *requires* a relaunch — into a forced re-login and a full re-walk, so both halves were removed, along with the `sessionStorage` login marker that gated the client half.)
 
-- **Server (authoritative)** — `recordSuccessfulLogin` resets `hasAcceptedTerms` and `photoURL` on any login where `hasCompletedOnboarding !== true`. This is the only trustworthy place, and it runs on every login. `photoURL` is named explicitly because the avatar upload is the *one* field written before completion; everything else on the details step is written in the same request that completes onboarding, so an incomplete run leaves nothing else behind.
-- **Client** — `AuthWrapper` ends a *restored* session whose onboarding never completed, so the user actually lands on Login rather than resuming mid-flow.
+The position lives in [`onboarding/resume.ts`](../src/app/(main)/onboarding/resume.ts):
 
-The client half is gated on `hasLoginSession()` ([`src/lib/loginSession.ts`](../src/lib/loginSession.ts)), a `sessionStorage` marker set by `Login` immediately **before** sign-in. `sessionStorage` is the right store precisely because it survives in-app navigation and reloads but dies with the renderer — which is exactly the distinction needed: *"did this run begin with a login, or with auth restored from disk?"* Without the marker the effect would sign out the user who just logged in and is standing on step 1.
+- **`OnboardingCard` records its step on mount** (`saveOnboardingStep(uid, path)`); the `done` step clears it. Every step renders through the card, so a new step is picked up with no extra wiring.
+- **The guard reads it back** (`getOnboardingResumePath(uid)`) when an incomplete user re-enters — see §3.
+- **localStorage keyed by uid, on purpose.** The permission steps are per-*machine* facts, so device-local is the right granularity, and it costs no Firestore write per step (rule 9). A second account on the same machine has its own entry.
+- **It is a convenience, never a gate.** Only the four permissions-leg/profile paths are accepted back; anything else (or unreadable storage) falls back to `/onboarding/permissions`. It cannot skip a step that writes a flag — `hasAcceptedTerms` and `hasCompletedOnboarding` are still decided by the user doc alone, and the registry still shows the user as *Invited* until the details step completes.
 
-**RULE — `Login` must write `sessionToken` and the login marker BEFORE `signInWithCustomToken`.** Signing in triggers `onAuthStateChanged` and the `users/{uid}` snapshot that follows reads both immediately. Writing the token afterwards meant the first snapshot of any *second* login compared the freshly rotated token against the previous one, flagged the session as **displaced**, and left `userData` null permanently — the doc never changes again, so no later snapshot corrects it. The symptom was an onboarding step stuck on skeleton avatars with a sign-out button that appeared inert. Now that an incomplete run forces a fresh login on every relaunch, that second login is the common path.
+**RULE — `Login` must write `sessionToken` BEFORE `signInWithCustomToken`.** Signing in triggers `onAuthStateChanged` and the `users/{uid}` snapshot that follows reads it immediately. Writing the token afterwards meant the first snapshot of any *second* login compared the freshly rotated token against the previous one, flagged the session as **displaced**, and left `userData` null permanently — the doc never changes again, so no later snapshot corrects it. The symptom was an onboarding step stuck on skeleton avatars with a sign-out button that appeared inert.
 
 ### Notifications on first login
 
@@ -107,18 +110,18 @@ useEffect(() => {
     return;
   }
   if (userData.hasCompletedOnboarding !== true) {
-    router.replace('/onboarding/permissions');
+    router.replace(getOnboardingResumePath(user.uid)); // the step they left — see below
     return;
   }
 }, [userData, userDataLoading, user, isUnauthenticatedRoute, isOnboardingRoute, router]);
 ```
 
-**RULE — keep these two predicates separate.** They were once a single `isAuthRoute` that lumped onboarding in with the OAuth pages, which had two bugs: session enforcement (revocation, displacement, the incomplete-onboarding discard) silently never ran during onboarding, and the render path returned children *before* the `!user` check — so signing out from an onboarding step cleared the session but kept rendering the step, making the button look inert. Onboarding is an authenticated surface; only `/auth/*` and `/creator` are not.
+**RULE — keep these two predicates separate.** They were once a single `isAuthRoute` that lumped onboarding in with the OAuth pages, which had two bugs: session enforcement (revocation, displacement) silently never ran during onboarding, and the render path returned children *before* the `!user` check — so signing out from an onboarding step cleared the session but kept rendering the step, making the button look inert. Onboarding is an authenticated surface; only `/auth/*` and `/creator` are not.
 
 **Key nuance:** the guard bails on `isOnboardingRoute`. It only *pulls* an incomplete user **into** onboarding when they try to reach anywhere else in the app; once inside `/onboarding/*` it steps back and lets each page's own `router.push` drive navigation. Two consequences:
 
 - **Reloading anywhere inside the flow keeps you there** — the guard never fires on an onboarding route, so a refresh on step 5 stays on step 5.
-- **Re-entering from outside** (quit and relaunch, or navigating to `/`) resumes at `/onboarding/welcome` if terms were never accepted, otherwise at `/onboarding/permissions` — the start of the permissions leg, not the exact step you left. There is no per-step resume; the form step re-hydrates from the user doc so nothing typed is lost.
+- **Re-entering from outside** (quit and relaunch, *Quit & Reopen*, sign out and back in, or navigating to `/`) lands on `/onboarding/welcome` if terms were never accepted, otherwise on **the exact step you left** (`getOnboardingResumePath`, falling back to `/onboarding/permissions`) — see *Onboarding resumes where it was left*. The form step re-hydrates from the user doc.
 
 Because `isAuthRoute` also covers `/auth/` and `/creator`, the mid-session kill-switch (`isActive === false`) and the displaced-session check are both skipped while inside `/onboarding/*`.
 
@@ -150,7 +153,7 @@ A **Sign out** control sits at the top-right of the header on **every** step (ab
 **It is built as an escape hatch, and must stay one.** If any part of the flow wedges — a permanently-null `userData`, a hung provider, a stuck effect — this button still has to reach the login screen. Three deliberate properties, none of which should be simplified away:
 
 1. **The clock-out flush is time-boxed** (`SIGN_OUT_FLUSH_TIMEOUT_MS`, 2.5s) via `Promise.race`. It awaits a Firebase token refresh and a network call, both of which can hang offline. Bookkeeping must never block the exit.
-2. **Local session state is cleared before `signOut()`, and no failure short-circuits the rest.** With the login marker gone, even a *failed* `signOut()` leaves the next boot in a state the incomplete-onboarding discard resolves into the login screen.
+2. **Local session state is cleared before `signOut()`, and no failure short-circuits the rest.** The onboarding resume position is deliberately *kept* (it is keyed by uid), so signing back in picks the flow up where it was.
 3. **It finishes with `window.location.assign('/')`, not a router push.** A full document load rebuilds the tree from scratch, so nothing stuck in the React state can pin the user to the step.
 
 ### Page locking and scroll (do not regress this)
@@ -189,20 +192,23 @@ Sets `identity="none"` and renders identity itself, as the heading **"Welcome to
 
 The terms link points at **`/terms`** with `target="_blank"`. In Electron that goes through `setWindowOpenHandler` → `openExternalSafe` → `shell.openExternal`, i.e. **it opens in the user's system browser, not in the app**. That is why `/terms` must stay in `BROWSER_ALLOWED_PREFIXES` — the external browser sends no `Electron/` user agent, so without the allowlist entry it would be rewritten to `/desktop-only`.
 
-[`src/app/terms/page.tsx`](../src/app/terms/page.tsx) is the **single source** of the legal text, and since v2.0 it is **one document for every surface, not just this one**. `src/app/terms/terms.md` used to hold a second, drifting copy; it is now only a pointer at the page.
+[`src/app/terms/page.tsx`](../src/app/terms/page.tsx) is the **single source** of the legal text, and since v2.0 it is **one document for every surface, not just this one** (v3.0 added the external-individual audience, Part E). `src/app/terms/terms.md` used to hold a second, drifting copy; it is now only a pointer at the page.
 
-Its four parts and their audiences:
+Its five parts and their audiences:
 
 | Part | Covers | Binds |
 |---|---|---|
 | **A — Terms of Use** | acceptance/changes, accounts, acceptable use, IP & confidentiality, warranties, **liability cap**, indemnity, governing law (England & Wales), general | everyone |
 | **B — Staff & Bluu Backend** | "Clocked In", the **monitoring disclosure** (what is captured, what is explicitly *not*, lawful basis, deletion requests), Google sign-in scope, devices/sessions, offboarding | employees + contractors |
 | **C — Creator Portal** | the portal is *not* the management agreement (signed agreement prevails), displayed amounts are tracking figures only, **18+ and content warranties**, the content licence, Drive uploads, acting on the creator's behalf | creators/clients |
-| **D — Privacy Policy** | controller + contact, collection by audience, lawful-basis table, sharing, named subprocessors, international transfers, security, data-subject rights | everyone |
+| **D — Privacy Policy** | controller + contact, collection by audience, lawful-basis table (incl. explicit consent for orientation/sex-life answers), sharing, named subprocessors, international transfers, security, data-subject rights | everyone |
+| **E — Applicants, Candidates & Other Visitors** (v3.0) | using a public page without an account (18+, accuracy, abuse limits), the **application form and `/join` onboarding** (photos upload before Submit, the link is the credential, answers autosave, sensitive-data consent), **hello@ triage**, **training candidates** (emailed-code sign-in, compulsory whole-screen recording — video only, test-material confidentiality, work copied to Drive, a test is not a job), **`/p` and `/s` share links** | people with no account |
 
 > **No retention periods are published, deliberately.** The policy states no schedule and no per-category periods; do not add any without checking first — a published period the system does not actually enforce is worse than silence.
 
-Clause 2 (Part A) and clause 12 (Part B) cover the access model: admin registration, personal Google sign-in, and what Google does and does not share with us. Keep them accurate when the auth model changes — see [auth.md](auth.md#the-allowlist-the-authorisation-gate). Clause 26's provider table must be kept in step with the actual stack.
+Clause 2 (Part A) and clause 12 (Part B) cover the access model: admin registration, personal Google sign-in, and what Google does and does not share with us; clause 16 (Part C) covers the creator's Telegram sign-in. Keep them accurate when the auth model changes — see [auth.md](auth.md#the-allowlist-the-authorisation-gate) and [telegram.md](telegram.md). Clause 25's provider table must be kept in step with the actual stack.
+
+**RULE — Part E was appended, not inserted, and clause numbers are cited by number.** The staff welcome step, the creator welcome page and the spokes cite Parts B/C/D and clauses by number, so a new audience or clause goes at the **end** and nothing is renumbered. Part E's clauses must stay true to what the surfaces actually do — when `/training`'s recording (audio, camera, what is captured), the application form's fields, the `/join` question model or the hello@ triage change, update clauses 30–32 and the matching entries in clause 20/21 in the same change. Part E's clause 32 is the only place a candidate is told about the screen recording in legal terms; see [training.md](training.md#screen-recording).
 
 **RULE — bump `VERSION` *and* `EFFECTIVE_DATE` at the top of `page.tsx` on any substantive edit.** They are printed in the header and the footer, and they are the only record of what a user agreed to (see the note below). Clause 1 also commits us to notifying users in-app or by email before a material change takes effect.
 
@@ -210,7 +216,9 @@ Clause 2 (Part A) and clause 12 (Part B) cover the access model: admin registrat
 
 **The creator portal has no acceptance step at all** — creators are given notice, not a gate. `/creator/dashboard/welcome` ends with a Terms & Privacy section linking out, and it is load-bearing for the same reason `Login`'s notice is; keep it if you touch that page.
 
-⚠️ **One notice was lost when Telegram sign-in replaced the login screen.** `/creator/login` used to carry a by-signing-in notice under its button, seen at *every* sign-in; the portal now signs creators in silently from Telegram's `initData`, so the welcome page is the only surface left carrying it — and a returning creator never sees that page. If the point-of-sign-in notice matters, it needs a new home (a persistent Terms link in the portal chrome is the obvious candidate).
+⚠️ **One notice was lost when Telegram sign-in replaced the login screen** (and v3.0 of the terms rewrote clauses 16 and 18 to describe the Telegram sign-in rather than email/password and a home-screen install). `/creator/login` used to carry a by-signing-in notice under its button, seen at *every* sign-in; the portal now signs creators in silently from Telegram's `initData`, so the welcome page is the only surface left carrying it — and a returning creator never sees that page. If the point-of-sign-in notice matters, it needs a new home (a persistent Terms link in the portal chrome is the obvious candidate).
+
+**Who is shown the document, by audience:** staff — `Login` + onboarding step 0; creators — the welcome page; applicants — the application form's submit step. **Training candidates (`/training`) and `/join` recruits are not shown a link yet** — Part E covers them, but nothing points them at it. See [training.md](training.md) and [creator-onboarding.md](creator-onboarding.md).
 
 **RULE — that notice on `Login` is load-bearing.** It is what makes updating the terms possible without a re-acceptance flow. Do not remove it, and keep it linked to `/terms`.
 
@@ -220,9 +228,9 @@ On **Next**: `PATCH /api/user/onboarding { hasAcceptedTerms: true }`, then push 
 Static two-item explainer (screen capturing, notifications). No writes, no Electron calls.
 
 ### Step 2 — `permission/screen`
-Reads the platform via `electronAPI.app.getPlatform()`. **macOS only, TEMPORARY** (see [CLAUDE.md](../CLAUDE.md#temporary-screenshot-tcc-repair-remove-after-fleet-migrates-off-pre-signing-builds) and [electron.md](electron.md#screen-capture-permission-repair-macos-tcc-temporary)): fires `permissions.resetScreenCapture()` on mount so the grant registers against the signed identity.
+Reads the platform via `electronAPI.app.getPlatform()`. **macOS only, TEMPORARY** (see [CLAUDE.md](../CLAUDE.md#temporary-screenshot-tcc-repair-remove-after-fleet-migrates-off-pre-signing-builds) and [electron.md](electron.md#screen-capture-permission-repair-macos-tcc-temporary)): fires `permissions.resetScreenCapture()` so the grant registers against the signed identity — **at most once per machine**, claimed in localStorage (`claimOnboardingTccReset`) *before* it runs. It used to fire on every mount; since a macOS grant needs a relaunch that lands the user straight back on this step, the reset wiped the grant they had just made, the app vanished from the Screen Recording list, and Next re-locked — an endless loop.
 
-**Prompt screen capture** → on macOS, a real `captureScreenshot()` first (a capture attempt is what makes the app appear in System Settings → Screen Recording at all), then `permissions.requestScreenAccess()`, which on macOS just opens System Settings; on Windows it calls `desktopCapturer.getSources(...)`. Prompting only *unlocks* **Next** — the grant is never verified.
+**Prompt screen capture** → on macOS, a real `captureScreenshot()` first (a capture attempt is what makes the app appear in System Settings → Screen Recording at all), then `permissions.requestScreenAccess()`, which on macOS just opens System Settings; on Windows it calls `desktopCapturer.getSources(...)`. Prompting only *unlocks* **Next** — the grant is never verified (there is no screen-status IPC; adding one needs an Electron build). The unlock is remembered per machine (`markScreenCapturePrompted`), so returning after the relaunch does not re-lock it. A very small **"Having issues?"** link under the actions skips straight to the notifications step, so a machine where the prompt misbehaves can never strand the user.
 
 ### Step 3 — `permission/notifications`
 `permissions.requestNotification()` shows a real silent OS notification, which is what triggers the macOS permission prompt on first fire. Prompting unlocks **Next** → `profile`.
@@ -273,7 +281,7 @@ if (body.hasAcceptedTerms === true) updates.hasAcceptedTerms = true;
 if (body.hasCompletedOnboarding === true) updates.hasCompletedOnboarding = true;
 ```
 
-Only `true` is ever accepted — **the client can never clear either flag.** The one reset that exists is server-side, in `ensureUserExists` at login (see *Onboarding is all-or-nothing*), where it cannot be triggered by a crafted request. Keep it that way. The route follows [data-layer.md](data-layer.md#firestore-read-optimization-rules)'s cache rule: `invalidateUserCache(token.uid)` runs in the same handler.
+Only `true` is ever accepted — **the client can never clear either flag.** There is no reset path at all any more (the login-time reset was removed with the all-or-nothing discard — see *Onboarding resumes where it was left*). Keep it that way. The route follows [data-layer.md](data-layer.md#firestore-read-optimization-rules)'s cache rule: `invalidateUserCache(token.uid)` runs in the same handler.
 
 The profile step writes through the existing allowlisted `/api/user/update` route — **no new fields, no new endpoint**, so onboarding and Settings cannot drift apart in what they are permitted to store.
 

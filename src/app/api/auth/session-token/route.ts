@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { getUserById, invalidateUserCache } from '@/lib/services/userService';
 import { isValidDeviceId, registerSession } from '@/lib/services/sessionService';
 import { FieldValue } from 'firebase-admin/firestore';
+import { TERMS_VERSION } from '@/lib/terms';
 
 /**
  * POST /api/auth/session-token
@@ -57,6 +58,9 @@ export const POST = withAuth(async (req: NextRequest, token: DecodedIdToken) => 
 
     await adminDb.collection('users').doc(token.uid).update({
       lastLoginAt: FieldValue.serverTimestamp(),
+      // Signing in is acceptance of the current terms — see lib/terms.ts.
+      acceptedTermsVersion: TERMS_VERSION,
+      acceptedTermsAt: FieldValue.serverTimestamp(),
     });
     invalidateUserCache(token.uid);
 
@@ -71,6 +75,8 @@ export const POST = withAuth(async (req: NextRequest, token: DecodedIdToken) => 
   await adminDb.collection('users').doc(token.uid).update({
     sessionToken,
     lastLoginAt: FieldValue.serverTimestamp(),
+    acceptedTermsVersion: TERMS_VERSION,
+    acceptedTermsAt: FieldValue.serverTimestamp(),
   });
 
   invalidateUserCache(token.uid);

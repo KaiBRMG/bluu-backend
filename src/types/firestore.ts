@@ -65,6 +65,15 @@ export interface UserDocument {
   lastActiveAt?: Timestamp;
   /** Google's stable account id (`sub`), recorded on login. Survives renames. */
   googleSub?: string | null;
+  /**
+   * The Terms of Use version (`lib/terms.ts`) this user last **signed in**
+   * under — written server-side by every login, never by a client. Absent on
+   * users from before it existed. `TermsUpdateSignOut` ends the session of
+   * anyone whose value is behind the published version.
+   */
+  acceptedTermsVersion?: string;
+  /** When {@link acceptedTermsVersion} was last stamped (the last login). */
+  acceptedTermsAt?: Timestamp;
   /** Set when the user moved off their @bluurock.com address. */
   emailMigratedAt?: Timestamp;
   /**

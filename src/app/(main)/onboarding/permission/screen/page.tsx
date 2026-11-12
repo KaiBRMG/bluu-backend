@@ -5,6 +5,11 @@ import { useRouter } from 'next/navigation';
 import { Focus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import OnboardingCard from '../../_components/OnboardingCard';
+import {
+  claimOnboardingTccReset,
+  hasPromptedScreenCapture,
+  markScreenCapturePrompted,
+} from '../../resume';
 
 export default function ScreenPermissionPage() {
   const router = useRouter();
@@ -17,12 +22,22 @@ export default function ScreenPermissionPage() {
         const p = await window.electronAPI.app.getPlatform();
         setPlatform(p);
 
+        // Coming back to this step after a relaunch (macOS's "Quit & Reopen"
+        // once Screen Recording is granted) must not re-lock Next: the prompt
+        // already ran on this machine.
+        if (hasPromptedScreenCapture()) setPrompted(true);
+
         // TEMPORARY (see CLAUDE.md): on macOS, clear any stale ScreenCapture TCC
         // record (left by pre-signing builds) BEFORE the user grants in this
         // step, so the permission they set registers against the signed identity
-        // and actually sticks. No-op on a clean machine; the native handler caps
-        // it to once per machine. Feature-detected — no-op on older builds.
-        if (p === 'darwin') {
+        // and actually sticks. No-op on a clean machine. Feature-detected.
+        //
+        // ONCE PER MACHINE, claimed in localStorage before it runs. The native
+        // handler has no marker, so this used to fire on every mount — and the
+        // relaunch after granting lands the user right back here, where the
+        // reset wiped the grant they had just made (the app vanished from the
+        // Screen Recording list and Next re-locked: an endless loop).
+        if (p === 'darwin' && claimOnboardingTccReset()) {
           window.electronAPI.permissions?.resetScreenCapture?.().catch(() => {});
         }
       }
@@ -50,9 +65,12 @@ export default function ScreenPermissionPage() {
       // the user is stranded on a disabled button with nothing explaining why.
       console.warn('[ScreenPermissionPage] Permission prompt failed (continuing):', err);
     } finally {
+      markScreenCapturePrompted();
       setPrompted(true);
     }
   };
+
+  const goNext = () => router.push('/onboarding/permission/notifications');
 
   const isMac = platform === 'darwin';
 
@@ -91,14 +109,21 @@ export default function ScreenPermissionPage() {
         >
           Back
         </Button>
-        <Button
-          onClick={() => router.push('/onboarding/permission/notifications')}
-          disabled={!prompted}
-          className="flex-1"
-        >
+        <Button onClick={goNext} disabled={!prompted} className="flex-1">
           Next
         </Button>
       </div>
+
+      {/* Escape hatch: the grant is never verified anyway, and a machine where
+          the prompt misbehaves must not strand the user on a locked Next. */}
+      <Button
+        variant="link"
+        size="xs"
+        onClick={goNext}
+        className="mx-auto mt-4 h-auto p-0 text-xs font-normal text-zinc-400 hover:text-zinc-200"
+      >
+        Having issues?
+      </Button>
     </OnboardingCard>
   );
 }

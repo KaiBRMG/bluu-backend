@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTimeTrackingContext } from '@/contexts/TimeTrackingContext';
 import { isUpdateInFlight } from '@/lib/updateInFlight';
+import { hasUnsavedTyping } from '@/lib/unsavedTyping';
 import LoadingScreen from '@/components/LoadingScreen';
 
 /**
@@ -99,23 +100,6 @@ const COVER_FAILSAFE_MS = 15 * 1000;
 const PROBE_TIMEOUT_MS = 8 * 1000;
 
 type StaleReason = 'deployment' | 'resume';
-
-/** Would a reload throw away something the user typed? An empty focused field
- *  loses nothing — blocking on it would let an autofocused search box pin a
- *  stale page forever. */
-function hasUnsavedTyping(): boolean {
-  const el = typeof document !== 'undefined' ? document.activeElement : null;
-  if (!el) return false;
-  if ((el as HTMLElement).isContentEditable) return !!el.textContent?.trim();
-  if (el instanceof HTMLTextAreaElement) return el.value.trim() !== '';
-  if (el instanceof HTMLInputElement) {
-    if (['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file'].includes(el.type)) {
-      return false;
-    }
-    return el.value.trim() !== '';
-  }
-  return false;
-}
 
 function readReloadStamp(): number {
   try {

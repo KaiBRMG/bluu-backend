@@ -12,6 +12,7 @@ import EmailMigrationDialog from "@/components/migration/EmailMigrationDialog";
 import InputMonitoringPrompt from "@/components/time-tracking/InputMonitoringPrompt";
 import AnnouncementCard from "@/components/announcements/AnnouncementCard";
 import DeploymentRefresher from "@/components/DeploymentRefresher";
+import TermsUpdateSignOut from "@/components/TermsUpdateSignOut";
 import NavigationWatchdog from "@/components/NavigationWatchdog";
 import NavigationProgress from "@/components/NavigationProgress";
 import DeepLinkRouter from "@/components/DeepLinkRouter";
@@ -102,6 +103,11 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 Main window only — a satellite must not reload under an
                 operator. */}
             <DeploymentRefresher />
+            {/* Inside LazyProviders because it reads clock state — it only ever
+                signs out a CLOCKED-OUT user, and only after a period of
+                inactivity in this window, when the Terms of Use have been
+                updated since they last signed in. Main window only. */}
+            <TermsUpdateSignOut />
             <SpeedInsights />
             <Analytics />
           </LazyProviders>

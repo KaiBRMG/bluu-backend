@@ -7,8 +7,8 @@ import type { AdminFullUser } from '@/hooks/useAdminUsers';
  * The span deliberately runs from registration all the way to the end of
  * onboarding, not just to first login. A user who signs in once and abandons
  * the flow has told us nothing about themselves — no phone, no address, no
- * emergency contact — and onboarding is all-or-nothing: `recordSuccessfulLogin`
- * discards an incomplete run and drops them back at the login screen. Treating
+ * emergency contact — nothing personal is stored until the final onboarding
+ * step (an unfinished run resumes where it was left; it is not discarded). Treating
  * that person as "Active" would mean the registry showed a complete-looking
  * employee record that is in fact empty, which is exactly the case an admin
  * needs to chase.

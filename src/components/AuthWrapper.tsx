@@ -16,7 +16,7 @@ import {
   readWorkArea,
   fitToWorkArea,
 } from '@/lib/windowSize';
-import { clearLoginSession, hasLoginSession } from '@/lib/loginSession';
+import { getOnboardingResumePath } from '@/app/(main)/onboarding/resume';
 
 export default function AuthWrapper({ children }: { children: React.ReactNode }) {
   const { user, loading, revokedRedirect } = useAuth();
@@ -28,10 +28,6 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
   // Guards the displaced handler against a re-run (StrictMode, or a re-render
   // before signOut settles) firing a second clock-out.
   const hasHandledDisplacedRef = useRef(false);
-
-  // Same purpose for the incomplete-onboarding discard: one sign-out per mount,
-  // even if StrictMode double-invokes or a re-render lands before it settles.
-  const hasDiscardedRef = useRef(false);
 
   // Hold the boot loader while Firebase auth resolves.
   useBootPhase('auth', loading);
@@ -51,7 +47,7 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
     pathname?.startsWith('/creator/');
 
   // Onboarding IS an authenticated surface, so session enforcement (revocation,
-  // displacement, the incomplete-onboarding discard) must run there. Only the
+  // displacement) must run there. Only the
   // onboarding guard itself skips it, or it would redirect in a loop.
   const isOnboardingRoute = pathname?.startsWith('/onboarding/');
 
@@ -160,35 +156,17 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
         console.error('[AuthWrapper] Clock-out on displaced logout failed:', err);
       }
       localStorage.removeItem('sessionToken');
-      clearLoginSession();
       await auth.signOut();
       router.replace('/auth/displaced');
     })();
   }, [displaced, userDataLoading, user, isUnauthenticatedRoute, router, clockOutAndFlush]);
 
-  // Onboarding is all-or-nothing: a run that never reached "Submit details" is
-  // discarded, and the user starts over from the login screen. `ensureUserExists`
-  // clears the partial data server-side on the next login; this is the client
-  // half — end the restored session so they actually land on Login.
-  //
-  // Gated on the login-session marker, which lives in sessionStorage and so
-  // exists only for the run the user actually signed in on. That is what
-  // separates "auth restored from disk on relaunch" (discard) from "signed in a
-  // moment ago and is mid-flow" (leave alone).
-  useEffect(() => {
-    if (!user || userDataLoading || !userData || isUnauthenticatedRoute) return;
-    if (userData.hasCompletedOnboarding === true) return;
-    if (hasLoginSession() || hasDiscardedRef.current) return;
-    hasDiscardedRef.current = true;
-
-    (async () => {
-      localStorage.removeItem('sessionToken');
-      await auth.signOut();
-      router.replace('/');
-    })();
-  }, [userData, userDataLoading, user, isUnauthenticatedRoute, router]);
-
-  // Onboarding guard: redirect to the appropriate onboarding step if not completed
+  // Onboarding guard: redirect an incomplete user into the flow — and RESUME it.
+  // An unfinished run is kept, not discarded: closing the window, a macOS
+  // "Quit & Reopen" after granting Screen Recording, or a crash brings the user
+  // back to the step they left (recorded per uid on this device by
+  // OnboardingCard — see onboarding/resume.ts). The flags still decide the
+  // floor: no terms accepted → the terms step, whatever was recorded.
   useEffect(() => {
     if (!user || userDataLoading || isUnauthenticatedRoute || isOnboardingRoute) return;
     if (!userData) return;
@@ -198,7 +176,7 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
       return;
     }
     if (userData.hasCompletedOnboarding !== true) {
-      router.replace('/onboarding/permissions');
+      router.replace(getOnboardingResumePath(user.uid));
       return;
     }
   }, [userData, userDataLoading, user, isUnauthenticatedRoute, isOnboardingRoute, router]);

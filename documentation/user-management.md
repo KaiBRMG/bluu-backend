@@ -25,7 +25,7 @@ Since the personal-email migration, **login is an allowlist check against the do
 !user.lastLoginAt || user.hasCompletedOnboarding === false
 ```
 
-**The span runs to the end of onboarding, not to first login.** A user who signs in once and abandons the flow has submitted nothing — and onboarding is all-or-nothing, so `recordSuccessfulLogin` discards the partial run and drops them back at the login screen ([onboarding.md](onboarding.md#onboarding-is-all-or-nothing)). Calling them "Active" would show a complete-looking employee record that is actually empty.
+**The span runs to the end of onboarding, not to first login.** A user who signs in once and abandons the flow has submitted nothing — their run is kept and resumes where they left it ([onboarding.md](onboarding.md#onboarding-resumes-where-it-was-left)), but no personal details are stored until the final step. Calling them "Active" would show a complete-looking employee record that is actually empty.
 
 **RULE — the second test must be `=== false`, never a falsy check.** Users created before the onboarding flow shipped have no `hasCompletedOnboarding` field at all, so it arrives as `undefined`; a falsy test would relabel every long-standing employee as "Invited".
 

@@ -108,7 +108,7 @@ Section 3 is therefore only ever the trial link and the earnings screenshots (**
 
 ### The collection notice on the last step is load-bearing
 
-Under the submit button on the **final** step only, the form carries *"By submitting you confirm you are 18 or over and agree to our Terms of Use & Privacy Policy"*, linking `/terms` in a new tab. This is the **only** place an applicant is ever given notice: the form is the product's one unauthenticated write path, it collects photographs of a person, and Part D of `/terms` claims to cover applicants — a policy nobody is shown is not notice. Do not remove it, and keep it on the step that actually submits. See [onboarding.md](onboarding.md#step-0--welcome-terms-of-use) for the document's structure.
+Under the submit button on the **final** step only, the form carries *"By submitting you confirm you are 18 or over and agree to our Terms of Use & Privacy Policy"*, linking `/terms` in a new tab. This is the **only** place an applicant is ever given notice: the form is the product's one unauthenticated write path, it collects photographs of a person, and Parts D and E of `/terms` cover applicants (Part E clause 30 is the application form specifically) — a policy nobody is shown is not notice. Do not remove it, and keep it on the step that actually submits. See [onboarding.md](onboarding.md#step-0--welcome-terms-of-use) for the document's structure.
 
 ### Contact: one of Telegram or WhatsApp is required
 

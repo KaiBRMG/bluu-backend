@@ -45,6 +45,10 @@
 | `src/scripts/seed-onboarding-permission.js` | One-off: copies the Model Submissions permission map to `creators-onboarding` |
 | `model-onboarding.md` (repo root) | The source questionnaire the question model was built from |
 
+## What the terms say about this funnel
+
+[`/terms`](../src/app/terms/page.tsx) Part E (clauses 30–31) covers the application, this onboarding form and the hello@ triage: the personal link is a credential, answers autosave before send, the sensitive answers (orientation, persona sexuality, content limits) are given on explicit consent, and hello@ mail is triaged by fixed rules. Keep those clauses in step with `creatorOnboarding.ts` and the filter. **`/join/[token]` does not link to `/terms` yet** — the welcome pass is the natural place.
+
 ## Firestore
 
 | Collection | Contents | Client access |

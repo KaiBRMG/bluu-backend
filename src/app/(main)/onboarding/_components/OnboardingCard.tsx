@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { LogOut } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -9,11 +9,11 @@ import { useAuth } from '@/components/AuthProvider';
 import { useUserData } from '@/hooks/useUserData';
 import { useTimeTrackingContext } from '@/contexts/TimeTrackingContext';
 import { clearPermissionsCache } from '@/lib/permissionsCache';
-import { clearLoginSession } from '@/lib/loginSession';
 import { auth } from '@/firebase-config';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { cn } from '@/lib/utils';
 import { ONBOARDING_STEPS, type OnboardingStepIndex } from '../steps';
+import { clearOnboardingStep, saveOnboardingStep } from '../resume';
 
 /**
  * The card surface. Opaque — DESIGN.md's translucent overlay recipe assumes the
@@ -133,13 +133,11 @@ function SignOutButton() {
     }
 
     // Clear local session state BEFORE signing out, and never let a failure here
-    // stop the rest. With the login marker gone, even a failed `signOut()` leaves
-    // the next boot in a state the incomplete-onboarding discard resolves into
-    // the login screen.
+    // stop the rest. The onboarding resume position is deliberately KEPT — it is
+    // keyed by uid, so signing back in picks the flow up where it was left.
     try {
       clearPermissionsCache();
       localStorage.removeItem('sessionToken');
-      clearLoginSession();
     } catch (error) {
       console.error('[Onboarding] Clearing local session state failed:', error);
     }
@@ -224,6 +222,21 @@ export default function OnboardingCard({
   footer,
 }: OnboardingCardProps) {
   const name = useFullName();
+  const { user } = useAuth();
+  const uid = user?.uid;
+
+  // Record this step as the resume point, so re-entering the app (window
+  // closed, macOS "Quit & Reopen" after a permission grant, a crash) lands here
+  // rather than at the start of the flow. The terminal step clears it — by then
+  // onboarding is complete and the guard never resumes anyone. See resume.ts.
+  useEffect(() => {
+    if (!uid) return;
+    if (ONBOARDING_STEPS[step].path === '/onboarding/done') {
+      clearOnboardingStep(uid);
+    } else {
+      saveOnboardingStep(uid, ONBOARDING_STEPS[step].path);
+    }
+  }, [uid, step]);
 
   return (
     // A flex column capped at the viewport: header and footer hold their size,

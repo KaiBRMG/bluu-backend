@@ -6,6 +6,7 @@ import { addNotificationToBatch } from '@/lib/middleware/apiHelpers';
 import { normalizeEmail } from '@/lib/authEmail';
 import { GROUP_DISPLAY_NAMES } from '@/types/firestore';
 import { DEFAULT_TIME_TRACKING_SETTINGS } from '@/lib/timeTrackingSettings';
+import { TERMS_VERSION } from '@/lib/terms';
 
 /** Server-only index: doc id = normalised email, body = { uid, email }. */
 export const AUTH_EMAIL_COLLECTION = 'auth-emails';
@@ -62,19 +63,10 @@ export async function recordSuccessfulLogin(record: LoginRecord): Promise<string
   const sessionToken = isWebLogin ? (data.sessionToken ?? randomUUID()) : randomUUID();
   const isFirstLogin = !data.lastLoginAt;
 
-  // An onboarding run that never reached "Submit details" is discarded, so the
-  // user starts the flow from the terms step exactly as a first-time signup
-  // would. Enforced here rather than client-side because this is the only
-  // place that can be trusted, and it runs on every login.
-  //
-  // `photoURL` is included because it is the one field onboarding writes
-  // before completion (the upload is immediate); everything else on the
-  // details step is written in the same request that completes onboarding, so
-  // an incomplete run leaves nothing else behind.
-  const abandonedOnboarding = data.hasCompletedOnboarding !== true;
-  if (abandonedOnboarding && !isFirstLogin) {
-    console.log(`[UserService] Discarding incomplete onboarding: ${record.email}`);
-  }
+  // An onboarding run that never reached "Submit details" is KEPT, not
+  // discarded: the user resumes at the step they left (see
+  // documentation/onboarding.md, "Onboarding resumes"). Nothing is reset here —
+  // `hasAcceptedTerms` and `photoURL` survive a relaunch or a re-login.
 
   // Self-heal the stored address to Google's spelling when the two differ only
   // cosmetically (an admin typed "J.Doe@gmail.com"; Google says "jdoe@gmail.com").
@@ -86,12 +78,16 @@ export async function recordSuccessfulLogin(record: LoginRecord): Promise<string
 
   await userRef.update({
     lastLoginAt: FieldValue.serverTimestamp(),
+    // Signing in IS acceptance of the current terms (the notice on Login says
+    // so). Stamped server-side so TermsUpdateSignOut can tell who has not yet
+    // signed in under a newer version. See lib/terms.ts.
+    acceptedTermsVersion: TERMS_VERSION,
+    acceptedTermsAt: FieldValue.serverTimestamp(),
     ...(isWebLogin ? {} : { sessionToken }),
     ...(emailNeedsSync ? { workEmail: record.email } : {}),
     ...(record.googleSub && data.googleSub !== record.googleSub
       ? { googleSub: record.googleSub }
       : {}),
-    ...(abandonedOnboarding ? { hasAcceptedTerms: false, photoURL: null } : {}),
   });
 
   invalidateUserCache(record.uid);

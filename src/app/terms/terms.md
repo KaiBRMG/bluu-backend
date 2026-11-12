@@ -17,6 +17,9 @@ this pointer.
    user doc is a bare boolean with no version stamp.
 3. If the change is material, notify users before the effective date (clause 1
    commits us to this).
+4. Add new audiences or clauses at the **end** (as Part E was in v3.0). Other
+   surfaces and the docs cite Parts and clauses by letter and number, so do not
+   insert or renumber.
 
 If you need a plain-text or PDF copy to send to a lawyer, export it from the
 rendered page rather than re-typing it here.

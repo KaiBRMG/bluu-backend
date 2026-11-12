@@ -117,8 +117,8 @@ export default function WelcomePage() {
             Your use of this portal is governed by our Terms of Use &amp; Privacy Policy.
             Part C covers creators specifically — what the portal is (and is not), your
             content and the licence you give us, and the confirmations you make about the
-            content you upload. Part D explains what personal data we hold, how long we keep
-            it, and how to ask for a copy or a deletion.
+            content you upload. Part D explains what personal data we hold, who we share it
+            with, and how to ask for a copy or a deletion.
           </P>
           <P>
             Amounts shown in this portal are internal tracking figures for coordination.

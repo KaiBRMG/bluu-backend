@@ -1889,6 +1889,16 @@
     },
     {
       "collectionGroup": "users",
+      "fieldPath": "acceptedTermsVersion",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "acceptedTermsAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
       "fieldPath": "offboardedAt",
       "indexes": []
     },

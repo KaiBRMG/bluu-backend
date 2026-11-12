@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { signInWithPopup, signInWithCustomToken } from 'firebase/auth';
 import { AlertCircle } from 'lucide-react';
 import { auth, googleProvider } from '../firebase-config';
-import { markLoginSession } from '@/lib/loginSession';
 import { getDeviceId, getDeviceLabel } from '@/lib/deviceId';
 
 /**
@@ -56,24 +55,17 @@ function Login() {
           return;
         }
 
-        // Both markers must be written BEFORE signing in. `signInWithCustomToken`
-        // triggers onAuthStateChanged, and the users/{uid} snapshot that follows
-        // reads both immediately.
-        //
-        // sessionToken: that snapshot compares the doc's freshly rotated token
-        // against localStorage. Writing it afterwards meant the first snapshot of
+        // The session token must be written BEFORE signing in.
+        // `signInWithCustomToken` triggers onAuthStateChanged, and the users/{uid}
+        // snapshot that follows reads it immediately: that snapshot compares the
+        // doc's freshly rotated token against localStorage. Writing it afterwards
+        // meant the first snapshot of
         // any *second* login compared the new token to the previous one, flagged
         // the session as displaced, and left `userData` null permanently — the
-        // doc never changes again, so no later snapshot ever corrects it. Now
-        // that an incomplete onboarding forces a fresh login on every relaunch,
-        // that second login is the common path, not an edge case.
+        // doc never changes again, so no later snapshot ever corrects it.
         if (data.sessionToken) {
           localStorage.setItem('sessionToken', data.sessionToken);
         }
-        // Marks this run as explicitly logged into, so the incomplete-onboarding
-        // discard in AuthWrapper doesn't immediately sign the user back out.
-        markLoginSession();
-
         // AuthProvider will check isActive before setting user
         await signInWithCustomToken(auth, data.customToken);
 
@@ -118,9 +110,6 @@ function Login() {
     try {
       setLoading(true);
       setError(null);
-      // Set before the popup resolves auth state, for the same reason as the
-      // Electron path above.
-      markLoginSession();
       const result = await signInWithPopup(auth, googleProvider);
 
       // No domain check here any more — staff sign in with personal Google
