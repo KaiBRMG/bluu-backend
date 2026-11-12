@@ -12,9 +12,11 @@ this pointer.
 ## When you change the terms
 
 1. Edit `page.tsx` only.
-2. Bump **both** `VERSION` and `EFFECTIVE_DATE` at the top of that file. They are
-   the only record of which version a user accepted — `hasAcceptedTerms` on the
-   user doc is a bare boolean with no version stamp.
+2. Bump **both** `TERMS_VERSION` and `TERMS_EFFECTIVE_DATE` in
+   [`src/lib/terms.ts`](../../lib/terms.ts) (the page imports them). **A bump signs
+   every employee out** — once they are clocked out and inactive — and signing back
+   in is their acceptance; `users/{uid}.acceptedTermsVersion` records which version.
+   So bump only for a substantive edit, never for a typo.
 3. If the change is material, notify users before the effective date (clause 1
    commits us to this).
 4. Add new audiences or clauses at the **end** (as Part E was in v3.0). Other

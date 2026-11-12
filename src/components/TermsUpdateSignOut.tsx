@@ -35,7 +35,11 @@ import { hasUnsavedTyping } from '@/lib/unsavedTyping';
  *     (idle timeout) starts the same clock — nobody is signed out the moment
  *     their shift ends. A sleep gap counts as inactivity, correctly.
  *  3. The page is not onboarding or an `/auth/` page, no desktop update is
- *     downloading, the machine is online, and nothing typed would be lost.
+ *     downloading, the machine is online, nothing typed would be lost, and the
+ *     time-tracking provider has finished hydrating (its default `clocked-out`
+ *     means nothing until it has asked the server).
+ *     Also: no satellite window (OF Manager, GoLogin) is open — they share this
+ *     origin's Firebase session and their input never reaches this window.
  *  4. The published version is newer than the user's stamp (below).
  *  5. It has not already signed this user out for this version on this device
  *     (the loop guard).
@@ -111,7 +115,7 @@ async function fetchRequiredVersion(): Promise<string | null> {
 export default function TermsUpdateSignOut() {
   const { user } = useAuth();
   const { userData } = useUserData();
-  const { displayState } = useTimeTrackingContext();
+  const { displayState, isHydrating } = useTimeTrackingContext();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -121,9 +125,10 @@ export default function TermsUpdateSignOut() {
   const acceptedRef = useRef<string | undefined>(undefined);
   const userDataReadyRef = useRef(false);
   const displayStateRef = useRef(displayState);
+  const hydratingRef = useRef(isHydrating);
   const pathnameRef = useRef(pathname);
 
-  const lastActivityRef = useRef(Date.now());
+  const lastActivityRef = useRef(0); // stamped on mount — Date.now() is impure in render
   const clockedOutSinceRef = useRef<number | null>(null);
   const requiredRef = useRef<{ version: string; at: number } | null>(null);
   const busyRef = useRef(false);
@@ -134,6 +139,7 @@ export default function TermsUpdateSignOut() {
     acceptedRef.current = userData?.acceptedTermsVersion;
   }, [userData]);
   useEffect(() => { pathnameRef.current = pathname; }, [pathname]);
+  useEffect(() => { hydratingRef.current = isHydrating; }, [isHydrating]);
 
   // The clock-out transition starts the "clocked out for a while" timer; any
   // other state clears it. The provider starts in `clocked-out` before it has
@@ -153,6 +159,9 @@ export default function TermsUpdateSignOut() {
   const eligible = useCallback((): boolean => {
     if (!uidRef.current || !userDataReadyRef.current) return false;
     if (displayStateRef.current !== 'clocked-out') return false;
+    // `clocked-out` is only the provider's DEFAULT until it has asked the server
+    // whether a session is open. Until hydration settles it proves nothing.
+    if (hydratingRef.current) return false;
     const since = clockedOutSinceRef.current;
     if (since === null) return false;
     if (Date.now() - Math.max(lastActivityRef.current, since) < IDLE_MS) return false;
@@ -183,6 +192,21 @@ export default function TermsUpdateSignOut() {
       const uid = uidRef.current;
       if (!uid || !eligible()) return;
 
+      // A satellite window (OF Manager, GoLogin) shares this origin's Firebase
+      // session, so signing out here would end it under an operator whose input
+      // this window cannot see. Any open satellite means someone may be working.
+      // `listSatellites` is absent on older shells — then there is no signal, and
+      // that is a known limitation rather than a reason to block forever.
+      try {
+        const open = await window.electronAPI?.window?.listSatellites?.();
+        if (open && open.length > 0) return;
+      } catch {
+        // No answer is not a reason to sign anyone out under a satellite — but
+        // neither can it block forever; the next tick asks again.
+        return;
+      }
+      if (!eligible()) return;
+
       const key = markerKey(uid, required.version);
       if (readMarker(key)) {
         console.warn(
@@ -192,13 +216,14 @@ export default function TermsUpdateSignOut() {
         );
         return;
       }
-      writeMarker(key);
-
       // Already clocked out, so there is nothing to flush (clockOutAndFlush is a
       // no-op in this state) — only the local session to clear.
       clearPermissionsCache();
       try { localStorage.removeItem('sessionToken'); } catch { /* ignore */ }
       await auth.signOut();
+      // Recorded only once the sign-out has landed: a throw above must leave the
+      // user eligible to be retried, not marked as already handled.
+      writeMarker(key);
       router.replace('/auth/terms-updated');
     } catch (error) {
       console.error('[TermsUpdateSignOut] sign-out failed:', error);
@@ -209,6 +234,7 @@ export default function TermsUpdateSignOut() {
 
   useEffect(() => {
     const onActivity = () => { lastActivityRef.current = Date.now(); };
+    onActivity(); // mounting is the baseline: the window has just been loaded
     for (const evt of ACTIVITY_EVENTS) {
       window.addEventListener(evt, onActivity, { passive: true, capture: true });
     }

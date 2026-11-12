@@ -21,6 +21,7 @@
 | `src/components/AuthProvider.tsx` | Internal-employee auth context (`isActive` enforced) |
 | `src/components/CreatorAuthProvider.tsx` | Creator auth context |
 | `src/components/AuthWrapper.tsx` | Gates the app during auth resolution (boot phase `'auth'`) |
+| `src/components/TermsUpdateSignOut.tsx` | Ends a clocked-out, idle session when the Terms were updated since the user's last sign-in — see [onboarding.md](onboarding.md#updating-the-terms-signs-the-organisation-out) |
 | `src/lib/middleware/withAuth.ts` | API guard: verifies the Firebase Bearer token **and** that it belongs to an active employee |
 | `src/lib/middleware/withCreatorAuth.ts` | API guard: token + creator doc existence + `isActive` |
 | `src/app/api/creator/telegram/session/route.ts` | **The creator portal's sign-in**: Mini App `initData` → Firebase custom token. See [telegram.md](telegram.md) |
@@ -193,6 +194,10 @@ Step 2 must stay. A session established before device identity shipped has no ma
 The delete cascade calls `releaseAllDeviceSessions` — without it the index keeps resolving a deleted employee's browser to their old uid, which is exactly the lookup the public share page performs. See [user-management.md](user-management.md).
 
 **RULE — a displaced logout must clock the timer out first.** `AuthWrapper`'s displaced effect `await`s `clockOutAndFlush()` (from `TimeTrackingContext`) *before* `auth.signOut()`. A displaced user is signed out without ever reaching the Clock Out button, so skipping this leaves the session open server-side until the daily stale-session Cloud Function closes it — and leaves a buffer with no `clock-out` event, which renders as a phantom live session. See [time-tracking.md](time-tracking.md#3-crash--restart-robustness).
+
+#### A fourth way a session ends: the terms were updated
+
+Besides revocation, displacement and deactivation, `TermsUpdateSignOut` signs a user out when `users/{uid}.acceptedTermsVersion` (stamped by every login) is behind `TERMS_VERSION`. It is deliberately the gentlest of the four: **clocked-out only, and only after 20 minutes of inactivity** in the window, so it never ends a shift and never catches someone who has just clocked out. Unlike a displaced logout it needs no `clockOutAndFlush()` — the state is already `clocked-out`. Full rules in [onboarding.md](onboarding.md#updating-the-terms-signs-the-organisation-out). **Any new login path must stamp the version** (`recordSuccessfulLogin` / `session-token` do).
 
 #### Web sessions (the groundwork for web access)
 

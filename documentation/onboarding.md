@@ -22,6 +22,8 @@
 | `src/app/(main)/onboarding/permission/notifications/page.tsx` | Step 4 — OS notification permission |
 | `src/app/(main)/onboarding/profile/page.tsx` | Step 5 — personal details form; **this is the step that completes onboarding** |
 | `src/app/(main)/onboarding/done/page.tsx` | Step 6 — terminal confirmation; explains the unassigned-group wait |
+| `src/lib/terms.ts` | `TERMS_VERSION` / `TERMS_EFFECTIVE_DATE` — **the single bump point** — and `termsAcceptanceIsStale`. Bumping it signs the org out (below) |
+| `src/components/TermsUpdateSignOut.tsx`, `src/app/(main)/auth/terms-updated/page.tsx`, `src/app/api/terms/version/route.ts` | The sign-out mechanism, its landing page, and the HTTP-served required version |
 | `src/app/terms/page.tsx` | The Terms of Use **& Privacy Policy** (single source, all surfaces — staff, creators, and external individuals: applicants, recruits, training candidates, enquirers, shared-link recipients) — opened in the **system browser**, not in-app |
 | `src/middleware.ts` | `/terms` is in `BROWSER_ALLOWED_PREFIXES` so the external browser can reach it |
 | `src/app/api/user/onboarding/route.ts` | The only write path for `hasAcceptedTerms` / `hasCompletedOnboarding` — one-way (true only) |
@@ -210,9 +212,33 @@ Clause 2 (Part A) and clause 12 (Part B) cover the access model: admin registrat
 
 **RULE — Part E was appended, not inserted, and clause numbers are cited by number.** The staff welcome step, the creator welcome page and the spokes cite Parts B/C/D and clauses by number, so a new audience or clause goes at the **end** and nothing is renumbered. Part E's clauses must stay true to what the surfaces actually do — when `/training`'s recording (audio, camera, what is captured), the application form's fields, the `/join` question model or the hello@ triage change, update clauses 30–32 and the matching entries in clause 20/21 in the same change. Part E's clause 32 is the only place a candidate is told about the screen recording in legal terms; see [training.md](training.md#screen-recording).
 
-**RULE — bump `VERSION` *and* `EFFECTIVE_DATE` at the top of `page.tsx` on any substantive edit.** They are printed in the header and the footer, and they are the only record of what a user agreed to (see the note below). Clause 1 also commits us to notifying users in-app or by email before a material change takes effect.
+**RULE — bump `TERMS_VERSION` *and* `TERMS_EFFECTIVE_DATE` in [`src/lib/terms.ts`](../src/lib/terms.ts) on any substantive edit** (`page.tsx` imports them and prints them in the header and footer). **A bump signs every employee out** — see [Updating the terms signs the organisation out](#updating-the-terms-signs-the-organisation-out) — so it is not for typos. Clause 1 also commits us to notifying users in-app or by email before a material change takes effect.
 
-**Note — editing the terms deliberately does not re-prompt anyone.** `hasAcceptedTerms` is a one-way flag ([§5](#5-write-path-guarantees)) with no version attached, so a user who has already accepted never sees the onboarding step again. **This is by design, not a gap:** `Login` carries *"By signing in you agree to our Terms of Use & Privacy Policy"* directly above the sign-in button, and every user passes that screen on every login — so agreement is re-affirmed continuously against whatever the current text says. The explicit onboarding step exists to make a new user read it once; it is not the only point of acceptance. (The known weakness: nothing records *which version* was accepted. Storing `acceptedTermsVersion` alongside the boolean would fix it and is the prerequisite for ever forcing re-acceptance.)
+**Note — the onboarding flag does not re-prompt anyone; the sign-out does.** `hasAcceptedTerms` is a one-way flag ([§5](#5-write-path-guarantees)) with no version attached, so a user who has already accepted never sees the onboarding step again, and that is still true. What brings an updated text in front of an existing user is **signing in again**: `Login` carries *"By signing in you agree to our Terms of Use & Privacy Policy"* directly above the sign-in button, and every login now stamps `acceptedTermsVersion`. Because a renderer can stay open for weeks and never pass that screen, a version bump ends the stale sessions — see the next section. The explicit onboarding step exists to make a new user read it once; it is not the only point of acceptance.
+
+#### Updating the terms signs the organisation out
+
+Bumping `TERMS_VERSION` ([`lib/terms.ts`](../src/lib/terms.ts)) is the whole trigger. Every login (`recordSuccessfulLogin`, `/api/auth/session-token`) writes `users/{uid}.acceptedTermsVersion` + `acceptedTermsAt` **server-side** (client writes to `users` are denied by the rules). [`TermsUpdateSignOut`](../src/components/TermsUpdateSignOut.tsx), mounted in `(main)/layout.tsx`, compares that stamp to the version the deployment publishes and signs the user out → `/auth/terms-updated` (explains, links `/terms`, "Back to Login"). Signing back in stamps the new version.
+
+It fires only when **all** hold:
+
+| Condition | Why |
+|---|---|
+| `displayState === 'clocked-out'` | An allowlist of one, like `DeploymentRefresher`. `idle`/`paused`/`on-break` are open shifts — never ended. |
+| **No input in this window for 20 min, and clocked out for 20 min** (`IDLE_MS`) | A user who has *just* clocked out and is still working in the app is never signed out — clock-out is itself input, and an automatic clock-out starts the same timer. Pointer/key/wheel/touch/focus count; a sleep gap counts as inactivity. |
+| Not onboarding / `/auth/*`, no desktop update in flight, online, no unsaved typing | Same safety gate as the deployment reload (`unsavedTyping.ts` is shared). |
+| Time tracking has finished hydrating (`!isHydrating`) | `clocked-out` is the provider's *default* until it has asked the server; before that it proves nothing. **Known gap:** if hydration *fails* (offline at boot) the provider stays `clocked-out` with a live server session — the same blind spot every `clocked-out` gate in the app (e.g. `DeploymentRefresher`) has. |
+| No satellite window open (`electronAPI.window.listSatellites`) | OF Manager / GoLogin share the origin's Firebase session and their input never reaches the main window, so an operator working there while clocked out would look idle. **Limitation:** shells that predate `listSatellites` give no signal, so they are not protected. |
+| Stamp is strictly older than the published version (or absent) | `termsAcceptanceIsStale` — equal or *newer* is fine, so a rolled-back deployment does not sign anyone out; a malformed answer never does. |
+| Not already signed out for this version on this device | Loop guard: a `localStorage` marker per `uid + version`, written before the sign-out. If a login path ever failed to stamp, the user is bounced once, not every 20 idle minutes. |
+
+**RULE — the required version is read over HTTP (rule 9c), never from the bundle.** `GET /api/terms/version` (unauthenticated, CDN-cached `s-maxage=300`), asked **only at the moment the component would act** and then remembered for 15 min — a user clocked in all day makes no request. Do not import `TERMS_VERSION` into client code to compare against.
+
+**Expect these:**
+- **Users with no stamp (everyone, the first time this ships) count as stale** and are signed out once, after 20 idle clocked-out minutes. That is intended — none of them has signed in under a published version.
+- A renderer on a pre-mechanism bundle has no such code; `DeploymentRefresher` reloads it onto the new bundle while clocked out, and the mechanism then applies.
+- **Soft enforcement**, like the email-migration card: it ends the session of a cooperating client, does not revoke refresh tokens, and a modified client can skip it. Employees only — creators (Telegram `initData` re-proved every launch) and training candidates (their own cookie) have no equivalent, and Part E reaches them by other means.
+- A new login path must stamp `acceptedTermsVersion`, or its users are bounced once (the loop guard bounds it).
 
 **The creator portal has no acceptance step at all** — creators are given notice, not a gate. `/creator/dashboard/welcome` ends with a Terms & Privacy section linking out, and it is load-bearing for the same reason `Login`'s notice is; keep it if you touch that page.
 
