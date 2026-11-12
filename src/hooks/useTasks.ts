@@ -7,7 +7,12 @@ import { getCache, setCache } from '@/lib/queryCache';
 import { buildTaskActor, filterVisibleTasks, type TaskActor } from '@/lib/taskAccess';
 import type { TaskDocument, TaskPayload, TaskStatus } from '@/types/task';
 
-const TTL = 5 * 60 * 1000;
+/**
+ * Short on purpose. Tasks are handed to you by someone else, and this page is
+ * re-entered all day — a 5-minute cache hid work an admin had just assigned.
+ * `refresh()` bypasses it entirely.
+ */
+const TTL = 60 * 1000;
 /**
  * Namespaced by uid. Unlike Resources, nothing here is safe to share between two
  * people signing in on one tab: an admin's payload is every task in the company.
@@ -18,6 +23,10 @@ interface UseTasksResult {
   /** Null until the list AND the user's identity have both resolved. */
   tasks: TaskDocument[] | null;
   loading: boolean;
+  /** True while a manual `refresh()` is in flight. */
+  refreshing: boolean;
+  /** Refetches the list from the server, ignoring the cache. Rejects on failure. */
+  refresh: () => Promise<void>;
   error: string | null;
   actor: TaskActor;
   /** Every write returns the stored task and patches local state — no list refetch. */
@@ -33,6 +42,7 @@ export function useTasks(): UseTasksResult {
   const { userData, loading: userDataLoading } = useUserData();
   const [raw, setRaw] = useState<TaskDocument[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const uid = user?.uid ?? '';
 
@@ -94,7 +104,7 @@ export function useTasks(): UseTasksResult {
     [raw, identityReady, actor]
   );
 
-  const send = useCallback(async (path: string, init: RequestInit, fallback: string): Promise<{ task: TaskDocument }> => {
+  const send = useCallback(async <T = { task: TaskDocument }>(path: string, init: RequestInit, fallback: string): Promise<T> => {
     if (!user) throw new Error('Not signed in');
     const idToken = await user.getIdToken();
     const res = await fetch(path, {
@@ -108,6 +118,18 @@ export function useTasks(): UseTasksResult {
     if (!res.ok) throw new Error(data.error || fallback);
     return data;
   }, [user]);
+
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const { tasks: fresh } = await send<{ tasks: TaskDocument[] }>('/api/tasks', { cache: 'no-store' }, 'Could not refresh tasks');
+      setRaw(fresh);
+      setError(null);
+      if (uid) setCache(cacheKey(uid), fresh);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [send, uid]);
 
   const createTask = useCallback(async (payload: TaskPayload) => {
     const { task } = await send('/api/tasks', { method: 'POST', body: JSON.stringify(payload) }, 'Failed to create task');
@@ -146,6 +168,8 @@ export function useTasks(): UseTasksResult {
   return {
     tasks,
     loading: loading || !identityReady,
+    refreshing,
+    refresh,
     error,
     actor,
     createTask,

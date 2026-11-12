@@ -12,7 +12,7 @@
 | `src/app/api/tasks/route.ts` | GET (own, or all for an admin) · POST |
 | `src/app/api/tasks/[id]/route.ts` | PUT · DELETE |
 | `src/app/api/tasks/blocking/route.ts` | GET — the caller's outstanding clock-out-blocking tasks |
-| `src/hooks/useTasks.ts` | Client state: sessionStorage cache **keyed by uid**, optimistic status, patches state from each write's response |
+| `src/hooks/useTasks.ts` | Client state: sessionStorage cache (60 s, **keyed by uid**), a manual `refresh()`, optimistic status, patches state from each write's response |
 | `src/hooks/useClockOutGuard.tsx` | The clock-out prompt — see below |
 | `src/app/(main)/applications/apps-tasks/` | The page: `TaskRow` (+ `StatusPill`), `TaskDialog` |
 | `src/components/rich-text/RichPromptEditor.tsx` | The body editor, **shared with the Prompt Library** (moved here from its route folder) |

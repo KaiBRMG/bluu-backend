@@ -2,7 +2,7 @@
 
 import { useDeferredValue, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Plus, Search, SlidersHorizontal, X } from 'lucide-react';
+import { Plus, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -91,7 +91,7 @@ function ListSkeleton() {
  * nothing here is load-bearing for security.
  */
 export default function TasksPage() {
-  const { tasks, loading, error, actor, createTask, updateTask, setStatus, deleteTask } = useTasks();
+  const { tasks, loading, refreshing, refresh, error, actor, createTask, updateTask, setStatus, deleteTask } = useTasks();
   const { users } = useBasicUsers(actor.isAdmin);
   const { timezone } = useViewerTimezone();
 
@@ -220,6 +220,12 @@ export default function TasksPage() {
       toast.error(e instanceof Error ? e.message : 'Could not update the status');
     });
 
+  const onRefresh = () =>
+    refresh().then(
+      () => toast.success('Tasks up to date'),
+      e => toast.error(e instanceof Error ? e.message : 'Could not refresh tasks')
+    );
+
   const openTask = openId && openId !== 'new' ? (tasks ?? []).find(t => t.id === openId) ?? null : null;
 
   const rail = (
@@ -291,6 +297,17 @@ export default function TasksPage() {
                 <ToggleGroupItem value="everyone" className="px-3">Everyone</ToggleGroupItem>
               </ToggleGroup>
             )}
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={onRefresh}
+              disabled={refreshing || loading}
+              aria-label="Refresh tasks"
+              title="Refresh tasks"
+              className="shrink-0"
+            >
+              <RefreshCw className={`size-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
+            </Button>
             <Button onClick={() => setOpenId('new')} className="shrink-0">
               <Plus className="size-4" /> New task
             </Button>
