@@ -25,7 +25,7 @@ BuddyX is where chat agents work now, and its read-only Public API is where CA s
 
 ## 2. The cutover
 
-`SALES_CUTOVER_AT` (`salaryConstants.ts`) = **2026-10-04 08:50:31 SAST**, the last Infloww row. `salesSourceFor(ms)` is the one predicate both writers use: Infloww owns `≤` it, BuddyX `>` it. Before it, BuddyX attribution is unusable for pay (most tips from 27 Sep–3 Oct are unassigned). Creator statistics split by day instead: Infloww owns days before `2026-10-04`, BuddyX from it (`BUDDYX_CREATOR_STATS_START_DAY`), so the two never write one `creator-stats-days` doc.
+`SALES_CUTOVER_AT` (`salaryConstants.ts`) = **2026-10-04 08:50:31 SAST**, the last Infloww row. `salesSourceFor(ms)` is the one predicate every writer uses: Infloww owns `≤` it, BuddyX `>` it **and `≤ ONLYMONSTER_CUTOVER_AT`**, OnlyMonster after that. `ONLYMONSTER_CUTOVER_AT` = **2026-11-06 01:00 SAST**; BuddyX's last sale is 2026-11-05 21:09 SAST. See [onlymonster.md](onlymonster.md). The BuddyX vanished pass never soft-removes a stored row after `ONLYMONSTER_CUTOVER_AT` (`planSalesSync({ ownedUntil })`), and a dispute may be filed on any sale after the Infloww cutover, BuddyX's or OnlyMonster's. Before it, BuddyX attribution is unusable for pay (most tips from 27 Sep–3 Oct are unassigned). Creator statistics split by day instead: Infloww owns days before `2026-10-04`, BuddyX from it (`BUDDYX_CREATOR_STATS_START_DAY`), so the two never write one `creator-stats-days` doc.
 
 ## 2b. Gross and net — which figure is which
 

@@ -107,7 +107,7 @@ export default function OnlyFansAnalyticsPage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">OnlyFans Analytics</h1>
-            <p className="mt-1 text-sm text-zinc-400">Each creator&apos;s earnings, subscribers and links — Infloww history, then BuddyX. Gross is what fans paid; net is the creator&apos;s 80% after OnlyFans&apos; 20% — the figure OnlyFans&apos; own statements show.</p>
+            <p className="mt-1 text-sm text-zinc-400">Each creator&apos;s earnings, subscribers and links — {data?.source === 'onlymonster' ? 'from OnlyMonster, with earlier days from the Infloww and BuddyX history' : 'Infloww history, then BuddyX'}. Gross is what fans paid; net is the creator&apos;s 80% after OnlyFans&apos; 20% — the figure OnlyFans&apos; own statements show.</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <ToggleGroup
@@ -212,6 +212,9 @@ function Body({ data, basis, selected, onSelect }: { data: CreatorAnalytics; bas
     );
   };
   const showCutover = data.from < data.cutoverDay && data.to >= data.cutoverDay;
+  // Older deployments send no `source`; they are BuddyX.
+  const fromOnlyMonster = data.source === 'onlymonster';
+  const newSource = fromOnlyMonster ? 'OnlyMonster' : 'BuddyX';
   const subscriberDays = data.daily.filter(d => d.day < data.subscribersFrom);
   // Keys stay `*Gross` so the chart config is shared; the values follow the toggle.
   const earningsDays =
@@ -312,7 +315,7 @@ function Body({ data, basis, selected, onSelect }: { data: CreatorAnalytics; bas
         </h2>
         <p className="mt-0.5 text-[11px] text-zinc-400">
           {basis === 'net' ? 'Net per day — 80% of gross.' : 'Gross per day — net is 80% of each.'} Days with no data are gaps, not zeros.
-          {showCutover && ' The hairline marks where Infloww history ends and BuddyX begins.'}
+          {showCutover && ` The hairline marks where the earlier history ends and ${newSource} begins.`}
         </p>
         {data.daily.length === 0 ? (
           <p className="mt-3 text-sm text-zinc-400">No creator statistics in this range.</p>
@@ -324,7 +327,7 @@ function Body({ data, basis, selected, onSelect }: { data: CreatorAnalytics; bas
               <YAxis tickLine={false} axisLine={false} width={56} tickFormatter={v => `$${v}`} />
               <ChartTooltip content={<ChartTooltipContent labelFormatter={l => formatDayLabelWithWeekday(String(l))} formatter={(v, n) => [` ${formatUsd(Number(v))}`, `${earningsConfig[n as keyof typeof earningsConfig]?.label ?? String(n)} (${basis})`]} />} />
               {showCutover && (
-                <ReferenceLine x={data.cutoverDay} stroke="rgba(255,255,255,0.35)" strokeDasharray="3 3" label={{ value: 'Infloww → BuddyX', position: 'insideTopLeft', fill: '#a1a1aa', fontSize: 11 }} />
+                <ReferenceLine x={data.cutoverDay} stroke="rgba(255,255,255,0.35)" strokeDasharray="3 3" label={{ value: fromOnlyMonster ? '→ OnlyMonster' : 'Infloww → BuddyX', position: 'insideTopLeft', fill: '#a1a1aa', fontSize: 11 }} />
               )}
               <Area dataKey="subsGross" stackId="s" type="monotone" stroke="var(--color-subsGross)" strokeWidth={2} fill="var(--color-subsGross)" fillOpacity={0.35} connectNulls={false} />
               <Area dataKey="tipsGross" stackId="s" type="monotone" stroke="var(--color-tipsGross)" strokeWidth={2} fill="var(--color-tipsGross)" fillOpacity={0.35} connectNulls={false} />
@@ -339,7 +342,7 @@ function Body({ data, basis, selected, onSelect }: { data: CreatorAnalytics; bas
         <section className={cn('rounded-xl p-5', SURFACE)} aria-labelledby="subscribers">
           <h2 id="subscribers" className="text-sm font-semibold">Subscribers</h2>
           <p className="mt-0.5 text-[11px] text-zinc-400">
-            New, returning and free-trial subscribers by day, from BuddyX (from 25 Sep 2026).
+            {fromOnlyMonster ? 'New, returning and free-trial subscribers by day, from OnlyMonster.' : 'New, returning and free-trial subscribers by day, from BuddyX (from 25 Sep 2026).'}
             {subscriberDays.length > 0 && ' Earlier days show total new subscribers only.'}
           </p>
           {subscriberDays.length > 0 && (
@@ -385,9 +388,10 @@ function Body({ data, basis, selected, onSelect }: { data: CreatorAnalytics; bas
             <Fact label="Mass messages" value={formatCount(data.mass.count)} meta={data.mass.avgPrice !== null ? `avg list price ${formatUsd(data.mass.avgPrice)}` : 'all free'} />
             <Fact label="Unsend rate" value={formatShare(data.mass.unsentRate)} />
             <Fact
-              label="Median reply time"
+              label={fromOnlyMonster ? 'Reply time' : 'Median reply time'}
               value={formatDuration(data.messaging.replyTimeMs)}
-              meta={showCutover ? 'BuddyX days only — Infloww reported an average, not a median' : undefined}
+              // OnlyMonster reports an average, BuddyX a median: never one axis (plan §3.2).
+              meta={fromOnlyMonster ? 'middle of the daily averages (OnlyMonster reports averages, not medians)' : showCutover ? 'BuddyX days only — Infloww reported an average, not a median' : undefined}
             />
           </dl>
           {data.revShareGross !== null && (

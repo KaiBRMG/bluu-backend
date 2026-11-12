@@ -58,6 +58,9 @@ export const UNIVERSAL_PAGES: UniversalPageDef[] = [
   // Moved out of the Apps teamspace on 2026-08-26: the whole organisation uses
   // Resources, and the page filters its own contents by group anyway.
   { title: 'Resources', href: '/applications/apps-resources', icon: 'FileSearch' },
+  // Every employee's own task list; admins manage everyone's. Authorization is
+  // the data layer's (`lib/taskAccess.ts` + /api/tasks) — see documentation/tasks.md.
+  { title: 'Tasks', href: '/applications/apps-tasks', icon: 'ListTodo' },
 ];
 
 export const TEAMSPACES: TeamspaceDef[] = [

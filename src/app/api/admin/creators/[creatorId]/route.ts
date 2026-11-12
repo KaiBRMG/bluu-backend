@@ -5,6 +5,7 @@ import { getUserById } from '@/lib/services/userService';
 import { invalidateAdminCreatorsCache } from '@/app/api/admin/creators/route';
 import { releaseTelegramIndexEntries } from '@/lib/services/telegramLinkService';
 import { FieldValue } from 'firebase-admin/firestore';
+import { parsePlatformField } from '@/lib/creators/accountPlatform';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 async function checkPermission(uid: string): Promise<boolean> {
@@ -12,7 +13,7 @@ async function checkPermission(uid: string): Promise<boolean> {
   return !!caller?.permittedPageIds?.includes('admin-creator-management');
 }
 
-const ALLOWED_UPDATE_FIELDS = ['stageName', 'OFID', 'isActive', 'isArchived', 'driveLink', 'defaultTimezone'] as const;
+const ALLOWED_UPDATE_FIELDS = ['stageName', 'OFID', 'platform', 'isActive', 'isArchived', 'driveLink', 'defaultTimezone'] as const;
 
 /**
  * PUT /api/admin/creators/[creatorId]
@@ -27,6 +28,11 @@ export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken, 
 
     const { creatorId } = await params;
     const body = await request.json();
+
+    // The platform decides which OnlyFans data maps to this account, so it is
+    // validated rather than copied through like the other fields.
+    const parsedPlatform = parsePlatformField(body.platform);
+    if (!parsedPlatform.ok) return NextResponse.json({ error: parsedPlatform.error }, { status: 400 });
 
     // Build whitelisted Firestore update
     const firestoreUpdate: Record<string, unknown> = {

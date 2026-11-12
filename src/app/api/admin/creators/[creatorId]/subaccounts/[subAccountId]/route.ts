@@ -21,6 +21,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { subAccountStageName } from '@/lib/services/creatorAccountService';
 import type { CreatorFullDocument, CreatorSubAccountDocument } from '@/types/firestore';
+import { parsePlatformField } from '@/lib/creators/accountPlatform';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 const SUBACCOUNTS = 'creator-subaccounts';
@@ -58,7 +59,9 @@ export const PATCH = withAuth(async (
     if (denied) return denied;
 
     const { creatorId, subAccountId } = await params;
-    const body = (await request.json()) as { label?: string; OFID?: string; isArchived?: boolean };
+    const body = (await request.json()) as { label?: string; OFID?: string; isArchived?: boolean; platform?: unknown };
+    const parsedPlatform = parsePlatformField(body.platform);
+    if (!parsedPlatform.ok) return NextResponse.json({ error: parsedPlatform.error }, { status: 400 });
 
     const ref = adminDb.collection(SUBACCOUNTS).doc(subAccountId);
     const snap = await ref.get();
@@ -83,6 +86,7 @@ export const PATCH = withAuth(async (
 
     if (typeof body.OFID === 'string') patch.OFID = body.OFID.trim();
     if (typeof body.isArchived === 'boolean') patch.isArchived = body.isArchived;
+    if (parsedPlatform.value) patch.platform = parsedPlatform.value;
 
     await ref.update(patch);
     invalidateAdminCreatorsCache();

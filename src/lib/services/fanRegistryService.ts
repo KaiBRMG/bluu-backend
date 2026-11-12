@@ -29,6 +29,14 @@ import {
 } from '../fans/fanIdentity';
 import type { FanRegistryDocument } from '@/types/firestore';
 
+/**
+ * The registry collection. **Moving to `fans` (migration plan §8)** is a deploy-time
+ * switch of this one line, in this order:
+ *   1. `node scripts/migrate-fan-registry.js --copy` then `--verify` (counts + per-doc hashes);
+ *   2. change this to `'fans'` and deploy (every reader and writer follows this constant);
+ *   3. `node scripts/migrate-fan-registry.js --delta --since <ISO of step 1>` for names written in between;
+ *   4. archive `buddyx-fan-names` (`scripts/archive-collection.js`, plan §9.3).
+ */
 export const FAN_REGISTRY = 'buddyx-fan-names';
 const CUSTOMS = 'campaign-tracking';
 
@@ -268,12 +276,14 @@ async function propagateIfChanged(key: string, prev: NameFields | null, next: Na
  */
 async function writeNameThrough(fanId: string, name: string | null, source: FanNameSource | null): Promise<void> {
   const override = source === 'manual' || source === 'customs' ? name : null;
-  const [fans, sales] = await Promise.all([
+  // Both fan rollups take the name while BuddyX's still exists (migration plan §8).
+  const [bxFans, omFans, sales] = await Promise.all([
     adminDb.collection('buddyx-fans').where('fanId', '==', fanId).select('displayName', 'displayNameSource', 'salesName').get(),
+    adminDb.collection('creator-fans').where('fanId', '==', fanId).select('displayName', 'displayNameSource', 'salesName').get(),
     adminDb.collection('ca-sales').where('fanId', '==', fanId).select('fanName').get(),
   ]);
   const writer = adminDb.bulkWriter();
-  for (const doc of fans.docs) {
+  for (const doc of [...bxFans.docs, ...omFans.docs]) {
     const same =
       (doc.get('displayName') ?? null) === override &&
       (doc.get('displayNameSource') ?? null) === (override ? source : null) &&

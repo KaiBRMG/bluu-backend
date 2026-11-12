@@ -210,6 +210,14 @@ export interface ChatterReport {
   accounts: ReportAccount[];
   /** Input monitoring is on for this agent right now. */
   inputMonitoring: boolean;
+  /**
+   * D13: what OnlyMonster itself attributes to this agent over the period
+   * (`sold_messages_price_sum + tips_amount_sum`, gross, never posts), beside the
+   * ledger. **Admin-only and display-only — never pay.** `differs` when it is off
+   * by more than 15% **and** $50 (D22). OnlyMonster leaves ~a quarter of PPV
+   * unattributed, so "lower" is normal. Null while OnlyMonster is not the source.
+   */
+  onlymonsterCredit?: { gross: number; differs: boolean } | null;
 }
 
 export type SegmentStateCode = 'working' | 'idle' | 'on-break' | 'paused';
@@ -314,7 +322,7 @@ export interface FanPurchase {
   kind: 'tip' | 'ppv';
   type: string;
   gross: number;
-  source: 'infloww' | 'buddyx';
+  source: 'infloww' | 'buddyx' | 'onlymonster';
   /** Admin: the agent's name. Agent: "You" or "Team". Null when nobody holds it. */
   earnedBy: string | null;
 }
@@ -432,7 +440,7 @@ export interface FanReport {
 
 export interface CreatorDayPoint {
   day: string;
-  source: 'infloww' | 'buddyx';
+  source: 'infloww' | 'buddyx' | 'onlymonster';
   totalGross: number | null;
   subsGross: number | null;
   tipsGross: number | null;
@@ -498,8 +506,10 @@ export interface CreatorAnalytics {
   from: string;
   to: string;
   creatorId: string | null;
-  /** The first day BuddyX owns — the chart's "Infloww → BuddyX" hairline. */
+  /** The first day the current source owns — the chart's hairline (Infloww → BuddyX, or → OnlyMonster). */
   cutoverDay: string;
+  /** Which source the page is reading (`onlymonster-meta/config.analyticsSource`). Absent from older deployments → `'buddyx'`. */
+  source?: 'buddyx' | 'onlymonster';
   /** Every creator, over the selected period — never scoped by `creatorId`. */
   kpis: {
     earnings: number;

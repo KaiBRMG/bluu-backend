@@ -21,6 +21,16 @@ export interface RichPromptEditorHandle {
   focus: () => void;
 }
 
+/**
+ * How the stored dialect's marks render, inside the editor and anywhere the
+ * stored form is shown read-only. One string so the two cannot drift: a body
+ * must look the same being read as being written. The reasons for 900 + the
+ * text-stroke are on the editor's className below.
+ */
+export const RICH_TEXT_MARK_CLASSES =
+  '[&_b]:font-black [&_b]:text-white [&_b]:[-webkit-text-stroke:0.4px_currentColor] [&_strong]:font-black [&_strong]:text-white [&_strong]:[-webkit-text-stroke:0.4px_currentColor] ' +
+  '[&_li]:ml-5 [&_li]:list-disc [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5';
+
 type Mark = 'bold' | 'italic' | 'underline' | 'insertUnorderedList';
 
 /**
@@ -119,6 +129,7 @@ export function RichPromptEditor({
   describedBy,
   placeholder,
   toolbarHost,
+  toolbarLabel = 'Prompt formatting',
 }: {
   id: string;
   initialHtml: string;
@@ -153,6 +164,8 @@ export function RichPromptEditor({
    * text. Rendered inline when no host is given.
    */
   toolbarHost?: HTMLElement | null;
+  /** Accessible name of the formatting toolbar — say what is being formatted. */
+  toolbarLabel?: string;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -349,7 +362,7 @@ export function RichPromptEditor({
     <div
       ref={toolbarRef}
       role="toolbar"
-      aria-label="Prompt formatting"
+      aria-label={toolbarLabel}
       aria-controls={id}
       onKeyDown={onToolbarKeyDown}
       className="flex w-fit items-center gap-0.5 rounded-lg border border-white/[0.07] bg-white/[0.025] p-0.5"
@@ -516,8 +529,7 @@ export function RichPromptEditor({
         // every surface that renders the stored form.
         className={cn(
           'w-full resize-y overflow-y-auto whitespace-pre-wrap break-words rounded-lg border p-4 font-mono text-sm font-normal leading-relaxed text-zinc-100 outline-none focus-visible:border-zinc-500',
-          '[&_b]:font-black [&_b]:text-white [&_b]:[-webkit-text-stroke:0.4px_currentColor] [&_strong]:font-black [&_strong]:text-white [&_strong]:[-webkit-text-stroke:0.4px_currentColor]',
-          '[&_li]:ml-5 [&_li]:list-disc [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5',
+          RICH_TEXT_MARK_CLASSES,
           '[&:empty]:before:text-zinc-400 [&:empty]:before:content-[attr(data-placeholder)]',
           'min-h-[26rem] border-white/[0.07] bg-white/[0.025]',
           bodyClassName,

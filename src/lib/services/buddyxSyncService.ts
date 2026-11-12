@@ -56,7 +56,7 @@ import {
   type StoredSale,
 } from '../buddyx/salesPlan';
 import type { BuddyxPpvRow, BuddyxTipRow } from '../buddyx/types';
-import { SALARY_TIMEZONE, SALES_CUTOVER_AT } from '../salary/salaryConstants';
+import { ONLYMONSTER_CUTOVER_AT, SALARY_TIMEZONE, SALES_CUTOVER_AT } from '../salary/salaryConstants';
 import { addMonths, currentMonthKey, monthKeyRange, toDayKey, type SalaryMonthKey } from '../salary/salaryDate';
 import { notifications } from '../notificationContent';
 import { getDepartures, getFinalizedMonthsFor, getScheduleMatches, resolvePayrollMonth } from './caSalaryService';
@@ -328,6 +328,7 @@ async function readStoredSales(months: SalaryMonthKey[]): Promise<Map<string, St
             : null,
         userId: data.userId ?? null,
         month: data.month ?? month,
+        occurredAtMs: occurredAtMs ?? null,
         transfer: data.transfer
           ? {
               toUserId: data.transfer.toUserId ?? null,
@@ -377,9 +378,10 @@ async function readFinalized(pairs: Set<string>): Promise<Set<string>> {
  */
 export async function syncSalesScope(ctx: SyncContext, write: boolean): Promise<SalesScopeResult> {
   const { start, months } = await salesWindow(ctx.now);
+  // BuddyX owns sales only up to the OnlyMonster cutover (§5.7): nothing after it is fetched.
   const range = {
     startDate: new Date(start).toISOString(),
-    endDate: new Date(ctx.now).toISOString(),
+    endDate: new Date(Math.min(ctx.now, ONLYMONSTER_CUTOVER_AT)).toISOString(),
     timeZone: SALARY_TIMEZONE,
   };
 

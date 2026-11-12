@@ -221,7 +221,7 @@ Five translucent tints, declared once in `globals.css` as `mark.hl-*` and mirror
 
 This is the **only** place in the system where colour carries no system-assigned meaning, and it does not breach the Semantic-Only Rule: the meaning is assigned by the *author of the prompt*, the same way it is in a highlighter pen. The rule forbids the designer decorating; it does not forbid the user annotating.
 
-Three constraints hold it in place: it applies to **prompt body text only** (the Prompt Library editor, the detail card, and the public share page), one shared alpha so the five read as one family, and `color: inherit` — the UA sheet paints `<mark>` black-on-yellow, which is illegible on every surface in this app. Never reach for these hues for chrome, status or charts.
+Three constraints hold it in place: it applies to **rich body text only** (the Prompt Library editor, detail card and public share page, and the Tasks editor and read-only view — one shared `RichPromptEditor`), one shared alpha so the five read as one family, and `color: inherit` — the UA sheet paints `<mark>` black-on-yellow, which is illegible on every surface in this app. Never reach for these hues for chrome, status or charts.
 
 ## 3. Typography
 
@@ -380,6 +380,8 @@ Its management surfaces (2026-09-30) add four conventions worth reusing:
 
 - **Sections are a derived closed vocabulary, not an alphabet.** `userStage()` ([`userStatus.ts`](src/components/admin/user-management/userStatus.ts)) collapses three raw fields into `Not set up` / `Active` / `No access` / `Archived`, each **borrowing its hue from `STATUS_COLORS`** exactly as `disputeStatus.ts` does. The `NOT SET UP` rail sits first, which is how a chase queue lives *inside* an index instead of becoming its own destination. Derive a stage this way rather than sectioning on a raw enum.
 - **Selection is a second target in the leading slot, and it is not permanent chrome.** The avatar crossfades to a checkbox on `:hover`, on `:focus-within`, and whenever a selection is already under way; a bulk action bar then appears on `--z-banner`. A resting list stays a list of *people* rather than a column of controls, and the keyboard path is the same reveal the action lane already uses. Selecting and opening are different intents, so they are allowed to be two targets — the "one row, one target" rule is about two hit areas pointing at the *same* destination.
+
+- **A status pill can be the control (Tasks).** On [`TaskRow`](src/app/(main)/applications/apps-tasks/components/TaskRow.tsx) the status is a fixed-width pill with a chevron that opens a menu of the statuses *that kind* of record has — the most frequent action never opens a dialog. Its hues are borrowed from `STATUS_COLORS` via `taskStatus.ts`, the whole row is one `inset-0` open-target with the pill the only thing above it, and "Overdue" / "Asked before clock-out" are the only coloured words on the row because each encodes a state.
 
 ### The decision queue (Disputes)
 

@@ -315,6 +315,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Tasks — every read and write goes through /api/tasks, which applies the
+    // access rules in lib/taskAccess.ts (an assignee sees their own; an admin
+    // sees all). Admin SDK only, so deny everything for defence-in-depth.
+    match /tasks/{taskId} {
+      allow read, write: if false;
+    }
+
     // 20. Analytics rollups
     // analytics_daily holds one precomputed doc per user per local day, written
     // by the rollupDailyAnalytics Cloud Function and read only by
@@ -632,6 +639,67 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /buddyx-team-hours/{day} {
+      allow read, write: if false;
+    }
+
+    // 31a. OnlyMonster integration (documentation/onlymonster.md) — the
+    // replacement for BuddyX. Admin SDK only, for the same reasons as section 31:
+    // the identity map decides, from Phase 3 on, which creator an OnlyFans
+    // account's sales belong to, and the run log carries operational detail.
+    // Later phases add their collections here, each Admin SDK only.
+    match /onlymonster-meta/{docId} {
+      allow read, write: if false;
+    }
+    match /onlymonster-sync-runs/{runId} {
+      allow read, write: if false;
+    }
+    match /onlymonster-accounts/{accountId} {
+      allow read, write: if false;
+    }
+    match /onlymonster-members/{memberId} {
+      allow read, write: if false;
+    }
+    // Phase 2–3: the account ledger, rollups, activity and the shadow pay ledger.
+    // Per-person activity (`chatter-days`) and per-fan spend must never reach the
+    // client SDK, for the reasons in section 31.
+    match /of-transaction-days/{docId} {
+      allow read, write: if false;
+    }
+    match /of-chargebacks/{chargebackId} {
+      allow read, write: if false;
+    }
+    match /of-subscription-days/{docId} {
+      allow read, write: if false;
+    }
+    match /of-mass-messages/{messageId} {
+      allow read, write: if false;
+    }
+    match /account-activity-days/{docId} {
+      allow read, write: if false;
+    }
+    match /chatter-days/{day} {
+      allow read, write: if false;
+    }
+    match /account-days/{docId} {
+      allow read, write: if false;
+    }
+    match /account-reconciliation/{docId} {
+      allow read, write: if false;
+    }
+    match /ca-sales-shadow/{saleId} {
+      allow read, write: if false;
+    }
+    match /creator-fans/{docId} {
+      allow read, write: if false;
+    }
+    match /creator-fan-months/{docId} {
+      allow read, write: if false;
+    }
+    match /fans/{fanKey} {
+      allow read, write: if false;
+    }
+    // Phase 7: creators' payout balances (read-only from OnlyMonster). Admin SDK only.
+    match /account-balances/{creatorId} {
       allow read, write: if false;
     }
 

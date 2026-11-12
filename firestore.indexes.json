@@ -585,9 +585,115 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "of-chargebacks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "platformAccountId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "chargebackAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "of-chargebacks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "creatorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "day",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "of-mass-messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "creatorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "day",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "account-days",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "creatorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "day",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [
+    {
+      "collectionGroup": "tasks",
+      "fieldPath": "createdBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "tasks",
+      "fieldPath": "kind",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "tasks",
+      "fieldPath": "status",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "tasks",
+      "fieldPath": "dueDate",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "tasks",
+      "fieldPath": "completedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "tasks",
+      "fieldPath": "createdAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "tasks",
+      "fieldPath": "updatedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "tasks",
+      "fieldPath": "title",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "tasks",
+      "fieldPath": "text",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "tasks",
+      "fieldPath": "textHtml",
+      "indexes": []
+    },
     {
       "collectionGroup": "creator-inquiries",
       "fieldPath": "messageId",
@@ -2566,6 +2672,353 @@
     {
       "collectionGroup": "training-candidates",
       "fieldPath": "driveFolders",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-sync-runs",
+      "fieldPath": "errors",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-sync-runs",
+      "fieldPath": "warnings",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-sync-runs",
+      "fieldPath": "counts",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-sync-runs",
+      "fieldPath": "stages",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-accounts",
+      "fieldPath": "name",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-accounts",
+      "fieldPath": "customLabel",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-accounts",
+      "fieldPath": "creatorName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-accounts",
+      "fieldPath": "username",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-members",
+      "fieldPath": "name",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-members",
+      "fieldPath": "customName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-members",
+      "fieldPath": "email",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-sync-runs",
+      "fieldPath": "expireAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "of-transaction-days",
+      "fieldPath": "txs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "of-subscription-days",
+      "fieldPath": "subs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "chatter-days",
+      "fieldPath": "rows",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-meta",
+      "fieldPath": "jobs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "of-mass-messages",
+      "fieldPath": "createdById",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "account-reconciliation",
+      "fieldPath": "om",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "account-reconciliation",
+      "fieldPath": "ledger",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "account-reconciliation",
+      "fieldPath": "diff",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-shadow",
+      "fieldPath": "expireAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "scheduledUids",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales",
+      "fieldPath": "txStatus",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-shadow",
+      "fieldPath": "scheduledUids",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-shadow",
+      "fieldPath": "txStatus",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-shadow",
+      "fieldPath": "fanName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-shadow",
+      "fieldPath": "syncHash",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-shadow",
+      "fieldPath": "transfer",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ca-sales-shadow",
+      "fieldPath": "assignmentLog",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "chatter-days",
+      "fieldPath": "breakdown",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-fans",
+      "fieldPath": "spendByMonth",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-fans",
+      "fieldPath": "subscriptions",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-fans",
+      "fieldPath": "acquisition",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-fans",
+      "fieldPath": "name",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-fans",
+      "fieldPath": "salesName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-fans",
+      "fieldPath": "nameSource",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-fans",
+      "fieldPath": "linkTotalSpent",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-fans",
+      "fieldPath": "isStacker",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-fans",
+      "fieldPath": "updatedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-fans",
+      "fieldPath": "displayName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-fans",
+      "fieldPath": "displayNameSource",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-fans",
+      "fieldPath": "subsByMonth",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-fan-months",
+      "fieldPath": "hashes",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "name",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "handle",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "handles",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "mergedInto",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "manualName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "manualNameBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "manualNameByName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "manualNameAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "customsName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "customsNameVotes",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "customsByType",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "customsOutstandingCount",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "customsOutstandingAmount",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "customsAbandonedCount",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "customsRejectedCount",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "customsCreatorIds",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "lastCustomAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "linkedBy",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "linkedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "fans",
+      "fieldPath": "updatedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "account-balances",
+      "fieldPath": "payouts",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-meta",
+      "fieldPath": "pendingTouched",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-meta",
+      "fieldPath": "failures",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-meta",
+      "fieldPath": "skipped",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "onlymonster-meta",
+      "fieldPath": "pendingStages",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "of-chargebacks",
+      "fieldPath": "preCutoverSaleId",
       "indexes": []
     }
   ]

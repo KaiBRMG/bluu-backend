@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { deleteAllSnipsForUser } from '@/lib/services/snipService';
 import { clearManualLinksForUser } from '@/lib/services/buddyxMappingService';
+import { clearManualMemberLinksForUser } from '@/lib/services/onlymonsterMappingService';
 import { releaseGoLoginSeat } from '@/lib/services/gologinAccountService';
 import { personName, userOffboardedEmail, type OffboardingKind } from '@/lib/email/templates';
 import { emailOrganizationManager } from '@/lib/email/accountEmails';
@@ -306,6 +307,9 @@ export const DELETE = withAuth(async (
       deleteQueryDocs(adminDb.collection('screenshots').where('userId', '==', targetUid)),
       deleteQueryDocs(adminDb.collection('shifts').where('userId', '==', targetUid)),
       deleteQueryDocs(adminDb.collection('leave_requests').where('userId', '==', targetUid)),
+      // Rule 6 — the tasks assigned TO them go with them. Tasks they assigned to
+      // others stay: they are the assignees' work, and the creator renders as deleted.
+      deleteQueryDocs(adminDb.collection('tasks').where('assigneeUid', '==', targetUid)),
       deleteQueryDocs(adminDb.collection('leave-ledger').where('userId', '==', targetUid)),
       deleteQueryDocs(adminDb.collection('notifications').where('userId', '==', targetUid)),
       deleteQueryDocs(adminDb.collection('bugs').where('uid', '==', targetUid)),
@@ -331,6 +335,10 @@ export const DELETE = withAuth(async (
       // a deleted uid. `ca-sales` rows keep their `userId` — that is pay history.
       clearManualLinksForUser(targetUid).catch(err => {
         console.error(`[DeleteUser] Failed to clear BuddyX links for ${targetUid}:`, err);
+      }),
+      // Same for an OnlyMonster member manually linked to this user.
+      clearManualMemberLinksForUser(targetUid).catch(err => {
+        console.error(`[DeleteUser] Failed to clear OnlyMonster links for ${targetUid}:`, err);
       }),
     ]);
 

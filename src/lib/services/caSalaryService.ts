@@ -171,8 +171,10 @@ export function serialiseSale(doc: CaSaleDocument): SalarySale {
     creatorId: doc.creatorId ?? null,
     modelId: doc.modelId ?? null,
     sourceUserId,
-    buddyxUserId: doc.buddyxUserId !== undefined ? doc.buddyxUserId : sourceUserId,
+    // OnlyMonster rows have no platform credit at all (no per-sale chatter, plan §3.1).
+    buddyxUserId: doc.buddyxUserId !== undefined ? doc.buddyxUserId : doc.source === 'onlymonster' ? null : sourceUserId,
     attributedBy: doc.attributedBy ?? 'buddyx',
+    ...(doc.source === 'onlymonster' ? { scheduledUids: doc.scheduledUids ?? [], txStatus: doc.txStatus ?? null } : {}),
     transfer: transfer
       ? {
           kind: transferKindOf(transfer),
@@ -280,9 +282,19 @@ export async function getAllSalesInRange(startMs: number, endMs: number): Promis
  */
 export async function getScheduleMatches(sales: ScheduleSale[], startMs: number, endMs: number, departures?: Departures) {
   if (sales.length === 0) return new Map<string, ScheduleMatch>();
+  return matchSalesToSchedule(sales, withoutDeparted(await getScheduleOccurrences(startMs, endMs), departures));
+}
+
+/**
+ * The expanded shift occurrences for a window — the same read and expansion as
+ * `getScheduleMatches`, without matching. The OnlyMonster pay derivation
+ * (`lib/onlymonster/payPlan.ts`) does its own strict matching and clamps each
+ * occurrence at its agent's departure (D8). One day of lookback for overnight shifts.
+ */
+export async function getScheduleOccurrences(startMs: number, endMs: number) {
   const shiftDocs = await getShiftsByRange(startMs - DAY_MS, endMs);
   const raw = shiftDocs.map(s => ({ ...serialiseShift(s), timeWorkedSeconds: null, attendanceStatus: null }));
-  return matchSalesToSchedule(sales, withoutDeparted(expandShiftsForWindow(raw, startMs - DAY_MS, endMs), departures));
+  return expandShiftsForWindow(raw, startMs - DAY_MS, endMs);
 }
 
 /**

@@ -1,4 +1,6 @@
 import type { IdleInputMode, TimeTrackingOverrides } from '@/lib/timeTrackingSettings';
+import type { AccountPlatform } from '@/lib/creators/accountPlatform';
+import type { LedgerTx } from '@/lib/onlymonster/ledger';
 // Timestamp used in shared types — compatible with both firebase/firestore and firebase-admin/firestore
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Timestamp = any;
@@ -635,8 +637,8 @@ export interface CaSaleDocument {
 
   // ── BuddyX integration (documentation/buddyx.md). Absent on Infloww rows
   //    written before it; the serialiser defaults them. ──
-  /** `'infloww'` when absent. */
-  source?: 'infloww' | 'buddyx';
+  /** `'infloww'` when absent. `'onlymonster'` from the Phase 4 cutover (`om-*` ids). */
+  source?: 'infloww' | 'buddyx' | 'onlymonster';
   /** BuddyX row id, or the Infloww sale hash. Index-exempt. */
   sourceId?: string;
   kind?: 'tip' | 'ppv';
@@ -659,7 +661,15 @@ export interface CaSaleDocument {
    * BuddyX — or `departed`: BuddyX credits someone who had left and no single
    * agent was on shift, so nobody. Index-exempt. Absent → `'buddyx'`.
    */
-  attributedBy?: 'schedule' | 'buddyx' | 'departed';
+  attributedBy?: 'schedule' | 'buddyx' | 'departed' | 'unscheduled' | 'overlap' | 'chargeback';
+  /** OnlyMonster rows: the agents scheduled when `attributedBy` is `overlap`. Index-exempt. */
+  scheduledUids?: string[];
+  /** OnlyMonster rows: the OnlyFans transaction (`of-transaction-days`). Null on a chargeback row. */
+  transactionId?: string | null;
+  /** OnlyMonster rows: the raw OnlyFans status (`done` · `loading` · `pending_return`). Index-exempt. */
+  txStatus?: string;
+  /** OnlyMonster chargeback rows (`om-cb-*`): the sale this one reverses. */
+  reversesSaleId?: string | null;
   /**
    * Index-exempt map. Bluu Backend's override of the source attribution — an
    * approved dispute, or an admin reassigning the sale on CA Admin → Sales.
@@ -1057,6 +1067,12 @@ export interface CreatorFullDocument {
    */
   photoThumb: string | null;
   OFID: string;             // '@handle' format
+  /**
+   * The platform this account is on. Required on create; absent only on a
+   * document that predates the field and was never backfilled, which the
+   * OnlyMonster mapping then refuses to match (`lib/creators/accountPlatform.ts`).
+   */
+  platform?: AccountPlatform;
   isActive: boolean;
   isArchived: boolean;
   createdAt: Timestamp;
@@ -1098,6 +1114,8 @@ export interface CreatorSubAccountDocument {
   stageName: string;
   /** '@handle' on the sub-account's own platform, when it has one. */
   OFID?: string;
+  /** The platform this sub-account is on — see `CreatorFullDocument.platform`. */
+  platform?: AccountPlatform;
   /**
    * Its own avatar, when it has one. Absent means it inherits the parent's —
    * resolved on read, so a parent's new photo flows to every sub-account that
@@ -1689,6 +1707,233 @@ export interface BuddyxConfigDocument {
   updatedAt?: Timestamp;
 }
 
+// ─── OnlyMonster (documentation/onlymonster.md) ───────────────────────────────
+
+/**
+ * `onlymonster-accounts/{omAccountId}` — one OnlyMonster account (OnlyFans or
+ * Fansly) and the Bluu creator or sub-account it maps to. Written by the
+ * `directory` stage only when something changed.
+ */
+export interface OnlyMonsterAccountDocument {
+  /** OnlyMonster's own account id, as a string. */
+  accountId: string;
+  /** OnlyMonster's platform string (`onlyfans`, `fansly`, …). Only `onlyfans` is synced. */
+  platform: string;
+  /** The numeric platform account id (big-int string). Stable across handle changes. */
+  platformAccountId: string;
+  username: string | null;
+  name: string | null;
+  customLabel: string | null;
+  /** A `creators` uid or a `creator-subaccounts` id; null = not in Bluu (ignored for now). */
+  creatorId: string | null;
+  creatorName: string | null;
+  match: 'handle' | 'manual' | 'none';
+  manualCreatorId: string | null;
+  linkedBy: string | null;
+  linkedAt: Timestamp | null;
+  /** False once OnlyMonster stops listing it. The doc is kept: history may reference it. */
+  listed: boolean;
+  syncedAt: Timestamp;
+}
+
+/** `onlymonster-members/{memberId}` — one OnlyMonster organisation member and the Bluu user it maps to. */
+export interface OnlyMonsterMemberDocument {
+  memberId: string;
+  name: string | null;
+  customName: string | null;
+  email: string | null;
+  uid: string | null;
+  match: 'email' | 'manual' | 'none';
+  manualUid: string | null;
+  linkedBy: string | null;
+  linkedAt: Timestamp | null;
+  listed: boolean;
+  syncedAt: Timestamp;
+}
+
+export interface OnlyMonsterStageState {
+  lastSuccessAt?: Timestamp;
+  lastAttemptAt?: Timestamp;
+  lastError?: string | null;
+}
+
+/** `onlymonster-meta/state` — per-stage freshness, plus the incident counter. */
+export interface OnlyMonsterStateDocument {
+  stages?: Record<string, OnlyMonsterStageState>;
+  lastRunAt?: Timestamp;
+  lastRunOk?: boolean;
+  runFailures?: number;
+}
+
+/** `onlymonster-meta/config` — server-read switches (rule 9c: never a compiled-in constant). */
+export interface OnlyMonsterConfigDocument {
+  /** Which source OnlyFans Analytics reads. Flipped after the Phase 2 sign-off; can be flipped back without a deploy. */
+  analyticsSource?: 'buddyx' | 'onlymonster';
+  /** Phase 4: whether the pay derivation writes `ca-sales` (off → `ca-sales-shadow` only). */
+  salesWriteEnabled?: boolean;
+  updatedBy?: string;
+  updatedAt?: Timestamp;
+}
+
+/**
+ * `of-transaction-days/{platformAccountId}_{day}` — the account ledger (D20):
+ * every OnlyFans transaction of one account on one Africa/Harare day, keyed by
+ * transaction id. `txs` is index-exempt. See `lib/onlymonster/ledger.ts`.
+ */
+export interface OfTransactionDayDocument {
+  accountId: string;
+  platformAccountId: string;
+  /** The mapped Bluu creator or sub-account at write time. */
+  creatorId: string;
+  day: string;
+  month: string;
+  txs: Record<string, LedgerTx>;
+  syncedAt: Timestamp;
+}
+
+/** `of-chargebacks/{chargebackId}` — chargeback ids are globally unique (spec). */
+export interface OfChargebackDocument {
+  chargebackId: string;
+  accountId: string;
+  platformAccountId: string;
+  creatorId: string;
+  fanId: string;
+  type: string;
+  category: string;
+  status: string;
+  amount: number;
+  chargebackAt: Timestamp;
+  transactionAt: Timestamp;
+  /** The chargeback's own salary day — where its deduction lands (D17). */
+  day: string;
+  month: string;
+  matchState: 'matched' | 'none' | 'ambiguous';
+  matchedTxId: string | null;
+  removedAt: Timestamp | null;
+  syncedAt: Timestamp;
+}
+
+/** `of-subscription-days/{platformAccountId}_{day}` — subscribe / prolong / return events, keyed `{fanId}_{subscribedAtMs}`. */
+export interface OfSubscriptionDayDocument {
+  accountId: string;
+  platformAccountId: string;
+  creatorId: string;
+  day: string;
+  subs: Record<string, { action: string; type: string; price: number; regular: number }>;
+  syncedAt: Timestamp;
+}
+
+/** `of-mass-messages/{massMessageId}` — read-only stats. */
+export interface OfMassMessageDocument {
+  id: string;
+  accountId: string;
+  creatorId: string;
+  createdAt: Timestamp;
+  day: string;
+  status: 'scheduled' | 'sending' | 'done' | 'unsent' | string;
+  priceGross: number | null;
+  sent: number;
+  viewed: number;
+  purchased: number;
+  purchasedGross: number;
+  createdByType: 'user' | 'api_key' | null;
+  createdById: string | null;
+  /** The Bluu user behind `createdById`, via `onlymonster-members`. */
+  uid: string | null;
+  syncedAt: Timestamp;
+}
+
+/**
+ * `account-activity-days/{platformAccountId}_{day}` — the account's chat
+ * activity from `/users/metrics` (`creator_ids=[accountId]`), summed over members.
+ * Exists from 2026-11-01 only (OnlyMonster's activity history).
+ */
+export interface AccountActivityDayDocument {
+  creatorId: string;
+  day: string;
+  fansChatted: number;
+  messagesSent: number;
+  ppvsSent: number;
+  ppvsUnlocked: number;
+  /** Message-weighted mean of members' `reply_time_avg`, in ms. An average, never a median. */
+  replyTimeAvgMs: number | null;
+  syncedAt: Timestamp;
+}
+
+/**
+ * `chatter-days/{day}` — one Africa/Harare day of per-member activity from
+ * `/users/metrics`, keyed by OnlyMonster member id. `rows` is index-exempt.
+ * Read by Chatter Analytics (Phase 5). Never pay.
+ */
+export interface ChatterDayDocument {
+  day: string;
+  source: 'onlymonster' | 'buddyx-historical';
+  rows: Record<string, {
+    uid: string | null;
+    chats: number;
+    messages: number;
+    ppvsSent: number;
+    ppvsSold: number;
+    soldGross: number;
+    tipsGross: number;
+    typedWords: number;
+    typedMessages: number;
+    replyTimeAvgMs: number | null;
+    workTimeS: number | null;
+  }>;
+  syncedAt: Timestamp;
+}
+
+/**
+ * `account-days/{creatorId}_{day}` — the rollup OnlyFans Analytics reads once
+ * `analyticsSource` is `onlymonster`. **Shaped like `CreatorStatsDayDocument`**
+ * so the read side swaps collections, not logic. Recomputed from scratch for
+ * every touched day.
+ */
+export interface AccountDayDocument extends Omit<CreatorStatsDayDocument, 'source'> {
+  source: 'onlymonster';
+  totalNet: number;
+  subsNet: number;
+  tipsNet: number;
+  messagesNet: number;
+  postsGross: number;
+  streamGross: number;
+  otherGross: number;
+  txCount: number;
+  spenders: number;
+  heldGross: number;
+  pendingReturnGross: number;
+  unknownTypeCount: number;
+  chargebacks: number;
+  chargebackGross: number;
+  returningSubs: number;
+  trialSubs: number;
+}
+
+/** `account-reconciliation/{creatorId}_{month}` — `/overview-metrics` vs the ledger (21:01 run). */
+export interface AccountReconciliationDocument {
+  creatorId: string;
+  month: string;
+  om: { gross: number; net: number };
+  ledger: { gross: number; net: number };
+  diff: { gross: number; net: number };
+  checkedAt: Timestamp;
+}
+
+/** `onlymonster-sync-runs/{auto}` — one row per run. TTL `expireAt`, 90 days. */
+export interface OnlyMonsterSyncRunDocument {
+  trigger: string;
+  stages: string[];
+  startedAt: Timestamp;
+  durationMs: number;
+  requestCount: number;
+  counts: Record<string, number>;
+  errors: string[];
+  warnings: string[];
+  partial: boolean;
+  expireAt: Timestamp;
+}
+
 /** `buddyx-meta/lock` — the one-sync-at-a-time lease. */
 export interface BuddyxLockDocument {
   holder: string;
@@ -1809,7 +2054,8 @@ export interface CreatorStatsDayDocument {
   /** A creator / sub-account id, or `buddyx:{modelId}` for a BuddyX model mapped to no creator. */
   creatorId: string;
   day: string;
-  source: 'infloww' | 'buddyx';
+  /** `'onlymonster'` only on an `account-days` row read through the analytics switch; never stored here. */
+  source: 'infloww' | 'buddyx' | 'onlymonster';
   /** The day boundary the source bucketed in: Infloww `Africa/Monrovia`, BuddyX `Africa/Harare`. */
   tz: string;
   totalGross: number | null;

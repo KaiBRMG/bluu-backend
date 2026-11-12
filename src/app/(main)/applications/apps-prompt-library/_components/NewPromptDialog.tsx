@@ -16,7 +16,7 @@ import { type LlmType } from '@/types/promptLibrary';
 import { CategoryPicker, TagPicker } from './LabelPicker';
 import { FieldError } from './FieldError';
 import { ModelPicker } from './ModelPicker';
-import { RichPromptEditor } from './RichPromptEditor';
+import { RichPromptEditor } from '@/components/rich-text/RichPromptEditor';
 import { wordCount } from '../_lib/format';
 
 const inputClass =

@@ -40,6 +40,7 @@ function stripTelegramFormatting(html: string): string {
 
 export type AutomatedNotificationCategory =
   | 'Team'
+  | 'Tasks'
   | 'Onboarding'
   | 'Custom Requests'
   | 'Leave'
@@ -96,6 +97,19 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     recipients: 'The employee whose birthday it is',
     sources: ['src/app/api/cron/birthday-notifications/route.ts', 'src/lib/services/birthdayNotifications.ts'],
     content: notifications.staffBirthday('{firstName}'),
+    telegramEnabled: true,
+  },
+
+  // ─── Tasks ────────────────────────────────────────────────────────────────
+  {
+    id: 'taskAssigned',
+    category: 'Tasks',
+    event: 'Task or role assigned',
+    trigger:
+      'An admin creates a task or role for someone else, or reassigns one to them. Not sent for tasks people make for themselves, or for edits to a task they already hold.',
+    recipients: 'The person the task is assigned to',
+    sources: ['src/app/api/tasks/route.ts', 'src/app/api/tasks/[id]/route.ts'],
+    content: notifications.taskAssigned('{title}', 'once-off', '{adminName}'),
     telegramEnabled: true,
   },
 
@@ -479,6 +493,16 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     ],
     content: notifications.buddyxSyncFailing('{reason}'),
   },
+  {
+    id: 'onlymonsterSyncFailing',
+    category: 'Integrations',
+    event: 'OnlyMonster sync failing',
+    trigger:
+      'An OnlyMonster sync run hits a rejected API key or a missing key permission, or fails three runs in a row. Once per incident: the latch clears on the next healthy run, so a later outage alerts again. Nothing is sent while ONLYMONSTER_API_KEY is unset.',
+    recipients: 'One named maintainer (OPS_ALERT_RECIPIENT_UID)',
+    sources: ['src/app/api/cron/onlymonster-sync/route.ts', 'src/lib/services/onlymonsterSyncService.ts'],
+    content: notifications.onlymonsterSyncFailing('{reason}'),
+  },
 
   // NOTE — `notifications.releaseNote()` is deliberately NOT catalogued here,
   // and that is the one sanctioned exception to cross-cutting rule 15. This tab
@@ -491,6 +515,7 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
 
 export const AUTOMATED_NOTIFICATION_CATEGORIES: AutomatedNotificationCategory[] = [
   'Team',
+  'Tasks',
   'Onboarding',
   'Custom Requests',
   'Leave',

@@ -15,6 +15,19 @@
  * - OnlyFans Analytics — everyone with the page sees every creator (internal).
  */
 import 'server-only';
+import {
+  fanRollupCollection,
+  isOnlyMonsterAnalytics,
+  onlyMonsterCoverage,
+  onlyMonsterCutoverDay,
+  readOnlyMonsterMass,
+  readOnlyMonsterMassForChatters,
+  readOnlyMonsterSubscribers,
+  readOnlyMonsterTeamRows,
+  readStitchedDays,
+  type TeamRow,
+} from './onlymonsterAnalyticsSource';
+import { ACTIVITY_START_DAY, HISTORY_START_DAY } from '../onlymonster/constants';
 import { adminDb } from '../firebase-admin';
 import {
   addDays,
@@ -252,15 +265,18 @@ function dailyOf(sales: LedgerSale[], days: SalaryDayKey[]): ChatterDailyPoint[]
  * activity from their BuddyX rows (when there are any). An unlinked BuddyX
  * chatter has no ledger, so its revenue is BuddyX's own.
  */
-function metricsFrom(rows: BuddyxTeamRow[], ledger: LedgerTotals | undefined, withMedians: boolean): ChatterMetrics {
+function metricsFrom(rows: TeamRow[], ledger: LedgerTotals | undefined, withMedians: boolean): ChatterMetrics {
   const sum = (k: keyof BuddyxTeamRow) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
   const hasActivity = rows.length > 0;
   const activity = (value: number) => (hasActivity ? value : null);
-  const bxRevenue = sum('ppvGross') + sum('tipsGross');
+  // Online time exists only on BuddyX rows (D12); OnlyMonster rows carry none, so the
+  // online figures (and the revenue they are divided into) come from BuddyX rows alone.
+  const online = rows.filter(r => r.source !== 'onlymonster');
+  const bxRevenue = online.reduce((s, r) => s + (Number(r.ppvGross) || 0) + (Number(r.tipsGross) || 0), 0);
   const ppvsSent = sum('ppvsSent');
   const ppvsUnlocked = sum('ppvsUnlocked');
   const totalMessages = sum('totalMessages');
-  const onlineMs = sum('onlineMs');
+  const onlineMs = online.reduce((s, r) => s + (Number(r.onlineMs) || 0), 0);
   // Medians come only from a whole-period row; a sum of days has none. An agent
   // with two BuddyX ids has two medians that cannot be combined, so the first
   // is used — one id per agent is the normal case.
@@ -276,7 +292,8 @@ function metricsFrom(rows: BuddyxTeamRow[], ledger: LedgerTotals | undefined, wi
     ppvRate: hasActivity && totalMessages > 0 ? round2(ppvsSent / totalMessages) : null,
     fansChatted: activity(sum('fansChatted')),
     totalMessages: activity(totalMessages),
-    onlineMs: activity(onlineMs),
+    // No BuddyX row → no online time (D12): null, never a misleading 0.
+    onlineMs: online.length ? onlineMs : null,
     medianResponseTimeMs: timed?.medianResponseTimeMs ?? null,
     p75ResponseTimeMs: timed?.p75ResponseTimeMs ?? null,
     // BuddyX revenue over BuddyX online time — both from the same window, so a
@@ -297,7 +314,9 @@ function groupRows(rows: BuddyxTeamRow[]): Map<string, BuddyxTeamRow[]> {
   return out;
 }
 
-function massSummary(docs: BuddyxMassMessageDocument[]): MassMessageSummary {
+type MassRow = Pick<BuddyxMassMessageDocument, 'uid' | 'price' | 'unsent' | 'sentDate'>;
+
+function massSummary(docs: MassRow[]): MassMessageSummary {
   const sent = docs.filter(d => d.sentDate);
   const priced = sent.filter(d => d.price > 0);
   return {
@@ -355,6 +374,35 @@ async function loadChatterTeam(period: ChatterPeriod, range: { from: string; to:
   const key = `chatters:${period}:${range.from}:${range.to}`;
   const activityFrom = BUDDYX_TEAM_STATS_START_DAY;
   const hasActivityWindow = range.to >= activityFrom;
+  if (await isOnlyMonsterAnalytics()) {
+    // The OnlyMonster switch (§7): activity from `chatter-days` from 2026-11-01, and the
+    // BuddyX days before it kept as history (D24). Revenue stays on the ledger either way.
+    return cached(`${key}:om`, async () => {
+      const [chatter, mass, sales] = await Promise.all([
+        readOnlyMonsterTeamRows(range.from, range.to),
+        readOnlyMonsterMassForChatters(range.from, range.to),
+        readSales(range.from, range.to),
+      ]);
+      // BuddyX days before OnlyMonster's activity starts, read from `buddyx-team-days` until
+      // `scripts/onlymonster-carry-buddyx-activity.js` has copied them into `chatter-days`.
+      const bxTo = range.to < ACTIVITY_START_DAY ? range.to : addDays(ACTIVITY_START_DAY, -1);
+      const bxDays = range.from <= bxTo && bxTo >= activityFrom
+        ? enumerateDays(range.from > activityFrom ? range.from : activityFrom, bxTo).filter(d => !chatter.days.has(d))
+        : [];
+      const bxSnaps = bxDays.length ? await adminDb.getAll(...bxDays.map(d => adminDb.collection('buddyx-team-days').doc(d))) : [];
+      const bxRows = bxSnaps.filter(s => s.exists).flatMap(s => (s.data() as BuddyxTeamDayDocument).breakdown ?? []);
+      const rows = [...bxRows, ...chatter.rows];
+      return {
+        rows,
+        grouped: groupRows(rows),
+        hasMedians: false,
+        om: true,
+        sales,
+        ledger: foldLedger(sales),
+        mass: mass as MassRow[],
+      };
+    });
+  }
   return cached(key, async () => {
     // BuddyX only holds activity from its start day; asking for earlier days is
     // a read that can only miss.
@@ -384,6 +432,7 @@ async function loadChatterTeam(period: ChatterPeriod, range: { from: string; to:
       rows,
       grouped: groupRows(rows),
       hasMedians: Boolean(periodDoc),
+      om: false,
       sales,
       ledger: foldLedger(sales),
       mass: (massSnap?.docs ?? []).map(d => d.data() as BuddyxMassMessageDocument),
@@ -474,8 +523,12 @@ async function loadBoard(period: ChatterPeriod, range: { from: string; to: strin
 
     // A BuddyX chatter mapped to nobody: its revenue is BuddyX's own (it holds
     // no ledger sale). Admin only — the route never sends these to an agent.
+    // OnlyMonster's per-member revenue is never a sales figure (D13, rule 9k): its rows are
+    // left out of the board entirely, so only BuddyX-era unlinked chatters appear here.
     const unlinked: SalesBoardRow[] = [...team.grouped.entries()]
       .filter(([k]) => k.startsWith('chatter:'))
+      .map(([k, rows]) => [k, (rows as TeamRow[]).filter(r => r.source !== 'onlymonster')] as const)
+      .filter(([, rows]) => rows.length > 0)
       .map(([, bxRows]) => {
         const m = metricsFrom(bxRows, undefined, false);
         const chatter = bxRows[0];
@@ -627,6 +680,15 @@ export async function getChatterReport(params: {
   const bxRows = team.grouped.get(params.uid) ?? [];
   const metrics = ledger || bxRows.length ? metricsFrom(bxRows, ledger, team.hasMedians) : null;
   const mySales = team.sales.filter(x => x.userId === params.uid);
+  // D13 cross-check: OnlyMonster's own per-member revenue against the ledger over the same
+  // days (OnlyMonster activity exists from ACTIVITY_START_DAY only). Admin-only route; never pay.
+  let onlymonsterCredit: ChatterReport['onlymonsterCredit'] = null;
+  if (team.om) {
+    const omGross = round2((bxRows as TeamRow[]).filter(r => r.source === 'onlymonster').reduce((s, r) => s + r.ppvGross + r.tipsGross, 0));
+    const ledgerGross = round2(mySales.filter(x => toDayKey(x.at) >= ACTIVITY_START_DAY).reduce((s, x) => s + x.gross, 0));
+    const gap = Math.abs(omGross - ledgerGross);
+    onlymonsterCredit = { gross: omGross, differs: gap > 50 && gap > 0.15 * Math.max(ledgerGross, 1) };
+  }
 
   const byAccount = new Map<string, ReportAccount>();
   for (const sale of mySales) {
@@ -658,6 +720,7 @@ export async function getChatterReport(params: {
     from: range.from,
     to: range.to,
     metrics,
+    onlymonsterCredit,
     clockedMs: computeTimeWorked(reads.start, reads.end, reads.entries, reads.active) * 1000,
     rank: position >= 0 ? { position: position + 1, of: board.rows.length } : null,
     integrity: summariseIntegrity(integrityDays.get(params.uid)),
@@ -765,12 +828,13 @@ export function summariseFan(doc: BuddyxFanDocument, months: string[] | null): F
  * Fan Analytics insights and the fan directory read the same rows.
  */
 export async function readFans(creatorIds: string[]): Promise<BuddyxFanDocument[]> {
-  return cached(`fan-docs:${[...creatorIds].sort().join(',')}`, async () => {
+  const fansCol = await fanRollupCollection();
+  return cached(`fan-docs:${fansCol}:${[...creatorIds].sort().join(',')}`, async () => {
     const chunks: string[][] = [];
     for (let i = 0; i < creatorIds.length; i += 30) chunks.push(creatorIds.slice(i, i + 30));
     const snaps = await Promise.all(chunks.map(ids =>
       adminDb
-        .collection('buddyx-fans')
+        .collection(fansCol)
         .where('creatorId', 'in', ids)
         .select('creatorId', 'fanId', 'name', 'nameSource', 'salesName', 'displayName', 'displayNameSource', 'spendByMonth', 'acquisition', 'subscriptions', 'isStacker', 'linkTotalSpent')
         .get(),
@@ -1006,15 +1070,22 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
   const prevFrom = addDays(from, -span);
   const prevTo = addDays(from, -1);
 
+  // The OnlyMonster switch (migration plan §6.5): flipped in CA Admin → Sales → OnlyMonster,
+  // read per request (rule 9c), and reversible without a deploy.
+  const om = await isOnlyMonsterAnalytics();
+  // Coverage once per request: the stitching of both ranges and the hairline all use it.
+  const coverage = om ? await cached('om:coverage', onlyMonsterCoverage) : new Map<string, string>();
+  const readDays = (f: string, t: string) =>
+    om ? cached(`om-days:${f}:${t}`, () => readCreatorDays(f, t).then(rows => readStitchedDays(f, t, rows, coverage))) : readCreatorDays(f, t);
   const [rawRangeDays, rawPrevDays, linkSnap, massSnap, subsSnap, models, accounts] = await Promise.all([
-    readCreatorDays(from, to),
-    readCreatorDays(prevFrom, prevTo),
+    readDays(from, to),
+    readDays(prevFrom, prevTo),
     cached('links:all', () => adminDb.collection('buddyx-links').get().then(s => s.docs.map(d => d.data() as BuddyxLinkDocument))),
-    cached(`mass:${from}:${to}`, () =>
+    om ? cached(`om-mass:${from}:${to}`, () => readOnlyMonsterMass(from, to)) : cached(`mass:${from}:${to}`, () =>
       adminDb.collection('buddyx-mass-messages').where('day', '>=', from).where('day', '<=', to).get()
         .then(s => s.docs.map(d => d.data() as BuddyxMassMessageDocument)),
     ),
-    cached(`subs:${from}:${to}`, () =>
+    om ? cached(`om-subs:${from}:${to}`, () => readOnlyMonsterSubscribers(from, to)) : cached(`subs:${from}:${to}`, () =>
       adminDb
         .collection('buddyx-subscribers')
         .where('day', '>=', from > BUDDYX_SUBSCRIBERS_START_DAY ? from : BUDDYX_SUBSCRIBERS_START_DAY)
@@ -1026,6 +1097,7 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
     readModelDirectory(),
     readCreatorAccounts(),
   ]);
+  const omCutover = om ? onlyMonsterCutoverDay(coverage, BUDDYX_CREATOR_STATS_START_DAY) : BUDDYX_CREATOR_STATS_START_DAY;
 
   const modelCreator = new Map(models.flatMap(m => (m.creatorId ? [[m.modelId, m.creatorId] as const] : [])));
   const modelName = new Map(models.map(m => [m.modelId, m.name]));
@@ -1096,7 +1168,8 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
     }
     dailyMap.set(d.day, {
       day: d.day,
-      source: prev.source === 'buddyx' || p.source === 'buddyx' ? 'buddyx' : 'infloww',
+      // The newest source present on the day names it.
+      source: prev.source === 'onlymonster' || p.source === 'onlymonster' ? 'onlymonster' : prev.source === 'buddyx' || p.source === 'buddyx' ? 'buddyx' : 'infloww',
       totalGross: addNullable(prev.totalGross, p.totalGross),
       subsGross: addNullable(prev.subsGross, p.subsGross),
       tipsGross: addNullable(prev.tipsGross, p.tipsGross),
@@ -1182,7 +1255,8 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
 
   // ── Messaging & rev share ──
   const sumSel = (k: keyof CreatorStatsDayDocument) => selected.reduce((s, d) => s + (Number(d[k]) || 0), 0);
-  const replies = selected.filter(d => d.source === 'buddyx' && d.replyTimeMs !== null).map(d => d.replyTimeMs as number).sort((a, b) => a - b);
+  // One kind of reply figure only: BuddyX medians and OnlyMonster averages never share an axis (§3.2).
+  const replies = selected.filter(d => d.source === (om ? 'onlymonster' : 'buddyx') && d.replyTimeMs !== null).map(d => d.replyTimeMs as number).sort((a, b) => a - b);
   const revShareRows = selected.filter(d => typeof d.revShareGross === 'number');
 
   const total = roster.reduce((s, r) => s + r.totalGross, 0);
@@ -1196,7 +1270,8 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
     from,
     to,
     creatorId,
-    cutoverDay: BUDDYX_CREATOR_STATS_START_DAY,
+    cutoverDay: omCutover,
+    source: om ? 'onlymonster' : 'buddyx',
     kpis: {
       earnings: round2(total),
       previousEarnings: hasPrevious ? round2(prevDays.reduce((s, d) => s + (d.totalGross ?? 0), 0)) : null,
@@ -1216,7 +1291,7 @@ export async function getCreatorAnalytics(params: { from: string; to: string; cr
     roster,
     daily,
     subscribers: [...subsByDay.values()].sort((a, b) => a.day.localeCompare(b.day)),
-    subscribersFrom: BUDDYX_SUBSCRIBERS_START_DAY,
+    subscribersFrom: om ? HISTORY_START_DAY : BUDDYX_SUBSCRIBERS_START_DAY,
     links,
     mass: {
       count: mass.length,

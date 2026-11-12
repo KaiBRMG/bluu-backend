@@ -30,6 +30,7 @@ import {
 import { safeTimezone } from '@/lib/utils/timezone';
 import { BREAK_BLOCKED_TOOLTIP } from '@/lib/shiftBreakPolicy';
 import { GrowthHomeWidget } from "@/components/growth/GrowthHomeWidget";
+import { ClockOutButton } from '@/components/ClockOutButton';
 import { canUseGrowthTracking } from "@/lib/growth/access";
 
 function formatTime(totalSeconds: number): string {
@@ -239,7 +240,6 @@ function TimeTrackingWidget() {
     breakRemainingSeconds,
     breakBlock,
     startTracking,
-    stopTracking,
     startBreak,
     endBreak,
     isLoading,
@@ -285,9 +285,7 @@ function TimeTrackingWidget() {
 
             {displayState === 'working' && (
               <>
-                <Button onClick={stopTracking} disabled={isLoading} variant="destructive" size="sm">
-                  {isLoading ? 'Stopping...' : 'Clock Out'}
-                </Button>
+                <ClockOutButton size="sm" stoppingLabel="Stopping..." />
                 {breakBlock ? (
                   // A disabled button takes no pointer events, so the
                   // focusable wrapper is what carries the tooltip.

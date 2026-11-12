@@ -371,6 +371,9 @@ The main process forwards `powerMonitor` `suspend`/`lock-screen`/`unlock-screen`
 
 **RULE — never trust a bare `lock` as "user is away".** macOS fires `lock-screen` on screensaver activation, and a screensaver by definition only starts *after* an inactivity timeout, so it carries no new information about presence. Acting on it marks a user who is reading on-screen idle at their screensaver timeout (often 5 min) instead of their configured idle threshold. With the default now 6 min this gap is narrower, but the rule stands — the threshold is per-user and can be longer. Only a lock preceded by recent input (`< LOCK_CONFIRM_IDLE_SECONDS`) means the user deliberately locked and walked away; everything else is left to the normal idle poll. `powerSaveBlocker` is `prevent-display-sleep` only and does **not** suppress screensaver locks.
 
+### Clock Out button → the Tasks prompt
+Both Clock Out buttons (Home's widget, the Time Tracking page) call `useClockOutGuard().requestClockOut`, not `stopTracking` directly: if an admin flagged a task/role of the user's as blocking and it is still outstanding, the user is asked first (Cancel / Clock Out Anyway / Go to Tasks). It is a **nudge that fails open**, and it is deliberately **not** inside `stopTracking`, so every soft clock-out below stays unconditional. See [tasks.md](tasks.md#the-clock-out-prompt-blocksclockout).
+
 ### Clock-out flush on app close
 The main process holds the window `close` (the single choke-point for both the X button and Cmd/Ctrl-Q) until the renderer's `clockOutAndFlush` finishes and calls `electronAPI.app.closingFlushed()`, or a 4s hard timeout elapses. This ensures the `/api/time-tracking/clock-out` POST completes instead of being killed mid-flight.
 

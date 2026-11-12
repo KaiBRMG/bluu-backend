@@ -73,6 +73,7 @@ Every row below is **automated** — fired by a handler on an event, never sent 
 | Event | Factory | Recipients | Sent by |
 |---|---|---|---|
 | Staff birthday (daily cron, 08:00 UTC) | `notifications.staffBirthday(firstName)` | the employee whose birthday it is (+ Telegram) | `cron/birthday-notifications` → `services/birthdayNotifications.ts` |
+| Task or role assigned by an admin | `notifications.taskAssigned(title, kind, assignerName)` | the assignee (+ Telegram) | `api/tasks` (POST, PUT), via `notifyUsers` |
 | New user — welcome message | `notifications.welcomeToTeam(firstName)` | the new user | `services/userService.ts` |
 | New user — admin alert | `notifications.adminNewUserAlert()` | **every uid in `groups/admin.members`** (do not hardcode an admin uid) | `services/userService.ts` |
 | CR submitted | `notifications.crCreated(creatorName, stageName)` | every uid in `groups/OFAM.members` | `campaign-tracking/create` |
@@ -104,6 +105,7 @@ Every row below is **automated** — fired by a handler on an event, never sent 
 | OF media cache hit its size threshold | `notifications.ofMediaCacheCritical(sizeLabel, periodLabel)` | **one named maintainer** — see below | `cron/onlyfans-media-usage` |
 | OF video renditions on an unrecognised host | `notifications.ofVideoSourceHostUnrecognised(host)` | **one named maintainer** — see below | `onlyfans/chats/[chatId]/messages` (via `after()`) |
 | BuddyX sales sync failing | `notifications.buddyxSyncFailing(reason)` | **one named maintainer** (`OPS_ALERT_RECIPIENT_UID`) — **once per incident**, not once ever | `cron/buddyx-sync` **and** `buddyx/sync` via `buddyxSyncService` — see [buddyx.md](buddyx.md#7-alerting) |
+| OnlyMonster sync failing | `notifications.onlymonsterSyncFailing(reason)` | **one named maintainer** (`OPS_ALERT_RECIPIENT_UID`) — **once per incident**; never while `ONLYMONSTER_API_KEY` is unset | `cron/onlymonster-sync` via `onlymonsterSyncService` — see [onlymonster.md](onlymonster.md#alerting) |
 
 ### The two OF Manager alerts — one recipient, once ever
 

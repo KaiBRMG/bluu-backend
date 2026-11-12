@@ -55,7 +55,7 @@ import { MAX_EDIT_NOTE_LENGTH, type PromptVersion } from '@/types/promptLibrary'
 import { LlmMarks } from './LlmMark';
 import { DiffLegend, DiffView } from './DiffView';
 import { EditMetaDialog } from './EditMetaDialog';
-import { RichPromptEditor, type RichPromptEditorHandle } from './RichPromptEditor';
+import { RichPromptEditor, type RichPromptEditorHandle } from '@/components/rich-text/RichPromptEditor';
 import { absoluteDateTime, relativeTime, wordCount } from '../_lib/format';
 
 /**

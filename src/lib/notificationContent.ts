@@ -27,9 +27,22 @@ export const notifications = {
   /** Sent once a year on each active employee's birthday (`birthdayNotifications.ts`). */
   staffBirthday: (firstName: string | null): NotificationContent => ({
     title: firstName ? `Happy birthday, ${firstName}! 💙` : 'Happy birthday! 💙',
-    message: 'From all of us here at Bluu Rock, Happy Birthday! 💙',
+    message: 'From all of us here at Bluu Rock, we hope you have a great day! 💙',
     type: 'success',
     actionUrl: null,
+  }),
+
+  // ─── Tasks ────────────────────────────────────────────────────────────────────
+  /**
+   * An admin gave someone a task or a role, or moved one onto them
+   * (`/api/tasks`). Never sent for a task people create for themselves, nor for an
+   * admin's own edits.
+   */
+  taskAssigned: (title: string, kind: 'once-off' | 'role', assignerName: string): NotificationContent => ({
+    title: kind === 'role' ? 'You have a new role' : 'You have a new task',
+    message: `${assignerName} assigned you "${title}".`,
+    type: 'action',
+    actionUrl: '/applications/apps-tasks',
   }),
 
   // ─── User onboarding ──────────────────────────────────────────────────────────
@@ -239,6 +252,19 @@ export const notifications = {
   buddyxSyncFailing: (reason: string): NotificationContent => ({
     title: '⚠️ BuddyX sales sync needs attention',
     message: `${reason} Chat-agent sales may be missing or unassigned until it is fixed — see CA Admin → Sales.`,
+    type: 'alert',
+    actionUrl: '/ca-portal/admin?tab=sales',
+  }),
+
+  // OnlyMonster replaces BuddyX as the source of OnlyFans data
+  // (documentation/onlymonster.md). Same recipient, same once-per-incident latch.
+  // After the Phase 4 cutover the same sync writes chat-agent sales, so the copy
+  // names both consequences.
+  // `reason` is a pre-written sentence from onlymonsterSyncService: a rejected
+  // key, a missing permission, or three failed runs in a row.
+  onlymonsterSyncFailing: (reason: string): NotificationContent => ({
+    title: '⚠️ OnlyMonster sync needs attention',
+    message: `${reason} OnlyFans data from OnlyMonster — and, after the cutover, chat-agent sales — may be missing or out of date until it is fixed. See CA Admin → Sales.`,
     type: 'alert',
     actionUrl: '/ca-portal/admin?tab=sales',
   }),

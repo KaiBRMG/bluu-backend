@@ -11,6 +11,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CreatorAvatar } from '@/components/creators/CreatorChip';
 import { useRefreshCreators } from '@/hooks/useCreators';
+import { PlatformSelect } from '@/components/admin/creators/PlatformField';
+import type { AccountPlatform } from '@/lib/creators/accountPlatform';
 
 /**
  * Managing a creator's secondary accounts.
@@ -38,6 +40,7 @@ export interface SubAccountRow {
   label: string;
   stageName: string;
   OFID?: string;
+  platform?: AccountPlatform | null;
   isArchived: boolean;
 }
 
@@ -53,6 +56,9 @@ export function SubAccountsDialog({ creator, onClose, onChanged, apiRequest }: S
   const [rows, setRows] = useState<SubAccountRow[] | null>(null);
   const [label, setLabel] = useState('');
   const [ofid, setOfid] = useState('');
+  // No default: a sub-account is usually a *different* platform from its
+  // parent (Fansly, JFF), so a preselected OnlyFans would be the wrong guess.
+  const [platform, setPlatform] = useState<AccountPlatform | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,6 +90,7 @@ export function SubAccountsDialog({ creator, onClose, onChanged, apiRequest }: S
     setError(null);
     setLabel('');
     setOfid('');
+    setPlatform(null);
     void load();
   }, [creatorId, load]);
 
@@ -136,13 +143,13 @@ export function SubAccountsDialog({ creator, onClose, onChanged, apiRequest }: S
           className="flex flex-wrap items-end gap-2"
           onSubmit={async event => {
             event.preventDefault();
-            if (!creatorId || !label.trim()) return;
+            if (!creatorId || !label.trim() || !platform) return;
             const ok = await send(
               `/api/admin/creators/${creatorId}/subaccounts`,
               {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ label: label.trim(), OFID: ofid.trim() }),
+                body: JSON.stringify({ label: label.trim(), OFID: ofid.trim(), platform }),
               },
               'create',
               'Sub-account added',
@@ -150,6 +157,7 @@ export function SubAccountsDialog({ creator, onClose, onChanged, apiRequest }: S
             if (ok) {
               setLabel('');
               setOfid('');
+              setPlatform(null);
             }
           }}
         >
@@ -178,7 +186,13 @@ export function SubAccountsDialog({ creator, onClose, onChanged, apiRequest }: S
               className="h-8"
             />
           </div>
-          <Button type="submit" size="sm" disabled={busy === 'create' || !label.trim()}>
+          <div className="space-y-1.5">
+            <Label htmlFor="sub-platform" className="text-xs">
+              Platform
+            </Label>
+            <PlatformSelect id="sub-platform" value={platform} onChange={setPlatform} size="sm" className="w-36" />
+          </div>
+          <Button type="submit" size="sm" disabled={busy === 'create' || !label.trim() || !platform}>
             {busy === 'create' && <Loader2Icon className="activity-spinner size-3.5" aria-hidden />}
             <Plus className="size-3.5" aria-hidden />
             Add
@@ -236,6 +250,28 @@ export function SubAccountsDialog({ creator, onClose, onChanged, apiRequest }: S
                 </span>
 
                 <span className="flex shrink-0 items-center gap-1">
+                  {/* Correctable in place: the platform decides which OnlyFans
+                      data this account receives, so a wrong one must not need a
+                      delete-and-recreate (which shifts would refuse). */}
+                  <PlatformSelect
+                    value={row.platform ?? null}
+                    size="sm"
+                    className="h-7 w-32 text-xs"
+                    aria-label={`Platform of ${row.stageName}`}
+                    disabled={busy === row.subAccountId}
+                    onChange={next =>
+                      void send(
+                        `/api/admin/creators/${creatorId}/subaccounts/${row.subAccountId}`,
+                        {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ platform: next }),
+                        },
+                        row.subAccountId,
+                        'Platform updated',
+                      )
+                    }
+                  />
                   <Button
                     size="xs"
                     variant="ghost"

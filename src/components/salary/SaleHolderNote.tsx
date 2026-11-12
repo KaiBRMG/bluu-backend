@@ -28,6 +28,7 @@ import { ArrowLeftRight, CalendarClock, UserX, type LucideIcon } from 'lucide-re
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { STATUS_COLORS } from '@/lib/campaignTracking';
 import { cn } from '@/lib/utils';
+import { statusClassOf } from '@/lib/onlymonster/classify';
 import type { SalarySale } from '@/lib/salary/salaryTypes';
 
 const INFO = STATUS_COLORS['In Progress'];
@@ -67,6 +68,10 @@ export function SaleHolderNote({
 }) {
   const buddyx = buddyxCreditName(sale, names, viewerUid);
   const held = holderName(sale.userId, names, viewerUid);
+
+  // OnlyMonster rows (migration plan §5.8): credited by the shift schedule alone (D2).
+  // OnlyMonster has no per-sale chatter, so there is no "source credits" to compare.
+  if (sale.source === 'onlymonster') return <OnlyMonsterNote sale={sale} names={names} viewerUid={viewerUid} held={held} />;
 
   if (!sale.transfer && sale.matchesSource) {
     if (sale.attributedBy === 'departed') {
@@ -117,6 +122,54 @@ export function SaleHolderNote({
         ? `Credited to ${credited} (BuddyX credits ${buddyx}).`
         : `Doesn’t match BuddyX, which credits ${buddyx}.`}{' '}
       Bluu Backend holds it on {held}. {because} Pay follows Bluu Backend.
+    </Pill>
+  );
+}
+
+const UNASSIGNED_NOTE: Record<string, { pill: string; why: string }> = {
+  unscheduled: { pill: 'Nobody on shift', why: 'Nobody was scheduled on this account at that moment' },
+  overlap: { pill: 'Overlapping shifts', why: 'More than one agent was scheduled on this account at that moment' },
+  departed: { pill: 'Agent had left', why: 'The only agent scheduled had already left' },
+};
+
+function OnlyMonsterNote({
+  sale,
+  names,
+  viewerUid,
+  held,
+}: {
+  sale: SalarySale;
+  names: Record<string, string>;
+  viewerUid?: string | null;
+  held: string;
+}) {
+  const pending = statusClassOf(sale.txStatus) === 'pending-return';
+  if (!sale.transfer) {
+    const u = UNASSIGNED_NOTE[sale.attributedBy];
+    if (u && !sale.userId) {
+      const candidates = (sale.scheduledUids ?? []).map(uid => holderName(uid, names, viewerUid));
+      return (
+        <Pill tone={ATTENTION} pill={u.pill} icon={UserX}>
+          {u.why}
+          {candidates.length ? ` (${candidates.join(', ')})` : ''}, so the strict shift rule credits nobody. It counts toward nobody until an admin assigns it
+          or a dispute moves it.
+        </Pill>
+      );
+    }
+    if (pending) {
+      return (
+        <Pill tone={ATTENTION} pill="Pending return" icon={CalendarClock}>
+          OnlyFans shows this sale as pending a return. It still counts; if the return completes it will be removed.
+        </Pill>
+      );
+    }
+    return null;
+  }
+  const scheduled = sale.sourceUserId ? holderName(sale.sourceUserId, names, viewerUid) : 'nobody';
+  const label = sale.assignment === 'admin' ? 'Reassigned by admin' : 'Moved by dispute';
+  return (
+    <Pill tone={sale.attributionConflict ? ATTENTION : INFO} pill={sale.attributionConflict ? `${label} · Schedule changed since` : label}>
+      The shift schedule credits {scheduled}. Bluu Backend holds it on {held}. Pay follows Bluu Backend.
     </Pill>
   );
 }

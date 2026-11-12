@@ -54,7 +54,9 @@ export function claimRefusal(
   isFinalized: (uid: string, month: string) => boolean,
 ): ClaimRefusal | null {
   if (!sale) return 'not-found';
-  if (salesSourceFor(sale.occurredAtMs) !== 'buddyx') return 'before-cutover';
+  // After the Infloww cutover: a BuddyX **or** OnlyMonster sale is claimable, so an
+  // agent can dispute across the BuddyX → OnlyMonster cutover (migration plan §5.4).
+  if (salesSourceFor(sale.occurredAtMs) === 'infloww') return 'before-cutover';
   if (sale.removed) return 'removed';
   if (sale.userId === filerUid) return 'yours';
   if (sale.disputeId) return 'disputed';

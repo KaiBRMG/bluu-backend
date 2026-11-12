@@ -75,7 +75,7 @@
  * counting. A removed row that reappears is restored.
  */
 import { createHash } from 'node:crypto';
-import { salesSourceFor } from '../salary/salaryConstants';
+import { ONLYMONSTER_CUTOVER_AT, salesSourceFor } from '../salary/salaryConstants';
 import { toDayKey, toMonthKey } from '../salary/salaryDate';
 import { normaliseSaleType } from '../salary/saleTypes';
 import { round2 } from '../salary/salaryEngine';
@@ -202,6 +202,8 @@ export interface StoredSale {
   removed: boolean;
   syncHash: string | null;
   vanishedAfterFinalise: boolean;
+  /** The row's instant, when known — so the vanished pass can stay on BuddyX's side of the OnlyMonster cutover. */
+  occurredAtMs?: number | null;
 }
 
 /**
@@ -495,8 +497,17 @@ export function planSalesSync(params: {
   finalized: Set<string>;
   /** Both endpoints paginated to completion — the only condition under which anything is removed. */
   complete: boolean;
+  /**
+   * BuddyX owns sales up to and including this instant (`ONLYMONSTER_CUTOVER_AT`,
+   * migration plan §5.7). A stored row after it is OnlyMonster's side and is never
+   * soft-removed here — BuddyX still returns those sales, but the cutover
+   * predicate drops them before they reach the planner, so without this guard
+   * every one of them would read as vanished.
+   */
+  ownedUntil?: number;
 }): SalesPlan {
   const { identity, stored, chatters, models, schedule, departures, finalized, complete } = params;
+  const ownedUntil = params.ownedUntil ?? ONLYMONSTER_CUTOVER_AT;
 
   const sales = new Map<string, NormalisedSale>();
   for (const sale of identity.sales) sales.set(sale.saleId, sale);
@@ -571,6 +582,7 @@ export function planSalesSync(params: {
   if (complete) {
     for (const prev of stored.values()) {
       if (prev.removed || sales.has(prev.saleId)) continue;
+      if (typeof prev.occurredAtMs === 'number' && prev.occurredAtMs > ownedUntil) continue;
       if (isFinal(prev.userId, prev.month)) {
         if (!prev.vanishedAfterFinalise) {
           plan.vanishedFlags.push(prev.saleId);

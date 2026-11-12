@@ -27,6 +27,8 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { timezoneLabel } from "@/lib/timezone";
 import { toast } from "sonner";
 import { CreatorAvatar } from '@/components/creators/CreatorChip';
+import { PlatformChip, PlatformSelect } from '@/components/admin/creators/PlatformField';
+import type { AccountPlatform } from '@/lib/creators/accountPlatform';
 import { SubAccountsDialog } from '@/components/admin/creators/SubAccountsDialog';
 import { useRefreshCreators } from '@/hooks/useCreators';
 import { cn } from '@/lib/utils';
@@ -41,6 +43,7 @@ interface Creator {
   photoURL: string | null;
   photoStoragePath: string | null;
   OFID: string;
+  platform?: AccountPlatform | null;
   isActive: boolean;
   isArchived: boolean;
   createdAt: string | null;
@@ -61,6 +64,7 @@ interface SubAccountSummary {
   label: string;
   stageName: string;
   OFID: string;
+  platform: AccountPlatform | null;
   isArchived: boolean;
 }
 
@@ -219,6 +223,9 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange, onRefresh }: Cr
   const isEdit = !!initial;
   const [stageName, setStageName] = useState(initial?.stageName ?? '');
   const [OFID, setOFID] = useState(initial?.OFID ?? '');
+  // New creators start on OnlyFans (the agency's main platform); an existing
+  // creator shows exactly what is stored, so a legacy blank stays visibly blank.
+  const [platform, setPlatform] = useState<AccountPlatform | null>(isEdit ? (initial?.platform ?? null) : 'onlyfans');
   const [driveLink, setDriveLink] = useState(initial?.driveLink ?? '');
   // Read-only: `defaultTimezone` is detected from the creator's own device when
   // they sign in (POST /api/creator/timezone) and is the basis of every due-date
@@ -258,6 +265,10 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange, onRefresh }: Cr
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!platform) {
+      setError('Choose the platform this account is on.');
+      return;
+    }
     setSaving(true);
     onBusyChange(true);
 
@@ -265,7 +276,7 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange, onRefresh }: Cr
       if (isEdit && initial) {
         const res = await apiRequest(`/api/admin/creators/${initial.uid}`, {
           method: 'PUT',
-          body: JSON.stringify({ stageName, OFID, driveLink }),
+          body: JSON.stringify({ stageName, OFID, platform, driveLink }),
         });
         if (!res.ok) throw new Error(await errorMessage(res, 'Could not save changes'));
 
@@ -277,7 +288,7 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange, onRefresh }: Cr
       } else {
         const res = await apiRequest('/api/admin/creators', {
           method: 'POST',
-          body: JSON.stringify({ stageName, OFID, driveLink }),
+          body: JSON.stringify({ stageName, OFID, platform, driveLink }),
         });
         if (!res.ok) throw new Error(await errorMessage(res, 'Could not add the creator'));
         const { uid } = (await res.json()) as { uid: string };
@@ -388,6 +399,12 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange, onRefresh }: Cr
             className="rounded-l-none"
           />
         </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="creator-platform" className="text-xs text-zinc-400">Platform</Label>
+        <PlatformSelect id="creator-platform" value={platform} onChange={setPlatform} className="w-full" />
+        <p className="text-xs text-zinc-400">Only OnlyFans accounts receive OnlyFans sales and stats.</p>
       </div>
 
       <div className="space-y-1.5">
@@ -568,7 +585,12 @@ function CreatorTable({
                       </span>
                     )}
                   </TableCell>
-                  <TableCell className="text-zinc-400">{creator.OFID}</TableCell>
+                  <TableCell className="text-zinc-400">
+                    <span className="inline-flex items-center gap-2">
+                      {creator.OFID}
+                      <PlatformChip platform={creator.platform} />
+                    </span>
+                  </TableCell>
                   <TableCell>
                     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                       creator.isActive
@@ -656,7 +678,12 @@ function CreatorTable({
                       </span>
                     </TableCell>
                     <TableCell className="text-sm">{sub.stageName}</TableCell>
-                    <TableCell className="text-zinc-400">{sub.OFID}</TableCell>
+                    <TableCell className="text-zinc-400">
+                      <span className="inline-flex items-center gap-2">
+                        {sub.OFID}
+                        <PlatformChip platform={sub.platform} />
+                      </span>
+                    </TableCell>
                     <TableCell>
                       {sub.isArchived && (
                         <span className="inline-flex items-center rounded-full bg-zinc-500/10 px-2 py-0.5 text-xs font-medium text-zinc-400">

@@ -30,6 +30,7 @@ import {
 } from '../fans/fanIdentity';
 import { readFans, resolveFanScope, summariseFan } from './buddyxAnalyticsService';
 import { FAN_REGISTRY, readCustomsFans, resolveFanKeyForLink } from './fanRegistryService';
+import { fanRollupCollection } from './onlymonsterAnalyticsSource';
 import { displayNamesFor } from './userService';
 import type {
   FanCustomItem,
@@ -199,7 +200,7 @@ export async function lookupFans(params: { q: string; creatorId: string | null; 
     const key = await resolveFanKeyForLink(params.q);
     if (!key) return [];
     const refs = [adminDb.collection(FAN_REGISTRY).doc(key)];
-    if (creatorId && !isHandleKey(key)) refs.push(adminDb.collection('buddyx-fans').doc(`${creatorId}_${key}`));
+    if (creatorId && !isHandleKey(key)) refs.push(adminDb.collection(await fanRollupCollection()).doc(`${creatorId}_${key}`));
     const [regSnap, fanSnap] = await adminDb.getAll(...refs);
     const reg = regSnap.exists ? (regSnap.data() as FanRegistryDocument) : null;
     const fan = fanSnap?.exists ? (fanSnap.data() as BuddyxFanDocument) : null;
@@ -290,11 +291,12 @@ export async function getFanReport(params: {
   const inScope = new Set(scope);
   const visible = (creatorId: string | null | undefined) => params.isAdmin || (creatorId ? inScope.has(creatorId) : false);
 
+  const fansCol = await fanRollupCollection();
   const [regSnap, fanSnap, customsSnap, salesSnap, subsSnap] = await Promise.all([
     adminDb.collection(FAN_REGISTRY).doc(fanKey).get(),
     fanId
       ? adminDb
-          .collection('buddyx-fans')
+          .collection(fansCol)
           .where('fanId', '==', fanId)
           .select('creatorId', 'fanId', 'name', 'nameSource', 'salesName', 'displayName', 'displayNameSource', 'spendByMonth', 'acquisition', 'isStacker')
           .get()
@@ -485,7 +487,7 @@ export async function canViewFan(params: { viewerUid: string; isAdmin: boolean; 
   const fanId = isHandleKey(params.fanKey) ? null : params.fanKey;
   const [customs, fans] = await Promise.all([
     adminDb.collection(CUSTOMS).where('fanKey', '==', params.fanKey).select('creatorID').get(),
-    fanId ? adminDb.collection('buddyx-fans').where('fanId', '==', fanId).select('creatorId').get() : Promise.resolve(null),
+    fanId ? adminDb.collection(await fanRollupCollection()).where('fanId', '==', fanId).select('creatorId').get() : Promise.resolve(null),
   ]);
   const inScope = new Set(scope);
   return (

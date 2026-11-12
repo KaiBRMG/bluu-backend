@@ -330,8 +330,16 @@ export interface SalarySale {
   sourceUserId: string | null;
   /** The uid BuddyX itself credits. Equals `sourceUserId` unless the schedule decided. */
   buddyxUserId: string | null;
-  /** `departed`: BuddyX credits someone who had left, and no single agent was on shift — unassigned. */
-  attributedBy: 'schedule' | 'buddyx' | 'departed';
+  /**
+   * `departed`: BuddyX credits someone who had left, and no single agent was on shift — unassigned.
+   * OnlyMonster rows (strict rule, D2): `schedule`, or unassigned as `unscheduled` / `overlap` /
+   * `departed`; `chargeback` on an `om-cb-*` reversal.
+   */
+  attributedBy: 'schedule' | 'buddyx' | 'departed' | 'unscheduled' | 'overlap' | 'chargeback';
+  /** OnlyMonster `overlap` rows: the agents scheduled at once, so the ledger can offer each. */
+  scheduledUids?: string[];
+  /** OnlyMonster rows: the raw OnlyFans status, for the *Pending return* flag. */
+  txStatus?: string | null;
   transfer: SaleTransfer | null;
   /** Set while an open dispute holds the sale. */
   disputeId: string | null;

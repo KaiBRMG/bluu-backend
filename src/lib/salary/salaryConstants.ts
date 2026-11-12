@@ -130,16 +130,33 @@ export function isSalaryMonthVisible(month: string): boolean {
  */
 export const SALES_CUTOVER_AT = Date.UTC(2026, 9, 4, 6, 50, 31);
 
+/**
+ * The BuddyX → OnlyMonster pay cutover (onlymonster-migration.md §5.7, Phase 4):
+ * **2026-11-06 01:00 SAST** (`2026-11-05T23:00:00Z`), set by the user on 2026-11-11 (D25).
+ * BuddyX owns every sale at or before it, OnlyMonster every sale after it.
+ *
+ * It is in the past on purpose: the team stopped working in BuddyX, whose last sale
+ * is 2026-11-05 21:09 SAST, and no `bx-*` row exists after this instant (checked
+ * 2026-11-11). So nothing is owned twice. OnlyMonster pay rows for the days since are
+ * written once `onlymonster-meta/config.salesWriteEnabled` is switched on; until
+ * then they go to `ca-sales-shadow`.
+ *
+ * Rolling back (before any pay decision on an `om-*` row) returns it to `Infinity`
+ * — see `scripts/onlymonster-rollback.js`.
+ */
+export const ONLYMONSTER_CUTOVER_AT: number = Date.UTC(2026, 10, 5, 23, 0, 0);
+
 /** Which system owns a sale at this instant. */
-export type SalesSource = 'infloww' | 'buddyx';
+export type SalesSource = 'infloww' | 'buddyx' | 'onlymonster';
 
 /**
- * The one predicate deciding which side of the cutover a sale is on: the sync
- * keeps a row only when this says `buddyx` (the deleted historical import kept
- * one only when it said `infloww`), and disputes refuse anything not `buddyx`.
+ * The one predicate deciding which side of each cutover a sale is on
+ * (invariant 2: one owner per instant): Infloww `≤ SALES_CUTOVER_AT` < BuddyX
+ * `≤ ONLYMONSTER_CUTOVER_AT` < OnlyMonster. Each writer keeps only its own side.
  */
 export function salesSourceFor(occurredAtMs: number): SalesSource {
-  return occurredAtMs <= SALES_CUTOVER_AT ? 'infloww' : 'buddyx';
+  if (occurredAtMs <= SALES_CUTOVER_AT) return 'infloww';
+  return occurredAtMs <= ONLYMONSTER_CUTOVER_AT ? 'buddyx' : 'onlymonster';
 }
 
 /** What kind of sale a row is. In BuddyX a PPV belongs to its sender; the sync credits both kinds to the agent on shift (`scheduleHolder`). */

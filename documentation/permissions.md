@@ -140,7 +140,7 @@ Not being in `PAGES` *is* the mechanism, and it cascades everywhere on its own:
 | Sidebar | rendered from `UNIVERSAL_PAGES` next to Home, unconditionally |
 | `AppLayout` route guard | href is added to `ALWAYS_ACCESSIBLE`, or every user would be bounced to `/` |
 
-Current members: **Resources** (`/applications/apps-resources`), moved out of the Apps teamspace on 2026-08-26.
+Current members: **Resources** (`/applications/apps-resources`), moved out of the Apps teamspace on 2026-08-26; **Tasks** (`/applications/apps-tasks`), which filters by assignee inside `/api/tasks` — see [tasks.md](tasks.md).
 
 **A page moving in either direction leaves orphans.** Removing one from `PAGES` strands its `page-permissions` doc and every `permittedPageIds` entry — and a stranded `page-permissions` doc makes `repair-permissions.js` **hard-abort**, so the drift-repair tool stops working entirely until it is cleaned up. `src/scripts/remove-retired-pages.js` does that cleanup (dry run by default; it refuses to touch any pageId `definitions.ts` still declares).
 

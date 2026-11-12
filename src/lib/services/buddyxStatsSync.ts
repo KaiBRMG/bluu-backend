@@ -20,6 +20,7 @@
  * a growing collection.
  */
 import 'server-only';
+import { FAN_REGISTRY } from './fanRegistryService';
 import { FieldPath, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { adminDb } from '../firebase-admin';
 import { buddyxAll, buddyxData } from '../buddyx/client';
@@ -76,7 +77,6 @@ const CREATOR_DAYS = 'creator-stats-days';
 const SUBSCRIBERS = 'buddyx-subscribers';
 const LINKS = 'buddyx-links';
 const FANS = 'buddyx-fans';
-const FAN_NAMES = 'buddyx-fan-names';
 
 /** Days backfilled per run, per series. Small: each creator day costs 1 + N expensive calls. */
 const TEAM_BACKFILL_PER_RUN = 4;
@@ -680,7 +680,7 @@ export async function syncFansScope(ctx: SyncContext): Promise<void> {
     writer.set(adminDb.collection(FANS).doc(key), update, { merge: true });
   }
   for (const [fanId, name] of fanNames) {
-    writer.set(adminDb.collection(FAN_NAMES).doc(fanId), {
+    writer.set(adminDb.collection(FAN_REGISTRY).doc(fanId), {
       fanId,
       name,
       source: 'buddyx-link',

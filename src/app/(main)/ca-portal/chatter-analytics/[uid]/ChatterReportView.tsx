@@ -143,7 +143,11 @@ function ReportBody({ report }: { report: ChatterReport }) {
           label="Sales"
           basis="gross"
           value={formatUsd(gross)}
-          meta={metrics ? `${formatUsd(metrics.ppvGross)} PPV · ${formatUsd(metrics.tipsGross)} tips` : 'No sales'}
+          meta={
+            (metrics ? `${formatUsd(metrics.ppvGross)} PPV · ${formatUsd(metrics.tipsGross)} tips` : 'No sales') +
+            // D13: OnlyMonster's own figure, a lead for an admin, never pay.
+            (report.onlymonsterCredit ? ` · OnlyMonster attributes ${formatUsd(report.onlymonsterCredit.gross)}${report.onlymonsterCredit.differs ? ' (check the schedule)' : ''}` : '')
+          }
         />
         <KpiTile label="Place on the board" value={report.rank ? `#${report.rank.position}` : '—'} meta={report.rank ? `of ${report.rank.of} agents` : undefined} />
         <KpiTile

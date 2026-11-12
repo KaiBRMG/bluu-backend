@@ -26,6 +26,14 @@
       "schedule": "1 5,13,21 * * *"
     },
     {
+      "path": "/api/cron/onlymonster-sync",
+      "schedule": "1 5,13,21 * * *"
+    },
+    {
+      "path": "/api/cron/onlymonster-continue",
+      "schedule": "*/10 * * * *"
+    },
+    {
       "path": "/api/cron/birthday-notifications",
       "schedule": "0 8 * * *"
     },

@@ -5,6 +5,7 @@ import { getUserById } from '@/lib/services/userService';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import type { CreatorSubAccountDocument } from '@/types/firestore';
+import { parsePlatformField, type AccountPlatform } from '@/lib/creators/accountPlatform';
 
 /** What the Creator Management table renders for each sub-account row. */
 interface AdminSubAccountSummary {
@@ -12,6 +13,7 @@ interface AdminSubAccountSummary {
   label: string;
   stageName: string;
   OFID: string;
+  platform: AccountPlatform | null;
   isArchived: boolean;
 }
 
@@ -43,6 +45,7 @@ async function fetchCreators() {
       label: sub.label,
       stageName: sub.stageName,
       OFID: sub.OFID ?? '',
+      platform: sub.platform ?? null,
       isArchived: sub.isArchived === true,
     });
     subAccountsByParent.set(sub.parentCreatorId, list);
@@ -117,11 +120,15 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     }
 
     const body = await request.json();
-    const { stageName, OFID, driveLink = '', defaultTimezone = '' } = body;
+    const { stageName, OFID, platform, driveLink = '', defaultTimezone = '' } = body;
 
     if (!stageName || !OFID) {
       return NextResponse.json({ error: 'stageName and OFID are required' }, { status: 400 });
     }
+    // An account without a platform is never matched to OnlyFans data; see parsePlatformField
+    // for why a missing one is still accepted for now (rule 9c).
+    const parsedPlatform = parsePlatformField(platform);
+    if (!parsedPlatform.ok) return NextResponse.json({ error: parsedPlatform.error }, { status: 400 });
 
     const { uid } = await adminAuth.createUser({ displayName: stageName });
 
@@ -135,6 +142,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       photoThumb: null,
       photoStoragePath: null,
       OFID,
+      ...(parsedPlatform.value ? { platform: parsedPlatform.value } : {}),
       isActive: true,
       isArchived: false,
       driveLink: driveLink || '',

@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { STATE_CONFIG } from "@/lib/stateColors";
 import { todayStr } from "@/lib/utils/timezone";
+import { ClockOutButton } from '@/components/ClockOutButton';
 
 /* ── Loading skeletons ───────────────────────────────────────────────
    Shaped to each tab's final layout (DESIGN.md § Loading & Empty States).
@@ -202,7 +203,6 @@ function TimeTrackingContent() {
     breakAllowanceSeconds,
     breakBlock,
     startTracking,
-    stopTracking,
     pauseTracking,
     resumeFromPause,
     startBreak,
@@ -415,13 +415,7 @@ function TimeTrackingContent() {
                   </span>
                 </div>
                 {(displayState === 'working' || displayState === 'paused') && (
-                  <Button
-                    onClick={stopTracking}
-                    disabled={isLoading}
-                    variant="destructive"
-                  >
-                    {isLoading ? 'Stopping…' : 'Clock Out'}
-                  </Button>
+                  <ClockOutButton />
                 )}
               </div>
             )}

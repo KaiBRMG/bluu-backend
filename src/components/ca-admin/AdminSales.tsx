@@ -22,7 +22,7 @@ import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { useUserData } from '@/hooks/useUserData';
 import { activeChatAgents, useBasicUsers } from '@/hooks/useBasicUsers';
 import { SALARY_HISTORY_START_MONTH } from '@/lib/salary/salaryConstants';
-import { addDays, addMonths, currentDayKey, enumerateDays, formatDayLabel, formatMonthName } from '@/lib/salary/salaryDate';
+import { addDays, addMonths, currentDayKey, currentMonthKey, enumerateDays, formatDayLabel, formatMonthName } from '@/lib/salary/salaryDate';
 import { SyncStatus } from '@/components/buddyx/SyncStatus';
 import { PeriodPicker, dayKeyToDate } from '@/components/buddyx/PeriodPicker';
 import { CreatorCombobox } from '@/components/buddyx/CreatorCombobox';
@@ -46,6 +46,9 @@ import { useDisputesData } from '@/hooks/useDisputesData';
 import { DisputeDetailDialog } from '@/components/disputes/DisputeDetailDialog';
 import { disputeStage, formatMoney, OUTCOME_LABEL, outcomePillClass, verdictToast } from '@/components/disputes/disputeStatus';
 import { DisputeMovesFeed } from './DisputeMovesFeed';
+import { OnlyMonsterMappingSection } from './OnlyMonsterMappingSection';
+import { statusClassOf } from '@/lib/onlymonster/classify';
+import { ShadowReconciliationSection } from './ShadowReconciliationSection';
 
 /**
  * CA Admin → Sales — every sale in a period, for the whole roster, newest
@@ -181,7 +184,8 @@ function inView(
       return schedule[s.saleId]?.differs === true;
     case 'differs':
       // Moved by a dispute or an admin, or credited to the agent on shift rather than BuddyX's chatter.
-      return !s.removedAt && (!s.matchesSource || Boolean(s.transfer) || s.buddyxUserId !== s.userId);
+      // OnlyMonster rows have no platform credit to differ from: only a move counts.
+      return !s.removedAt && (!s.matchesSource || Boolean(s.transfer) || (s.source !== 'onlymonster' && s.buddyxUserId !== s.userId));
     case 'disputed':
       // Removed rows included: a dispute's outcome is history worth keeping.
       return Boolean(disputes[s.saleId]);
@@ -637,7 +641,7 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
     if (data.unassigned.ppv > 0) {
       lines.push({
         key: 'unassigned-ppv',
-        text: `${pluralise(data.unassigned.ppv, 'PPV')} with no sender in BuddyX, ${formatUsd(data.unassigned.ppvGross)} — counting toward nobody`,
+        text: `${pluralise(data.unassigned.ppv, 'unassigned PPV')}, ${formatUsd(data.unassigned.ppvGross)} — counting toward nobody`,
         action: { label: 'Show them', run: () => showRows('Unassigned PPVs', unassignedIds('ppv')) },
       });
     }
@@ -686,6 +690,41 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
         action: { label: 'Show them', run: () => showRows('Vanished after finalising', data.flags.vanishedAfterFinalise) },
       });
     }
+    // OnlyMonster rows (migration plan §5.8): the strict shift rule leaves a sale unassigned
+    // and says why; a pending return still counts but is flagged.
+    const omLive = live.filter(s => s.source === 'onlymonster');
+    const OM_UNASSIGNED: Array<[string, string]> = [
+      ['unscheduled', 'Unassigned: nobody on shift'],
+      ['overlap', 'Unassigned: overlapping shifts'],
+      ['departed', 'Unassigned: the agent on shift had left'],
+    ];
+    for (const [why, label] of OM_UNASSIGNED) {
+      const rows = omLive.filter(s => !s.userId && s.attributedBy === why);
+      if (rows.length === 0) continue;
+      lines.push({
+        key: `om-${why}`,
+        text: `${label} — ${pluralise(rows.length, 'sale')}, ${formatUsd(rows.reduce((t, s) => t + s.signedGross, 0))}`,
+        action: { label: 'Show them', run: () => showRows(label, rows.map(s => s.saleId)) },
+      });
+    }
+    const pendingReturn = omLive.filter(s => statusClassOf(s.txStatus) === 'pending-return');
+    if (pendingReturn.length > 0) {
+      lines.push({
+        key: 'om-pending-return',
+        text: `${pluralise(pendingReturn.length, 'sale')} pending a return on OnlyFans — still counting`,
+        action: { label: 'Show them', run: () => showRows('Pending return', pendingReturn.map(s => s.saleId)) },
+      });
+    }
+    // `chargeback` is the status Bluu gives its own om-cb-* reversal rows, not an OnlyFans one.
+    const unknownStatus = omLive.filter(s => s.txStatus && s.txStatus !== 'chargeback' && statusClassOf(s.txStatus) === 'unknown');
+    if (unknownStatus.length > 0) {
+      lines.push({
+        key: 'om-unknown-status',
+        text: `${pluralise(unknownStatus.length, 'sale')} with an OnlyFans status Bluu does not recognise — still counting`,
+        action: { label: 'Show them', run: () => showRows('Unknown status', unknownStatus.map(s => s.saleId)) },
+      });
+    }
+
     const counts = lastRun?.counts ?? {};
     const refused = counts['sales.rejectedFinalized'] ?? 0;
     if (refused > 0) lines.push({ key: 'refused', text: `The last sync refused ${pluralise(refused, 'change')} to a finalised month` });
@@ -1022,7 +1061,9 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
                             <OnShift match={match} names={data.names} />
                           </td>
                           <td className="max-w-[12rem] px-3 py-2 text-xs">
-                            {sale.unmappedChatterId ? (
+                            {sale.source === 'onlymonster' ? (
+                              <span className="text-zinc-400">—</span>
+                            ) : sale.unmappedChatterId ? (
                               <span className="text-orange-400">{sale.employeeName || `Chatter ${sale.unmappedChatterId}`} (not linked)</span>
                             ) : sale.buddyxUserId ? (
                               <span className="text-zinc-300">
@@ -1036,7 +1077,9 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
                           <td className="px-3 py-2">
                             <span className="flex flex-wrap items-center gap-1.5">
                               <AttrChip>{saleTypeLabel(sale.type)}</AttrChip>
-                              {data.spansCutover && <AttrChip>{sale.source === 'buddyx' ? 'BuddyX' : 'Infloww'}</AttrChip>}
+                              {(data.spansCutover || sale.source === 'onlymonster') && (
+                                <AttrChip>{sale.source === 'onlymonster' ? 'OnlyMonster' : sale.source === 'buddyx' ? 'BuddyX' : 'Infloww'}</AttrChip>
+                              )}
                               {sale.status === 'reverse' && <span className="text-[11px] text-red-400">Reversed</span>}
                               {sale.disputeId && !showDisputeColumn && (
                                 <span className={cn('text-[11px]', staleLocks.has(sale.saleId) ? 'text-orange-400' : 'text-zinc-300')}>
@@ -1142,6 +1185,15 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
       <Section title="Mapping" open={mappingOpen} onOpenChange={setMappingOpen}>
         <MappingSection mapping={mapping} isAdmin={isAdmin} authed={authed} onChanged={loadMapping} />
       </Section>
+      {/* BuddyX → OnlyMonster migration, Phase 1: identity only, no pay impact.
+          Its content mounts (and fetches) only when opened. */}
+      <Section title="OnlyMonster mapping">
+        <OnlyMonsterMappingSection isAdmin={isAdmin} authed={authed} timezone={timezone} />
+      </Section>
+      {/* Phase 3: what OnlyMonster would pay beside what BuddyX pays. Never pay. */}
+      <Section title="Shadow reconciliation (OnlyMonster)">
+        <ShadowReconciliationSection authed={authed} month={currentMonthKey()} />
+      </Section>
     </div>
   );
 }
@@ -1200,7 +1252,7 @@ const LEDGER_COLUMNS: Array<{ label: string; right?: boolean; hint?: string; bas
   { label: 'Creator' },
   { label: 'Held by' },
   { label: 'On shift', hint: 'Who the shift schedule had on this account at the time of sale' },
-  { label: 'BuddyX credits' },
+  { label: 'Source credits', hint: 'Who the source platform credits. BuddyX rows only (historical); OnlyMonster reports no per-sale chatter.' },
   { label: 'Type' },
   { label: 'Fan' },
   { label: 'Gross', right: true, basis: 'gross' },
@@ -1518,8 +1570,12 @@ function ReassignSaleDialog({
             {onShift.length ? onShift.map(uid => nameOf(uid)).join(', ') : <span className="text-zinc-400">Nobody scheduled on this account</span>}
             {schedule[sale.saleId]?.differs && <span className="text-[11px]"> · off schedule</span>}
           </dd>
-          <dt className="text-zinc-400">BuddyX credits</dt>
-          <dd>{buddyxCreditName(sale, allNames)}</dd>
+          {sale.source !== 'onlymonster' && (
+            <>
+              <dt className="text-zinc-400">BuddyX credits</dt>
+              <dd>{buddyxCreditName(sale, allNames)}</dd>
+            </>
+          )}
           <dt className="text-zinc-400">Sale ID</dt>
           <dd className="font-mono text-xs text-zinc-300">{sale.saleId}</dd>
         </dl>

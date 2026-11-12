@@ -20,6 +20,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getSubAccountsForCreator, subAccountStageName } from '@/lib/services/creatorAccountService';
 import type { CreatorFullDocument } from '@/types/firestore';
+import { parsePlatformField } from '@/lib/creators/accountPlatform';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 const SUBACCOUNTS = 'creator-subaccounts';
@@ -60,12 +61,14 @@ export const POST = withAuth(async (
     if (denied) return denied;
 
     const { creatorId } = await params;
-    const { label, OFID } = (await request.json()) as { label?: string; OFID?: string };
+    const { label, OFID, platform } = (await request.json()) as { label?: string; OFID?: string; platform?: unknown };
 
     const trimmed = (label ?? '').trim();
     if (!trimmed) {
       return NextResponse.json({ error: 'A label is required, e.g. "Fansly".' }, { status: 400 });
     }
+    const parsedPlatform = parsePlatformField(platform);
+    if (!parsedPlatform.ok) return NextResponse.json({ error: parsedPlatform.error }, { status: 400 });
     if (trimmed.length > MAX_LABEL) {
       return NextResponse.json({ error: `Keep the label under ${MAX_LABEL} characters.` }, { status: 400 });
     }
@@ -95,6 +98,7 @@ export const POST = withAuth(async (
       // silently rewrite history on shifts already assigned to this account.
       stageName: subAccountStageName(parent.stageName, trimmed),
       OFID: (OFID ?? '').trim(),
+      ...(parsedPlatform.value ? { platform: parsedPlatform.value } : {}),
       // Null, not the parent's URL: inheritance is resolved on read, so a new
       // photo on the parent reaches every sub-account that never set its own.
       photoURL: null,
