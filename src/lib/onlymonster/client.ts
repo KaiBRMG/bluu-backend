@@ -172,13 +172,22 @@ export async function omPaginateCursor<T>(
   }
 }
 
-/** Walk an offset-paged list (`/members` ≤ 50, `/users/metrics` ≤ 100) until a short page. */
-export async function omPaginateOffset<T>(path: string, query: OmQuery, itemsKey: string, limit: number): Promise<T[]> {
+/**
+ * Walk an offset-paged list (`/members` ≤ 50, `/users/metrics` ≤ 100) until a short page.
+ *
+ * `itemsKey` may list several names: `/members` is documented as `users` but was seen
+ * answering with `items` (2026-11-12), so the first one present wins. A body with none
+ * of them is an error, never an empty list: a silent empty list would unmap people.
+ */
+export async function omPaginateOffset<T>(path: string, query: OmQuery, itemsKey: string | string[], limit: number): Promise<T[]> {
   const out: T[] = [];
+  const keys = Array.isArray(itemsKey) ? itemsKey : [itemsKey];
   for (let pages = 0, offset = 0; ; pages++, offset += limit) {
     if (pages >= MAX_PAGES) throw new OnlyMonsterError('PAGINATION_LIMIT', `${path} exceeded ${MAX_PAGES} pages`, 0);
     const body = await omGet<Record<string, unknown>>(path, { ...query, offset, limit });
-    const items = (body[itemsKey] as T[] | undefined) ?? [];
+    const key = keys.find(k => Array.isArray(body[k]));
+    if (!key) throw new OnlyMonsterError('UNEXPECTED_BODY', `${path} returned none of ${keys.join(' / ')} (keys: ${Object.keys(body).join(', ')})`, 0);
+    const items = body[key] as T[];
     out.push(...items);
     if (items.length < limit) return out;
   }

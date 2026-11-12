@@ -98,7 +98,7 @@ export interface DirectoryResult {
 export async function syncDirectory(): Promise<DirectoryResult> {
   const [omAccounts, omMembers, roster, accountSnap, memberSnap] = await Promise.all([
     omPaginateCursor<OmAccount>('/api/v0/accounts', { limit: 1000, withExpiredSubscriptions: true }, { items: 'accounts', cursor: 'nextCursor' }),
-    omPaginateOffset<OmMember>('/api/v0/members', {}, 'users', 50),
+    omPaginateOffset<OmMember>('/api/v0/members', {}, ['users', 'items'], 50),
     readRoster(),
     adminDb.collection(ACCOUNTS).get(),
     adminDb.collection(MEMBERS).get(),
