@@ -31,7 +31,7 @@ import { RICH_TEXT_MARK_CLASSES, RichPromptEditor } from '@/components/rich-text
 import { UserAvatarLabel } from '@/components/UserAvatarLabel';
 import { ACTION_BLUE_DEEP } from '@/lib/actionBlue';
 import { promptBodyHtml } from '@/lib/promptHtml';
-import { canDeleteTask, canEditTask, defaultStatus, remapStatus, statusesFor, type TaskActor } from '@/lib/taskAccess';
+import { canDeleteTask, canEditTask, formatDue, defaultStatus, remapStatus, statusesFor, type TaskActor } from '@/lib/taskAccess';
 import {
   TASK_TEXT_MAX,
   TASK_TITLE_MAX,
@@ -192,7 +192,8 @@ export function TaskDialog({
     <>
       <Dialog open={open} onOpenChange={o => (o ? onOpenChange(true) : requestClose())}>
         <DialogContent
-          className="max-h-[90vh] max-w-2xl gap-4 overflow-y-auto"
+          // `sm:` matters: the shared DialogContent sets sm:max-w-lg, which a bare max-w-2xl loses to.
+          className="max-h-[90vh] gap-4 overflow-y-auto sm:max-w-2xl"
           onKeyDown={e => {
             if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
               e.preventDefault();
@@ -218,14 +219,18 @@ export function TaskDialog({
                   aria-invalid={titleError || undefined}
                   onChange={e => { setTitle(e.target.value); setTitleError(false); }}
                   placeholder={kind === 'role' ? 'Name the role' : 'What needs doing?'}
-                  className="h-11 border-transparent bg-transparent px-0 pr-8 text-lg font-semibold shadow-none focus-visible:ring-0 aria-invalid:border-b-red-500"
+                  // A heading-weight field: no box, but a hairline underline that appears on
+                  // focus (the ring is dropped, so the underline IS the focus indicator)
+                  // and turns red on a failed save.
+                  className="h-11 rounded-none border-0 border-b border-transparent bg-transparent px-0 pr-8 text-lg font-semibold shadow-none focus-visible:border-white/25 focus-visible:ring-0 aria-invalid:border-red-500"
                 />
                 {titleError && <p className="text-xs text-red-400">Give it a title.</p>}
               </>
             )}
             {readOnly && (
               <p className="text-xs text-zinc-400">
-                Assigned to you by {task.createdByName ?? 'a deleted user'}. You can change its status.
+                {task.kind === 'role' ? 'A role' : 'A task'} assigned to you by {task.createdByName ?? 'a deleted user'}.
+                {task.dueDate && ` Due ${formatDue(task.dueDate)}.`} You can change its status.
               </p>
             )}
           </DialogHeader>

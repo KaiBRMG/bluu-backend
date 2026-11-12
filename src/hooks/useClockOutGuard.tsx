@@ -123,7 +123,7 @@ export function useClockOutGuard() {
               no manual watchNavigation call, and no borrowed telemetry label. */}
           <AlertDialogAction
             asChild
-            className="text-white hover:brightness-110 focus-visible:ring-2"
+            className="text-white hover:brightness-110"
             style={{ backgroundColor: ACTION_BLUE_DEEP }}
           >
             <Link id="clock-out-guard-go" href={TASKS_HREF} prefetch={false}>

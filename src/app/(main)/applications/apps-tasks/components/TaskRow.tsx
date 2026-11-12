@@ -95,7 +95,7 @@ export function TaskRow({
         <p className={cn('truncate text-sm font-medium', closed ? 'text-zinc-400 line-through decoration-zinc-600' : 'text-white')}>
           {task.title || 'Untitled'}
         </p>
-        <p className="flex min-w-0 items-center gap-x-2 text-xs text-zinc-400">
+        <p className="flex min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap text-xs text-zinc-400">
           {task.kind === 'role' && (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[11px] font-medium text-zinc-300">
               <Repeat className="size-3" aria-hidden /> Role
@@ -112,7 +112,7 @@ export function TaskRow({
           )}
           {task.blocksClockOut && !closed && (
             <span className="inline-flex shrink-0 items-center gap-1 text-orange-400">
-              <LogOut className="size-3" aria-hidden /> Asked before clock-out
+              <LogOut className="size-3" aria-hidden /> Checked at clock-out
             </span>
           )}
           {preview && <span className="min-w-0 truncate">{preview}</span>}

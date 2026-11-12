@@ -51,7 +51,13 @@ export function ShadowReconciliationSection({ authed, month }: { authed: ReturnT
     };
   }, [authed, month]);
 
-  if (error) return <p className="text-sm text-red-400">{error}</p>;
+  if (error) {
+    return (
+      <p role="alert" className="text-sm text-red-400">
+        {error}. Close and reopen this section to try again.
+      </p>
+    );
+  }
   if (!data) return <Skeleton className="h-32 w-full rounded-lg" />;
 
   const unassigned = Object.entries(data.totals.shadowUnassigned);

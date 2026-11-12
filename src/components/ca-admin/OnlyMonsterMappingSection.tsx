@@ -10,6 +10,8 @@ import { CreatorChip } from '@/components/creators/CreatorChip';
 import { PersonTag } from '@/components/disputes/disputeUi';
 import { DataFreshness, type FreshnessStatus } from '@/components/onlymonster/DataFreshness';
 import { activeChatAgents, useBasicUsers } from '@/hooks/useBasicUsers';
+import { Button } from '@/components/ui/button';
+import { formatUsd } from '@/lib/salary/salaryFormat';
 import type { useAuthFetch } from '@/hooks/useAuthFetch';
 
 /**
@@ -132,7 +134,16 @@ export function OnlyMonsterMappingSection({
     }
   };
 
-  if (error) return <p className="text-sm text-red-400">{error}</p>;
+  if (error) {
+    return (
+      <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
+        <p className="text-red-400">{error}</p>
+        <Button size="sm" variant="outline" onClick={() => void load()}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
   if (!data) return <Skeleton className="h-32 w-full rounded-lg" />;
 
   const onlyfans = data.accounts.filter(a => a.platform === 'onlyfans' && a.listed);
@@ -145,8 +156,11 @@ export function OnlyMonsterMappingSection({
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <DataFreshness status={data.status} timezone={timezone} />
-        {lastRun && (lastRun.errors.length > 0 || lastRun.warnings.length > 0) && (
-          <span className="text-xs text-orange-400">{[...lastRun.errors, ...lastRun.warnings][0]}</span>
+        {lastRun && lastRun.errors.length + lastRun.warnings.length > 0 && (
+          <span className="min-w-0 max-w-full truncate text-xs text-orange-400" title={[...lastRun.errors, ...lastRun.warnings].join('\n')}>
+            {[...lastRun.errors, ...lastRun.warnings][0]}
+            {lastRun.errors.length + lastRun.warnings.length > 1 && ` (+${lastRun.errors.length + lastRun.warnings.length - 1} more)`}
+          </span>
         )}
       </div>
 
@@ -275,8 +289,6 @@ export function OnlyMonsterMappingSection({
   );
 }
 
-const money = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
 /**
  * Phase 2's gate, on one screen: backfill progress, the nightly reconciliation
  * against OnlyMonster's own account totals, and the switch that moves OnlyFans
@@ -343,13 +355,13 @@ function MigrationBlock({
                   <CreatorChip creatorId={r.creatorId} size="xs" />
                 </span>
                 <span className="w-20 tabular-nums text-zinc-400">{r.month}</span>
-                <span className="tabular-nums">{money(r.ledger.net)}</span>
+                <span className="tabular-nums">{formatUsd(r.ledger.net)}</span>
                 {Math.abs(r.diff.net) < 0.01 ? (
                   <span className="text-xs text-zinc-400">Matches</span>
                 ) : (
                   <span className="text-xs text-orange-400">
-                    OnlyMonster {money(r.om.net)} ({r.diff.net > 0 ? '+' : ''}
-                    {money(r.diff.net)})
+                    OnlyMonster {formatUsd(r.om.net)} ({r.diff.net > 0 ? '+' : ''}
+                    {formatUsd(r.diff.net)})
                   </span>
                 )}
               </li>
@@ -371,14 +383,18 @@ function BalancesBlock({ authed }: { authed: ReturnType<typeof useAuthFetch> }) 
     configured: boolean;
     balances: Array<{ creatorId: string; available: number; pending: number; currency: string; checkedAt: string | null }>;
   } | null>(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     let live = true;
-    (authed('/api/admin/onlymonster/balances') as Promise<NonNullable<typeof data>>).then(b => live && setData(b)).catch(() => live && setData(null));
+    (authed('/api/admin/onlymonster/balances') as Promise<NonNullable<typeof data>>)
+      .then(b => live && setData(b))
+      .catch(() => live && setFailed(true));
     return () => {
       live = false;
     };
   }, [authed]);
-  if (!data) return null;
+  if (failed) return <p className="text-xs text-orange-400">Payout balances could not be loaded. Reopen this section to try again.</p>;
+  if (!data) return <Skeleton className="h-10 w-full rounded-lg" />;
   return (
     <div className="space-y-2">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Payout balances (OnlyFans)</h3>
@@ -391,8 +407,8 @@ function BalancesBlock({ authed }: { authed: ReturnType<typeof useAuthFetch> }) 
           {data.balances.map(b => (
             <li key={b.creatorId} className="flex flex-wrap items-center gap-3 py-1.5 text-sm">
               <span className="w-44"><CreatorChip creatorId={b.creatorId} size="xs" /></span>
-              <span className="tabular-nums">{money(b.available)} available</span>
-              <span className="tabular-nums text-zinc-400">{money(b.pending)} pending</span>
+              <span className="tabular-nums">{formatUsd(b.available)} available</span>
+              <span className="tabular-nums text-zinc-400">{formatUsd(b.pending)} pending</span>
             </li>
           ))}
         </ul>

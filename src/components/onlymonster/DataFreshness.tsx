@@ -28,9 +28,10 @@ export function DataFreshness({ status, timezone, className }: { status: Freshne
   const tz = safeTimezone(timezone);
   const time = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: tz });
   const exact = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: tz });
+  const dayOf = new Intl.DateTimeFormat('en-CA', { timeZone: tz });
   const at = (iso: string) => {
     const d = new Date(iso);
-    const sameDay = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(d) === new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+    const sameDay = dayOf.format(d) === dayOf.format(new Date());
     return sameDay ? time.format(d) : exact.format(d);
   };
 

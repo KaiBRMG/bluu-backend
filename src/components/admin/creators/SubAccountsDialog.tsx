@@ -256,7 +256,7 @@ export function SubAccountsDialog({ creator, onClose, onChanged, apiRequest }: S
                   <PlatformSelect
                     value={row.platform ?? null}
                     size="sm"
-                    className="h-7 w-32 text-xs"
+                    className="w-32 text-xs"
                     aria-label={`Platform of ${row.stageName}`}
                     disabled={busy === row.subAccountId}
                     onChange={next =>
