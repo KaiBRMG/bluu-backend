@@ -88,9 +88,9 @@ export const PAGES: PageDef[] = [
   // queue is its right-hand column and the full workspace is a dialog behind
   // it, so there is no page left to grant. `/ca-portal/disputes` survives as a
   // redirect, because five notification `actionUrl`s still point at it.
-  // BuddyX analytics (2026-10). Agents see themselves against an anonymous team
-  // benchmark and fans of the creators they are rostered on; `ca-admin` holders
-  // see everything, named. See documentation/buddyx.md.
+  // Chatter / Fan Analytics (2026-10; OnlyMonster since 2026-11). Agents see a
+  // named sales board and fans of the creators they are rostered on; `ca-admin`
+  // holders see everything. See documentation/onlymonster.md.
   { pageId: 'ca-chatter-analytics', title: 'Chatter Analytics', teamspaceId: 'ca-portal', href: '/ca-portal/chatter-analytics', icon: 'MessagesSquare', order: 2 },
   { pageId: 'ca-fan-analytics', title: 'Fan Analytics', teamspaceId: 'ca-portal', href: '/ca-portal/fan-analytics', icon: 'UsersRound', order: 3 },
   { pageId: 'ca-custom-requests', title: 'Custom Requests', teamspaceId: 'ca-portal', href: '/ca-portal/custom-requests', icon: 'ImagePlay', order: 4 },
@@ -120,7 +120,7 @@ export const PAGES: PageDef[] = [
   // it is the permission key, and the five /api/admin/creators routes gate on
   // it by name. `/admin-portal/creator-management` survives as a redirect.
   { pageId: 'admin-creator-management', title: 'Creator Management', teamspaceId: 'creator-portal', href: '/creator-portal/creator-management', icon: 'UserStar', order: 4 },
-  // Per-creator OnlyFans performance from BuddyX, continuous with the Infloww
+  // Per-creator OnlyFans performance from OnlyMonster, continuous with the Infloww / BuddyX
   // history. Internal only — not exposed in the Telegram Mini App.
   { pageId: 'creators-of-analytics', title: 'OnlyFans Analytics', teamspaceId: 'creator-portal', href: '/creator-portal/onlyfans-analytics', icon: 'ChartColumnBig', order: 5 },
 

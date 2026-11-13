@@ -49,7 +49,7 @@ import {
 import { displayNamesFor } from '@/lib/services/userService';
 import { getSaleDisputeMarks } from '@/lib/services/disputeLedger';
 import { addDays, addMonths, currentMonthKey, dayKeyRange, enumerateDays, isDayKey, isMonthKey, monthKeyRange } from '@/lib/salary/salaryDate';
-import { SALARY_HISTORY_START_MONTH, SALES_CUTOVER_AT } from '@/lib/salary/salaryConstants';
+import { SALARY_HISTORY_START_MONTH, spansSourceCutover } from '@/lib/salary/salaryConstants';
 import { round2 } from '@/lib/salary/salaryEngine';
 import { leaveAt } from '@/lib/salary/leavePay';
 import { adminDb } from '@/lib/firebase-admin';
@@ -212,7 +212,7 @@ async function adminLedger(searchParams: URLSearchParams): Promise<NextResponse>
         offSchedule: [...schedule].filter(([, m]) => m.differs).map(([id]) => id),
         ...flags,
       },
-      spansCutover: start <= SALES_CUTOVER_AT && SALES_CUTOVER_AT < end,
+      spansCutover: spansSourceCutover(start, end),
     },
     { headers: NO_STORE },
   );
@@ -243,7 +243,7 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
 
     const { deductionRate } = await getSalaryConfig();
     const [monthStart, monthEnd] = monthKeyRange(month);
-    const spansCutover = monthStart <= SALES_CUTOVER_AT && SALES_CUTOVER_AT < monthEnd;
+    const spansCutover = spansSourceCutover(monthStart, monthEnd);
 
     // ── One agent ──
     const subject = await resolveSalarySubject(token, searchParams.get('userId'));
@@ -316,12 +316,13 @@ export const DELETE = withAuth(async (request: NextRequest, token: DecodedIdToke
 
     const sale = snap.data() as CaSaleDocument;
 
-    // A BuddyX row would simply come back on the next sync. Removal there is
-    // the sync's job (a row BuddyX stops returning is soft-removed); a row on
-    // the wrong agent is a dispute, or an un-transfer.
-    if (sale.source === 'buddyx') {
+    // Only an imported Infloww row is deleted here. An OnlyMonster row would come
+    // back on the next sync; a BuddyX row is frozen pay history (BuddyX is
+    // retired, so a deleted one would never come back). A row on the wrong agent
+    // is a dispute, or an admin reassignment.
+    if (sale.source === 'buddyx' || sale.source === 'onlymonster') {
       return NextResponse.json(
-        { error: 'BuddyX sales are synced and cannot be deleted here. Use a dispute to move one.' },
+        { error: 'Synced sales cannot be deleted here. Use a dispute or a reassignment to move one.' },
         { status: 409 },
       );
     }

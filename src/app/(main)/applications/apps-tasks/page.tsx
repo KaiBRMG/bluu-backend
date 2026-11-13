@@ -14,7 +14,7 @@ import { FacetButton, FacetSection, type Facet } from '@/components/facets/Facet
 import { useTasks } from '@/hooks/useTasks';
 import { useBasicUsers } from '@/hooks/useBasicUsers';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
-import { isAssignableUser, isClosed, isClosedStatus, statusesFor } from '@/lib/taskAccess';
+import { compareByDueThenRecent, isAssignableUser, isClosed, isClosedStatus, statusesFor } from '@/lib/taskAccess';
 import { todayStr } from '@/lib/utils/timezone';
 import { ONCE_OFF_STATUSES, ROLE_STATUSES, type TaskDocument, type TaskKind, type TaskStatus } from '@/types/task';
 import { TaskRow } from './components/TaskRow';
@@ -40,16 +40,6 @@ function matches(t: TaskDocument, f: Filters): boolean {
   return !f.q || `${t.title} ${t.text}`.toLowerCase().includes(f.q);
 }
 
-/** Soonest due first, undated last, then most recently touched. */
-function byDueThenRecent(a: TaskDocument, b: TaskDocument): number {
-  if (a.dueDate !== b.dueDate) {
-    if (!a.dueDate) return 1;
-    if (!b.dueDate) return -1;
-    return a.dueDate < b.dueDate ? -1 : 1;
-  }
-  return b.updatedAt.localeCompare(a.updatedAt);
-}
-
 interface Section {
   key: string;
   label: React.ReactNode;
@@ -61,7 +51,7 @@ function arrange(tasks: TaskDocument[], showClosed: boolean) {
   const open = tasks.filter(t => !isClosed(t));
   return {
     roles: open.filter(t => t.kind === 'role').sort((a, b) => a.title.localeCompare(b.title)),
-    once: open.filter(t => t.kind === 'once-off').sort(byDueThenRecent),
+    once: open.filter(t => t.kind === 'once-off').sort(compareByDueThenRecent),
     closed: showClosed
       ? tasks.filter(isClosed).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, CLOSED_CAP)
       : [],

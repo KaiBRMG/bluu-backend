@@ -3,7 +3,7 @@
 import { format, subMonths } from 'date-fns';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { DatePicker } from '@/components/smm/shared/DatePicker';
-import { SEGMENT } from '@/components/buddyx/buddyxUi';
+import { SEGMENT } from '@/components/analytics/analyticsUi';
 
 /**
  * The period control shared by OnlyFans Analytics and Chatter Analytics: preset

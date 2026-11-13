@@ -2,27 +2,27 @@
 
 import { useMemo } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { LegendSwatch, LoadError } from '@/components/buddyx/buddyxUi';
-import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
+import { LegendSwatch, LoadError } from '@/components/analytics/analyticsUi';
+import { useAnalytics } from '@/hooks/useAnalytics';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { cn } from '@/lib/utils';
 import { STATE_CONFIG } from '@/lib/stateColors';
 import { STATUS_HEX } from '@/lib/campaignTracking';
-import { SEQUENTIAL_COLOR } from '@/lib/buddyx/chartColors';
-import { formatDuration } from '@/lib/buddyx/analyticsFormat';
-import { HOUR_MS } from '@/lib/buddyx/coverage';
-import type { ShiftDetail } from '@/lib/buddyx/analyticsTypes';
+import { SEQUENTIAL_COLOR } from '@/lib/analytics/chartColors';
+import { formatDuration } from '@/lib/analytics/analyticsFormat';
+import { HOUR_MS } from '@/lib/analytics/coverage';
+import type { ShiftDetail } from '@/lib/analytics/analyticsTypes';
 
 /**
- * One shift at minute grain — the report's evidence view. Five lanes share one
- * time axis, so a reader can line up "clocked in and working" against "online
- * in BuddyX", "typing", and "what looked machine-made":
+ * One shift at minute grain — the report's evidence view. The lanes share one
+ * time axis, so a reader can line up "clocked in and working" against "typing"
+ * and "what looked machine-made":
  *
  * 1. **Bluu** — the time-tracking state, in the timer's own palette
  *    (`STATE_CONFIG`), over a dashed outline of the scheduled shift.
- * 2. **BuddyX** — online share per hour (BuddyX's finest grain), one hue at
- *    full strength, the share as height; an hour with no data is a dashed
- *    outline, never drawn as zero.
+ * 2. **BuddyX** (archive) — online share per hour, from BuddyX's hourly data,
+ *    which ends 5 Nov 2026 (the OnlyMonster cutover). Drawn only for a shift that has some; an hour
+ *    with no data is a dashed outline, never drawn as zero.
  * 3. **Typing** — key presses per minute (√-scaled so a burst does not flatten
  *    the rest). A gap is "not measured", not "no typing".
  * 4. **Flags** — machine-regular rhythm, modifier-only input, unchanged screen.
@@ -53,7 +53,7 @@ const ONLINE_HEIGHT_FLOOR = 0.25;
 
 export function ShiftTimeline({ uid, startMs, endMs, scheduled }: { uid: string; startMs: number; endMs: number; scheduled: boolean }) {
   const url = `/api/analytics/chatters/${encodeURIComponent(uid)}/shift?start=${startMs}&end=${endMs}${scheduled ? '&scheduled=1' : ''}`;
-  const { data, loading, error, reload } = useBuddyxAnalytics<ShiftDetail>(url);
+  const { data, loading, error, reload } = useAnalytics<ShiftDetail>(url);
   if (loading && !data) return <Skeleton className="h-52 rounded-lg" />;
   if (error && !data) return <LoadError error={error} onRetry={() => void reload(true)} />;
   if (!data) return null;
@@ -82,6 +82,8 @@ function TimelineBody({ detail }: { detail: ShiftDetail }) {
   const measured = detail.keysPerMinute.some(n => n >= 0);
   const worked = detail.segments.filter(s => s.state === 'working').reduce((sum, s) => sum + (s.endMs - s.startMs), 0);
   const online = detail.hours.reduce((sum, h) => sum + (h.onlineMs ?? 0), 0);
+  // BuddyX is retired; its hourly archive covers shifts until 5 Nov 2026 (the cutover) only.
+  const hasHourly = detail.hours.some(h => h.onlineMs !== null);
   const flaggedMinutes = (kind: keyof typeof FLAG_HUE) =>
     Math.round(detail.intervals.filter(i => i.kind === kind).reduce((s, i) => s + (i.endMs - i.startMs), 0) / 60_000);
 
@@ -114,40 +116,44 @@ function TimelineBody({ detail }: { detail: ShiftDetail }) {
           ))}
         </div>
 
-        {/* BuddyX */}
-        <span className="pt-1 text-zinc-400">BuddyX</span>
-        <div
-          className="relative h-6 rounded-sm bg-white/[0.03]"
-          role="img"
-          aria-label={`Online in BuddyX ${formatDuration(online)} across the hours shown.`}
-        >
-          {detail.hours.map(h => {
-            const share = h.onlineMs === null ? null : h.onlineMs / HOUR_MS;
-            // No data is an outline, not a fill: "unknown" must look different
-            // from "zero" (empty track) and from "some" (a fill).
-            return (
-              <span
-                key={h.startMs}
-                className={cn(
-                  'absolute',
-                  share === null ? 'inset-y-1 rounded-[2px] border border-dashed border-zinc-500' : 'bottom-0.5 border-r border-[var(--card)]',
-                )}
-                style={{
-                  left: pct(h.startMs),
-                  width: width(h.startMs, h.startMs + HOUR_MS),
-                  background: share !== null && share > 0 ? SEQUENTIAL_COLOR : 'transparent',
-                  ...(share !== null && { height: share > 0 ? `${(ONLINE_HEIGHT_FLOOR + (1 - ONLINE_HEIGHT_FLOOR) * Math.min(1, share)) * 85}%` : 0 }),
-                }}
-                title={
-                  share === null
-                    ? `${t(h.startMs)}: no hourly BuddyX data yet`
-                    : `${t(h.startMs)}: online ${formatDuration(h.onlineMs)} · ${h.messages ?? 0} messages`
-                }
-                aria-hidden
-              />
-            );
-          })}
-        </div>
+        {/* BuddyX (archive) */}
+        {hasHourly && (
+          <>
+            <span className="pt-1 text-zinc-400">BuddyX</span>
+            <div
+              className="relative h-6 rounded-sm bg-white/[0.03]"
+              role="img"
+              aria-label={`Online in BuddyX ${formatDuration(online)} across the hours shown.`}
+            >
+              {detail.hours.map(h => {
+                const share = h.onlineMs === null ? null : h.onlineMs / HOUR_MS;
+                // No data is an outline, not a fill: "unknown" must look different
+                // from "zero" (empty track) and from "some" (a fill).
+                return (
+                  <span
+                    key={h.startMs}
+                    className={cn(
+                      'absolute',
+                      share === null ? 'inset-y-1 rounded-[2px] border border-dashed border-zinc-500' : 'bottom-0.5 border-r border-[var(--card)]',
+                    )}
+                    style={{
+                      left: pct(h.startMs),
+                      width: width(h.startMs, h.startMs + HOUR_MS),
+                      background: share !== null && share > 0 ? SEQUENTIAL_COLOR : 'transparent',
+                      ...(share !== null && { height: share > 0 ? `${(ONLINE_HEIGHT_FLOOR + (1 - ONLINE_HEIGHT_FLOOR) * Math.min(1, share)) * 85}%` : 0 }),
+                    }}
+                    title={
+                      share === null
+                        ? `${t(h.startMs)}: no hourly BuddyX data`
+                        : `${t(h.startMs)}: online ${formatDuration(h.onlineMs)} · ${h.messages ?? 0} messages`
+                    }
+                    aria-hidden
+                  />
+                );
+              })}
+            </div>
+          </>
+        )}
 
         {/* Typing */}
         <span className="pt-1 text-zinc-400">Typing</span>

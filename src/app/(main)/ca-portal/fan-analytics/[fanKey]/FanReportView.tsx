@@ -12,20 +12,20 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
-import { AttrChip, BasisTag, KpiTile, LegendSwatch, LoadError, fanReportHref } from '@/components/buddyx/buddyxUi';
+import { AttrChip, BasisTag, KpiTile, LegendSwatch, LoadError, fanReportHref } from '@/components/analytics/analyticsUi';
 import { CreatorChip } from '@/components/creators/CreatorChip';
-import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
+import { useAnalytics } from '@/hooks/useAnalytics';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { formatSaleDateTime, formatUsd, pluralise } from '@/lib/salary/salaryFormat';
 import { saleTypeLabel } from '@/lib/salary/saleTypes';
 import { SALES_CUTOVER_AT } from '@/lib/salary/salaryConstants';
-import { daysAgo } from '@/lib/buddyx/analyticsFormat';
-import { SALE_KIND_COLORS } from '@/lib/buddyx/chartColors';
+import { daysAgo } from '@/lib/analytics/analyticsFormat';
+import { SALE_KIND_COLORS } from '@/lib/analytics/chartColors';
 import { STATUS_COLORS, TYPE_LABELS, type CRStatus } from '@/lib/campaignTracking';
 import { FAN_NAME_MAX, FAN_NAME_SOURCE_LABEL, cleanFanName } from '@/lib/fans/fanIdentity';
 import { formatMonthLabelShort } from '@/lib/salary/salaryDate';
-import type { FanCustomItem, FanReport } from '@/lib/buddyx/analyticsTypes';
+import type { FanCustomItem, FanReport } from '@/lib/analytics/analyticsTypes';
 
 /**
  * One fan, everything known — `/ca-portal/fan-analytics/[fanKey]`.
@@ -52,7 +52,7 @@ const spendConfig = {
 
 export function FanReportView({ fanKey }: { fanKey: string }) {
   const router = useRouter();
-  const { data, loading, error, reload } = useBuddyxAnalytics<FanReport | { movedTo: string }>(`/api/fans/${encodeURIComponent(fanKey)}`);
+  const { data, loading, error, reload } = useAnalytics<FanReport | { movedTo: string }>(`/api/fans/${encodeURIComponent(fanKey)}`);
   const movedTo = data && 'movedTo' in data ? data.movedTo : null;
   const report = data && !('movedTo' in data) && data.fanKey === fanKey ? data : null;
 
@@ -238,7 +238,7 @@ function FanHeader({ report, creators, onChanged }: { report: FanReport; creator
             Cancel
           </Button>
           <p className="basis-full text-[11px] text-zinc-400">
-            A name set here sticks — customs and BuddyX won&apos;t change it until you revert it.
+            A name set here sticks — customs and synced names won&apos;t change it until you revert it.
           </p>
         </form>
       ) : (

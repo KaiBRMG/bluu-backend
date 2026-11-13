@@ -24,7 +24,7 @@ import type {
   SalaryOverrideField,
   SalaryShiftBreakdown,
 } from '@/lib/salary/salaryTypes';
-import { BasisTag } from '@/components/buddyx/buddyxUi';
+import { BasisTag } from '@/components/analytics/analyticsUi';
 
 /**
  * The month grid — one row per calendar day, exactly like the sheet it replaces.

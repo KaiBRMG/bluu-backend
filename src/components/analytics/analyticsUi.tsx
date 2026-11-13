@@ -1,12 +1,11 @@
 'use client';
 
 /**
- * Small atoms shared by every BuddyX-backed surface.
+ * Small atoms shared by the analytics and sales surfaces.
  *
- * The two attribution sentences are **copy of record** — the plan fixes their
- * wording, and they appear on the Sales Report, the dispute dialog, Chatter
- * Analytics and CA Admin → Sales. One constant each. They describe how BuddyX
- * attributes a sale; who Bluu Backend holds it on can differ after a dispute or
+ * The two attribution sentences are **copy of record**, and they appear on the
+ * Sales Report, the dispute dialog, Chatter Analytics and CA Admin → Sales. One
+ * constant each. Who Bluu Backend holds a sale on can differ after a dispute or
  * an admin reassignment, which every ledger row states (`SaleHolderNote`).
  */
 import Link from 'next/link';
@@ -17,34 +16,33 @@ import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { profileLinkForKey } from '@/lib/fans/fanIdentity';
 
-export const TIPS_ATTRIBUTION = 'Tips are assigned to the chat agent on shift at the time of sale';
-export const PPV_ATTRIBUTION = 'PPV sales are assigned to the sender';
-
 /**
- * How Bluu Backend's own ledger (`ca-sales` — pay, the Sales Report, CA Admin →
- * Sales, disputes) credits a sale. Not BuddyX's rule above: the sync credits
- * every sale, PPVs included, to the agent the shift schedule had on the
- * account (`scheduleHolder`), and falls back to BuddyX only without one.
+ * How Bluu Backend's ledger (`ca-sales` — pay, the Sales Report, CA Admin →
+ * Sales, disputes, Chatter Analytics) credits a sale: every sale, PPVs
+ * included, goes to the agent the shift schedule had on the account. Since the
+ * OnlyMonster cutover (6 Nov 2026) a sale with nobody — or several — on shift is
+ * unassigned; before it, BuddyX's own pick filled that gap.
  */
 export const LEDGER_TIPS_ATTRIBUTION =
-  'Tips are credited to the chat agent on shift on the account at the time of sale — BuddyX’s pick when nobody was scheduled';
+  'Tips are credited to the chat agent on shift on the account at the time of sale — unassigned when nobody was scheduled (before 6 Nov 2026, BuddyX’s pick)';
 export const LEDGER_PPV_ATTRIBUTION =
-  'PPV sales are credited to the chat agent on shift on the account when the fan unlocks it, not the sender — the sender only when nobody was scheduled';
+  'PPV sales are credited to the chat agent on shift on the account when the fan unlocks it, not the sender — unassigned when nobody was scheduled (before 6 Nov 2026, the sender)';
 
 /**
- * Gross vs net, said the same way everywhere. Every money figure on a BuddyX
- * surface is labelled one or the other; these are the sentences behind the
- * labels. BuddyX's own split is `net = gross × 0.8` (buddyxapi.yaml).
+ * Gross vs net, said the same way everywhere. Every money figure on an
+ * analytics surface is labelled one or the other; these are the sentences
+ * behind the labels. OnlyFans' split is `net = gross × 0.8` (verified per
+ * transaction in OnlyMonster's data).
  */
 export const GROSS_NOTE = 'Gross — what the fan paid. Net is 80% of gross; OnlyFans keeps 20%.';
 /** Net on Bluu's own ledger (pay, the Sales Report, CA Admin): the deduction is configurable, so no fixed 80%. */
 export const LEDGER_NET_NOTE = 'Net — gross less the platform deduction (OnlyFans’ share; 20% unless CA Admin → Rates says otherwise). Pay is worked out on net.';
 export const NET_NOTE = 'Net — what the creator receives: 80% of gross, after OnlyFans keeps 20%. Matches OnlyFans’ own earnings statement to within a few cents.';
 /**
- * The few BuddyX money fields that are a bare number, not a {gross, net} pair:
- * link revenue and a link fan's total spent. The API does not say which they are.
+ * The archived BuddyX link figures are a bare number, not a {gross, net} pair:
+ * link revenue and a link fan's total spent. Its API never said which they are.
  */
-export const LINK_REVENUE_NOTE = 'As BuddyX reports it for the link — its API does not say whether this is gross or net.';
+export const LINK_REVENUE_NOTE = 'As BuddyX reported it for the link (archived) — it never said whether this is gross or net.';
 
 /**
  * An `Info` icon carrying a sentence. Keyboard-focusable, and never the only
@@ -180,7 +178,7 @@ export function KpiTile({
   );
 }
 
-/** Which money figure a label is: either half of BuddyX's pair, or a bare number it never qualified. */
+/** Which money figure a label is: either half of the gross/net pair, or a bare number never qualified. */
 export type MoneyTag = 'gross' | 'net' | 'reported';
 
 const BASIS_TAG: Record<MoneyTag, { text: string; note: string; className: string }> = {

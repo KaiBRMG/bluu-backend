@@ -12,8 +12,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
-import { analyticsAccess, ANALYTICS_CACHE_HEADERS, parseChatterPeriod } from '@/lib/buddyx/analyticsAuth';
-import { getChatterAnalytics } from '@/lib/services/buddyxAnalyticsService';
+import { analyticsAccess, ANALYTICS_CACHE_HEADERS, parseChatterPeriod } from '@/lib/analytics/analyticsAuth';
+import { getChatterAnalytics } from '@/lib/services/ofAnalyticsService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) => {

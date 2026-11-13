@@ -22,10 +22,6 @@
       "schedule": "15 4 * * *"
     },
     {
-      "path": "/api/cron/buddyx-sync",
-      "schedule": "1 5,13,21 * * *"
-    },
-    {
       "path": "/api/cron/onlymonster-sync",
       "schedule": "1 5,13,21 * * *"
     },

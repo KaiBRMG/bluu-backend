@@ -1,8 +1,8 @@
 /**
  * Commission-tier crossings after something moved a month's gross.
  *
- * Three things move gross for an agent: a BuddyX sales sync (new or changed
- * rows), an approved dispute (a sale transferred between two agents) and an
+ * Three things move gross for an agent: the OnlyMonster pay derivation (new or
+ * changed rows), an approved dispute (a sale transferred between two agents) and an
  * admin un-transfer. Each recomputes the agent-months it touched and asks
  * `syncCommissionTierNotice` — which owns the memory of what each agent was
  * last told, and the once-per-band, upwards-only gate — whether a band was

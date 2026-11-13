@@ -10,7 +10,6 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { randomUUID } from 'crypto';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { deleteAllSnipsForUser } from '@/lib/services/snipService';
-import { clearManualLinksForUser } from '@/lib/services/buddyxMappingService';
 import { clearManualMemberLinksForUser } from '@/lib/services/onlymonsterMappingService';
 import { releaseGoLoginSeat } from '@/lib/services/gologinAccountService';
 import { personName, userOffboardedEmail, type OffboardingKind } from '@/lib/email/templates';
@@ -142,7 +141,7 @@ export const PUT = withAuth(async (
 
     const userRef = adminDb.collection('users').doc(targetUid);
 
-    // Date the departure: the BuddyX sales sync stops crediting someone from
+    // Date the departure: the OnlyMonster pay derivation stops crediting someone from
     // the moment they were offboarded (`getDepartures`). Stamped on the
     // transition only — a second offboarding write keeps the first date — and
     // cleared on a full restore. A direct read, not `getUserById`'s cache, so
@@ -331,12 +330,8 @@ export const DELETE = withAuth(async (
       deleteAllSnipsForUser(targetUid).catch(err => {
         console.error(`[DeleteUser] Failed to delete snips for ${targetUid}:`, err);
       }),
-      // A BuddyX chatter manually linked to this user must not keep pointing at
-      // a deleted uid. `ca-sales` rows keep their `userId` — that is pay history.
-      clearManualLinksForUser(targetUid).catch(err => {
-        console.error(`[DeleteUser] Failed to clear BuddyX links for ${targetUid}:`, err);
-      }),
-      // Same for an OnlyMonster member manually linked to this user.
+      // An OnlyMonster member manually linked to this user must not keep pointing
+      // at a deleted uid. `ca-sales` rows keep their `userId` — that is pay history.
       clearManualMemberLinksForUser(targetUid).catch(err => {
         console.error(`[DeleteUser] Failed to clear OnlyMonster links for ${targetUid}:`, err);
       }),

@@ -429,21 +429,20 @@ export async function getRecentOnlyMonsterRuns(limit = 10) {
 // ─── Config (rule 9c: server-read switches) ──────────────────────────
 
 const CONFIG_DOC = `${COLLECTIONS.meta}/config`;
-let configCache: { at: number; value: Required<Pick<OnlyMonsterConfigDocument, 'analyticsSource' | 'salesWriteEnabled'>> } | null = null;
+let configCache: { at: number; value: Required<Pick<OnlyMonsterConfigDocument, 'salesWriteEnabled'>> } | null = null;
 
 /** Cached 30 s per instance: page reads ask on every request, and it changes a handful of times ever. */
-export async function getOnlyMonsterConfig(): Promise<{ analyticsSource: 'buddyx' | 'onlymonster'; salesWriteEnabled: boolean }> {
+export async function getOnlyMonsterConfig(): Promise<{ salesWriteEnabled: boolean }> {
   if (configCache && Date.now() - configCache.at < 30_000) return configCache.value;
   const snap = await adminDb.doc(CONFIG_DOC).get();
   const value = {
-    analyticsSource: snap.get('analyticsSource') === 'onlymonster' ? ('onlymonster' as const) : ('buddyx' as const),
     salesWriteEnabled: snap.get('salesWriteEnabled') === true,
   };
   configCache = { at: Date.now(), value };
   return value;
 }
 
-export async function setOnlyMonsterConfig(patch: Partial<{ analyticsSource: 'buddyx' | 'onlymonster'; salesWriteEnabled: boolean }>, actorUid: string): Promise<void> {
+export async function setOnlyMonsterConfig(patch: { salesWriteEnabled: boolean }, actorUid: string): Promise<void> {
   await adminDb.doc(CONFIG_DOC).set({ ...patch, updatedBy: actorUid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   configCache = null;
 }

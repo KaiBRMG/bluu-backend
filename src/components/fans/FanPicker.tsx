@@ -9,7 +9,7 @@ import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { formatUsd, pluralise } from '@/lib/salary/salaryFormat';
 import { FAN_NAME_MAX, FAN_NAME_SOURCE_LABEL, cleanFanName, fanKeyOf, parseProfileLink } from '@/lib/fans/fanIdentity';
-import type { FanLookupHit } from '@/lib/buddyx/analyticsTypes';
+import type { FanLookupHit } from '@/lib/analytics/analyticsTypes';
 
 /**
  * The fan step of every "new custom / campaign" wizard. The fan base comes

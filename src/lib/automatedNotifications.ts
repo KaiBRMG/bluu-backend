@@ -341,10 +341,10 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
     category: 'Salary',
     event: 'Commission tier reached',
     trigger:
-      'An agent’s month-to-date gross crosses into a higher commission band — after a BuddyX sales sync, an approved dispute or an overturned one, an admin reassignment (one sale or a bulk move) or un-transfer that moves a sale, or an admin override that re-tiers the month. Once per band per month: the trigger is a change, and the derived salary data cannot remember what the agent was last told, so ca-salary-tier-notices holds that memory. A tier that falls (a large reversal dated mid-month) notifies nobody.',
+      'An agent’s month-to-date gross crosses into a higher commission band — after the OnlyMonster sync writes sales, an approved dispute or an overturned one, an admin reassignment (one sale or a bulk move) or un-transfer that moves a sale, or an admin override that re-tiers the month. Once per band per month: the trigger is a change, and the derived salary data cannot remember what the agent was last told, so ca-salary-tier-notices holds that memory. A tier that falls (a large reversal dated mid-month) notifies nobody.',
     recipients: 'The agent who crossed the band',
     sources: [
-      'src/lib/services/buddyxSyncService.ts',
+      'src/lib/services/onlymonsterPayService.ts',
       'src/app/api/disputes/[disputeId]/ca-approval/route.ts',
       'src/app/api/disputes/[disputeId]/admin-approval/route.ts',
       'src/app/api/ca-sales/[saleId]/transfer/route.ts',
@@ -479,20 +479,6 @@ export const AUTOMATED_NOTIFICATIONS: AutomatedNotification[] = [
   },
 
   // ─── Integrations ──────────────────────────────────────────────────────────
-  {
-    id: 'buddyxSyncFailing',
-    category: 'Integrations',
-    event: 'BuddyX sales sync failing',
-    trigger:
-      'A BuddyX sync run hits a revoked or invalid API key, fails three runs in a row, or finds a new BuddyX chatter carrying sales that matches no Bluu user. Once per incident: the latch clears on the next healthy run, so a later outage alerts again. Each unmapped chatter alerts once.',
-    recipients: 'One named maintainer (OPS_ALERT_RECIPIENT_UID)',
-    sources: [
-      'src/app/api/cron/buddyx-sync/route.ts',
-      'src/app/api/buddyx/sync/route.ts',
-      'src/lib/services/buddyxSyncService.ts',
-    ],
-    content: notifications.buddyxSyncFailing('{reason}'),
-  },
   {
     id: 'onlymonsterSyncFailing',
     category: 'Integrations',

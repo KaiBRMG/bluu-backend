@@ -128,7 +128,7 @@ A user's timezone drives every time the product renders: shift times, salary day
 
 `users/{uid}.isArchived === true` → user is **removed from the system but their data is NOT deleted** from Firestore.
 
-**Archiving (like deactivating) is dated** — `offboardedAt` is stamped on the transition (a second offboarding write keeps the first date) and deleted on a full restore. The BuddyX sales sync credits nobody for a sale after it, and their leftover shifts stop counting from it; see [buddyx.md](buddyx.md) §4.
+**Archiving (like deactivating) is dated** — `offboardedAt` is stamped on the transition (a second offboarding write keeps the first date) and deleted on a full restore. The OnlyMonster pay derivation credits nobody for a sale after it, and their leftover shifts stop counting from it; see [onlymonster.md](onlymonster.md).
 
 **Archiving (like deactivating) also ends access server-side** — the Firebase Auth account is disabled and its refresh tokens revoked, and `withAuth` refuses any uid whose doc is archived or inactive. See [auth.md](auth.md#device-identity--session-enforcement).
 

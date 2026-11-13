@@ -311,7 +311,7 @@ function OrgDefaultsSection({
 /**
  * Shown, not editable — deliberately. The salary day boundary is compiled into
  * `salaryDate.ts` as a fixed offset, stamped onto every stored sale, override
- * and leave period, and has to match the zone BuddyX and the CRM exports report
+ * and leave period, and has to match the zone the sales sources and the CRM exports report
  * in. Changing it is an engineering change with a data migration, not a toggle
  * (ca-salary.md §7). Surfacing it here is what makes it discoverable.
  */
@@ -340,7 +340,7 @@ function OrgTimezoneSection() {
           <ul className="mt-1.5 list-disc space-y-1 pl-4">
             <li>Salary days and months run midnight to midnight SAST. A shift is paid on the day it starts; a sale counts on the day it happened.</li>
             <li>Leave periods, month finalisation and the payday and overtime reminders.</li>
-            <li>The BuddyX sync and sales imports, which must match the zone the CRM reports in.</li>
+            <li>The OnlyMonster sync and sales imports, which must match the zone the CRM reports in.</li>
           </ul>
           <p className="mt-3">
             Everyone still <span className="text-zinc-300">reads</span> times in their own timezone; salary pages show

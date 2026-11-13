@@ -17,7 +17,7 @@
  * | `integrity-state` | uid | the previous capture's fingerprints |
  *
  * Day keys are the salary day (`Africa/Harare`), the same day Chatter
- * Analytics and BuddyX use, so a flag lands on the day its figures do.
+ * Analytics and the sales ledger use, so a flag lands on the day its figures do.
  */
 import 'server-only';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';

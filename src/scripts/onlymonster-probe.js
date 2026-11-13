@@ -524,7 +524,7 @@ async function compareBluu(accounts, members) {
   admin.initializeApp({ credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)) });
   const db = admin.firestore();
 
-  // Ports of lib/authEmail.ts normalizeEmail and lib/buddyx/mapping.ts foldHandle (kept in sync by hand;
+  // Ports of lib/authEmail.ts normalizeEmail and lib/onlymonster/mapping.ts foldHandle (kept in sync by hand;
   // this script is a one-off and must not import server-only TypeScript).
   const GMAIL = new Set(['gmail.com', 'googlemail.com']);
   const normEmail = e => {

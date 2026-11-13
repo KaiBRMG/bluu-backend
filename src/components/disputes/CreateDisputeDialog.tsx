@@ -3,8 +3,8 @@
 /**
  * File a dispute — v2: claim specific sales (tips and PPVs), found by search.
  *
- * An approved dispute now *moves the sale* inside Bluu Backend (BuddyX is
- * read-only), so the agent no longer types a sale's details; they pick the
+ * An approved dispute *moves the sale* inside Bluu Backend (the sales sources
+ * are read-only), so the agent no longer types a sale's details; they pick the
  * sales themselves. The search is deliberately narrow (D6): one creator, a
  * window inside the open months (this month or last), no totals. PPVs are claimable like tips — they were
  * refused only while BuddyX, which cannot reassign a PPV, was where the fix
@@ -37,11 +37,11 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { SEGMENT_ITEM_CLASS } from '@/components/growth/growthUi';
 import { DatePicker } from '@/components/smm/shared/DatePicker';
 import { useAuth } from '@/components/AuthProvider';
-import { useBuddyxCreators } from '@/hooks/useBuddyxSync';
+import { useMappedCreators } from '@/hooks/useMappedCreators';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
-import { CreatorCombobox } from '@/components/buddyx/CreatorCombobox';
+import { CreatorCombobox } from '@/components/analytics/CreatorCombobox';
 import { CreatorChip } from '@/components/creators/CreatorChip';
-import { AttrChip, BasisTag, FanLabel, InfoTip, LEDGER_PPV_ATTRIBUTION, LEDGER_TIPS_ATTRIBUTION } from '@/components/buddyx/buddyxUi';
+import { AttrChip, BasisTag, FanLabel, InfoTip, LEDGER_PPV_ATTRIBUTION, LEDGER_TIPS_ATTRIBUTION } from '@/components/analytics/analyticsUi';
 import { PersonTag } from './disputeUi';
 import { formatSaleDateTime, formatUsd, formatZoneOffset, pluralise } from '@/lib/salary/salaryFormat';
 import { saleTypeLabel } from '@/lib/salary/saleTypes';
@@ -85,7 +85,7 @@ const dayKey = (d: Date) => format(d, 'yyyy-MM-dd');
 export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted }: CreateDisputeDialogProps) {
   const { user } = useAuth();
   const authFetch = useAuthFetch();
-  const mappedCreatorIds = useBuddyxCreators();
+  const mappedCreatorIds = useMappedCreators();
 
   const [creatorId, setCreatorId] = useState<string | null>(null);
   const [from, setFrom] = useState<Date | undefined>(() => new Date());
@@ -328,7 +328,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
           )}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-zinc-400">
-          <span>An approved PPV moves to you in Bluu Backend, even though BuddyX keeps it on the sender.</span>
+          <span>An approved sale moves to you in Bluu Backend, and pay follows it.</span>
           {truncated && <span>Showing the first 500 — narrow the window to see the rest.</span>}
         </div>
 

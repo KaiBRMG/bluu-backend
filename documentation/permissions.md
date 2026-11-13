@@ -146,7 +146,7 @@ Current members: **Resources** (`/applications/apps-resources`), moved out of th
 
 Access is still real for a universal page — it is just enforced by the page's own data layer rather than by page permission. Resources filters its contents by group inside `/api/resources`; see [resources.md](resources.md).
 
-## BuddyX analytics pages (2026-10)
+## Analytics pages (2026-10; OnlyMonster since 2026-11)
 
 Three pages, each its own permission, granted on Sharing like any other:
 
@@ -156,7 +156,7 @@ Three pages, each its own permission, granted on Sharing like any other:
 | `ca-fan-analytics` | CA Portal | every creator and the acquisition table (agents otherwise see creators they are rostered on this month) |
 | `creators-of-analytics` | Creator Portal | — (internal page; not in the Telegram Mini App) |
 
-The "what `ca-admin` adds" column is enforced server-side by `lib/buddyx/analyticsAuth.ts` — holding the analytics page is what lets you in; holding `ca-admin` as well (or the admin claim) is what widens the view. See [buddyx.md](buddyx.md).
+The "what `ca-admin` adds" column is enforced server-side by `lib/analytics/analyticsAuth.ts` — holding the analytics page is what lets you in; holding `ca-admin` as well (or the admin claim) is what widens the view. See [buddyx.md](buddyx.md).
 
 ## Rules for new pages
 

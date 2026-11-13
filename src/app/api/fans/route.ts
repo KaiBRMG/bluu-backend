@@ -9,13 +9,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
-import { analyticsAccess, ANALYTICS_CACHE_HEADERS } from '@/lib/buddyx/analyticsAuth';
+import { analyticsAccess, ANALYTICS_CACHE_HEADERS } from '@/lib/analytics/analyticsAuth';
 import {
   FAN_DIRECTORY_FILTERS,
   FAN_DIRECTORY_SORTS,
   type FanDirectoryFilter,
   type FanDirectorySort,
-} from '@/lib/buddyx/analyticsTypes';
+} from '@/lib/analytics/analyticsTypes';
 import { getFanDirectory } from '@/lib/services/fanBaseService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 

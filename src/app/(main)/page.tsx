@@ -31,6 +31,7 @@ import { safeTimezone } from '@/lib/utils/timezone';
 import { BREAK_BLOCKED_TOOLTIP } from '@/lib/shiftBreakPolicy';
 import { GrowthHomeWidget } from "@/components/growth/GrowthHomeWidget";
 import { ClockOutButton } from '@/components/ClockOutButton';
+import { TasksHomeWidget } from '@/components/tasks/TasksHomeWidget';
 import { canUseGrowthTracking } from "@/lib/growth/access";
 
 function formatTime(totalSeconds: number): string {
@@ -639,6 +640,7 @@ export default function Home() {
             </div>
             <div className="flex flex-col gap-6 w-full sm:flex-1 min-w-0">
               {showTimeTracking && <TimeTrackingWidget />}
+              <TasksHomeWidget />
               {welcomeCard}
             </div>
           </div>

@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Repeat, ListTodo } from 'lucide-react';
+import { ListTodo, LogOut, Pencil, Repeat } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,7 +31,7 @@ import { RICH_TEXT_MARK_CLASSES, RichPromptEditor } from '@/components/rich-text
 import { UserAvatarLabel } from '@/components/UserAvatarLabel';
 import { ACTION_BLUE_DEEP } from '@/lib/actionBlue';
 import { promptBodyHtml } from '@/lib/promptHtml';
-import { canDeleteTask, canEditTask, formatDue, defaultStatus, remapStatus, statusesFor, type TaskActor } from '@/lib/taskAccess';
+import { canDeleteTask, canEditTask, formatDue, isClosed, defaultStatus, remapStatus, statusesFor, type TaskActor } from '@/lib/taskAccess';
 import {
   TASK_TEXT_MAX,
   TASK_TITLE_MAX,
@@ -54,6 +54,12 @@ export interface AssigneeOption {
  *  - A task an admin assigned opens **read-only** for its assignee (`canEditTask`
  *    is false): the text is rendered, not editable, and the status select is the
  *    one live control, saving the moment it changes.
+ *
+ * An existing task always OPENS read-only; **Edit** (offered only where
+ * `canEditTask` allows — an admin, or the assignee of a task they made
+ * themselves) switches it to the form. Creating opens straight into the form.
+ * While reading, the status stays a live control that saves as it changes, so
+ * moving a task along never needs Edit.
  *
  * The body is the Prompt Library's `RichPromptEditor` (bold / italic / underline /
  * highlight / bullets, plain-text paste). Saving OVERWRITES the task — Tasks has
@@ -84,7 +90,11 @@ export function TaskDialog({
   onSetStatus: (id: string, status: TaskStatus) => Promise<void>;
 }) {
   const creating = task === null;
-  const readOnly = !creating && !canEditTask(task, actor);
+  const canEdit = !creating && canEditTask(task, actor);
+  const [editing, setEditing] = useState(false);
+  const readOnly = !creating && !editing;
+  // An admin-assigned task the viewer may work but not rewrite.
+  const locked = !creating && !canEdit;
   const canDelete = !creating && canDeleteTask(task, actor);
 
   const initial = {
@@ -108,7 +118,8 @@ export function TaskDialog({
   const [baseHtml, setBaseHtml] = useState<string | null>(null);
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
   const [saving, setSaving] = useState(false);
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // What a confirmed discard does: close the dialog, or just leave edit mode.
+  const [confirmDiscard, setConfirmDiscard] = useState<'close' | 'edit' | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [titleError, setTitleError] = useState(false);
 
@@ -129,9 +140,29 @@ export function TaskDialog({
 
   const requestClose = useCallback(() => {
     if (saving) return;
-    if (dirty) setConfirmDiscard(true);
+    if (dirty) setConfirmDiscard('close');
     else onOpenChange(false);
   }, [dirty, saving, onOpenChange]);
+
+  /** Re-seeds every field from the task AS IT IS NOW — a status moved while reading must not be reverted. */
+  const startEditing = () => {
+    if (!task) return;
+    setTitle(task.title);
+    setKind(task.kind);
+    setStatus(task.status);
+    setDueDate(task.dueDate ?? '');
+    setAssigneeUid(task.assigneeUid);
+    setBlocks(task.blocksClockOut);
+    setBaseHtml(null);
+    setHtml('');
+    setTitleError(false);
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    if (dirty) setConfirmDiscard('edit');
+    else setEditing(false);
+  };
 
   const changeKind = (next: TaskKind) => {
     if (next === kind) return;
@@ -185,8 +216,10 @@ export function TaskDialog({
     }
   };
 
-  const statusOptions = statusesFor(kind);
+  // Reading shows the stored kind; editing shows the form's (it can be flipped).
+  const statusOptions = statusesFor(readOnly && task ? task.kind : kind);
   const assignee = assigneeOptions.find(o => o.uid === assigneeUid);
+  const viewAssignee = assigneeOptions.find(o => o.uid === task?.assigneeUid);
 
   return (
     <>
@@ -204,7 +237,7 @@ export function TaskDialog({
           <DialogHeader>
             <DialogTitle className="sr-only">{creating ? 'New task' : readOnly ? task.title : 'Edit task'}</DialogTitle>
             <DialogDescription className="sr-only">
-              {readOnly ? 'An admin assigned this task. You can change its status.' : 'Title, details and status.'}
+              {locked && readOnly ? 'An admin assigned this task. You can change its status.' : readOnly ? 'Task details. Use Edit to change them.' : 'Title, details and status.'}
             </DialogDescription>
             {readOnly ? (
               <p className="pr-8 text-lg font-semibold leading-snug text-white">{task.title}</p>
@@ -215,7 +248,7 @@ export function TaskDialog({
                   id="task-title"
                   value={title}
                   maxLength={TASK_TITLE_MAX}
-                  autoFocus={creating}
+                  autoFocus
                   aria-invalid={titleError || undefined}
                   onChange={e => { setTitle(e.target.value); setTitleError(false); }}
                   placeholder={kind === 'role' ? 'Name the role' : 'What needs doing?'}
@@ -227,7 +260,7 @@ export function TaskDialog({
                 {titleError && <p className="text-xs text-red-400">Give it a title.</p>}
               </>
             )}
-            {readOnly && (
+            {readOnly && locked && (
               <p className="text-xs text-zinc-400">
                 {task.kind === 'role' ? 'A role' : 'A task'} assigned to you by {task.createdByName ?? 'a deleted user'}.
                 {task.dueDate && ` Due ${formatDue(task.dueDate)}.`} You can change its status.
@@ -257,6 +290,39 @@ export function TaskDialog({
                   {kind === 'role' ? 'Ongoing — a standing responsibility.' : 'Finished once it is done.'}
                 </p>
               </div>
+            )}
+
+            {readOnly && task && (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Kind</Label>
+                  <p className="flex h-9 items-center gap-1.5 text-sm text-zinc-200">
+                    {task.kind === 'role' ? (
+                      <><Repeat className="size-3.5 text-zinc-400" aria-hidden /> Role — ongoing</>
+                    ) : (
+                      <><ListTodo className="size-3.5 text-zinc-400" aria-hidden /> Once-off</>
+                    )}
+                  </p>
+                </div>
+                {task.dueDate && (
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Due date</Label>
+                    <p className="flex h-9 items-center text-sm tabular-nums text-zinc-200">{formatDue(task.dueDate)}</p>
+                  </div>
+                )}
+                {actor.isAdmin && (
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Assigned to</Label>
+                    <div className="flex h-9 items-center text-sm text-zinc-200">
+                      {viewAssignee ? (
+                        <UserAvatarLabel name={viewAssignee.name} photoURL={viewAssignee.photoURL} />
+                      ) : (
+                        'Former employee'
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
 
             <div className="flex flex-col gap-1.5">
@@ -293,7 +359,7 @@ export function TaskDialog({
               </div>
             )}
 
-            {actor.isAdmin && (
+            {actor.isAdmin && !readOnly && (
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="task-assignee">Assigned to</Label>
                 <Select value={assigneeUid} onValueChange={setAssigneeUid}>
@@ -318,7 +384,14 @@ export function TaskDialog({
             )}
           </div>
 
-          {actor.isAdmin && (
+          {readOnly && task?.blocksClockOut && !isClosed(task) && (
+            <p className="flex items-center gap-1.5 text-xs text-orange-400">
+              <LogOut className="size-3.5" aria-hidden />
+              {actor.isAdmin ? 'The assignee is asked about this when they clock out.' : 'You will be asked about this when you clock out.'}
+            </p>
+          )}
+
+          {actor.isAdmin && !readOnly && (
             <div className="flex items-start justify-between gap-4 rounded-lg bg-white/[0.04] px-3 py-2.5">
               <div className="min-w-0">
                 <Label htmlFor="task-blocks" className="text-sm">Ask before they clock out</Label>
@@ -376,9 +449,24 @@ export function TaskDialog({
               )}
             </div>
             <div className="flex gap-2">
-              <Button type="button" variant="outline" onClick={requestClose} disabled={saving}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={creating || readOnly ? requestClose : cancelEdit}
+                disabled={saving}
+              >
                 {readOnly ? 'Close' : 'Cancel'}
               </Button>
+              {readOnly && canEdit && (
+                <Button
+                  type="button"
+                  onClick={startEditing}
+                  className="gap-1.5 text-white hover:brightness-110"
+                  style={{ backgroundColor: ACTION_BLUE_DEEP }}
+                >
+                  <Pencil className="size-3.5" aria-hidden /> Edit
+                </Button>
+              )}
               {!readOnly && (
                 <Button
                   type="button"
@@ -395,7 +483,7 @@ export function TaskDialog({
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={confirmDiscard} onOpenChange={setConfirmDiscard}>
+      <AlertDialog open={confirmDiscard !== null} onOpenChange={o => !o && setConfirmDiscard(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Discard your changes?</AlertDialogTitle>
@@ -403,7 +491,14 @@ export function TaskDialog({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep editing</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { setConfirmDiscard(false); onOpenChange(false); }}>
+            <AlertDialogAction
+              onClick={() => {
+                const then = confirmDiscard;
+                setConfirmDiscard(null);
+                if (then === 'edit') setEditing(false);
+                else onOpenChange(false);
+              }}
+            >
               Discard
             </AlertDialogAction>
           </AlertDialogFooter>

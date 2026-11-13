@@ -271,6 +271,28 @@ export async function onlyFansBluuAccountIds(): Promise<string[]> {
   return accounts.filter(a => a.platform === ONLYFANS_PLATFORM).map(a => a.id);
 }
 
+let mappedCache: { at: number; ids: string[] } | null = null;
+
+/**
+ * Every Bluu creator or sub-account an OnlyFans account in OnlyMonster maps to:
+ * the dispute dialog's creator picker and an admin's Fan Analytics scope.
+ * Field-masked and cached 60 s per instance; the map changes a few times a year.
+ */
+export async function mappedCreatorIds(): Promise<string[]> {
+  if (mappedCache && Date.now() - mappedCache.at < 60_000) return mappedCache.ids;
+  const snap = await adminDb.collection(ACCOUNTS).where('platform', '==', ONLYFANS_PLATFORM).select('creatorId', 'listed').get();
+  const ids = [
+    ...new Set(
+      snap.docs
+        .filter(d => d.get('listed') !== false)
+        .map(d => d.get('creatorId') as string | null)
+        .filter((v): v is string => Boolean(v)),
+    ),
+  ];
+  mappedCache = { at: Date.now(), ids };
+  return ids;
+}
+
 /** Both mapping lists, for CA Admin → Sales → OnlyMonster mapping. Two collection reads. */
 export async function getMapping(): Promise<{ accounts: OnlyMonsterAccountDocument[]; members: OnlyMonsterMemberDocument[] }> {
   const [a, m] = await Promise.all([adminDb.collection(ACCOUNTS).get(), adminDb.collection(MEMBERS).get()]);

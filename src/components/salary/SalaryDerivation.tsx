@@ -7,7 +7,7 @@ import { formatDayLabel } from '@/lib/salary/salaryDate';
 import { formatHours, formatPercent, formatUsd, pluralise } from '@/lib/salary/salaryFormat';
 import { round2 } from '@/lib/salary/salaryEngine';
 import type { SalaryDayResult, SalaryMonthResult, SalaryOverrideField } from '@/lib/salary/salaryTypes';
-import { BasisTag, LEDGER_NET_NOTE } from '@/components/buddyx/buddyxUi';
+import { BasisTag, LEDGER_NET_NOTE } from '@/components/analytics/analyticsUi';
 
 /**
  * "How this was calculated" — the agent's own month, worked through.

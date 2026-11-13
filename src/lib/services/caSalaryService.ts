@@ -25,7 +25,7 @@ import { expandShiftsForWindow } from '../utils/recurrence';
 import { serialiseShift } from '../utils/shiftSerialise';
 import { computeTimeWorked } from '../utils/shiftAttendance';
 import { computeSalaryMonth, DEFAULT_SALARY_CONFIG, round2, sumMonth } from '../salary/salaryEngine';
-import { saleMatchKey } from '../buddyx/salesPlan';
+import { saleMatchKey } from '../salary/saleTypes';
 import { lockIsStale } from '../disputes/disputeRules';
 import { addMonths, currentMonthKey, monthKeyRange, toDayKey, type SalaryDayKey, type SalaryMonthKey } from '../salary/salaryDate';
 import { isSalaryMonthVisible, PAID_LEAVE_ACCOUNT_LOOKBACK_DAYS } from '../salary/salaryConstants';

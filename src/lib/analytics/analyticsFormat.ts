@@ -37,7 +37,7 @@ export function daysAgo(ms: number | null, now = Date.now()): string {
 /** Gross or net — which half of BuddyX's `{ gross, net }` pair a figure shows. */
 export type MoneyBasis = 'gross' | 'net';
 
-/** BuddyX's split: `net = gross × 0.8` (OnlyFans keeps 20%; buddyxapi.yaml). */
+/** OnlyFans' split: `net = gross × 0.8` (OnlyFans keeps 20%). */
 export const NET_SHARE = 0.8;
 
 /**

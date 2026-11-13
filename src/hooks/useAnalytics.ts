@@ -9,13 +9,13 @@ import { getCache, setCache } from '@/lib/queryCache';
 const TTL_MS = 60_000;
 
 /**
- * One BuddyX-backed route, read through `queryCache` (60s), the way the salary
- * surfaces read theirs. `reload(true)` forces past both caches — the refresh
- * button's `onSynced`. A forced reload keeps the current figures on screen
+ * One analytics route (Chatter, Fan or OnlyFans Analytics), read through
+ * `queryCache` (60s), the way the salary surfaces read theirs. `reload(true)`
+ * forces past both caches. A forced reload keeps the current figures on screen
  * (stale is not empty); a new URL clears them. A failed read is a state, never
  * an empty page.
  */
-export function useBuddyxAnalytics<T>(url: string | null) {
+export function useAnalytics<T>(url: string | null) {
   const { user } = useAuth();
   const authFetch = useAuthFetch();
   const [data, setData] = useState<T | null>(null);

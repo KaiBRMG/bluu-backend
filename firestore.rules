@@ -612,7 +612,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // 31. BuddyX integration (documentation/buddyx.md).
+    // 31. BuddyX integration — RETIRED 2026-11-13 (onlymonster-migration.md,
+    // Phase 6). Nothing writes these any more; the server still reads a few as
+    // archive (links, the fan registry, hourly activity, subscribers). The
+    // blocks stay until each collection is exported and deleted (§9.3).
     //
     // Admin SDK only, every one of them — the same posture as the rest of CA
     // salary, and for the same reason: per-person performance, fan spend and the

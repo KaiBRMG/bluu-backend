@@ -9,17 +9,17 @@ import { SURFACE } from '@/lib/surfaces';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
-import { SyncStatus } from '@/components/buddyx/SyncStatus';
-import { CreatorCombobox } from '@/components/buddyx/CreatorCombobox';
+import { SyncFreshness } from '@/components/onlymonster/SyncFreshness';
+import { CreatorCombobox } from '@/components/analytics/CreatorCombobox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FanDirectory } from '@/components/fans/FanDirectory';
-import { BasisTag, LegendSwatch, KpiTile, LoadError, SEGMENT, fanReportHref } from '@/components/buddyx/buddyxUi';
+import { BasisTag, LegendSwatch, KpiTile, LoadError, SEGMENT, fanReportHref } from '@/components/analytics/analyticsUi';
 import { CreatorChip } from '@/components/creators/CreatorChip';
-import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
+import { useAnalytics } from '@/hooks/useAnalytics';
 import { formatUsd, pluralise } from '@/lib/salary/salaryFormat';
-import { daysAgo, formatShare } from '@/lib/buddyx/analyticsFormat';
-import { SALE_KIND_COLORS, SEQUENTIAL_COLOR } from '@/lib/buddyx/chartColors';
-import type { FanAnalytics, FanPeriod, FanSummary } from '@/lib/buddyx/analyticsTypes';
+import { daysAgo, formatShare } from '@/lib/analytics/analyticsFormat';
+import { SALE_KIND_COLORS, SEQUENTIAL_COLOR } from '@/lib/analytics/chartColors';
+import type { FanAnalytics, FanPeriod, FanSummary } from '@/lib/analytics/analyticsTypes';
 
 /**
  * Fan Analytics — `/ca-portal/fan-analytics`.
@@ -50,7 +50,7 @@ export default function FanAnalyticsPage() {
   const [lifetimeTop, setLifetimeTop] = useState(false);
 
   const url = `/api/analytics/fans?period=${period}${creatorId ? `&creatorId=${encodeURIComponent(creatorId)}` : ''}`;
-  const { data, loading, error, reload } = useBuddyxAnalytics<FanAnalytics>(url);
+  const { data, loading, error, reload } = useAnalytics<FanAnalytics>(url);
 
   return (
     <AppLayout>
@@ -71,7 +71,7 @@ export default function FanAnalyticsPage() {
                 {PERIODS.map(p => <ToggleGroupItem key={p.value} value={p.value} className={SEGMENT}>{p.label}</ToggleGroupItem>)}
               </ToggleGroup>
             )}
-            <SyncStatus scope="fans" onSynced={() => void reload(true)} />
+            <SyncFreshness />
           </div>
         </div>
 
@@ -187,7 +187,7 @@ export default function FanAnalyticsPage() {
                   <div><dt className="text-xs text-zinc-400">Returning</dt><dd className="text-2xl font-semibold tabular-nums">{data.subscribers.returning}</dd></div>
                   <div><dt className="text-xs text-zinc-400">Free trial</dt><dd className="text-2xl font-semibold tabular-nums">{data.subscribers.trial}</dd></div>
                 </dl>
-                <p className="mt-2 text-[11px] text-zinc-400">From BuddyX subscriber events, which begin 25 Sep 2026.</p>
+                <p className="mt-2 text-[11px] text-zinc-400">From OnlyFans subscription events, via OnlyMonster.</p>
               </section>
             </div>
 
@@ -195,7 +195,7 @@ export default function FanAnalyticsPage() {
             {data.acquisition && (
               <section className={cn('rounded-xl p-5', SURFACE)} aria-labelledby="acquisition">
                 <h2 id="acquisition" className="text-sm font-semibold">Where good fans come from</h2>
-                <p className="mt-0.5 text-[11px] text-zinc-400">Tracking and free-trial links. ROI is (revenue − cost) ÷ cost; a free link shows “—”. Link revenue is as BuddyX reports it — its API does not say whether that is gross or net.</p>
+                <p className="mt-0.5 text-[11px] text-zinc-400">Tracking and free-trial links. ROI is (revenue − cost) ÷ cost; a free link shows “—”. Links are BuddyX&apos;s archived table (to 5 Nov 2026) — OnlyMonster has no link figures. Link revenue is as BuddyX reported it; it never said whether that is gross or net.</p>
                 {data.acquisition.length === 0 ? (
                   <p className="mt-3 text-sm text-zinc-400">No links synced yet.</p>
                 ) : (

@@ -4,8 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { CreatorCombobox } from '@/components/buddyx/CreatorCombobox';
-import { AttrChip } from '@/components/buddyx/buddyxUi';
+import { CreatorCombobox } from '@/components/analytics/CreatorCombobox';
+import { AttrChip } from '@/components/analytics/analyticsUi';
 import { CreatorChip } from '@/components/creators/CreatorChip';
 import { PersonTag } from '@/components/disputes/disputeUi';
 import { DataFreshness, type FreshnessStatus } from '@/components/onlymonster/DataFreshness';
@@ -59,7 +59,7 @@ interface Reconciliation {
 
 interface MappingResponse {
   status: FreshnessStatus;
-  config: { analyticsSource: 'buddyx' | 'onlymonster'; salesWriteEnabled: boolean };
+  config: { salesWriteEnabled: boolean };
   /** Null for a `ca-admin` without the admin claim (it carries creator revenue). */
   migration: { backfill: { next: number; total: number; done: boolean } | null; reconciliation: Reconciliation[] } | null;
   linkTargets: string[];
@@ -121,19 +121,6 @@ export function OnlyMonsterMappingSection({
     }
   };
 
-  const setSource = async (analyticsSource: 'buddyx' | 'onlymonster') => {
-    setBusy('config');
-    try {
-      await authed('/api/admin/onlymonster/config', { method: 'PATCH', body: JSON.stringify({ analyticsSource }) });
-      await load();
-      toast.success(analyticsSource === 'onlymonster' ? 'OnlyFans Analytics now reads OnlyMonster' : 'OnlyFans Analytics back on BuddyX');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not change the source');
-    } finally {
-      setBusy(null);
-    }
-  };
-
   if (error) {
     return (
       <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
@@ -164,7 +151,7 @@ export function OnlyMonsterMappingSection({
         )}
       </div>
 
-      {data.migration && <MigrationBlock data={data} migration={data.migration} isAdmin={isAdmin} busy={busy === 'config'} onSource={v => void setSource(v)} />}
+      {data.migration && <MigrationBlock migration={data.migration} />}
       {isAdmin && <BalancesBlock authed={authed} />}
 
       <div>
@@ -296,19 +283,7 @@ export function OnlyMonsterMappingSection({
  * cent reads as a match; anything else names the amount, because the gate is
  * "$0.00 or explained" (plan Phase 2).
  */
-function MigrationBlock({
-  data,
-  migration,
-  isAdmin,
-  busy,
-  onSource,
-}: {
-  data: MappingResponse;
-  migration: NonNullable<MappingResponse['migration']>;
-  isAdmin: boolean;
-  busy: boolean;
-  onSource: (v: 'buddyx' | 'onlymonster') => void;
-}) {
+function MigrationBlock({ migration }: { migration: NonNullable<MappingResponse['migration']> }) {
   const { backfill, reconciliation } = migration;
   const latest = new Map<string, Reconciliation>();
   for (const r of reconciliation) if (!latest.has(`${r.creatorId}_${r.month}`)) latest.set(`${r.creatorId}_${r.month}`, r);
@@ -322,23 +297,6 @@ function MigrationBlock({
         History backfill:{' '}
         {backfill === null ? 'starts after the first successful sync' : backfill.done ? 'complete' : `${backfill.next} of ${backfill.total} chunks`}
       </p>
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        <span className="text-zinc-300">
-          OnlyFans Analytics reads{' '}
-          <span className="font-medium text-white">{data.config.analyticsSource === 'onlymonster' ? 'OnlyMonster' : 'BuddyX'}</span>
-        </span>
-        {isAdmin && (
-          <Select value={data.config.analyticsSource} onValueChange={v => onSource(v as 'buddyx' | 'onlymonster')} disabled={busy}>
-            <SelectTrigger size="sm" className="w-40" aria-label="OnlyFans Analytics source">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="buddyx">BuddyX</SelectItem>
-              <SelectItem value="onlymonster">OnlyMonster</SelectItem>
-            </SelectContent>
-          </Select>
-        )}
-      </div>
       {rows.length === 0 ? (
         <p className="text-xs text-zinc-400">No reconciliation yet. It runs with the 21:01 UTC sync.</p>
       ) : (

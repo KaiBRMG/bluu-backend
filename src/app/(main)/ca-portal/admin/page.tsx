@@ -138,7 +138,7 @@ export default function CaAdminPage() {
 
   const { timezone: userTimezone } = useViewerTimezone();
 
-  // `?tab=sales` is where the BuddyX sync-failing alert points. Read as an
+  // `?tab=sales` is where the OnlyMonster sync-failing alert points. Read as an
   // external value (server: none) rather than through `useSearchParams`, which
   // would suspend the page; the reader's own pick then wins.
   const requestedTab = useSyncExternalStore(noopSubscribe, readRequestedTab, () => null);

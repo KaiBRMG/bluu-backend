@@ -1,10 +1,9 @@
 /**
  * OnlyFans Analytics, read from the OnlyMonster collections (migration plan §6.5).
  *
- * Used by `getCreatorAnalytics` only while `onlymonster-meta/config.analyticsSource`
- * is `'onlymonster'`, so the switch flips back without a deploy. Each reader
- * returns the **same shape** the BuddyX path already consumes, which keeps the
- * analytics logic in one place.
+ * Each reader returns the shape the analytics fold consumes (originally BuddyX's
+ * row shapes, which the archived history still uses), so the logic stays in one
+ * place.
  *
  * **History stitching (§6.3).** `account-days` holds a mapped account from its
  * first OnlyMonster transaction (`onlymonster-accounts.firstTxDay`). For any day
@@ -19,13 +18,7 @@ import 'server-only';
 import { adminDb } from '../firebase-admin';
 import { COLLECTIONS } from '../onlymonster/constants';
 import { ONLYFANS_PLATFORM } from '../creators/accountPlatform';
-import { getOnlyMonsterConfig } from './onlymonsterSyncService';
 import type { AccountDayDocument, BuddyxTeamRow, ChatterDayDocument, CreatorStatsDayDocument } from '@/types/firestore';
-
-/** Whether the analytics surfaces read OnlyMonster (`config.analyticsSource`, cached 30 s). */
-export async function isOnlyMonsterAnalytics(): Promise<boolean> {
-  return (await getOnlyMonsterConfig()).analyticsSource === 'onlymonster';
-}
 
 /** A Chatter Analytics team row, stamped with where it came from (absent = BuddyX). */
 export type TeamRow = BuddyxTeamRow & { source?: 'buddyx' | 'onlymonster' };
@@ -64,7 +57,7 @@ export function onlyMonsterCutoverDay(coverage: Map<string, string>, fallback: s
   return [...coverage.values()].sort()[0] ?? fallback;
 }
 
-/** Subscribers in the shape the BuddyX path reads (`buddyx-subscribers`). Includes free trials. */
+/** Subscribers in the shape the analytics fold reads (archived `buddyx-subscribers`' shape). Includes free trials. */
 export async function readOnlyMonsterSubscribers(from: string, to: string) {
   const snap = await adminDb.collection(COLLECTIONS.subDays).where('day', '>=', from).where('day', '<=', to).get();
   const out: Array<{ modelId: string | null; creatorId: string | null; subType: string | null; isTrial: boolean; isCreator: boolean; day: string }> = [];
@@ -86,7 +79,7 @@ export async function readOnlyMonsterSubscribers(from: string, to: string) {
   return out;
 }
 
-/** Mass messages in the shape the BuddyX path reads (`buddyx-mass-messages`). */
+/** Mass messages in the shape the analytics fold reads (archived `buddyx-mass-messages`' shape). */
 export async function readOnlyMonsterMass(from: string, to: string) {
   const snap = await adminDb
     .collection(COLLECTIONS.massMessages)
@@ -177,15 +170,4 @@ export async function readOnlyMonsterMassForChatters(from: string, to: string) {
     unsent: d.get('status') === 'unsent',
     sentDate: d.get('createdAt'),
   }));
-}
-
-// ─── Fan Analytics (migration plan §6.2, §8) ─────────────────────────
-
-/**
- * The per-creator fan rollup the fan surfaces read: `creator-fans` (built from
- * the account ledger, every category) once the analytics switch is on, else
- * BuddyX's `buddyx-fans`. Same document shape, so readers only swap the name.
- */
-export async function fanRollupCollection(): Promise<'creator-fans' | 'buddyx-fans'> {
-  return (await isOnlyMonsterAnalytics()) ? 'creator-fans' : 'buddyx-fans';
 }

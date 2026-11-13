@@ -8,19 +8,19 @@ import { ArrowLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SURFACE } from '@/lib/surfaces';
 import { Skeleton } from '@/components/ui/skeleton';
-import { PeriodPicker, dayKeyToDate } from '@/components/buddyx/PeriodPicker';
-import { SyncStatus } from '@/components/buddyx/SyncStatus';
-import { BasisTag, KpiTile, LegendSwatch, LoadError } from '@/components/buddyx/buddyxUi';
-import { FlagList, integrityBasis } from '@/components/buddyx/integrityUi';
-import { ShiftTimeline } from '@/components/buddyx/ShiftTimeline';
-import { DailySalesChart } from '@/components/buddyx/SalesBoard';
-import { chatterPeriodOptions, chatterAnalyticsUrl, chatterReportHref } from '@/components/buddyx/chatterPeriods';
-import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
+import { PeriodPicker, dayKeyToDate } from '@/components/analytics/PeriodPicker';
+import { SyncFreshness } from '@/components/onlymonster/SyncFreshness';
+import { BasisTag, KpiTile, LegendSwatch, LoadError } from '@/components/analytics/analyticsUi';
+import { FlagList, integrityBasis } from '@/components/analytics/integrityUi';
+import { ShiftTimeline } from '@/components/analytics/ShiftTimeline';
+import { DailySalesChart } from '@/components/analytics/SalesBoard';
+import { chatterPeriodOptions, chatterAnalyticsUrl, chatterReportHref } from '@/components/analytics/chatterPeriods';
+import { useAnalytics } from '@/hooks/useAnalytics';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { formatUsd } from '@/lib/salary/salaryFormat';
-import { formatCount, formatDuration } from '@/lib/buddyx/analyticsFormat';
-import { SALE_KIND_COLORS, SEQUENTIAL_COLOR } from '@/lib/buddyx/chartColors';
-import { CHATTER_PERIODS, type ChatterPeriod, type ChatterReport, type ReportAccount, type ReportShift } from '@/lib/buddyx/analyticsTypes';
+import { formatCount, formatDuration } from '@/lib/analytics/analyticsFormat';
+import { SALE_KIND_COLORS, SEQUENTIAL_COLOR } from '@/lib/analytics/chartColors';
+import { CHATTER_PERIODS, type ChatterPeriod, type ChatterReport, type ReportAccount, type ReportShift } from '@/lib/analytics/analyticsTypes';
 
 /**
  * One chat agent's report — `/ca-portal/chatter-analytics/[uid]`, `ca-admin`
@@ -58,7 +58,7 @@ export function ReportView({ uid }: { uid: string }) {
     () => chatterAnalyticsUrl(`/api/analytics/chatters/${encodeURIComponent(uid)}`, period, range.from, range.to),
     [uid, period, range],
   );
-  const { data, loading, error, reload } = useBuddyxAnalytics<ChatterReport>(url);
+  const { data, loading, error, reload } = useAnalytics<ChatterReport>(url);
   // A preset's days are resolved on the server (salary timezone); show the ones it answered with.
   const presetData = period !== 'custom' && data?.period === period ? data : null;
 
@@ -99,7 +99,7 @@ export function ReportView({ uid }: { uid: string }) {
               setTo(nextTo);
             }}
           />
-          <SyncStatus scope="chatters" onSynced={() => void reload(true)} />
+          <SyncFreshness />
         </div>
       </div>
 
@@ -326,7 +326,7 @@ function ShiftTable({ report }: { report: ChatterReport }) {
 }
 
 function Pending() {
-  return <span className="text-zinc-400" title="Hourly BuddyX data for this shift has not synced yet">—</span>;
+  return <span className="text-zinc-400" title="No hourly data for this shift — BuddyX's hourly archive ends 5 Nov 2026">—</span>;
 }
 
 function shiftKind(s: ReportShift): string {

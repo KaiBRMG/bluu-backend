@@ -243,21 +243,9 @@ export const notifications = {
   }),
 
   // ─── Integrations ─────────────────────────────────────────────────────────────
-  // The BuddyX sync is what pays chat agents now (documentation/buddyx.md), so a
-  // sync that has stopped working is a payroll problem, not a cosmetic one. One
-  // named operator (OPS_ALERT_RECIPIENT_UID), once per incident: the latch is
-  // cleared on the first healthy run, so a later outage alerts again.
-  // `reason` is a pre-written sentence from buddyxSyncService — a revoked key,
-  // three failed runs in a row, or a new chatter carrying unmapped sales.
-  buddyxSyncFailing: (reason: string): NotificationContent => ({
-    title: '⚠️ BuddyX sales sync needs attention',
-    message: `${reason} Chat-agent sales may be missing or unassigned until it is fixed — see CA Admin → Sales.`,
-    type: 'alert',
-    actionUrl: '/ca-portal/admin?tab=sales',
-  }),
-
-  // OnlyMonster replaces BuddyX as the source of OnlyFans data
-  // (documentation/onlymonster.md). Same recipient, same once-per-incident latch.
+  // OnlyMonster is the source of OnlyFans data (documentation/onlymonster.md).
+  // One named operator (OPS_ALERT_RECIPIENT_UID), once per incident: the latch
+  // is cleared on the first healthy run, so a later outage alerts again.
   // After the Phase 4 cutover the same sync writes chat-agent sales, so the copy
   // names both consequences.
   // `reason` is a pre-written sentence from onlymonsterSyncService: a rejected

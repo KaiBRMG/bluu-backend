@@ -1,54 +1,13 @@
-/**
- * POST /api/analytics/chatters/pull `{ from, to }` — one live team overview for
- * any range that is not a synced preset, stored for 7 days (`ca-admin`).
- *
- * Medians and p75s cannot be summed from days, so a custom range renders them
- * as "—" until an admin pulls the whole range at once. This is the only BuddyX
- * call a page makes outside a sync, and it is one request on the expensive
- * bucket, behind a person pressing a button.
- */
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
-import { handleApiError, readJsonBody } from '@/lib/middleware/apiHelpers';
-import { requireCaAdmin } from '@/lib/salary/salaryAuth';
-import { isBuddyxConfigured } from '@/lib/buddyx/client';
-import { isBuddyxError } from '@/lib/buddyx/errors';
-import { isDayKey } from '@/lib/salary/salaryDate';
-import { MAX_CUSTOM_DAYS } from '@/lib/buddyx/analyticsTypes';
-import { BUDDYX_TEAM_STATS_START_DAY } from '@/lib/buddyx/constants';
-import { loadBuddyxMaps } from '@/lib/services/buddyxMappingService';
-import { pullCustomTeamPeriod } from '@/lib/services/buddyxStatsSync';
-import type { DecodedIdToken } from 'firebase-admin/auth';
 
-export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
-  try {
-    const denied = await requireCaAdmin(token);
-    if (denied) return denied;
-    if (!isBuddyxConfigured()) {
-      return NextResponse.json({ error: 'BuddyX is not configured on this deployment.' }, { status: 503 });
-    }
+const RETIRED = 'BuddyX has been retired, so there is nothing to pull. Reload the app to update this page.';
 
-    const parsed = await readJsonBody(request, 256);
-    if (!parsed.ok) return parsed.response;
-    const { from, to } = parsed.body as { from?: unknown; to?: unknown };
-    if (!isDayKey(from) || !isDayKey(to) || from > to) {
-      return NextResponse.json({ error: 'from ≤ to (YYYY-MM-DD) are required.' }, { status: 400 });
-    }
-    if ((Date.parse(to) - Date.parse(from)) / 86_400_000 + 1 > MAX_CUSTOM_DAYS) {
-      return NextResponse.json({ error: `A range can span at most ${MAX_CUSTOM_DAYS} days.` }, { status: 400 });
-    }
-    if (to < BUDDYX_TEAM_STATS_START_DAY) {
-      return NextResponse.json({ error: 'BuddyX has no activity for this range.' }, { status: 400 });
-    }
-
-    try {
-      await pullCustomTeamPeriod(await loadBuddyxMaps(), from, to);
-    } catch (err) {
-      if (isBuddyxError(err)) return NextResponse.json({ error: `BuddyX: ${err.message}` }, { status: 502 });
-      throw err;
-    }
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    return handleApiError(err, 'analytics/chatters/pull POST');
-  }
-});
+/**
+ * POST /api/analytics/chatters/pull — **compatibility stub, delete after 2026-11-30.**
+ *
+ * The "Pull" button fetched a custom range's reply-time medians from BuddyX.
+ * BuddyX is retired and medians are no longer shown; a renderer loaded before
+ * that can still press it (rule 9c), and shows this message as a toast.
+ */
+export const POST = withAuth(async () => NextResponse.json({ error: RETIRED }, { status: 410 }));

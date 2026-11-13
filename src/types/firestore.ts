@@ -1656,66 +1656,6 @@ export interface ResolvedAccess {
 // the same posture as the rest of CA salary: per-person performance and pay
 // data is assembled server-side and projected per caller.
 
-/** `buddyx-chatters/{chatterId}` — a BuddyX team member and the Bluu user they resolve to. */
-export interface BuddyxChatterDocument {
-  chatterId: string;
-  name: string | null;
-  email: string | null;
-  status: string | null;
-  timeZone: string | null;
-  /** Resolved Bluu uid: `manualUid`, else an email match, else null. */
-  uid: string | null;
-  match: 'email' | 'manual' | 'none';
-  /** An admin's link. Wins over the email match. */
-  manualUid?: string | null;
-  linkedBy?: string | null;
-  linkedAt?: Timestamp | null;
-  /** First time this chatter was seen carrying sales while unmapped — the alert latch. */
-  unmappedAlertedAt?: Timestamp | null;
-  syncedAt: Timestamp;
-}
-
-/** `buddyx-models/{modelId}` — a linked OnlyFans creator and the Bluu creator it resolves to. */
-export interface BuddyxModelDocument {
-  modelId: string;
-  handle: string | null;
-  customName: string | null;
-  revShare: number | null;
-  /** A `creators` uid **or** a `creator-subaccounts` id (rule 9h). */
-  creatorId: string | null;
-  /** The resolved creator's stage name, denormalised for the sales ledger. */
-  creatorName: string | null;
-  match: 'handle' | 'manual' | 'none';
-  manualCreatorId?: string | null;
-  linkedBy?: string | null;
-  linkedAt?: Timestamp | null;
-  syncedAt: Timestamp;
-}
-
-export type BuddyxSyncScope = 'directory' | 'sales' | 'chatters' | 'creators' | 'fans';
-
-export interface BuddyxScopeState {
-  lastSuccessAt: Timestamp | null;
-  lastAttemptAt: Timestamp | null;
-  lastError: string | null;
-  /** Consecutive failed runs — the alert fires at 3. */
-  failures?: number;
-}
-
-/** `buddyx-meta/state` — per-scope freshness, the one doc every "Synced 3 min ago" reads. */
-export type BuddyxStateDocument = Partial<Record<BuddyxSyncScope, BuddyxScopeState>>;
-
-/** `buddyx-meta/config` — server-read switches (rule 9c: never a compiled-in constant). */
-export interface BuddyxConfigDocument {
-  /**
-   * Whether the `sales` scope writes `ca-sales`. Off until an admin has
-   * eyeballed a dry run against the BuddyX dashboard (sequencing step 3).
-   */
-  salesWriteEnabled: boolean;
-  updatedBy?: string;
-  updatedAt?: Timestamp;
-}
-
 // ─── OnlyMonster (documentation/onlymonster.md) ───────────────────────────────
 
 /**
@@ -1776,7 +1716,7 @@ export interface OnlyMonsterStateDocument {
 
 /** `onlymonster-meta/config` — server-read switches (rule 9c: never a compiled-in constant). */
 export interface OnlyMonsterConfigDocument {
-  /** Which source OnlyFans Analytics reads. Flipped after the Phase 2 sign-off; can be flipped back without a deploy. */
+  /** Retired with BuddyX (analytics always read OnlyMonster); may linger on the stored doc. */
   analyticsSource?: 'buddyx' | 'onlymonster';
   /** Phase 4: whether the pay derivation writes `ca-sales` (off → `ca-sales-shadow` only). */
   salesWriteEnabled?: boolean;
@@ -1943,26 +1883,6 @@ export interface OnlyMonsterSyncRunDocument {
   expireAt: Timestamp;
 }
 
-/** `buddyx-meta/lock` — the one-sync-at-a-time lease. */
-export interface BuddyxLockDocument {
-  holder: string;
-  scope: string;
-  expiresAt: Timestamp;
-}
-
-/** `buddyx-sync-runs/{auto}` — one row per run, for CA Admin → Sales. TTL 90 days. */
-export interface BuddyxSyncRunDocument {
-  trigger: 'cron' | string;
-  scopes: BuddyxSyncScope[];
-  startedAt: Timestamp;
-  durationMs: number;
-  requestCount: number;
-  counts: Record<string, number>;
-  errors: string[];
-  dryRun?: boolean;
-  expireAt: Timestamp;
-}
-
 /** One row of `/team-reports/overview`, as stored. Money is gross; ids are strings. */
 export interface BuddyxTeamRow {
   chatterId: string;
@@ -1982,30 +1902,6 @@ export interface BuddyxTeamRow {
   p75ResponseTimeMs: number | null;
 }
 
-export interface BuddyxTeamTotals {
-  ppvGross: number;
-  tipsGross: number;
-  tipsAssignedGross: number;
-  tipsCount: number;
-  ppvsSent: number;
-  ppvsUnlocked: number;
-  unlockRate: number;
-  ppvRate: number;
-  fansChatted: number;
-  totalMessages: number;
-  onlineMs: number;
-  medianResponseTimeMs: number | null;
-  p75ResponseTimeMs: number | null;
-}
-
-/** `buddyx-team-days/{day}` (salary-timezone day). */
-export interface BuddyxTeamDayDocument {
-  day: string;
-  totals: BuddyxTeamTotals;
-  breakdown: BuddyxTeamRow[];
-  syncedAt: Timestamp;
-}
-
 /**
  * `buddyx-team-hours/{day}` (salary-timezone day) — online time and messages
  * per chatter per hour, hour index `'0'`–`'23'` from the day's start. Written
@@ -2020,38 +1916,6 @@ export interface BuddyxTeamHoursDocument {
   uids: Record<string, string | null>;
   /** hour index → when it was last pulled (ms). Presence = the hour has data. */
   hours: Record<string, number>;
-  syncedAt: Timestamp;
-}
-
-/**
- * `buddyx-team-periods/{preset}` — the same shape for a whole period. Exists
- * because medians and p75s cannot be summed from days.
- */
-export interface BuddyxTeamPeriodDocument {
-  period: string;
-  from: string;
-  to: string;
-  totals: BuddyxTeamTotals;
-  breakdown: BuddyxTeamRow[];
-  syncedAt: Timestamp;
-  /** Custom ranges only — 7-day TTL. */
-  expireAt?: Timestamp;
-}
-
-/** `buddyx-mass-messages/{id}` — no message text, on purpose. */
-export interface BuddyxMassMessageDocument {
-  id: string;
-  modelId: string | null;
-  creatorId: string | null;
-  sentBy: string | null;
-  uid: string | null;
-  sentDate: Timestamp | null;
-  day: string | null;
-  price: number;
-  previewCount: number;
-  unsent: boolean;
-  unsentBy: string | null;
-  unsentDate: Timestamp | null;
   syncedAt: Timestamp;
 }
 
@@ -2083,21 +1947,6 @@ export interface CreatorStatsDayDocument {
   ppvsUnlocked?: number | null;
   unlockRate?: number | null;
   onlineMs?: number | null;
-  syncedAt: Timestamp;
-}
-
-/** `buddyx-subscribers/{eventId}` — one "subscribed" event. */
-export interface BuddyxSubscriberDocument {
-  id: string;
-  modelId: string | null;
-  creatorId: string | null;
-  fanId: string | null;
-  subType: string | null;
-  isTrial: boolean;
-  isCreator: boolean;
-  priceGross: number;
-  subscribedAt: Timestamp | null;
-  day: string | null;
   syncedAt: Timestamp;
 }
 
@@ -2209,10 +2058,3 @@ export interface FanRegistryDocument {
   updatedAt?: Timestamp;
 }
 
-/** `buddyx-fan-names/{fanId}` — a fan's name is the same on every creator. */
-export interface BuddyxFanNameDocument {
-  fanId: string;
-  name: string;
-  source: 'infloww' | 'buddyx-link';
-  lastSeenAt: Timestamp;
-}

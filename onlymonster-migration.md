@@ -1,6 +1,6 @@
 # BuddyX → OnlyMonster migration plan
 
-**Status:** draft for review, 2026-11-06. Nothing is implemented.
+**Status (2026-11-13):** Phases 1–5 and 7 built; Phase 6 code removal done; `salesWriteEnabled` switched on 2026-11-13 (Phase 4 live). See each phase's status and [`documentation/onlymonster.md`](documentation/onlymonster.md).
 **Scope:** OnlyFans only. Fansly is out of scope for every phase.
 **Sources:** [`OnlyMonsterAPI.md`](OnlyMonsterAPI.md) (om-api-service v0.77.0), [`OnlyMonsterWebhooks.md`](OnlyMonsterWebhooks.md), [`documentation/buddyx.md`](documentation/buddyx.md), [`documentation/ca-salary.md`](documentation/ca-salary.md), [`documentation/fan-base.md`](documentation/fan-base.md), and the code under `src/lib/buddyx/`, `src/lib/services/buddyx*`, `src/lib/salary/`.
 
@@ -537,7 +537,12 @@ The first week live (the gate below) is therefore the period in which to find pr
 
 ### Phase 6: BuddyX decommission
 
-**Status 2026-11-11: not started, by design.** Its precondition (the cutover month finalised for every agent) cannot be met yet.
+**Status 2026-11-13: code removed, ahead of the precondition, on the user's instruction** (the team had stopped using BuddyX, and the key was already removed).
+- **The incident that made it urgent:** at 05:01 UTC the BuddyX sync got an empty-but-complete answer and soft-removed all 150 November `bx-*` rows ($13,288). They were restored (only the ids that run removed), and `buddyx-meta/config.salesWriteEnabled` was set to `false` before the next run. The removal itself touched no data (nothing was deployed when it was checked); the real confirmation is to rerun the baseline snapshot after the deploy and after the next OnlyMonster run: 150 rows, $13,288, id hash `e02436496a3e2b24`. See [`documentation/buddyx.md`](documentation/buddyx.md) §3.
+- **Done:** steps 1, 2 and 5. The cron, the code (§9.1), the refresh buttons, online time, `never-online` and the `analyticsSource` switch are gone. Compatibility stubs stay until 2026-11-30.
+- **Kept on purpose:** `salesSourceFor` / `ONLYMONSTER_CUTOVER_AT` (they stop OnlyMonster double-paying the frozen `bx-*` rows). The `buddyx-*` rule blocks and index exemptions stay until each collection is deleted, because removing an exemption would *start* indexing the archive.
+- **Accepted consequence of skipping the precondition:** a shift corrected for 1–5 Nov no longer re-credits those sales. Admin reassignment and disputes still move them. `scripts/onlymonster-rollback.js` was deleted, because rollback relied on BuddyX re-pulling.
+- **Left:** step 3 (remove `BUDDYX_API_KEY`, revoke the key); steps 6–7 (export, then delete only on go-ahead, readers first: `creator-stats-days`, `buddyx-links`, `buddyx-subscribers`, `buddyx-models`, `buddyx-team-hours` and the registry are still read as archive).
 
 - **Precondition:** the month containing `ONLYMONSTER_CUTOVER_AT` is **finalised for every agent**. Until then the BuddyX sync keeps running on its own side, because the shift-correction re-derivation of `bx-*` rows depends on it.
 - Steps:

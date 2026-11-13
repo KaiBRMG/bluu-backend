@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CreatorChip } from '@/components/creators/CreatorChip';
-import { BasisTag } from '@/components/buddyx/buddyxUi';
+import { BasisTag } from '@/components/analytics/analyticsUi';
 import { formatUsd } from '@/lib/salary/salaryFormat';
 import { formatDayLabel } from '@/lib/salary/salaryDate';
 import type { useAuthFetch } from '@/hooks/useAuthFetch';

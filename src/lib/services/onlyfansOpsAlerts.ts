@@ -75,7 +75,7 @@ export async function sendOpsAlertOnce(key: string, content: NotificationContent
  * Re-arm a latched alert, so the next occurrence of its condition sends again.
  *
  * Every alert above is once-*ever*, because its condition persists until fixed.
- * An **incident** alert is different: `buddyx-sync-failing` describes something
+ * An **incident** alert is different: `onlymonster-sync-failing` describes something
  * that recovers on its own, and a second outage next month is news. Its owner
  * clears the latch on the first healthy run after it fired, which makes it
  * once-per-incident rather than once-ever. A no-op when nothing is latched.

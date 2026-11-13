@@ -65,3 +65,19 @@ const LABELS: Record<string, string> = {
 export function saleTypeLabel(type: string): string {
   return LABELS[normaliseSaleType(type)] ?? type;
 }
+
+/**
+ * The facts that identify a sale independently of its source id: what kind,
+ * which model, which fan, the instant, and the gross in cents. Used on CA Admin
+ * → Sales to spot possible duplicates among the BuddyX-era rows, whose ids were
+ * re-keyed by the (now retired) BuddyX sync.
+ */
+export function saleMatchKey(sale: {
+  kind: SaleKind;
+  modelId: string | null;
+  fanId: string;
+  occurredAtMs: number;
+  gross: number;
+}): string {
+  return [sale.kind, sale.modelId ?? '', sale.fanId, sale.occurredAtMs, Math.round(sale.gross * 100)].join('|');
+}

@@ -319,7 +319,7 @@ It is a **snapshot at clock-in**, not live — an admin toggling `enableScreensh
 
 ## 4b. Integrity Signals — Input Quality and Unchanged Screens
 
-Shown on Chatter Analytics to **CA admins only** (documentation/buddyx.md §Chatter Analytics). **Display only — none of this changes idle state, the time ledger or pay.** A flag is a lead to look at; the report shows the minutes behind it. Everything here is gated by the `inputMonitoring` setting (§3f).
+Shown on Chatter Analytics to **CA admins only** (documentation/buddyx.md §6, *Integrity*). **Display only — none of this changes idle state, the time ledger or pay.** A flag is a lead to look at; the report shows the minutes behind it. Everything here is gated by the `inputMonitoring` setting (§3f).
 
 ### What is collected (Electron main, v0.17.0+)
 

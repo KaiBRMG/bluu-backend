@@ -53,6 +53,14 @@ reassign / blocksClockOut yes          no                 —
 - **No Cache-Control caching on the list** (`no-store`): the page patches its own state after each write, and a browser-cached list would hand a refetch the pre-write copy.
 - The body is sanitised on write and again on read (`promptHtml.ts`). Highlights are the Prompt Library's palette (DESIGN §2).
 
+## Home widget
+
+`TasksHomeWidget` (`src/components/tasks/`) sits in the home page's middle column under Time Tracking, for every user. It shows **your own** outstanding once-off tasks (soonest due first, overdue leading, capped at five with "+N more") and your **Active** roles as greyscale chips — always the viewer's own, even for an admin, whose `useTasks` also carries everyone's. The one action is a check-off button that sets the task **Done** (optimistic, with an Undo toast); the row is otherwise a link to the Tasks page. It gates boot with `useBootPhase('home-tasks')` (rule 8).
+
+## Opening a task
+
+An existing task **always opens read-only**. **Edit** appears only where `canEditTask` allows (an admin, or the assignee of a task they made themselves); an admin-assigned task never offers it to its assignee. Creating opens straight into the form. While reading, the status select is live and saves as it changes, so moving a task along never needs Edit. Cancel leaves edit mode (with a discard confirm if dirty); Escape / the X close the dialog through the same guard.
+
 ## The clock-out prompt (`blocksClockOut`)
 
 An admin can mark a task or role **"Ask before they clock out"**. While it is **outstanding** — a once-off not Done, or a role that is Active (`isOutstanding`) — pressing **Clock Out** shows the assignee the outstanding items with **Cancel · Clock Out Anyway · Go to Tasks** (Go to Tasks is the focused default).

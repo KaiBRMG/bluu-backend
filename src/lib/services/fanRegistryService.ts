@@ -8,7 +8,7 @@
  *
  * **A name change is written through, not resolved on read.** Sales and the
  * analytics rollups carry the fan's name (`ca-sales.fanName`,
- * `buddyx-fans.displayName`) so a ledger of hundreds of rows costs no registry
+ * `creator-fans.displayName`) so a ledger of hundreds of rows costs no registry
  * reads; a rename is rare, so the rename pays instead — one query per
  * collection for that one fan.
  */
@@ -276,14 +276,12 @@ async function propagateIfChanged(key: string, prev: NameFields | null, next: Na
  */
 async function writeNameThrough(fanId: string, name: string | null, source: FanNameSource | null): Promise<void> {
   const override = source === 'manual' || source === 'customs' ? name : null;
-  // Both fan rollups take the name while BuddyX's still exists (migration plan §8).
-  const [bxFans, omFans, sales] = await Promise.all([
-    adminDb.collection('buddyx-fans').where('fanId', '==', fanId).select('displayName', 'displayNameSource', 'salesName').get(),
+  const [fans, sales] = await Promise.all([
     adminDb.collection('creator-fans').where('fanId', '==', fanId).select('displayName', 'displayNameSource', 'salesName').get(),
     adminDb.collection('ca-sales').where('fanId', '==', fanId).select('fanName').get(),
   ]);
   const writer = adminDb.bulkWriter();
-  for (const doc of [...bxFans.docs, ...omFans.docs]) {
+  for (const doc of fans.docs) {
     const same =
       (doc.get('displayName') ?? null) === override &&
       (doc.get('displayNameSource') ?? null) === (override ? source : null) &&

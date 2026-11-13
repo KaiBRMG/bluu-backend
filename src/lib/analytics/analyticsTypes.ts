@@ -78,7 +78,6 @@ export interface IntegritySummary {
 }
 
 export type IntegrityFlagKind =
-  | 'never-online'
   | 'regular-input'
   | 'modifier-only'
   | 'static-screen'
@@ -92,8 +91,6 @@ export interface IntegrityFlag {
   severity: 'high' | 'medium';
   /** Flagged minutes (input / static kinds). */
   minutes: number | null;
-  /** Shifts involved (never-online). */
-  shifts: number | null;
   /** Salary days the signal appeared on, ascending. */
   days: string[];
 }
@@ -508,7 +505,7 @@ export interface CreatorAnalytics {
   creatorId: string | null;
   /** The first day the current source owns — the chart's hairline (Infloww → BuddyX, or → OnlyMonster). */
   cutoverDay: string;
-  /** Which source the page is reading (`onlymonster-meta/config.analyticsSource`). Absent from older deployments → `'buddyx'`. */
+  /** Always `'onlymonster'` since BuddyX was retired; kept for renderers that still branch on it (rule 9c). */
   source?: 'buddyx' | 'onlymonster';
   /** Every creator, over the selected period — never scoped by `creatorId`. */
   kpis: {

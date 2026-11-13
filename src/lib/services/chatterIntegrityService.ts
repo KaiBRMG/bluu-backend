@@ -11,14 +11,15 @@
 import 'server-only';
 import { adminDb } from '../firebase-admin';
 import { dayKeyRange, enumerateDays, toDayKey, type SalaryDayKey } from '../salary/salaryDate';
-import { HOUR_MS, LEDGER_LOOKBACK_MS, hourKey, sessionSpans, workingSpans } from '../buddyx/coverage';
+import { HOUR_MS, LEDGER_LOOKBACK_MS, hourKey, sessionSpans, workingSpans } from '../analytics/coverage';
+import { BUDDYX_LAST_DAY } from '../analytics/history';
 import { INTERVAL_MODIFIER_ONLY } from '../inputQuality';
 import { serialiseShift } from '../utils/shiftSerialise';
 import { expandShiftsForWindow } from '../utils/recurrence';
 import { getActiveSessionsForUsers, getLedgerEntriesForUsers, getShiftsByRange } from './shiftService';
 import { getIntegrityCaptures, type IntegrityCaptureDocument, type IntegrityDayDocument } from './integrityService';
 import { getScreenshotUrl } from './screenshotService';
-import type { IntegrityFlag, IntegritySummary, ReportShift, ShiftDetail } from '../buddyx/analyticsTypes';
+import type { IntegrityFlag, IntegritySummary, ReportShift, ShiftDetail } from '../analytics/analyticsTypes';
 import type { ActiveSessionDocument, BuddyxTeamHoursDocument, TimeEntryLedgerDocument } from '@/types/firestore';
 
 // ─── Flag thresholds ─────────────────────────────────────────────────
@@ -32,12 +33,18 @@ const INPUT_HIGH_MINUTES = 120;
 const STATIC_FLAG_MINUTES = 60;
 const STATIC_HIGH_MINUTES = 180;
 
-// ─── Hourly BuddyX data ──────────────────────────────────────────────
+// ─── Hourly activity (archived BuddyX data) ──────────────────────────
+// BuddyX's hourly online time and messages. Read as archive for the shift table,
+// through `BUDDYX_LAST_DAY` only: the retired sync kept writing zeros after the
+// cutover, which would read as "online 0, 0 messages" on OnlyMonster-era shifts.
+// A later hour has no doc and renders as "no hourly data". OnlyMonster has no
+// hourly equivalent.
 
 export async function readTeamHours(days: SalaryDayKey[]): Promise<Map<string, BuddyxTeamHoursDocument>> {
   const out = new Map<string, BuddyxTeamHoursDocument>();
-  if (days.length === 0) return out;
-  const snaps = await adminDb.getAll(...days.map(d => adminDb.collection('buddyx-team-hours').doc(d)));
+  const archived = days.filter(d => d <= BUDDYX_LAST_DAY);
+  if (archived.length === 0) return out;
+  const snaps = await adminDb.getAll(...archived.map(d => adminDb.collection('buddyx-team-hours').doc(d)));
   for (const snap of snaps) if (snap.exists) out.set(snap.id, snap.data() as BuddyxTeamHoursDocument);
   return out;
 }
@@ -110,7 +117,6 @@ const SEVERITY_RANK = { high: 0, medium: 1 } as const;
 
 /** Rank: severity, then size (flagged minutes). */
 function flagMagnitude(f: IntegrityFlag): number {
-  if (f.kind === 'never-online') return 1;
   return (f.minutes ?? 0) / 600;
 }
 
@@ -124,20 +130,11 @@ export function sortFlags(flags: IntegrityFlag[]): IntegrityFlag[] {
 export function flagsForAgent(params: {
   uid: string;
   name: string;
-  /** BuddyX online time over the part of the period BuddyX covers; null = no BuddyX row at all. */
-  onlineMs: number | null;
-  rosteredShifts: number;
   integrityDays: IntegrityDayDocument[] | undefined;
 }): IntegrityFlag[] {
   const { uid, name } = params;
   const out: IntegrityFlag[] = [];
-  const base = { uid, name, minutes: null, shifts: null };
-
-  // Rostered, yet BuddyX never saw them: absent, or working under a chatter id
-  // nobody has linked. Either way an admin needs to know.
-  if (params.rosteredShifts > 0 && !params.onlineMs) {
-    out.push({ ...base, kind: 'never-online', severity: 'high', shifts: params.rosteredShifts, days: [] });
-  }
+  const base = { uid, name, minutes: null };
 
   const days = params.integrityDays ?? [];
   const summary = summariseIntegrity(days);

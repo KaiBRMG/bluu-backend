@@ -1,6 +1,6 @@
 'use client';
 
-import { SOURCE_MIX_COLORS } from '@/lib/buddyx/chartColors';
+import { SOURCE_MIX_COLORS } from '@/lib/analytics/chartColors';
 import { formatUsd } from '@/lib/salary/salaryFormat';
 
 /**

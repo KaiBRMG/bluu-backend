@@ -10,19 +10,19 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
-import { PeriodPicker, monthName } from '@/components/buddyx/PeriodPicker';
-import { SyncStatus } from '@/components/buddyx/SyncStatus';
-import { SourceMixBar } from '@/components/buddyx/SourceMixBar';
-import { BasisTag, LegendSwatch, KpiTile, Fact, LoadError, LINK_REVENUE_NOTE, SEGMENT } from '@/components/buddyx/buddyxUi';
+import { PeriodPicker, monthName } from '@/components/analytics/PeriodPicker';
+import { SyncFreshness } from '@/components/onlymonster/SyncFreshness';
+import { SourceMixBar } from '@/components/analytics/SourceMixBar';
+import { BasisTag, LegendSwatch, KpiTile, Fact, LoadError, LINK_REVENUE_NOTE, SEGMENT } from '@/components/analytics/analyticsUi';
 import { CreatorAvatar, CreatorChip } from '@/components/creators/CreatorChip';
 import { Sparkline } from '@/components/growth/Sparkline';
 import { useCreatorMap } from '@/hooks/useCreators';
-import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
+import { useAnalytics } from '@/hooks/useAnalytics';
 import { formatUsd } from '@/lib/salary/salaryFormat';
 import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
-import { atBasis, formatCount, formatDuration, formatShare, type MoneyBasis } from '@/lib/buddyx/analyticsFormat';
-import { SEQUENTIAL_COLOR, SOURCE_MIX_COLORS } from '@/lib/buddyx/chartColors';
-import type { CreatorAnalytics, CreatorIdentity } from '@/lib/buddyx/analyticsTypes';
+import { atBasis, formatCount, formatDuration, formatShare, type MoneyBasis } from '@/lib/analytics/analyticsFormat';
+import { SEQUENTIAL_COLOR, SOURCE_MIX_COLORS } from '@/lib/analytics/chartColors';
+import type { CreatorAnalytics, CreatorIdentity } from '@/lib/analytics/analyticsTypes';
 
 /**
  * OnlyFans Analytics — `/creator-portal/onlyfans-analytics` (internal only).
@@ -31,14 +31,14 @@ import type { CreatorAnalytics, CreatorIdentity } from '@/lib/buddyx/analyticsTy
  * works?" **Roster first**, on the metric-roster pattern (DESIGN.md §5): one
  * card per creator with its own-scale sparkline and a source-mix bar; selecting
  * a card scopes everything below it. The history runs back to October 2025 as
- * one series — the Infloww import kept only the fields BuddyX continues — and
- * the cutover is drawn where the source changes.
+ * one series — Infloww's import, then BuddyX's archive, then OnlyMonster — and
+ * the cutover is drawn where OnlyMonster begins.
  *
  * **Gross / net toggle — opens on net**, the figure OnlyFans' own statements
  * show, so the page reconciles with them by default. Every earnings figure follows it (net = summed gross
  * × 0.8, derived here — the response stays gross) and wears a GROSS/NET tag.
  * Percentages, shares and the source mix are the same at either basis. Link
- * revenue does not follow it: BuddyX does not say which basis that is.
+ * revenue does not follow it: the archived BuddyX figures never said which basis.
  */
 
 type Preset = 'mtd' | 'prev-month' | 'month-2' | '3m' | '6m' | '12m';
@@ -99,7 +99,7 @@ export default function OnlyFansAnalyticsPage() {
   const url = range
     ? `/api/analytics/creators?from=${range.from}&to=${range.to}${creatorId ? `&creatorId=${encodeURIComponent(creatorId)}` : ''}`
     : null;
-  const { data, loading, error, reload } = useBuddyxAnalytics<CreatorAnalytics>(url);
+  const { data, loading, error, reload } = useAnalytics<CreatorAnalytics>(url);
 
   return (
     <AppLayout>
@@ -107,7 +107,7 @@ export default function OnlyFansAnalyticsPage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">OnlyFans Analytics</h1>
-            <p className="mt-1 text-sm text-zinc-400">Each creator&apos;s earnings, subscribers and links — {data?.source === 'onlymonster' ? 'from OnlyMonster, with earlier days from the Infloww and BuddyX history' : 'Infloww history, then BuddyX'}. Gross is what fans paid; net is the creator&apos;s 80% after OnlyFans&apos; 20% — the figure OnlyFans&apos; own statements show.</p>
+            <p className="mt-1 text-sm text-zinc-400">Each creator&apos;s earnings, subscribers and links — from OnlyMonster, with earlier days from the Infloww and BuddyX history. Gross is what fans paid; net is the creator&apos;s 80% after OnlyFans&apos; 20% — the figure OnlyFans&apos; own statements show.</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <ToggleGroup
@@ -132,7 +132,7 @@ export default function OnlyFansAnalyticsPage() {
                 setCustom({ from, to });
               }}
             />
-            <SyncStatus scope="creators" onSynced={() => void reload(true)} />
+            <SyncFreshness />
           </div>
         </div>
 
@@ -164,8 +164,8 @@ function vsPrevious(current: number, previous: number | null): string {
 
 /**
  * How an account that is not an active Bluu creator is marked. History keeps
- * archived creators (named, greyed) and shows BuddyX creators Bluu cannot place
- * (orange — someone should map them in CA Admin → Sales → Mapping).
+ * archived creators (named, greyed) and archived BuddyX creators Bluu could
+ * never place (orange).
  */
 const STATUS_NOTE: Record<Exclude<CreatorIdentity['status'], 'active'>, { label: string; title: string; className: string }> = {
   archived: {
@@ -175,12 +175,12 @@ const STATUS_NOTE: Record<Exclude<CreatorIdentity['status'], 'active'>, { label:
   },
   unmapped: {
     label: 'Not in Bluu',
-    title: 'A BuddyX creator not linked to any Bluu creator. Link it in CA Admin → Sales → Mapping.',
+    title: 'A creator from the BuddyX history that was never linked to a Bluu creator.',
     className: 'bg-orange-500/15 text-orange-400',
   },
   missing: {
     label: 'Deleted in Bluu',
-    title: 'BuddyX is linked to a creator that no longer exists in Bluu. Re-link it in CA Admin → Sales → Mapping.',
+    title: 'History linked to a creator that no longer exists in Bluu.',
     className: 'bg-orange-500/15 text-orange-400',
   },
 };
@@ -212,9 +212,6 @@ function Body({ data, basis, selected, onSelect }: { data: CreatorAnalytics; bas
     );
   };
   const showCutover = data.from < data.cutoverDay && data.to >= data.cutoverDay;
-  // Older deployments send no `source`; they are BuddyX.
-  const fromOnlyMonster = data.source === 'onlymonster';
-  const newSource = fromOnlyMonster ? 'OnlyMonster' : 'BuddyX';
   const subscriberDays = data.daily.filter(d => d.day < data.subscribersFrom);
   // Keys stay `*Gross` so the chart config is shared; the values follow the toggle.
   const earningsDays =
@@ -315,7 +312,7 @@ function Body({ data, basis, selected, onSelect }: { data: CreatorAnalytics; bas
         </h2>
         <p className="mt-0.5 text-[11px] text-zinc-400">
           {basis === 'net' ? 'Net per day — 80% of gross.' : 'Gross per day — net is 80% of each.'} Days with no data are gaps, not zeros.
-          {showCutover && ` The hairline marks where the earlier history ends and ${newSource} begins.`}
+          {showCutover && ' The hairline marks where the earlier history ends and OnlyMonster begins.'}
         </p>
         {data.daily.length === 0 ? (
           <p className="mt-3 text-sm text-zinc-400">No creator statistics in this range.</p>
@@ -327,7 +324,7 @@ function Body({ data, basis, selected, onSelect }: { data: CreatorAnalytics; bas
               <YAxis tickLine={false} axisLine={false} width={56} tickFormatter={v => `$${v}`} />
               <ChartTooltip content={<ChartTooltipContent labelFormatter={l => formatDayLabelWithWeekday(String(l))} formatter={(v, n) => [` ${formatUsd(Number(v))}`, `${earningsConfig[n as keyof typeof earningsConfig]?.label ?? String(n)} (${basis})`]} />} />
               {showCutover && (
-                <ReferenceLine x={data.cutoverDay} stroke="rgba(255,255,255,0.35)" strokeDasharray="3 3" label={{ value: fromOnlyMonster ? '→ OnlyMonster' : 'Infloww → BuddyX', position: 'insideTopLeft', fill: '#a1a1aa', fontSize: 11 }} />
+                <ReferenceLine x={data.cutoverDay} stroke="rgba(255,255,255,0.35)" strokeDasharray="3 3" label={{ value: '→ OnlyMonster', position: 'insideTopLeft', fill: '#a1a1aa', fontSize: 11 }} />
               )}
               <Area dataKey="subsGross" stackId="s" type="monotone" stroke="var(--color-subsGross)" strokeWidth={2} fill="var(--color-subsGross)" fillOpacity={0.35} connectNulls={false} />
               <Area dataKey="tipsGross" stackId="s" type="monotone" stroke="var(--color-tipsGross)" strokeWidth={2} fill="var(--color-tipsGross)" fillOpacity={0.35} connectNulls={false} />
@@ -342,7 +339,7 @@ function Body({ data, basis, selected, onSelect }: { data: CreatorAnalytics; bas
         <section className={cn('rounded-xl p-5', SURFACE)} aria-labelledby="subscribers">
           <h2 id="subscribers" className="text-sm font-semibold">Subscribers</h2>
           <p className="mt-0.5 text-[11px] text-zinc-400">
-            {fromOnlyMonster ? 'New, returning and free-trial subscribers by day, from OnlyMonster.' : 'New, returning and free-trial subscribers by day, from BuddyX (from 25 Sep 2026).'}
+            New, returning and free-trial subscribers by day, from OnlyMonster.
             {subscriberDays.length > 0 && ' Earlier days show total new subscribers only.'}
           </p>
           {subscriberDays.length > 0 && (
@@ -388,10 +385,10 @@ function Body({ data, basis, selected, onSelect }: { data: CreatorAnalytics; bas
             <Fact label="Mass messages" value={formatCount(data.mass.count)} meta={data.mass.avgPrice !== null ? `avg list price ${formatUsd(data.mass.avgPrice)}` : 'all free'} />
             <Fact label="Unsend rate" value={formatShare(data.mass.unsentRate)} />
             <Fact
-              label={fromOnlyMonster ? 'Reply time' : 'Median reply time'}
+              label="Reply time"
               value={formatDuration(data.messaging.replyTimeMs)}
               // OnlyMonster reports an average, BuddyX a median: never one axis (plan §3.2).
-              meta={fromOnlyMonster ? 'middle of the daily averages (OnlyMonster reports averages, not medians)' : showCutover ? 'BuddyX days only — Infloww reported an average, not a median' : undefined}
+              meta="middle of the daily averages (OnlyMonster reports averages, not medians)"
             />
           </dl>
           {data.revShareGross !== null && (
@@ -406,7 +403,7 @@ function Body({ data, basis, selected, onSelect }: { data: CreatorAnalytics; bas
       <section className={cn('rounded-xl p-5', SURFACE)} aria-labelledby="links">
         <h2 id="links" className="text-sm font-semibold">Links</h2>
         <p className="mt-0.5 text-[11px] text-zinc-400">
-          Tracking and free-trial links, by revenue — as BuddyX reports it; its API does not say whether link revenue is gross or net. The trend is new revenue per day since the link was first synced. ROI is (revenue − cost) ÷ cost; a free link shows “—”.
+          Tracking and free-trial links, by revenue — BuddyX&apos;s archived table (to 5 Nov 2026; OnlyMonster has no link figures), which never said whether link revenue is gross or net. The trend is new revenue per day since the link was first synced. ROI is (revenue − cost) ÷ cost; a free link shows “—”.
         </p>
         {data.links.length === 0 ? (
           <p className="mt-3 text-sm text-zinc-400">No links synced for {name(selected)}.</p>

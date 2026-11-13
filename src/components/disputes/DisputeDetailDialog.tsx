@@ -21,7 +21,7 @@ import {
 import { DisputeCreatorChip, OVERTURN_COPY, PersonTag, StagePill, RejectReasonBar, type ReasonBarCopy } from './disputeUi';
 import type { DisputeVerdict } from './DisputeReviewQueue';
 import { CreatorChip } from '@/components/creators/CreatorChip';
-import { AttrChip, BasisTag, FanLabel } from '@/components/buddyx/buddyxUi';
+import { AttrChip, BasisTag, FanLabel } from '@/components/analytics/analyticsUi';
 import { formatSaleDateTime } from '@/lib/salary/salaryFormat';
 import { saleTypeLabel } from '@/lib/salary/saleTypes';
 

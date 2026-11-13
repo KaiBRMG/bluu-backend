@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { checkPageAccess, handleApiError } from '@/lib/middleware/apiHelpers';
-import { analyticsAccess, ANALYTICS_CACHE_HEADERS } from '@/lib/buddyx/analyticsAuth';
+import { analyticsAccess, ANALYTICS_CACHE_HEADERS } from '@/lib/analytics/analyticsAuth';
 import { getShiftDetail } from '@/lib/services/chatterIntegrityService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 

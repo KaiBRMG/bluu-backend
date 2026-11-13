@@ -16,7 +16,7 @@ import { getCache, setCache } from '@/lib/queryCache';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { formatMonthLabel, formatMonthLabelShort } from '@/lib/salary/salaryDate';
 import { formatHours, formatUsd, formatUsdCompact, pluralise, signedMoneyClass } from '@/lib/salary/salaryFormat';
-import { BasisTag } from '@/components/buddyx/buddyxUi';
+import { BasisTag } from '@/components/analytics/analyticsUi';
 
 /**
  * The month above the roster: where the revenue came from, and what it cost.
@@ -309,8 +309,8 @@ function Overview({ data }: { data: OverviewResponse }) {
         <div className={cn('rounded-xl p-6 text-center', SURFACE)}>
           <p className="text-sm font-medium">No sales recorded for {formatMonthLabel(data.month)}.</p>
           <p className="mx-auto mt-1 max-w-md text-sm text-zinc-400">
-            The breakdown by creator is built from the sales BuddyX syncs in. If the month has started and this is
-            still empty, check the sync status on the <span className="text-foreground">Sales</span> tab.
+            The breakdown by creator is built from the sales the OnlyMonster sync writes. If the month has started and
+            this is still empty, check the OnlyMonster mapping on the <span className="text-foreground">Sales</span> tab.
           </p>
         </div>
       )}
@@ -533,7 +533,7 @@ function AttentionBand({
             people={attention.agentsWithoutSales.map(a => ({ uid: a.uid, name: a.displayName }))}
             max={8}
           />{' '}
-          — either they did not work, or their BuddyX chatter is not mapped to them (Sales → Mapping).
+          — either they did not work, or no single agent was on shift for their sales (unassigned sales are on the Sales tab).
         </>
       ),
     });

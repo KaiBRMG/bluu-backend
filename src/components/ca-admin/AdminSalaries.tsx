@@ -47,7 +47,7 @@ import { SELECT_BOX_CLASS } from '@/lib/surfaces';
 import { formatHours, formatPercent, formatRelative, formatUsd, pluralise } from '@/lib/salary/salaryFormat';
 import type { SalaryMonthTotals, SalaryTierProgress } from '@/lib/salary/salaryTypes';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
-import { BasisTag } from '@/components/buddyx/buddyxUi';
+import { BasisTag } from '@/components/analytics/analyticsUi';
 
 /**
  * Payroll: every chat agent's month, and one agent's month in detail.

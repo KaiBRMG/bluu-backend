@@ -23,10 +23,10 @@ import { useUserData } from '@/hooks/useUserData';
 import { activeChatAgents, useBasicUsers } from '@/hooks/useBasicUsers';
 import { SALARY_HISTORY_START_MONTH } from '@/lib/salary/salaryConstants';
 import { addDays, addMonths, currentDayKey, currentMonthKey, enumerateDays, formatDayLabel, formatMonthName } from '@/lib/salary/salaryDate';
-import { SyncStatus } from '@/components/buddyx/SyncStatus';
-import { PeriodPicker, dayKeyToDate } from '@/components/buddyx/PeriodPicker';
-import { CreatorCombobox } from '@/components/buddyx/CreatorCombobox';
-import { AttrChip, BasisTag, FanLabel, InfoTip, LEDGER_NET_NOTE, LEDGER_PPV_ATTRIBUTION, SEGMENT, LEDGER_TIPS_ATTRIBUTION } from '@/components/buddyx/buddyxUi';
+import { SyncFreshness } from '@/components/onlymonster/SyncFreshness';
+import { PeriodPicker, dayKeyToDate } from '@/components/analytics/PeriodPicker';
+import { CreatorCombobox } from '@/components/analytics/CreatorCombobox';
+import { AttrChip, BasisTag, FanLabel, InfoTip, LEDGER_NET_NOTE, LEDGER_PPV_ATTRIBUTION, SEGMENT, LEDGER_TIPS_ATTRIBUTION } from '@/components/analytics/analyticsUi';
 import { CreatorChip } from '@/components/creators/CreatorChip';
 import { PersonTag } from '@/components/disputes/disputeUi';
 import { buddyxCreditName, holderName, SaleHolderNote } from '@/components/salary/SaleHolderNote';
@@ -123,33 +123,6 @@ interface AllSalesResponse {
 interface Focus {
   label: string;
   ids: Set<string>;
-}
-
-interface MappingResponse {
-  chatters: Array<{
-    chatterId: string;
-    name: string | null;
-    email: string | null;
-    status: string | null;
-    uid: string | null;
-    displayName: string | null;
-    match: 'email' | 'manual' | 'none';
-  }>;
-  models: Array<{
-    modelId: string;
-    handle: string | null;
-    customName: string | null;
-    creatorId: string | null;
-    creatorName: string | null;
-    match: 'handle' | 'manual' | 'none';
-  }>;
-}
-
-/** Only what the attention band reads from the last sync. */
-interface SyncRun {
-  scopes: string[];
-  counts: Record<string, number>;
-  dryRun: boolean;
 }
 
 type KindFilter = 'all' | 'tip' | 'ppv';
@@ -254,9 +227,6 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
   const [data, setData] = useState<AllSalesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [mapping, setMapping] = useState<MappingResponse | null>(null);
-  const [mappingOpen, setMappingOpen] = useState(false);
-  const [lastRun, setLastRun] = useState<SyncRun | null>(null);
 
   // ── Filters ──
   // Derived, not copied into state: the page reads `?tab=disputes` after its
@@ -305,30 +275,9 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
     [user, range.from, range.to, rangeProblem, authed],
   );
 
-  const loadMapping = useCallback(async () => {
-    try {
-      setMapping((await authed('/api/admin/buddyx/mapping')) as MappingResponse);
-    } catch {
-      /* the band falls back to what the ledger alone can say */
-    }
-  }, [authed]);
-
-  const loadLastRun = useCallback(async () => {
-    try {
-      const { runs } = (await authed('/api/admin/buddyx/runs')) as { runs: SyncRun[] };
-      setLastRun(runs.find(r => r.scopes.includes('sales') && !r.dryRun) ?? null);
-    } catch {
-      /* the last-sync lines are simply absent */
-    }
-  }, [authed]);
-
   useEffect(() => {
     void load();
   }, [load]);
-  useEffect(() => {
-    void loadMapping();
-    void loadLastRun();
-  }, [loadMapping, loadLastRun]);
 
   const schedule = useMemo(() => data?.schedule ?? {}, [data]);
   const disputeMarks = useMemo(() => data?.disputes ?? {}, [data]);
@@ -605,29 +554,14 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
       });
     }
 
-    const unmappedRows = new Map<string, { count: number; gross: number }>();
-    for (const s of live) {
-      if (!s.unmappedChatterId) continue;
-      const e = unmappedRows.get(s.unmappedChatterId) ?? { count: 0, gross: 0 };
-      e.count += 1;
-      e.gross += s.signedGross;
-      unmappedRows.set(s.unmappedChatterId, e);
-    }
-    for (const c of mapping?.chatters.filter(c => !c.uid) ?? []) {
-      const rows = unmappedRows.get(c.chatterId);
-      if (!rows && c.status !== 'active') continue;
+    // BuddyX-era sales from a BuddyX chatter that matched no Bluu user. BuddyX is
+    // retired, so the mapping can no longer be fixed: reassign them from the ledger.
+    const unmapped = live.filter(s => s.unmappedChatterId && !s.userId);
+    if (unmapped.length > 0) {
       lines.push({
-        key: `chatter-${c.chatterId}`,
-        text: `BuddyX chatter ${c.name ?? c.chatterId}${c.email ? ` (${c.email})` : ''} matches no Bluu user${rows ? ` — ${pluralise(rows.count, 'sale')}, ${formatUsd(rows.gross)}` : ''}`,
-        action: { label: 'Open mapping', run: () => setMappingOpen(true) },
-      });
-    }
-    for (const m of mapping?.models.filter(m => !m.creatorId) ?? []) {
-      const rows = live.filter(s => !s.creatorId && s.creatorName === (m.handle ?? ''));
-      lines.push({
-        key: `model-${m.modelId}`,
-        text: `BuddyX creator @${m.handle ?? m.modelId} matches no creator${rows.length ? ` — ${pluralise(rows.length, 'sale')}` : ''}`,
-        action: { label: 'Open mapping', run: () => setMappingOpen(true) },
+        key: 'unmapped-chatter',
+        text: `${pluralise(unmapped.length, 'BuddyX-era sale')}, ${formatUsd(unmapped.reduce((t, x) => t + x.signedGross, 0))}, came from a BuddyX chatter linked to no Bluu user — assign them`,
+        action: { label: 'Show them', run: () => showRows('From an unlinked BuddyX chatter', unmapped.map(x => x.saleId)) },
       });
     }
     const unassignedIds = (k: 'tip' | 'ppv') => live.filter(s => !s.userId && !s.unmappedChatterId && s.kind === k).map(s => s.saleId);
@@ -662,7 +596,7 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
     if (data.flags.possibleDuplicates.length > 0) {
       lines.push({
         key: 'duplicates',
-        text: `${pluralise(data.flags.possibleDuplicates.length, 'sale')} share a creator, fan, time and amount with another row — check BuddyX for a double entry`,
+        text: `${pluralise(data.flags.possibleDuplicates.length, 'sale')} share a creator, fan, time and amount with another row — check for a double entry`,
         action: { label: 'Show them', run: () => showRows('Possible duplicates', data.flags.possibleDuplicates) },
       });
     }
@@ -725,24 +659,10 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
       });
     }
 
-    const counts = lastRun?.counts ?? {};
-    const refused = counts['sales.rejectedFinalized'] ?? 0;
-    if (refused > 0) lines.push({ key: 'refused', text: `The last sync refused ${pluralise(refused, 'change')} to a finalised month` });
-    const unplaceable = counts['sales.unplaceable'] ?? 0;
-    if (unplaceable > 0) {
-      lines.push({ key: 'unplaceable', text: `The last sync could not place ${pluralise(unplaceable, 'BuddyX row')} (no id or no date) — they are not in the ledger` });
-    }
-    const ambiguous = counts['sales.rekeyAmbiguous'] ?? 0;
-    if (ambiguous > 0) {
-      lines.push({
-        key: 'rekey-ambiguous',
-        text: `The last sync saw ${pluralise(ambiguous, 'BuddyX row')} change id where more than one stored sale matched — any move on the old row did not carry over`,
-      });
-    }
     return lines;
     // `showRows`/`showView` only call setters; listing them would re-derive the band every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, mapping, lastRun, rulings]);
+  }, [data, rulings]);
 
   const rangeLabel = range.from && range.to ? (range.from === range.to ? formatDayLabel(range.from) : `${formatDayLabel(range.from)} – ${formatDayLabel(range.to)}`) : '';
   const month = currentDayKey().slice(0, 7);
@@ -784,7 +704,7 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
               setCustomTo(nextTo);
             }}
           />
-          <SyncStatus scope="sales" onSynced={() => { void load(true); void loadLastRun(); }} />
+          <SyncFreshness />
         </div>
       </div>
 
@@ -1182,9 +1102,6 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
       />
 
       {/* ── Machinery, collapsed ── */}
-      <Section title="Mapping" open={mappingOpen} onOpenChange={setMappingOpen}>
-        <MappingSection mapping={mapping} isAdmin={isAdmin} authed={authed} onChanged={loadMapping} />
-      </Section>
       {/* BuddyX → OnlyMonster migration, Phase 1: identity only, no pay impact.
           Its content mounts (and fetches) only when opened. */}
       <Section title="OnlyMonster mapping">
@@ -1542,7 +1459,7 @@ function ReassignSaleDialog({
         <DialogHeader>
           <DialogTitle>{sale.userId ? 'Reassign sale' : 'Assign sale'}</DialogTitle>
           <DialogDescription>
-            Moves the sale in Bluu Backend. Pay follows it, and later BuddyX syncs keep it.
+            Moves the sale in Bluu Backend. Pay follows it.
           </DialogDescription>
         </DialogHeader>
 
@@ -1659,112 +1576,3 @@ function Section({
 
 type Authed = ReturnType<typeof useAuthFetch>;
 
-function MappingSection({
-  mapping,
-  isAdmin,
-  authed,
-  onChanged,
-}: {
-  mapping: MappingResponse | null;
-  isAdmin: boolean;
-  authed: Authed;
-  onChanged: () => Promise<void>;
-}) {
-  const { users } = useBasicUsers(isAdmin);
-  const [busy, setBusy] = useState<string | null>(null);
-
-  const link = async (kind: 'chatter' | 'model', id: string, target: string | null) => {
-    setBusy(id);
-    try {
-      await authed('/api/admin/buddyx/mapping', { method: 'PATCH', body: JSON.stringify({ kind, id, target }) });
-      await onChanged();
-      toast.success(target ? 'Linked — open-month sales re-stamp on the next sync' : 'Manual link cleared — the automatic match applies on the next sync');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not save the link');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  if (!mapping) return <Skeleton className="h-32 w-full rounded-lg" />;
-
-  const matchLabel: Record<string, string> = { email: 'email', handle: 'handle', manual: 'manual', none: 'unmatched' };
-
-  return (
-    <div className="space-y-5">
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Chatters</h3>
-        {mapping.chatters.length === 0 ? (
-          <p className="mt-2 text-sm text-zinc-400">No BuddyX team members synced yet.</p>
-        ) : (
-          <ul className="mt-2 divide-y divide-white/[0.07]">
-            {mapping.chatters.map(c => (
-              <li key={c.chatterId} className="flex flex-wrap items-center gap-3 py-2 text-sm">
-                <span className="min-w-0 flex-1">
-                  {c.name ?? `Chatter ${c.chatterId}`}
-                  <span className="block truncate text-[11px] text-zinc-400">
-                    {c.email ?? 'no email'} · <span className="font-mono">{c.chatterId}</span>
-                    {c.status && c.status !== 'active' && ` · ${c.status}`}
-                  </span>
-                </span>
-                <span className="w-44">
-                  {c.uid ? <PersonTag name={c.displayName ?? ''} photoURL={null} size="sm" /> : <span className="text-xs text-orange-400">No Bluu user</span>}
-                </span>
-                <AttrChip>{matchLabel[c.match]}</AttrChip>
-                {isAdmin && (
-                  <Select
-                    value={c.match === 'manual' ? c.uid ?? '__none__' : '__none__'}
-                    onValueChange={v => void link('chatter', c.chatterId, v === '__none__' ? null : v)}
-                    disabled={busy === c.chatterId}
-                  >
-                    <SelectTrigger size="sm" className="w-44" aria-label={`Link ${c.name ?? c.chatterId} manually`}>
-                      <SelectValue placeholder="Link manually" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Automatic (by email)</SelectItem>
-                      {activeChatAgents(users).map(u => <SelectItem key={u.uid} value={u.uid}>{u.displayName}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Creators</h3>
-        {mapping.models.length === 0 ? (
-          <p className="mt-2 text-sm text-zinc-400">No BuddyX creators synced yet.</p>
-        ) : (
-          <ul className="mt-2 divide-y divide-white/[0.07]">
-            {mapping.models.map(m => (
-              <li key={m.modelId} className="flex flex-wrap items-center gap-3 py-2 text-sm">
-                <span className="min-w-0 flex-1">
-                  @{m.handle ?? '—'}
-                  <span className="block truncate text-[11px] text-zinc-400">
-                    {m.customName ? `${m.customName} · ` : ''}<span className="font-mono">{m.modelId}</span>
-                  </span>
-                </span>
-                <span className="w-44">
-                  {m.creatorId ? <CreatorChip creatorId={m.creatorId} size="xs" /> : <span className="text-xs text-orange-400">No creator</span>}
-                </span>
-                <AttrChip>{matchLabel[m.match]}</AttrChip>
-                {isAdmin && (
-                  <CreatorCombobox
-                    value={m.match === 'manual' ? m.creatorId : null}
-                    onChange={id => void link('model', m.modelId, id)}
-                    allLabel="Automatic (by handle)"
-                    ariaLabel={`Link @${m.handle ?? m.modelId} manually`}
-                    className="w-44"
-                  />
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-      {!isAdmin && <p className="text-[11px] text-zinc-400">Linking manually needs an administrator account.</p>}
-    </div>
-  );
-}

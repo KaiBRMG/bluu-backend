@@ -17,7 +17,7 @@ import { ONLYFANS_PLATFORM } from '../creators/accountPlatform';
 
 /**
  * `@Handle`, `handle`, `onlyfans.com/handle`, `https://onlyfans.com/handle/` →
- * `handle`. The same fold as BuddyX's (`lib/buddyx/mapping.ts`), held here so
+ * `handle`. The same fold the retired BuddyX mapping used, held here so
  * this module survives BuddyX's removal (migration plan §9.1).
  */
 export function foldHandle(raw: string | null | undefined): string {

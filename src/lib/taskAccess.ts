@@ -148,6 +148,19 @@ export function isOutstanding(task: Pick<TaskDocument, 'kind' | 'status'>): bool
   return task.kind === 'role' ? task.status === 'Active' : task.status !== 'Done';
 }
 
+/** Soonest due first, undated last, then most recently touched. Overdue tasks therefore lead. */
+export function compareByDueThenRecent(
+  a: Pick<TaskDocument, 'dueDate' | 'updatedAt'>,
+  b: Pick<TaskDocument, 'dueDate' | 'updatedAt'>
+): number {
+  if (a.dueDate !== b.dueDate) {
+    if (!a.dueDate) return 1;
+    if (!b.dueDate) return -1;
+    return a.dueDate < b.dueDate ? -1 : 1;
+  }
+  return b.updatedAt.localeCompare(a.updatedAt);
+}
+
 /** Finished with: Done (a task) or Ended (a role). */
 export function isClosedStatus(status: TaskStatus): boolean {
   return status === 'Done' || status === 'Ended';

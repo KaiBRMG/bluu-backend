@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
-import { analyticsAccess } from '@/lib/buddyx/analyticsAuth';
+import { analyticsAccess } from '@/lib/analytics/analyticsAuth';
 import { getUserById } from '@/lib/services/userService';
 import { canViewFan } from '@/lib/services/fanBaseService';
 import { setManualFanName } from '@/lib/services/fanRegistryService';

@@ -1,8 +1,8 @@
 # OnlyMonster
 
-OnlyMonster is replacing BuddyX as Bluu's source of OnlyFans data. **The migration plan of record is [`onlymonster-migration.md`](../onlymonster-migration.md)**: decisions D1–D15, proposals P1–P7, invariants, phases and gates. This spoke documents **what is built**. It grows phase by phase, and each phase updates it in the same change.
+OnlyMonster is Bluu's source of OnlyFans data; it replaced BuddyX, which is retired ([buddyx.md](buddyx.md)). **The migration plan of record is [`onlymonster-migration.md`](../onlymonster-migration.md)**: decisions D1–D15, proposals P1–P7, invariants, phases and gates. This spoke documents **what is built**. It grows phase by phase, and each phase updates it in the same change.
 
-**Status (2026-11-11): Phases 1–5 and 7 are built; Phase 6 waits for its precondition.** BuddyX still writes every `ca-sales` row. OnlyMonster pay rows go to `ca-sales-shadow` until the Phase 4 switches are set (`ONLYMONSTER_CUTOVER_AT` and `config.salesWriteEnabled`). The analytics surfaces read OnlyMonster only once `config.analyticsSource` is flipped. See [Switches](#switches) and [What is gated](#what-is-gated-and-on-what).
+**Status (2026-11-13): Phases 1–5 and 7 are built, and Phase 6 has removed BuddyX's code.** The cutover is set (`ONLYMONSTER_CUTOVER_AT`, 2026-11-06 01:00 SAST). BuddyX's rows before it are frozen pay history. **`config.salesWriteEnabled` was switched on 2026-11-13**: OnlyMonster writes `ca-sales/om-*` for every sale after the cutover, and the shadow rows remain as evidence. The analytics surfaces always read OnlyMonster. See [Switches](#switches) and [What is gated](#what-is-gated-and-on-what).
 
 API spec: [`OnlyMonsterAPI.md`](../OnlyMonsterAPI.md) (om-api-service v0.77.0). Webhooks ([`OnlyMonsterWebhooks.md`](../OnlyMonsterWebhooks.md)) are not used (D14).
 
@@ -129,30 +129,30 @@ The pure planner [`payPlan.ts`](../src/lib/onlymonster/payPlan.ts), with its I/O
 
 The ledger UI (CA Admin → Sales, Sales Report) labels `om-*` rows **OnlyMonster** and leaves *Source credits* empty. [`SaleHolderNote`](../src/components/salary/SaleHolderNote.tsx) says *Nobody on shift* / *Overlapping shifts* (naming the candidates) / *Agent had left* / *Pending return*. The attention band lists each.
 
-**Cutover (§5.7).** `salesSourceFor` has three sides; `ONLYMONSTER_CUTOVER_AT` is 2026-11-06 01:00 SAST (D25). BuddyX's vanished pass never removes a row after the cutover (`planSalesSync({ ownedUntil })`). Disputes accept anything after the Infloww cutover.
+**Cutover (§5.7).** `salesSourceFor` has three sides; `ONLYMONSTER_CUTOVER_AT` is 2026-11-06 01:00 SAST (D25). It must stay: it is what stops this derivation writing a sale the frozen BuddyX rows already hold (double pay). Disputes accept anything after the Infloww cutover.
 
 ## Analytics
 
-All three switch on `config.analyticsSource`, read per request with a 30 s cache:
+All three read OnlyMonster's collections and the BuddyX archive (`ofAnalyticsService.ts`; the `analyticsSource` switch went with BuddyX):
 
 - **OnlyFans Analytics:** earnings from `account-days` (stitched), subscribers from `of-subscription-days`, mass messages from `of-mass-messages`. Links stay on `buddyx-links` until the fan-registry move.
-- **Chatter Analytics:** activity from `chatter-days`. **Revenue always comes from the `ca-sales` ledger.** Online time is null (D12), and reply time is an average, never a median. 27 Sep – 31 Oct 2026 come from BuddyX's days, copied into `chatter-days` as `buddyx-historical` (D24, `scripts/onlymonster-carry-buddyx-activity.js`, run 2026-11-11: 35 days).
+- **Chatter Analytics:** activity from `chatter-days`. **Revenue always comes from the `ca-sales` ledger.** Online time and reply-time medians are gone (D12; their keys stay null for stale renderers), and so is the `never-online` flag. 27 Sep – 31 Oct 2026 come from BuddyX's days, copied into `chatter-days` as `buddyx-historical` (D24, run 2026-11-11: 35 days).
 - **The sales board never shows OnlyMonster's per-member revenue** (rule 9k): those rows are dropped from its unlinked list.
 - **D13 cross-check:** the admin-only report shows *"OnlyMonster attributes $X"* under Sales, with *(check the schedule)* past 15% and $50. It is never pay.
-- **Fan Analytics:** `creator-fans` (every category; `spendByMonth[month].{tips,ppv,subs,other,…}`) instead of `buddyx-fans`. Display-name write-through updates both while both exist.
+- **Fan Analytics:** `creator-fans` (every category; `spendByMonth[month].{tips,ppv,subs,other,…}`); subscribers from `of-subscription-days`. Admin scope and the dispute picker use `mappedCreatorIds()` (`onlymonsterMappingService.ts`, via `/api/onlymonster/creators`).
+- **Page headers** show `SyncFreshness` → `DataFreshness` ("Updated 13:01 · next 21:01") from `GET /api/onlymonster/status`. There is no refresh button (D10).
 
 ## Switches
 
 | Switch | Where | Effect |
 |---|---|---|
-| `config.analyticsSource` | CA Admin → Sales → OnlyMonster mapping (admin claim) | `buddyx` / `onlymonster` for OnlyFans, Chatter and Fan Analytics. Reversible, no deploy. |
-| `ONLYMONSTER_CUTOVER_AT` | `salaryConstants.ts` (deploy) | **2026-11-06 01:00 SAST** (D25). BuddyX owns sales at or before it, OnlyMonster after. `Infinity` would hand everything back to BuddyX (rollback). |
+| `ONLYMONSTER_CUTOVER_AT` | `salaryConstants.ts` (deploy) | **2026-11-06 01:00 SAST** (D25). BuddyX owns sales at or before it, OnlyMonster after. **No rollback any more**: BuddyX is gone, so nothing would re-pull its side. |
 | `config.salesWriteEnabled` | `PATCH /api/admin/onlymonster/config` (admin claim) | Off → `ca-sales-shadow` only. On (refused while the cutover is unset) → `ca-sales/om-*`. |
 | `FAN_REGISTRY` | `fanRegistryService.ts` (deploy) | `buddyx-fan-names` → `fans`, after `scripts/migrate-fan-registry.js --copy` / `--verify`, then `--delta`. |
 
 ## Admin views (CA Admin → Sales)
 
-- **OnlyMonster mapping:** mapping, freshness, the backfill's progress, the reconciliation per account-month (✓, or the difference), the analytics source switch, and payout balances (admin claim).
+- **OnlyMonster mapping:** mapping, freshness, the backfill's progress, the reconciliation per account-month (✓, or the difference), and payout balances (admin claim).
 - **Shadow reconciliation:** paid vs OnlyFans per account-day; agent-days; the strict rule's impact per agent; unassigned totals by reason; chargebacks; accounts BuddyX pays that OnlyMonster doesn't cover; and, once the cutover is set, the boundary check (rows on the wrong side must be zero).
 
 ## Scripts
@@ -162,20 +162,17 @@ All three switch on `config.analyticsSource`, read per request with a 30 s cache
 | `onlymonster-probe.js` | GET-only probe (Phase 0, V-items). `--history-only`, `--coverage`, `--compare-bluu`. |
 | `archive-collection.js` | Export / verify / confirmed delete; `--backup <label>` for the pay collections. |
 | `backfill-account-platform.js` | The 2026-11-11 `platform` backfill (done: 18 docs). |
-| `onlymonster-carry-buddyx-activity.js` | D24 (done: 35 days). |
 | `migrate-fan-registry.js` | `buddyx-fan-names` → `fans`. |
-| `onlymonster-rollback.js` | Phase 4 rollback: soft-remove `om-*` rows, replay pay decisions onto `bx-*` on a unique match only. |
 
 ## What is gated, and on what
 
 | Step | Waits for |
 |---|---|
 | Phase 1 gate | Deploy and the key; three clean scheduled runs. |
-| Phase 2 sign-off → flip `analyticsSource` | The backfill completes, and 7 days of the nightly reconciliation are clean or explained. |
+| Phase 2 sign-off | The backfill completes, and 7 days of the nightly reconciliation are clean or explained. (The analytics already read OnlyMonster.) |
 | Phase 4: switch `salesWriteEnabled` on (the cutover is set, D25) | A review of 6 Nov onward in the Shadow reconciliation after the first deployed runs, and a fresh invariant-6 backup. V4 id stability (snapshot compare ≥ 2026-11-17) is still checked afterwards. |
-| `FAN_REGISTRY` → `fans` | Phase 5, after the analytics switch has run cleanly. |
-| Phase 6: delete BuddyX code, cron, key, rules; archive `buddyx-*` | **The month containing the cutover is finalised for every agent** (the BuddyX sync still re-derives `bx-*` rows until then). Delete each collection only on the user's go-ahead. |
-| Remove BuddyX refresh buttons / `SyncStatus`, online time, the `never-online` flag | Phase 6 with the rest of BuddyX: they serve BuddyX data until then. |
+| `FAN_REGISTRY` → `fans` | `scripts/migrate-fan-registry.js` run and verified. |
+| Phase 6 remainder | **Code removed 2026-11-13** (ahead of the original precondition, on the user's instruction: the team had stopped using BuddyX). Left: remove `BUDDYX_API_KEY` and revoke it; delete the compatibility stubs after 2026-11-30; export and delete the archived `buddyx-*` collections only on the user's go-ahead, readers first ([buddyx.md §8](buddyx.md#8-collections-archive)). |
 | Phase 7 sending (mass messages, campaigns) | Not built. It needs a separate key and separate approval (§12). |
 
 ## Alerting

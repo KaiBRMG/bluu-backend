@@ -11,7 +11,7 @@ import { useBootPhase } from '@/contexts/BootLoaderContext';
 import { formatHours, formatUsd } from '@/lib/salary/salaryFormat';
 import { currentMonthKey, formatMonthLabel } from '@/lib/salary/salaryDate';
 import { SURFACE, SURFACE_INTERACTIVE } from '@/lib/surfaces';
-import { BasisTag } from '@/components/buddyx/buddyxUi';
+import { BasisTag } from '@/components/analytics/analyticsUi';
 
 /**
  * The salary section on the chat-agent dashboard.

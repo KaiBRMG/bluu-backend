@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
-import { formatDuration } from '@/lib/buddyx/analyticsFormat';
-import type { IntegrityFlag, IntegritySummary } from '@/lib/buddyx/analyticsTypes';
+import { formatDuration } from '@/lib/analytics/analyticsFormat';
+import type { IntegrityFlag, IntegritySummary } from '@/lib/analytics/analyticsTypes';
 
 /**
  * The integrity layer of Chatter Analytics — admin views only, display only.
@@ -27,10 +27,6 @@ export function flagSentence(flag: IntegrityFlag, withName: boolean): string {
   const minutes = formatDuration((flag.minutes ?? 0) * MINUTE);
   const say = (named: string, bare: string) => (withName ? `${flag.name} ${named}` : bare);
   switch (flag.kind) {
-    case 'never-online': {
-      const shifts = `${flag.shifts} ${flag.shifts === 1 ? 'shift' : 'shifts'}`;
-      return say(`was rostered on ${shifts} and never online in BuddyX`, `Rostered on ${shifts} and never online in BuddyX`);
-    }
     case 'regular-input':
       return say(`typed on a machine-regular beat for ${minutes}`, `Typed on a machine-regular beat for ${minutes}`);
     case 'modifier-only':

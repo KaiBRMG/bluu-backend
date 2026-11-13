@@ -159,5 +159,10 @@ export function salesSourceFor(occurredAtMs: number): SalesSource {
   return occurredAtMs <= ONLYMONSTER_CUTOVER_AT ? 'buddyx' : 'onlymonster';
 }
 
+/** Whether `[start, end)` contains a change of sales source (Infloww → BuddyX, or BuddyX → OnlyMonster). */
+export function spansSourceCutover(start: number, end: number): boolean {
+  return [SALES_CUTOVER_AT, ONLYMONSTER_CUTOVER_AT].some(t => start <= t && t < end);
+}
+
 /** What kind of sale a row is. In BuddyX a PPV belongs to its sender; the sync credits both kinds to the agent on shift (`scheduleHolder`). */
 export type SaleKind = 'tip' | 'ppv';

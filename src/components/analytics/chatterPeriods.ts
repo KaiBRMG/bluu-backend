@@ -1,4 +1,4 @@
-import type { ChatterPeriod } from '@/lib/buddyx/analyticsTypes';
+import type { ChatterPeriod } from '@/lib/analytics/analyticsTypes';
 import { monthName } from './PeriodPicker';
 
 /**

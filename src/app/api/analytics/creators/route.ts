@@ -11,8 +11,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
-import { analyticsAccess, ANALYTICS_CACHE_HEADERS } from '@/lib/buddyx/analyticsAuth';
-import { CREATOR_HISTORY_START_DAY, getCreatorAnalytics } from '@/lib/services/buddyxAnalyticsService';
+import { analyticsAccess, ANALYTICS_CACHE_HEADERS } from '@/lib/analytics/analyticsAuth';
+import { CREATOR_HISTORY_START_DAY, getCreatorAnalytics } from '@/lib/services/ofAnalyticsService';
 import { currentDayKey, isDayKey } from '@/lib/salary/salaryDate';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 

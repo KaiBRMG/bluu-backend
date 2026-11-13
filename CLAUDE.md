@@ -96,14 +96,16 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
                       — DESIGN.md §10)
  Telegram bot @BluuRockBot → one bot, two audiences: employee alerts + the creator
               Mini App. Webhook at /api/telegram/webhook — see telegram.md
- CA salary → sales synced from BuddyX (read-only API) → ca-sales, each CREDITED
-              TO THE AGENT ON SHIFT on that account (shift schedule), not
-              BuddyX's chatter — BuddyX gives a PPV to its sender; every figure
-              DERIVED on read (engine: src/lib/salary) — see ca-salary.md and
-              buddyx.md. An approved dispute — tip OR PPV — or an admin
-              reassignment (CA Admin → Sales) MOVES the sale here (Bluu is
-              the source of truth for who holds a sale; a sync never undoes
-              one, and every row says when it differs from BuddyX and why). Leave approval releases
+ CA salary → sales synced from OnlyMonster (read-only API) → ca-sales, each
+              CREDITED TO THE AGENT ON SHIFT on that account (shift schedule;
+              nobody / several on shift → unassigned); every figure DERIVED on
+              read (engine: src/lib/salary) — see ca-salary.md and
+              onlymonster.md. Infloww (≤ 4 Oct 2026) and BuddyX (≤ 6 Nov 2026,
+              RETIRED — buddyx.md) rows stay as frozen pay history. An
+              approved dispute — tip OR PPV — or an admin reassignment
+              (CA Admin → Sales) MOVES the sale here (Bluu is the source of
+              truth for who holds a sale; a sync never undoes one, and every
+              row says when it differs from its source and why). Leave approval releases
               creator accounts to an overtime board that creates the shifts that pay.
               Leave pays on read too: no sales count inside a leave shift, and
               paid leave pays 8h on the previous day's accounts (src/lib/salary/leavePay.ts).
@@ -123,17 +125,11 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
                 overtime still unassigned (approver) and still
                 unclaimed (every agent) + the monthly payday reminder)
                 — see ca-salary.md §11
-              + BuddyX sync 05:01 / 13:01 / 21:01 UTC: sales into ca-sales (only
-                while buddyx-meta/config.salesWriteEnabled), team + creator
-                stats (incl. hourly online time → buddyx-team-hours, which
-                the Chatter Analytics report's shift timeline reads), links;
-                fans on the 21:01
-                run — see buddyx.md
-              + OnlyMonster sync 05:01 / 13:01 / 21:01 UTC (BuddyX's replacement,
-                migrating in phases — onlymonster-migration.md): mapping, the
-                account ledger (of-transaction-days), rollups, the SHADOW pay
-                ledger (ca-sales-shadow — real ca-sales only after the Phase 4
-                cutover + switch), reconciliation and balances on the 21:01 run;
+              + OnlyMonster sync 05:01 / 13:01 / 21:01 UTC (replaced BuddyX,
+                retired 2026-11-13 — onlymonster-migration.md): mapping, the
+                account ledger (of-transaction-days), rollups, the pay ledger
+                (ca-sales-shadow until onlymonster-meta/config.salesWriteEnabled,
+                then ca-sales), reconciliation and balances on the 21:01 run;
                 + a continuation tick every 10 min (resumes / backfills, idle =
                 one read); both skip silently until ONLYMONSTER_API_KEY is set
                 — see onlymonster.md
@@ -289,8 +285,8 @@ Fixing the `AppLayout` hoist is therefore not only the navigation speed-up alrea
 | [smm-portal.md](documentation/smm-portal.md) | **SMM Portal** — Twitter/X accounts, the content schedule, the bonus rounds/submissions engine, Viral Accounts + page suggestions |
 | [growth-tracking.md](documentation/growth-tracking.md) | **Growth Tracking** — nightly Apify follower scrape, `growth-accounts` + its year-keyed series, the Apify cost rules. **Unrelated to `twitterx-accounts` by design** |
 | [ca-salary.md](documentation/ca-salary.md) | **Chat-agent salary & coverage** — the commission/wage engine, the `.xlsx` sales import, month close, creator assignment on shifts, the leave → overtime marketplace, and the eight CA notifications |
-| [buddyx.md](documentation/buddyx.md) | **BuddyX** — Chatter Analytics' **sales board** (every agent named and ranked by gross — sales only), integrity flags and per-chatter report; the read-only API client, the scheduled/refresh sync and its lease, identity mapping, the BuddyX sales written into `ca-sales` (cutover, sale identity + re-keying, attribution invariant, vanished rows, the write switch), disputes v2 transfers (tips and PPVs), admin reassignment and the ledger's anomaly band, the Infloww historical import, and Chatter / Fan / OnlyFans Analytics |
-| [onlymonster.md](documentation/onlymonster.md) | **OnlyMonster** — BuddyX's replacement as the OnlyFans data source, being migrated in phases ([`onlymonster-migration.md`](onlymonster-migration.md) is the plan of record). Built: the GET-only allowlisted client, the scheduled sync + continuation/backfill, identity mapping (OnlyFans accounts only against `platform: 'onlyfans'` Bluu accounts), the per-account-day ledger and `account-days`, the strict-shift pay derivation (shadow until the cutover switches), the Shadow reconciliation, the analytics switch (OnlyFans / Chatter / Fan Analytics), read-only payout balances. BuddyX decommission is pending its precondition |
+| [buddyx.md](documentation/buddyx.md) | **BuddyX (retired 2026-11-13)** and the **sales-ledger rules it introduced** — what was removed and what stays (frozen `bx-*` pay rows, archived collections still read, compatibility stubs), the 13 Nov empty-response incident, disputes v2 transfers (tips and PPVs), admin reassignment, the CA Admin → Sales ledger and its anomaly band, and the Chatter Analytics integrity flags |
+| [onlymonster.md](documentation/onlymonster.md) | **OnlyMonster** — the OnlyFans data source ([`onlymonster-migration.md`](onlymonster-migration.md) is the plan of record). The GET-only allowlisted client, the scheduled sync + continuation/backfill, identity mapping (OnlyFans accounts only against `platform: 'onlyfans'` Bluu accounts), the per-account-day ledger and `account-days`, the strict-shift pay derivation (shadow until `salesWriteEnabled`), the Shadow reconciliation, OnlyFans / Chatter / Fan Analytics (with the BuddyX archive), page-header freshness, read-only payout balances |
 | [fan-base.md](documentation/fan-base.md) | **Fan base** — one fan across creators: the fan registry (`buddyx-fan-names`), name resolution (manual → customs → synced) and its write-through to sales, the `/ca-portal/fan-analytics/[fanKey]` report, the All fans directory, and the wizard `FanPicker` that guarantees every new fan a name |
 | [campaign-tracking.md](documentation/campaign-tracking.md) | Custom requests vs campaigns, the two archive mechanisms, transfer |
 | [tasks.md](documentation/tasks.md) | **Tasks** — `/applications/apps-tasks` (universal page): own tasks/roles per person, admins manage everyone's, the assignee-vs-admin access rules, the statuses, the assignment notification, and the **clock-out prompt** (`blocksClockOut` → `useClockOutGuard`; any new Clock Out button must use it) |
@@ -330,11 +326,11 @@ Fixing the `AppLayout` hoist is therefore not only the navigation speed-up alrea
 
 9h. **A creator's sub-accounts are assignable peers, not children.** `creator-subaccounts/{id}` holds the other accounts a creator runs ("Cole (Fansly)"). One agent can be assigned the parent and another a sub-account, and **each counts as one account** toward the assignee's wage tier. The mechanism is that a sub-account is simply another id in `shifts.creatorIds` — creator ids are auth uids, sub-account ids are Firestore auto-ids, the spaces are disjoint — so the salary engine and the claimant load count needed no change and must not gain one: never weight a sub-account as a fraction, and never group ids under a parent before counting. `isSubAccount` is display only. A sub-account is deliberately **not** a `creators` doc (that id is an auth uid; a sub-account has no login). Validate assignment ids with `normaliseAccountIds`, never against `creators` alone. See [ca-salary.md](documentation/ca-salary.md).
 
-9j. **BuddyX is read only through `src/lib/buddyx/client.ts`, and only from a sync.** No page read may call the API — the analytics routes read Firestore — and every BuddyX call is rate-limited per key (120/min, 30/min on the two aggregate endpoints). Don't `curl` it to explore; the spec is [`buddyxapi.yaml`](buddyxapi.yaml). Three invariants on the sales it writes: **a sale's document is found by its BuddyX id, never by its holder, and its document id never changes** (a vanished id is re-keyed to a new one only on a unique match of facts); **a sync never clears a transfer** (an approved dispute's or an admin's move stands; a later BuddyX re-attribution is flagged `attributionConflict`, never applied); and **nothing is soft-removed unless both endpoints paginated to completion**. A sale is **credited to the agent the shift schedule had on its account** (`scheduleHolder`), BuddyX's chatter only without a single answer — that is `sourceUserId`; BuddyX's own credit is `buddyxUserId`. **Nobody archived or deactivated is credited for a sale after `offboardedAt`** — neither by a leftover shift nor by BuddyX. Every holder change goes through `disputeTransfer.ts` and appends to `assignmentLog`. See [buddyx.md](documentation/buddyx.md).
+9j. **BuddyX is retired; its rows are frozen pay history.** Nothing may call BuddyX or write a `buddyx-*` collection again (the registry `buddyx-fan-names` excepted until `FAN_REGISTRY` moves). `ca-sales` rows with `source: 'buddyx'` (4 Oct – 6 Nov 2026) count like any other and move only by dispute or admin reassignment — **never delete or soft-remove one in code** (a later chargeback is a separate negative `om-cb-*` row, D17), no reader may take a BuddyX archive row after `BUDDYX_LAST_DAY` (its retired sync wrote zeros after the cutover), and never remove `salesSourceFor` / `ONLYMONSTER_CUTOVER_AT`, which stop OnlyMonster double-paying those sales. The ledger invariants BuddyX introduced bind every source: **a sale's document id never changes; a sync never clears a transfer** (a later re-attribution is flagged `attributionConflict`); **nothing is soft-removed on an incomplete or suspiciously empty answer** — an empty-but-complete pull from a switched-off source removed every November BuddyX row on 13 Nov 2026 (restored); **nobody archived or deactivated is credited after `offboardedAt`**; every holder change goes through `disputeTransfer.ts` and appends to `assignmentLog`. See [buddyx.md](documentation/buddyx.md).
 
 9l. **OnlyMonster is read only through `src/lib/onlymonster/client.ts`, only from a sync, GET only — and never a chat endpoint.** The client has no non-GET request and a path allowlist; keep it that way (write endpoints are real, non-idempotent actions on creators' accounts and belong to a separate module and key — plan §12). **Reading a chat through the API marks it read on OnlyFans**, exactly as if the creator opened it, so no sync may ever read one. Pages read Firestore. Don't `curl` the API to explore: use [`OnlyMonsterAPI.md`](OnlyMonsterAPI.md), the plan's §11 findings, or `scripts/onlymonster-probe.js` (GET-only, budgeted). **Attribution is the shift schedule**; OnlyMonster's per-member revenue (`/users/metrics`) is display-only and admin-only and never reaches pay. OnlyFans accounts map **only to Bluu accounts with `platform: 'onlyfans'`**. See [onlymonster.md](documentation/onlymonster.md).
 
-9k. **Integrity signals are display only, and admin only.** "Never online", input quality (machine-regular rhythm, modifier-only input) and unchanged screens surface on Chatter Analytics as leads for a CA admin — they never change idle state, the time ledger or pay, and no salary path may read them. They live in server-only collections (`integrity-*`, `buddyx-team-hours`) precisely because an agent can read their own `screenshots` / `active_sessions` docs; never write a flag where the client SDK can reach it. The Chatter Analytics **sales board** goes to every agent with colleagues named, so its row type (`SalesBoardRow`) must never carry any of these — or any activity figure. Collection is gated by the `inputMonitoring` time-tracking setting. See [time-tracking.md §4b](documentation/time-tracking.md).
+9k. **Integrity signals are display only, and admin only.** Input quality (machine-regular rhythm, modifier-only input) and unchanged screens surface on Chatter Analytics as leads for a CA admin — they never change idle state, the time ledger or pay, and no salary path may read them. They live in server-only collections (`integrity-*`, `buddyx-team-hours`) precisely because an agent can read their own `screenshots` / `active_sessions` docs; never write a flag where the client SDK can reach it. The Chatter Analytics **sales board** goes to every agent with colleagues named, so its row type (`SalesBoardRow`) must never carry any of these — or any activity figure. Collection is gated by the `inputMonitoring` time-tracking setting. See [time-tracking.md §4b](documentation/time-tracking.md).
 
 9f. **Chat-agent salary is DERIVED, never stored.** Every figure on the CA salary surfaces is recomputed on read from sales + shifts + the time ledger + admin overrides + the rate config, by the pure engine in [`salaryEngine.ts`](src/lib/salary/salaryEngine.ts). Do not materialise a daily row, and do not patch a figure client-side — an override can re-tier every *later* day in the month via the commission ratchet, which no optimistic update can reproduce (the override endpoints return the recomputed month for exactly this reason). The one sanctioned snapshot is `ca-salary-months`, written by finalisation to freeze what was paid. The salary day boundary is **`Africa/Harare` for every agent**, and `salaryDate.ts`'s fixed-offset arithmetic is only correct because that zone has no DST — never reuse those helpers for a zone that does. See [ca-salary.md](documentation/ca-salary.md).
 

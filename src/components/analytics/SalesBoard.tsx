@@ -8,14 +8,14 @@ import { cn } from '@/lib/utils';
 import { SURFACE } from '@/lib/surfaces';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
-import { AttrChip, BasisTag, LegendSwatch } from '@/components/buddyx/buddyxUi';
-import { dayKeyToDate } from '@/components/buddyx/PeriodPicker';
+import { AttrChip, BasisTag, LegendSwatch } from '@/components/analytics/analyticsUi';
+import { dayKeyToDate } from '@/components/analytics/PeriodPicker';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
 import { formatUsd } from '@/lib/salary/salaryFormat';
 import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
-import { formatCount } from '@/lib/buddyx/analyticsFormat';
-import { SALE_KIND_COLORS } from '@/lib/buddyx/chartColors';
-import type { ChatterDailyPoint, IntegrityFlag, SalesBoardRow, TeamSales } from '@/lib/buddyx/analyticsTypes';
+import { formatCount } from '@/lib/analytics/analyticsFormat';
+import { SALE_KIND_COLORS } from '@/lib/analytics/chartColors';
+import type { ChatterDailyPoint, IntegrityFlag, SalesBoardRow, TeamSales } from '@/lib/analytics/analyticsTypes';
 
 /**
  * The sales board — Chatter Analytics' primary surface (DESIGN.md §5, the
@@ -156,7 +156,7 @@ export function SalesBoard({
       {unlinked.length > 0 && (
         <div className="border-t border-white/[0.07]">
           <p className="px-4 pt-3 text-[11px] text-zinc-400">
-            BuddyX chatters linked to no Bluu agent — their sales are BuddyX&apos;s own figures and hold no place. Link them in CA Admin.
+            Archived BuddyX chatters linked to no Bluu agent — their sales are BuddyX&apos;s own figures and hold no place.
           </p>
           <ul className="space-y-px p-1.5">
             {unlinked.map(row => (

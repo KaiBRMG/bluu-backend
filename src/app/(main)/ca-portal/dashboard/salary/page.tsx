@@ -21,7 +21,7 @@ import { formatHours, formatUsd, pluralise, signedMoneyClass } from '@/lib/salar
 import type { SalaryMonthResult } from '@/lib/salary/salaryTypes';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
 import { useSalaryEarliestMonth } from '@/hooks/useSalaryEarliestMonth';
-import { BasisTag, LEDGER_NET_NOTE } from '@/components/buddyx/buddyxUi';
+import { BasisTag, LEDGER_NET_NOTE } from '@/components/analytics/analyticsUi';
 
 // Overview is the tab that opens, and it needs neither of these. Radix unmounts
 // an inactive `TabsContent`, so they were shipped and parsed on every visit
@@ -273,7 +273,7 @@ function Overview({ month, data }: { month: string; data: SalaryMonthResult }) {
               )}
             </>
           ) : (
-            'No sales recorded for this month yet. Sales sync from BuddyX a few times a day.'
+            'No sales recorded for this month yet. Sales sync from OnlyMonster three times a day.'
           )}
         </p>
       </section>

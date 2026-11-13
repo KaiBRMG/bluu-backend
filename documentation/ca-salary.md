@@ -150,7 +150,7 @@ An admin can replace any of eight fields on any day: `grossEarnings`, `hours`, `
 
 ## 4. Where sales come from
 
-**Sales come from BuddyX** (2026-10). Everything after the cutover (2026-10-04 08:50:31 SAST) is written by the BuddyX sync — see [buddyx.md §4](buddyx.md). Everything before it is **Infloww history**: rows imported from the old CRM's `.xlsx` exports, identified by a SHA-1 of their facts. Both the `.xlsx` upload (`/api/ca-salary/import`) and the one-off historical import (`/api/admin/buddyx/historical-import`, with `inflowwImportService.ts`, `salesImport.ts`, `xlsx.ts` and the email map) are **deleted** (the latter 2026-10-18); nothing writes Infloww rows any more.
+**Sales come from OnlyMonster** after 2026-11-06 01:00 SAST — see [onlymonster.md](onlymonster.md). From 2026-10-04 08:50:31 SAST until then they came from **BuddyX**, now retired: those rows are frozen pay history ([buddyx.md](buddyx.md)). Everything before that is **Infloww history**: rows imported from the old CRM's `.xlsx` exports, identified by a SHA-1 of their facts. Both the `.xlsx` upload (`/api/ca-salary/import`) and the one-off historical import (`/api/admin/buddyx/historical-import`, with `inflowwImportService.ts`, `salesImport.ts`, `xlsx.ts` and the email map) are **deleted** (the latter 2026-10-18); nothing writes Infloww rows any more.
 
 An Infloww row is an ordinary `ca-sales` document. It is paid, disputed and **reassigned** exactly like a BuddyX row (CA Admin → Sales; `reassignRefusal` no longer looks at `source`). A row written before `sourceUserId` existed reads its holder as its original attribution (`serialiseSale`), and the first move pins that value on the document so it survives the transfer.
 
@@ -403,7 +403,7 @@ Both queries are bounded (400 requests, 600 entries) and names resolve in one `g
 
 Two pay rules, both in [`leavePay.ts`](../src/lib/salary/leavePay.ts) (pure, tested in `leavePay.test.ts`), applied by `assembleDays` in [`caSalaryService.ts`](../src/lib/services/caSalaryService.ts) **before** the engine runs. Both builders — the single-agent month and `buildSalaryMonthForUsers` (roster, overview, payroll, import) — go through `assembleDays`, so they cannot price leave differently.
 
-1. **No sales count during a leave shift, paid or unpaid** — even if BuddyX still credits the sale to the absent agent. The shift's accounts were released to someone else. Matching is by the sale's **timestamp** against the leave shift's window, not by salary day, so an agent on leave for one shift who works another that day keeps the second shift's sales.
+1. **No sales count during a leave shift, paid or unpaid** — even if the source credits the sale to the absent agent. The shift's accounts were released to someone else. Matching is by the sale's **timestamp** against the leave shift's window, not by salary day, so an agent on leave for one shift who works another that day keeps the second shift's sales.
 2. **Paid leave pays a normal day's wage.** Approval tombstones the shift, so nothing is tracked and the day would otherwise pay $0. The day instead gets a synthetic `paidLeave` shift of **`PAID_LEAVE_HOURS` (8)**, with no grace, rated on the accounts the agent was paid on **the previous salary day**. Those are the engine's own paying accounts: in-shift overtime and `paysWage: false` cover are excluded. When the previous day had no shift (a day off, or more leave), it walks back to the most recent day that did, up to `PAID_LEAVE_ACCOUNT_LOOKBACK_DAYS` (7). If it finds nothing, the day pays on 0 accounts ($0) and the sub-row says an admin must set the account count with an override. Everything downstream is an ordinary paying shift: overrides, the `per-day` basis and the blended rate all apply. Paid-leave hours do **not** count toward `daysWorked`.
 
 **The leave shift's window.** A request pins only `occurrenceStart`; the start used is `releasedOccurrenceStart ?? occurrenceStart`. The end comes from the shift docs already being read: approval leaves a tombstone override (recurring) or a soft-deleted doc (one-off), and both still carry `startTime`/`endTime`. A shift deleted outright falls back to `config.defaultShiftHours`. To cover a paid-leave day on the 1st, shifts are read from **7 days before the month** (`SHIFT_LOOKBACK_MS`); the time ledger still looks back only 8h.
@@ -445,7 +445,7 @@ Two rules, and both are load-bearing:
 
 | Collection | Doc id | What |
 |---|---|---|
-| `ca-sales` | content hash (Infloww) · `bx-tip-{id}` / `bx-ppv-{id}` (BuddyX) | One sale row — see [buddyx.md](buddyx.md#8-collections) for the BuddyX fields |
+| `ca-sales` | content hash (Infloww) · `bx-tip-{id}` / `bx-ppv-{id}` (BuddyX, frozen) · `om-{pid}_{txId}` / `om-cb-{id}` (OnlyMonster) | One sale row — see [buddyx.md](buddyx.md#8-collections-archive) for the fields BuddyX introduced, [onlymonster.md](onlymonster.md) for OnlyMonster's |
 | `ca-sales-imports` | auto | Audit record for one upload — **no longer written** (the importers are deleted); old records remain |
 | `ca-salary-overrides` | `{uid}_{YYYY-MM-DD}` | An admin's edits to one day |
 | `ca-salary-months` | `{uid}_{YYYY-MM}` | Frozen payout record |
@@ -521,7 +521,7 @@ Helpers: [`salaryAuth.ts`](../src/lib/salary/salaryAuth.ts).
                             breakdown · Sales report (breakdown
                             first: tips/PPV tiles, daily chart, by creator/type,
                             then the ledger; transfers in and away)
-/ca-portal/chatter-analytics · /ca-portal/fan-analytics   BuddyX analytics — buddyx.md
+/ca-portal/chatter-analytics · /ca-portal/fan-analytics   analytics — onlymonster.md
 /ca-portal/disputes         REDIRECT → /ca-portal/dashboard?disputes=1
 ```
 
@@ -664,7 +664,7 @@ Three calls worth not re-litigating:
 | [`salaryEngine.ts`](../src/lib/salary/salaryEngine.ts) | The whole calculation. Pure. |
 | [`salaryDate.ts`](../src/lib/salary/salaryDate.ts) | Day/month keys in the salary timezone |
 | [`salaryConstants.ts`](../src/lib/salary/salaryConstants.ts) | Defaults, the history floor, the cutover |
-| [`scheduleMatch.ts`](../src/lib/salary/scheduleMatch.ts) | Sales against the shift schedule — `scheduleHolder`, which the BuddyX sync credits each sale by (pay path), and the off-schedule flag (display) |
+| [`scheduleMatch.ts`](../src/lib/salary/scheduleMatch.ts) | Sales against the shift schedule — `scheduleHolder`, which the retired BuddyX sync credited each `bx-*` sale by, and the off-schedule flag (display). OnlyMonster's pay path uses its own strict attribution (`attributeAll`, `payPlan.ts`) |
 | [`caSalaryService.ts`](../src/lib/services/caSalaryService.ts) | Firestore + the assembler |
 | [`caCoverageService.ts`](../src/lib/services/caCoverageService.ts) | Offers, claims, assignment |
 | [`leaveCoverage.ts`](../src/lib/services/leaveCoverage.ts) | Leave approval → release, and withdrawal → revert. `resolveLiveOccurrence` re-resolves a pinned request against the live roster first — see §6 |
@@ -837,12 +837,12 @@ When a rule genuinely changes, change the assertion **and** this document in the
 
 ---
 
-## 13. Sales from BuddyX (was: "When OF Manager lands")
+## 13. Synced sales — BuddyX, then OnlyMonster (was: "When OF Manager lands")
 
-It landed as BuddyX rather than OF Manager, and the prediction held: **the engine did not change.** BuddyX rows are written into `ca-sales` with the same shape (`documentation/buddyx.md`), and `buildSalaryMonth` reads them like any other. What did change is around the engine:
+It landed as BuddyX rather than OF Manager, and the prediction held: **the engine did not change.** BuddyX rows (frozen since BuddyX was retired on 2026-11-13, `documentation/buddyx.md`) and OnlyMonster rows (`documentation/onlymonster.md`) are written into `ca-sales` with the same shape, and `buildSalaryMonth` reads them like any other. What did change is around the engine:
 
 - `userId` can be `null` (an unassigned tip, an unmapped chatter) — such a row counts toward nobody, and `getSalesForMonthByUser` skips it.
-- A row can be soft-removed (`removedAt`) when BuddyX stops returning it; every pay read drops those in memory.
+- A row can be soft-removed (`removedAt`) when its source stops returning it (OnlyMonster: a charged-back sale); every pay read drops those in memory. BuddyX rows can no longer be removed — the sync that did it is gone.
 - A row can be **transferred** by an approved dispute (`transfer`, `userId = transfer.toUserId`) — Bluu Backend is the source of truth for that, and a sync never undoes it.
 - Both importers are gone (`/api/ca-salary/import`, and the historical import on 2026-10-18), with `SALES_EMAIL_MAP`, `buildUserResolver`, `xlsx.ts` and `salesImport.ts`.
 

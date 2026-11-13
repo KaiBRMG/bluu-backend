@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/components/AuthProvider';
 import { CreatorChip } from '@/components/creators/CreatorChip';
-import { SyncStatus } from '@/components/buddyx/SyncStatus';
+import { SyncFreshness } from '@/components/onlymonster/SyncFreshness';
 import {
   AttrChip,
   BasisTag,
@@ -35,24 +35,26 @@ import {
   LegendSwatch,
   LEDGER_PPV_ATTRIBUTION,
   LEDGER_TIPS_ATTRIBUTION,
-} from '@/components/buddyx/buddyxUi';
+} from '@/components/analytics/analyticsUi';
 import { getCache, setCache } from '@/lib/queryCache';
 import { formatUsd, pluralise, signedMoneyClass } from '@/lib/salary/salaryFormat';
 import { HintedLabel, SALARY_DAY_HINT, SaleWhen } from './SalaryClock';
 import { SaleHolderNote } from './SaleHolderNote';
 import { formatDayLabel, formatDayLabelWithWeekday, toDayKey } from '@/lib/salary/salaryDate';
-import { SALARY_TZ_OFFSET_MINUTES, SALES_CUTOVER_AT } from '@/lib/salary/salaryConstants';
+import { ONLYMONSTER_CUTOVER_AT, SALARY_TZ_OFFSET_MINUTES, SALES_CUTOVER_AT } from '@/lib/salary/salaryConstants';
 import { saleTypeLabel } from '@/lib/salary/saleTypes';
-import { SALE_KIND_COLORS } from '@/lib/buddyx/chartColors';
+import { SALE_KIND_COLORS } from '@/lib/analytics/chartColors';
 import type { SalarySale } from '@/lib/salary/salaryTypes';
 
-/** When BuddyX took over from the Infloww export, in the salary clock — from the one constant, not retyped. */
-const CUTOVER_LABEL = (() => {
-  const local = new Date(SALES_CUTOVER_AT + SALARY_TZ_OFFSET_MINUTES * 60_000);
+/** A source cutover in the salary clock — from the one constant, not retyped. */
+function cutoverLabel(at: number): string {
+  const local = new Date(at + SALARY_TZ_OFFSET_MINUTES * 60_000);
   const hh = String(local.getUTCHours()).padStart(2, '0');
   const mm = String(local.getUTCMinutes()).padStart(2, '0');
-  return `${hh}:${mm} on ${formatDayLabel(toDayKey(SALES_CUTOVER_AT))} ${local.getUTCFullYear()}`;
-})();
+  return `${hh}:${mm} on ${formatDayLabel(toDayKey(at))} ${local.getUTCFullYear()}`;
+}
+
+const SOURCE_LABEL = { infloww: 'Infloww', buddyx: 'BuddyX', onlymonster: 'OnlyMonster' } as const;
 
 /**
  * Every individual sale behind a month's figures — **breakdown first**.
@@ -275,7 +277,7 @@ export function SalesReport({
         <div className="flex items-center gap-2">
           {data.finalized && <AttrChip>Finalised — figures frozen</AttrChip>}
         </div>
-        <SyncStatus scope="sales" onSynced={() => void load(true)} />
+        <SyncFreshness />
       </div>
 
       {/* ── KPI row ── */}
@@ -304,7 +306,7 @@ export function SalesReport({
         <KpiTile
           label="Moved"
           basis="gross"
-          tip="Sales an approved dispute or an admin moved to or from you. A sale credited to the agent on shift instead of BuddyX’s sender is not a move — it carries an “Assigned by shift” note. Pay follows Bluu Backend."
+          tip="Sales an approved dispute or an admin moved to or from you. A sale credited to the agent on shift by the schedule is not a move. Pay follows Bluu Backend."
           value={
             data.transfers.inCount + data.transfers.outCount === 0
               ? '—'
@@ -445,7 +447,8 @@ export function SalesReport({
 
           {data.spansCutover && (
             <p className="text-[11px] text-zinc-400">
-              Sales before {CUTOVER_LABEL} (salary time) came from Infloww; later sales come from BuddyX.
+              Sales came from Infloww until {cutoverLabel(SALES_CUTOVER_AT)} and from BuddyX until {cutoverLabel(ONLYMONSTER_CUTOVER_AT)} (salary
+              time); later sales come from OnlyMonster.
             </p>
           )}
 
@@ -511,7 +514,7 @@ export function SalesReport({
         <section id="transferred-away" className="space-y-2 pt-2" aria-labelledby="transferred-away-title">
           <h2 id="transferred-away-title" className="text-sm font-semibold">Credited to {userId && userId !== user?.uid ? 'this agent' : 'you'}, held elsewhere</h2>
           <p className="text-[11px] text-zinc-400">
-            Credited to {userId && userId !== user?.uid ? 'this agent' : 'you'} — by the shift schedule, or by BuddyX when nobody was on shift — but an approved dispute or an admin moved them.
+            Credited to {userId && userId !== user?.uid ? 'this agent' : 'you'} by the shift schedule, but an approved dispute or an admin moved them.
             They don&apos;t count toward this month — pay follows Bluu Backend.
           </p>
           <SalesTable rows={data.transferredAway} names={data.names} timezone={timezone} showSource={false} away />
@@ -598,7 +601,7 @@ function SalesTable({
               <td className="px-3 py-2">
                 <span className="flex flex-wrap items-center gap-1.5">
                   <AttrChip>{saleTypeLabel(sale.type)}</AttrChip>
-                  {showSource && <AttrChip>{sale.source === 'buddyx' ? 'BuddyX' : 'Infloww'}</AttrChip>}
+                  {showSource && <AttrChip>{SOURCE_LABEL[sale.source]}</AttrChip>}
                   {sale.status === 'reverse' && (
                     <span className="rounded-full bg-red-500/10 px-1.5 py-0.5 text-[11px] font-medium text-red-400">Reversed</span>
                   )}
@@ -681,8 +684,8 @@ function BreakdownList({ title, rows }: { title: string; rows: Array<{ key: stri
 
 /**
  * Removing an Infloww sale is destructive and changes a payout, so it confirms.
- * BuddyX rows have no delete — the sync owns them, and a wrongly-held one is a
- * dispute.
+ * Synced rows (BuddyX history, OnlyMonster) have no delete, and a wrongly-held
+ * one is a dispute.
  */
 function DeleteSaleButton({ saleId, onDeleted }: { saleId: string; onDeleted: () => void }) {
   const { user } = useAuth();

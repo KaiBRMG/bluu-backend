@@ -11,12 +11,12 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { BasisTag, LoadError, SEGMENT, fanReportHref } from '@/components/buddyx/buddyxUi';
+import { BasisTag, LoadError, SEGMENT, fanReportHref } from '@/components/analytics/analyticsUi';
 import { CreatorChip } from '@/components/creators/CreatorChip';
-import { useBuddyxAnalytics } from '@/hooks/useBuddyxAnalytics';
+import { useAnalytics } from '@/hooks/useAnalytics';
 import { formatUsd, pluralise } from '@/lib/salary/salaryFormat';
-import { daysAgo } from '@/lib/buddyx/analyticsFormat';
-import type { FanDirectory as FanDirectoryData, FanDirectoryFilter, FanDirectoryRow, FanDirectorySort } from '@/lib/buddyx/analyticsTypes';
+import { daysAgo } from '@/lib/analytics/analyticsFormat';
+import type { FanDirectory as FanDirectoryData, FanDirectoryFilter, FanDirectoryRow, FanDirectorySort } from '@/lib/analytics/analyticsTypes';
 
 /**
  * Every fan in the viewer's scope — "find the one I need". One row per fan
@@ -58,7 +58,7 @@ export function FanDirectory({ creatorId }: { creatorId: string | null }) {
   const params = new URLSearchParams({ filter, sort, offset: String(page * PAGE_SIZE) });
   if (q) params.set('q', q);
   if (creatorId) params.set('creatorId', creatorId);
-  const { data, loading, error, reload } = useBuddyxAnalytics<FanDirectoryData>(`/api/fans?${params}`);
+  const { data, loading, error, reload } = useAnalytics<FanDirectoryData>(`/api/fans?${params}`);
 
   const pages = data ? Math.ceil(data.total / PAGE_SIZE) : 0;
   const filterLabel = FILTERS.find(f => f.value === filter)?.label ?? '';
