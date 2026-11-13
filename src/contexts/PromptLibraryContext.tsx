@@ -32,7 +32,6 @@ import {
 // list is now filtered per person — a stale v2 entry would still hold prompts
 // that are no longer theirs.
 const CACHE_KEY = 'bluu_prompt_library_v3';
-const SHOW_ALL_KEY = 'bluu_prompt_library_show_all';
 const TTL = 5 * 60 * 1000;
 
 interface Snapshot {
@@ -62,23 +61,6 @@ export interface OverwriteVersionInput {
 export type AccessChangeInput = PromptAccessChange;
 
 interface PromptLibraryValue extends Snapshot {
-  /**
-   * Everything the server sent, including the prompts Show-all is hiding.
-   * Lookups by id (the detail card, deep links) read THIS, not `prompts`: a link
-   * to a prompt an admin has not switched on must still open it.
-   */
-  allPrompts: PromptDocument[];
-  /**
-   * Admin-only. True when the caller is an admin, i.e. may reveal the prompts
-   * that are outside their own grants.
-   */
-  canShowAll: boolean;
-  /** Whether those admin-only prompts are currently mixed into `prompts`. */
-  showAll: boolean;
-  setShowAll: (on: boolean) => void;
-  /** How many prompts the switch would reveal — shown beside it. */
-  hiddenByAdminCount: number;
-
   loading: boolean;
   error: string | null;
   refresh: () => void;
@@ -149,21 +131,6 @@ async function readError(res: Response, fallback: string): Promise<never> {
  */
 export function PromptLibraryProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const [showAll, setShowAllState] = useState(() => {
-    try {
-      return typeof window !== 'undefined' && localStorage.getItem(SHOW_ALL_KEY) === '1';
-    } catch {
-      return false; // Storage blocked — the switch simply starts off.
-    }
-  });
-  const setShowAll = useCallback((on: boolean) => {
-    setShowAllState(on);
-    try {
-      localStorage.setItem(SHOW_ALL_KEY, on ? '1' : '0');
-    } catch {
-      // Not persisted; still applies for this session.
-    }
-  }, []);
   const [snapshot, setSnapshot] = useState<Snapshot>({
     prompts: [],
     taxonomy: EMPTY_TAXONOMY,
@@ -467,28 +434,9 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
     return map;
   }, [models]);
 
-  // An admin's everyday view is the prompts shared with them; the rest sit
-  // behind the switch. Every consumer reads `prompts`, so search, the model
-  // pages and the counts all agree on what "the library" currently is.
-  const canShowAll = snapshot.viewer.isAdmin;
-  const hiddenByAdminCount = useMemo(
-    () => snapshot.prompts.filter(p => p.viaAdmin).length,
-    [snapshot.prompts]
-  );
-  const visibleSnapshot = useMemo<Snapshot>(
-    () =>
-      showAll ? snapshot : { ...snapshot, prompts: snapshot.prompts.filter(p => !p.viaAdmin) },
-    [snapshot, showAll]
-  );
-
   const value = useMemo<PromptLibraryValue>(
     () => ({
-      ...visibleSnapshot,
-      allPrompts: snapshot.prompts,
-      canShowAll,
-      showAll,
-      setShowAll,
-      hiddenByAdminCount,
+      ...snapshot,
       updateAccess,
       loading,
       error,
@@ -507,12 +455,7 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
       removeLabel,
     }),
     [
-      visibleSnapshot,
-      snapshot.prompts,
-      canShowAll,
-      showAll,
-      setShowAll,
-      hiddenByAdminCount,
+      snapshot,
       updateAccess,
       loading,
       error,

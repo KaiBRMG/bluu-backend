@@ -5,7 +5,7 @@ Read first: `documentation/prompt-library.md` (*Authorization*, *Sharing a promp
 ## Decisions (confirmed with user, 2026-11-13)
 1. **The organisation owns every prompt.** There is no individual owner. Admins are the implicit owner of all prompts, existing and future. Whoever creates a prompt is just its first **editor**.
 2. **Existing prompts → admins only**, with edit access. No migration write is needed: org ownership is implicit, and a missing `access` field means no grants.
-3. **Admins see and edit everything as a fallback.** Their everyday view still shows only what was shared with them; an admin-only **Show all prompts** switch reveals the rest.
+3. **Admins see and edit everything.** Their board always includes every prompt; those not shared with them are marked *Admin access*. (A "Show all prompts" switch was built and then removed: with every legacy prompt admin-only, hiding them behind a toggle only got in the way.)
 4. **Editors manage sharing:** they add or remove people and groups, change roles, and turn the public link on or off. Viewers only read and copy.
 5. **Home: one board** with an `All · Created by me · Shared with me` filter, not a separate section.
 6. The public link (`/p/[shareId]` and the `prompt-shares` index) is kept unchanged and becomes one row of the sharing model.
@@ -32,7 +32,7 @@ Union of user + group grants, highest wins. One pure resolver: `src/lib/promptAc
 - `grantedBy`/`grantedAt` exist because editors can re-share: the dialog shows who added whom, which is the only check on access quietly spreading.
 
 ## Server
-1. `getPromptLibraryFor(viewer)`: filter the 60s global cache per caller and attach `myRole` to each prompt. For admins, also return the prompts outside their grants, flagged `viaAdmin: true`, so the Show-all switch is client-side with no refetch.
+1. `getPromptLibraryFor(viewer)`: filter the 60s global cache per caller and attach `myRole` to each prompt. For admins, also return the prompts outside their grants, flagged `viaAdmin: true`, so the UI can mark them.
 2. Route guards (the page permission stays as the outer gate):
    - GET list → filtered.
    - GET versions → `view+`.
@@ -77,7 +77,6 @@ Union of user + group grants, highest wins. One pure resolver: `src/lib/promptAc
 **Home / board:**
 - Segmented filter `All · Created by me · Shared with me`. "Shared with me" means visible and not created by me. Counts are shown in each segment.
 - Cards for prompts you didn't create get a small owner-less provenance mark: a group icon or avatar showing how you got access, with a tooltip like "Shared with CA (view)".
-- The admin-only **Show all prompts** switch sits in the toolbar and is remembered per device in localStorage.
 - The Public Prompts rail becomes **Public links**: public prompts you can see. Copying a link from it still issues no request.
 - Model pages and search work over the visible set. With Show all on, search includes everything.
 

@@ -8,7 +8,6 @@ import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/components/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { SEGMENT_ITEM_CLASS } from '@/lib/surfaces';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -64,23 +63,32 @@ function LlmTile({ llm, count, share }: {
 }
 
 /**
- * Opens the detail dialog for `?prompt=<id>`.
+ * Opens the detail dialog for `?prompt=<id>`, then CONSUMES the parameter.
  *
  * That parameter is how a deep link lands: the public share page's "Open in
  * Bluu Backend" fires `bluu://prompt?id=…`, `DeepLinkRouter` turns it into this
  * URL, and the dialog opens over the board — the same result as clicking the
  * card, which is the point.
  *
- * It runs once per id rather than on every render of the param, so closing the
- * dialog does not immediately reopen it. The URL is deliberately left alone: a
- * user who reloads gets the prompt back, which is what a link should do.
+ * It is stripped from the URL once handled. Left in place, closing the dialog
+ * and clicking the same link again would navigate to an identical URL: nothing
+ * changes, this effect never refires, and the app comes to the front with no
+ * prompt on screen. `replaceState` (not a router call) so no navigation, no
+ * history entry and no re-render of the route — Next syncs `useSearchParams` to
+ * it. The trade is that a reload no longer reopens the prompt, which is right:
+ * the link was a one-shot request, not a place.
  */
 function usePromptDeepLinkParam(open: (id: string) => void) {
   const searchParams = useSearchParams();
   const requested = searchParams.get('prompt');
 
   useEffect(() => {
-    if (requested) open(requested);
+    if (!requested) return;
+    open(requested);
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete('prompt');
+    window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
     // `open` is a setState function and stable; keying on the id alone is what
     // makes this fire once per link rather than once per render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,8 +106,7 @@ export default function PromptLibraryPage() {
 }
 
 function PromptLibraryBoard() {
-  const { prompts, models, loading, error, canShowAll, showAll, setShowAll, hiddenByAdminCount } =
-    usePromptLibrary();
+  const { prompts, models, loading, error } = usePromptLibrary();
   const { user } = useAuth();
   const myUid = user?.uid ?? '';
   const [scope, setScope] = useState<Scope>('all');
@@ -155,29 +162,6 @@ function PromptLibraryBoard() {
             New prompt
           </Button>
         </header>
-
-        {/* The admin fallback. Off by default, so an admin's everyday board is
-            what has been shared with them, like everyone else's; on, it mixes
-            in every prompt in the organisation. Remembered per device. */}
-        {canShowAll && !loading && (
-          <div className="flex max-w-5xl items-center gap-3">
-            <Switch
-              id="show-all-prompts"
-              checked={showAll}
-              onCheckedChange={setShowAll}
-              disabled={hiddenByAdminCount === 0 && !showAll}
-            />
-            <label htmlFor="show-all-prompts" className="text-sm text-zinc-300">
-              Show all prompts
-              <span className="text-zinc-400">
-                {' '}
-                — {hiddenByAdminCount === 0
-                  ? 'everything is already shared with you'
-                  : `${hiddenByAdminCount} not shared with you`}
-              </span>
-            </label>
-          </div>
-        )}
 
         {error && (
           <p className="max-w-5xl rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">

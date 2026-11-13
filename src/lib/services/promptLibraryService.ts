@@ -306,8 +306,8 @@ export function projectPrompt(p: PromptDocument, viewer: PromptViewer): PromptDo
 
 /**
  * The library as one caller may see it. The 60s cache stays global and is
- * filtered per call — an admin also receives the prompts outside their grants,
- * flagged `viaAdmin`, so the "Show all prompts" switch needs no refetch.
+ * filtered per call — an admin receives every prompt, those outside their
+ * grants flagged `viaAdmin` so the UI can say why they can see it.
  */
 export async function getPromptLibraryFor(viewer: PromptViewer): Promise<PromptLibrarySnapshot> {
   const { prompts, taxonomy } = await getPromptLibrary();

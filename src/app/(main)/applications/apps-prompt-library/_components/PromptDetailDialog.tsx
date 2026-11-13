@@ -130,7 +130,7 @@ function PromptDetailBody({
   registerGuard: (fn: (() => boolean) | null) => void;
 }) {
   const {
-    allPrompts,
+    prompts,
     loading,
     refresh,
     getVersions,
@@ -142,8 +142,7 @@ function PromptDetailBody({
   const { names } = useUserName();
   const { userData } = useUserData();
 
-  // The UNFILTERED list: a deep link to a prompt Show-all is hiding must still open.
-  const prompt = useMemo(() => allPrompts.find(p => p.id === promptId) ?? null, [allPrompts, promptId]);
+  const prompt = useMemo(() => prompts.find(p => p.id === promptId) ?? null, [prompts, promptId]);
 
   const [versions, setVersions] = useState<PromptVersion[] | null>(null);
   const [viewing, setViewing] = useState<number | null>(null);
